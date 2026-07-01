@@ -13,7 +13,7 @@ static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn rust_backend_public_api_exists() {
-    let _ = RustTranspiler::default();
+    let _ = RustTranspiler::new_legacy(RustTranspileOptions::default());
     let _ = RustTranspiler::new_auto(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     });
@@ -669,7 +669,7 @@ fn rust_backend_generates_direct_rust_for_algebraic_current() {
         .compile_canonical_ir(tiny_resistor_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions::default())
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile simple resistor");
 
@@ -995,7 +995,7 @@ fn rust_backend_reuses_reactive_derivative_aliases_for_ddt_charge() {
         .compile_canonical_ir(conditional_ddt_reactive_alias_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -1028,7 +1028,7 @@ fn rust_backend_inlines_one_use_ddt_scaled_derivative_locals() {
         .compile_canonical_ir(ddt_scaled_derivative_inline_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -1070,7 +1070,7 @@ fn rust_backend_inlines_simple_derivative_leaf_locals() {
         .compile_canonical_ir(simple_derivative_leaf_inline_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -1112,7 +1112,7 @@ fn rust_backend_reuses_duplicate_derivative_rhs_inside_stamp_helpers() {
         .compile_canonical_ir(&chunked_repeated_product_equation_source(16))
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -1159,7 +1159,7 @@ fn rust_backend_hoists_duplicate_safe_derivative_rhs_from_guarded_stamp_helpers(
         .compile_canonical_ir(&chunked_guarded_repeated_product_equation_source(16))
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2288,6 +2288,48 @@ fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
 }
 
 #[test]
+fn rust_backend_default_transpiler_uses_auto_scalar_path() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(assignment_fed_current_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile assignment-fed current with default constructor");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("self.scalar_v2"), "{stamp}");
+    assert!(!stamp.contains("GenericAdValue"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
+    assert!(!stamp.contains("Scratch"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+
+    let default_generated = RustTranspiler::default()
+        .transpile(&artifact)
+        .expect("transpile assignment-fed current with Default");
+    let default_stamp = default_generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(default_stamp.contains("self.scalar_v2"), "{default_stamp}");
+    assert!(!default_stamp.contains("GenericAdValue"), "{default_stamp}");
+    assert!(!default_stamp.contains("AdValue"), "{default_stamp}");
+    assert!(!default_stamp.contains("Scratch"), "{default_stamp}");
+}
+
+#[test]
 fn scalar_rust_backend_emits_native_math_for_sine_current() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(sine_current_source())
@@ -2373,7 +2415,7 @@ fn rust_backend_omits_zero_derivative_locals_and_stamp_terms() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(constant_current_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile constant current source");
     let stamp = generated
@@ -2406,7 +2448,7 @@ fn rust_backend_uses_derivative_free_stamp_for_constant_potential() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(constant_potential_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile constant potential source");
     let stamp = generated
@@ -2468,7 +2510,7 @@ fn rust_backend_uses_fixed_arity_stamp_for_three_node_sparse_current() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(three_node_sparse_current_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile three-node sparse current source");
     let stamp = generated
@@ -2494,7 +2536,7 @@ fn rust_backend_collapses_zero_conditional_derivatives() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(parameter_conditional_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile parameter conditional assignment");
     let stamp = generated
@@ -2517,7 +2559,7 @@ fn rust_backend_does_not_copy_scratch_derivatives_through_temporary_locals() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(same_branch_conditional_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile same branch conditional assignment");
     let stamp = generated
@@ -2547,7 +2589,7 @@ fn rust_backend_merges_adjacent_identical_conditional_blocks() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(repeated_conditional_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2583,7 +2625,7 @@ fn rust_backend_lowers_compact_conditional_noop_branch_as_guarded_store() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_noop_branch_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2610,7 +2652,7 @@ fn rust_backend_lowers_compact_conditional_scalar_noop_branch_as_direct_store() 
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_scalar_noop_branch_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2634,7 +2676,7 @@ fn rust_backend_uses_compact_scalar_store_helper() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_scalar_noop_branch_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile compact scalar store");
     let stamp = generated
@@ -2662,7 +2704,7 @@ fn rust_backend_moves_compact_ad_rvalue_stores_into_scratch() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_ad_branch_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2699,7 +2741,7 @@ fn rust_backend_moves_same_branch_generated_ad_locals_into_scratch() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_generated_ad_local_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2731,7 +2773,7 @@ fn rust_backend_uses_direct_compact_voltage_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_voltage_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2850,7 +2892,7 @@ fn rust_backend_compacts_generated_scratch_storage_field_names() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_scalar_noop_branch_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2897,7 +2939,7 @@ fn rust_backend_lowers_compact_conditional_scalar_branch_as_direct_store() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_scalar_branch_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2924,7 +2966,7 @@ fn rust_backend_lowers_compact_conditional_ad_branches_as_direct_stores() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_ad_branch_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2955,7 +2997,7 @@ fn rust_backend_uses_general_ad_store_helpers_for_block_valued_operands() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_conditional_ad_branch_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -2978,7 +3020,7 @@ fn rust_backend_lowers_compact_ad_identifier_assignment_as_direct_copy() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_ad_identifier_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3007,7 +3049,7 @@ fn rust_backend_drops_compact_ad_self_assignment() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_ad_self_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3030,7 +3072,7 @@ fn rust_backend_lowers_compact_conditional_ad_noop_branch_as_direct_copy() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_conditional_ad_noop_branch_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3055,7 +3097,7 @@ fn rust_backend_uses_compact_ad_operation_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_ad_operation_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3107,7 +3149,7 @@ fn rust_backend_uses_compact_integer_power_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_integer_power_helper_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3135,7 +3177,7 @@ fn rust_backend_materializes_repeated_expensive_compact_ad_subexpressions() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_repeated_expensive_ad_subexpression_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3165,7 +3207,7 @@ fn rust_backend_materializes_repeated_expensive_compact_ad_operands() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_repeated_expensive_ad_operand_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3208,7 +3250,7 @@ fn rust_backend_avoids_pow_operand_local_when_pow_root_is_reused() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_repeated_expensive_ad_root_with_operand_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3242,7 +3284,7 @@ fn rust_backend_uses_compact_nested_ad_operation_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_nested_ad_operation_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3296,7 +3338,7 @@ fn rust_backend_uses_compact_scaled_input_unary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_input_unary_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3358,7 +3400,7 @@ fn rust_backend_uses_compact_limited_exp_store_helpers_for_scratch_sources() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_limited_exp_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3392,7 +3434,7 @@ fn rust_backend_uses_compact_scaled_input_unary_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_input_unary_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3453,7 +3495,7 @@ fn rust_backend_uses_compact_scaled_output_scaled_input_unary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_output_scaled_input_unary_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3528,7 +3570,7 @@ fn rust_backend_uses_compact_offset_input_unary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_offset_input_unary_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3574,7 +3616,7 @@ fn rust_backend_uses_compact_negated_input_unary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_negated_input_unary_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3626,7 +3668,7 @@ fn rust_backend_fuses_softplus_ad_operation_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_softplus_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3703,7 +3745,7 @@ fn rust_backend_fuses_expression_scaled_input_intrinsics() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scaled_input_intrinsics_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3751,7 +3793,7 @@ fn rust_backend_uses_compact_output_scaled_and_offset_unary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_output_scaled_and_offset_unary_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3811,7 +3853,7 @@ fn rust_backend_uses_compact_scaled_and_offset_negation_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_and_offset_negation_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3843,7 +3885,7 @@ fn rust_backend_uses_compact_div_from_scalar_affine_input_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_div_from_scalar_affine_input_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3896,7 +3938,7 @@ fn rust_backend_uses_compact_sqrt_square_and_affine_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_sqrt_square_and_affine_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3950,7 +3992,7 @@ fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -3994,7 +4036,7 @@ fn rust_backend_fuses_expression_scaled_multiply_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scaled_multiply_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4036,7 +4078,7 @@ fn rust_backend_fuses_expression_offset_multiply_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_multiply_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4093,7 +4135,7 @@ fn rust_backend_fuses_expression_sub_from_scalar_multiply_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_sub_from_scalar_multiply_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4176,7 +4218,7 @@ fn rust_backend_preserves_expression_scaled_sub_from_scalar_self_product_fusion(
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scaled_sub_from_scalar_self_product_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4213,7 +4255,7 @@ fn rust_backend_fuses_expression_sub_from_scalar_value_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_sub_from_scalar_value_product_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4253,7 +4295,7 @@ fn rust_backend_fuses_expression_affine_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4290,7 +4332,7 @@ fn rust_backend_fuses_expression_offset_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_product_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4333,7 +4375,7 @@ fn rust_backend_fuses_expression_nested_multiply_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_nested_multiply_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4370,7 +4412,7 @@ fn rust_backend_fuses_expression_product_add_sub_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_product_add_sub_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4410,7 +4452,7 @@ fn rust_backend_fuses_expression_nested_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_nested_product_add_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4447,7 +4489,7 @@ fn rust_backend_fuses_expression_three_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_three_product_add_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4484,7 +4526,7 @@ fn rust_backend_fuses_expression_value_three_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_value_three_product_add_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4521,7 +4563,7 @@ fn rust_backend_fuses_expression_inputs_two_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_inputs_two_product_add_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4558,7 +4600,7 @@ fn rust_backend_stores_expression_inputs_two_product_add_chains_directly() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_inputs_two_product_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4591,7 +4633,7 @@ fn rust_backend_fuses_expression_offset_product_two_product_add_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_product_two_product_add_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4631,7 +4673,7 @@ fn rust_backend_fuses_expression_square_product_add_sub_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_square_product_add_sub_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4665,7 +4707,7 @@ fn rust_backend_fuses_expression_affine3_add_sub_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine3_add_sub_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4714,7 +4756,7 @@ fn rust_backend_fuses_expression_affine3_offset_add_sub_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine3_offset_add_sub_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4751,7 +4793,7 @@ fn rust_backend_fuses_expression_affine4_add_sub_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine4_add_sub_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4782,7 +4824,7 @@ fn rust_backend_fuses_expression_scaled_division_operands() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scaled_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4816,7 +4858,7 @@ fn rust_backend_fuses_expression_offset_division_numerators() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4848,7 +4890,7 @@ fn rust_backend_fuses_expression_affine_pair_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_pair_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4881,7 +4923,7 @@ fn rust_backend_fuses_expression_affine_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4919,7 +4961,7 @@ fn rust_backend_fuses_expression_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_product_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4960,7 +5002,7 @@ fn rust_backend_fuses_expression_add_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_add_product_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -4990,7 +5032,7 @@ fn rust_backend_directly_stores_common_fused_expression_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_fused_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5036,7 +5078,7 @@ fn rust_backend_directly_stores_affine_sum_expression_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_affine_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5112,7 +5154,7 @@ fn rust_backend_directly_stores_product_sum_expression_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_product_sum_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5155,7 +5197,7 @@ fn rust_backend_directly_stores_affine_product_expression_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_affine_product_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5205,7 +5247,7 @@ fn rust_backend_directly_stores_affine_division_expression_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_affine_division_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5271,7 +5313,7 @@ fn rust_backend_directly_stores_product_division_expression_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_product_division_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5315,7 +5357,7 @@ fn rust_backend_directly_stores_scaled_sub_from_scalar_multiply_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_sub_scaled_multiply_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5356,7 +5398,7 @@ fn rust_backend_directly_stores_mixed_scaled_affine_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_mixed_scaled_affine_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5400,7 +5442,7 @@ fn rust_backend_directly_stores_mixed_scaled_sub_from_scalar_multiply_helpers() 
             compact_expression_direct_store_mixed_sub_scaled_multiply_helpers_source(),
         )
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5442,7 +5484,7 @@ fn rust_backend_directly_stores_square_sub_from_scalar_multiply_helpers() {
             compact_expression_direct_store_square_sub_scaled_multiply_helpers_source(),
         )
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5486,7 +5528,7 @@ fn rust_backend_directly_stores_double_nested_square_sub_from_scalar_multiply_he
             ),
         )
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5527,7 +5569,7 @@ fn rust_backend_directly_stores_offset_product_add_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_offset_product_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5567,7 +5609,7 @@ fn rust_backend_directly_stores_mixed_offset_product_add_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_mixed_offset_product_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5615,7 +5657,7 @@ fn rust_backend_directly_stores_value_products_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_value_products_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5652,7 +5694,7 @@ fn rust_backend_directly_stores_indexed_product_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_indexed_product_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5730,7 +5772,7 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_hybrid_index_product_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5806,7 +5848,7 @@ fn rust_backend_directly_stores_mixed_index_product_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_direct_store_mixed_index_product_helpers_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5899,7 +5941,7 @@ fn rust_backend_directly_stores_square_product_and_product3_helpers() {
             compact_expression_direct_store_square_product_and_product3_helpers_source(),
         )
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5963,7 +6005,7 @@ fn rust_backend_fuses_expression_affine_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_affine_product_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -5996,7 +6038,7 @@ fn rust_backend_fuses_expression_product_ratio_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_product_ratio_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6042,7 +6084,7 @@ fn rust_backend_fuses_expression_divided_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_divided_product_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6094,7 +6136,7 @@ fn rust_backend_fuses_expression_scalar_divided_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scalar_divided_product_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6136,7 +6178,7 @@ fn rust_backend_fuses_expression_nested_quotient_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_nested_quotient_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6194,7 +6236,7 @@ fn rust_backend_fuses_expression_offset_product_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_product_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6251,7 +6293,7 @@ fn rust_backend_fuses_expression_offset_denominator_division_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_offset_denominator_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6295,7 +6337,7 @@ fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_result_scaled_mixed_mul_div_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6338,7 +6380,7 @@ fn rust_backend_uses_compact_scaled_mixed_add_sub_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_mixed_add_sub_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6387,7 +6429,7 @@ fn rust_backend_fuses_expression_scaled_add_sub_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scaled_add_sub_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6453,7 +6495,7 @@ fn rust_backend_fuses_expression_scaled_sub_from_scalar_chains() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_expression_scaled_sub_from_scalar_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6481,7 +6523,7 @@ fn rust_backend_uses_compact_scaled_general_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_general_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6529,7 +6571,7 @@ fn rust_backend_uses_compact_scaled_general_unary_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_general_unary_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6606,7 +6648,7 @@ fn rust_backend_uses_compact_mixed_scaled_operand_add_sub_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_mixed_scaled_operand_add_sub_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6654,7 +6696,7 @@ fn rust_backend_uses_compact_scaled_binary_operand_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_binary_operand_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6699,7 +6741,7 @@ fn rust_backend_uses_compact_scaled_output_scaled_binary_operand_store_helpers()
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_output_scaled_binary_operand_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6728,7 +6770,7 @@ fn rust_backend_uses_compact_offset_binary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_offset_binary_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6779,7 +6821,7 @@ fn rust_backend_uses_compact_offset_scaled_binary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_offset_scaled_binary_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6831,7 +6873,7 @@ fn rust_backend_uses_compact_offset_general_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_offset_general_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6924,7 +6966,7 @@ fn rust_backend_uses_compact_offset_special_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_offset_special_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -6992,7 +7034,7 @@ fn rust_backend_uses_compact_div_from_scalar_general_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_div_from_scalar_general_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7054,7 +7096,7 @@ fn rust_backend_uses_compact_sqrt_general_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_sqrt_general_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7105,7 +7147,7 @@ fn rust_backend_uses_compact_unary_binary_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_unary_binary_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7158,7 +7200,7 @@ fn rust_backend_combines_scaled_offset_scaled_inputs() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_offset_scaled_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7184,7 +7226,7 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_mixed_scratch_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7246,7 +7288,7 @@ fn rust_backend_fuses_nested_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_nested_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7305,7 +7347,7 @@ fn rust_backend_fuses_product3_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_product3_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7351,7 +7393,7 @@ fn rust_backend_fuses_affine_nested_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_affine_nested_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7400,7 +7442,7 @@ fn rust_backend_fuses_add_sub_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_add_sub_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7444,7 +7486,7 @@ fn rust_backend_fuses_general_add_sub_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_general_add_sub_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7488,7 +7530,7 @@ fn rust_backend_fuses_offset_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_offset_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7555,7 +7597,7 @@ fn rust_backend_fuses_sub_from_scalar_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_sub_from_scalar_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7595,7 +7637,7 @@ fn rust_backend_fuses_scaled_value_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_value_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7634,7 +7676,7 @@ fn rust_backend_fuses_div_from_scalar_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_div_from_scalar_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7670,7 +7712,7 @@ fn rust_backend_fuses_pow_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_pow_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7706,7 +7748,7 @@ fn rust_backend_fuses_extended_unary_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_extended_unary_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7748,7 +7790,7 @@ fn rust_backend_fuses_negated_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_negated_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7793,7 +7835,7 @@ fn rust_backend_fuses_division_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_division_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7837,7 +7879,7 @@ fn rust_backend_fuses_square_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_square_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7871,7 +7913,7 @@ fn rust_backend_fuses_unary_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_unary_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7909,7 +7951,7 @@ fn rust_backend_fuses_nested_unary_mixed_multiply_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_nested_unary_mixed_multiply_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -7947,7 +7989,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_general_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8030,7 +8072,7 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_general_ad_special_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8112,7 +8154,7 @@ fn rust_backend_lowers_compact_numeric_scale_without_full_ad_multiply() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_numeric_scale_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8141,7 +8183,7 @@ fn rust_backend_lowers_compact_additive_numeric_identities_directly() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_additive_identity_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8178,7 +8220,7 @@ fn rust_backend_lowers_compact_duplicate_ad_operands_directly() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_duplicate_ad_operands_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8212,7 +8254,7 @@ fn rust_backend_lowers_compact_duplicate_ad_multiply_as_square() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_duplicate_ad_multiply_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8238,7 +8280,7 @@ fn rust_backend_lowers_compact_add_with_negated_operand_as_subtract() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_add_with_negated_operand_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8267,7 +8309,7 @@ fn rust_backend_lowers_compact_scalar_plus_negated_operand_without_constant_ad_w
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_plus_negated_operand_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8296,7 +8338,7 @@ fn rust_backend_avoids_double_negated_scalar_derivative_literals() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(negated_reverse_voltage_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8318,7 +8360,7 @@ fn rust_backend_lowers_compact_parameter_scale_without_full_ad_multiply() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_parameter_scale_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8347,7 +8389,7 @@ fn rust_backend_lowers_compact_scalar_expression_scale_without_full_ad_multiply(
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_expression_scale_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8378,7 +8420,7 @@ fn rust_backend_lowers_compact_scalar_numerator_division_without_constant_ad_wra
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_numerator_division_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8407,7 +8449,7 @@ fn rust_backend_combines_nested_compact_scalar_scales() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_nested_scalar_scale_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8433,7 +8475,7 @@ fn rust_backend_combines_scaled_compact_duplicate_ad_operands() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scaled_duplicate_ad_operands_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8459,7 +8501,7 @@ fn rust_backend_folds_compact_scalar_only_arithmetic_to_scratch_value() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_only_arithmetic_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8489,7 +8531,7 @@ fn rust_backend_folds_compact_scalar_comparisons_without_ad_wrappers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_comparison_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8520,7 +8562,7 @@ fn rust_backend_stores_zero_derivative_compact_comparison_assignments_as_values(
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_comparison_flag_current_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8550,7 +8592,7 @@ fn rust_backend_caches_compact_boolean_assignments_for_later_conditions() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_boolean_reuse_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8579,7 +8621,7 @@ fn rust_backend_caches_compact_boolean_literal_conditionals_for_later_conditions
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_boolean_literal_conditional_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8607,7 +8649,7 @@ fn rust_backend_lowers_compact_comparison_scale_factors_as_plain_scalars() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_comparison_scale_factor_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8631,7 +8673,7 @@ fn rust_backend_lowers_compact_comparison_conditional_operands_as_values() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_comparison_conditional_operand_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8656,7 +8698,7 @@ fn rust_backend_lowers_compact_mixed_scalar_comparisons_without_scalar_ad_wrappe
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_mixed_scalar_comparison_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8688,7 +8730,7 @@ fn rust_backend_lowers_compact_scalar_truth_conditions_without_ad_wrappers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_truth_condition_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8713,7 +8755,7 @@ fn rust_backend_lowers_compact_compound_conditions_as_value_arithmetic() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_compound_condition_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8744,7 +8786,7 @@ fn rust_backend_lowers_compact_scalar_offsets_without_full_ad_add_or_subtract() 
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_offset_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8785,7 +8827,7 @@ fn rust_backend_folds_nested_compact_scalar_only_arithmetic_to_scratch_value() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_nested_scalar_only_arithmetic_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -8928,7 +8970,7 @@ fn rust_backend_keeps_reactive_shadow_code_out_of_transient_stamp() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(capacitor_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile capacitor");
     let stamp = generated
@@ -9014,7 +9056,7 @@ fn rust_backend_prunes_static_assignments_from_reactive_stamp() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(mixed_dynamic_static_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile mixed dynamic/static device");
     let stamp = generated
@@ -9042,7 +9084,7 @@ fn rust_backend_splits_large_stamp_bodies_into_helper_blocks() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_assignment_chain_source(320))
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile chunked assignment chain");
     let stamp = generated
@@ -9196,7 +9238,7 @@ fn rust_backend_omits_unused_base_arguments_from_assignment_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_assignment_chain_source(320))
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9287,7 +9329,7 @@ fn rust_backend_keeps_used_common_stamp_helper_arguments() {
     let time_artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_time_assignment_chain_source(320))
         .expect("time canonical IR");
-    let time_generated = RustTranspiler::new(RustTranspileOptions {
+    let time_generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&time_artifact)
@@ -9337,7 +9379,7 @@ fn rust_backend_keeps_used_common_stamp_helper_arguments() {
     let param_given_artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_param_given_assignment_chain_source(320))
         .expect("param_given canonical IR");
-    let param_given_generated = RustTranspiler::new(RustTranspileOptions {
+    let param_given_generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&param_given_artifact)
@@ -9393,7 +9435,7 @@ fn rust_backend_caches_context_reads_inside_stamp_helper_blocks() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_direct_voltage_equation_source(24))
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile chunked direct voltage equations");
     let helper = generated
@@ -9423,7 +9465,7 @@ fn rust_backend_packs_stamp_helpers_to_reduce_module_fanout() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_assignment_chain_source(1200))
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile large chunked assignment chain");
 
@@ -9444,7 +9486,7 @@ fn rust_backend_splits_large_equation_bodies_into_helper_blocks() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_equation_source(80))
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9524,7 +9566,7 @@ fn rust_backend_hoists_dynamic_operator_scales_across_helper_blocks() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_ddt_equation_source(12))
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9660,7 +9702,7 @@ fn rust_backend_omits_dynamic_operator_state_from_algebraic_helpers_in_dynamic_m
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_dynamic_assignment_source(320))
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9750,7 +9792,7 @@ fn rust_backend_borrowed_helper_arrays_compile_with_dense_stamps() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_dense_equation_source(120))
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9868,7 +9910,7 @@ fn generated_runtime_loop_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(loop_accumulator_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9882,7 +9924,7 @@ fn generated_algebraic_current_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(tiny_resistor_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9910,7 +9952,7 @@ fn rust_backend_emits_terminal_and_internal_node_metadata() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(internal_node_resistor_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile internal-node resistor");
     let state = generated
@@ -9935,7 +9977,7 @@ fn generated_internal_node_device_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(internal_node_resistor_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9962,7 +10004,7 @@ endmodule
 "#,
         )
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -9977,7 +10019,7 @@ fn rust_backend_lowers_ddt_current_into_stateful_stamp_and_reactive_stamp() {
         .compile_canonical_ir(capacitor_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile capacitor");
     let state = generated
@@ -10013,7 +10055,7 @@ fn rust_backend_uses_single_ddt_derivative_scale_per_stamp_body() {
         .compile_canonical_ir(wide_ddt_current_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile wide ddt current");
     let stamp = generated
@@ -10054,7 +10096,7 @@ fn rust_backend_skips_dead_ddx_assignment() {
         .compile_canonical_ir(ddx_op_info_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile ddx operating-point assignment");
     let stamp = generated
@@ -10076,7 +10118,7 @@ fn generated_ddx_assignment_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddx_op_info_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10116,7 +10158,7 @@ fn rust_backend_lowers_ddx_feeding_current_as_projected_constant() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddx_current_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile ddx-fed current contribution");
     let stamp = generated
@@ -10139,7 +10181,7 @@ fn rust_backend_lowers_scaled_ddx_projection_as_scalar_store() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(scaled_ddx_current_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile scaled ddx-fed current contribution");
     let stamp = generated
@@ -10165,7 +10207,7 @@ fn generated_ddx_fed_current_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddx_current_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10179,7 +10221,7 @@ fn generated_ddt_current_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(capacitor_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10193,7 +10235,7 @@ fn generated_ddt_current_prunes_unused_root_stamp_support_aliases() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(capacitor_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10221,7 +10263,7 @@ fn generated_ddt_followed_by_parameter_use_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(ddt_then_parameter_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10248,7 +10290,7 @@ fn rust_backend_lowers_idt_potential_state() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(idt_potential_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile idt potential state");
     let state = generated
@@ -10377,7 +10419,7 @@ fn generated_idt_potential_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(idt_potential_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10392,7 +10434,7 @@ fn rust_backend_lowers_noise_terms_to_zero_for_large_signal_stamps() {
         .compile_canonical_ir(noisy_current_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile noisy current source");
     let stamp = generated
@@ -10416,7 +10458,7 @@ fn rust_backend_omits_large_signal_work_for_noise_only_contributions() {
         .compile_canonical_ir(noise_only_assignment_chain_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10444,7 +10486,7 @@ fn rust_backend_keeps_guard_only_assignments_value_only() {
         .compile_canonical_ir(guard_only_voltage_probe_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10475,7 +10517,7 @@ fn generated_noise_term_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(noisy_current_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10490,7 +10532,7 @@ fn rust_backend_lowers_intrinsic_math_with_analytic_derivatives() {
         .compile_canonical_ir(math_device_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile math device");
     let stamp = generated
@@ -10523,7 +10565,7 @@ fn rust_backend_simplifies_zero_derivative_intrinsic_axes() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(sparse_wide_intrinsic_derivative_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10547,7 +10589,7 @@ fn rust_backend_lowers_compact_scalar_exponent_pow_without_constant_ad_wrapper()
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_exponent_pow_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10576,7 +10618,7 @@ fn rust_backend_lowers_compact_scalar_base_pow_without_constant_ad_wrapper() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_base_pow_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10608,7 +10650,7 @@ fn rust_backend_lowers_compact_scalar_min_max_without_constant_ad_wrapper() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_min_max_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10645,7 +10687,7 @@ fn rust_backend_uses_direct_compact_scalar_choice_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_choice_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10695,7 +10737,7 @@ fn rust_backend_uses_direct_compact_scratch_choice_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scratch_choice_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10745,7 +10787,7 @@ fn rust_backend_uses_direct_compact_multiply_by_voltage_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_multiply_by_voltage_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10787,7 +10829,7 @@ fn rust_backend_uses_direct_compact_divide_voltage_by_ad_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_divide_voltage_by_ad_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10831,7 +10873,7 @@ fn rust_backend_uses_direct_compact_abs_voltage_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_abs_voltage_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10865,7 +10907,7 @@ fn rust_backend_uses_direct_compact_sub_voltage_abs_voltage_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_sub_voltage_abs_voltage_store_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10901,7 +10943,7 @@ fn generated_scalar_literal_min_max_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_literal_min_max_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10924,7 +10966,7 @@ fn generated_compact_scalar_literal_pow_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_literal_pow_assignment_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10946,7 +10988,7 @@ fn generated_guard_scalar_literal_pow_types_receiver() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(guard_scalar_literal_pow_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -10975,7 +11017,7 @@ fn rust_backend_evaluates_scalar_limexp_argument_once() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_scalar_limexp_argument_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile compact scalar limexp");
     let stamp = generated
@@ -10999,7 +11041,7 @@ fn generated_intrinsic_math_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(math_device_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11013,7 +11055,7 @@ fn generated_pow_integer_derivative_stays_finite_for_negative_base() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(negative_base_pow_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11028,7 +11070,7 @@ fn rust_backend_lowers_conditional_expressions_with_selected_derivatives() {
         .compile_canonical_ir(conditional_device_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile conditional device");
     let stamp = generated
@@ -11056,7 +11098,7 @@ fn rust_backend_keeps_noncompact_conditional_branches_lazy() {
         .compile_canonical_ir(noncompact_lazy_conditional_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile lazy conditional device");
     let stamp = generated
@@ -11098,7 +11140,7 @@ fn rust_backend_scopes_repeated_compact_condition_cache_to_branches() {
         .compile_canonical_ir(branch_scoped_repeated_compact_predicate_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11113,7 +11155,7 @@ fn rust_backend_allocates_distinct_cached_compact_condition_names() {
         .compile_canonical_ir(distinct_cached_compact_conditions_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11139,7 +11181,7 @@ fn rust_backend_keeps_cheap_repeated_compact_conditions_inline() {
         .compile_canonical_ir(cheap_repeated_compact_conditions_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11167,7 +11209,7 @@ fn rust_backend_keeps_parameter_division_compact_conditions_inline() {
         .compile_canonical_ir(parameter_division_compact_conditions_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11194,7 +11236,7 @@ fn generated_conditional_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(conditional_device_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11209,7 +11251,7 @@ fn rust_backend_lowers_numeric_comparisons_as_one_zero_values() {
         .compile_canonical_ir(comparison_value_device_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile comparison-valued device");
     let stamp = generated
@@ -11232,7 +11274,7 @@ fn rust_backend_lowers_logical_comparisons_as_zero_reactive_values() {
         .compile_canonical_ir(logical_value_device_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile logical-valued device");
     let stamp = generated
@@ -11255,7 +11297,7 @@ fn rust_backend_lowers_logical_not_as_one_zero_value() {
         .compile_canonical_ir(logical_not_device_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile logical-not-valued device");
     let stamp = generated
@@ -11278,7 +11320,7 @@ fn rust_backend_uses_dense_stamp_calls_for_wide_derivative_equations() {
         .compile_canonical_ir(dense_derivative_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile dense derivative device");
     let stamp = generated
@@ -11307,7 +11349,7 @@ fn rust_backend_prunes_zero_scaled_named_branch_dense_derivatives() {
         .compile_canonical_ir(zero_scaled_named_branch_dense_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11373,7 +11415,7 @@ fn rust_backend_unrolls_medium_sparse_wide_current_stamps() {
         .compile_canonical_ir(wide_static_zero_derivative_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11416,7 +11458,7 @@ fn rust_backend_uses_const_stamp_for_wide_zero_derivative_current() {
         .compile_canonical_ir(wide_runtime_zero_derivative_current_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11486,7 +11528,7 @@ fn rust_backend_uses_fixed_mixed_sparse_current_stamp() {
         .compile_canonical_ir(mixed_sparse_current_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile mixed sparse current device");
     let stamp = generated
@@ -11513,7 +11555,7 @@ fn rust_backend_uses_fixed_mixed_sparse_potential_stamp() {
         .compile_canonical_ir(mixed_sparse_potential_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile mixed sparse potential device");
     let stamp = generated
@@ -11539,7 +11581,7 @@ fn generated_dense_derivative_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(dense_derivative_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11553,7 +11595,7 @@ fn rust_backend_uses_compact_ad_for_large_dense_equations() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(large_dense_equation_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11591,7 +11633,7 @@ fn rust_backend_uses_indexed_compact_ad_for_large_static_zero_derivatives() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(large_static_zero_derivative_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11630,7 +11672,7 @@ fn rust_backend_lowers_simulator_system_functions_to_direct_runtime_access() {
         .compile_canonical_ir(system_function_device_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile system-function device");
     let state = generated
@@ -11674,7 +11716,7 @@ fn rust_backend_caches_repeated_simulator_scalar_context_reads() {
         .compile_canonical_ir(repeated_context_read_source())
         .expect("canonical IR");
 
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile repeated context reads");
     let stamp = generated
@@ -11704,7 +11746,7 @@ fn rust_backend_lowers_param_given_conditions_as_direct_boolean_reads() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(param_given_condition_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11757,7 +11799,7 @@ fn rust_backend_rejects_compact_zero_arg_system_functions_with_arguments() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_temperature_with_argument_source())
         .expect("canonical IR");
-    let err = RustTranspiler::default()
+    let err = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect_err("compact $temperature with arguments must be rejected");
     let rendered = err.to_string();
@@ -11773,7 +11815,7 @@ fn rust_backend_rejects_compact_port_connected_without_terminal_argument() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_port_connected_without_argument_source())
         .expect("canonical IR");
-    let err = RustTranspiler::default()
+    let err = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect_err("compact $port_connected without a terminal must be rejected");
     let rendered = err.to_string();
@@ -11789,7 +11831,7 @@ fn generated_system_function_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(system_function_device_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -11803,7 +11845,7 @@ fn rust_backend_uses_compact_parameter_state_initialization_and_validation() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_parameter_state_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile compact parameter-state device");
     let state = generated
@@ -11866,7 +11908,7 @@ fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_parameter_field_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile compact parameter-field device");
     let state = generated
@@ -11924,7 +11966,7 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_parameter_state_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile compact parameter-state device");
     let state = generated
@@ -11986,7 +12028,7 @@ fn rust_backend_generates_restore_that_preserves_live_scratch_buffers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(&chunked_assignment_chain_source(320))
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile chunked assignment chain");
     let state = generated
@@ -12040,7 +12082,7 @@ fn generated_compact_parameter_state_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_parameter_state_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13337,7 +13379,7 @@ endmodule
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(src)
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile limexp");
     let stamp = generated
@@ -13358,7 +13400,7 @@ fn rust_backend_preserves_recognized_limited_exp_function_as_helper_call() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(limited_exp_function_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13392,7 +13434,7 @@ endmodule
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(src)
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13406,7 +13448,7 @@ fn rust_backend_lowers_potential_contribution_to_branch_unknown_stamp() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(zero_voltage_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile potential contribution");
     let state = generated
@@ -13439,7 +13481,7 @@ fn generated_potential_contribution_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(zero_voltage_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13453,7 +13495,7 @@ fn rust_backend_keeps_distinct_named_potential_branches_with_shared_endpoints() 
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(shared_endpoint_voltage_branches())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile shared endpoint voltage branches");
     let state = generated
@@ -13488,7 +13530,7 @@ fn generated_shared_endpoint_voltage_branches_rust_compiles_with_runtime_stub() 
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(shared_endpoint_voltage_branches())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13502,7 +13544,7 @@ fn rust_backend_lowers_named_branch_current_access_from_prior_contribution() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(named_branch_current_probe())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile named branch current access");
     let stamp = generated
@@ -13522,7 +13564,7 @@ fn generated_named_branch_current_access_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(named_branch_current_probe())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13536,7 +13578,7 @@ fn rust_backend_lowers_sparse_named_branch_current_axis() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(sparse_named_branch_current_axis_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile sparse named branch current axis");
     let stamp = generated
@@ -13563,7 +13605,7 @@ fn generated_sparse_named_branch_current_axis_rust_compiles_with_runtime_stub() 
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(sparse_named_branch_current_axis_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13577,7 +13619,7 @@ fn rust_backend_lowers_named_branch_custom_potential_access() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(thermal_branch_probe())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile custom potential branch access");
     let stamp = generated
@@ -13596,7 +13638,7 @@ fn generated_custom_potential_branch_access_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(thermal_branch_probe())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13610,7 +13652,7 @@ fn rust_backend_lowers_mod_operator() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(mod_operator_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile mod operator");
     let stamp = generated
@@ -13632,7 +13674,7 @@ fn generated_mod_operator_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(mod_operator_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13646,7 +13688,7 @@ fn rust_backend_lowers_asinh_intrinsic() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(asinh_intrinsic_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile asinh intrinsic");
     let stamp = generated
@@ -13665,7 +13707,7 @@ fn generated_asinh_intrinsic_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(asinh_intrinsic_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13679,7 +13721,7 @@ fn rust_backend_lowers_atan_intrinsic() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(atan_intrinsic_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile atan intrinsic");
     let stamp = generated
@@ -13698,7 +13740,7 @@ fn generated_atan_intrinsic_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(atan_intrinsic_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13712,7 +13754,7 @@ fn rust_backend_lowers_conditional_parameter_default() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(conditional_parameter_default_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile conditional parameter default");
     let state = generated
@@ -13732,7 +13774,7 @@ fn generated_conditional_parameter_default_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(conditional_parameter_default_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13746,7 +13788,7 @@ fn rust_backend_lowers_simparam_parameter_default_to_explicit_fallback() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(simparam_default_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile simparam default");
     let state = generated
@@ -13766,7 +13808,7 @@ fn generated_simparam_parameter_default_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(simparam_default_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13780,7 +13822,7 @@ fn rust_backend_lowers_analysis_call() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(analysis_call_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile analysis call");
     let stamp = generated
@@ -13827,7 +13869,7 @@ fn generated_analysis_call_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(analysis_call_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13841,7 +13883,7 @@ fn rust_backend_lowers_forward_potential_branch_current_probe() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(forward_potential_branch_current_probe())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile forward branch current probe");
     let stamp = generated
@@ -13860,7 +13902,7 @@ fn rust_backend_lowers_potential_branch_current_axis_derivative() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(potential_branch_current_axis_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile branch-current axis device");
     let stamp = generated
@@ -13884,7 +13926,7 @@ fn rust_backend_caches_branch_current_reads_in_top_level_stamp_body() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(branch_current_cache_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13915,7 +13957,7 @@ fn rust_backend_propagates_branch_current_axis_through_assignment() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(assigned_branch_current_axis_source())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile assigned branch-current axis device");
     let stamp = generated
@@ -13943,7 +13985,7 @@ fn generated_forward_potential_branch_current_probe_rust_compiles_with_runtime_s
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(forward_potential_branch_current_probe())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13957,7 +13999,7 @@ fn rust_backend_lowers_anonymous_potential_branch_current_probe() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(anonymous_potential_branch_current_probe())
         .expect("canonical IR");
-    let generated = RustTranspiler::default()
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions::default())
         .transpile(&artifact)
         .expect("transpile anonymous branch current probe");
     let stamp = generated
@@ -13977,7 +14019,7 @@ fn generated_anonymous_potential_branch_current_probe_rust_compiles_with_runtime
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(anonymous_potential_branch_current_probe())
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
@@ -13998,7 +14040,7 @@ endmodule
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(src)
         .expect("canonical IR");
-    let generated = RustTranspiler::new(RustTranspileOptions {
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
     .transpile(&artifact)
