@@ -269,6 +269,7 @@ pub(super) fn generate_step_values(
             }
             Ok(values.clone())
         }
+        StepSweep::Data { .. } => Ok(Vec::new()),
     }
 }
 

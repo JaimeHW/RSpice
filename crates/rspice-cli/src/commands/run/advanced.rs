@@ -7,10 +7,11 @@ pub(super) fn run_step(
     ctx: &RunContext<'_>,
     step_cmd: &rspice_core::netlist::StepCommand,
 ) -> Result<(), CliError> {
-    use rspice_core::netlist::StepTarget;
+    use rspice_core::netlist::{StepSweep, StepTarget};
 
+    let is_data_sweep = matches!(step_cmd.sweep, StepSweep::Data { .. });
     let values = generate_step_values(&step_cmd.sweep)?;
-    if values.is_empty() {
+    if values.is_empty() && !is_data_sweep {
         return Err(CliError::SimulationError {
             message: ".STEP produced no sweep values".to_string(),
             analysis: Some("Step".to_string()),
@@ -39,13 +40,17 @@ pub(super) fn run_step(
             };
 
             if !ctx.quiet {
-                println!(
-                    "Running .STEP sweep on {}: {} values ({:.3e} to {:.3e})...",
-                    target_desc,
-                    values.len(),
-                    values.first().unwrap_or(&0.0),
-                    values.last().unwrap_or(&0.0)
-                );
+                if let StepSweep::Data { table_name } = &step_cmd.sweep {
+                    println!("Running .STEP DATA sweep from table {}...", table_name);
+                } else {
+                    println!(
+                        "Running .STEP sweep on {}: {} values ({:.3e} to {:.3e})...",
+                        target_desc,
+                        values.len(),
+                        values.first().unwrap_or(&0.0),
+                        values.last().unwrap_or(&0.0)
+                    );
+                }
             }
 
             let sweep_results = ctx
@@ -68,15 +73,29 @@ pub(super) fn run_step(
                 )?;
             }
 
+            let requested_points = if is_data_sweep {
+                sweep_results.len()
+            } else {
+                values.len()
+            };
             for (i, (value, result)) in sweep_results.iter().enumerate() {
                 if ctx.verbose && !ctx.quiet {
-                    println!(
-                        "  Step {}/{}: {} = {:.4e}",
-                        i + 1,
-                        values.len(),
-                        target_desc,
-                        value
-                    );
+                    if is_data_sweep {
+                        println!(
+                            "  Step {}/{}: DATA row {:.0}",
+                            i + 1,
+                            requested_points,
+                            value
+                        );
+                    } else {
+                        println!(
+                            "  Step {}/{}: {} = {:.4e}",
+                            i + 1,
+                            requested_points,
+                            target_desc,
+                            value
+                        );
+                    }
                     if result.node_voltages.len() > 1 {
                         let name = result
                             .node_names
@@ -92,7 +111,7 @@ pub(super) fn run_step(
                 println!(
                     ".STEP sweep complete: {} converged / {} requested",
                     sweep_results.len(),
-                    values.len()
+                    requested_points
                 );
             }
 
