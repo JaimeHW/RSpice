@@ -719,16 +719,32 @@ pub(super) fn parse_pspice_u_device(
     }
 
     let name = fields[0].to_ascii_uppercase();
-    let Some(gate) = parse_pspice_simple_u_gate(&fields[1]) else {
-        return Err(ParseError::Syntax {
+
+    if let Some(gate) = parse_pspice_simple_u_gate(&fields[1]) {
+        return parse_pspice_simple_u_gate_instance(&name, &fields, gate, line_num, elements);
+    }
+
+    let (kind, count) = parse_pspice_u_kind_and_count(&fields[1]);
+    match kind.as_str() {
+        "DFF" => parse_pspice_u_dff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "JKFF" => parse_pspice_u_jkff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported simple gates are AND, NAND, OR, NOR, XOR, XNOR, BUF, and INV",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, and JKFF",
                 fields[1]
             ),
-        });
-    };
+        }),
+    }
+}
 
+fn parse_pspice_simple_u_gate_instance(
+    name: &str,
+    fields: &[String],
+    gate: PspiceSimpleUGate,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
     let pins = &fields[4..]; // fields[2] and fields[3] are DPWR/DGND pins.
     if pins.len() < gate.input_count + 1 {
         return Err(ParseError::Syntax {
@@ -758,10 +774,122 @@ pub(super) fn parse_pspice_u_device(
         ]
     };
 
+    push_pspice_u_xspice_element(elements, name.to_string(), gate.xspice_model, ports);
+
+    Ok(())
+}
+
+fn parse_pspice_u_dff(
+    name: &str,
+    fields: &[String],
+    count: usize,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    if count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' requires at least one DFF",
+                name, fields[1]
+            ),
+        });
+    }
+
+    let pins = &fields[4..];
+    let required = 3 + count * 3 + 1;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice DFF U-device '{}' requires PREBAR, CLRBAR, CLK, {} D input(s), {} Q output(s), {} QBAR output(s), and a timing model",
+                name, count, count, count
+            ),
+        });
+    }
+
+    let prebar = pspice_u_active_low_control_port(&pins[0]);
+    let clrbar = pspice_u_active_low_control_port(&pins[1]);
+    let clk = pspice_u_required_digital_port(&pins[2], "clock", fields, line_num)?;
+    let d_offset = 3;
+    let q_offset = d_offset + count;
+    let qb_offset = q_offset + count;
+
+    for index in 0..count {
+        let data =
+            pspice_u_required_digital_port(&pins[d_offset + index], "D input", fields, line_num)?;
+        let q = pspice_u_nullable_output_port(&pins[q_offset + index]);
+        let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
+        let instance_name = pspice_u_lowered_instance_name(name, count, index);
+        let ports = vec![data, clk.clone(), prebar.clone(), clrbar.clone(), q, qb];
+        push_pspice_u_xspice_element(elements, instance_name, "d_dff", ports);
+    }
+
+    Ok(())
+}
+
+fn parse_pspice_u_jkff(
+    name: &str,
+    fields: &[String],
+    count: usize,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    if count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' requires at least one JKFF",
+                name, fields[1]
+            ),
+        });
+    }
+
+    let pins = &fields[4..];
+    let required = 3 + count * 4 + 1;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice JKFF U-device '{}' requires PREBAR, CLRBAR, CLKBAR, {} J input(s), {} K input(s), {} Q output(s), {} QBAR output(s), and a timing model",
+                name, count, count, count, count
+            ),
+        });
+    }
+
+    let prebar = pspice_u_active_low_control_port(&pins[0]);
+    let clrbar = pspice_u_active_low_control_port(&pins[1]);
+    let clkbar = pspice_u_required_inverted_digital_port(&pins[2], "clock", fields, line_num)?;
+    let j_offset = 3;
+    let k_offset = j_offset + count;
+    let q_offset = k_offset + count;
+    let qb_offset = q_offset + count;
+
+    for index in 0..count {
+        let j =
+            pspice_u_required_digital_port(&pins[j_offset + index], "J input", fields, line_num)?;
+        let k =
+            pspice_u_required_digital_port(&pins[k_offset + index], "K input", fields, line_num)?;
+        let q = pspice_u_nullable_output_port(&pins[q_offset + index]);
+        let qb = pspice_u_nullable_output_port(&pins[qb_offset + index]);
+        let instance_name = pspice_u_lowered_instance_name(name, count, index);
+        let ports = vec![j, k, clkbar.clone(), prebar.clone(), clrbar.clone(), q, qb];
+        push_pspice_u_xspice_element(elements, instance_name, "d_jkff", ports);
+    }
+
+    Ok(())
+}
+
+fn push_pspice_u_xspice_element(
+    elements: &mut Vec<Element>,
+    name: String,
+    model: &str,
+    ports: Vec<XspicePort>,
+) {
     elements.push(Element {
         name,
         kind: ElementKind::Xspice {
-            model: gate.xspice_model.to_string(),
+            model: model.to_string(),
             ports,
             params: Vec::new(),
             expr_params: Vec::new(),
@@ -774,8 +902,68 @@ pub(super) fn parse_pspice_u_device(
         },
         nodes: Vec::new(),
     });
+}
 
-    Ok(())
+fn pspice_u_lowered_instance_name(name: &str, count: usize, index: usize) -> String {
+    if count == 1 {
+        name.to_string()
+    } else {
+        format!("{name}_{index}")
+    }
+}
+
+fn pspice_u_required_digital_port(
+    raw: &str,
+    role: &str,
+    fields: &[String],
+    line_num: usize,
+) -> Result<XspicePort, ParseError> {
+    if pspice_u_is_no_connect(raw) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' cannot use {} as a required {}",
+                fields[0], fields[1], raw, role
+            ),
+        });
+    }
+
+    Ok(XspicePort::Digital(normalize_pspice_u_node(raw)))
+}
+
+fn pspice_u_required_inverted_digital_port(
+    raw: &str,
+    role: &str,
+    fields: &[String],
+    line_num: usize,
+) -> Result<XspicePort, ParseError> {
+    if pspice_u_is_no_connect(raw) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice U-device '{}' type '{}' cannot use {} as a required {}",
+                fields[0], fields[1], raw, role
+            ),
+        });
+    }
+
+    Ok(XspicePort::DigitalInverted(normalize_pspice_u_node(raw)))
+}
+
+fn pspice_u_active_low_control_port(raw: &str) -> XspicePort {
+    if pspice_u_is_inactive_control(raw) {
+        XspicePort::Null
+    } else {
+        XspicePort::DigitalInverted(normalize_pspice_u_node(raw))
+    }
+}
+
+fn pspice_u_nullable_output_port(raw: &str) -> XspicePort {
+    if pspice_u_is_no_connect(raw) {
+        XspicePort::Null
+    } else {
+        XspicePort::Digital(normalize_pspice_u_node(raw))
+    }
 }
 
 struct PspiceSimpleUGate {
@@ -832,6 +1020,16 @@ fn parse_pspice_u_kind_and_count(raw: &str) -> (String, Option<usize>) {
 
 fn normalize_pspice_u_node(raw: &str) -> String {
     raw.trim().to_ascii_uppercase()
+}
+
+fn pspice_u_is_no_connect(raw: &str) -> bool {
+    let normalized = raw.trim().to_ascii_uppercase();
+    matches!(normalized.as_str(), "$D_NC" | "NULL")
+}
+
+fn pspice_u_is_inactive_control(raw: &str) -> bool {
+    let normalized = raw.trim().to_ascii_uppercase();
+    matches!(normalized.as_str(), "$D_HI" | "$D_NC" | "NULL")
 }
 
 pub(super) fn parse_diode(

@@ -4684,13 +4684,129 @@ mod tests {
     }
 
     #[test]
-    fn pspice_u_unsupported_frontend_families_fail_closed() {
-        let err = Netlist::parse(
-            "pspice u dff unsupported slice\n\
-             U1 DFF(1) $G_DPWR $G_DGND pre clr clk d q qb dly\n\
+    fn pspice_u_dff_lowers_to_xspice_flip_flop() {
+        let netlist = Netlist::parse(
+            "pspice u dff\n\
+             U1 DFF(1) $G_DPWR $G_DGND $D_HI clear clk data q $D_NC dly IO_LEVEL=0\n\
              .end\n",
         )
-        .expect_err("sequential U-device lowering is not implemented in this slice");
+        .expect("PSpice DFF U-device should lower to d_dff");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U1")
+            .expect("U1 exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_dff");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("DATA".to_string()),
+                        XspicePort::Digital("CLK".to_string()),
+                        XspicePort::Null,
+                        XspicePort::DigitalInverted("CLEAR".to_string()),
+                        XspicePort::Digital("Q".to_string()),
+                        XspicePort::Null,
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_dff_array_expands_to_scalar_xspice_instances() {
+        let netlist = Netlist::parse(
+            "pspice u dff array\n\
+             U2 DFF(2) $G_DPWR $G_DGND pre clear clk d1 d2 q1 q2 qb1 qb2 dly\n\
+             .end\n",
+        )
+        .expect("PSpice DFF array should lower to scalar d_dff instances");
+
+        assert_eq!(netlist.elements.len(), 2);
+        assert_eq!(netlist.elements[0].name, "U2_0");
+        assert_eq!(netlist.elements[1].name, "U2_1");
+
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_dff");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("D2".to_string()),
+                        XspicePort::Digital("CLK".to_string()),
+                        XspicePort::DigitalInverted("PRE".to_string()),
+                        XspicePort::DigitalInverted("CLEAR".to_string()),
+                        XspicePort::Digital("Q2".to_string()),
+                        XspicePort::Digital("QB2".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_jkff_lowers_active_low_controls_and_clock() {
+        let netlist = Netlist::parse(
+            "pspice u jkff\n\
+             U3 JKFF(1) $G_DPWR $G_DGND preset clear clk j k q qb dly\n\
+             .end\n",
+        )
+        .expect("PSpice JKFF U-device should lower to d_jkff");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U3")
+            .expect("U3 exists");
+
+        match &element.kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_jkff");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("J".to_string()),
+                        XspicePort::Digital("K".to_string()),
+                        XspicePort::DigitalInverted("CLK".to_string()),
+                        XspicePort::DigitalInverted("PRESET".to_string()),
+                        XspicePort::DigitalInverted("CLEAR".to_string()),
+                        XspicePort::Digital("Q".to_string()),
+                        XspicePort::Digital("QB".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_sequential_devices_reject_required_no_connects() {
+        let err = Netlist::parse(
+            "pspice u jkff invalid nc\n\
+             U4 JKFF(1) $G_DPWR $G_DGND high clear $D_NC j k q qb dly\n\
+             .end\n",
+        )
+        .expect_err("required PSpice JKFF clock cannot be no-connect");
+
+        assert!(
+            err.to_string().contains("required clock"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn pspice_u_unsupported_frontend_families_fail_closed() {
+        let err = Netlist::parse(
+            "pspice u logicexp unsupported slice\n\
+             U1 LOGICEXP(4,10) $G_DPWR $G_DGND a b c d y1 y2\n\
+             .end\n",
+        )
+        .expect_err("LOGICEXP lowering is not implemented in this slice");
 
         assert!(
             err.to_string().contains("Unsupported PSpice U-device type"),
