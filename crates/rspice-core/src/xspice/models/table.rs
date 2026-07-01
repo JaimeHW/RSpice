@@ -141,16 +141,6 @@ impl<'a> TokenCursor<'a> {
         }
     }
 
-    fn next_data_line(&mut self, file: &str, model: &str, role: &str) -> CmResult<&TableLine<'a>> {
-        self.next_data_line_optional().ok_or_else(|| {
-            table_file_error(
-                model,
-                file,
-                format!("missing {role}; table file ended early"),
-            )
-        })
-    }
-
     fn skip_header_ignored(&mut self) {
         while self
             .lines
@@ -540,7 +530,13 @@ fn parse_table3d_values(
     let mut values = Vec::with_capacity(x_len * y_len * z_len);
     for z in 0..z_len {
         for y in 0..y_len {
-            let table_row = cursor.next_data_line(file, model, &format!("table {z} row {y}"))?;
+            let table_row = cursor.next_data_line_optional().ok_or_else(|| {
+                table_file_error(
+                    model,
+                    file,
+                    format!("missing table {z} row {y}; table file ended early"),
+                )
+            })?;
             if table_row.tokens.len() > x_len {
                 return Err(table_line_error(
                     model,
@@ -1727,6 +1723,31 @@ mod tests {
         let row = cursor.next_data_line_optional().unwrap();
 
         assert_eq!(row.tokens.as_ptr(), data_tokens);
+    }
+
+    #[test]
+    fn table3d_missing_value_row_reports_coordinates() {
+        let err = parse_table3d_contents(
+            "inline-table3d",
+            "\
+2
+2
+2
+0 1
+0 1
+0 1
+10 11
+12 13
+20 21
+",
+        )
+        .expect_err("short table3d data must report the missing row");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("missing table 1 row 1; table file ended early"),
+            "missing table3d row error should include z/y coordinates, got {message}"
+        );
     }
 
     #[test]
