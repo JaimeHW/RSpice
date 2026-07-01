@@ -3845,6 +3845,57 @@ mod tests {
     }
 
     #[test]
+    fn xyce_rf_ports_lower_to_dc_source_and_z0_termination() {
+        let netlist = Netlist::parse(
+            "xyce rf ports\n\
+             P1 OUT 0 DC 2 PORT=1 Z0=75\n\
+             P2 LOAD 0 PORT=2 Z0=100\n\
+             .dc P1 0 2 1\n\
+             .end\n",
+        )
+        .expect("Xyce RF port cards parse");
+
+        let driven = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "P1")
+            .expect("driven port keeps source name");
+        match &driven.kind {
+            ElementKind::VoltageSource(SourceSpec::Dc(value)) => assert_eq!(*value, 2.0),
+            other => panic!("expected driven port voltage source, got {other:?}"),
+        }
+        assert_eq!(
+            driven.nodes,
+            vec!["__RSPICE_P1_PORT".to_string(), "0".to_string()]
+        );
+
+        let series = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "__RSPICE_P1_Z0")
+            .expect("driven port has series Z0 resistor");
+        match &series.kind {
+            ElementKind::Resistor { value, .. } => assert_eq!(*value, 75.0),
+            other => panic!("expected driven port Z0 resistor, got {other:?}"),
+        }
+        assert_eq!(
+            series.nodes,
+            vec!["OUT".to_string(), "__RSPICE_P1_PORT".to_string()]
+        );
+
+        let passive = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "P2")
+            .expect("passive port keeps port name");
+        match &passive.kind {
+            ElementKind::Resistor { value, .. } => assert_eq!(*value, 100.0),
+            other => panic!("expected passive port Z0 termination, got {other:?}"),
+        }
+        assert_eq!(passive.nodes, vec!["LOAD".to_string(), "0".to_string()]);
+    }
+
+    #[test]
     fn pulse_source_accepts_xspice_phase_argument() {
         let netlist = Netlist::parse(
             "pulse phase\n\

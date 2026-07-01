@@ -450,7 +450,7 @@ pub(super) fn parse_line(
         'T' => parse_transmission_line(&mut stream, line_num, elements, params),
         'O' => parse_lossless_tline(&mut stream, line_num, elements, params),
         'Y' => parse_lossy_tline(&mut stream, line_num, elements, params),
-        'P' => parse_coupled_tlines(&mut stream, line_num, elements),
+        'P' => parse_coupled_tlines(&mut stream, line_num, elements, params),
         // MESFET (Z element) - treat like JFET with model
         'Z' => parse_mesfet(
             &mut stream,

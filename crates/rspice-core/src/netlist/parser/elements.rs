@@ -1538,12 +1538,17 @@ fn xyce_ydevice_keyword(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Parse coupled transmission lines (P element)
+/// Parse Xyce RF ports or coupled transmission lines (P element).
 pub(super) fn parse_coupled_tlines(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
+    if xyce_port_tail_is_present(stream, line_num) {
+        return parse_xyce_port(stream, line_num, elements, params);
+    }
+
     let name = expect_ident(stream, line_num)?;
 
     // Coupled lines have more nodes - collect them all
@@ -1581,6 +1586,129 @@ pub(super) fn parse_coupled_tlines(
     });
 
     Ok(())
+}
+
+fn xyce_port_tail_is_present(stream: &TokenStream, line_num: usize) -> bool {
+    let mut probe = stream.clone();
+    if expect_ident(&mut probe, line_num).is_err()
+        || expect_node(&mut probe, line_num).is_err()
+        || expect_node(&mut probe, line_num).is_err()
+    {
+        return false;
+    }
+
+    while !probe.is_eof() && !matches!(probe.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(&mut probe);
+        let TokenKind::Ident(raw) = &probe.peek().kind else {
+            probe.advance();
+            continue;
+        };
+        if is_xyce_port_assignment(raw) || is_xyce_port_source_keyword(raw) {
+            return true;
+        }
+        probe.advance();
+    }
+
+    false
+}
+
+fn parse_xyce_port(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    let node_pos = expect_node(stream, line_num)?;
+    let node_neg = expect_node(stream, line_num)?;
+
+    let mut z0 = 50.0;
+    let mut source_tokens = Vec::new();
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        if let TokenKind::Ident(raw) = &stream.peek().kind {
+            let upper = raw.to_ascii_uppercase();
+            if is_xyce_port_assignment(&upper) {
+                stream.advance();
+                skip_commas(stream);
+                stream.consume(&TokenKind::Equals);
+                let value = expect_value(stream, line_num, params)?;
+                if upper == "Z0" {
+                    if value <= 0.0 || !value.is_finite() {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "Xyce port '{}' requires a positive finite Z0 value",
+                                name
+                            ),
+                        });
+                    }
+                    z0 = value;
+                }
+                continue;
+            }
+        }
+
+        let lexeme = stream.peek().lexeme.clone();
+        if !lexeme.is_empty() {
+            source_tokens.push(lexeme);
+        }
+        stream.advance();
+    }
+
+    if source_tokens.is_empty() {
+        elements.push(Element {
+            name,
+            kind: ElementKind::Resistor {
+                value: z0,
+                value_expr: None,
+                model: None,
+                instance_params: Vec::new(),
+                deferred_params: Vec::new(),
+            },
+            nodes: vec![node_pos, node_neg],
+        });
+        return Ok(());
+    }
+
+    let source_text = source_tokens.join(" ");
+    let source_spec = parse_source_spec_text(&source_text, line_num, params)?;
+    let internal_node = format!("__RSPICE_{}_PORT", name.to_ascii_uppercase());
+    let resistor_name = format!("__RSPICE_{}_Z0", name.to_ascii_uppercase());
+
+    elements.push(Element {
+        name,
+        kind: ElementKind::VoltageSource(source_spec),
+        nodes: vec![internal_node.clone(), node_neg],
+    });
+    elements.push(Element {
+        name: resistor_name,
+        kind: ElementKind::Resistor {
+            value: z0,
+            value_expr: None,
+            model: None,
+            instance_params: Vec::new(),
+            deferred_params: Vec::new(),
+        },
+        nodes: vec![node_pos, internal_node],
+    });
+
+    Ok(())
+}
+
+fn is_xyce_port_assignment(raw: &str) -> bool {
+    matches!(raw.to_ascii_uppercase().as_str(), "PORT" | "PORTNUM" | "Z0")
+}
+
+fn is_xyce_port_source_keyword(raw: &str) -> bool {
+    matches!(
+        raw.to_ascii_uppercase().as_str(),
+        "DC" | "AC" | "PULSE" | "SIN" | "SINE" | "PWL" | "EXP" | "SFFM" | "AM" | "TRNOISE"
+    )
 }
 
 /// Parse subcircuit instance: X1 node1 node2... SUBCKTNAME [PARAM=val ...]
