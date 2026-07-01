@@ -56,6 +56,7 @@ const ABS_VALUE_MASK_LOW: u64 = 0x7fff_ffff_ffff_ffff;
 const ABS_VALUE_MASK_HIGH: u64 = 0;
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
+const THERMAL_VOLTAGE_PER_K: f64 = K_BOLTZMANN / Q_ELECTRON;
 const BOOLEAN_EPSILON: f64 = 1.0e-15;
 const TIMESTEP_DC_EPSILON: f64 = 1.0e-20;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
@@ -2824,8 +2825,7 @@ impl FunctionCompiler {
         let dst = self.push_register()?;
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, self.ctx_arg_reg(), TEMPERATURE_OFFSET);
-        self.emit_literal_binary_op(dst, K_BOLTZMANN, BinaryOp::Mul);
-        self.emit_literal_binary_op(dst, Q_ELECTRON, BinaryOp::Div);
+        self.emit_literal_binary_op(dst, THERMAL_VOLTAGE_PER_K, BinaryOp::Mul);
         Ok(())
     }
 
@@ -3778,12 +3778,13 @@ mod tests {
         ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
-        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, TableHelper, TimerHelper,
-        VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
-        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
-        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
-        entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
-        program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
+        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, THERMAL_VOLTAGE_PER_K,
+        TableHelper, TimerHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES,
+        X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
+        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
+        entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
+        native_op_uses_helper_call, program_uses_helper_calls, rspice_exp,
+        value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -6728,6 +6729,19 @@ mod tests {
     fn generated_value_leaf_computes_thermal_voltage_from_context_temperature() {
         let program = native_program(EntryKind::StampValue, vec![Instruction::PushVt], 0);
         let bytes = compile_value_function(&program).expect("compile thermal voltage leaf");
+        assert!(
+            contains_bytes(&bytes, &THERMAL_VOLTAGE_PER_K.to_le_bytes()),
+            "thermal voltage should use one precomputed k/q literal"
+        );
+        assert!(
+            !contains_bytes(&bytes, &K_BOLTZMANN.to_le_bytes()),
+            "thermal voltage should not emit a separate Boltzmann literal"
+        );
+        assert!(
+            !contains_bytes(&bytes, &Q_ELECTRON.to_le_bytes()),
+            "thermal voltage should not emit a separate electron-charge literal"
+        );
+
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate thermal voltage leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -11258,6 +11272,6 @@ mod tests {
     }
 
     fn thermal_voltage(temperature: f64) -> f64 {
-        K_BOLTZMANN * temperature / Q_ELECTRON
+        temperature * THERMAL_VOLTAGE_PER_K
     }
 }
