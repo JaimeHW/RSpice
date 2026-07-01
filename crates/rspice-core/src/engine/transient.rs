@@ -742,7 +742,7 @@ impl Engine {
         // single accepted step can still be expensive.
         const ABORT_CHECK_INTERVAL: usize = 16;
         let estimated_steps = ((tstop / max_step).ceil().max(1.0) as usize).saturating_add(1);
-        let max_total_iterations = estimated_steps.saturating_mul(40).max(10_000_000);
+        let max_total_iterations = estimated_steps.saturating_mul(400).max(50_000);
         let mut last_progress_log = crate::time_compat::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
