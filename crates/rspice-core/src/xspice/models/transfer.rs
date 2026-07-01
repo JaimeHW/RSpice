@@ -963,6 +963,55 @@ fn s_xfer_transient_scratch(ctx: &mut CmContext) -> Arc<SXferTransientScratchRes
         .expect("s_xfer transient scratch resource was just installed")
 }
 
+fn s_xfer_input_partial_from_system(
+    coefficients: &SXferCoefficients,
+    system: &SXferTransientSystem,
+) -> Value {
+    let dy_du = system
+        .remainder
+        .iter()
+        .zip(system.sensitivity.iter())
+        .map(|(coefficient, value)| coefficient * value)
+        .sum::<Value>()
+        + system.feedthrough;
+    dy_du * coefficients.gain
+}
+
+fn s_xfer_input_partial_for_coefficients(
+    ctx: &CmContext,
+    coefficients: &Arc<SXferCoefficients>,
+) -> CmResult<Value> {
+    let order = coefficients.denominator.len() - 1;
+    if order == 0 || !ctx.timestep.is_finite() || ctx.timestep <= 0.0 {
+        return Ok(s_xfer_feedthrough(coefficients) * coefficients.gain);
+    }
+
+    if let Some(resource) =
+        ctx.resource::<SXferTransientSystemResource>(SXFER_TRANSIENT_SYSTEM_RESOURCE)
+        && resource.timestep == ctx.timestep
+        && Arc::ptr_eq(&resource.coefficients, coefficients)
+    {
+        let system = resource.system.clone()?;
+        return Ok(s_xfer_input_partial_from_system(
+            coefficients.as_ref(),
+            system.as_ref(),
+        ));
+    }
+
+    let system = build_s_xfer_transient_system(coefficients.as_ref(), ctx.timestep)?;
+    Ok(s_xfer_input_partial_from_system(
+        coefficients.as_ref(),
+        system.as_ref(),
+    ))
+}
+
+fn s_xfer_input_partial_for_context(ctx: &CmContext) -> CmResult<Value> {
+    let Some(coefficients) = s_xfer_coefficients_for_context(ctx)? else {
+        return Ok(0.0);
+    };
+    s_xfer_input_partial_for_coefficients(ctx, &coefficients)
+}
+
 fn s_xfer_transient_eval(
     ctx: &mut CmContext,
     coefficients: &Arc<SXferCoefficients>,
@@ -1014,19 +1063,13 @@ fn s_xfer_transient_eval(
         .map(|(coefficient, value)| coefficient * value)
         .sum::<Value>()
         + system.feedthrough * u;
-    let dy_du = system
-        .remainder
-        .iter()
-        .zip(system.sensitivity.iter())
-        .map(|(coefficient, value)| coefficient * value)
-        .sum::<Value>()
-        + system.feedthrough;
+    let partial = s_xfer_input_partial_from_system(coefficients.as_ref(), system.as_ref());
     if transfer_commits_state(ctx) {
         for (index, value) in state.iter().copied().enumerate() {
             ctx.set_state(index, value);
         }
     }
-    Ok((output, dy_du * coefficients.gain))
+    Ok((output, partial))
 }
 
 fn transfer_commits_state(ctx: &CmContext) -> bool {
@@ -1157,7 +1200,10 @@ impl CodeModel for SXfer {
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
         if output_port.eq_ignore_ascii_case("out") {
-            vec![("in".to_string(), ctx.partial("out"))]
+            vec![(
+                "in".to_string(),
+                s_xfer_input_partial_for_context(ctx).unwrap_or(0.0),
+            )]
         } else {
             Vec::new()
         }
@@ -1291,6 +1337,53 @@ mod tests {
             "accepted zero-timestep fallback should restore the previous integrator state"
         );
         assert!(ctx.output("out").is_finite());
+    }
+
+    #[test]
+    fn s_xfer_partials_compute_from_context_without_prior_evaluate() {
+        let mut ctx = first_order_lowpass_context();
+        SXfer.init(&mut ctx).expect("s_xfer initializes");
+
+        assert_eq!(
+            ctx.partial("out"),
+            0.0,
+            "test must start without an evaluated output partial"
+        );
+
+        let partials = SXfer.output_input_partials(&ctx, "out");
+        assert_eq!(partials.len(), 1);
+        assert_eq!(partials[0].0, "in");
+        assert!(
+            (partials[0].1 - 0.2).abs() < 1.0e-12,
+            "s_xfer should compute the transient input partial from coefficients and timestep, got {partials:?}"
+        );
+    }
+
+    #[test]
+    fn s_xfer_partials_ignore_stale_output_partial_after_timestep_change() {
+        let mut ctx = first_order_lowpass_context();
+        SXfer.init(&mut ctx).expect("s_xfer initializes");
+        SXfer
+            .evaluate(&mut ctx)
+            .expect("s_xfer evaluates at original step");
+        assert!(
+            (ctx.partial("out") - 0.2).abs() < 1.0e-12,
+            "baseline partial should match the original timestep"
+        );
+
+        ctx.timestep = 0.5;
+        let partials = SXfer.output_input_partials(&ctx, "out");
+
+        assert_eq!(partials.len(), 1);
+        assert_eq!(partials[0].0, "in");
+        assert!(
+            (partials[0].1 - (1.0 / 3.0)).abs() < 1.0e-12,
+            "s_xfer should recompute partials for the current timestep instead of reusing stale output partials, got {partials:?}"
+        );
+        assert!(
+            (ctx.partial("out") - 0.2).abs() < 1.0e-12,
+            "partial lookup should not mutate the stored output partial"
+        );
     }
 
     #[test]
