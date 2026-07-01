@@ -178,7 +178,7 @@ fn parse_filesource_value_token(
     file: &str,
     line: usize,
     input: &str,
-    role: &str,
+    value_index: usize,
 ) -> CmResult<Option<(Value, usize)>> {
     let Some((value, len)) = data_file::parse_numeric_prefix_len(input) else {
         return Ok(None);
@@ -187,7 +187,7 @@ fn parse_filesource_value_token(
         return Err(filesource_line_error(
             file,
             line,
-            format!("{role} must be finite, got {input}"),
+            format!("value[{value_index}] must be finite, got {input}"),
         ));
     }
     Ok(Some((value, len)))
@@ -212,14 +212,9 @@ fn parse_filesource_time_token(
 }
 
 fn skip_filesource_data_delimiters(input: &str, mut offset: usize) -> usize {
-    while let Some(ch) = input[offset..].chars().next() {
-        if !ch.is_ascii_whitespace() && ch != ',' {
-            break;
-        }
-        offset += ch.len_utf8();
-        if offset >= input.len() {
-            break;
-        }
+    let bytes = input.as_bytes();
+    while offset < bytes.len() && (bytes[offset].is_ascii_whitespace() || bytes[offset] == b',') {
+        offset += 1;
     }
     offset
 }
@@ -271,7 +266,7 @@ fn parse_filesource_contents(
                 file,
                 line_number,
                 &trimmed_start[offset..],
-                &format!("value[{value_index}]"),
+                value_index,
             )?
             else {
                 break;
@@ -848,6 +843,26 @@ mod tests {
     fn filesource_cache_lock_recovers_after_poison() {
         poison_filesource_cache_lock();
         lock_filesource_cache().clear();
+    }
+
+    #[test]
+    fn filesource_delimiter_skip_uses_ascii_byte_delimiters() {
+        let line = "0,\t \r\n1";
+
+        assert_eq!(skip_filesource_data_delimiters(line, 1), 6);
+        assert_eq!(&line[6..], "1");
+    }
+
+    #[test]
+    fn filesource_value_parse_reports_indexed_nonfinite_value() {
+        let err = parse_filesource_contents("stim.txt", 2, "0 1 Inf\n")
+            .expect_err("nonfinite filesource value should fail");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("line 1: value[1] must be finite, got Inf"),
+            "filesource value error should identify the failing value index, got {message}"
+        );
     }
 
     #[test]
