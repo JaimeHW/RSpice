@@ -48,6 +48,13 @@ enum NativeValueEntry {
 }
 
 #[cfg(feature = "native")]
+struct NativeEntryDependencies<'a> {
+    current_pairs: &'a [usize],
+    prior_currents: &'a [usize],
+    branch_unknowns: &'a [usize],
+}
+
+#[cfg(feature = "native")]
 #[derive(Clone, PartialEq, Eq)]
 enum NativeCompileCacheKey {
     Bytecode,
@@ -839,6 +846,34 @@ impl VerilogADevice {
     }
 
     #[cfg(feature = "native")]
+    fn missing_native_stamp_value_entry(index: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing stamp-value entry {index}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_jacobian_entry(stamp: usize, entry: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing Jacobian entry {stamp}.{entry}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_reactive_jacobian_entry(stamp: usize, entry: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing reactive-Jacobian entry {stamp}.{entry}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn missing_native_noise_psd_entry(index: usize) -> VmError {
+        VmError::NativeJit(format!(
+            "native JIT missing noise PSD entry for source {index}; no interpreter fallback"
+        ))
+    }
+
+    #[cfg(feature = "native")]
     fn missing_native_terminal_pair_current_slot(pair_index: usize) -> VmError {
         VmError::NativeJit(format!(
             "native JIT missing terminal-pair current slot {pair_index}; no interpreter fallback"
@@ -1398,6 +1433,82 @@ impl VerilogADevice {
         }
     }
 
+    #[cfg(feature = "native")]
+    fn native_entry_dependencies<'a>(
+        native: &'a NativeModel,
+        entry: NativeValueEntry,
+    ) -> Result<NativeEntryDependencies<'a>, VmError> {
+        Ok(match entry {
+            NativeValueEntry::ParameterDefault(_) => NativeEntryDependencies {
+                current_pairs: &[],
+                prior_currents: &[],
+                branch_unknowns: &[],
+            },
+            NativeValueEntry::StaticCondition(index) => NativeEntryDependencies {
+                current_pairs: &[],
+                prior_currents: &[],
+                branch_unknowns: native
+                    .static_condition_branch_unknowns(index)
+                    .ok_or_else(|| Self::missing_native_static_condition_entry(index))?,
+            },
+            NativeValueEntry::StampValue(index) => NativeEntryDependencies {
+                current_pairs: native
+                    .stamp_value_current_pairs(index)
+                    .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
+                prior_currents: native
+                    .stamp_value_prior_currents(index)
+                    .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
+                branch_unknowns: native
+                    .stamp_value_branch_unknowns(index)
+                    .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
+            },
+            NativeValueEntry::Jacobian { stamp, entry } => NativeEntryDependencies {
+                current_pairs: native
+                    .jacobian_current_pairs(stamp, entry)
+                    .ok_or_else(|| Self::missing_native_jacobian_entry(stamp, entry))?,
+                prior_currents: native
+                    .jacobian_prior_currents(stamp, entry)
+                    .ok_or_else(|| Self::missing_native_jacobian_entry(stamp, entry))?,
+                branch_unknowns: native
+                    .jacobian_branch_unknowns(stamp, entry)
+                    .ok_or_else(|| Self::missing_native_jacobian_entry(stamp, entry))?,
+            },
+            NativeValueEntry::ReactiveJacobian { stamp, entry } => NativeEntryDependencies {
+                current_pairs: native
+                    .reactive_jacobian_current_pairs(stamp, entry)
+                    .ok_or_else(|| Self::missing_native_reactive_jacobian_entry(stamp, entry))?,
+                prior_currents: native
+                    .reactive_jacobian_prior_currents(stamp, entry)
+                    .ok_or_else(|| Self::missing_native_reactive_jacobian_entry(stamp, entry))?,
+                branch_unknowns: native
+                    .reactive_jacobian_branch_unknowns(stamp, entry)
+                    .ok_or_else(|| Self::missing_native_reactive_jacobian_entry(stamp, entry))?,
+            },
+            NativeValueEntry::NoisePsd(index) => NativeEntryDependencies {
+                current_pairs: native
+                    .noise_psd_current_pairs(index)
+                    .ok_or_else(|| Self::missing_native_noise_psd_entry(index))?,
+                prior_currents: native
+                    .noise_psd_prior_currents(index)
+                    .ok_or_else(|| Self::missing_native_noise_psd_entry(index))?,
+                branch_unknowns: native
+                    .noise_psd_branch_unknowns(index)
+                    .ok_or_else(|| Self::missing_native_noise_psd_entry(index))?,
+            },
+            NativeValueEntry::NoiseExponent(index) => NativeEntryDependencies {
+                current_pairs: native
+                    .noise_exponent_current_pairs(index)
+                    .ok_or_else(|| Self::missing_native_noise_exponent_entry(index))?,
+                prior_currents: native
+                    .noise_exponent_prior_currents(index)
+                    .ok_or_else(|| Self::missing_native_noise_exponent_entry(index))?,
+                branch_unknowns: native
+                    .noise_exponent_branch_unknowns(index)
+                    .ok_or_else(|| Self::missing_native_noise_exponent_entry(index))?,
+            },
+        })
+    }
+
     /// Run one value-returning native entry point.
     #[cfg(feature = "native")]
     fn run_value_program(
@@ -1406,56 +1517,11 @@ impl VerilogADevice {
         native: &NativeModel,
         entry: NativeValueEntry,
     ) -> Result<f64, VmError> {
-        if let NativeValueEntry::NoiseExponent(index) = entry
-            && !native.has_noise_exponent_entry(index)
-        {
-            return Err(Self::missing_native_noise_exponent_entry(index));
-        }
-
-        let current_pairs = match entry {
-            NativeValueEntry::ParameterDefault(_) => &[],
-            NativeValueEntry::StaticCondition(_) => &[],
-            NativeValueEntry::StampValue(index) => native.stamp_value_current_pairs(index),
-            NativeValueEntry::Jacobian { stamp, entry } => {
-                native.jacobian_current_pairs(stamp, entry)
-            }
-            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
-                native.reactive_jacobian_current_pairs(stamp, entry)
-            }
-            NativeValueEntry::NoisePsd(index) => native.noise_psd_current_pairs(index),
-            NativeValueEntry::NoiseExponent(index) => native.noise_exponent_current_pairs(index),
-        };
-        let prior_currents = match entry {
-            NativeValueEntry::StampValue(index) => native.stamp_value_prior_currents(index),
-            NativeValueEntry::Jacobian { stamp, entry } => {
-                native.jacobian_prior_currents(stamp, entry)
-            }
-            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
-                native.reactive_jacobian_prior_currents(stamp, entry)
-            }
-            NativeValueEntry::NoisePsd(index) => native.noise_psd_prior_currents(index),
-            NativeValueEntry::NoiseExponent(index) => native.noise_exponent_prior_currents(index),
-            _ => &[],
-        };
-        let branch_unknowns = match entry {
-            NativeValueEntry::StaticCondition(index) => {
-                native.static_condition_branch_unknowns(index)
-            }
-            NativeValueEntry::StampValue(index) => native.stamp_value_branch_unknowns(index),
-            NativeValueEntry::Jacobian { stamp, entry } => {
-                native.jacobian_branch_unknowns(stamp, entry)
-            }
-            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
-                native.reactive_jacobian_branch_unknowns(stamp, entry)
-            }
-            NativeValueEntry::NoisePsd(index) => native.noise_psd_branch_unknowns(index),
-            NativeValueEntry::NoiseExponent(index) => native.noise_exponent_branch_unknowns(index),
-            _ => &[],
-        };
         Self::validate_native_storage(vm.context, native)?;
-        Self::validate_native_current_pairs(vm.context, current_pairs)?;
-        Self::validate_native_prior_currents(vm.context, prior_currents)?;
-        Self::validate_native_branch_unknowns(vm.context, branch_unknowns)?;
+        let dependencies = Self::native_entry_dependencies(native, entry)?;
+        Self::validate_native_current_pairs(vm.context, dependencies.current_pairs)?;
+        Self::validate_native_prior_currents(vm.context, dependencies.prior_currents)?;
+        Self::validate_native_branch_unknowns(vm.context, dependencies.branch_unknowns)?;
 
         let ctx = Self::eval_context_from(vm.context);
         let vars_ptr = vm.context.variables.as_ptr();
@@ -1467,14 +1533,18 @@ impl VerilogADevice {
             NativeValueEntry::StaticCondition(index) => native
                 .run_static_condition(index, &ctx, vars_ptr)
                 .ok_or_else(|| Self::missing_native_static_condition_entry(index))?,
-            NativeValueEntry::StampValue(index) => native.run_stamp_value(index, &ctx, vars_ptr),
-            NativeValueEntry::Jacobian { stamp, entry } => {
-                native.run_jacobian(stamp, entry, &ctx, vars_ptr)
-            }
-            NativeValueEntry::ReactiveJacobian { stamp, entry } => {
-                native.run_reactive_jacobian(stamp, entry, &ctx, vars_ptr)
-            }
-            NativeValueEntry::NoisePsd(index) => native.run_noise_psd(index, &ctx, vars_ptr),
+            NativeValueEntry::StampValue(index) => native
+                .run_stamp_value(index, &ctx, vars_ptr)
+                .ok_or_else(|| Self::missing_native_stamp_value_entry(index))?,
+            NativeValueEntry::Jacobian { stamp, entry } => native
+                .run_jacobian(stamp, entry, &ctx, vars_ptr)
+                .ok_or_else(|| Self::missing_native_jacobian_entry(stamp, entry))?,
+            NativeValueEntry::ReactiveJacobian { stamp, entry } => native
+                .run_reactive_jacobian(stamp, entry, &ctx, vars_ptr)
+                .ok_or_else(|| Self::missing_native_reactive_jacobian_entry(stamp, entry))?,
+            NativeValueEntry::NoisePsd(index) => native
+                .run_noise_psd(index, &ctx, vars_ptr)
+                .ok_or_else(|| Self::missing_native_noise_psd_entry(index))?,
             NativeValueEntry::NoiseExponent(index) => native
                 .run_noise_exponent(index, &ctx, vars_ptr)
                 .ok_or_else(|| Self::missing_native_noise_exponent_entry(index))?,
@@ -2941,6 +3011,106 @@ endmodule
         .expect_err("missing optional native noise exponent entry must not index dependencies");
 
         assert_native_hard_fail(err, "noise exponent entry");
+    }
+
+    #[test]
+    fn native_missing_static_condition_entry_hard_fails_before_dependency_tables() {
+        let native = NativeModel::new_for_test(0, 0, vec![], vec![]);
+        let mut context = VmContext::with_internal_nodes(0, 0);
+        let mut vm = Vm::new(&mut context);
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(1.0)],
+        };
+
+        let err = VerilogADevice::run_value_program(
+            &mut vm,
+            &program,
+            &native,
+            NativeValueEntry::StaticCondition(0),
+        )
+        .expect_err("missing static condition entry must not index dependencies");
+
+        assert_native_hard_fail(err, "static-condition entry");
+    }
+
+    #[test]
+    fn native_missing_stamp_value_entry_hard_fails_before_dependency_tables() {
+        let native = NativeModel::new_for_test(0, 0, vec![], vec![]);
+        let mut context = VmContext::with_internal_nodes(0, 0);
+        let mut vm = Vm::new(&mut context);
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(1.0)],
+        };
+
+        let err = VerilogADevice::run_value_program(
+            &mut vm,
+            &program,
+            &native,
+            NativeValueEntry::StampValue(0),
+        )
+        .expect_err("missing stamp entry must not index dependencies");
+
+        assert_native_hard_fail(err, "stamp-value entry 0");
+    }
+
+    #[test]
+    fn native_missing_jacobian_entry_hard_fails_before_dependency_tables() {
+        let native = NativeModel::new_for_test(0, 1, vec![0], vec![0]);
+        let mut context = VmContext::with_internal_nodes(0, 0);
+        let mut vm = Vm::new(&mut context);
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(1.0)],
+        };
+
+        let err = VerilogADevice::run_value_program(
+            &mut vm,
+            &program,
+            &native,
+            NativeValueEntry::Jacobian { stamp: 0, entry: 0 },
+        )
+        .expect_err("missing Jacobian entry must not index dependencies");
+
+        assert_native_hard_fail(err, "Jacobian entry 0.0");
+    }
+
+    #[test]
+    fn native_missing_reactive_jacobian_entry_hard_fails_before_dependency_tables() {
+        let native = NativeModel::new_for_test(0, 1, vec![0], vec![0]);
+        let mut context = VmContext::with_internal_nodes(0, 0);
+        let mut vm = Vm::new(&mut context);
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(1.0)],
+        };
+
+        let err = VerilogADevice::run_value_program(
+            &mut vm,
+            &program,
+            &native,
+            NativeValueEntry::ReactiveJacobian { stamp: 0, entry: 0 },
+        )
+        .expect_err("missing reactive-Jacobian entry must not index dependencies");
+
+        assert_native_hard_fail(err, "reactive-Jacobian entry 0.0");
+    }
+
+    #[test]
+    fn native_missing_noise_psd_entry_hard_fails_before_dependency_tables() {
+        let native = NativeModel::new_for_test(0, 0, vec![], vec![]);
+        let mut context = VmContext::with_internal_nodes(0, 0);
+        let mut vm = Vm::new(&mut context);
+        let program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(1.0)],
+        };
+
+        let err = VerilogADevice::run_value_program(
+            &mut vm,
+            &program,
+            &native,
+            NativeValueEntry::NoisePsd(0),
+        )
+        .expect_err("missing noise PSD entry must not index dependencies");
+
+        assert_native_hard_fail(err, "noise PSD entry");
     }
 
     #[test]

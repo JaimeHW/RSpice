@@ -1132,7 +1132,9 @@ endmodule
         let voltages = [5.0_f64, 1.0_f64];
         let ctx = eval_context(&params, &voltages);
         assert_eq!(
-            native.run_stamp_value(0, &ctx, std::ptr::null()),
+            native
+                .run_stamp_value(0, &ctx, std::ptr::null())
+                .expect("stamp value entry"),
             (voltages[0] - voltages[1]) / params[0]
         );
     }
@@ -1299,11 +1301,15 @@ endmodule
         native.run_assignments(&ctx, vars.as_mut_ptr());
         assert_near(vars[0], 0.25, "assignment output");
         assert_near(
-            native.run_stamp_value(0, &ctx, vars.as_ptr()),
+            native
+                .run_stamp_value(0, &ctx, vars.as_ptr())
+                .expect("stamp value entry"),
             1.25,
             "stamp value",
         );
-        let expected_jacobian = native.run_jacobian(0, 0, &ctx, vars.as_ptr());
+        let expected_jacobian = native
+            .run_jacobian(0, 0, &ctx, vars.as_ptr())
+            .expect("Jacobian entry");
         assert!(
             (expected_jacobian.abs() - 0.25).abs() <= 1.0e-12,
             "first jacobian entry should be +/-0.25, got {expected_jacobian}"
@@ -1334,11 +1340,13 @@ endmodule
             samples,
             1.25,
             || {
-                native.run_stamp_value(
-                    0,
-                    std::hint::black_box(&ctx),
-                    std::hint::black_box(vars.as_ptr()),
-                )
+                native
+                    .run_stamp_value(
+                        0,
+                        std::hint::black_box(&ctx),
+                        std::hint::black_box(vars.as_ptr()),
+                    )
+                    .expect("stamp value entry")
             },
         );
         run_native_model_entry_microbench(
@@ -1348,12 +1356,14 @@ endmodule
             samples,
             expected_jacobian,
             || {
-                native.run_jacobian(
-                    0,
-                    0,
-                    std::hint::black_box(&ctx),
-                    std::hint::black_box(vars.as_ptr()),
-                )
+                native
+                    .run_jacobian(
+                        0,
+                        0,
+                        std::hint::black_box(&ctx),
+                        std::hint::black_box(vars.as_ptr()),
+                    )
+                    .expect("Jacobian entry")
             },
         );
     }
