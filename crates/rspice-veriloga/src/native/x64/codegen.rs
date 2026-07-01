@@ -4746,6 +4746,68 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_applies_constant_lhs_commutative_arithmetic_without_extra_stack_slot() {
+        let cases = [
+            (
+                "add-finite",
+                Instruction::Add,
+                10.0_f64,
+                3.25_f64,
+                10.0_f64 + 3.25_f64,
+            ),
+            (
+                "mul-finite",
+                Instruction::Mul,
+                -3.5_f64,
+                4.0_f64,
+                -3.5_f64 * 4.0_f64,
+            ),
+            (
+                "add-snan-rhs",
+                Instruction::Add,
+                10.0_f64,
+                f64::from_bits(0x7ff0_0000_0000_1111),
+                10.0_f64 + f64::from_bits(0x7ff0_0000_0000_1111),
+            ),
+        ];
+
+        for (name, instruction, lhs, input, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(lhs),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name} should use a literal LHS commutative op, not a second stack slot"
+            );
+
+            let bytes = compile_value_function(&program)
+                .expect("compile literal LHS commutative arithmetic leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "constant LHS commutative arithmetic should stay helper-free"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes)
+                .expect("allocate literal LHS commutative arithmetic leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let mut ctx = eval_context(&[], &[], &[], &[]);
+            ctx.temperature = input;
+
+            assert_f64_matches(f(&ctx, std::ptr::null()), expected, name);
+        }
+    }
+
+    #[test]
     fn generated_value_leaf_folds_constant_binary_arithmetic_to_literal() {
         let cases = [
             (
@@ -5509,11 +5571,7 @@ mod tests {
 
         assert_eq!(
             program.ops(),
-            &[
-                NativeOp::Const(1.0),
-                NativeOp::LoadVariable(2),
-                NativeOp::Add
-            ],
+            &[NativeOp::LoadVariable(2), NativeOp::AddConst(1.0)],
             "finite in-range literal dynamic index should lower to direct variable load"
         );
 
@@ -9964,7 +10022,7 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_loads_differential_voltage_at_full_xmm_stack_depth_without_scratch() {
-        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let prefix = variable_prefix(0, XMM_STACK.len() - 1);
         let mut instructions = prefix.clone();
         instructions.push(Instruction::PushVoltage(0, 1));
         instructions.extend(add_reductions(prefix.len()));
@@ -9989,9 +10047,10 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
         let ctx = eval_context(&[], &[9.0, 4.0], &[], &[]);
+        let vars: Vec<f64> = (0..prefix.len()).map(|index| (index + 1) as f64).collect();
 
         assert_eq!(
-            f(&ctx, std::ptr::null()).to_bits(),
+            f(&ctx, vars.as_ptr()).to_bits(),
             (constant_prefix_sum(prefix.len()) + 5.0).to_bits()
         );
     }

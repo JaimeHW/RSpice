@@ -1571,6 +1571,9 @@ impl NativeProgram {
                     if lower_constant_lhs_identity_arithmetic(&mut ops, instruction) {
                         continue;
                     }
+                    if lower_constant_lhs_commutative_arithmetic(&mut ops, instruction) {
+                        continue;
+                    }
                     if lower_constant_lhs_noncommutative_arithmetic(&mut ops, instruction) {
                         continue;
                     }
@@ -3836,6 +3839,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         if lower_constant_binary_arithmetic(&mut self.ops, &instruction)
             || lower_constant_rhs_arithmetic(&mut self.ops, &instruction)
             || lower_constant_lhs_identity_arithmetic(&mut self.ops, &instruction)
+            || lower_constant_lhs_commutative_arithmetic(&mut self.ops, &instruction)
             || lower_constant_lhs_noncommutative_arithmetic(&mut self.ops, &instruction)
         {
             return Ok(());
@@ -4741,6 +4745,32 @@ fn lower_constant_lhs_noncommutative_arithmetic(
     let op = match instruction {
         Instruction::Sub => NativeOp::SubFromConst(value),
         Instruction::Div => NativeOp::DivFromConst(value),
+        _ => return false,
+    };
+    ops.remove(lhs_index);
+    ops.push(op);
+    true
+}
+
+fn lower_constant_lhs_commutative_arithmetic(
+    ops: &mut Vec<NativeOp>,
+    instruction: &Instruction,
+) -> bool {
+    if ops.len() < 2 {
+        return false;
+    }
+    let rhs_index = ops.len() - 1;
+    if !is_independent_value_push(&ops[rhs_index]) {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let NativeOp::Const(value) = ops[lhs_index] else {
+        return false;
+    };
+    let op = match instruction {
+        Instruction::Add if value.is_finite() => NativeOp::AddConst(value),
+        Instruction::Mul if value.is_finite() && value != 0.0 => NativeOp::MulConst(value),
         _ => return false,
     };
     ops.remove(lhs_index);
@@ -6286,13 +6316,9 @@ endmodule
 
         assert_eq!(
             program.ops(),
-            &[
-                NativeOp::Const(2.0),
-                NativeOp::LoadPriorCurrent(0),
-                NativeOp::Mul,
-            ]
+            &[NativeOp::LoadPriorCurrent(0), NativeOp::MulConst(2.0)]
         );
-        assert_eq!(program.max_stack_depth(), 2);
+        assert_eq!(program.max_stack_depth(), 1);
         assert_eq!(program.current_pair_dependencies(), &[]);
         assert_eq!(program.prior_current_dependencies(), &[0]);
     }
@@ -6737,6 +6763,66 @@ endmodule
     }
 
     #[test]
+    fn lowers_canonical_constant_lhs_commutative_arithmetic_without_extra_stack_slot() {
+        let cases = [
+            (
+                "add",
+                r#"
+module mir_lhs_add(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ 10.0 + V(p, n);
+  end
+endmodule
+"#,
+                NativeOp::AddConst(10.0),
+            ),
+            (
+                "mul",
+                r#"
+module mir_lhs_mul(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ -3.5 * V(p, n);
+  end
+endmodule
+"#,
+                NativeOp::MulConst(-3.5),
+            ),
+        ];
+
+        for (case, source, expected) in cases {
+            let artifact = VerilogACompiler::new(CompilerOptions::default())
+                .compile_canonical_ir(source)
+                .expect("compile canonical IR");
+
+            let program = NativeProgram::from_mir_equation(
+                format!("mir_lhs_{case}"),
+                EntryKind::StampValue,
+                &artifact.mir,
+                crate::canonical_ir::EquationId::new(0),
+                NativeLoweringLimits::new(2, 0, 0, 0, 0),
+            )
+            .expect("lower canonical constant-LHS commutative arithmetic");
+
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadVoltage {
+                        pos: VoltageNode::Terminal(0),
+                        neg: VoltageNode::Terminal(1),
+                    },
+                    expected,
+                ],
+                "{case}"
+            );
+            assert_eq!(program.max_stack_depth(), 1, "{case}");
+        }
+    }
+
+    #[test]
     fn lowers_constant_rhs_arithmetic_without_extra_stack_slot() {
         let cases = [
             (Instruction::Add, NativeOp::AddConst(4.0)),
@@ -6878,6 +6964,79 @@ endmodule
 
         assert_eq!(lowered.max_stack_depth(), 1);
         assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature]);
+    }
+
+    #[test]
+    fn lowers_constant_lhs_commutative_arithmetic_without_extra_stack_slot() {
+        let cases = [
+            (Instruction::Add, NativeOp::AddConst(10.0)),
+            (Instruction::Mul, NativeOp::MulConst(-3.5)),
+        ];
+
+        for (instruction, expected) in cases {
+            let instruction_name = format!("{instruction:?}");
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(match expected {
+                        NativeOp::AddConst(value) | NativeOp::MulConst(value) => value,
+                        _ => unreachable!("test only uses constant arithmetic ops"),
+                    }),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "literal-lhs-commutative-arithmetic",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant LHS commutative arithmetic has a direct native lowering");
+
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{instruction_name} should not allocate a second XMM stack slot for LHS constants"
+            );
+            assert_eq!(lowered.ops(), &[NativeOp::LoadTemperature, expected]);
+        }
+    }
+
+    #[test]
+    fn keeps_unsafe_constant_lhs_commutative_arithmetic_explicit() {
+        let cases = [
+            (
+                "add-qnan",
+                Instruction::Add,
+                f64::from_bits(0x7ff8_0000_0000_1111),
+            ),
+            ("add-infinity", Instruction::Add, f64::INFINITY),
+            ("mul-positive-zero", Instruction::Mul, 0.0),
+            ("mul-negative-zero", Instruction::Mul, -0.0),
+            ("mul-infinity", Instruction::Mul, f64::INFINITY),
+        ];
+
+        for (case, instruction, literal) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(literal),
+                    Instruction::PushTemperature,
+                    instruction.clone(),
+                ],
+            };
+
+            let lowered =
+                NativeProgram::from_bytecode(case, EntryKind::Assignment, &program, limits(0, 0))
+                    .expect("conservative LHS literal should keep explicit arithmetic");
+
+            assert_eq!(lowered.max_stack_depth(), 2, "{case}");
+            let [NativeOp::Const(value), NativeOp::LoadTemperature, op] = lowered.ops() else {
+                panic!("{case}: expected explicit constant arithmetic, got {lowered:?}");
+            };
+            assert_eq!(value.to_bits(), literal.to_bits(), "{case}");
+            assert_eq!(*op, arithmetic_op(&instruction), "{case}");
+        }
     }
 
     #[test]
