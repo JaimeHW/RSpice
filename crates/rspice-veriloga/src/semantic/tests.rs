@@ -336,6 +336,41 @@ fn user_function_is_inlined() {
 }
 
 #[test]
+fn recognized_limited_exp_function_assignment_keeps_real_type() {
+    let m = analyze_one(&module_src(
+        r#"
+            real y;
+            analog function real lexp;
+                input x;
+                real x;
+                begin
+                    if (x > 1.0)
+                        lexp = 5.540622384e34 * (1.0 + x - 1.0);
+                    else if (x < -1.0)
+                        lexp = 1.804851387e-35;
+                    else
+                        lexp = exp(x);
+                end
+            endfunction
+            analog begin
+                y = lexp(V(p, n));
+                I(p, n) <+ y;
+            end
+            "#,
+    ));
+
+    let y_assignment = flat_assignments(&m)
+        .into_iter()
+        .find(|assignment| assignment.target == "y")
+        .expect("limited-exp assignment");
+    assert_eq!(y_assignment.expr_type, ValueType::Real);
+    assert!(matches!(
+        &y_assignment.expression,
+        Expression::Call(call) if call.name == RSPICE_LIMITED_EXP_INTRINSIC
+    ));
+}
+
+#[test]
 fn function_with_conditional_inlines_to_ternary() {
     let m = analyze_one(&module_src(
         r#"

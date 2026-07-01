@@ -377,8 +377,28 @@ impl FunctionRegistry {
 
         // Math functions
         for name in &[
-            "abs", "sqrt", "exp", "ln", "log", "log10", "sin", "cos", "tan", "asin", "acos",
-            "atan", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh", "floor", "ceil", "limexp",
+            "abs",
+            "sqrt",
+            "exp",
+            "ln",
+            "log",
+            "log10",
+            "sin",
+            "cos",
+            "tan",
+            "asin",
+            "acos",
+            "atan",
+            "sinh",
+            "cosh",
+            "tanh",
+            "asinh",
+            "acosh",
+            "atanh",
+            "floor",
+            "ceil",
+            "limexp",
+            "__rspice_limited_exp",
         ] {
             functions.insert((*name).into(), FunctionSignature::math_unary(name));
         }
