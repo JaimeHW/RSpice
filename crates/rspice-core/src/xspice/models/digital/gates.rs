@@ -516,21 +516,53 @@ macro_rules! define_gate {
 }
 
 fn and_op(inputs: &[DigitalValue]) -> DigitalState {
-    inputs
-        .iter()
-        .fold(DigitalState::One, |a, b| a.and(&b.state))
+    let mut unknown = false;
+    for input in inputs {
+        match input.state.logic_level() {
+            Some(false) => return DigitalState::Zero,
+            Some(true) => {}
+            None => unknown = true,
+        }
+    }
+
+    if unknown {
+        DigitalState::Unknown
+    } else {
+        DigitalState::One
+    }
 }
 
 fn or_op(inputs: &[DigitalValue]) -> DigitalState {
-    inputs
-        .iter()
-        .fold(DigitalState::Zero, |a, b| a.or(&b.state))
+    let mut unknown = false;
+    for input in inputs {
+        match input.state.logic_level() {
+            Some(true) => return DigitalState::One,
+            Some(false) => {}
+            None => unknown = true,
+        }
+    }
+
+    if unknown {
+        DigitalState::Unknown
+    } else {
+        DigitalState::Zero
+    }
 }
 
 fn xor_op(inputs: &[DigitalValue]) -> DigitalState {
-    inputs
-        .iter()
-        .fold(DigitalState::Zero, |a, b| a.xor(&b.state))
+    let mut parity = false;
+    for input in inputs {
+        let Some(bit) = input.state.logic_level() else {
+            return DigitalState::Unknown;
+        };
+        parity ^= bit;
+    }
+
+    if parity {
+        DigitalState::One
+    } else {
+        DigitalState::Zero
+    }
 }
 
 define_gate!(DigitalAnd, "d_and", "AND gate", and_op);
@@ -1148,6 +1180,60 @@ impl CodeModel for DigitalOpenEmitter {
 mod tests {
     use super::*;
     use crate::xspice::context::InputValue;
+
+    fn logic_values(states: &[DigitalState]) -> Vec<DigitalValue> {
+        states
+            .iter()
+            .copied()
+            .map(|state| DigitalValue::new(state, DigitalStrength::Strong))
+            .collect()
+    }
+
+    #[test]
+    fn basic_gate_fast_ops_match_digital_state_truth_tables() {
+        let states = [
+            DigitalState::Zero,
+            DigitalState::One,
+            DigitalState::Unknown,
+            DigitalState::ZeroR,
+            DigitalState::OneR,
+            DigitalState::UnknownR,
+            DigitalState::ZeroZ,
+            DigitalState::OneZ,
+            DigitalState::UnknownZ,
+            DigitalState::HighZ,
+        ];
+
+        for first in states {
+            for second in states {
+                for third in states {
+                    let state_inputs = [first, second, third];
+                    let inputs = logic_values(&state_inputs);
+
+                    let expected_and = state_inputs
+                        .iter()
+                        .fold(DigitalState::One, |acc, state| acc.and(state));
+                    let expected_or = state_inputs
+                        .iter()
+                        .fold(DigitalState::Zero, |acc, state| acc.or(state));
+                    let expected_xor = state_inputs
+                        .iter()
+                        .fold(DigitalState::Zero, |acc, state| acc.xor(state));
+
+                    assert_eq!(and_op(&inputs), expected_and);
+                    assert_eq!(or_op(&inputs), expected_or);
+                    assert_eq!(xor_op(&inputs), expected_xor);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn basic_gate_fast_ops_preserve_empty_vector_identities() {
+        assert_eq!(and_op(&[]), DigitalState::One);
+        assert_eq!(or_op(&[]), DigitalState::Zero);
+        assert_eq!(xor_op(&[]), DigitalState::Zero);
+    }
 
     #[test]
     fn basic_gate_rollbackable_probe_does_not_commit_previous_output_state() {
