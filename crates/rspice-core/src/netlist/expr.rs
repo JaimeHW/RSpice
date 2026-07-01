@@ -22,11 +22,13 @@ mod tests;
 
 use parser::ExprParser;
 
-pub use api::{eval_expression, eval_simple, parse_expression};
+pub use api::{
+    eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
+};
 pub use behavioral::prepare_behavioral_expression;
 pub use context::{
     DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, RandomState, StatisticalParamMode,
 };
 pub use error::ExprError;
-pub use eval::evaluate;
-pub use types::{BinOpKind, Expr, UnaryOpKind};
+pub use eval::{evaluate, evaluate_complex};
+pub use types::{BinOpKind, ComplexValue, Expr, UnaryOpKind};

@@ -66,6 +66,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
 
         match expr {
             NetExpr::Number(v) => Ok(NetExpr::Number(*v)),
+            NetExpr::ComplexNumber(v) => Ok(NetExpr::Number(v.real_projection())),
             NetExpr::Param(name) => {
                 if is_behavioral_runtime_symbol(name) {
                     Ok(NetExpr::Param(name.clone()))
@@ -463,6 +464,7 @@ fn extract_parenthesized(chars: &[char], lparen_idx: usize) -> Option<(String, u
 fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> NetExpr {
     match expr {
         NetExpr::Number(v) => NetExpr::Number(*v),
+        NetExpr::ComplexNumber(v) => NetExpr::Number(v.real_projection()),
         NetExpr::Param(name) => args
             .get(&name.to_ascii_uppercase())
             .cloned()
@@ -502,6 +504,7 @@ fn serialize_expr(expr: &NetExpr) -> String {
                 format!("{}", v)
             }
         }
+        NetExpr::ComplexNumber(v) => serialize_expr(&NetExpr::Number(v.real_projection())),
         NetExpr::Param(name) => name.clone(),
         NetExpr::UnaryOp { op, operand } => match op {
             UnaryOpKind::Neg => format!("(-{})", serialize_expr(operand)),

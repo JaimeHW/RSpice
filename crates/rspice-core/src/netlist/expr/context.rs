@@ -141,6 +141,7 @@ impl FunctionDef {
 #[derive(Debug, Clone, Default)]
 pub struct ParamContext {
     params: HashMap<String, Value>,
+    complex_params: HashMap<String, ComplexValue>,
     string_params: HashMap<String, String>,
     /// User-defined functions (.FUNC)
     functions: HashMap<String, FunctionDef>,
@@ -158,7 +159,20 @@ impl ParamContext {
 
     /// Set a parameter value
     pub fn set(&mut self, name: &str, value: Value) {
-        self.params.insert(name.to_uppercase(), value);
+        let key = name.to_uppercase();
+        self.params.insert(key.clone(), value);
+        self.complex_params.remove(&key);
+    }
+
+    /// Set a parameter value while preserving its imaginary component.
+    pub fn set_complex(&mut self, name: &str, value: ComplexValue) {
+        let key = name.to_uppercase();
+        self.params.insert(key.clone(), value.real_projection());
+        if value.is_real() {
+            self.complex_params.remove(&key);
+        } else {
+            self.complex_params.insert(key, value);
+        }
     }
 
     /// Set a string parameter value.
@@ -169,6 +183,9 @@ impl ParamContext {
     /// Get a parameter value
     pub fn get(&self, name: &str) -> Option<Value> {
         let key = name.to_uppercase();
+        if let Some(value) = self.complex_params.get(&key) {
+            return Some(value.real_projection());
+        }
         if let Some(value) = self.params.get(&key) {
             return Some(*value);
         }
@@ -180,6 +197,15 @@ impl ParamContext {
             .copied()
             .unwrap_or(DEFAULT_TEMPERATURE_C);
         builtin_numeric_param(&key, temp_c)
+    }
+
+    /// Get a parameter value, preserving any imaginary component.
+    pub fn get_complex(&self, name: &str) -> Option<ComplexValue> {
+        let key = name.to_uppercase();
+        if let Some(value) = self.complex_params.get(&key) {
+            return Some(*value);
+        }
+        self.get(&key).map(ComplexValue::real)
     }
 
     /// Get a string parameter value.
@@ -196,6 +222,12 @@ impl ParamContext {
     pub fn merge(&mut self, other: &ParamContext) {
         for (k, v) in &other.params {
             self.params.insert(k.clone(), *v);
+            if !other.complex_params.contains_key(k) {
+                self.complex_params.remove(k);
+            }
+        }
+        for (k, v) in &other.complex_params {
+            self.complex_params.insert(k.clone(), *v);
         }
         for (k, v) in &other.string_params {
             self.string_params.insert(k.clone(), v.clone());

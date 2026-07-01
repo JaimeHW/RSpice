@@ -16,7 +16,18 @@ pub fn eval_expression(input: &str, ctx: &ParamContext) -> Result<Value, ExprErr
     evaluate(&expr, ctx)
 }
 
+/// Parse and evaluate a SPICE expression, preserving complex values.
+pub fn eval_expression_complex(input: &str, ctx: &ParamContext) -> Result<ComplexValue, ExprError> {
+    let expr = parse_expression(input)?;
+    evaluate_complex(&expr, ctx)
+}
+
 /// Evaluate a simple expression without parameters
 pub fn eval_simple(input: &str) -> Result<Value, ExprError> {
     eval_expression(input, &ParamContext::new())
+}
+
+/// Evaluate a simple expression without parameters, preserving complex values.
+pub fn eval_simple_complex(input: &str) -> Result<ComplexValue, ExprError> {
+    eval_expression_complex(input, &ParamContext::new())
 }

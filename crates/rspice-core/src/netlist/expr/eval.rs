@@ -5,6 +5,11 @@ const MAX_EVAL_FUNCTION_CALL_DEPTH: usize = 4096;
 
 /// Evaluate an expression with the given context
 pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
+    evaluate_complex(expr, ctx).map(ComplexValue::real_projection)
+}
+
+/// Evaluate an expression with the given context, preserving complex values.
+pub fn evaluate_complex(expr: &Expr, ctx: &ParamContext) -> Result<ComplexValue, ExprError> {
     ExpressionEvaluator::new(ctx).evaluate(expr)
 }
 
@@ -90,14 +95,15 @@ impl<'a> ExpressionEvaluator<'a> {
         }
     }
 
-    fn evaluate(&mut self, expr: &Expr) -> Result<Value, ExprError> {
+    fn evaluate(&mut self, expr: &Expr) -> Result<ComplexValue, ExprError> {
         let mut frames = vec![EvalFrame::Eval(expr.clone(), EvalScope::global())];
-        let mut values = Vec::<Value>::new();
+        let mut values = Vec::<ComplexValue>::new();
 
         while let Some(frame) = frames.pop() {
             match frame {
                 EvalFrame::Eval(expr, scope) => match expr {
-                    Expr::Number(value) => values.push(value),
+                    Expr::Number(value) => values.push(ComplexValue::real(value)),
+                    Expr::ComplexNumber(value) => values.push(value),
                     Expr::Param(name) => {
                         self.push_param_eval(&mut frames, &mut values, name, scope)?
                     }
@@ -130,7 +136,11 @@ impl<'a> ExpressionEvaluator<'a> {
                 } => {
                     let cond = pop_value(&mut values)?;
                     frames.push(EvalFrame::Eval(
-                        if cond != 0.0 { then_expr } else { else_expr },
+                        if complex_truth(cond) {
+                            then_expr
+                        } else {
+                            else_expr
+                        },
                         scope,
                     ));
                 }
@@ -178,7 +188,7 @@ impl<'a> ExpressionEvaluator<'a> {
     fn push_param_eval(
         &mut self,
         frames: &mut Vec<EvalFrame>,
-        values: &mut Vec<Value>,
+        values: &mut Vec<ComplexValue>,
         name: String,
         scope: EvalScope,
     ) -> Result<(), ExprError> {
@@ -194,14 +204,14 @@ impl<'a> ExpressionEvaluator<'a> {
                     });
                     frames.push(EvalFrame::Eval(arg.expr, arg.scope));
                 }
-                FunctionArgBinding::Unset(_) => values.push(0.0),
+                FunctionArgBinding::Unset(_) => values.push(ComplexValue::zero()),
             }
             return Ok(());
         }
 
         values.push(
             self.ctx
-                .get(&name)
+                .get_complex(&name)
                 .ok_or_else(|| ExprError::UndefinedParam(name.to_string()))?,
         );
         Ok(())
@@ -353,13 +363,13 @@ impl<'a> ExpressionEvaluator<'a> {
     }
 }
 
-fn pop_value(values: &mut Vec<Value>) -> Result<Value, ExprError> {
+fn pop_value(values: &mut Vec<ComplexValue>) -> Result<ComplexValue, ExprError> {
     values.pop().ok_or_else(|| {
         ExprError::InvalidArgument("expression evaluation stack underflow".to_string())
     })
 }
 
-fn pop_args(values: &mut Vec<Value>, argc: usize) -> Result<Vec<Value>, ExprError> {
+fn pop_args(values: &mut Vec<ComplexValue>, argc: usize) -> Result<Vec<ComplexValue>, ExprError> {
     if values.len() < argc {
         return Err(ExprError::InvalidArgument(
             "expression function argument stack underflow".to_string(),
@@ -368,329 +378,430 @@ fn pop_args(values: &mut Vec<Value>, argc: usize) -> Result<Vec<Value>, ExprErro
     Ok(values.split_off(values.len() - argc))
 }
 
-fn apply_unary(op: UnaryOpKind, value: Value) -> Value {
+fn apply_unary(op: UnaryOpKind, value: ComplexValue) -> ComplexValue {
     match op {
-        UnaryOpKind::Neg => -value,
+        UnaryOpKind::Neg => ComplexValue::new(-value.re, -value.im),
         UnaryOpKind::Pos => value,
-        UnaryOpKind::Not => {
-            if value == 0.0 {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        UnaryOpKind::Not => bool_value(!complex_truth(value)),
     }
 }
 
-fn apply_binary(op: BinOpKind, left: Value, right: Value) -> Result<Value, ExprError> {
+fn apply_binary(
+    op: BinOpKind,
+    left: ComplexValue,
+    right: ComplexValue,
+) -> Result<ComplexValue, ExprError> {
     Ok(match op {
-        BinOpKind::Add => left + right,
-        BinOpKind::Sub => left - right,
-        BinOpKind::Mul => left * right,
-        BinOpKind::Div => {
-            if right.abs() < 1e-300 {
-                return Err(ExprError::DivisionByZero);
-            }
-            left / right
-        }
-        BinOpKind::Pow => left.powf(right),
-        BinOpKind::Gt => {
-            if left > right {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        BinOpKind::Lt => {
-            if left < right {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        BinOpKind::Ge => {
-            if left >= right {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        BinOpKind::Le => {
-            if left <= right {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        BinOpKind::Add => complex_add(left, right),
+        BinOpKind::Sub => complex_sub(left, right),
+        BinOpKind::Mul => complex_mul(left, right),
+        BinOpKind::Div => complex_div(left, right)?,
+        BinOpKind::Pow => complex_pow(left, right),
+        BinOpKind::Gt => bool_value(left.re > right.re),
+        BinOpKind::Lt => bool_value(left.re < right.re),
+        BinOpKind::Ge => bool_value(left.re >= right.re),
+        BinOpKind::Le => bool_value(left.re <= right.re),
         BinOpKind::Eq => {
-            if (left - right).abs() < 1e-12 {
-                1.0
-            } else {
-                0.0
-            }
+            bool_value((left.re - right.re).abs() < 1e-12 && (left.im - right.im).abs() < 1e-12)
         }
         BinOpKind::Ne => {
-            if (left - right).abs() >= 1e-12 {
-                1.0
-            } else {
-                0.0
-            }
+            bool_value((left.re - right.re).abs() >= 1e-12 || (left.im - right.im).abs() >= 1e-12)
         }
-        BinOpKind::And => {
-            if left != 0.0 && right != 0.0 {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        BinOpKind::Or => {
-            if left != 0.0 || right != 0.0 {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        BinOpKind::And => bool_value(complex_truth(left) && complex_truth(right)),
+        BinOpKind::Or => bool_value(complex_truth(left) || complex_truth(right)),
     })
+}
+
+#[inline]
+fn bool_value(value: bool) -> ComplexValue {
+    ComplexValue::real(if value { 1.0 } else { 0.0 })
+}
+
+#[inline]
+fn complex_truth(value: ComplexValue) -> bool {
+    value.re != 0.0 || value.im != 0.0
+}
+
+#[inline]
+fn complex_add(left: ComplexValue, right: ComplexValue) -> ComplexValue {
+    ComplexValue::new(left.re + right.re, left.im + right.im)
+}
+
+#[inline]
+fn complex_sub(left: ComplexValue, right: ComplexValue) -> ComplexValue {
+    ComplexValue::new(left.re - right.re, left.im - right.im)
+}
+
+#[inline]
+fn complex_mul(left: ComplexValue, right: ComplexValue) -> ComplexValue {
+    ComplexValue::new(
+        left.re.mul_add(right.re, -(left.im * right.im)),
+        left.re.mul_add(right.im, left.im * right.re),
+    )
+}
+
+#[inline]
+fn complex_div(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, ExprError> {
+    let denom = right.re.mul_add(right.re, right.im * right.im);
+    if denom < 1e-300 {
+        return Err(ExprError::DivisionByZero);
+    }
+    Ok(ComplexValue::new(
+        (left.re * right.re + left.im * right.im) / denom,
+        (left.im * right.re - left.re * right.im) / denom,
+    ))
+}
+
+#[inline]
+fn complex_arg(value: ComplexValue) -> Value {
+    if value.im == 0.0 && value.re < 0.0 {
+        -std::f64::consts::PI
+    } else {
+        value.im.atan2(value.re)
+    }
+}
+
+#[inline]
+fn complex_ln(value: ComplexValue) -> ComplexValue {
+    ComplexValue::new(value.magnitude().ln(), complex_arg(value))
+}
+
+#[inline]
+fn complex_exp(value: ComplexValue) -> ComplexValue {
+    let scale = value.re.exp();
+    ComplexValue::new(scale * value.im.cos(), scale * value.im.sin())
+}
+
+#[inline]
+fn complex_pow(base: ComplexValue, exponent: ComplexValue) -> ComplexValue {
+    if base.is_real() && exponent.is_real() {
+        let real = base.re.powf(exponent.re);
+        if real.is_finite() || base.re >= 0.0 {
+            return ComplexValue::real(real);
+        }
+    }
+    complex_exp(complex_mul(exponent, complex_ln(base)))
+}
+
+#[inline]
+fn complex_sqrt(value: ComplexValue) -> ComplexValue {
+    if value.im == 0.0 {
+        return if value.re >= 0.0 {
+            ComplexValue::real(value.re.sqrt())
+        } else {
+            ComplexValue::new(0.0, -(-value.re).sqrt())
+        };
+    }
+    complex_pow(value, ComplexValue::real(0.5))
+}
+
+#[inline]
+fn complex_sin(value: ComplexValue) -> ComplexValue {
+    ComplexValue::new(
+        value.re.sin() * value.im.cosh(),
+        value.re.cos() * value.im.sinh(),
+    )
+}
+
+#[inline]
+fn complex_cos(value: ComplexValue) -> ComplexValue {
+    ComplexValue::new(
+        value.re.cos() * value.im.cosh(),
+        -(value.re.sin() * value.im.sinh()),
+    )
+}
+
+#[inline]
+fn complex_tan(value: ComplexValue) -> Result<ComplexValue, ExprError> {
+    complex_div(complex_sin(value), complex_cos(value))
 }
 
 fn eval_builtin_function_values(
     name: &str,
-    args: &[Value],
+    args: &[ComplexValue],
     ctx: &ParamContext,
-) -> Result<Value, ExprError> {
-    let expr_args = args.iter().copied().map(Expr::Number).collect::<Vec<_>>();
-    eval_function(name, &expr_args, ctx)
+) -> Result<ComplexValue, ExprError> {
+    eval_complex_builtin_function(name, args, ctx)
 }
 
-/// Evaluate a built-in or user-defined function
-fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value, ExprError> {
-    // First check for user-defined functions
-    if ctx.has_function(name) {
-        let arg_values: Vec<Value> = args
-            .iter()
-            .map(|e| evaluate(e, ctx))
-            .collect::<Result<Vec<_>, _>>()?;
-        return ctx.call_function(name, &arg_values);
-    }
-
-    let get_arg = |idx: usize| -> Result<Value, ExprError> {
-        args.get(idx)
-            .ok_or_else(|| ExprError::WrongArgCount(name.to_string()))
-            .and_then(|e| evaluate(e, ctx))
-    };
-
+fn eval_complex_builtin_function(
+    name: &str,
+    args: &[ComplexValue],
+    ctx: &ParamContext,
+) -> Result<ComplexValue, ExprError> {
     match name {
-        "SQRT" => Ok(get_arg(0)?.sqrt()),
-        "SIN" => Ok(get_arg(0)?.sin()),
-        "COS" => Ok(get_arg(0)?.cos()),
-        "TAN" => Ok(get_arg(0)?.tan()),
-        "ASIN" => Ok(get_arg(0)?.asin()),
-        "ACOS" => Ok(get_arg(0)?.acos()),
-        "ATAN" => Ok(get_arg(0)?.atan()),
-        "ATAN2" => Ok(get_arg(0)?.atan2(get_arg(1)?)),
-        "EXP" => Ok(get_arg(0)?.exp()),
-        "LOG" | "LN" => Ok(get_arg(0)?.ln()),
-        "LOG10" => Ok(get_arg(0)?.log10()),
-        "ABS" | "M" => Ok(get_arg(0)?.abs()),
-        "FLOOR" => Ok(get_arg(0)?.floor()),
-        "CEIL" => Ok(get_arg(0)?.ceil()),
-        "ROUND" => Ok(get_arg(0)?.round()),
-        "MIN" => Ok(get_arg(0)?.min(get_arg(1)?)),
-        "MAX" => Ok(get_arg(0)?.max(get_arg(1)?)),
-        "POW" => Ok(get_arg(0)?.powf(get_arg(1)?)),
-        "PWR" => Ok(get_arg(0)?.abs().powf(get_arg(1)?)),
+        "SQRT" => {
+            require_arg_count(name, args, 1)?;
+            Ok(complex_sqrt(args[0]))
+        }
+        "SIN" => {
+            require_arg_count(name, args, 1)?;
+            Ok(complex_sin(args[0]))
+        }
+        "COS" => {
+            require_arg_count(name, args, 1)?;
+            Ok(complex_cos(args[0]))
+        }
+        "TAN" => {
+            require_arg_count(name, args, 1)?;
+            complex_tan(args[0])
+        }
+        "EXP" => {
+            require_arg_count(name, args, 1)?;
+            Ok(complex_exp(args[0]))
+        }
+        "LOG" | "LN" => {
+            require_arg_count(name, args, 1)?;
+            Ok(complex_ln(args[0]))
+        }
+        "LOG10" => {
+            require_arg_count(name, args, 1)?;
+            let value = complex_ln(args[0]);
+            Ok(ComplexValue::new(
+                value.re / std::f64::consts::LN_10,
+                value.im / std::f64::consts::LN_10,
+            ))
+        }
+        "ABS" | "M" | "MAG" => {
+            require_arg_count(name, args, 1)?;
+            Ok(ComplexValue::real(args[0].magnitude()))
+        }
+        "R" | "RE" | "REAL" => {
+            require_arg_count(name, args, 1)?;
+            Ok(ComplexValue::real(args[0].re))
+        }
+        "IMG" | "IMAG" => {
+            require_arg_count(name, args, 1)?;
+            Ok(ComplexValue::real(args[0].im))
+        }
+        "PH" | "PHASE" => {
+            require_arg_count(name, args, 1)?;
+            Ok(ComplexValue::real(complex_arg(args[0]).to_degrees()))
+        }
+        "DB" => {
+            require_arg_count(name, args, 1)?;
+            Ok(ComplexValue::real(20.0 * args[0].magnitude().log10()))
+        }
+        "ASIN" => real_unary(name, args, |x| x.asin()),
+        "ACOS" => real_unary(name, args, |x| x.acos()),
+        "ATAN" => real_unary(name, args, |x| x.atan()),
+        "ATAN2" => real_binary(name, args, |left, right| left.atan2(right)),
+        "FLOOR" => real_unary(name, args, |x| x.floor()),
+        "CEIL" => real_unary(name, args, |x| x.ceil()),
+        "ROUND" => real_unary(name, args, |x| x.round()),
+        "MIN" => real_binary(name, args, |left, right| left.min(right)),
+        "MAX" => real_binary(name, args, |left, right| left.max(right)),
+        "POW" => {
+            require_arg_count(name, args, 2)?;
+            Ok(complex_pow(args[0], args[1]))
+        }
+        "PWR" => Ok(ComplexValue::real(
+            checked_real_arg(name, args, 0)?
+                .abs()
+                .powf(checked_real_arg(name, args, 1)?),
+        )),
         "PWRS" => {
-            let base = get_arg(0)?;
-            Ok(base.signum() * base.abs().powf(get_arg(1)?))
+            let base = checked_real_arg(name, args, 0)?;
+            Ok(ComplexValue::real(
+                base.signum() * base.abs().powf(checked_real_arg(name, args, 1)?),
+            ))
         }
         "LIMIT" => match args.len() {
-            // LIMIT(nom, avar): worst-case two-point draw, nom ± avar with a
-            // random sign (ngspice/HSPICE .param semantics).
             2 => {
-                let nom = get_arg(0)?;
-                let avar = get_arg(1)?;
+                let nom = checked_real_arg(name, args, 0)?;
+                let avar = checked_real_arg(name, args, 1)?;
                 if ctx.statistical_mode() == StatisticalParamMode::Nominal {
-                    return Ok(nom);
+                    return Ok(ComplexValue::real(nom));
                 }
                 let sign = if ctx.random().next_symmetric() >= 0.0 {
                     1.0
                 } else {
                     -1.0
                 };
-                Ok(nom + avar * sign)
+                Ok(ComplexValue::real(nom + avar * sign))
             }
-            // LIMIT(x, min, max): clamp.
             3 => {
-                let x = get_arg(0)?;
-                let min = get_arg(1)?;
-                let max = get_arg(2)?;
-                Ok(x.clamp(min, max))
+                let x = checked_real_arg(name, args, 0)?;
+                let min = checked_real_arg(name, args, 1)?;
+                let max = checked_real_arg(name, args, 2)?;
+                Ok(ComplexValue::real(x.clamp(min, max)))
             }
             _ => Err(ExprError::WrongArgCount("LIMIT".to_string())),
         },
-        // Statistical distribution functions (ngspice/HSPICE .param
-        // semantics). Draws come from the context's seeded deterministic
-        // stream, so identical seeds reproduce identical values.
         "GAUSS" | "AGAUSS" => {
-            if args.len() != 3 {
-                return Err(ExprError::WrongArgCount(name.to_string()));
-            }
-            let nom = get_arg(0)?;
-            let var = get_arg(1)?;
-            let sigma = get_arg(2)?;
+            require_arg_count(name, args, 3)?;
+            let nom = checked_real_arg(name, args, 0)?;
+            let var = checked_real_arg(name, args, 1)?;
+            let sigma = checked_real_arg(name, args, 2)?;
             if sigma == 0.0 {
                 return Err(ExprError::InvalidArgument(format!(
                     "{name}: sigma must be non-zero"
                 )));
             }
-            // gauss: variation is relative to nom; agauss: absolute.
             let deviation = if name == "GAUSS" { nom * var } else { var };
             if ctx.statistical_mode() == StatisticalParamMode::Nominal {
-                return Ok(nom);
+                return Ok(ComplexValue::real(nom));
             }
-            Ok(nom + deviation / sigma * ctx.random().next_standard_normal())
+            Ok(ComplexValue::real(
+                nom + deviation / sigma * ctx.random().next_standard_normal(),
+            ))
         }
         "UNIF" | "AUNIF" => {
-            if args.len() != 2 {
-                return Err(ExprError::WrongArgCount(name.to_string()));
-            }
-            let nom = get_arg(0)?;
-            let var = get_arg(1)?;
-            // unif: variation is relative to nom; aunif: absolute.
+            require_arg_count(name, args, 2)?;
+            let nom = checked_real_arg(name, args, 0)?;
+            let var = checked_real_arg(name, args, 1)?;
             let deviation = if name == "UNIF" { nom * var } else { var };
             if ctx.statistical_mode() == StatisticalParamMode::Nominal {
-                return Ok(nom);
+                return Ok(ComplexValue::real(nom));
             }
-            Ok(nom + deviation * ctx.random().next_symmetric())
+            Ok(ComplexValue::real(
+                nom + deviation * ctx.random().next_symmetric(),
+            ))
         }
         "IF" => {
-            // IF(cond, then, else)
-            let cond = get_arg(0)?;
-            if cond != 0.0 { get_arg(1) } else { get_arg(2) }
+            require_arg_count(name, args, 3)?;
+            if complex_truth(args[0]) {
+                Ok(args[1])
+            } else {
+                Ok(args[2])
+            }
         }
         "URAMP" => {
-            // URAMP(x) = x if x > 0, else 0
-            let x = get_arg(0)?;
-            Ok(if x > 0.0 { x } else { 0.0 })
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(ComplexValue::real(if x > 0.0 { x } else { 0.0 }))
         }
         "SGN" | "SIGN" => {
-            let x = get_arg(0)?;
-            Ok(if x > 0.0 {
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(ComplexValue::real(if x > 0.0 {
                 1.0
             } else if x < 0.0 {
                 -1.0
             } else {
                 0.0
-            })
+            }))
         }
-        "TABLE" => {
-            // TABLE(x, x1, y1, x2, y2, ...) - piecewise linear interpolation
-            // Used extensively in vendor models for nonlinear behavior
-            if args.len() < 3 {
-                return Err(ExprError::WrongArgCount("TABLE".to_string()));
-            }
-
-            let x = get_arg(0)?;
-
-            // Extract (x, y) pairs from remaining arguments
-            let mut points: Vec<(Value, Value)> = Vec::new();
-            let mut i = 1;
-            while i + 1 < args.len() {
-                let xi = get_arg(i)?;
-                let yi = get_arg(i + 1)?;
-                points.push((xi, yi));
-                i += 2;
-            }
-
-            Ok(table_interpolate(x, &points))
-        }
-        "PWL" => {
-            // PWL is an alias for TABLE (both do piecewise linear)
-            if args.len() < 3 {
-                return Err(ExprError::WrongArgCount("PWL".to_string()));
-            }
-
-            let x = get_arg(0)?;
-            let mut points: Vec<(Value, Value)> = Vec::new();
-            let mut i = 1;
-            while i + 1 < args.len() {
-                let xi = get_arg(i)?;
-                let yi = get_arg(i + 1)?;
-                points.push((xi, yi));
-                i += 2;
-            }
-
-            Ok(table_interpolate(x, &points))
-        }
-        // Hyperbolic trigonometric functions
-        "SINH" => Ok(get_arg(0)?.sinh()),
-        "COSH" => Ok(get_arg(0)?.cosh()),
-        "TANH" => Ok(get_arg(0)?.tanh()),
-        "ASINH" => Ok(get_arg(0)?.asinh()),
-        "ACOSH" => Ok(get_arg(0)?.acosh()),
-        "ATANH" => Ok(get_arg(0)?.atanh()),
-        "ARCTAN" => Ok(get_arg(0)?.atan()), // Alias for atan
-        // Integer/rounding functions
-        "INT" | "TRUNC" => Ok(get_arg(0)?.trunc()),
+        "TABLE" | "PWL" => eval_real_table_function(name, args),
+        "SINH" => real_unary(name, args, |x| x.sinh()),
+        "COSH" => real_unary(name, args, |x| x.cosh()),
+        "TANH" => real_unary(name, args, |x| x.tanh()),
+        "ASINH" => real_unary(name, args, |x| x.asinh()),
+        "ACOSH" => real_unary(name, args, |x| x.acosh()),
+        "ATANH" => real_unary(name, args, |x| x.atanh()),
+        "ARCTAN" => real_unary(name, args, |x| x.atan()),
+        "INT" | "TRUNC" => real_unary(name, args, |x| x.trunc()),
         "NINT" => {
-            // Nearest integer (round half towards even - banker's rounding)
-            let x = get_arg(0)?;
-            Ok(x.round_ties_even())
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(ComplexValue::real(x.round_ties_even()))
         }
         "SQR" => {
-            // Square of x
-            let x = get_arg(0)?;
-            Ok(x * x)
+            require_arg_count(name, args, 1)?;
+            Ok(complex_mul(args[0], args[0]))
         }
-        // Step functions for behavioral modeling
         "U" | "USTEP" => {
-            // Unit step: 1 if x > 0, 0.5 if x == 0, 0 if x < 0
-            let x = get_arg(0)?;
-            Ok(if x > 0.0 {
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(ComplexValue::real(if x > 0.0 {
                 1.0
             } else if x == 0.0 {
                 0.5
             } else {
                 0.0
-            })
+            }))
         }
         "U2" => {
-            // Smooth step: 0 for x<=0, x for 0<x<1, 1 for x>=1
-            let x = get_arg(0)?;
-            Ok(x.clamp(0.0, 1.0))
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(ComplexValue::real(x.clamp(0.0, 1.0)))
         }
-        // Comparison functions (return 0 or 1)
         "EQ0" => {
-            let x = get_arg(0)?;
-            Ok(if x.abs() < 1e-12 { 1.0 } else { 0.0 })
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(bool_value(x.abs() < 1e-12))
         }
         "NE0" => {
-            let x = get_arg(0)?;
-            Ok(if x.abs() >= 1e-12 { 1.0 } else { 0.0 })
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(bool_value(x.abs() >= 1e-12))
         }
         "GT0" => {
-            let x = get_arg(0)?;
-            Ok(if x > 0.0 { 1.0 } else { 0.0 })
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(bool_value(x > 0.0))
         }
         "LT0" => {
-            let x = get_arg(0)?;
-            Ok(if x < 0.0 { 1.0 } else { 0.0 })
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(bool_value(x < 0.0))
         }
         "GE0" => {
-            let x = get_arg(0)?;
-            Ok(if x >= 0.0 { 1.0 } else { 0.0 })
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(bool_value(x >= 0.0))
         }
         "LE0" => {
-            let x = get_arg(0)?;
-            Ok(if x <= 0.0 { 1.0 } else { 0.0 })
+            let x = checked_real_arg(name, args, 0)?;
+            Ok(bool_value(x <= 0.0))
         }
-        // Pseudo-random (constant for DC, deterministic)
-        "RAND" | "RANDOM" => {
-            // Return a pseudo-random value (for testing, use a hash)
-            Ok(0.5) // Constant for DC evaluation
-        }
+        "RAND" | "RANDOM" => Ok(ComplexValue::real(0.5)),
         _ => Err(ExprError::UnknownFunction(name.to_string())),
     }
+}
+
+fn require_arg_count(name: &str, args: &[ComplexValue], expected: usize) -> Result<(), ExprError> {
+    if args.len() == expected {
+        Ok(())
+    } else {
+        Err(ExprError::WrongArgCount(name.to_string()))
+    }
+}
+
+fn checked_arg(name: &str, args: &[ComplexValue], index: usize) -> Result<ComplexValue, ExprError> {
+    args.get(index)
+        .copied()
+        .ok_or_else(|| ExprError::WrongArgCount(name.to_string()))
+}
+
+fn checked_real_arg(name: &str, args: &[ComplexValue], index: usize) -> Result<Value, ExprError> {
+    let value = checked_arg(name, args, index)?;
+    if value.is_real() {
+        Ok(value.re)
+    } else {
+        Err(ExprError::InvalidArgument(format!(
+            "{name}: complex argument {} is not valid for a real-valued function",
+            index + 1
+        )))
+    }
+}
+
+fn real_unary(
+    name: &str,
+    args: &[ComplexValue],
+    op: impl FnOnce(Value) -> Value,
+) -> Result<ComplexValue, ExprError> {
+    require_arg_count(name, args, 1)?;
+    Ok(ComplexValue::real(op(checked_real_arg(name, args, 0)?)))
+}
+
+fn real_binary(
+    name: &str,
+    args: &[ComplexValue],
+    op: impl FnOnce(Value, Value) -> Value,
+) -> Result<ComplexValue, ExprError> {
+    require_arg_count(name, args, 2)?;
+    Ok(ComplexValue::real(op(
+        checked_real_arg(name, args, 0)?,
+        checked_real_arg(name, args, 1)?,
+    )))
+}
+
+fn eval_real_table_function(name: &str, args: &[ComplexValue]) -> Result<ComplexValue, ExprError> {
+    if args.len() < 3 {
+        return Err(ExprError::WrongArgCount(name.to_string()));
+    }
+    let x = checked_real_arg(name, args, 0)?;
+    let mut points = Vec::<(Value, Value)>::new();
+    let mut i = 1;
+    while i + 1 < args.len() {
+        points.push((
+            checked_real_arg(name, args, i)?,
+            checked_real_arg(name, args, i + 1)?,
+        ));
+        i += 2;
+    }
+    Ok(ComplexValue::real(table_interpolate(x, &points)))
 }
 
 /// Piecewise linear interpolation for TABLE function

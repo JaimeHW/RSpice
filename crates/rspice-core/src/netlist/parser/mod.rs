@@ -6,7 +6,7 @@
 //! - .PARAM statements with expression evaluation
 //! - Subcircuit definitions and instances
 
-use super::expr::eval_expression;
+use super::expr::{eval_expression, eval_expression_complex};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::xspice_parser;
 use super::{

@@ -664,6 +664,66 @@ fn power_operator_matches_ngspice_numparam() {
 }
 
 #[test]
+fn xyce_complex_log10_negative_param_projects_components() {
+    let mut ctx = ParamContext::new();
+    let value = eval_expression_complex("log10(-1)", &ctx)
+        .unwrap_or_else(|e| panic!("complex log10 failed: {e}"));
+    let expected_im = -std::f64::consts::PI / std::f64::consts::LN_10;
+
+    assert!(value.re.abs() < 1.0e-14, "real part {}", value.re);
+    assert!(
+        (value.im - expected_im).abs() < 1.0e-14,
+        "imaginary part {}",
+        value.im
+    );
+
+    ctx.set_complex("r0", value);
+    assert!(eval_with(&ctx, "r0").abs() < 1.0e-14);
+    assert!(eval_with(&ctx, "re(r0)").abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "img(r0)") - expected_im).abs() < 1.0e-14);
+}
+
+#[test]
+fn xyce_complex_literals_and_projection_functions() {
+    let ctx = ParamContext::new();
+    let literal = eval_expression_complex("3.0+2.0J", &ctx)
+        .unwrap_or_else(|e| panic!("complex literal failed: {e}"));
+    assert!((literal.re - 3.0).abs() < 1.0e-14);
+    assert!((literal.im - 2.0).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "m(3.0+2.0J)") - 13.0_f64.sqrt()).abs() < 1.0e-14);
+
+    let sqrt_negative = eval_expression_complex("sqrt(-1.0)", &ctx)
+        .unwrap_or_else(|e| panic!("complex sqrt failed: {e}"));
+    assert!(sqrt_negative.re.abs() < 1.0e-14);
+    assert!((sqrt_negative.im + 1.0).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "img(sqrt(-1.0))") + 1.0).abs() < 1.0e-14);
+}
+
+#[test]
+fn parser_preserves_complex_param_storage() {
+    let netlist = crate::netlist::Netlist::parse(
+        "complex params\n\
+         .param r0={log10(-1)}\n\
+         .param realPart=1.0e-4\n\
+         .param imagPart=2.0e-4\n\
+         .param par1={realPart + imagPart*1.0J}\n\
+         .param alias=par1\n\
+         .END\n",
+    )
+    .expect("complex parameter deck parses");
+
+    let r0 = netlist.params.get_complex("r0").expect("r0 exists");
+    let expected_im = -std::f64::consts::PI / std::f64::consts::LN_10;
+    assert!(r0.re.abs() < 1.0e-14);
+    assert!((r0.im - expected_im).abs() < 1.0e-14);
+
+    let par1 = netlist.params.get_complex("par1").expect("par1 exists");
+    assert!((par1.re - 1.0e-4).abs() < 1.0e-18);
+    assert!((par1.im - 2.0e-4).abs() < 1.0e-18);
+    assert_eq!(netlist.params.get_complex("alias"), Some(par1));
+}
+
+#[test]
 fn number_suffixes_match_ngspice_numparam() {
     // numparam swallows letters after a number, applies the scale factor
     // even after a scientific exponent, and has no `mil` unit (`1mil` is

@@ -447,15 +447,20 @@ impl<'a> ExprParser<'a> {
 
         let numeric_end = i;
 
-        // ngspice numparam scale factors (xpressn.c `parseunit`).
+        // ngspice numparam scale factors (xpressn.c `parseunit`), plus
+        // Xyce's engineering-expression imaginary suffix (`2.0J`).
         let mut multiplier = 1.0;
+        let mut imaginary_literal = false;
         if i < chars.len() && chars[i].is_ascii_alphabetic() {
             let is_meg = i + 3 <= chars.len()
                 && chars[i..i + 3]
                     .iter()
                     .collect::<String>()
                     .eq_ignore_ascii_case("meg");
-            multiplier = if is_meg {
+            imaginary_literal = chars[i].eq_ignore_ascii_case(&'j');
+            multiplier = if imaginary_literal {
+                1.0
+            } else if is_meg {
                 1e6
             } else {
                 match chars[i].to_ascii_uppercase() {
@@ -482,7 +487,14 @@ impl<'a> ExprParser<'a> {
 
         let num_str: String = chars[..numeric_end].iter().collect();
         match num_str.parse::<f64>() {
-            Ok(v) => Ok(Expr::Number(v * multiplier)),
+            Ok(v) => {
+                let value = v * multiplier;
+                if imaginary_literal {
+                    Ok(Expr::ComplexNumber(ComplexValue::new(0.0, value)))
+                } else {
+                    Ok(Expr::Number(value))
+                }
+            }
             Err(_) => Err(ExprError::InvalidNumber(num_str)),
         }
     }

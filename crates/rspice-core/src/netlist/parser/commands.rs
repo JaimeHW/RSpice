@@ -1403,9 +1403,9 @@ pub(super) fn parse_param_statement(
             }
             _ if param_rhs_continues(stream) => {
                 let expr = collect_param_rhs_expression(stream, line_num, &name)?;
-                let value = eval_expression(&expr, params)
+                let value = eval_expression_complex(&expr, params)
                     .map_err(|e| ParseError::InvalidValue(format!("line {}: {}", line_num, e)))?;
-                params.set(&name, value);
+                params.set_complex(&name, value);
             }
             TokenKind::Expression(expr) if params.get_string(expr).is_some() => {
                 let value = params
@@ -1414,6 +1414,20 @@ pub(super) fn parse_param_statement(
                     .to_string();
                 stream.advance();
                 params.set_string(&name, value);
+            }
+            TokenKind::Expression(expr) => {
+                let expr = expr.clone();
+                stream.advance();
+                let value = eval_expression_complex(&expr, params)
+                    .map_err(|e| ParseError::InvalidValue(format!("line {}: {}", line_num, e)))?;
+                params.set_complex(&name, value);
+            }
+            TokenKind::Ident(param_name) if params.get_complex(param_name).is_some() => {
+                let value = params
+                    .get_complex(param_name)
+                    .expect("parameter presence checked");
+                stream.advance();
+                params.set_complex(&name, value);
             }
             _ => {
                 let value = expect_value(stream, line_num, params)?;
