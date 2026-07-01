@@ -2437,6 +2437,32 @@ fn oneshot_output_below_or_at_official(value: Value, target: Value) -> bool {
     value - target < 1.0e-20
 }
 
+fn oneshot_edge_time(
+    ctx: &CmContext,
+    old_clock: Value,
+    clock: Value,
+    trigger: Value,
+    has_previous_sample: bool,
+) -> Value {
+    if !has_previous_sample
+        || !ctx.time_prev.is_finite()
+        || !ctx.time.is_finite()
+        || ctx.time <= ctx.time_prev
+        || !old_clock.is_finite()
+        || !clock.is_finite()
+    {
+        return ctx.time;
+    }
+
+    let delta_clock = clock - old_clock;
+    if delta_clock.abs() <= Value::EPSILON {
+        return ctx.time;
+    }
+
+    let alpha = ((trigger - old_clock) / delta_clock).clamp(0.0, 1.0);
+    ctx.time_prev + alpha * (ctx.time - ctx.time_prev)
+}
+
 impl CodeModel for AnalogOneShot {
     fn name(&self) -> &str {
         "oneshot"
@@ -2505,13 +2531,15 @@ impl CodeModel for AnalogOneShot {
         let mut state = ctx.state_prev(ONESHOT_STATE) > 0.5;
         let mut locked = ctx.state_prev(ONESHOT_LOCKED) > 0.5;
         let previous_output = ctx.state_prev(ONESHOT_OUTPUT_OLD);
-        let old_clock = if ctx.state_prev(ONESHOT_TRAN_INIT) > 0.5 {
+        let has_previous_sample = ctx.state_prev(ONESHOT_TRAN_INIT) > 0.5;
+        let old_clock = if has_previous_sample {
             ctx.state_prev(ONESHOT_CLOCK)
         } else {
             0.0
         };
         let clock = ctx.input("clk");
         let commit_state = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
+        let mut trigger_time = ctx.time;
 
         let mut output = output_low;
         if ctx.port_width("clear") > 0 && ctx.input("clear") > trigger {
@@ -2535,6 +2563,8 @@ impl CodeModel for AnalogOneShot {
             if positive_edge {
                 if !set {
                     if clock > old_clock && clock > trigger {
+                        trigger_time =
+                            oneshot_edge_time(ctx, old_clock, clock, trigger, has_previous_sample);
                         state = true;
                         set = true;
                     }
@@ -2543,6 +2573,8 @@ impl CodeModel for AnalogOneShot {
                 }
             } else if !set {
                 if clock < old_clock && clock < trigger {
+                    trigger_time =
+                        oneshot_edge_time(ctx, old_clock, clock, trigger, has_previous_sample);
                     state = true;
                     set = true;
                 }
@@ -2552,7 +2584,7 @@ impl CodeModel for AnalogOneShot {
 
             if state && oneshot_output_below_or_at_official(previous_output, output_low) && !locked
             {
-                time1 = ctx.time + rise_delay;
+                time1 = trigger_time + rise_delay;
                 time2 = time1 + rise_time;
                 time3 = time2 + pulse_width + fall_delay;
                 time4 = time3 + fall_time;
@@ -2567,7 +2599,7 @@ impl CodeModel for AnalogOneShot {
                 && oneshot_output_below_or_at_official(previous_output, output_high)
                 && !locked
             {
-                time3 = ctx.time + pulse_width + rise_delay + fall_delay + rise_time;
+                time3 = trigger_time + pulse_width + rise_delay + fall_delay + rise_time;
                 time4 = time3 + fall_time;
                 if commit_state {
                     request_oneshot_breakpoints(ctx, &[time3, time4]);
