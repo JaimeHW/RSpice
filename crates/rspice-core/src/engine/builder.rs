@@ -397,6 +397,54 @@ fn xspice_meter_measured_value(
 }
 
 impl Engine {
+    pub(crate) fn resolved_resistor_value(
+        &self,
+        netlist: &Netlist,
+        resistor_name: &str,
+    ) -> Result<Option<f64>, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        let flattened = flatten_netlist_with_models(netlist)
+            .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
+        let mut effective_netlist;
+        let netlist = if flattened.scoped_models.is_empty() {
+            netlist
+        } else {
+            effective_netlist = netlist.clone();
+            effective_netlist.models.extend(flattened.scoped_models);
+            &effective_netlist
+        };
+
+        let Some(element) = flattened
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(resistor_name))
+        else {
+            return Ok(None);
+        };
+
+        let ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Ok(None);
+        };
+
+        resolve_resistor_instance_value(
+            netlist,
+            &element.name,
+            *value,
+            value_expr.as_deref(),
+            model.as_deref(),
+            instance_params,
+            engine.config.temperature,
+        )
+        .map(Some)
+    }
+
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
         let mut circuit = CircuitData::new();
@@ -1755,6 +1803,8 @@ impl Engine {
                                     jfet.enable_xyce_jfet2_model()
                                 }
                             };
+                        } else if self.config.spice_dialect == SpiceDialect::Xyce {
+                            jfet = jfet.enable_xyce_jfet1_model();
                         }
                         jfet = jfet.with_model_params(&params_map);
                     }

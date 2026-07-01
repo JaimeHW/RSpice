@@ -179,6 +179,29 @@ impl Jfet {
         self
     }
 
+    /// Enable Xyce-compatible level-1 Sydney University JFET equations.
+    pub fn enable_xyce_jfet1_model(mut self) -> Self {
+        self.params.channel_model = JfetChannelModel::XyceSydney;
+        self.hfet_legacy_inverse_mode = false;
+        self.hfet_legacy_inverse_active = false;
+        self.params.hfet_level = 1;
+        self.params.vto = -2.0;
+        self.params.beta = 1.0e-4;
+        self.params.lambda = 0.0;
+        self.params.is = 1.0e-14;
+        self.params.pb = 1.0;
+        self.params.fc = 0.5;
+        self.params.n = 1.0;
+        self.params.mes_b = 1.0;
+        self.vgs = Value::NAN;
+        self.vds = Value::NAN;
+        self.vgs_prev = Value::NAN;
+        self.vds_prev = Value::NAN;
+        self.eval_valid = false;
+        self.limiter_applied = false;
+        self
+    }
+
     /// Enable Xyce-compatible modified-Shockley JFET2 defaults.
     pub fn enable_xyce_jfet2_model(mut self) -> Self {
         self.params.channel_model = JfetChannelModel::XyceModifiedShockley;

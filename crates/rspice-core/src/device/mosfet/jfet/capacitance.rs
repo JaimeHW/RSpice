@@ -562,7 +562,9 @@ impl Jfet {
     pub fn transient_capacitances(&self, vgs: Value, vgd: Value, temp: Value) -> (Value, Value) {
         let (temp_common, temp_source, _) = self.resolved_temperatures(temp);
         let (mut cgs, mut cgd) = match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
+            JfetChannelModel::ShichmanHodges
+            | JfetChannelModel::XyceSydney
+            | JfetChannelModel::LegacyMesfet => {
                 let pol = self.jfet_type.polarity();
                 self.capacitances(pol * vgs, pol * vgd)
             }
@@ -625,7 +627,9 @@ impl Jfet {
         };
 
         match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
+            JfetChannelModel::ShichmanHodges
+            | JfetChannelModel::XyceSydney
+            | JfetChannelModel::LegacyMesfet => {
                 let pol = self.jfet_type.polarity();
                 let (cgs, cgd) = self.capacitances(pol * vgs, pol * vgd);
                 (cgs, cgd, cds)
@@ -675,6 +679,7 @@ impl Jfet {
 
         let (gm, gds) = match self.params.channel_model {
             JfetChannelModel::ShichmanHodges
+            | JfetChannelModel::XyceSydney
             | JfetChannelModel::XyceModifiedShockley
             | JfetChannelModel::LegacyMesfet => (gm_base, gds_base),
             JfetChannelModel::ParkerSkellern => {

@@ -916,6 +916,77 @@ impl Jfet {
         (pol * ids, gm, gds)
     }
 
+    /// Calculate Xyce level-1 Sydney University JFET drain current.
+    pub(super) fn calculate_xyce_sydney_level1(
+        &self,
+        vgs: Value,
+        vds: Value,
+    ) -> (Value, Value, Value) {
+        let pol = self.jfet_type.polarity();
+        let vgs_int = pol * vgs;
+        let vds_int = pol * vds;
+        let vgd_int = vgs_int - vds_int;
+
+        let beta = (self.params.beta * self.area * self.m).max(0.0);
+        let vto = self.params.vto;
+        let lambda = self.params.lambda;
+        let pb = self.params.pb;
+        let b = self.params.mes_b;
+        let bfac_base = if (pb - vto).abs() > 1.0e-30 {
+            (1.0 - b) / (pb - vto)
+        } else {
+            0.0
+        };
+
+        let (cdrain, gm, gds) = if vds_int >= 0.0 {
+            let vgst = vgs_int - vto;
+            if vgst <= 0.0 {
+                (0.0, 0.0, 0.0)
+            } else {
+                let betap = beta * (1.0 + lambda * vds_int);
+                if vgst >= vds_int {
+                    let apart = 2.0 * b + 3.0 * bfac_base * (vgst - vds_int);
+                    let cpart = vds_int * (vds_int * (bfac_base * vds_int - b) + vgst * apart);
+                    let cdrain = betap * cpart;
+                    let gm = betap * vds_int * (apart + 3.0 * bfac_base * vgst);
+                    let gds = betap * (vgst - vds_int) * apart + lambda * beta * cpart;
+                    (cdrain, gm, gds)
+                } else {
+                    let bfac = vgst * bfac_base;
+                    let cpart = vgst * vgst * (b + bfac);
+                    let cdrain = betap * cpart;
+                    let gm = betap * vgst * (2.0 * b + 3.0 * bfac);
+                    let gds = lambda * beta * cpart;
+                    (cdrain, gm, gds)
+                }
+            }
+        } else {
+            let vgdt = vgd_int - vto;
+            if vgdt <= 0.0 {
+                (0.0, 0.0, 0.0)
+            } else {
+                let betap = beta * (1.0 - lambda * vds_int);
+                if vgdt + vds_int >= 0.0 {
+                    let apart = 2.0 * b + 3.0 * bfac_base * (vgdt + vds_int);
+                    let cpart = vds_int * (-vds_int * (-bfac_base * vds_int - b) + vgdt * apart);
+                    let cdrain = betap * cpart;
+                    let gm = betap * vds_int * (apart + 3.0 * bfac_base * vgdt);
+                    let gds = betap * (vgdt + vds_int) * apart - lambda * beta * cpart - gm;
+                    (cdrain, gm, gds)
+                } else {
+                    let bfac = vgdt * bfac_base;
+                    let cpart = vgdt * vgdt * (b + bfac);
+                    let cdrain = -betap * cpart;
+                    let gm = -betap * vgdt * (2.0 * b + 3.0 * bfac);
+                    let gds = lambda * beta * cpart - gm;
+                    (cdrain, gm, gds)
+                }
+            }
+        };
+
+        (pol * cdrain, gm, gds)
+    }
+
     /// Calculate Berkeley SPICE level-1 MESFET drain current and conductances.
     pub(super) fn calculate_legacy_mesfet(&self, vgs: Value, vds: Value) -> (Value, Value, Value) {
         let pol = self.jfet_type.polarity();

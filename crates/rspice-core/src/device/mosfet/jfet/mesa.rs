@@ -1033,6 +1033,7 @@ impl Jfet {
         let (temp_common, temp_source, _) = self.resolved_temperatures(temp);
         match self.params.channel_model {
             JfetChannelModel::ShichmanHodges => self.calculate_shichman_hodges(vgs, vds),
+            JfetChannelModel::XyceSydney => self.calculate_xyce_sydney_level1(vgs, vds),
             JfetChannelModel::XyceModifiedShockley => {
                 let vgd = vgs - vds;
                 let terms = self.xyce_jfet2_operating_terms(vgs, vds, vgd, temp_common);

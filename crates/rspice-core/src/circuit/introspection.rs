@@ -246,7 +246,8 @@ impl CircuitData {
         for jfet in &self.jfets {
             let (vgs, vds, ids, gm, gds, igs, igd) = jfet.op_values();
             let device_kind = match jfet.params.channel_model {
-                crate::device::JfetChannelModel::ShichmanHodges => "JFET",
+                crate::device::JfetChannelModel::ShichmanHodges
+                | crate::device::JfetChannelModel::XyceSydney => "JFET",
                 crate::device::JfetChannelModel::ParkerSkellern => "JFET2",
                 crate::device::JfetChannelModel::XyceModifiedShockley => "JFET2_XYCE",
                 crate::device::JfetChannelModel::LegacyMesfet => "MESFET",

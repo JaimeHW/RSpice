@@ -1,8 +1,9 @@
 //! JFET (Junction Field-Effect Transistor) Device Model
 //!
 //! Implements native JFET-family models for N-channel and P-channel devices,
-//! including Shichman-Hodges level 1, ngspice Parker-Skellern JFET2, Xyce
-//! modified-Shockley JFET2, and the MESFET/HFET-compatible variants.
+//! including Shichman-Hodges level 1, Xyce Sydney level 1, ngspice
+//! Parker-Skellern JFET2, Xyce modified-Shockley JFET2, and the
+//! MESFET/HFET-compatible variants.
 //!
 //! # Model Equations
 //!
@@ -74,6 +75,8 @@ impl JfetType {
 pub enum JfetChannelModel {
     /// Classic Shichman-Hodges JFET equations.
     ShichmanHodges,
+    /// Xyce level-1 Sydney University JFET equations.
+    XyceSydney,
     /// ngspice JFET2 Parker-Skellern short-channel JFET/MESFET equations.
     ParkerSkellern,
     /// Xyce JFET level-2 modified-Shockley equations.
