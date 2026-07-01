@@ -14,6 +14,27 @@ use rspice_veriloga::rust_backend::{
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 const MANIFEST_FILE_NAME: &str = "manifest.txt";
+const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
+    "src/lib.rs",
+    "src/ast.rs",
+    "src/canonical_ir",
+    "src/codegen",
+    "src/disciplines.rs",
+    "src/error.rs",
+    "src/expr_converter.rs",
+    "src/ir.rs",
+    "src/laplace.rs",
+    "src/lexer.rs",
+    "src/parser",
+    "src/preprocessor.rs",
+    "src/rust_backend",
+    "src/semantic",
+    "src/semantic.rs",
+    "src/source.rs",
+    "src/stdlib.rs",
+    "src/types.rs",
+    "src/zfilter.rs",
+];
 
 fn main() {
     println!("cargo:rerun-if-env-changed=RSPICE_VERILOGA_BUILTINS_DIR");
@@ -98,12 +119,12 @@ fn default_model_root() -> PathBuf {
         .join("models/veriloga")
 }
 
-fn generator_source_root() -> PathBuf {
+fn generator_crate_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     manifest_dir
         .parent()
         .expect("rspice-core must live under workspace crates directory")
-        .join("rspice-veriloga/src")
+        .join("rspice-veriloga")
 }
 
 fn generator_digest() -> Result<String, Box<dyn std::error::Error>> {
@@ -111,18 +132,43 @@ fn generator_digest() -> Result<String, Box<dyn std::error::Error>> {
     let build_script = manifest_dir.join("build.rs");
     println!("cargo:rerun-if-changed={}", build_script.display());
 
-    let transpiler_digest = tree_digest(&generator_source_root(), false)?;
+    let generator_root = generator_crate_root();
     let build_script_bytes = fs::read(&build_script)?;
     let mut input = String::new();
-    input.push_str("rspice-veriloga/src");
-    input.push('\0');
-    input.push_str(&transpiler_digest);
-    input.push('\0');
+    for relative in GENERATOR_SOURCE_DIGEST_INPUTS {
+        let path = generator_root.join(relative);
+        let digest = if path.is_dir() {
+            tree_digest(&path, true)?
+        } else if path.is_file() {
+            println!("cargo:rerun-if-changed={}", path.display());
+            file_digest(&path)?
+        } else {
+            return Err(format!(
+                "Verilog-A generator digest input '{}' does not exist",
+                path.display()
+            )
+            .into());
+        };
+        input.push_str(relative);
+        input.push('\0');
+        input.push_str(&digest);
+        input.push('\0');
+    }
     input.push_str("rspice-core/build.rs");
     input.push('\0');
     input.push_str(&build_script_bytes.len().to_string());
     input.push('\0');
     input.push_str(&String::from_utf8_lossy(&build_script_bytes));
+    input.push('\0');
+    Ok(StableDigest::from_text(&input).as_hex())
+}
+
+fn file_digest(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let bytes = fs::read(path)?;
+    let mut input = String::new();
+    input.push_str(&bytes.len().to_string());
+    input.push('\0');
+    input.push_str(&String::from_utf8_lossy(&bytes));
     input.push('\0');
     Ok(StableDigest::from_text(&input).as_hex())
 }
