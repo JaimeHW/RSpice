@@ -1,13 +1,13 @@
 //! Multi-input analog XSPICE code models.
 
 use crate::Value;
-use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
 use std::sync::{Arc, OnceLock};
 
 const TABLE_RESOURCE: &str = "xspice.multi_input_pwl.table";
+const EVAL_RESOURCE: &str = "xspice.multi_input_pwl.eval";
 
 #[derive(Debug, Default)]
 pub struct MultiInputPwl;
@@ -20,7 +20,7 @@ enum MultiInputPwlMode {
     Nor,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct TableEval {
     value: Value,
     slope: Value,
@@ -48,6 +48,19 @@ struct TableSignature {
 struct TableResource {
     signature: TableSignature,
     data: CmResult<Arc<TableData>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct EvalSignature {
+    table: TableSignature,
+    mode: MultiInputPwlMode,
+    inputs: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct EvalResource {
+    signature: EvalSignature,
+    result: Option<(usize, TableEval)>,
 }
 
 fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
@@ -210,16 +223,30 @@ fn table(ctx: &CmContext) -> CmResult<Arc<TableData>> {
     table_uncached(ctx).map(Arc::new)
 }
 
-fn controlling_input(inputs: &[AnalogValue], mode: MultiInputPwlMode) -> Option<(usize, Value)> {
+fn eval_signature(ctx: &CmContext) -> CmResult<EvalSignature> {
+    let inputs = ctx
+        .input_analog_vector_values("in")
+        .unwrap_or(&[])
+        .iter()
+        .map(|input| input.value)
+        .collect();
+    Ok(EvalSignature {
+        table: table_signature(ctx),
+        mode: mode(ctx)?,
+        inputs,
+    })
+}
+
+fn controlling_input(inputs: &[Value], mode: MultiInputPwlMode) -> Option<(usize, Value)> {
     match mode {
         MultiInputPwlMode::And | MultiInputPwlMode::Nand => inputs
             .iter()
-            .map(|input| input.value)
+            .copied()
             .enumerate()
             .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
         MultiInputPwlMode::Or | MultiInputPwlMode::Nor => inputs
             .iter()
-            .map(|input| input.value)
+            .copied()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
     }
@@ -332,25 +359,24 @@ fn reverse_output_increasing(table: &[TablePoint], input: Value) -> TableEval {
     }
 }
 
-fn evaluate_multi_input_with_table(
-    ctx: &CmContext,
+fn evaluate_multi_input_with_signature(
     table: &TableData,
+    signature: &EvalSignature,
 ) -> CmResult<Option<(usize, TableEval)>> {
-    let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
-    if inputs.len() < 2 {
+    if signature.inputs.len() < 2 {
         return Err(CmError::PortCountMismatch {
             expected: 2,
-            actual: inputs.len(),
+            actual: signature.inputs.len(),
         });
     }
 
-    let mode = mode(ctx)?;
-    let Some((index, controlling_input)) = controlling_input(inputs, mode) else {
+    let Some((index, controlling_input)) = controlling_input(&signature.inputs, signature.mode)
+    else {
         return Ok(None);
     };
 
     let points = table.points.as_slice();
-    let result = match (mode, table.strictly_increasing_x) {
+    let result = match (signature.mode, table.strictly_increasing_x) {
         (MultiInputPwlMode::And | MultiInputPwlMode::Or, true) => {
             forward_output_increasing(points, controlling_input)
         }
@@ -369,13 +395,29 @@ fn evaluate_multi_input_with_table(
 }
 
 fn evaluate_multi_input(ctx: &CmContext) -> CmResult<Option<(usize, TableEval)>> {
+    let signature = eval_signature(ctx)?;
+    if let Some(resource) = ctx.resource::<EvalResource>(EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result);
+    }
+
     let table = table(ctx)?;
-    evaluate_multi_input_with_table(ctx, &table)
+    evaluate_multi_input_with_signature(&table, &signature)
 }
 
 fn evaluate_multi_input_cached(ctx: &mut CmContext) -> CmResult<Option<(usize, TableEval)>> {
+    let signature = eval_signature(ctx)?;
+    if let Some(resource) = ctx.resource::<EvalResource>(EVAL_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(resource.result);
+    }
+
     let table = cache_table(ctx)?;
-    evaluate_multi_input_with_table(ctx, &table)
+    let result = evaluate_multi_input_with_signature(&table, &signature)?;
+    ctx.set_resource(EVAL_RESOURCE, Arc::new(EvalResource { signature, result }));
+    Ok(result)
 }
 
 impl CodeModel for MultiInputPwl {
@@ -431,6 +473,13 @@ impl CodeModel for MultiInputPwl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xspice::context::AnalogValue;
+
+    fn set_inputs(ctx: &mut CmContext, values: &[Value]) {
+        ctx.set_input_analog_vector_from_fn("in", values.len(), |index| {
+            AnalogValue::new(values[index])
+        });
+    }
 
     #[test]
     fn multi_input_table_cache_reloads_when_params_change() {
@@ -460,6 +509,118 @@ mod tests {
             "changed multi_input_pwl table parameters must refresh the parsed table"
         );
         assert_eq!(updated.points[2].y, 30.0);
+    }
+
+    #[test]
+    fn multi_input_eval_cache_reuses_current_result_until_inputs_change() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x", vec![0.0, 1.0, 2.0]);
+        ctx.set_real_vector_param("y", vec![0.0, 10.0, 20.0]);
+        ctx.set_string_param("model", "or");
+        set_inputs(&mut ctx, &[0.5, 1.5, 1.0]);
+
+        let initial = evaluate_multi_input_cached(&mut ctx)
+            .expect("evaluation caches")
+            .expect("controlling input is present");
+        assert_eq!(
+            initial,
+            (
+                1,
+                TableEval {
+                    value: 15.0,
+                    slope: 10.0,
+                }
+            )
+        );
+
+        let signature = eval_signature(&ctx).expect("current signature");
+        let sentinel = Some((
+            2,
+            TableEval {
+                value: 123.0,
+                slope: 456.0,
+            },
+        ));
+        ctx.set_resource(
+            EVAL_RESOURCE,
+            Arc::new(EvalResource {
+                signature,
+                result: sentinel,
+            }),
+        );
+
+        assert_eq!(
+            evaluate_multi_input(&ctx).expect("read-only path reuses cache"),
+            sentinel
+        );
+
+        set_inputs(&mut ctx, &[0.5, 0.75, 1.0]);
+        assert_eq!(
+            evaluate_multi_input(&ctx).expect("changed inputs invalidate cache"),
+            Some((
+                2,
+                TableEval {
+                    value: 10.0,
+                    slope: 10.0,
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn multi_input_eval_cache_invalidates_when_model_changes() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x", vec![0.0, 1.0, 2.0]);
+        ctx.set_real_vector_param("y", vec![0.0, 10.0, 20.0]);
+        ctx.set_string_param("model", "and");
+        set_inputs(&mut ctx, &[0.5, 1.5]);
+
+        let initial = evaluate_multi_input_cached(&mut ctx)
+            .expect("evaluation caches")
+            .expect("and controlling input is present");
+        assert_eq!(
+            initial,
+            (
+                0,
+                TableEval {
+                    value: 5.0,
+                    slope: 10.0,
+                }
+            )
+        );
+
+        let signature = eval_signature(&ctx).expect("current signature");
+        let sentinel = Some((
+            1,
+            TableEval {
+                value: 99.0,
+                slope: 99.0,
+            },
+        ));
+        ctx.set_resource(
+            EVAL_RESOURCE,
+            Arc::new(EvalResource {
+                signature,
+                result: sentinel,
+            }),
+        );
+
+        assert_eq!(
+            evaluate_multi_input(&ctx).expect("matching model reuses cache"),
+            sentinel
+        );
+
+        ctx.set_string_param("model", "nand");
+        assert_eq!(
+            evaluate_multi_input(&ctx).expect("changed model invalidates cache"),
+            Some((
+                0,
+                TableEval {
+                    value: 10.0,
+                    slope: 0.0,
+                }
+            ))
+        );
     }
 
     #[test]
