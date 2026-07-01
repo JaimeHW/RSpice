@@ -5,10 +5,15 @@ use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
 
 const TABLE_RESOURCE: &str = "xspice.multi_input_pwl.table";
 const EVAL_RESOURCE: &str = "xspice.multi_input_pwl.eval";
+const TABLE_UNSET_UPPER_INDEX: usize = usize::MAX;
+const TABLE_CURSOR_LINEAR_STEPS: usize = 8;
 
 #[derive(Debug, Default)]
 pub struct MultiInputPwl;
@@ -33,10 +38,11 @@ struct TablePoint {
     y: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct TableData {
     points: Vec<TablePoint>,
     strictly_increasing_x: bool,
+    last_upper_index: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,6 +204,7 @@ fn table_data(points: Vec<TablePoint>) -> TableData {
     TableData {
         points,
         strictly_increasing_x,
+        last_upper_index: AtomicUsize::new(TABLE_UNSET_UPPER_INDEX),
     }
 }
 
@@ -323,26 +330,75 @@ fn forward_output(table: &[TablePoint], input: Value) -> TableEval {
     }
 }
 
-fn forward_output_increasing(table: &[TablePoint], input: Value) -> TableEval {
-    let last = table.len() - 1;
-    if input <= table[0].x {
+fn table_interval_contains(points: &[TablePoint], upper: usize, input: Value) -> bool {
+    debug_assert!(upper > 0);
+    debug_assert!(upper < points.len());
+    points[upper - 1].x < input && input <= points[upper].x
+}
+
+fn table_upper_index_binary(points: &[TablePoint], input: Value) -> usize {
+    points.partition_point(|point| point.x < input)
+}
+
+fn table_upper_index_with_cursor(table: &TableData, input: Value) -> usize {
+    let points = table.points.as_slice();
+    let point_count = points.len();
+    let mut upper = table.last_upper_index.load(Ordering::Relaxed);
+
+    if upper == TABLE_UNSET_UPPER_INDEX || upper == 0 || upper >= point_count {
+        upper = table_upper_index_binary(points, input);
+        table.last_upper_index.store(upper, Ordering::Relaxed);
+        return upper;
+    }
+
+    if table_interval_contains(points, upper, input) {
+        return upper;
+    }
+
+    let mut steps = 0;
+    if input > points[upper].x {
+        while upper + 1 < point_count
+            && input > points[upper].x
+            && steps < TABLE_CURSOR_LINEAR_STEPS
+        {
+            upper += 1;
+            steps += 1;
+        }
+    } else {
+        while upper > 1 && input <= points[upper - 1].x && steps < TABLE_CURSOR_LINEAR_STEPS {
+            upper -= 1;
+            steps += 1;
+        }
+    }
+
+    if !table_interval_contains(points, upper, input) {
+        upper = table_upper_index_binary(points, input);
+    }
+    table.last_upper_index.store(upper, Ordering::Relaxed);
+    upper
+}
+
+fn forward_output_increasing(table: &TableData, input: Value) -> TableEval {
+    let points = table.points.as_slice();
+    let last = points.len() - 1;
+    if input <= points[0].x {
         return TableEval {
-            value: table[0].y,
+            value: points[0].y,
             slope: 0.0,
         };
     }
-    if input >= table[last].x {
+    if input >= points[last].x {
         return TableEval {
-            value: table[last].y,
+            value: points[last].y,
             slope: 0.0,
         };
     }
 
-    let upper = table.partition_point(|point| point.x < input);
+    let upper = table_upper_index_with_cursor(table, input);
     let lower = upper - 1;
-    let slope = (table[upper].y - table[lower].y) / (table[upper].x - table[lower].x);
+    let slope = (points[upper].y - points[lower].y) / (points[upper].x - points[lower].x);
     TableEval {
-        value: table[upper].y + slope * (input - table[upper].x),
+        value: points[upper].y + slope * (input - points[upper].x),
         slope,
     }
 }
@@ -377,24 +433,25 @@ fn reverse_output(table: &[TablePoint], input: Value) -> TableEval {
     }
 }
 
-fn reverse_output_increasing(table: &[TablePoint], input: Value) -> TableEval {
-    let last = table.len() - 1;
-    if input <= table[0].x {
+fn reverse_output_increasing(table: &TableData, input: Value) -> TableEval {
+    let points = table.points.as_slice();
+    let last = points.len() - 1;
+    if input <= points[0].x {
         return TableEval {
-            value: table[last].y,
+            value: points[last].y,
             slope: 0.0,
         };
     }
-    if input >= table[last].x {
+    if input >= points[last].x {
         return TableEval {
-            value: table[0].y,
+            value: points[0].y,
             slope: 0.0,
         };
     }
 
-    let upper = table.partition_point(|point| point.x < input);
+    let upper = table_upper_index_with_cursor(table, input);
     TableEval {
-        value: table[last - upper].y,
+        value: points[last - upper].y,
         slope: 0.0,
     }
 }
@@ -419,18 +476,19 @@ where
         return Ok(None);
     };
 
-    let points = table.points.as_slice();
     let result = match (mode, table.strictly_increasing_x) {
         (MultiInputPwlMode::And | MultiInputPwlMode::Or, true) => {
-            forward_output_increasing(points, controlling_input)
+            forward_output_increasing(table, controlling_input)
         }
         (MultiInputPwlMode::And | MultiInputPwlMode::Or, false) => {
+            let points = table.points.as_slice();
             forward_output(points, controlling_input)
         }
         (MultiInputPwlMode::Nand | MultiInputPwlMode::Nor, true) => {
-            reverse_output_increasing(points, controlling_input)
+            reverse_output_increasing(table, controlling_input)
         }
         (MultiInputPwlMode::Nand | MultiInputPwlMode::Nor, false) => {
+            let points = table.points.as_slice();
             reverse_output(points, controlling_input)
         }
     };
@@ -728,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_input_uses_binary_lookup_for_strictly_increasing_tables() {
+    fn multi_input_uses_cursor_lookup_for_strictly_increasing_tables() {
         let data = table_data(vec![
             TablePoint { x: 0.0, y: 0.0 },
             TablePoint { x: 1.0, y: 10.0 },
@@ -736,14 +794,51 @@ mod tests {
         ]);
 
         assert!(data.strictly_increasing_x);
+        assert_eq!(
+            data.last_upper_index.load(Ordering::Relaxed),
+            TABLE_UNSET_UPPER_INDEX
+        );
 
-        let forward = forward_output_increasing(&data.points, 1.5);
+        let forward = forward_output_increasing(&data, 1.5);
         assert_eq!(forward.value, 20.0);
         assert_eq!(forward.slope, 20.0);
+        assert_eq!(data.last_upper_index.load(Ordering::Relaxed), 2);
 
-        let reverse = reverse_output_increasing(&data.points, 0.5);
+        let exact = forward_output_increasing(&data, 1.0);
+        assert_eq!(
+            exact,
+            TableEval {
+                value: 10.0,
+                slope: 10.0,
+            },
+            "exact table knots must keep the original left-segment slope"
+        );
+        assert_eq!(data.last_upper_index.load(Ordering::Relaxed), 1);
+
+        let reverse = reverse_output_increasing(&data, 0.5);
         assert_eq!(reverse.value, 10.0);
         assert_eq!(reverse.slope, 0.0);
+    }
+
+    #[test]
+    fn multi_input_lookup_cursor_falls_back_for_large_jumps() {
+        let data = table_data(
+            (1..=24)
+                .map(|x| TablePoint {
+                    x: x as Value,
+                    y: x as Value,
+                })
+                .collect(),
+        );
+
+        assert_eq!(forward_output_increasing(&data, 2.5).value, 2.5);
+        assert_eq!(data.last_upper_index.load(Ordering::Relaxed), 2);
+        assert_eq!(forward_output_increasing(&data, 22.5).value, 22.5);
+        assert_eq!(
+            data.last_upper_index.load(Ordering::Relaxed),
+            22,
+            "large non-local jumps should land on the binary-search bracket"
+        );
     }
 
     #[test]
