@@ -1219,7 +1219,155 @@ impl CodeModel for BidiBridge {
 mod tests {
     use super::*;
     use crate::xspice::context::{AnalogValue, InputValue};
-    use crate::xspice::{AnalysisType, CallType, EvaluationPhase};
+    use crate::xspice::{AnalysisType, CallType, EvaluationPhase, ParamType};
+
+    #[test]
+    fn adc_bridge_metadata_matches_ngspice46_interface() {
+        let ports = AdcBridge.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["in", "out"]
+        );
+        assert_eq!(ports[0].direction, PortDirection::In);
+        assert_eq!(ports[0].default_type, PortType::Voltage);
+        assert_eq!(
+            ports[0].allowed_types,
+            vec![
+                PortType::Voltage,
+                PortType::DifferentialVoltage,
+                PortType::Current,
+                PortType::DifferentialCurrent,
+                PortType::VoltageName,
+            ]
+        );
+        assert!(ports[0].is_vector);
+        assert!(!ports[0].null_allowed);
+        assert_eq!(ports[1].direction, PortDirection::Out);
+        assert_eq!(ports[1].default_type, PortType::Digital);
+        assert!(ports[1].is_vector);
+        assert!(!ports[1].null_allowed);
+
+        let params = AdcBridge.parameters();
+        assert_eq!(
+            params
+                .iter()
+                .map(|param| (param.name.as_str(), &param.param_type, param.default))
+                .collect::<Vec<_>>(),
+            vec![
+                ("in_low", &ParamType::Real, 0.1),
+                ("in_high", &ParamType::Real, 0.9),
+                ("rise_delay", &ParamType::Real, 1.0e-9),
+                ("fall_delay", &ParamType::Real, 1.0e-9),
+            ]
+        );
+    }
+
+    #[test]
+    fn dac_bridge_metadata_matches_ngspice46_interface() {
+        let ports = DacBridge.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["in", "out"]
+        );
+        assert_eq!(ports[0].direction, PortDirection::In);
+        assert_eq!(ports[0].default_type, PortType::Digital);
+        assert!(ports[0].is_vector);
+        assert!(!ports[0].null_allowed);
+        assert_eq!(ports[1].direction, PortDirection::Out);
+        assert_eq!(ports[1].default_type, PortType::Voltage);
+        assert_eq!(
+            ports[1].allowed_types,
+            vec![
+                PortType::Voltage,
+                PortType::DifferentialVoltage,
+                PortType::Current,
+                PortType::DifferentialCurrent,
+            ]
+        );
+        assert!(ports[1].is_vector);
+        assert!(!ports[1].null_allowed);
+
+        let params = DacBridge.parameters();
+        assert_eq!(
+            params
+                .iter()
+                .map(|param| (param.name.as_str(), &param.param_type, param.default))
+                .collect::<Vec<_>>(),
+            vec![
+                ("out_low", &ParamType::Real, 0.0),
+                ("out_high", &ParamType::Real, 1.0),
+                ("out_undef", &ParamType::Real, 0.5),
+                ("input_load", &ParamType::Real, 1.0e-12),
+                ("t_rise", &ParamType::Real, 1.0e-9),
+                ("t_fall", &ParamType::Real, 1.0e-9),
+            ]
+        );
+    }
+
+    #[test]
+    fn bidi_bridge_metadata_matches_ngspice46_interface() {
+        let ports = BidiBridge.ports();
+        assert_eq!(
+            ports
+                .iter()
+                .map(|port| port.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "d", "dir"]
+        );
+        assert_eq!(ports[0].direction, PortDirection::InOut);
+        assert_eq!(ports[0].default_type, PortType::Conductance);
+        assert_eq!(
+            ports[0].allowed_types,
+            vec![PortType::Conductance, PortType::DifferentialConductance]
+        );
+        assert!(ports[0].is_vector);
+        assert!(!ports[0].null_allowed);
+        assert_eq!(ports[0].vector_min_len, Some(1));
+        assert_eq!(ports[1].direction, PortDirection::InOut);
+        assert_eq!(ports[1].default_type, PortType::Digital);
+        assert!(ports[1].is_vector);
+        assert!(!ports[1].null_allowed);
+        assert_eq!(ports[1].vector_min_len, Some(1));
+        assert_eq!(ports[2].direction, PortDirection::In);
+        assert_eq!(ports[2].default_type, PortType::Digital);
+        assert!(ports[2].is_vector);
+        assert!(ports[2].null_allowed);
+        assert_eq!(ports[2].vector_min_len, None);
+
+        let params = BidiBridge.parameters();
+        assert_eq!(
+            params
+                .iter()
+                .map(|param| (param.name.as_str(), &param.param_type, param.default))
+                .collect::<Vec<_>>(),
+            vec![
+                ("direction", &ParamType::Integer, 2.0),
+                ("input_load", &ParamType::Real, 1.0e-12),
+                ("strength", &ParamType::Integer, 0.0),
+                ("smooth", &ParamType::Integer, 0.0),
+                ("in_low", &ParamType::Real, 0.1),
+                ("in_high", &ParamType::Real, 0.9),
+                ("out_low", &ParamType::Real, 0.0),
+                ("out_high", &ParamType::Real, 3.3),
+                ("drive_low", &ParamType::Real, 0.02),
+                ("drive_high", &ParamType::Real, 0.02),
+                ("r_stl", &ParamType::Real, 20.0),
+                ("r_sth", &ParamType::Real, 20.0),
+                ("r_low", &ParamType::Real, 10_000.0),
+                ("r_high", &ParamType::Real, 10_000.0),
+                ("t_rise", &ParamType::Real, 1.0e-9),
+                ("t_fall", &ParamType::Real, 1.0e-9),
+                ("rise_delay", &ParamType::Real, 1.0e-9),
+                ("fall_delay", &ParamType::Real, 1.0e-9),
+            ]
+        );
+    }
 
     #[test]
     fn adc_bridge_does_not_commit_rollbackable_probe_crossing() {
