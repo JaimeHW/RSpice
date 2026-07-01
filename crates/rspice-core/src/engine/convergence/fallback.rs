@@ -548,6 +548,56 @@ impl Engine {
         }
     }
 
+    /// Seed promoted VBIC internal MNA nodes from their owning terminal
+    /// voltages. The linear presolve intentionally excludes nonlinear compact
+    /// devices, so active VBIC internal rows can otherwise start at 0 V even
+    /// when their external collector/base/emitter terminals are already fixed
+    /// by ideal sources. That creates an artificial multi-volt internal step
+    /// before Newton has evaluated the device once.
+    pub(in crate::engine::convergence) fn apply_vbic_internal_initial_guess_correction(
+        guess: &mut [Value],
+        circuit: &CircuitData,
+    ) {
+        let node_voltage = |values: &[Value], node: usize| {
+            if node == 0 {
+                0.0
+            } else {
+                values.get(node - 1).copied().unwrap_or(0.0)
+            }
+        };
+
+        fn set_node(values: &mut [Value], node: usize, value: Value) {
+            if node > 0
+                && let Some(slot) = values.get_mut(node - 1)
+                && value.is_finite()
+            {
+                *slot = value;
+            }
+        }
+
+        for bjt in &circuit.bjts.devices {
+            if !bjt.vbic_mna_promoted() {
+                continue;
+            }
+
+            let vc = node_voltage(guess, bjt.node_collector);
+            let vb = node_voltage(guess, bjt.node_base);
+            let ve = node_voltage(guess, bjt.node_emitter);
+            let vs = node_voltage(guess, bjt.node_substrate);
+
+            set_node(guess, bjt.node_cx, vc);
+            set_node(guess, bjt.node_ci, vc);
+            set_node(guess, bjt.node_bx, vb);
+            set_node(guess, bjt.node_bi, vb);
+            set_node(guess, bjt.node_ei, ve);
+            set_node(guess, bjt.node_bp, vc);
+            set_node(guess, bjt.node_si, vs);
+            set_node(guess, bjt.node_rth, 0.0);
+            set_node(guess, bjt.node_xf1, 0.0);
+            set_node(guess, bjt.node_xf2, 0.0);
+        }
+    }
+
     /// Perform linear pre-solve to get initial voltage guess
     ///
     /// This solves the circuit with only linear devices (nonlinear devices

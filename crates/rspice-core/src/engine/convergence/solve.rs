@@ -113,6 +113,7 @@ impl Engine {
             .unwrap_or_else(|| vec![0.0; size]);
 
         Self::apply_b3soi_pd_initial_guess_correction(&mut initial_guess, circuit);
+        Self::apply_vbic_internal_initial_guess_correction(&mut initial_guess, circuit);
         for &(node_id, voltage) in node_hints {
             if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
                 continue;
