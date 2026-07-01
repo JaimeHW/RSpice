@@ -10,7 +10,7 @@
 use crate::abort_signal::AbortSignal;
 use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
-    extract_dc_value,
+    TransientResult, extract_dc_value,
 };
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, Netlist, NetlistParseOptions,
@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
 const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
+const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 50_000.0;
 
 /// Configuration for the Xyce corpus runner.
 #[derive(Debug, Clone)]
@@ -168,6 +169,15 @@ struct XyceStaticDcPlan {
     dc: XyceDcSweep,
     steps: Vec<StepCommand>,
     diagnostics: Vec<crate::netlist::ParseDiagnostic>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceStaticTranPlan {
+    deck_path: PathBuf,
+    reference_path: PathBuf,
+    source: String,
+    print: XycePrintRequest,
+    tran: XyceTranAnalysis,
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +355,15 @@ struct XyceDcSweep {
     step: Value,
     mode: crate::netlist::DcSweepMode,
     sweep2: Option<DcSecondSweep>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XyceTranAnalysis {
+    step: Value,
+    stop: Value,
+    start: Option<Value>,
+    max_step: Option<Value>,
+    uic: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -678,19 +697,25 @@ impl XyceTestRunner {
             return result;
         }
 
-        let plan = match self.execution_plan(deck) {
-            Ok(plan) => plan,
-            Err(reason) => {
-                return self.expected_unsupported_result(
-                    deck,
-                    start,
-                    "unsupported_xyce_contract",
-                    &reason,
-                );
-            }
+        let result = match self.execution_plan(deck) {
+            Ok(plan) => self.run_static_prn_dc_plan(deck, plan, start),
+            Err(dc_reason) => match self.static_tran_plan_for_deck(deck) {
+                Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
+                Err(tran_reason) => {
+                    let reason = if self.deck_has_print_analysis(deck, "TRAN") {
+                        tran_reason
+                    } else {
+                        dc_reason
+                    };
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_contract",
+                        &reason,
+                    );
+                }
+            },
         };
-
-        let result = self.run_static_prn_dc_plan(deck, plan, start);
         if self.config.verbose {
             println!(
                 "{} [{}] {}",
@@ -799,6 +824,53 @@ impl XyceTestRunner {
             dc: static_plan.dc,
             steps: static_plan.steps,
             contract,
+        })
+    }
+
+    fn static_tran_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticTranPlan, String> {
+        if self.requires_upstream_wrapper(&deck.relative_path) {
+            return Err(Self::upstream_wrapper_required_reason().to_string());
+        }
+
+        let reference_path = self
+            .static_prn_reference_path(&deck.path)
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        if !reference_path.is_file() {
+            return Err(format!(
+                "no checked-in static .prn oracle at {}",
+                self.display_path(&reference_path)
+            ));
+        }
+
+        let source =
+            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        if Self::contains_control_block(&source) {
+            return Err(
+                "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
+                    .to_string(),
+            );
+        }
+        Self::reject_unsupported_source_directives(&source)?;
+
+        let print = Self::single_tran_print_request(&source)?;
+        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
+            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        let tran = Self::single_tran_analysis(&netlist)?;
+        let steps = Self::step_commands(&netlist)?;
+        if !steps.is_empty() {
+            return Err(
+                ".STEP .PRINT TRAN comparison is not implemented in the native Xyce adapter yet"
+                    .to_string(),
+            );
+        }
+        Self::validate_static_tran_contract(&netlist, &tran, &print)?;
+
+        Ok(XyceStaticTranPlan {
+            deck_path: deck.path.clone(),
+            reference_path,
+            source,
+            print,
+            tran,
         })
     }
 
@@ -1360,6 +1432,127 @@ impl XyceTestRunner {
                 start,
                 contract,
                 format!("{} Xyce reference mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn run_static_prn_tran_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticTranPlan,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = "static_prn_tran";
+        let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
+            Ok(netlist) => netlist,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("parse failed after contract validation: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let reference = match Self::parse_prn_file(&plan.reference_path) {
+            Ok(reference) => reference,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("failed to parse Xyce .prn oracle: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let max_step = match Self::transient_max_step_for_reference(&plan.tran, &reference) {
+            Ok(max_step) => max_step,
+            Err(err) if err.contains("transient harness execution envelope") => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_contract",
+                    &err,
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("reference time-grid error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let engine = self.create_xyce_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let result = match engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort) {
+            Ok(result) => result,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this transient deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("simulation error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let mismatches = match self.compare_tran_prn_reference(
+            &reference,
+            &plan.print,
+            &netlist,
+            &plan.source,
+            &result,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("reference comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("{} Xyce transient reference mismatch(es)", mismatches.len()),
                 mismatches,
             )
         }
@@ -2080,6 +2273,10 @@ impl XyceTestRunner {
     }
 
     fn create_dc_engine(&self) -> Engine {
+        self.create_xyce_engine()
+    }
+
+    fn create_xyce_engine(&self) -> Engine {
         let defaults = SimulationConfig::default();
         Engine::new(SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),
@@ -2269,6 +2466,203 @@ impl XyceTestRunner {
         }
 
         Ok(mismatches)
+    }
+
+    fn compare_tran_prn_reference(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        source: &str,
+        result: &TransientResult,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if reference.columns.is_empty() {
+            return Err("reference table has no columns".to_string());
+        }
+        let has_index_column = reference
+            .columns
+            .first()
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"));
+        let time_column = usize::from(has_index_column);
+        if !reference
+            .columns
+            .get(time_column)
+            .is_some_and(|column| Self::normalize_probe(column) == "time")
+        {
+            return Err("expected Xyce transient .prn table to contain a TIME column".to_string());
+        }
+        let data_column_offset = time_column + 1;
+        let data_columns = Self::reference_tran_data_columns(reference, print, data_column_offset)?;
+        let comp_columns = data_columns
+            .iter()
+            .map(|probe| XyceReferenceColumn::Probe {
+                name: probe.clone(),
+            })
+            .collect::<Vec<_>>();
+        let comp_tolerances = self.comp_tolerances(source, &comp_columns)?;
+        Self::validate_transient_result_time_grid(result)?;
+
+        let mut mismatches = Vec::new();
+        for (row_index, row) in reference.rows.iter().enumerate() {
+            if row.len() != reference.columns.len() {
+                return Err(format!(
+                    "row {} has {} values, expected {}",
+                    row_index,
+                    row.len(),
+                    reference.columns.len()
+                ));
+            }
+            if has_index_column {
+                let expected_index = row[0];
+                let actual_index = row_index as f64;
+                if (expected_index - actual_index).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "Index".to_string(),
+                        expected: expected_index,
+                        actual: actual_index,
+                        relative_error: 1.0,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+
+            let time = row[time_column];
+            if !time.is_finite() {
+                return Err(format!("row {row_index} has non-finite TIME value {time}"));
+            }
+
+            for (column_index, probe) in data_columns.iter().enumerate() {
+                let expected = row[column_index + data_column_offset];
+                let actual = Self::evaluate_tran_probe(probe, netlist, result, time)?;
+                let normalized_probe = Self::normalize_probe(probe);
+                let tolerance = comp_tolerances
+                    .get(&normalized_probe)
+                    .copied()
+                    .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: probe.clone(),
+                        expected,
+                        actual,
+                        relative_error,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+        }
+
+        Ok(mismatches)
+    }
+
+    fn reference_tran_data_columns(
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        first_data_column: usize,
+    ) -> Result<Vec<String>, String> {
+        let mut data_columns =
+            Vec::with_capacity(reference.columns.len().saturating_sub(first_data_column));
+        let mut probe_index = 0usize;
+        for column in reference.columns.iter().skip(first_data_column) {
+            let Some(probe) = print.probes.get(probe_index) else {
+                return Err(format!(
+                    "reference column '{}' has no matching .PRINT TRAN probe",
+                    column
+                ));
+            };
+            if !Self::reference_column_matches_probe(column, probe) {
+                return Err(format!(
+                    "reference column '{}' does not match .PRINT TRAN probe '{}'",
+                    column, probe
+                ));
+            }
+            data_columns.push(probe.clone());
+            probe_index += 1;
+        }
+        if probe_index != print.probes.len() {
+            return Err(format!(
+                "reference table matched {} .PRINT TRAN probe(s), but deck requested {}",
+                probe_index,
+                print.probes.len()
+            ));
+        }
+        Ok(data_columns)
+    }
+
+    fn transient_max_step_for_reference(
+        tran: &XyceTranAnalysis,
+        reference: &XycePrnTable,
+    ) -> Result<Value, String> {
+        let requested = tran
+            .max_step
+            .or_else(|| (tran.step > 0.0).then_some(tran.step));
+        let reference_step = Self::reference_min_positive_time_step(reference)?;
+        let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
+        let max_step = match (requested, reference_step) {
+            (Some(requested), Some(reference_step)) => requested.min(reference_step),
+            (Some(requested), None) => requested,
+            (None, Some(reference_step)) => reference_step,
+            (None, None) => fallback,
+        };
+        if !max_step.is_finite() || max_step <= 0.0 {
+            return Err(format!(
+                "resolved transient maximum step must be finite and positive, got {max_step}"
+            ));
+        }
+        let estimated_steps = (tran.stop / max_step).ceil();
+        if estimated_steps > MAX_NATIVE_TRAN_ORACLE_STEPS {
+            return Err(format!(
+                "transient harness execution envelope supports at most {:.0} oracle-derived native step(s), but this deck requires about {:.0}",
+                MAX_NATIVE_TRAN_ORACLE_STEPS, estimated_steps
+            ));
+        }
+        Ok(max_step)
+    }
+
+    fn reference_min_positive_time_step(reference: &XycePrnTable) -> Result<Option<Value>, String> {
+        let time_column = Self::reference_time_column_index(reference)
+            .ok_or_else(|| "reference table has no TIME column".to_string())?;
+        let mut previous = None;
+        let mut min_step: Option<Value> = None;
+        for (row_index, row) in reference.rows.iter().enumerate() {
+            let time = *row.get(time_column).ok_or_else(|| {
+                format!("row {row_index} has no TIME column at index {time_column}")
+            })?;
+            if !time.is_finite() {
+                return Err(format!("row {row_index} has non-finite TIME value {time}"));
+            }
+            if let Some(previous_time) = previous {
+                let step = time - previous_time;
+                if step < 0.0 {
+                    return Err(format!(
+                        "reference TIME column is not monotonic at row {row_index}"
+                    ));
+                }
+                if step > 0.0 {
+                    min_step = Some(min_step.map_or(step, |current| current.min(step)));
+                }
+            }
+            previous = Some(time);
+        }
+        Ok(min_step)
+    }
+
+    fn reference_time_column_index(reference: &XycePrnTable) -> Option<usize> {
+        let has_index_column = reference
+            .columns
+            .first()
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"));
+        let time_column = usize::from(has_index_column);
+        reference
+            .columns
+            .get(time_column)
+            .is_some_and(|column| Self::normalize_probe(column) == "time")
+            .then_some(time_column)
     }
 
     fn compare_step_res_reference(
@@ -2821,6 +3215,131 @@ impl XyceTestRunner {
         Self::reject_unsupported_static_dc_model_observables(netlist, print)?;
         Self::reject_unsupported_vbic_nested_current_source_sweeps(netlist, dc, print)?;
 
+        Ok(())
+    }
+
+    fn validate_static_tran_contract(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+        print: &XycePrintRequest,
+    ) -> Result<(), String> {
+        if !tran.stop.is_finite() || tran.stop <= 0.0 {
+            return Err(format!(
+                ".TRAN stop time must be finite and positive, got {}",
+                tran.stop
+            ));
+        }
+        if !tran.step.is_finite() || tran.step < 0.0 {
+            return Err(format!(
+                ".TRAN print step must be finite and non-negative, got {}",
+                tran.step
+            ));
+        }
+        if let Some(start) = tran.start
+            && (!start.is_finite() || start < 0.0 || start > tran.stop)
+        {
+            return Err(format!(
+                ".TRAN start time must be finite and within [0, stop], got {start}"
+            ));
+        }
+        if let Some(max_step) = tran.max_step
+            && (!max_step.is_finite() || max_step <= 0.0)
+        {
+            return Err(format!(
+                ".TRAN maximum step must be finite and positive when specified, got {max_step}"
+            ));
+        }
+        // `run_tran` reads UIC from the parsed netlist; the plan carries it so
+        // validation still reflects the complete .TRAN command surface.
+        let _engine_reads_uic_from_netlist = tran.uic;
+
+        for probe in &print.probes {
+            Self::validate_tran_probe(probe, netlist)?;
+        }
+        Self::validate_resistive_transient_contract(netlist)?;
+
+        Ok(())
+    }
+
+    fn validate_resistive_transient_contract(netlist: &Netlist) -> Result<(), String> {
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::VoltageSource(_)
+                | ElementKind::CurrentSource(_)
+                | ElementKind::Resistor { .. } => {}
+                _ => {
+                    return Err(format!(
+                        "native static .PRINT TRAN comparison currently supports source/resistor-only transient decks; element '{}' requires a broader transient oracle contract",
+                        element.name
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_tran_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
+        if let Some(expression) = Self::print_expression_inner(probe) {
+            let normalized_expression = Self::normalize_probe(expression);
+            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+                return Self::validate_atomic_tran_probe(
+                    &normalized_expression,
+                    expression,
+                    netlist,
+                );
+            }
+            if Self::print_expression_contains_probe_call(expression) {
+                return Self::validate_tran_probe_expression(expression, netlist);
+            }
+            let context = Self::print_tran_eval_context(netlist, 0.0);
+            crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
+                format!("unsupported .PRINT TRAN expression '{{{expression}}}': {err}")
+            })?;
+            return Ok(());
+        }
+
+        let normalized = Self::normalize_probe(probe);
+        Self::validate_atomic_tran_probe(&normalized, probe, netlist)
+    }
+
+    fn validate_atomic_tran_probe(
+        normalized: &str,
+        original: &str,
+        _netlist: &Netlist,
+    ) -> Result<(), String> {
+        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+            if !voltage_probe.node_pos.is_empty()
+                && voltage_probe
+                    .node_neg
+                    .as_deref()
+                    .is_none_or(|node| !node.is_empty())
+            {
+                return Ok(());
+            }
+        }
+        if Self::parse_current_probe(normalized).is_some() {
+            return Err(format!(
+                "transient branch-current probe '{}' requires the native transient current oracle contract",
+                original
+            ));
+        }
+        if Self::normalize_probe(original) == "time" {
+            return Ok(());
+        }
+        Err(format!("unsupported .PRINT TRAN probe '{}'", original))
+    }
+
+    fn validate_tran_probe_expression(expression: &str, netlist: &Netlist) -> Result<(), String> {
+        let mut call_value = |call: &str| {
+            let normalized = Self::normalize_probe(call);
+            Self::validate_atomic_tran_probe(&normalized, call, netlist)?;
+            Ok(1.0)
+        };
+        let context = Self::print_tran_eval_context(netlist, 0.0);
+        Self::evaluate_print_expression_with_probe_calls(expression, context, &mut call_value)
+            .map_err(|err| {
+                format!("unsupported .PRINT TRAN expression '{{{expression}}}': {err}")
+            })?;
         Ok(())
     }
 
@@ -3491,6 +4010,180 @@ impl XyceTestRunner {
             .map_err(|err| {
                 format!("failed to evaluate .PRINT DC expression '{{{expression}}}': {err}")
             })
+    }
+
+    fn evaluate_tran_probe(
+        probe: &str,
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+    ) -> Result<f64, String> {
+        if let Some(expression) = Self::print_expression_inner(probe) {
+            let normalized_expression = Self::normalize_probe(expression);
+            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+                return Self::evaluate_atomic_tran_probe(
+                    &normalized_expression,
+                    netlist,
+                    result,
+                    time,
+                );
+            }
+            if Self::print_expression_contains_probe_call(expression) {
+                return Self::evaluate_tran_probe_expression(expression, netlist, result, time);
+            }
+            let context = Self::print_tran_eval_context(netlist, time);
+            return crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
+                format!("failed to evaluate .PRINT TRAN expression '{{{expression}}}': {err}")
+            });
+        }
+
+        let normalized = Self::normalize_probe(probe);
+        Self::evaluate_atomic_tran_probe(&normalized, netlist, result, time)
+    }
+
+    fn evaluate_atomic_tran_probe(
+        normalized: &str,
+        _netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+    ) -> Result<f64, String> {
+        if normalized == "time" {
+            return Ok(time);
+        }
+
+        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+            let pos = Self::transient_voltage_named(result, &voltage_probe.node_pos, time)?;
+            let neg = match voltage_probe.node_neg {
+                Some(node) => Self::transient_voltage_named(result, &node, time)?,
+                None => 0.0,
+            };
+            return Ok(voltage_probe.accessor.evaluate_dc(pos - neg));
+        }
+
+        if let Some(element_name) = Self::parse_current_probe(normalized) {
+            let waveform = result
+                .try_branch_current_waveform_named(&element_name)
+                .ok_or_else(|| {
+                    format!(
+                        "branch current '{}' not found in transient result",
+                        element_name
+                    )
+                })?;
+            return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
+        }
+
+        Err(format!("unsupported TRAN probe '{}'", normalized))
+    }
+
+    fn evaluate_tran_probe_expression(
+        expression: &str,
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+    ) -> Result<f64, String> {
+        let context = Self::print_tran_eval_context(netlist, time);
+        let mut call_value = |call: &str| {
+            let normalized = Self::normalize_probe(call);
+            Self::evaluate_atomic_tran_probe(&normalized, netlist, result, time)
+        };
+        Self::evaluate_print_expression_with_probe_calls(expression, context, &mut call_value)
+            .map_err(|err| {
+                format!("failed to evaluate .PRINT TRAN expression '{{{expression}}}': {err}")
+            })
+    }
+
+    fn transient_voltage_named(
+        result: &TransientResult,
+        node_name: &str,
+        time: Value,
+    ) -> Result<Value, String> {
+        let node = result
+            .node_index_named(node_name)
+            .ok_or_else(|| format!("node '{}' not found in transient result", node_name))?;
+        if node == 0 {
+            return Ok(0.0);
+        }
+        let waveform = result
+            .try_voltage_waveform(node)
+            .ok_or_else(|| format!("node '{}' not found in transient result", node_name))?;
+        Self::interpolate_transient_waveform_at(&result.time, waveform, time)
+    }
+
+    fn validate_transient_result_time_grid(result: &TransientResult) -> Result<(), String> {
+        if result.time.is_empty() {
+            return Err("transient result has no time points".to_string());
+        }
+        for (index, time) in result.time.iter().copied().enumerate() {
+            if !time.is_finite() {
+                return Err(format!(
+                    "transient result time point {index} is non-finite ({time})"
+                ));
+            }
+            if index > 0 && time < result.time[index - 1] {
+                return Err(format!(
+                    "transient result time grid is not monotonic at point {index}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn interpolate_transient_waveform_at(
+        times: &[Value],
+        values: &[Value],
+        time: Value,
+    ) -> Result<Value, String> {
+        if times.len() != values.len() {
+            return Err(format!(
+                "transient waveform has {} sample(s) for {} time point(s)",
+                values.len(),
+                times.len()
+            ));
+        }
+        let Some((&first_time, &last_time)) = times.first().zip(times.last()) else {
+            return Err("transient waveform has no samples".to_string());
+        };
+        let scale = first_time
+            .abs()
+            .max(last_time.abs())
+            .max(time.abs())
+            .max(1.0);
+        let edge_tol = 1.0e-12 * scale;
+        if time < first_time - edge_tol || time > last_time + edge_tol {
+            return Err(format!(
+                "requested transient sample time {time:e} is outside simulated range [{first_time:e}, {last_time:e}]"
+            ));
+        }
+        if time <= first_time + edge_tol {
+            return Ok(values[0]);
+        }
+        if time >= last_time - edge_tol {
+            return Ok(*values.last().expect("non-empty waveform"));
+        }
+
+        let upper = times.partition_point(|sample| *sample < time);
+        if upper == 0 || upper >= times.len() {
+            return Err(format!(
+                "requested transient sample time {time:e} is outside interpolation brackets"
+            ));
+        }
+        let lower = upper - 1;
+        let t0 = times[lower];
+        let t1 = times[upper];
+        if (time - t0).abs() <= edge_tol {
+            return Ok(values[lower]);
+        }
+        if (time - t1).abs() <= edge_tol {
+            return Ok(values[upper]);
+        }
+        let dt = t1 - t0;
+        if !dt.is_finite() || dt <= 0.0 {
+            return Err(format!(
+                "invalid transient interpolation interval [{t0:e}, {t1:e}]"
+            ));
+        }
+        let alpha = (time - t0) / dt;
+        Ok(values[lower] + alpha * (values[upper] - values[lower]))
     }
 
     fn evaluate_print_expression_with_probe_calls<F>(
@@ -4663,6 +5356,12 @@ impl XyceTestRunner {
         context
     }
 
+    fn print_tran_eval_context(netlist: &Netlist, time: Value) -> crate::netlist::ParamContext {
+        let mut context = Self::print_eval_context(netlist, None, None);
+        context.set("TIME", time);
+        context
+    }
+
     fn add_resistor_parameter_bindings(
         netlist: &Netlist,
         context: &mut crate::netlist::ParamContext,
@@ -5262,6 +5961,38 @@ impl XyceTestRunner {
         Ok(step_commands)
     }
 
+    fn single_tran_analysis(netlist: &Netlist) -> Result<XyceTranAnalysis, String> {
+        let analyses = netlist
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Tran {
+                    step,
+                    stop,
+                    start,
+                    max_step,
+                    uic,
+                } => Some(XyceTranAnalysis {
+                    step: *step,
+                    stop: *stop,
+                    start: *start,
+                    max_step: *max_step,
+                    uic: *uic,
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        match analyses.len() {
+            0 => Err("deck has no .TRAN analysis for static .PRINT TRAN output".to_string()),
+            1 => Ok(analyses[0]),
+            _ => Err(
+                "deck has multiple .TRAN analyses; multi-analysis transient comparison is not implemented yet"
+                    .to_string(),
+            ),
+        }
+    }
+
     fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
         let mut dimensions = Vec::new();
         for analysis in &netlist.analyses {
@@ -5363,7 +6094,7 @@ impl XyceTestRunner {
     }
 
     fn single_dc_print_request(source: &str) -> Result<XycePrintRequest, String> {
-        let requests = Self::dc_print_output_requests(source)?
+        let requests = Self::print_output_requests(source, "DC")?
             .into_iter()
             .filter(|request| request.file.is_none())
             .map(|request| XycePrintRequest {
@@ -5378,7 +6109,40 @@ impl XyceTestRunner {
         }
     }
 
+    fn single_tran_print_request(source: &str) -> Result<XycePrintRequest, String> {
+        let requests = Self::print_output_requests(source, "TRAN")?
+            .into_iter()
+            .filter(|request| request.file.is_none())
+            .map(|request| XycePrintRequest {
+                probes: request.probes,
+            })
+            .collect::<Vec<_>>();
+
+        match requests.len() {
+            0 => Err("deck has no .PRINT TRAN statement with static columns".to_string()),
+            1 => Ok(requests.into_iter().next().expect("one request")),
+            _ => Err("deck has multiple .PRINT TRAN statements; multi-table comparison is not implemented yet".to_string()),
+        }
+    }
+
     fn dc_print_output_requests(source: &str) -> Result<Vec<XycePrintOutputRequest>, String> {
+        Self::print_output_requests(source, "DC")
+    }
+
+    fn deck_has_print_analysis(&self, deck: &XyceDeck, analysis: &str) -> bool {
+        fs::read_to_string(&deck.path).is_ok_and(|source| {
+            Self::print_output_requests(&source, analysis).is_ok_and(|requests| {
+                requests
+                    .into_iter()
+                    .any(|request| request.file.is_none() && !request.probes.is_empty())
+            })
+        })
+    }
+
+    fn print_output_requests(
+        source: &str,
+        expected_analysis: &str,
+    ) -> Result<Vec<XycePrintOutputRequest>, String> {
         let mut requests = Vec::new();
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
@@ -5395,7 +6159,7 @@ impl XyceTestRunner {
             let Some(analysis) = tokens.get(1).copied() else {
                 return Err(".PRINT statement has no analysis type".to_string());
             };
-            if !analysis.eq_ignore_ascii_case("DC") {
+            if !analysis.eq_ignore_ascii_case(expected_analysis) {
                 continue;
             }
 
@@ -5428,7 +6192,10 @@ impl XyceTestRunner {
             }
 
             if probes.is_empty() {
-                return Err(".PRINT DC statement has no probes".to_string());
+                return Err(format!(
+                    ".PRINT {} statement has no probes",
+                    expected_analysis.to_ascii_uppercase()
+                ));
             }
             requests.push(XycePrintOutputRequest {
                 format,

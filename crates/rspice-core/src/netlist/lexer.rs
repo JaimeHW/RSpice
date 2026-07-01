@@ -645,6 +645,7 @@ fn parse_spice_suffix(chars: &[char]) -> (Value, usize) {
         'N' => (1e-9, 1),
         'P' => (1e-12, 1),
         'F' => (1e-15, 1),
+        'X' if chars.len() == 1 || !chars[1].is_ascii_alphabetic() => (1e6, 1),
         // Unit designators (e.g., "1V", "1A", ".1s") are treated as neutral scale.
         'V' | 'A' | 'S' => (1.0, 1),
         _ => (1.0, 0),
@@ -925,6 +926,13 @@ mod tests {
         assert!((parse_spice_value("50nm").expect("50nm parses") - 50.0e-9).abs() <= 1.0e-21);
         assert!((parse_spice_value("1.0e3m").expect("bare m is milli") - 1.0).abs() <= 1.0e-15);
         assert!((parse_spice_value("1.0e3M").expect("bare M is milli") - 1.0).abs() <= 1.0e-15);
+    }
+
+    #[test]
+    fn xyce_x_scale_suffix_matches_meg() {
+        assert_eq!(parse_spice_value("1X").expect("1X parses"), 1.0e6);
+        assert_eq!(parse_spice_value("1x").expect("1x parses"), 1.0e6);
+        assert_eq!(parse_spice_value("2.5X").expect("2.5X parses"), 2.5e6);
     }
 
     #[test]

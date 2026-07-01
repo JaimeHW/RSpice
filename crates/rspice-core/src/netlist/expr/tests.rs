@@ -788,4 +788,6 @@ fn number_suffixes_match_ngspice_numparam() {
     assert_eq!(eval_with(&ctx, "5xyz"), 5.0);
     assert_eq!(eval_with(&ctx, "10k + 1"), 10_001.0);
     assert_eq!(eval_with(&ctx, "3meg"), 3e6);
+    assert_eq!(eval_with(&ctx, "3x"), 3e6);
+    assert_eq!(eval_with(&ctx, "3X"), 3e6);
 }

@@ -458,9 +458,13 @@ impl<'a> ExprParser<'a> {
                     .collect::<String>()
                     .eq_ignore_ascii_case("meg");
             imaginary_literal = chars[i].eq_ignore_ascii_case(&'j');
+            let x_scale_suffix = chars[i].eq_ignore_ascii_case(&'x')
+                && (i + 1 == chars.len() || !chars[i + 1].is_ascii_alphabetic());
             multiplier = if imaginary_literal {
                 1.0
             } else if is_meg {
+                1e6
+            } else if x_scale_suffix {
                 1e6
             } else {
                 match chars[i].to_ascii_uppercase() {
