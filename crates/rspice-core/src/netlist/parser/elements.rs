@@ -735,6 +735,7 @@ pub(super) fn parse_pspice_u_device(
             elements,
         ),
         "DFF" => parse_pspice_u_dff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "DLYLINE" => parse_pspice_u_dlyline(&name, &fields, line_num, elements),
         "DLTCH" => parse_pspice_u_dlatch(&name, &fields, count.unwrap_or(1), line_num, elements),
         "INV3" | "INV3A" => {
             parse_pspice_u_tristate(&name, &fields, count.unwrap_or(1), true, line_num, elements)
@@ -744,7 +745,7 @@ pub(super) fn parse_pspice_u_device(
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, JKFF, SRFF, BUF3A, and INV3A",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, SRFF, BUF3A, and INV3A",
                 fields[1]
             ),
         }),
@@ -860,6 +861,40 @@ fn parse_pspice_u_dff(
             pspice_u_timing.clone(),
         );
     }
+
+    Ok(())
+}
+
+fn parse_pspice_u_dlyline(
+    name: &str,
+    fields: &[String],
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let pins = &fields[4..];
+    if pins.len() < 3 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice DLYLINE U-device '{}' requires input, output, and a timing model",
+                name
+            ),
+        });
+    }
+
+    let input =
+        pspice_u_required_digital_port(&pins[0], "delay-line input", fields, line_num, elements)?;
+    let output =
+        pspice_u_required_digital_port(&pins[1], "delay-line output", fields, line_num, elements)?;
+    let pspice_u_timing =
+        pspice_u_timing_model_token(&pins[2]).map(|timing_model| PspiceUTiming { timing_model });
+    push_pspice_u_xspice_element_with_timing(
+        elements,
+        name.to_string(),
+        "d_buffer",
+        vec![input, output],
+        pspice_u_timing,
+    );
 
     Ok(())
 }

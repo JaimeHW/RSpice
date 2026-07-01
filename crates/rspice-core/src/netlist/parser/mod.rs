@@ -439,6 +439,8 @@ fn pspice_u_timing_model_supported(code_model: &str, timing_model: &ModelDef) ->
             && pspice_u_tristate_model_accepts_utgate_timing(code_model))
         || (timing_model.model_type.eq_ignore_ascii_case("UGFF")
             && pspice_u_latch_model_accepts_ugff_timing(code_model))
+        || (timing_model.model_type.eq_ignore_ascii_case("UDLY")
+            && pspice_u_delay_line_model_accepts_udly_timing(code_model))
 }
 
 fn pspice_u_timing_alias_model(
@@ -486,6 +488,16 @@ fn pspice_u_timing_alias_model(
         ));
     }
 
+    if timing_model.model_type.eq_ignore_ascii_case("UDLY")
+        && pspice_u_delay_line_model_accepts_udly_timing(code_model)
+    {
+        return Some(pspice_udly_alias_model(
+            alias_name,
+            code_model,
+            timing_model,
+        ));
+    }
+
     None
 }
 
@@ -509,6 +521,10 @@ fn pspice_u_latch_model_accepts_ugff_timing(model: &str) -> bool {
         model.to_ascii_lowercase().as_str(),
         "d_dlatch" | "d_srlatch"
     )
+}
+
+fn pspice_u_delay_line_model_accepts_udly_timing(model: &str) -> bool {
+    model.eq_ignore_ascii_case("d_buffer")
 }
 
 fn pspice_ugate_alias_model(
@@ -536,6 +552,31 @@ fn pspice_ugate_alias_model(
         &mut params,
         &mut expr_params,
     );
+
+    ModelDef {
+        name: alias_name.to_string(),
+        model_type: code_model.to_string(),
+        params,
+        expr_params,
+        string_params: Vec::new(),
+        string_vector_params: Vec::new(),
+        real_vector_params: Vec::new(),
+        integer_vector_params: Vec::new(),
+    }
+}
+
+fn pspice_udly_alias_model(
+    alias_name: &str,
+    code_model: &str,
+    timing_model: &ModelDef,
+) -> ModelDef {
+    let mut params = vec![("inertial_delay".to_string(), 0.0)];
+    let mut expr_params = Vec::new();
+    let delay = pspice_timing_delay_estimate(timing_model, &["DLYTY", "DLYMN", "DLYMX"])
+        .unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
+
+    push_pspice_timing_delay("rise_delay", delay.clone(), &mut params, &mut expr_params);
+    push_pspice_timing_delay("fall_delay", delay, &mut params, &mut expr_params);
 
     ModelDef {
         name: alias_name.to_string(),

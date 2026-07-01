@@ -4871,6 +4871,66 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_dlyline_udly_timing_creates_buffer_alias() {
+        let netlist = Netlist::parse(
+            "pspice u dlyline timing\n\
+             U9 DLYLINE $G_DPWR $G_DGND in out dly IO_LEVEL=0\n\
+             .model DLY UDLY (DLYTY=12n)\n\
+             .end\n",
+        )
+        .expect("PSpice DLYLINE should lower to d_buffer with UDLY timing");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "U9")
+            .expect("U9 exists");
+
+        let alias_name = match &element.kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("IN".to_string()),
+                        XspicePort::Digital("OUT".to_string()),
+                    ]
+                );
+                model.as_str()
+            }
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert_eq!(alias.model_type, "d_buffer");
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "rise_delay" && (*value - 12.0e-9).abs() < 1.0e-21
+            })
+        );
+        assert!(
+            alias.params.iter().any(|(name, value)| {
+                name == "fall_delay" && (*value - 12.0e-9).abs() < 1.0e-21
+            })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "inertial_delay" && value.abs() < f64::EPSILON })
+        );
+    }
+
+    #[test]
     fn pspice_u_inverter_lowers_to_scalar_xspice_ports() {
         let netlist = Netlist::parse(
             "pspice u inverter\n\
