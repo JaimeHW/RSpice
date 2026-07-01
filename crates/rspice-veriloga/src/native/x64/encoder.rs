@@ -361,6 +361,10 @@ impl X64Encoder {
         self.emit_sse_reg_reg(0x66, 0x57, dst, src);
     }
 
+    pub(crate) fn andpd_xmm_m128_rip_disp32(&mut self, dst: Xmm, disp: i32) -> usize {
+        self.emit_sse_reg_rip_disp32(0x66, 0x54, dst, disp)
+    }
+
     pub(crate) fn movq_r64_xmm(&mut self, dst: Gpr, src: Xmm) {
         self.emit_u8(0x66);
         self.emit_rex(true, src.code(), 0, dst.code());
@@ -927,6 +931,19 @@ mod tests {
                 0x66, 0x48, 0x0F, 0x7E, 0xD0, 0x48, 0x0F, 0xBA, 0xF0, 0x3F, 0x66, 0x48, 0x0F, 0x6E,
                 0xD0,
             ]
+        );
+    }
+
+    #[test]
+    fn encodes_scalar_abs_vector_mask_operation() {
+        let mut encoder = X64Encoder::new();
+
+        let displacement_offset = encoder.andpd_xmm_m128_rip_disp32(Xmm::Xmm2, -16);
+
+        assert_eq!(displacement_offset, 4);
+        assert_eq!(
+            encoder.into_bytes(),
+            [0x66, 0x0F, 0x54, 0x15, 0xF0, 0xFF, 0xFF, 0xFF,]
         );
     }
 

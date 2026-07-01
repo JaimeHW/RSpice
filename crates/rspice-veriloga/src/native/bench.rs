@@ -926,3 +926,35 @@ fn take_native_error(phase: &str) -> Result<(), String> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{NativeBenchConfig, run_dense_entrypoint_case, run_device_evaluate_case};
+
+    fn smoke_config() -> NativeBenchConfig {
+        NativeBenchConfig {
+            iterations: 1,
+            samples: 1,
+            min_speedup: 0.0,
+            max_native_p95_ns_per_sweep: None,
+        }
+    }
+
+    #[test]
+    fn dense_entrypoint_benchmark_smoke_runs_native_sweep() {
+        let report =
+            run_dense_entrypoint_case(smoke_config()).expect("dense native benchmark case runs");
+
+        assert!(report.checksum_native.is_finite());
+        assert!(report.checksum_bytecode.is_finite());
+    }
+
+    #[test]
+    fn device_evaluate_benchmark_smoke_runs_native_sweep() {
+        let report =
+            run_device_evaluate_case(smoke_config()).expect("device native benchmark case runs");
+
+        assert!(report.checksum_native.is_finite());
+        assert!(report.checksum_bytecode.is_finite());
+    }
+}

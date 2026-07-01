@@ -21,6 +21,9 @@ use crate::codegen::{AssignmentStep, CompiledModel, StampIndex, StampProgram};
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 
+const ENTRY_ALIGNMENT: usize = 16;
+const X64_NOP: u8 = 0x90;
+
 pub(crate) fn compile_model(model: &CompiledModel) -> JitResult<NativeModel> {
     compile_model_inner(model, None)
 }
@@ -484,7 +487,6 @@ fn append_assignment_entry(
     model: &CompiledModel,
     image: &mut Vec<u8>,
 ) -> JitResult<(CodeOffset, AssignmentDependencies)> {
-    let offset = CodeOffset::new(image.len());
     let assignments = model
         .assignment_steps
         .iter()
@@ -498,6 +500,7 @@ fn append_assignment_entry(
     } else {
         codegen::compile_assignment_pass_function(&assignments)?
     };
+    let offset = align_image_for_entry(image);
     image.extend_from_slice(&bytes);
     Ok((offset, dependencies))
 }
@@ -648,10 +651,16 @@ fn constant_indexed_assignment_slot(
 }
 
 fn append_value_entry(image: &mut Vec<u8>, program: &NativeProgram) -> JitResult<CodeOffset> {
-    let offset = CodeOffset::new(image.len());
     let bytes = codegen::compile_value_function(program)?;
+    let offset = align_image_for_entry(image);
     image.extend_from_slice(&bytes);
     Ok(offset)
+}
+
+fn align_image_for_entry(image: &mut Vec<u8>) -> CodeOffset {
+    let padding = (ENTRY_ALIGNMENT - (image.len() % ENTRY_ALIGNMENT)) % ENTRY_ALIGNMENT;
+    image.resize(image.len() + padding, X64_NOP);
+    CodeOffset::new(image.len())
 }
 
 fn infer_current_terminal_pair(program: &StampProgram) -> Option<(usize, usize)> {
@@ -735,7 +744,8 @@ mod tests {
     use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
     use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
     use crate::native::EvalContext;
-    use crate::native::expr::NativeOp;
+    use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeOp, NativeProgram};
+    use crate::native::runtime::ExecutableMemory;
     use crate::native::x64::codegen::NativeAssignment;
     use crate::{CompilerOptions, VerilogACompiler};
     use smol_str::SmolStr;
@@ -761,6 +771,48 @@ mod tests {
         let opt = OptModel::from_mir(&mir).expect("synthetic canonical MIR still validates");
         CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
             .expect("synthetic canonical artifact has refreshed digests")
+    }
+
+    #[test]
+    fn append_value_entry_aligns_vector_literal_entries_for_concatenated_images() {
+        let program = NativeProgram::from_bytecode(
+            "aligned-vector-entry",
+            EntryKind::StampValue,
+            &BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushVariable(0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::IfElse,
+                ],
+            },
+            NativeLoweringLimits::new(0, 0, 0, 1, 0),
+        )
+        .expect("variable ifelse lowers to native program");
+        let mut image = vec![0xC3];
+
+        let offset =
+            super::append_value_entry(&mut image, &program).expect("append aligned value entry");
+
+        assert_eq!(offset.as_usize(), super::ENTRY_ALIGNMENT);
+        assert_eq!(offset.as_usize() % super::ENTRY_ALIGNMENT, 0);
+        assert!(
+            image[1..offset.as_usize()]
+                .iter()
+                .all(|byte| *byte == super::X64_NOP),
+            "entry padding should be x64 NOPs"
+        );
+
+        let memory = ExecutableMemory::allocate(&image).expect("allocate aligned image");
+        let entry = memory
+            .ptr_at(offset.as_usize())
+            .expect("aligned entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[]);
+        let vars = [2.0];
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
     }
 
     #[test]

@@ -13,6 +13,11 @@ impl CodeOffset {
     pub(crate) fn new(offset: usize) -> Self {
         Self(offset)
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn as_usize(self) -> usize {
+        self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
