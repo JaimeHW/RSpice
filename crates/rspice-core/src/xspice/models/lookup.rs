@@ -6,12 +6,17 @@ use crate::Value;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
 
 const INPUT_DOMAIN_MIN: Value = 1.0e-12;
 const INPUT_DOMAIN_MAX: Value = 0.5;
 const LOOKUP_TABLE_RESOURCE: &str = "xspice.lookup.table";
 const LOOKUP_EVAL_RESOURCE: &str = "xspice.lookup.eval";
+const LOOKUP_UNSET_CENTER_INDEX: usize = usize::MAX;
+const LOOKUP_CURSOR_LINEAR_STEPS: usize = 8;
 
 #[derive(Debug, Clone, Copy)]
 struct LookupPoint {
@@ -19,10 +24,11 @@ struct LookupPoint {
     y: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct LookupTable {
     points: Vec<LookupPoint>,
     upper_midpoints: Vec<Value>,
+    last_center_index: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -245,6 +251,7 @@ fn lookup_table_from_points(points: Vec<LookupPoint>) -> LookupTable {
     LookupTable {
         points,
         upper_midpoints,
+        last_center_index: AtomicUsize::new(LOOKUP_UNSET_CENTER_INDEX),
     }
 }
 
@@ -320,6 +327,64 @@ fn expanded_lookup_point(points: &[LookupPoint], index: usize, limit: bool) -> L
 
 fn lookup_midpoint(left: LookupPoint, right: LookupPoint) -> Value {
     (left.x + right.x) / 2.0
+}
+
+fn lookup_center_index_binary(table: &LookupTable, x: Value) -> usize {
+    table
+        .upper_midpoints
+        .partition_point(|midpoint| x >= *midpoint)
+}
+
+fn lookup_center_interval_contains(table: &LookupTable, center_index: usize, x: Value) -> bool {
+    debug_assert!(center_index < table.points.len());
+    let lower_ok = center_index == 0 || x >= table.upper_midpoints[center_index - 1];
+    let upper_ok =
+        center_index + 1 == table.points.len() || x < table.upper_midpoints[center_index];
+    lower_ok && upper_ok
+}
+
+fn lookup_center_index_with_cursor(table: &LookupTable, x: Value) -> usize {
+    let point_count = table.points.len();
+    let mut center_index = table.last_center_index.load(Ordering::Relaxed);
+
+    if center_index == LOOKUP_UNSET_CENTER_INDEX || center_index >= point_count {
+        center_index = lookup_center_index_binary(table, x);
+        table
+            .last_center_index
+            .store(center_index, Ordering::Relaxed);
+        return center_index;
+    }
+
+    if lookup_center_interval_contains(table, center_index, x) {
+        return center_index;
+    }
+
+    let mut steps = 0;
+    if center_index + 1 < point_count && x >= table.upper_midpoints[center_index] {
+        while center_index + 1 < point_count
+            && x >= table.upper_midpoints[center_index]
+            && steps < LOOKUP_CURSOR_LINEAR_STEPS
+        {
+            center_index += 1;
+            steps += 1;
+        }
+    } else {
+        while center_index > 0
+            && x < table.upper_midpoints[center_index - 1]
+            && steps < LOOKUP_CURSOR_LINEAR_STEPS
+        {
+            center_index -= 1;
+            steps += 1;
+        }
+    }
+
+    if !lookup_center_interval_contains(table, center_index, x) {
+        center_index = lookup_center_index_binary(table, x);
+    }
+    table
+        .last_center_index
+        .store(center_index, Ordering::Relaxed);
+    center_index
 }
 
 fn lookup_breakpoint_times(table: &LookupTable, input_domain: Value, fraction: bool) -> Vec<Value> {
@@ -403,9 +468,7 @@ fn evaluate_lookup(
         return linear_value(last, segment_slope(last, last_bound), x);
     }
 
-    let center_index = table
-        .upper_midpoints
-        .partition_point(|midpoint| x >= *midpoint);
+    let center_index = lookup_center_index_with_cursor(table, x);
     let expanded_index = center_index + 1;
     let lower = expanded_lookup_point(points, expanded_index - 1, limit);
     let center = points[center_index];
@@ -775,6 +838,62 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn lookup_midpoint_selection_reuses_monotonic_cursor() {
+        let table =
+            validate_lookup_table(&[0.0, 0.5, 1.0, 1.5, 3.0], &[0.0, 10.0, 30.0, 60.0, 120.0])
+                .expect("strictly increasing lookup table");
+        assert_eq!(
+            table.last_center_index.load(Ordering::Relaxed),
+            LOOKUP_UNSET_CENTER_INDEX
+        );
+
+        let first = evaluate_lookup(&table, 0.3, 0.01, false, false);
+        let first_legacy = evaluate_lookup_legacy_scan(&table, 0.3, 0.01, false, false);
+        assert_near(first.value, first_legacy.value);
+        assert_near(first.slope, first_legacy.slope);
+        assert_eq!(table.last_center_index.load(Ordering::Relaxed), 1);
+
+        let second = evaluate_lookup(&table, 0.8, 0.01, false, false);
+        let second_legacy = evaluate_lookup_legacy_scan(&table, 0.8, 0.01, false, false);
+        assert_near(second.value, second_legacy.value);
+        assert_near(second.slope, second_legacy.slope);
+        assert_eq!(table.last_center_index.load(Ordering::Relaxed), 2);
+
+        let exact_midpoint = evaluate_lookup(&table, 0.75, 0.01, false, false);
+        let exact_midpoint_legacy = evaluate_lookup_legacy_scan(&table, 0.75, 0.01, false, false);
+        assert_near(exact_midpoint.value, exact_midpoint_legacy.value);
+        assert_near(exact_midpoint.slope, exact_midpoint_legacy.slope);
+        assert_eq!(
+            table.last_center_index.load(Ordering::Relaxed),
+            2,
+            "exact midpoints should choose the center above the midpoint like the legacy scan"
+        );
+    }
+
+    #[test]
+    fn lookup_midpoint_cursor_falls_back_for_large_input_jumps() {
+        let xs: Vec<Value> = (0..32).map(Value::from).collect();
+        let ys = xs.clone();
+        let table = validate_lookup_table(&xs, &ys).expect("strictly increasing lookup table");
+
+        let first = evaluate_lookup(&table, 2.6, 0.01, false, false);
+        let first_legacy = evaluate_lookup_legacy_scan(&table, 2.6, 0.01, false, false);
+        assert_near(first.value, first_legacy.value);
+        assert_near(first.slope, first_legacy.slope);
+        assert_eq!(table.last_center_index.load(Ordering::Relaxed), 3);
+
+        let jumped = evaluate_lookup(&table, 25.6, 0.01, false, false);
+        let jumped_legacy = evaluate_lookup_legacy_scan(&table, 25.6, 0.01, false, false);
+        assert_near(jumped.value, jumped_legacy.value);
+        assert_near(jumped.slope, jumped_legacy.slope);
+        assert_eq!(
+            table.last_center_index.load(Ordering::Relaxed),
+            26,
+            "large non-local input jumps should land on the binary-search center"
+        );
     }
 
     #[test]
