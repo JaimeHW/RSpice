@@ -602,12 +602,137 @@ impl CodeModel for MultiInputPwl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xspice::ParamType;
     use crate::xspice::context::AnalogValue;
 
     fn set_inputs(ctx: &mut CmContext, values: &[Value]) {
         ctx.set_input_analog_vector_from_fn("in", values.len(), |index| {
             AnalogValue::new(values[index])
         });
+    }
+
+    fn port_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        PortDirection,
+        PortType,
+        Vec<PortType>,
+        bool,
+        bool,
+        Option<usize>,
+        Option<usize>,
+    )> {
+        model
+            .ports()
+            .iter()
+            .map(|port| {
+                (
+                    port.name.as_str(),
+                    port.direction,
+                    port.default_type,
+                    port.allowed_types.clone(),
+                    port.is_vector,
+                    port.null_allowed,
+                    port.vector_min_len,
+                    port.vector_max_len,
+                )
+            })
+            .collect()
+    }
+
+    fn param_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        ParamType,
+        Value,
+        Option<&str>,
+        bool,
+        Option<usize>,
+        Option<usize>,
+        Option<Vec<Value>>,
+    )> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str(),
+                    param.param_type,
+                    param.default,
+                    param.string_default.as_deref(),
+                    param.required,
+                    param.vector_min_len,
+                    param.vector_max_len,
+                    param.real_vector_default.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn multi_input_pwl_metadata_matches_ngspice46_interface() {
+        assert_eq!(
+            port_summary(&MultiInputPwl),
+            vec![
+                (
+                    "in",
+                    PortDirection::In,
+                    PortType::DifferentialVoltage,
+                    vec![PortType::DifferentialVoltage, PortType::DifferentialCurrent],
+                    true,
+                    false,
+                    Some(2),
+                    None,
+                ),
+                (
+                    "out",
+                    PortDirection::Out,
+                    PortType::DifferentialVoltage,
+                    vec![PortType::DifferentialVoltage, PortType::DifferentialCurrent],
+                    false,
+                    false,
+                    None,
+                    None,
+                ),
+            ]
+        );
+        assert_eq!(
+            param_summary(&MultiInputPwl),
+            vec![
+                (
+                    "x",
+                    ParamType::RealVector,
+                    0.0,
+                    None,
+                    true,
+                    Some(2),
+                    None,
+                    Some(Vec::new()),
+                ),
+                (
+                    "y",
+                    ParamType::RealVector,
+                    0.0,
+                    None,
+                    true,
+                    Some(2),
+                    None,
+                    Some(Vec::new()),
+                ),
+                (
+                    "model",
+                    ParamType::String,
+                    0.0,
+                    Some("and"),
+                    false,
+                    None,
+                    None,
+                    None,
+                ),
+            ]
+        );
     }
 
     #[test]
