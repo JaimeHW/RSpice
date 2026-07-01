@@ -254,7 +254,6 @@ struct Table3DResource {
 
 #[derive(Debug, Clone, PartialEq)]
 struct Table2DEvalSignature {
-    file: String,
     table_id: usize,
     order: usize,
     offset: Value,
@@ -271,7 +270,6 @@ struct Table2DEvalResource {
 
 #[derive(Debug, Clone, PartialEq)]
 struct Table3DEvalSignature {
-    file: String,
     table_id: usize,
     order: usize,
     offset: Value,
@@ -1280,14 +1278,12 @@ fn table_arc_id<T>(table: &Arc<T>) -> usize {
 
 fn table2d_eval_signature(
     ctx: &CmContext,
-    file: &str,
     table: &Arc<Table2DData>,
     order: usize,
     inx: Value,
     iny: Value,
 ) -> Table2DEvalSignature {
     Table2DEvalSignature {
-        file: file.to_string(),
         table_id: table_arc_id(table),
         order,
         offset: ctx.param("offset"),
@@ -1299,7 +1295,6 @@ fn table2d_eval_signature(
 
 fn table3d_eval_signature(
     ctx: &CmContext,
-    file: &str,
     table: &Arc<Table3DData>,
     order: usize,
     inx: Value,
@@ -1307,7 +1302,6 @@ fn table3d_eval_signature(
     inz: Value,
 ) -> Table3DEvalSignature {
     Table3DEvalSignature {
-        file: file.to_string(),
         table_id: table_arc_id(table),
         order,
         offset: ctx.param("offset"),
@@ -1344,7 +1338,7 @@ fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
     validate_table2d_order(&table, order)?;
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
-    let signature = table2d_eval_signature(ctx, file, &table, order, inx, iny);
+    let signature = table2d_eval_signature(ctx, &table, order, inx, iny);
     if let Some(resource) = ctx.resource::<Table2DEvalResource>(TABLE2D_EVAL_RESOURCE)
         && resource.signature == signature
     {
@@ -1366,7 +1360,7 @@ fn scaled_table2d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval2D> {
     validate_table2d_order(&table, order)?;
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
-    let signature = table2d_eval_signature(ctx, &file, &table, order, inx, iny);
+    let signature = table2d_eval_signature(ctx, &table, order, inx, iny);
     if let Some(resource) = ctx.resource::<Table2DEvalResource>(TABLE2D_EVAL_RESOURCE)
         && resource.signature == signature
     {
@@ -1409,7 +1403,7 @@ fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
     let inz = ctx.input("inz");
-    let signature = table3d_eval_signature(ctx, file, &table, order, inx, iny, inz);
+    let signature = table3d_eval_signature(ctx, &table, order, inx, iny, inz);
     if let Some(resource) = ctx.resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
         && resource.signature == signature
     {
@@ -1433,7 +1427,7 @@ fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
     let inz = ctx.input("inz");
-    let signature = table3d_eval_signature(ctx, &file, &table, order, inx, iny, inz);
+    let signature = table3d_eval_signature(ctx, &table, order, inx, iny, inz);
     if let Some(resource) = ctx.resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
         && resource.signature == signature
     {
