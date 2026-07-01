@@ -2802,6 +2802,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &[],
         );
 
         assert_eq!(
@@ -2848,6 +2849,7 @@ mod tests {
             &digital_event_times,
             &real_values,
             &HashMap::new(),
+            &[],
         );
 
         let analog_ptr = instance
@@ -2880,6 +2882,7 @@ mod tests {
             &digital_event_times,
             &real_values,
             &HashMap::new(),
+            &[],
         );
 
         let analog = instance.context.input_analog_vector_values("ain").unwrap();
@@ -2983,6 +2986,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &[],
         );
         instance
             .evaluate(
@@ -3007,6 +3011,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &[],
         );
         instance
             .evaluate(
@@ -3050,6 +3055,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &[],
         );
         let err = instance
             .evaluate(
@@ -3172,6 +3178,7 @@ mod tests {
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
+                &[],
             );
             instance
                 .evaluate(
