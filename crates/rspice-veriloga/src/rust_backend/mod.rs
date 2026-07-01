@@ -104,11 +104,21 @@ impl RustTranspiler {
         match self.backend {
             RustBackendKind::Auto => match scalar::generate_device(artifact, &self.options) {
                 Ok(device) => Ok(device),
-                Err(error) if error.is_unsupported() => {
+                Err(scalar_error) if scalar_error.is_unsupported() => {
                     match device::generate_hybrid_device(artifact, &self.options) {
                         Ok(device) => Ok(device),
-                        Err(error) if error.is_unsupported() => {
-                            device::generate_auto_device(artifact, &self.options)
+                        Err(hybrid_error) if hybrid_error.is_unsupported() => {
+                            match device::generate_auto_device(artifact, &self.options) {
+                                Ok(device) => reject_legacy_ad_device(artifact, device),
+                                Err(legacy_error) if legacy_error.is_unsupported() => {
+                                    Err(auto_backend_unsupported(
+                                        artifact,
+                                        &scalar_error,
+                                        &hybrid_error,
+                                    ))
+                                }
+                                Err(error) => Err(error),
+                            }
                         }
                         Err(error) => Err(error),
                     }
@@ -117,6 +127,104 @@ impl RustTranspiler {
             },
             RustBackendKind::Legacy => device::generate_device(artifact, &self.options),
             RustBackendKind::ScalarOptIr => scalar::generate_device(artifact, &self.options),
+        }
+    }
+}
+
+fn reject_legacy_ad_device(
+    artifact: &CanonicalIrArtifact,
+    device: GeneratedRustDevice,
+) -> Result<GeneratedRustDevice, RustBackendError> {
+    if let Some((relative_path, marker)) = generated_legacy_ad_marker(&device) {
+        return Err(RustBackendError::unsupported(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            format!(
+                "model requires legacy AD backend; generated {relative_path} contains {marker}"
+            ),
+        ));
+    }
+    Ok(device)
+}
+
+fn generated_legacy_ad_marker(device: &GeneratedRustDevice) -> Option<(&str, &'static str)> {
+    const MARKERS: &[&str] = &[
+        "GenericAdValue",
+        "AdValue",
+        "GenericScratch",
+        "GenericReactiveScratch",
+        "scratch:",
+        "reactive_scratch:",
+        "scratch.",
+        "reactive_scratch.",
+        "::support::",
+    ];
+
+    device.files.iter().find_map(|file| {
+        MARKERS
+            .iter()
+            .copied()
+            .find(|marker| file.contents.contains(marker))
+            .map(|marker| (file.relative_path.as_str(), marker))
+    })
+}
+
+fn auto_backend_unsupported(
+    artifact: &CanonicalIrArtifact,
+    scalar_error: &RustBackendError,
+    hybrid_error: &RustBackendError,
+) -> RustBackendError {
+    RustBackendError::unsupported(
+        artifact.metadata.source_package.as_str(),
+        artifact.mir.module_name.as_str(),
+        format!(
+            "model cannot be lowered without the legacy AD backend; scalar path: {}; hybrid scalar path: {}",
+            unsupported_detail(scalar_error),
+            unsupported_detail(hybrid_error)
+        ),
+    )
+}
+
+fn unsupported_detail(error: &RustBackendError) -> &str {
+    error
+        .message
+        .strip_prefix("unsupported Verilog-A construct for Rust backend: ")
+        .unwrap_or(error.message.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_legacy_ad_marker_detects_ad_runtime_usage() {
+        let device = generated_device("let eq0 = AdValue::log10(input);");
+
+        assert_eq!(
+            generated_legacy_ad_marker(&device),
+            Some(("stamp.rs", "AdValue"))
+        );
+    }
+
+    #[test]
+    fn generated_legacy_ad_marker_allows_native_local_output() {
+        let device = generated_device(
+            "let v0: f64 = ctx.node_voltage(nodes[0]);\nstamper.stamp_current_node2_local();",
+        );
+
+        assert_eq!(generated_legacy_ad_marker(&device), None);
+    }
+
+    fn generated_device(stamp: &str) -> GeneratedRustDevice {
+        GeneratedRustDevice {
+            module_name: "fixture".to_string(),
+            public_model_name: "fixture".to_string(),
+            folder_name: "fixture__fixture__00000000".to_string(),
+            source_digest: "0000000000000000".to_string(),
+            files: vec![GeneratedRustFile {
+                relative_path: "stamp.rs".to_string(),
+                contents: stamp.to_string(),
+            }],
         }
     }
 }

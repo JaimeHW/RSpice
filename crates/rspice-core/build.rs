@@ -89,8 +89,8 @@ fn main() {
             model_root.display()
         );
     }
-    reject_legacy_support_imports(&devices).unwrap_or_else(|error| {
-        panic!("generated Verilog-A built-ins require legacy support: {error}")
+    reject_legacy_ad_runtime(&devices).unwrap_or_else(|error| {
+        panic!("generated Verilog-A built-ins require legacy AD runtime: {error}")
     });
 
     println!("cargo:rustc-cfg=rspice_veriloga_builtins_generated");
@@ -192,15 +192,31 @@ fn read_generated_manifest(
         .then_some(manifest)
 }
 
-fn reject_legacy_support_imports(
+fn reject_legacy_ad_runtime(
     devices: &[GeneratedRustDevice],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    const MARKERS: &[&str] = &[
+        "GenericAdValue",
+        "AdValue",
+        "GenericScratch",
+        "GenericReactiveScratch",
+        "scratch:",
+        "reactive_scratch:",
+        "scratch.",
+        "reactive_scratch.",
+        "::support::",
+    ];
+
     for device in devices {
         for file in &device.files {
-            if file.contents.contains("::support::") {
+            if let Some(marker) = MARKERS
+                .iter()
+                .copied()
+                .find(|marker| file.contents.contains(marker))
+            {
                 return Err(format!(
-                    "{}:{} imports the legacy Verilog-A support runtime",
-                    device.folder_name, file.relative_path
+                    "{}:{} contains legacy Verilog-A AD marker {marker}",
+                    device.folder_name, file.relative_path,
                 )
                 .into());
             }
