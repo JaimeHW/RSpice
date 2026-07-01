@@ -1734,10 +1734,6 @@ impl XyceTestRunner {
             if trimmed.is_empty() {
                 continue;
             }
-            let directive = trimmed.split_whitespace().next().unwrap_or_default();
-            match directive {
-                _ => {}
-            }
         }
         Ok(())
     }

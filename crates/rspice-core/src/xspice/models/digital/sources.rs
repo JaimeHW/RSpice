@@ -704,9 +704,10 @@ fn parse_d_state_contents(
                     "continuation row appears before any state header",
                 )
             })?;
-            output_values.extend(
-                std::iter::repeat(d_state_output_from_code(stale_bit_code)).take(output_width),
-            );
+            output_values.extend(std::iter::repeat_n(
+                d_state_output_from_code(stale_bit_code),
+                output_width,
+            ));
             (state, 0, continuation_len - 1)
         } else {
             return Err(d_state_error(
