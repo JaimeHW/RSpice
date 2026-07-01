@@ -678,6 +678,14 @@ pub(super) fn parse_options_command(
                 let method = expect_ident(stream, line_num)?;
                 options.method = Some(method.to_uppercase());
             }
+            (_, "INTERP" | "NOACCT") => {
+                // Ngspice compatibility flags. INTERP affects rawfile storage
+                // density and NOACCT suppresses accounting output; neither
+                // changes the solved circuit state in RSpice today.
+                if has_equals {
+                    let _ = expect_value(stream, line_num, params)?;
+                }
+            }
             (_, "ALLOW_SIMPLIFIED_MOS" | "ALLOWSIMPLIFIEDMOS") => {
                 // Bare flag enables; an explicit value of 0 disables.
                 let enabled = if has_equals {
