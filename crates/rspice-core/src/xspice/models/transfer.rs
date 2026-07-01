@@ -153,13 +153,10 @@ fn xfer_params() -> &'static [ParamSpec] {
                 .with_description("Interpret table magnitude values as dB"),
             ParamSpec::boolean("rad", false).with_description("Interpret phase values as radians"),
             ParamSpec::integer("span", 3)
-                .with_min(3.0)
                 .with_description("Number of values per source row, clamped to at least 3"),
-            ParamSpec::integer("offset", 1)
-                .with_min(1.0)
-                .with_description(
-                    "One-based offset of the selected value pair, clamped to at least 1",
-                ),
+            ParamSpec::integer("offset", 1).with_description(
+                "One-based offset of the selected value pair, clamped to at least 1",
+            ),
         ]
     })
 }
@@ -1495,7 +1492,7 @@ mod tests {
                     3.0,
                     None,
                     false,
-                    Some(3.0),
+                    None,
                     None,
                     None,
                     None,
@@ -1507,7 +1504,7 @@ mod tests {
                     1.0,
                     None,
                     false,
-                    Some(1.0),
+                    None,
                     None,
                     None,
                     None,
