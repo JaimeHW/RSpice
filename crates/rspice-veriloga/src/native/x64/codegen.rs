@@ -813,9 +813,9 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        self.encoder.movq_r64_xmm(Gpr::Rax, target);
-        self.encoder.btc_r64_imm8(Gpr::Rax, 63);
-        self.encoder.movq_xmm_r64(target, Gpr::Rax);
+        self.encoder.movq_r64_xmm(Gpr::R11, target);
+        self.encoder.btc_r64_imm8(Gpr::R11, 63);
+        self.encoder.movq_xmm_r64(target, Gpr::R11);
         Ok(())
     }
 
@@ -945,8 +945,8 @@ impl FunctionCompiler {
         self.encoder.cmp_r64_imm32(Gpr::R11, 0);
         let zero = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
         self.encoder
-            .movabs_r64_imm64(Gpr::Rax, F64_EXACT_INTEGER_LIMIT_ABS_BITS);
-        self.encoder.cmp_r64_r64(Gpr::R11, Gpr::Rax);
+            .movabs_r64_imm64(Gpr::R10, F64_EXACT_INTEGER_LIMIT_ABS_BITS);
+        self.encoder.cmp_r64_r64(Gpr::R11, Gpr::R10);
         let already_integral_or_unordered = self
             .encoder
             .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
@@ -1077,7 +1077,7 @@ impl FunctionCompiler {
             self.encoder.movsd_xmm_xmm(raw_index, target);
             let slow_jumps =
                 self.emit_dynamic_variable_address_inline(target, base_disp, len, lower)?;
-            self.encoder.movsd_xmm_m64_base_disp32(target, Gpr::Rax, 0);
+            self.encoder.movsd_xmm_m64_base_disp32(target, Gpr::R11, 0);
             let fast_done = self.encoder.jmp_rel32_placeholder();
 
             for slow_jump in slow_jumps {
@@ -1095,7 +1095,7 @@ impl FunctionCompiler {
 
         let slow_jumps =
             self.emit_dynamic_variable_address_inline(target, base_disp, len, lower)?;
-        self.encoder.movsd_xmm_m64_base_disp32(target, Gpr::Rax, 0);
+        self.encoder.movsd_xmm_m64_base_disp32(target, Gpr::R11, 0);
         self.encoder.add_rsp_imm32(DYNAMIC_READ_FRAME_BYTES);
         let fast_done = self.encoder.jmp_rel32_placeholder();
 
@@ -1179,7 +1179,7 @@ impl FunctionCompiler {
         let slow_jumps =
             self.emit_dynamic_variable_address_inline(target, base_disp, len, lower)?;
         self.encoder
-            .mov_m64_base_disp32_r64(Gpr::Rsp, INDEXED_ASSIGNMENT_SLOT_PTR_DISP, Gpr::Rax);
+            .mov_m64_base_disp32_r64(Gpr::Rsp, INDEXED_ASSIGNMENT_SLOT_PTR_DISP, Gpr::R11);
         let fast_done = self.encoder.jmp_rel32_placeholder();
 
         for slow_jump in slow_jumps {
@@ -1225,8 +1225,8 @@ impl FunctionCompiler {
     ) -> JitResult<Vec<usize>> {
         let mut slow_jumps = Vec::new();
 
-        self.encoder.movq_r64_xmm(Gpr::Rax, index);
-        self.encoder.mov_r64_r64(Gpr::R11, Gpr::Rax);
+        self.encoder.movq_r64_xmm(Gpr::R8, index);
+        self.encoder.mov_r64_r64(Gpr::R11, Gpr::R8);
         self.encoder.btr_r64_imm8(Gpr::R11, 63);
         self.encoder
             .movabs_r64_imm64(Gpr::R10, F64_EXACT_INTEGER_LIMIT_ABS_BITS);
@@ -1236,7 +1236,7 @@ impl FunctionCompiler {
                 .jcc_rel32_placeholder(ConditionCode::AboveOrEqual),
         );
 
-        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
+        self.encoder.test_r64_r64(Gpr::R8, Gpr::R8);
         let non_negative = self
             .encoder
             .jcc_rel32_placeholder(ConditionCode::NotNegative);
@@ -1257,7 +1257,7 @@ impl FunctionCompiler {
         );
 
         self.encoder.lea_r64_base_index_scale8_disp32(
-            Gpr::Rax,
+            Gpr::R11,
             self.vars_arg_reg(),
             Gpr::R10,
             base_disp,
@@ -1407,7 +1407,7 @@ impl FunctionCompiler {
             self.encoder.mov_r64_r64(Gpr::R10, entry_ctx_arg_reg());
         }
 
-        self.emit_rust_f64_to_i64(left, Gpr::Rax)?;
+        self.emit_rust_f64_to_i64(left, Gpr::R11)?;
         self.emit_rust_f64_to_i64(right, Gpr::Rcx)?;
         self.encoder.test_r64_r64(Gpr::Rcx, Gpr::Rcx);
         let negative_count = self.encoder.jcc_rel32_placeholder(ConditionCode::Negative);
@@ -1416,8 +1416,8 @@ impl FunctionCompiler {
             .encoder
             .jcc_rel32_placeholder(ConditionCode::AboveOrEqual);
         match op {
-            IntegerBinaryOp::Shl => self.encoder.shl_r64_cl(Gpr::Rax),
-            IntegerBinaryOp::Shr => self.encoder.sar_r64_cl(Gpr::Rax),
+            IntegerBinaryOp::Shl => self.encoder.shl_r64_cl(Gpr::R11),
+            IntegerBinaryOp::Shr => self.encoder.sar_r64_cl(Gpr::R11),
             IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor => {
                 unreachable!("bitwise integer ops use emit_integer_bitwise_op")
             }
@@ -1426,7 +1426,7 @@ impl FunctionCompiler {
         if restore_entry_ctx {
             self.encoder.mov_r64_r64(entry_ctx_arg_reg(), Gpr::R10);
         }
-        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::Rax);
+        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::R11);
         let valid_count_done = self.encoder.jmp_rel32_placeholder();
 
         self.patch_rel32_to_current(negative_count)?;
@@ -1446,17 +1446,17 @@ impl FunctionCompiler {
         right: Xmm,
         op: IntegerBinaryOp,
     ) -> JitResult<()> {
-        self.emit_rust_f64_to_i64(left, Gpr::Rax)?;
+        self.emit_rust_f64_to_i64(left, Gpr::R10)?;
         self.emit_rust_f64_to_i64(right, Gpr::R11)?;
         match op {
-            IntegerBinaryOp::BitAnd => self.encoder.and_r64_r64(Gpr::Rax, Gpr::R11),
-            IntegerBinaryOp::BitOr => self.encoder.or_r64_r64(Gpr::Rax, Gpr::R11),
-            IntegerBinaryOp::BitXor => self.encoder.xor_r64_r64(Gpr::Rax, Gpr::R11),
+            IntegerBinaryOp::BitAnd => self.encoder.and_r64_r64(Gpr::R10, Gpr::R11),
+            IntegerBinaryOp::BitOr => self.encoder.or_r64_r64(Gpr::R10, Gpr::R11),
+            IntegerBinaryOp::BitXor => self.encoder.xor_r64_r64(Gpr::R10, Gpr::R11),
             IntegerBinaryOp::Shl | IntegerBinaryOp::Shr => {
                 unreachable!("shift integer ops use emit_integer_shift_op")
             }
         }
-        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::Rax);
+        self.encoder.cvtsi2sd_xmm_r64(left, Gpr::R10);
         Ok(())
     }
 
@@ -2598,11 +2598,11 @@ impl FunctionCompiler {
         let then_value = XMM_STACK[self.depth - 2];
         let else_value = XMM_STACK[self.depth - 1];
         self.emit_truthy_to_gpr(cond, Gpr::R10);
-        self.encoder.movq_r64_xmm(Gpr::Rax, else_value);
+        self.encoder.movq_r64_xmm(Gpr::R8, else_value);
         self.encoder.movq_r64_xmm(Gpr::R11, then_value);
         self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
-        self.encoder.cmovne_r64_r64(Gpr::Rax, Gpr::R11);
-        self.encoder.movq_xmm_r64(cond, Gpr::Rax);
+        self.encoder.cmovne_r64_r64(Gpr::R8, Gpr::R11);
+        self.encoder.movq_xmm_r64(cond, Gpr::R8);
         self.depth -= 2;
         Ok(())
     }
@@ -2617,10 +2617,10 @@ impl FunctionCompiler {
 
         let left = XMM_STACK[self.depth - 2];
         let right = XMM_STACK[self.depth - 1];
-        self.encoder.movq_r64_xmm(Gpr::Rax, left);
+        self.encoder.movq_r64_xmm(Gpr::R8, left);
         self.encoder.ucomisd_xmm_xmm(left, left);
         self.encoder.setcc_r8(ConditionCode::NotParity, Gpr::R10);
-        self.emit_abs_zero_to_gpr(left, Gpr::R8);
+        self.emit_abs_zero_from_bits_to_gpr(Gpr::R8, Gpr::R9);
         match op {
             ExtremumOp::Min => self.encoder.minsd_xmm_xmm(left, right),
             ExtremumOp::Max => self.encoder.maxsd_xmm_xmm(left, right),
@@ -2639,10 +2639,10 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        self.encoder.movq_r64_xmm(Gpr::Rax, target);
+        self.encoder.movq_r64_xmm(Gpr::R8, target);
         self.encoder.ucomisd_xmm_xmm(target, target);
         self.encoder.setcc_r8(ConditionCode::NotParity, Gpr::R10);
-        self.emit_abs_zero_to_gpr(target, Gpr::R8);
+        self.emit_abs_zero_from_bits_to_gpr(Gpr::R8, Gpr::R9);
         self.emit_literal_extremum_op(target, value, op);
         self.emit_extremum_select_left_fixup_from_result(target);
         Ok(())
@@ -2662,17 +2662,27 @@ impl FunctionCompiler {
 
     fn emit_extremum_select_left_fixup_after_right_check(&mut self, result: Xmm) {
         self.encoder.and_r8_r8(Gpr::R10, Gpr::R11);
-        self.emit_abs_zero_to_gpr(result, Gpr::R9);
-        self.encoder.and_r8_r8(Gpr::R8, Gpr::R9);
-        self.encoder.or_r8_r8(Gpr::R10, Gpr::R8);
+        self.emit_abs_zero_to_gpr(result, Gpr::R11);
+        self.encoder.and_r8_r8(Gpr::R9, Gpr::R11);
+        self.encoder.or_r8_r8(Gpr::R10, Gpr::R9);
         self.encoder.movq_r64_xmm(Gpr::R11, result);
         self.encoder.test_r8_r8(Gpr::R10, Gpr::R10);
-        self.encoder.cmovne_r64_r64(Gpr::R11, Gpr::Rax);
+        self.encoder.cmovne_r64_r64(Gpr::R11, Gpr::R8);
         self.encoder.movq_xmm_r64(result, Gpr::R11);
     }
 
     fn emit_abs_zero_to_gpr(&mut self, value: Xmm, dst: Gpr) {
         self.encoder.movq_r64_xmm(dst, value);
+        self.emit_abs_zero_bits_in_place(dst);
+    }
+
+    fn emit_abs_zero_from_bits_to_gpr(&mut self, bits: Gpr, dst: Gpr) {
+        debug_assert_ne!(bits, dst);
+        self.encoder.mov_r64_r64(dst, bits);
+        self.emit_abs_zero_bits_in_place(dst);
+    }
+
+    fn emit_abs_zero_bits_in_place(&mut self, dst: Gpr) {
         self.encoder.btr_r64_imm8(dst, 63);
         self.encoder.test_r64_r64(dst, dst);
         self.encoder.setcc_r8(ConditionCode::Equal, dst);
@@ -3394,38 +3404,54 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
 }
 
 fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
-    matches!(
-        op,
-        NativeOp::Const(_)
-            | NativeOp::LoadParam(_)
-            | NativeOp::LoadParamGiven(_)
-            | NativeOp::LoadPortConnected(_)
-            | NativeOp::LoadVoltage { .. }
-            | NativeOp::LoadTemperature
-            | NativeOp::LoadThermalVoltage
-            | NativeOp::LoadTime
-            | NativeOp::Analysis(_)
-            | NativeOp::LoadMfactor
-            | NativeOp::LoadCurrent(_)
-            | NativeOp::LoadPriorCurrent(_)
-            | NativeOp::LoadInternalVoltage(_)
-            | NativeOp::LoadBranchUnknown(_)
-            | NativeOp::LoadVariable(_)
-            | NativeOp::Add
-            | NativeOp::Sub
-            | NativeOp::Mul
-            | NativeOp::Div
-            | NativeOp::AddConst(_)
-            | NativeOp::SubConst(_)
-            | NativeOp::MulConst(_)
-            | NativeOp::DivConst(_)
-            | NativeOp::SubFromConst(_)
-            | NativeOp::DivFromConst(_)
-            | NativeOp::Square
-            | NativeOp::Sqrt
-            | NativeOp::WhiteNoise
-            | NativeOp::FlickerNoise
-    )
+    match op {
+        NativeOp::LoadVariableDyn { len, lower, .. } => {
+            dynamic_variable_inline_supported(len, lower)
+        }
+        _ => matches!(
+            op,
+            NativeOp::Const(_)
+                | NativeOp::LoadParam(_)
+                | NativeOp::LoadParamGiven(_)
+                | NativeOp::LoadPortConnected(_)
+                | NativeOp::LoadVoltage { .. }
+                | NativeOp::LoadTemperature
+                | NativeOp::LoadThermalVoltage
+                | NativeOp::LoadTime
+                | NativeOp::Analysis(_)
+                | NativeOp::LoadMfactor
+                | NativeOp::LoadCurrent(_)
+                | NativeOp::LoadPriorCurrent(_)
+                | NativeOp::LoadInternalVoltage(_)
+                | NativeOp::LoadBranchUnknown(_)
+                | NativeOp::LoadVariable(_)
+                | NativeOp::Add
+                | NativeOp::Sub
+                | NativeOp::Mul
+                | NativeOp::Div
+                | NativeOp::AddConst(_)
+                | NativeOp::SubConst(_)
+                | NativeOp::MulConst(_)
+                | NativeOp::DivConst(_)
+                | NativeOp::SubFromConst(_)
+                | NativeOp::DivFromConst(_)
+                | NativeOp::Neg
+                | NativeOp::Abs
+                | NativeOp::Square
+                | NativeOp::Sqrt
+                | NativeOp::Compare(_)
+                | NativeOp::CompareConst(_, _)
+                | NativeOp::Logical(_)
+                | NativeOp::LogicalConst(_, _)
+                | NativeOp::IfElse
+                | NativeOp::Extremum(_)
+                | NativeOp::ExtremumConst(_, _)
+                | NativeOp::UnaryMath(UnaryMathOp::Floor | UnaryMathOp::Ceil)
+                | NativeOp::IntegerBinary(_)
+                | NativeOp::WhiteNoise
+                | NativeOp::FlickerNoise
+        ),
+    }
 }
 
 fn program_needs_stateful_stack_scratch(program: &NativeProgram) -> bool {
@@ -3691,7 +3717,8 @@ mod tests {
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
     use crate::native::expr::{
-        CompareOp, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
+        CompareOp, EntryKind, ExtremumOp, IntegerBinaryOp, LogicalOp, NativeLoweringLimits,
+        NativeOp, NativeProgram, UnaryMathOp,
     };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::{
@@ -3974,6 +4001,119 @@ mod tests {
         let ctx = eval_context(&params, &[], &[], &[]);
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 4.75_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_inline_dynamic_variable_load() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadVariableDyn {
+                    base: 0,
+                    len: 3,
+                    lower: 1,
+                },
+                NativeOp::LoadParam(1),
+                NativeOp::Add,
+            ],
+            2,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile dynamic variable param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across inline dynamic variable fast path"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate dynamic variable leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [2.0_f64, 3.5_f64];
+        let vars = [5.0_f64, 7.0_f64, 9.0_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.5_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_boolean_select_ops() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadParam(1),
+                NativeOp::Compare(CompareOp::Eq),
+                NativeOp::LoadParam(2),
+                NativeOp::Logical(LogicalOp::And),
+                NativeOp::LoadParam(3),
+                NativeOp::LoadParam(4),
+                NativeOp::IfElse,
+                NativeOp::LoadParam(5),
+                NativeOp::Add,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile boolean select param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across compare/logical/ifelse ops"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate boolean select leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [2.0_f64, 2.0_f64, 7.0_f64, 10.0_f64, 20.0_f64, 5.0_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 15.0_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_misc_pure_ops() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::Neg,
+                NativeOp::Abs,
+                NativeOp::UnaryMath(UnaryMathOp::Floor),
+                NativeOp::LoadParam(1),
+                NativeOp::Extremum(ExtremumOp::Max),
+                NativeOp::LoadParam(2),
+                NativeOp::IntegerBinary(IntegerBinaryOp::BitAnd),
+                NativeOp::ExtremumConst(ExtremumOp::Max, 2.0),
+                NativeOp::LoadParam(3),
+                NativeOp::Add,
+                NativeOp::LoadParam(4),
+                NativeOp::IntegerBinary(IntegerBinaryOp::Shl),
+            ],
+            2,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile misc pure param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across branchless pure ops"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate misc pure leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [6.75_f64, 4.0_f64, 3.0_f64, 5.0_f64, 1.0_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 14.0_f64.to_bits());
     }
 
     #[test]
@@ -8162,7 +8302,7 @@ mod tests {
                 "{name}: runtime shifts should not pay helper-call prologue"
             );
             assert!(
-                contains_bytes(&bytes, &xor_r64_bytes(Gpr::Rax, Gpr::Rax)),
+                contains_bytes(&bytes, &xor_r64_bytes(Gpr::R11, Gpr::R11)),
                 "{name}: f64-to-i64 NaN path should zero the left operand with a zero idiom"
             );
             assert!(
@@ -8170,7 +8310,7 @@ mod tests {
                 "{name}: f64-to-i64 NaN path should zero the shift count with a zero idiom"
             );
             assert!(
-                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::Rax, 0)),
+                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R11, 0)),
                 "{name}: f64-to-i64 NaN path should not materialize zero as a 64-bit immediate"
             );
             assert!(
@@ -10182,7 +10322,7 @@ mod tests {
     fn dynamic_variable_scaled_address_bytes(base: usize) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.lea_r64_base_index_scale8_disp32(
-            Gpr::Rax,
+            Gpr::R11,
             entry_vars_arg_reg(),
             Gpr::R10,
             super::byte_disp(base).expect("dynamic address test index fits disp32"),
