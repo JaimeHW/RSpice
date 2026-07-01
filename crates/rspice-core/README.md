@@ -210,9 +210,9 @@ only.
 | `faer-parallel` | yes | Adds faer's rayon feature for parallel sparse factorization |
 | `parallel` | yes | rayon + portable-atomic for parallel solver paths (`solver/parallel.rs`) |
 | `simd` | yes | `wide`-based SIMD kernels (`simd/` module, `device/batch/`) |
-| `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus serde/bincode/blake3/dirs for the compiled-model cache |
+| `veriloga` | no | Verilog-A device support via `rspice-veriloga`, plus serde_json/blake3/dirs for the compiled-model cache |
 | `veriloga-native` | no | RSpice-owned native JIT for Verilog-A devices; requested native mode is full JIT or typed construction error |
-| `veriloga-builtins` | no | Build-time generated Rust devices from bundled Verilog-A sources; uses `build.rs` to materialize `src/device/veriloga_generated/` and compile a generated registry. Feature-gated until CMC model qualification and product gates are explicit |
+| `veriloga-builtins` | no | Checked-in generated Rust devices from bundled Verilog-A sources under `src/device/veriloga_generated/`; refresh with `cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins` and validate with `check-builtins`. Feature-gated until CMC model qualification and product gates are explicit |
 | `wasm` | no | wasm-bindgen + `getrandom/js` so the crate builds on `wasm32-unknown-unknown`; used by `rspice-wasm` and the UI's wasm target, which also set `default-features = false` to drop rayon/SIMD |
 | `ffi` | no | Experimental `libloading` integration for dynamically loaded external device models; not a production-stable device ABI until the callback ownership, library lifetime, and stamping contracts are audited |
 

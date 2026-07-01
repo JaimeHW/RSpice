@@ -1,4 +1,4 @@
-#![cfg(all(feature = "veriloga-builtins", rspice_veriloga_builtins_generated))]
+#![cfg(feature = "veriloga-builtins")]
 
 use rspice_core::device::veriloga_generated::builtins;
 use rspice_core::engine::{Engine, SimulationConfig};
