@@ -1821,6 +1821,40 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_named_branch_current_cache() {
 }
 
 #[test]
+fn rust_backend_auto_scalarizes_ddt_branch_current_reactive_derivative() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(ddt_branch_current_reactive_derivative_source())
+        .expect("canonical IR");
+
+    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile branch-current DDT derivative through auto backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        !stamp.contains("reactive_scratch"),
+        "branch-current DDT reactive derivative should not need legacy reactive scratch:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("stamper.stamp_current_branch1_local("),
+        "DDT transient stamp should use native branch derivative stamping:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("stamper.stamp_current_reactive_branch1("),
+        "DDT reactive stamp should use native branch derivative stamping:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_auto_scalarizes_hybrid_static_named_branch_current_cache() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(static_named_branch_runtime_loop_source())
@@ -18901,6 +18935,21 @@ module ddt_named_branch_runtime_loop(p, n);
             loop = loop + 1.0;
         end
         I(p, n) <+ acc + I(sense);
+    end
+endmodule
+"#
+}
+
+fn ddt_branch_current_reactive_derivative_source() -> &'static str {
+    r#"
+module ddt_branch_current_reactive_derivative(p, n);
+    inout p, n;
+    electrical p, n;
+    branch (p, n) sense;
+    parameter real c = 1e-12 from [0:inf);
+    analog begin
+        V(sense) <+ V(p, n);
+        I(p, n) <+ ddt(c * I(sense));
     end
 endmodule
 "#

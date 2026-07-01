@@ -327,6 +327,7 @@ fn generate_stamp_file(
             "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
         );
         out.push_str("        let nodes = self.nodes;\n");
+        out.push_str("        let branches = self.branches;\n");
         if static_cache.has_temperature_values() {
             out.push_str(
                 "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
@@ -682,7 +683,7 @@ pub(super) fn scalarizable_ddt_current_equation_roots(
             continue;
         };
         match validate_scalar_current_equation(artifact, equation, root)
-            .and_then(|()| scalar_node_derivatives(artifact, equation, root).map(|_| ()))
+            .and_then(|()| scalar_derivatives(artifact, equation, root).map(|_| ()))
         {
             Ok(()) => {
                 selected.insert(equation.id, root);
@@ -967,13 +968,23 @@ pub(super) fn scalar_reactive_current_lowered_variable(
         .values
         .get(usize::from(root))
         .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
-    let derivatives = scalar_node_derivatives(artifact, equation, root)?;
+    let derivatives = scalar_derivatives(artifact, equation, root)?;
 
     let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
-    for (node, _) in &derivatives {
+    for (node, _) in &derivatives.nodes {
         node_derivatives[*node as usize] = derivative_name(root, *node);
     }
-    let branch_derivatives = vec!["0.0".to_string(); branch_axis_count];
+    let mut branch_derivatives = vec!["0.0".to_string(); branch_axis_count];
+    for (branch, _) in &derivatives.branches {
+        let index = *branch as usize;
+        if index >= branch_axis_count {
+            return Err(internal(
+                artifact,
+                format!("branch derivative lane {branch} exceeds axis count {branch_axis_count}"),
+            ));
+        }
+        branch_derivatives[index] = branch_derivative_name(root, *branch);
+    }
     let root_name = cached_or_local_value_name(root, static_cache);
     let value = current_root_expr(root_value.value_type, &root_name);
 
@@ -1010,21 +1021,6 @@ fn scalar_derivatives(
         }
     }
     Ok(ScalarDerivatives { nodes, branches })
-}
-
-fn scalar_node_derivatives(
-    artifact: &CanonicalIrArtifact,
-    equation: &MirEquation,
-    root: ValueId,
-) -> Result<Vec<(u32, ValueId)>, RustBackendError> {
-    let derivatives = scalar_derivatives(artifact, equation, root)?;
-    if !derivatives.branches.is_empty() {
-        return Err(unsupported(
-            artifact,
-            format!("branch derivative lane on scalar equation {}", equation.id),
-        ));
-    }
-    Ok(derivatives.nodes)
 }
 
 fn emit_transient_operator_root(
@@ -1469,21 +1465,31 @@ fn emit_current_reactive_stamp(
     static_cache: &ScalarStaticCache,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
-    let derivatives = scalar_node_derivatives(artifact, equation, root)?;
+    let derivatives = scalar_derivatives(artifact, equation, root)?;
 
-    for (node, value) in &derivatives {
+    for (node, value) in &derivatives.nodes {
         out.push_str(&format!(
             "        let {}: f64 = {};\n",
             derivative_name(root, *node),
             cached_or_local_value_name(*value, static_cache)
         ));
     }
+    for (branch, value) in &derivatives.branches {
+        out.push_str(&format!(
+            "        let {}: f64 = {};\n",
+            branch_derivative_name(root, *branch),
+            cached_or_local_value_name(*value, static_cache)
+        ));
+    }
 
     let pos = optional_node_global_expr(equation.branch.pos_node);
     let neg = optional_node_global_expr(equation.branch.neg_node);
-    match derivatives.as_slice() {
-        [] => {}
-        [(node0, _)] => {
+    match (
+        derivatives.nodes.as_slice(),
+        derivatives.branches.as_slice(),
+    ) {
+        ([], []) => {}
+        ([(node0, _)], []) => {
             out.push_str("        stamper.stamp_current_reactive_node1(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1494,7 +1500,7 @@ fn emit_current_reactive_stamp(
             ));
             out.push_str("        );\n");
         }
-        [(node0, _), (node1, _)] => {
+        ([(node0, _), (node1, _)], []) => {
             out.push_str("        stamper.stamp_current_reactive_node2(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1510,7 +1516,7 @@ fn emit_current_reactive_stamp(
             ));
             out.push_str("        );\n");
         }
-        [(node0, _), (node1, _), (node2, _)] => {
+        ([(node0, _), (node1, _), (node2, _)], []) => {
             out.push_str("        stamper.stamp_current_reactive_node3(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1531,14 +1537,207 @@ fn emit_current_reactive_stamp(
             ));
             out.push_str("        );\n");
         }
+        ([], [(branch0, _)]) => {
+            out.push_str("        stamper.stamp_current_reactive_branch1(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            branches[{branch0}],\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                branch_derivative_name(root, *branch0)
+            ));
+            out.push_str("        );\n");
+        }
+        ([], [(branch0, _), (branch1, _)]) => {
+            out.push_str("        stamper.stamp_current_reactive_branch2(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            branches[{branch0}],\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                branch_derivative_name(root, *branch0)
+            ));
+            out.push_str(&format!("            branches[{branch1}],\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                branch_derivative_name(root, *branch1)
+            ));
+            out.push_str("        );\n");
+        }
+        ([(node0, _)], [(branch0, _)]) => {
+            out.push_str("        stamper.stamp_current_reactive_node1_branch1(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            nodes[{node0}],\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                derivative_name(root, *node0)
+            ));
+            out.push_str(&format!("            branches[{branch0}],\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                branch_derivative_name(root, *branch0)
+            ));
+            out.push_str("        );\n");
+        }
+        ([(node0, _), (node1, _)], [(branch0, _)]) => {
+            out.push_str("        stamper.stamp_current_reactive_node2_branch1(\n");
+            out.push_str(&format!("            {pos},\n"));
+            out.push_str(&format!("            {neg},\n"));
+            out.push_str(&format!("            nodes[{node0}],\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                derivative_name(root, *node0)
+            ));
+            out.push_str(&format!("            nodes[{node1}],\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                derivative_name(root, *node1)
+            ));
+            out.push_str(&format!("            branches[{branch0}],\n"));
+            out.push_str(&format!(
+                "            multiplicity * ({}),\n",
+                branch_derivative_name(root, *branch0)
+            ));
+            out.push_str("        );\n");
+        }
         _ => {
-            emit_wide_current_reactive_stamp(artifact, root, &derivatives, &pos, &neg, out);
+            emit_wide_current_reactive_stamp(
+                artifact,
+                root,
+                &derivatives.nodes,
+                &derivatives.branches,
+                &pos,
+                &neg,
+                out,
+            );
         }
     }
     Ok(())
 }
 
 fn emit_wide_current_reactive_stamp(
+    artifact: &CanonicalIrArtifact,
+    root: ValueId,
+    node_derivatives: &[(u32, ValueId)],
+    branch_derivatives: &[(u32, ValueId)],
+    pos: &str,
+    neg: &str,
+    out: &mut String,
+) {
+    if branch_derivatives.is_empty() {
+        emit_wide_node_current_reactive_stamp(artifact, root, node_derivatives, pos, neg, out);
+        return;
+    }
+
+    if node_derivatives.len() == artifact.mir.nodes.len()
+        && branch_derivatives.len() == artifact.mir.branch_unknowns.len()
+    {
+        let mut node_values = vec!["0.0".to_string(); artifact.mir.nodes.len()];
+        for (node, _) in node_derivatives {
+            node_values[*node as usize] = derivative_name(root, *node);
+        }
+        let mut branch_values = vec!["0.0".to_string(); artifact.mir.branch_unknowns.len()];
+        for (branch, _) in branch_derivatives {
+            branch_values[*branch as usize] = branch_derivative_name(root, *branch);
+        }
+        out.push_str(&format!(
+            "        let {}_reactive_node_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            node_values.len(),
+            node_values.join(", ")
+        ));
+        out.push_str(&format!(
+            "        let {}_reactive_branch_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            branch_values.len(),
+            branch_values.join(", ")
+        ));
+        out.push_str("        stamper.stamp_current_reactive_dense(\n");
+        out.push_str(&format!("            {pos},\n"));
+        out.push_str(&format!("            {neg},\n"));
+        out.push_str("            &nodes,\n");
+        out.push_str(&format!(
+            "            &{}_reactive_node_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            &branches,\n");
+        out.push_str(&format!(
+            "            &{}_reactive_branch_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            multiplicity,\n");
+        out.push_str("        );\n");
+    } else {
+        let node_indices = node_derivatives
+            .iter()
+            .map(|(node, _)| format!("nodes[{node}]"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let node_values = node_derivatives
+            .iter()
+            .map(|(node, _)| derivative_name(root, *node))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let branch_indices = branch_derivatives
+            .iter()
+            .map(|(branch, _)| format!("branches[{branch}]"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let branch_values = branch_derivatives
+            .iter()
+            .map(|(branch, _)| branch_derivative_name(root, *branch))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "        let {}_reactive_nodes: [usize; {}] = [{}];\n",
+            value_name(root),
+            node_derivatives.len(),
+            node_indices
+        ));
+        out.push_str(&format!(
+            "        let {}_reactive_node_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            node_derivatives.len(),
+            node_values
+        ));
+        out.push_str(&format!(
+            "        let {}_reactive_branches: [usize; {}] = [{}];\n",
+            value_name(root),
+            branch_derivatives.len(),
+            branch_indices
+        ));
+        out.push_str(&format!(
+            "        let {}_reactive_branch_derivatives: [f64; {}] = [{}];\n",
+            value_name(root),
+            branch_derivatives.len(),
+            branch_values
+        ));
+        out.push_str("        stamper.stamp_current_reactive_dense(\n");
+        out.push_str(&format!("            {pos},\n"));
+        out.push_str(&format!("            {neg},\n"));
+        out.push_str(&format!(
+            "            &{}_reactive_nodes,\n",
+            value_name(root)
+        ));
+        out.push_str(&format!(
+            "            &{}_reactive_node_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str(&format!(
+            "            &{}_reactive_branches,\n",
+            value_name(root)
+        ));
+        out.push_str(&format!(
+            "            &{}_reactive_branch_derivatives,\n",
+            value_name(root)
+        ));
+        out.push_str("            multiplicity,\n");
+        out.push_str("        );\n");
+    }
+}
+
+fn emit_wide_node_current_reactive_stamp(
     artifact: &CanonicalIrArtifact,
     root: ValueId,
     derivatives: &[(u32, ValueId)],
