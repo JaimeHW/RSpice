@@ -70,13 +70,6 @@ struct SXferCoefficientResource {
     coefficients: Option<Arc<SXferCoefficients>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct SXferTransientSystemSignature {
-    timestep: Value,
-    numerator: Vec<Value>,
-    denominator: Vec<Value>,
-}
-
 #[derive(Debug, Clone)]
 struct LinearFactorization {
     lu: Vec<Vec<Value>>,
@@ -93,7 +86,8 @@ struct SXferTransientSystem {
 
 #[derive(Debug, Clone)]
 struct SXferTransientSystemResource {
-    signature: SXferTransientSystemSignature,
+    coefficients: Arc<SXferCoefficients>,
+    timestep: Value,
     system: CmResult<Arc<SXferTransientSystem>>,
 }
 
@@ -901,27 +895,6 @@ fn s_xfer_backward_euler_matrix(coefficients: &SXferCoefficients, dt: Value) -> 
     matrix
 }
 
-fn s_xfer_transient_system_signature(
-    coefficients: &SXferCoefficients,
-    timestep: Value,
-) -> SXferTransientSystemSignature {
-    SXferTransientSystemSignature {
-        timestep,
-        numerator: coefficients.numerator.clone(),
-        denominator: coefficients.denominator.clone(),
-    }
-}
-
-fn s_xfer_transient_system_signature_matches(
-    coefficients: &SXferCoefficients,
-    timestep: Value,
-    signature: &SXferTransientSystemSignature,
-) -> bool {
-    signature.timestep == timestep
-        && coefficients.numerator.as_slice() == signature.numerator.as_slice()
-        && coefficients.denominator.as_slice() == signature.denominator.as_slice()
-}
-
 fn build_s_xfer_transient_system(
     coefficients: &SXferCoefficients,
     timestep: Value,
@@ -950,25 +923,22 @@ fn build_s_xfer_transient_system(
 
 fn s_xfer_transient_system_for_context(
     ctx: &mut CmContext,
-    coefficients: &SXferCoefficients,
+    coefficients: &Arc<SXferCoefficients>,
 ) -> CmResult<Arc<SXferTransientSystem>> {
     if let Some(resource) =
         ctx.resource::<SXferTransientSystemResource>(SXFER_TRANSIENT_SYSTEM_RESOURCE)
-        && s_xfer_transient_system_signature_matches(
-            coefficients,
-            ctx.timestep,
-            &resource.signature,
-        )
+        && resource.timestep == ctx.timestep
+        && Arc::ptr_eq(&resource.coefficients, coefficients)
     {
         return resource.system.clone();
     }
 
-    let signature = s_xfer_transient_system_signature(coefficients, ctx.timestep);
-    let system = build_s_xfer_transient_system(coefficients, ctx.timestep);
+    let system = build_s_xfer_transient_system(coefficients.as_ref(), ctx.timestep);
     ctx.set_resource(
         SXFER_TRANSIENT_SYSTEM_RESOURCE,
         Arc::new(SXferTransientSystemResource {
-            signature,
+            coefficients: Arc::clone(coefficients),
+            timestep: ctx.timestep,
             system: system.clone(),
         }),
     );
@@ -995,7 +965,7 @@ fn s_xfer_transient_scratch(ctx: &mut CmContext) -> Arc<SXferTransientScratchRes
 
 fn s_xfer_transient_eval(
     ctx: &mut CmContext,
-    coefficients: &SXferCoefficients,
+    coefficients: &Arc<SXferCoefficients>,
 ) -> CmResult<(Value, Value)> {
     let order = coefficients.denominator.len() - 1;
     let input = ctx.input("in") + ctx.param("in_offset");
@@ -1008,7 +978,7 @@ fn s_xfer_transient_eval(
 
     let dt = ctx.timestep;
     if !dt.is_finite() || dt <= 0.0 {
-        let (feedthrough, remainder) = s_xfer_feedthrough_and_remainder(coefficients);
+        let (feedthrough, remainder) = s_xfer_feedthrough_and_remainder(coefficients.as_ref());
         let output = remainder
             .iter()
             .enumerate()
@@ -1326,7 +1296,7 @@ mod tests {
     #[test]
     fn s_xfer_transient_system_cache_reloads_when_timestep_or_coefficients_change() {
         let mut ctx = first_order_lowpass_context();
-        let coefficients = s_xfer_coefficients(&ctx).expect("s_xfer coefficients");
+        let coefficients = Arc::new(s_xfer_coefficients(&ctx).expect("s_xfer coefficients"));
 
         let first =
             s_xfer_transient_system_for_context(&mut ctx, &coefficients).expect("transient system");
@@ -1340,7 +1310,8 @@ mod tests {
         assert!(!Arc::ptr_eq(&first, &larger_step));
 
         ctx.set_real_vector_param("den_coeff", vec![2.0, 1.0]);
-        let changed_coefficients = s_xfer_coefficients(&ctx).expect("changed s_xfer coefficients");
+        let changed_coefficients =
+            Arc::new(s_xfer_coefficients(&ctx).expect("changed s_xfer coefficients"));
         let changed = s_xfer_transient_system_for_context(&mut ctx, &changed_coefficients)
             .expect("coefficient-specific transient system");
         assert!(!Arc::ptr_eq(&larger_step, &changed));
