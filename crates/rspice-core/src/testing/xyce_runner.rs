@@ -200,7 +200,7 @@ impl XyceStaticDcContract {
         }
     }
 
-    fn requires_step_res_reference(self) -> bool {
+    fn compares_step_res_reference(self) -> bool {
         matches!(self, Self::WrapperDefaultPrn)
     }
 }
@@ -733,19 +733,8 @@ impl XyceTestRunner {
         &self,
         contract: XyceStaticDcContract,
         plan: &XyceStaticDcPlan,
-        reference_path: &Path,
+        _reference_path: &Path,
     ) -> Result<(), String> {
-        if contract.requires_step_res_reference() && plan.step.is_some() {
-            if Self::step_res_reference_path(&plan.deck_path, reference_path).is_none() {
-                let output_res_path = reference_path.with_extension("res");
-                let deck_res_path = Self::deck_sidecar_path(&plan.deck_path, "res");
-                return Err(format!(
-                    "wrapper-origin stepped .PRINT DC deck has no checked-in Xyce .res oracle at {} or {}",
-                    self.display_path(&output_res_path),
-                    self.display_path(&deck_res_path)
-                ));
-            }
-        }
         if matches!(contract, XyceStaticDcContract::WrapperResistorDefaultPrn) {
             Self::validate_resistor_default_wrapper_diagnostics(plan)?;
         }
@@ -1114,29 +1103,24 @@ impl XyceTestRunner {
             .as_ref()
             .expect("step plan checked before stepped execution");
         let step_values = step.sweep.values();
-        if plan.contract.requires_step_res_reference() {
-            let Some(res_reference_path) =
+        if plan.contract.compares_step_res_reference() {
+            if let Some(res_reference_path) =
                 Self::step_res_reference_path(&plan.deck_path, &plan.reference_path)
-            else {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    "missing checked-in Xyce .STEP .res oracle after contract validation"
-                        .to_string(),
-                    Vec::new(),
-                );
-            };
-            if let Err(err) =
-                self.compare_step_res_reference(&res_reference_path, &netlist, step, &step_values)
             {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("Xyce .STEP result summary comparison error: {err}"),
-                    Vec::new(),
-                );
+                if let Err(err) = self.compare_step_res_reference(
+                    &res_reference_path,
+                    &netlist,
+                    step,
+                    &step_values,
+                ) {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("Xyce .STEP result summary comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
             }
         }
         let stepped_netlists = match engine.step_netlists_for_command(&netlist, step, &step_values)

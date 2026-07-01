@@ -841,6 +841,10 @@ fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
             "Netlists/Output/DC/dc-step-prn.cir",
             "wrapper_static_prn_step_dc",
         ),
+        (
+            "Netlists/Output/DC/op-step-prn-nodc.cir",
+            "wrapper_static_prn_step_dc",
+        ),
     ] {
         assert!(
             runner.requires_upstream_wrapper(relative),
