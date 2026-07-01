@@ -3758,6 +3758,26 @@ rload out 0 1000
 }
 
 #[test]
+fn aswitch_control_ac_uses_operating_point_partial() {
+    let deck = "\
+* XSPICE official aswitch control AC path
+vin in 0 dc 1 ac 0
+vctrl ctrl 0 dc 0.5 ac 1
+asw ctrl %gd[in out] sw
+.model sw aswitch (cntl_on=1 cntl_off=0 r_on=1000 r_off=9000 log=false)
+rload out 0 5000
+.ac lin 1 1k 1k
+.end
+";
+
+    let out = ac_voltage(deck, "out");
+    assert!(
+        (out.re - 0.4).abs() < 1.0e-9 && out.im.abs() < 1.0e-12,
+        "aswitch control AC partial must use the DC switch voltage: got {out}"
+    );
+}
+
+#[test]
 fn aswitch_limit_parameter_clamps_resistance_like_ngspice() {
     let deck = "\
 * XSPICE aswitch official limit parameter
