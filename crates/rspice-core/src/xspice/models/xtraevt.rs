@@ -162,6 +162,10 @@ impl CodeModel for DigitalToReal {
         Ok(())
     }
 
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let delay = if ctx.time > 0.0 {
             limited_event_delay(ctx, "delay", 1.0e-9)
