@@ -1781,6 +1781,9 @@ impl NativeProgram {
                     if lower_constant_rhs_integer_bitwise(&mut ops, op) {
                         continue;
                     }
+                    if lower_constant_lhs_integer_bitwise(&mut ops, op) {
+                        continue;
+                    }
                     ops.push(NativeOp::IntegerBinary(op));
                 }
                 Instruction::TableLookup(table_id) => {
@@ -6790,6 +6793,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         if lower_constant_integer_binary(&mut self.ops, op)
             || lower_constant_rhs_integer_shift(&mut self.ops, op)
             || lower_constant_rhs_integer_bitwise(&mut self.ops, op)
+            || lower_constant_lhs_integer_bitwise(&mut self.ops, op)
         {
             return Ok(());
         }
@@ -7484,13 +7488,40 @@ fn lower_constant_rhs_integer_bitwise(ops: &mut Vec<NativeOp>, op: IntegerBinary
     let rhs = value as i64;
 
     ops.pop();
-    match (op, rhs) {
+    push_integer_bitwise_const_op(ops, op, rhs);
+    true
+}
+
+fn lower_constant_lhs_integer_bitwise(ops: &mut Vec<NativeOp>, op: IntegerBinaryOp) -> bool {
+    if !matches!(
+        op,
+        IntegerBinaryOp::BitAnd | IntegerBinaryOp::BitOr | IntegerBinaryOp::BitXor
+    ) || ops.len() < 2
+    {
+        return false;
+    }
+
+    let rhs_index = ops.len() - 1;
+    if !is_independent_value_push(&ops[rhs_index]) {
+        return false;
+    }
+
+    let lhs_index = ops.len() - 2;
+    let NativeOp::Const(value) = ops[lhs_index] else {
+        return false;
+    };
+    ops.remove(lhs_index);
+    push_integer_bitwise_const_op(ops, op, value as i64);
+    true
+}
+
+fn push_integer_bitwise_const_op(ops: &mut Vec<NativeOp>, op: IntegerBinaryOp, value: i64) {
+    match (op, value) {
         (IntegerBinaryOp::BitAnd, -1)
         | (IntegerBinaryOp::BitOr, 0)
         | (IntegerBinaryOp::BitXor, 0) => ops.push(NativeOp::IntegerCast),
-        _ => ops.push(NativeOp::IntegerBinaryConst(op, rhs)),
+        _ => ops.push(NativeOp::IntegerBinaryConst(op, value)),
     }
-    true
 }
 
 fn lower_constant_unary_math(ops: &mut Vec<NativeOp>, op: UnaryMathOp) -> bool {
@@ -10180,6 +10211,110 @@ endmodule
     }
 
     #[test]
+    fn lowers_canonical_constant_lhs_bitwise_without_extra_stack_slot() {
+        let cases = [
+            (
+                "bitand",
+                BinaryOp::BitAnd,
+                "6.25",
+                6.25,
+                NativeOp::IntegerBinaryConst(IntegerBinaryOp::BitAnd, 6),
+            ),
+            (
+                "bitor-negative",
+                BinaryOp::BitOr,
+                "-1.0",
+                -1.0,
+                NativeOp::IntegerBinaryConst(IntegerBinaryOp::BitOr, -1),
+            ),
+            (
+                "bitxor-nonzero",
+                BinaryOp::BitXor,
+                "7.0",
+                7.0,
+                NativeOp::IntegerBinaryConst(IntegerBinaryOp::BitXor, 7),
+            ),
+        ];
+
+        for (case, op, raw, literal, expected) in cases {
+            let mir = analyzed_two_terminal_mir(
+                &format!("mir_lhs_{case}"),
+                Expression::Binary(BinaryExpr {
+                    op,
+                    left: Box::new(number(literal, raw)),
+                    right: Box::new(voltage_expr()),
+                    span: Span::dummy(),
+                }),
+            );
+
+            let program = NativeProgram::from_mir_equation(
+                format!("mir_lhs_{case}"),
+                EntryKind::StampValue,
+                &mir,
+                crate::canonical_ir::EquationId::new(0),
+                NativeLoweringLimits::new(2, 0, 0, 0, 0),
+            )
+            .expect("lower canonical constant-LHS bitwise op");
+
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadVoltage {
+                        pos: VoltageNode::Terminal(0),
+                        neg: VoltageNode::Terminal(1),
+                    },
+                    expected,
+                ],
+                "{case}"
+            );
+            assert_eq!(program.max_stack_depth(), 1, "{case}");
+        }
+    }
+
+    #[test]
+    fn lowers_canonical_constant_lhs_bitwise_identities_as_integer_cast() {
+        let cases = [
+            ("bitand-all-ones", BinaryOp::BitAnd, "-1.0", -1.0),
+            ("bitor-zero", BinaryOp::BitOr, "0.0", 0.0),
+            ("bitxor-zero", BinaryOp::BitXor, "-0.0", -0.0),
+        ];
+
+        for (case, op, raw, literal) in cases {
+            let mir = analyzed_two_terminal_mir(
+                &format!("mir_lhs_{case}"),
+                Expression::Binary(BinaryExpr {
+                    op,
+                    left: Box::new(number(literal, raw)),
+                    right: Box::new(voltage_expr()),
+                    span: Span::dummy(),
+                }),
+            );
+
+            let program = NativeProgram::from_mir_equation(
+                format!("mir_lhs_{case}"),
+                EntryKind::StampValue,
+                &mir,
+                crate::canonical_ir::EquationId::new(0),
+                NativeLoweringLimits::new(2, 0, 0, 0, 0),
+            )
+            .expect("lower canonical constant-LHS bitwise identity");
+
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadVoltage {
+                        pos: VoltageNode::Terminal(0),
+                        neg: VoltageNode::Terminal(1),
+                    },
+                    NativeOp::IntegerCast,
+                ],
+                "{case}"
+            );
+            assert_eq!(program.max_stack_depth(), 1, "{case}");
+        }
+    }
+
+    #[test]
     fn lowers_constant_rhs_arithmetic_without_extra_stack_slot() {
         let cases = [
             (Instruction::Add, NativeOp::AddConst(4.0)),
@@ -12312,6 +12447,110 @@ endmodule
                 lowered.max_stack_depth(),
                 1,
                 "{case} should not allocate an RHS XMM stack slot"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_constant_lhs_bitwise_without_extra_stack_slot() {
+        let cases = [
+            (
+                "bitand",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                6.25,
+                6,
+            ),
+            (
+                "bitor-negative",
+                Instruction::BitOr,
+                IntegerBinaryOp::BitOr,
+                -1.0,
+                -1,
+            ),
+            (
+                "bitxor-nonzero",
+                Instruction::BitXor,
+                IntegerBinaryOp::BitXor,
+                7.0,
+                7,
+            ),
+            (
+                "bitand-saturating",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                f64::INFINITY,
+                i64::MAX,
+            ),
+        ];
+
+        for (case, instruction, expected_op, literal, expected_lhs) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(literal),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "bits-const-lhs",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant LHS bitwise op should lower without an LHS stack slot");
+
+            assert_eq!(
+                lowered.ops(),
+                &[
+                    NativeOp::LoadTemperature,
+                    NativeOp::IntegerBinaryConst(expected_op, expected_lhs),
+                ],
+                "{case}"
+            );
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should not allocate an LHS XMM stack slot"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_constant_lhs_bitwise_identities_as_integer_cast() {
+        let cases = [
+            ("bitand-all-ones", Instruction::BitAnd, -1.0),
+            ("bitor-zero", Instruction::BitOr, 0.0),
+            ("bitxor-zero", Instruction::BitXor, -0.0),
+        ];
+
+        for (case, instruction, literal) in cases {
+            let program = BytecodeProgram {
+                instructions: vec![
+                    Instruction::PushConst(literal),
+                    Instruction::PushTemperature,
+                    instruction,
+                ],
+            };
+
+            let lowered = NativeProgram::from_bytecode(
+                "bits-const-lhs-identity",
+                EntryKind::Assignment,
+                &program,
+                limits(0, 0),
+            )
+            .expect("constant LHS bitwise identity should lower to integer conversion");
+
+            assert_eq!(
+                lowered.ops(),
+                &[NativeOp::LoadTemperature, NativeOp::IntegerCast],
+                "{case} should still integerize the right operand"
+            );
+            assert_eq!(
+                lowered.max_stack_depth(),
+                1,
+                "{case} should not allocate an LHS XMM stack slot"
             );
         }
     }

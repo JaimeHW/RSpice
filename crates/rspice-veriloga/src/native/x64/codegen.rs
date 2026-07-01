@@ -9098,6 +9098,124 @@ mod tests {
     }
 
     #[test]
+    fn generated_value_leaf_computes_constant_lhs_bitwise_without_lhs_conversion() {
+        let cases = [
+            (
+                "bitand-lhs-imm",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                6.25,
+                13.75,
+                6,
+                runtime_bitand(6.25, 13.75),
+            ),
+            (
+                "bitor-negative-lhs-imm",
+                Instruction::BitOr,
+                IntegerBinaryOp::BitOr,
+                -1.0,
+                -16.0,
+                -1,
+                runtime_bitor(-1.0, -16.0),
+            ),
+            (
+                "bitxor-lhs-imm",
+                Instruction::BitXor,
+                IntegerBinaryOp::BitXor,
+                7.0,
+                f64::NAN,
+                7,
+                runtime_bitxor(7.0, f64::NAN),
+            ),
+        ];
+
+        for (name, instruction, expected_op, left, right, lhs_i64, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushParam(0),
+                    instruction,
+                ],
+                0,
+            );
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadParam(0),
+                    NativeOp::IntegerBinaryConst(expected_op, lhs_i64),
+                ],
+                "{name}: constant LHS should commute to an immediate bitwise op"
+            );
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name}: constant LHS bitwise should not allocate an LHS stack slot"
+            );
+
+            let bytes =
+                compile_value_function(&program).expect("compile constant-LHS bitwise leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "{name}: constant-LHS bitwise ops should not pay helper-call prologue"
+            );
+            assert!(
+                contains_bytes(
+                    &bytes,
+                    &bitwise_imm32_bytes(expected_op, Gpr::R10, lhs_i64 as i32)
+                ),
+                "{name}: generated code should apply the LHS as an imm32"
+            );
+            assert!(
+                !contains_bytes(&bytes, &xor_r64_bytes(Gpr::R11, Gpr::R11)),
+                "{name}: constant LHS bitwise should not convert the LHS through R11"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate constant-LHS bitwise leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [right];
+            let ctx = eval_context(&params, &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+
+        let wide_program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushConst(f64::INFINITY),
+                Instruction::PushParam(0),
+                Instruction::BitAnd,
+            ],
+            0,
+        );
+        let wide_bytes =
+            compile_value_function(&wide_program).expect("compile wide constant-LHS bitwise leaf");
+        assert!(
+            contains_bytes(&wide_bytes, &movabs_imm64_bytes(Gpr::R11, i64::MAX as u64)),
+            "wide constant LHS bitwise should materialize the full i64 value"
+        );
+
+        let memory = ExecutableMemory::allocate(&wide_bytes)
+            .expect("allocate wide constant-LHS bitwise leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [13.75];
+        let ctx = eval_context(&params, &[], &[], &[]);
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            runtime_bitand(f64::INFINITY, 13.75).to_bits()
+        );
+    }
+
+    #[test]
     fn generated_value_leaf_integerizes_constant_rhs_bitwise_identities() {
         let cases = [
             (
@@ -9177,6 +9295,96 @@ mod tests {
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
             let params = [left];
+            let ctx = eval_context(&params, &[], &[], &[]);
+
+            assert_eq!(
+                f(&ctx, std::ptr::null()).to_bits(),
+                expected.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_integerizes_constant_lhs_bitwise_identities() {
+        let cases = [
+            (
+                "bitor-zero-fraction",
+                Instruction::BitOr,
+                IntegerBinaryOp::BitOr,
+                0.0,
+                13.75,
+                runtime_bitor(0.0, 13.75),
+            ),
+            (
+                "bitxor-negative-zero-fraction",
+                Instruction::BitXor,
+                IntegerBinaryOp::BitXor,
+                -0.0,
+                -16.75,
+                runtime_bitxor(-0.0, -16.75),
+            ),
+            (
+                "bitand-all-ones-nan",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                -1.0,
+                f64::NAN,
+                runtime_bitand(-1.0, f64::NAN),
+            ),
+            (
+                "bitand-all-ones-positive-infinity",
+                Instruction::BitAnd,
+                IntegerBinaryOp::BitAnd,
+                -1.0,
+                f64::INFINITY,
+                runtime_bitand(-1.0, f64::INFINITY),
+            ),
+        ];
+
+        for (name, instruction, elided_op, left, right, expected) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushConst(left),
+                    Instruction::PushParam(0),
+                    instruction,
+                ],
+                0,
+            );
+            assert_eq!(
+                program.ops(),
+                &[NativeOp::LoadParam(0), NativeOp::IntegerCast],
+                "{name}: identity bitwise op should lower to integer conversion"
+            );
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name}: identity bitwise op should not allocate an LHS stack slot"
+            );
+
+            let bytes = compile_value_function(&program).expect("compile integer-cast leaf");
+            assert!(
+                !bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+                "{name}: integer cast should not pay helper-call prologue"
+            );
+            assert!(
+                !contains_bytes(
+                    &bytes,
+                    &bitwise_imm32_bytes(elided_op, Gpr::R10, left as i64 as i32)
+                ),
+                "{name}: generated code should elide the no-op bitwise immediate"
+            );
+            assert!(
+                !contains_bytes(&bytes, &movabs_imm64_bytes(Gpr::R11, left as i64 as u64)),
+                "{name}: generated code should not materialize the LHS"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate integer-cast leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+            let params = [right];
             let ctx = eval_context(&params, &[], &[], &[]);
 
             assert_eq!(
