@@ -1660,8 +1660,7 @@ pub(super) fn parse_func_statement(
     line_num: usize,
     params: &mut ParamContext,
 ) -> Result<(), ParseError> {
-    // Get function name
-    let func_name = expect_ident(stream, line_num)?;
+    let func_name = expect_function_name(stream, line_num)?;
 
     let args = parse_function_argument_list(stream, line_num, &func_name)?;
 
@@ -1717,6 +1716,69 @@ pub(super) fn parse_func_statement(
     log::debug!("Defined function: {}(...) = {}", func_name, body);
 
     Ok(())
+}
+
+fn expect_function_name(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
+    skip_commas(stream);
+
+    let first = stream.peek().clone();
+    let mut name = match &first.kind {
+        TokenKind::Ident(_) => first.lexeme.clone(),
+        TokenKind::AtSign => first.lexeme.clone(),
+        TokenKind::Other(ch) if is_xyce_expr_ident_start(*ch) => first.lexeme.clone(),
+        other => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected function name, found {:?}", other),
+            });
+        }
+    };
+
+    let mut end = first.span.end;
+    stream.advance();
+
+    loop {
+        let token = stream.peek().clone();
+        if token.span.start != end {
+            break;
+        }
+
+        let Some(fragment) = function_name_continuation_fragment(&token) else {
+            break;
+        };
+
+        name.push_str(fragment);
+        end = token.span.end;
+        stream.advance();
+    }
+
+    Ok(name.to_ascii_uppercase())
+}
+
+fn function_name_continuation_fragment(token: &crate::netlist::lexer::Token) -> Option<&str> {
+    if token.lexeme.is_empty()
+        || !token
+            .lexeme
+            .chars()
+            .all(is_xyce_expr_ident_continue_after_start)
+    {
+        return None;
+    }
+
+    match token.kind {
+        TokenKind::Ident(_) | TokenKind::Number(_) | TokenKind::AtSign | TokenKind::Other(_) => {
+            Some(token.lexeme.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn is_xyce_expr_ident_start(ch: char) -> bool {
+    matches!(ch, '`' | '@' | '#' | '$')
+}
+
+fn is_xyce_expr_ident_continue_after_start(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '`' | '@' | '#' | '.' | '$')
 }
 
 fn parse_dc_sweep_spec(

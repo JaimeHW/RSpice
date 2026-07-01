@@ -429,11 +429,11 @@ fn coefficient_is_numeric_zero(coeff: &str) -> bool {
 }
 
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
+    c.is_ascii_alphabetic() || matches!(c, '_' | '`' | '@' | '#' | '$')
 }
 
 fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':'
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':' | '`' | '@' | '#' | '$')
 }
 
 fn extract_parenthesized(chars: &[char], lparen_idx: usize) -> Option<(String, usize)> {
