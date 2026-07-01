@@ -685,9 +685,26 @@ impl VerilogADevice {
 
     /// Set simulation temperature in Kelvin
     pub fn set_temperature(&mut self, temp_k: f64) {
+        self.try_set_temperature(temp_k).unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' temperature update failed: {}",
+                self.name, self.model.name, err
+            )
+        });
+    }
+
+    /// Checked temperature update for callers that can surface native static
+    /// guard refresh failures as diagnostics instead of panicking.
+    pub fn try_set_temperature(&mut self, temp_k: f64) -> Result<(), VmError> {
         self.context.temperature = temp_k;
         // Static guards may reference $temperature
+        #[cfg(feature = "native")]
+        self.try_refresh_static_conditions()?;
+
+        #[cfg(not(feature = "native"))]
         self.refresh_static_conditions();
+
+        Ok(())
     }
 
     /// Set simulation time
