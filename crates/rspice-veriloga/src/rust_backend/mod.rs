@@ -261,4 +261,40 @@ endmodule
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
     }
+
+    #[test]
+    fn scalar_backend_lowers_nested_ddt_conditionals() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module nested_ddt(p, n, th);
+    inout p, n, th;
+    electrical p, n, th;
+    parameter integer enable = 1 from [0:1];
+    analog begin
+        I(p, n) <+ V(p, n);
+        I(th) <+ (enable != 0) ? (V(th) + ddt(2.0 * V(th))) : 0.0;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("nested ddt contribution should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("eval_ddt("), "{stamp}");
+        assert!(stamp.contains("stamp_current_reactive"), "{stamp}");
+    }
 }

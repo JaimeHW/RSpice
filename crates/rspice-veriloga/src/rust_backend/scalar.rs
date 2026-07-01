@@ -335,6 +335,10 @@ fn generate_stamp_file(
         out.push_str("    }\n");
     } else {
         let reactive_live = collect_stamp_live_values(artifact, &reactive_roots, static_cache)?;
+        let reactive_needs_param_given = artifact.opt.values.iter().any(|value| {
+            reactive_live.contains(&value.id)
+                && matches!(value.kind, OptValueKind::ParamGiven { .. })
+        });
         out.push_str(
             "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
         );
@@ -346,6 +350,9 @@ fn generate_stamp_file(
             );
         }
         out.push_str("        let p = &(*self.params);\n");
+        if reactive_needs_param_given {
+            out.push_str("        let param_given = self.param_given.as_ref();\n");
+        }
         out.push_str("        let multiplicity = self.multiplicity;\n");
         let reactive_context = ValueEmitContext {
             cached_values: &static_cache.set,
@@ -659,6 +666,9 @@ pub(super) fn scalarizable_current_equation_roots(
         let Some(root) = roots.get(&equation.id).copied() else {
             continue;
         };
+        if value_graph_contains_ddt(artifact, root, &mut HashSet::new())? {
+            continue;
+        }
         match validate_scalar_current_equation(artifact, equation, root) {
             Ok(()) => {
                 selected.insert(equation.id, root);
@@ -685,6 +695,9 @@ pub(super) fn scalarizable_potential_equation_roots(
         let Some(root) = roots.get(&equation.id).copied() else {
             continue;
         };
+        if value_graph_contains_ddt(artifact, root, &mut HashSet::new())? {
+            continue;
+        }
         match validate_scalar_potential_equation(artifact, equation, root) {
             Ok(()) => {
                 selected.insert(equation.id, root);
@@ -2714,19 +2727,17 @@ fn value_graph_contains_ddt(
         OptValueKind::Ddx { value: input, .. } | OptValueKind::Unary { input, .. } => {
             value_graph_contains_ddt(artifact, input, visited)
         }
-        OptValueKind::Binary { left, right, .. } => Ok(
-            value_graph_contains_ddt(artifact, left, visited)?
-                || value_graph_contains_ddt(artifact, right, visited)?,
-        ),
+        OptValueKind::Binary { left, right, .. } => {
+            Ok(value_graph_contains_ddt(artifact, left, visited)?
+                || value_graph_contains_ddt(artifact, right, visited)?)
+        }
         OptValueKind::Select {
             condition,
             then_value,
             else_value,
-        } => Ok(
-            value_graph_contains_ddt(artifact, condition, visited)?
-                || value_graph_contains_ddt(artifact, then_value, visited)?
-                || value_graph_contains_ddt(artifact, else_value, visited)?,
-        ),
+        } => Ok(value_graph_contains_ddt(artifact, condition, visited)?
+            || value_graph_contains_ddt(artifact, then_value, visited)?
+            || value_graph_contains_ddt(artifact, else_value, visited)?),
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
