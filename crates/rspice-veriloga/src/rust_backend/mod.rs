@@ -61,14 +61,18 @@ pub struct RustTranspiler {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum RustBackendKind {
-    Auto,
     #[default]
+    Auto,
     Legacy,
     ScalarOptIr,
 }
 
 impl RustTranspiler {
     pub fn new(options: RustTranspileOptions) -> Self {
+        Self::new_auto(options)
+    }
+
+    pub fn new_legacy(options: RustTranspileOptions) -> Self {
         Self {
             options,
             backend: RustBackendKind::Legacy,

@@ -2224,8 +2224,8 @@ fn oneshot_table_optional(ctx: &mut CmContext) -> CmResult<Option<Arc<OneShotTab
 fn interpolate_oneshot_pulse_width_linear_scan(table: &[OneShotPoint], control: Value) -> Value {
     let first = table[0];
     let last = table[table.len() - 1];
-    let raw = if control <= first.control {
-        interpolate_oneshot_segment(table[0], table[1], control)
+    if control <= first.control {
+        interpolate_oneshot_segment(table[0], table[1], control).max(0.0)
     } else if control >= last.control {
         interpolate_oneshot_segment(table[table.len() - 2], last, control)
     } else {
@@ -2238,9 +2238,7 @@ fn interpolate_oneshot_pulse_width_linear_scan(table: &[OneShotPoint], control: 
             }
         }
         pulse_width.unwrap_or(last.pulse_width)
-    };
-
-    raw.max(0.0)
+    }
 }
 
 fn interpolate_oneshot_pulse_width(table: &OneShotTableData, control: Value) -> Value {
@@ -2251,16 +2249,14 @@ fn interpolate_oneshot_pulse_width(table: &OneShotTableData, control: Value) -> 
 
     let first = points[0];
     let last = points[points.len() - 1];
-    let raw = if control <= first.control {
-        interpolate_oneshot_segment(points[0], points[1], control)
+    if control <= first.control {
+        interpolate_oneshot_segment(points[0], points[1], control).max(0.0)
     } else if control >= last.control {
         interpolate_oneshot_segment(points[points.len() - 2], last, control)
     } else {
         let upper = points.partition_point(|point| point.control <= control);
         interpolate_oneshot_segment(points[upper - 1], points[upper], control)
-    };
-
-    raw.max(0.0)
+    }
 }
 
 fn interpolate_oneshot_segment(left: OneShotPoint, right: OneShotPoint, control: Value) -> Value {
@@ -2625,6 +2621,28 @@ mod tests {
         assert!(
             (pulse_width - 91.666_666_666_666_66e-9).abs() < 1.0e-21,
             "ngspice scans every matching oneshot segment and keeps the later pulse width, got {pulse_width}"
+        );
+    }
+
+    #[test]
+    fn oneshot_extrapolation_only_clamps_low_control_path_like_ngspice() {
+        let falling_table =
+            oneshot_table_data(vec![oneshot_point(0.0, 1.0e-9), oneshot_point(1.0, 0.5e-9)]);
+        let rising_table =
+            oneshot_table_data(vec![oneshot_point(0.0, 0.5e-9), oneshot_point(1.0, 1.0e-9)]);
+
+        assert!(
+            (interpolate_oneshot_pulse_width(&falling_table, -3.0) - 2.5e-9).abs() < 1.0e-21,
+            "positive low-control extrapolation should be preserved"
+        );
+        assert_eq!(
+            interpolate_oneshot_pulse_width(&rising_table, -2.0),
+            0.0,
+            "negative low-control extrapolation should clamp to zero"
+        );
+        assert!(
+            (interpolate_oneshot_pulse_width(&falling_table, 4.0) + 1.0e-9).abs() < 1.0e-21,
+            "ngspice only clamps the low-control oneshot pulse-width extrapolation path"
         );
     }
 
