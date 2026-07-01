@@ -5683,6 +5683,91 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_aoi_compound_lowers_to_zero_delay_terms_and_timed_output() {
+        let netlist = Netlist::parse(
+            "pspice u aoi compound\n\
+             U18 AOI(2,2) $G_DPWR $G_DGND a1 b1 a2 b2 y dly\n\
+             .model DLY UGATE (TPLHTY=7n TPHLTY=9n)\n\
+             .end\n",
+        )
+        .expect("PSpice AOI should lower to zero-delay term gates and a timed output gate");
+
+        assert_eq!(netlist.elements.len(), 3);
+        assert_eq!(netlist.elements[0].name, "U18_0__GATE");
+        assert_eq!(netlist.elements[1].name, "U18_1__GATE");
+        assert_eq!(netlist.elements[2].name, "U18");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                params,
+                pspice_u_timing,
+                ..
+            } => {
+                assert_eq!(model, "d_and");
+                assert!(pspice_u_timing.is_none());
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec!["A1".to_string(), "B1".to_string()]),
+                        XspicePort::Digital("__PSPICE_U18_0_CMP".to_string())
+                    ]
+                );
+                assert!(params.iter().any(|(name, value)| {
+                    name == "rise_delay" && (*value - 1.0e-12).abs() < f64::EPSILON
+                }));
+                assert!(params.iter().any(|(name, value)| {
+                    name == "fall_delay" && (*value - 1.0e-12).abs() < f64::EPSILON
+                }));
+            }
+            other => panic!("expected zero-delay term gate, got {other:?}"),
+        }
+
+        let alias_name = match &netlist.elements[2].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                pspice_u_timing,
+                ..
+            } => {
+                assert!(pspice_u_timing.is_none());
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec![
+                            "__PSPICE_U18_0_CMP".to_string(),
+                            "__PSPICE_U18_1_CMP".to_string()
+                        ]),
+                        XspicePort::Digital("Y".to_string())
+                    ]
+                );
+                model.as_str()
+            }
+            other => panic!("expected timed output gate, got {other:?}"),
+        };
+
+        let alias = netlist
+            .models
+            .iter()
+            .find(|alias| alias.name == alias_name)
+            .expect("generated UGATE alias exists");
+        assert_eq!(alias.model_type, "d_nor");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "rise_delay" && (*value - 7.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "fall_delay" && (*value - 9.0e-9).abs() < 1.0e-21 })
+        );
+    }
+
+    #[test]
     fn pspice_u_buf3a_array_lowers_to_tristate_instances() {
         let netlist = Netlist::parse(
             "pspice u buf3a array\n\

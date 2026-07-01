@@ -782,6 +782,26 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "AO" => parse_pspice_u_compound_gate(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_and",
+            "d_or",
+            "$D_HI",
+            line_num,
+            elements,
+        ),
+        "AOI" => parse_pspice_u_compound_gate(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_and",
+            "d_nor",
+            "$D_HI",
+            line_num,
+            elements,
+        ),
         "NANDA" => parse_pspice_u_vector_gate_array(
             &name,
             &fields,
@@ -862,6 +882,26 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "OA" => parse_pspice_u_compound_gate(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_or",
+            "d_and",
+            "$D_LO",
+            line_num,
+            elements,
+        ),
+        "OAI" => parse_pspice_u_compound_gate(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            "d_or",
+            "d_nand",
+            "$D_LO",
+            line_num,
+            elements,
+        ),
         "OR3" => parse_pspice_u_tristate_vector_gate_array(
             &name,
             &fields,
@@ -922,7 +962,7 @@ pub(super) fn parse_pspice_u_device(
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, and NXOR3A",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
                 fields[1]
             ),
         }),
@@ -1294,6 +1334,160 @@ fn parse_pspice_u_tristate_vector_gate_array(
     }
 
     Ok(())
+}
+
+fn parse_pspice_u_compound_gate(
+    name: &str,
+    fields: &[String],
+    shape: Option<(usize, usize)>,
+    term_model: &str,
+    output_model: &str,
+    ignored_constant: &str,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let Some((input_count, term_count)) = shape else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice compound U-device '{}' requires valid type dimensions",
+                name
+            ),
+        });
+    };
+    if input_count < 2 || term_count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice compound U-device '{}' requires at least two inputs per term and one term",
+                name
+            ),
+        });
+    }
+
+    let input_total = input_count
+        .checked_mul(term_count)
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice compound U-device '{}' is too large", name),
+        })?;
+    let required = input_total
+        .checked_add(2)
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice compound U-device '{}' is too large", name),
+        })?;
+
+    let pins = &fields[4..];
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice compound U-device '{}' requires {} input pin(s), one output pin, and a timing model",
+                name, input_total
+            ),
+        });
+    }
+
+    let output = pspice_u_required_digital_port(
+        &pins[input_total],
+        "compound output",
+        fields,
+        line_num,
+        elements,
+    )?;
+    let pspice_u_timing = pspice_u_timing_model_token(&pins[input_total + 1])
+        .map(|timing_model| PspiceUTiming { timing_model });
+    let mut term_outputs = Vec::with_capacity(term_count);
+
+    for term_index in 0..term_count {
+        let input_start = term_index * input_count;
+        let mut kept_inputs = Vec::new();
+        for pin in &pins[input_start..input_start + input_count] {
+            if pin.trim().eq_ignore_ascii_case(ignored_constant) {
+                continue;
+            }
+            kept_inputs.push(pspice_u_required_digital_node(
+                pin,
+                "compound input",
+                fields,
+                line_num,
+                elements,
+            )?);
+        }
+
+        let term_output = match kept_inputs.len() {
+            0 => {
+                let folded = pspice_u_compound_folded_constant(term_model);
+                ensure_pspice_u_constant_driver(folded, elements);
+                normalize_pspice_u_node(folded)
+            }
+            1 => kept_inputs.remove(0),
+            _ => {
+                let instance_name = pspice_u_lowered_instance_name(name, term_count, term_index);
+                let connector = pspice_u_internal_compound_connector_name(&instance_name);
+                push_pspice_u_xspice_element_with_params(
+                    elements,
+                    format!("{instance_name}__GATE"),
+                    term_model,
+                    vec![
+                        XspicePort::DigitalVector(kept_inputs),
+                        XspicePort::Digital(connector.clone()),
+                    ],
+                    pspice_u_zero_gate_delay_params(),
+                    None,
+                );
+                connector
+            }
+        };
+        term_outputs.push(term_output);
+    }
+
+    let (final_model, input_port) =
+        pspice_u_compound_output_model_and_port(output_model, term_outputs);
+    push_pspice_u_xspice_element_with_timing(
+        elements,
+        name.to_string(),
+        final_model,
+        vec![input_port, output],
+        pspice_u_timing,
+    );
+
+    Ok(())
+}
+
+fn pspice_u_compound_folded_constant(term_model: &str) -> &'static str {
+    if term_model.eq_ignore_ascii_case("d_or") {
+        "$D_LO"
+    } else {
+        "$D_HI"
+    }
+}
+
+fn pspice_u_compound_output_model_and_port(
+    output_model: &str,
+    term_outputs: Vec<String>,
+) -> (&'static str, XspicePort) {
+    if term_outputs.len() == 1 {
+        let model = if matches!(
+            output_model.to_ascii_lowercase().as_str(),
+            "d_nand" | "d_nor"
+        ) {
+            "d_inverter"
+        } else {
+            "d_buffer"
+        };
+        return (model, XspicePort::Digital(term_outputs[0].clone()));
+    }
+
+    let model = match output_model.to_ascii_lowercase().as_str() {
+        "d_and" => "d_and",
+        "d_nand" => "d_nand",
+        "d_nor" => "d_nor",
+        "d_or" => "d_or",
+        _ => "d_or",
+    };
+    (model, XspicePort::DigitalVector(term_outputs))
 }
 
 fn push_pspice_u_tristate_vector_gate(
@@ -1748,6 +1942,14 @@ fn pspice_u_zero_gate_delay_params() -> Vec<(String, Value)> {
 }
 
 fn pspice_u_internal_connector_name(instance_name: &str) -> String {
+    pspice_u_internal_connector_name_with_suffix(instance_name, "TRI")
+}
+
+fn pspice_u_internal_compound_connector_name(instance_name: &str) -> String {
+    pspice_u_internal_connector_name_with_suffix(instance_name, "CMP")
+}
+
+fn pspice_u_internal_connector_name_with_suffix(instance_name: &str, suffix: &str) -> String {
     let mut name = String::from("__PSPICE_");
     for ch in instance_name.chars() {
         if ch.is_ascii_alphanumeric() || ch == '_' {
@@ -1756,7 +1958,8 @@ fn pspice_u_internal_connector_name(instance_name: &str) -> String {
             name.push('_');
         }
     }
-    name.push_str("_TRI");
+    name.push('_');
+    name.push_str(suffix);
     name
 }
 
