@@ -338,7 +338,7 @@ impl CodeModel for DigitalLookupTable {
         static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
         PORTS.get_or_init(|| {
             vec![
-                PortSpec::vector_input("in", PortType::Digital).with_vector_min_len(1),
+                PortSpec::vector_input("in", PortType::Digital),
                 PortSpec::output("out", PortType::Digital),
             ]
         })
@@ -572,7 +572,7 @@ mod tests {
         assert_digital_ports(
             &DigitalLookupTable,
             &[
-                ("in", PortDirection::In, true, Some(1), None),
+                ("in", PortDirection::In, true, None, None),
                 ("out", PortDirection::Out, false, None, None),
             ],
         );
