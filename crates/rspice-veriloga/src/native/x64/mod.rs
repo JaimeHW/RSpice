@@ -10,7 +10,7 @@ use super::expr::{
     canonical_limit_slots_for_equation, canonical_slew_slots_for_equation,
     canonical_table_lookup_slots_for_equation, canonical_timer_slots_for_equation,
     canonical_transition_slots_for_equation, canonical_zi_slots_for_equation,
-    constant_dynamic_variable_slot,
+    constant_dynamic_variable_slot, native_op_stack_effect,
 };
 use super::model::{
     CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeEntryStarts, NativeModel,
@@ -19,16 +19,18 @@ use super::model::{
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
-    CanonicalIrArtifact, EquationId, ExprId, HirAnalogOperator, HirExprKind, HirExprRef,
-    HirExpression, HirLaplaceKind, HirZiKind, MirEquationKind, MirModel, NodeId, SourceSpanRef,
+    CanonicalIrArtifact, EquationId, ExprId, HirAnalogOperator, HirAssignment, HirExprKind,
+    HirExprRef, HirExpression, HirLaplaceKind, HirLoop, HirModel, HirStatement, HirZiKind,
+    MirEquationKind, MirModel, NodeId, SourceSpanRef,
 };
 use crate::codegen::{
-    AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, CompiledNoiseSource, JacobianEntry,
-    StampIndex, StampProgram,
+    AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, CompiledNoiseSource, Instruction,
+    JacobianEntry, StampIndex, StampProgram,
 };
 use crate::native::x64::codegen::NativeAssignment;
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
+use std::collections::HashMap;
 
 const ENTRY_ALIGNMENT: usize = 16;
 const X64_NOP: u8 = 0x90;
@@ -42,14 +44,15 @@ pub(crate) fn compile_model_with_canonical_ir(
     artifact: &CanonicalIrArtifact,
 ) -> JitResult<NativeModel> {
     validate_canonical_artifact_for_model(model, artifact)?;
-    compile_model_inner(model, Some(&artifact.mir))
+    compile_model_inner(model, Some(artifact))
 }
 
 fn compile_model_inner(
     model: &CompiledModel,
-    canonical_mir: Option<&MirModel>,
+    canonical_artifact: Option<&CanonicalIrArtifact>,
 ) -> JitResult<NativeModel> {
     super::validate_native_coverage(model)?;
+    let canonical_mir = canonical_artifact.map(|artifact| &artifact.mir);
     let canonical_branch_unknown_map = match canonical_mir {
         Some(mir) => canonical_branch_unknown_runtime_map(model, mir)?,
         None => Vec::new(),
@@ -63,8 +66,13 @@ fn compile_model_inner(
 
     let mut image = Vec::new();
     let mut entry_starts = Vec::new();
-    let (assignment, assignment_dependencies) =
-        append_assignment_entry(model, &mut image, &mut entry_starts)?;
+    let (assignment, assignment_dependencies) = append_assignment_entry(
+        model,
+        canonical_artifact,
+        base_limits,
+        &mut image,
+        &mut entry_starts,
+    )?;
 
     let mut parameter_defaults = Vec::with_capacity(model.parameters.len());
     for (parameter_index, parameter) in model.parameters.iter().enumerate() {
@@ -2865,14 +2873,23 @@ struct AssignmentDependencies {
 
 fn append_assignment_entry(
     model: &CompiledModel,
+    canonical_artifact: Option<&CanonicalIrArtifact>,
+    limits: NativeLoweringLimits<'_>,
     image: &mut Vec<u8>,
     entry_starts: &mut Vec<CodeOffset>,
 ) -> JitResult<(CodeOffset, AssignmentDependencies)> {
-    let assignments = model
-        .assignment_steps
-        .iter()
-        .map(|step| lower_assignment_step(model, step))
-        .collect::<JitResult<Vec<_>>>()?;
+    let assignments = match canonical_artifact {
+        Some(artifact) => {
+            lower_live_canonical_assignment_statements(model, &artifact.hir, &artifact.mir, limits)?
+        }
+        None => {
+            let live_assignment_steps = live_native_assignment_steps(model);
+            live_assignment_steps
+                .iter()
+                .map(|step| lower_assignment_step_with_limits(model, step, limits))
+                .collect::<JitResult<Vec<_>>>()?
+        }
+    };
     let mut dependencies = AssignmentDependencies::default();
     collect_assignment_dependencies(&assignments, &mut dependencies);
 
@@ -2933,11 +2950,981 @@ fn push_unique_indices(target: &mut Vec<usize>, source: &[usize]) {
     }
 }
 
+fn live_native_assignment_steps(model: &CompiledModel) -> Vec<AssignmentStep> {
+    let live = live_assignment_slots(model);
+    filter_live_assignment_steps(&model.assignment_steps, &live)
+}
+
+fn live_assignment_slots(model: &CompiledModel) -> Vec<bool> {
+    let mut live = native_assignment_roots(model);
+    propagate_live_assignment_slots(model, &mut live);
+    live
+}
+
+fn live_canonical_assignment_slots(
+    model: &CompiledModel,
+    mir: &MirModel,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<bool>> {
+    let mut live = native_observable_assignment_roots(model);
+    mark_canonical_entry_variable_roots(model, mir, limits, &mut live)?;
+    propagate_live_assignment_slots(model, &mut live);
+    Ok(live)
+}
+
+fn propagate_live_assignment_slots(model: &CompiledModel, live: &mut [bool]) {
+    loop {
+        let mut changed = false;
+        propagate_assignment_liveness(&model.assignment_steps, live, &mut changed);
+        if !changed {
+            break;
+        }
+    }
+}
+
+struct AssignmentShadowIndex {
+    scalar: HashMap<String, Vec<ScalarDerivativeShadow>>,
+    arrays: HashMap<String, Vec<ArrayDerivativeShadow>>,
+    malformed_arrays: HashMap<String, Vec<MalformedArrayDerivativeShadow>>,
+}
+
+struct ScalarDerivativeShadow {
+    var_index: usize,
+    name: SmolStr,
+    axes: Vec<CanonicalDerivativeAxis>,
+}
+
+struct ArrayDerivativeShadow {
+    suffix: String,
+    axes: Vec<CanonicalDerivativeAxis>,
+    base: usize,
+    len: usize,
+    lower: i64,
+}
+
+struct MalformedArrayDerivativeShadow {
+    logical_index: i64,
+    name: SmolStr,
+}
+
+struct ArrayDerivativeShadowAccumulator {
+    axes: Vec<CanonicalDerivativeAxis>,
+    slots: Vec<(i64, usize)>,
+}
+
+impl AssignmentShadowIndex {
+    fn for_model(model: &CompiledModel) -> JitResult<Self> {
+        let mut scalar: HashMap<String, Vec<ScalarDerivativeShadow>> = HashMap::new();
+        let mut array_accumulators: HashMap<(String, String), ArrayDerivativeShadowAccumulator> =
+            HashMap::new();
+        let mut array_order: Vec<(String, String)> = Vec::new();
+        let mut malformed_arrays: HashMap<String, Vec<MalformedArrayDerivativeShadow>> =
+            HashMap::new();
+
+        for (slot, name) in model.variable_names.iter().enumerate() {
+            let name_str = name.as_str();
+            if let Some((array_name, logical_index, suffix)) = parse_array_variable_name(name_str) {
+                if let Some(raw_suffix) = suffix.strip_prefix('@') {
+                    if let Some(axes) = derivative_shadow_axes_from_suffix(raw_suffix) {
+                        let key = (array_name.to_string(), suffix.to_string());
+                        if !array_accumulators.contains_key(&key) {
+                            array_order.push(key.clone());
+                        }
+                        array_accumulators
+                            .entry(key)
+                            .or_insert_with(|| ArrayDerivativeShadowAccumulator {
+                                axes,
+                                slots: Vec::new(),
+                            })
+                            .slots
+                            .push((logical_index, slot));
+                    } else {
+                        malformed_arrays
+                            .entry(array_name.to_string())
+                            .or_default()
+                            .push(MalformedArrayDerivativeShadow {
+                                logical_index,
+                                name: name.clone(),
+                            });
+                    }
+                }
+                continue;
+            }
+
+            let Some((base, raw_suffix)) = name_str.split_once('@') else {
+                continue;
+            };
+            if base.is_empty() || base.contains('[') {
+                continue;
+            }
+            let Some(axes) = derivative_shadow_axes_from_suffix(raw_suffix) else {
+                continue;
+            };
+            scalar
+                .entry(base.to_string())
+                .or_default()
+                .push(ScalarDerivativeShadow {
+                    var_index: slot,
+                    name: name.clone(),
+                    axes,
+                });
+        }
+
+        let mut arrays: HashMap<String, Vec<ArrayDerivativeShadow>> = HashMap::new();
+        for key in array_order {
+            let Some(mut accumulator) = array_accumulators.remove(&key) else {
+                continue;
+            };
+            accumulator.slots.sort_by_key(|(index, _)| *index);
+            let Some((lower, base)) = accumulator.slots.first().copied() else {
+                continue;
+            };
+            for (offset, (logical_index, slot)) in accumulator.slots.iter().enumerate() {
+                let expected_index = lower + offset as i64;
+                let expected_slot = base + offset;
+                if *logical_index != expected_index || *slot != expected_slot {
+                    return Err(JitError::InvalidCanonicalIr {
+                        model: model.name.clone(),
+                        detail: format!(
+                            "canonical indexed assignment '{}' shadow suffix '{}' is not contiguous in compiled variable storage",
+                            key.0, key.1
+                        )
+                        .into(),
+                    });
+                }
+            }
+            arrays
+                .entry(key.0)
+                .or_default()
+                .push(ArrayDerivativeShadow {
+                    suffix: key.1,
+                    axes: accumulator.axes,
+                    base,
+                    len: accumulator.slots.len(),
+                    lower,
+                });
+        }
+
+        Ok(Self {
+            scalar,
+            arrays,
+            malformed_arrays,
+        })
+    }
+
+    fn scalar_shadows(&self, target_name: &str) -> &[ScalarDerivativeShadow] {
+        self.scalar.get(target_name).map_or(&[], Vec::as_slice)
+    }
+
+    fn array_shadows(&self, array_name: &str) -> &[ArrayDerivativeShadow] {
+        self.arrays.get(array_name).map_or(&[], Vec::as_slice)
+    }
+
+    fn malformed_array_shadows(&self, array_name: &str) -> &[MalformedArrayDerivativeShadow] {
+        self.malformed_arrays
+            .get(array_name)
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+fn parse_array_variable_name(name: &str) -> Option<(&str, i64, &str)> {
+    let (array_name, remainder) = name.split_once('[')?;
+    let (index, suffix) = remainder.split_once(']')?;
+    Some((array_name, index.parse::<i64>().ok()?, suffix))
+}
+
+fn ranges_overlap(left_lower: i64, left_len: usize, right_lower: i64, right_len: usize) -> bool {
+    let left_upper = left_lower + left_len as i64;
+    let right_upper = right_lower + right_len as i64;
+    left_lower < right_upper && right_lower < left_upper
+}
+
+fn lower_live_canonical_assignment_statements(
+    model: &CompiledModel,
+    hir: &HirModel,
+    mir: &MirModel,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<NativeAssignment>> {
+    let live = live_canonical_assignment_slots(model, mir, limits)?;
+    let shadow_index = AssignmentShadowIndex::for_model(model)?;
+    lower_canonical_assignment_statements(
+        model,
+        hir,
+        mir,
+        &hir.statements,
+        &live,
+        &shadow_index,
+        limits,
+    )
+}
+
+fn lower_canonical_assignment_statements(
+    model: &CompiledModel,
+    hir: &HirModel,
+    mir: &MirModel,
+    statements: &[HirStatement],
+    live: &[bool],
+    shadow_index: &AssignmentShadowIndex,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<NativeAssignment>> {
+    let mut assignments = Vec::new();
+    for statement in statements {
+        assignments.extend(lower_canonical_assignment_statement(
+            model,
+            hir,
+            mir,
+            statement,
+            live,
+            shadow_index,
+            limits,
+        )?);
+    }
+    Ok(assignments)
+}
+
+fn lower_canonical_assignment_statement(
+    model: &CompiledModel,
+    hir: &HirModel,
+    mir: &MirModel,
+    statement: &HirStatement,
+    live: &[bool],
+    shadow_index: &AssignmentShadowIndex,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<NativeAssignment>> {
+    match statement {
+        HirStatement::Assignment(assignment) => {
+            lower_canonical_assignment(model, hir, mir, assignment, live, shadow_index, limits)
+        }
+        HirStatement::Loop(loop_statement) => lower_canonical_assignment_loop(
+            model,
+            hir,
+            mir,
+            loop_statement,
+            live,
+            shadow_index,
+            limits,
+        ),
+    }
+}
+
+fn lower_canonical_assignment(
+    model: &CompiledModel,
+    hir: &HirModel,
+    mir: &MirModel,
+    assignment: &HirAssignment,
+    live: &[bool],
+    shadow_index: &AssignmentShadowIndex,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<NativeAssignment>> {
+    if let Some(index) = &assignment.index {
+        return lower_canonical_indexed_assignment(
+            model,
+            hir,
+            mir,
+            assignment,
+            index.id,
+            live,
+            shadow_index,
+            limits,
+        );
+    }
+
+    let var_index = validate_canonical_scalar_assignment_target(model, assignment)?;
+    let mut assignments = canonical_scalar_shadow_assignments(
+        model,
+        mir,
+        assignment.target_name.as_str(),
+        assignment.expr.id,
+        live,
+        shadow_index,
+        limits,
+    )?;
+    if live.get(var_index).copied().unwrap_or(false) {
+        let program = NativeProgram::from_mir_expression(
+            model.name.clone(),
+            EntryKind::Assignment,
+            mir,
+            assignment.expr.id,
+            limits,
+        )?;
+        trace_assignment_program_stack(model, assignment.target_name.as_str(), &program);
+        assignments.push(NativeAssignment::Direct { var_index, program });
+    }
+    Ok(assignments)
+}
+
+fn lower_canonical_indexed_assignment(
+    model: &CompiledModel,
+    hir: &HirModel,
+    mir: &MirModel,
+    assignment: &HirAssignment,
+    index_expr: ExprId,
+    live: &[bool],
+    shadow_index: &AssignmentShadowIndex,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<NativeAssignment>> {
+    let (base, len, lower) = canonical_assignment_array_range(model, hir, assignment)?;
+    let mut assignments = canonical_array_shadow_assignments(
+        model,
+        mir,
+        assignment.target_name.as_str(),
+        base,
+        len,
+        lower,
+        index_expr,
+        assignment.expr.id,
+        live,
+        shadow_index,
+        limits,
+    )?;
+    if !assignment_range_live(base, len, live) {
+        return Ok(assignments);
+    }
+    let index = NativeProgram::from_mir_expression(
+        model.name.clone(),
+        EntryKind::Assignment,
+        mir,
+        index_expr,
+        limits,
+    )?;
+    let value = NativeProgram::from_mir_expression(
+        model.name.clone(),
+        EntryKind::Assignment,
+        mir,
+        assignment.expr.id,
+        limits,
+    )?;
+    trace_assignment_program_stack(model, assignment.target_name.as_str(), &value);
+    if let Some(var_index) = constant_indexed_assignment_slot(&index, base, len, lower) {
+        validate_assignment_target(model, var_index)?;
+        assignments.push(NativeAssignment::Direct {
+            var_index,
+            program: value,
+        });
+        return Ok(assignments);
+    }
+    assignments.push(NativeAssignment::Indexed {
+        base,
+        len,
+        lower,
+        index,
+        value,
+    });
+    Ok(assignments)
+}
+
+fn lower_canonical_assignment_loop(
+    model: &CompiledModel,
+    hir: &HirModel,
+    mir: &MirModel,
+    loop_statement: &HirLoop,
+    live: &[bool],
+    shadow_index: &AssignmentShadowIndex,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<NativeAssignment>> {
+    let body = lower_canonical_assignment_statements(
+        model,
+        hir,
+        mir,
+        &loop_statement.body,
+        live,
+        shadow_index,
+        limits,
+    )?;
+    if body.is_empty() {
+        return Ok(Vec::new());
+    }
+    let condition = NativeProgram::from_mir_expression(
+        model.name.clone(),
+        EntryKind::Assignment,
+        mir,
+        loop_statement.condition.id,
+        limits,
+    )?;
+    Ok(vec![NativeAssignment::Loop { condition, body }])
+}
+
+fn canonical_scalar_shadow_assignments(
+    model: &CompiledModel,
+    mir: &MirModel,
+    target_name: &str,
+    expr_id: ExprId,
+    live: &[bool],
+    shadow_index: &AssignmentShadowIndex,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<NativeAssignment>> {
+    let mut assignments = Vec::new();
+    for shadow in shadow_index.scalar_shadows(target_name) {
+        if !live.get(shadow.var_index).copied().unwrap_or(false) {
+            continue;
+        }
+        validate_assignment_target(model, shadow.var_index)?;
+        let program = lower_canonical_shadow_program(model, mir, expr_id, &shadow.axes, limits)?;
+        trace_assignment_program_stack(model, shadow.name.as_str(), &program);
+        assignments.push(NativeAssignment::Direct {
+            var_index: shadow.var_index,
+            program,
+        });
+    }
+    Ok(assignments)
+}
+
+fn canonical_array_shadow_assignments(
+    model: &CompiledModel,
+    mir: &MirModel,
+    array_name: &str,
+    source_base: usize,
+    source_len: usize,
+    source_lower: i64,
+    index_expr: ExprId,
+    value_expr: ExprId,
+    live: &[bool],
+    shadow_index: &AssignmentShadowIndex,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<Vec<NativeAssignment>> {
+    let mut assignments = Vec::new();
+    let source_upper = source_lower + source_len as i64;
+    for malformed in shadow_index.malformed_array_shadows(array_name) {
+        if malformed.logical_index >= source_lower && malformed.logical_index < source_upper {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical indexed assignment '{array_name}' has malformed derivative shadow '{}'",
+                    malformed.name
+                )
+                .into(),
+            });
+        }
+    }
+    for shadow in shadow_index.array_shadows(array_name) {
+        if !ranges_overlap(shadow.lower, shadow.len, source_lower, source_len) {
+            continue;
+        }
+        if shadow.len != source_len || shadow.lower != source_lower {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical indexed assignment '{array_name}' shadow suffix '{}' range {}..{} does not match source range {source_lower}..{}",
+                    shadow.suffix,
+                    shadow.lower,
+                    shadow.lower + shadow.len as i64,
+                    source_lower + source_len as i64
+                )
+                .into(),
+            });
+        }
+        if shadow.base == source_base {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical indexed assignment '{array_name}' shadow suffix '{}' aliases source array storage",
+                    shadow.suffix
+                )
+                .into(),
+            });
+        }
+        if !assignment_range_live(shadow.base, shadow.len, live) {
+            continue;
+        }
+        let index = NativeProgram::from_mir_expression(
+            model.name.clone(),
+            EntryKind::Assignment,
+            mir,
+            index_expr,
+            limits,
+        )?;
+        let value = lower_canonical_shadow_program(model, mir, value_expr, &shadow.axes, limits)?;
+        trace_assignment_program_stack(model, &format!("{array_name}{}", shadow.suffix), &value);
+        if let Some(var_index) =
+            constant_indexed_assignment_slot(&index, shadow.base, shadow.len, shadow.lower)
+        {
+            validate_assignment_target(model, var_index)?;
+            assignments.push(NativeAssignment::Direct {
+                var_index,
+                program: value,
+            });
+        } else {
+            assignments.push(NativeAssignment::Indexed {
+                base: shadow.base,
+                len: shadow.len,
+                lower: shadow.lower,
+                index,
+                value,
+            });
+        }
+    }
+    Ok(assignments)
+}
+
+fn trace_assignment_program_stack(model: &CompiledModel, label: &str, program: &NativeProgram) {
+    if std::env::var_os("RSPICE_NATIVE_TRACE_ASSIGNMENT_STACK").is_some()
+        && program.max_stack_depth() > 16
+    {
+        let mut depth = 0usize;
+        let mut max_depth = 0usize;
+        let mut max_index = 0usize;
+        for (index, op) in program.ops().iter().enumerate() {
+            let (pop, push) = native_op_stack_effect(op);
+            depth = depth.saturating_sub(pop) + push;
+            if depth > max_depth {
+                max_depth = depth;
+                max_index = index;
+            }
+        }
+        let start = max_index.saturating_sub(24);
+        let end = (max_index + 24).min(program.ops().len());
+        eprintln!(
+            "native-assignment-stack model={} target={} depth={} max_index={} window={:?}",
+            model.name,
+            label,
+            program.max_stack_depth(),
+            max_index,
+            &program.ops()[start..end]
+        );
+    }
+}
+
+fn lower_canonical_shadow_program(
+    model: &CompiledModel,
+    mir: &MirModel,
+    expr_id: ExprId,
+    axes: &[CanonicalDerivativeAxis],
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    match axes {
+        [axis] => NativeProgram::from_mir_expression_derivative(
+            model.name.clone(),
+            EntryKind::Assignment,
+            mir,
+            EquationId::new(0),
+            expr_id,
+            *axis,
+            limits,
+        ),
+        [first, second] => NativeProgram::from_mir_expression_second_derivative(
+            model.name.clone(),
+            EntryKind::Assignment,
+            mir,
+            EquationId::new(0),
+            expr_id,
+            *first,
+            *second,
+            limits,
+        ),
+        _ => Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical assignment derivative shadow has unsupported order {}",
+                axes.len()
+            )
+            .into(),
+        }),
+    }
+}
+
+fn derivative_shadow_axes_from_suffix(suffix: &str) -> Option<Vec<CanonicalDerivativeAxis>> {
+    let mut axes = Vec::new();
+    for part in suffix.split('@') {
+        axes.push(derivative_shadow_axis(part)?);
+    }
+    (!axes.is_empty()).then_some(axes)
+}
+
+fn derivative_shadow_axis(part: &str) -> Option<CanonicalDerivativeAxis> {
+    if let Some(index) = part.strip_prefix("dI") {
+        return index
+            .parse::<usize>()
+            .ok()
+            .map(CanonicalDerivativeAxis::Branch);
+    }
+    let index = part.strip_prefix('d')?.parse::<usize>().ok()?;
+    Some(CanonicalDerivativeAxis::Node(NodeId::from(index)))
+}
+
+fn validate_canonical_scalar_assignment_target(
+    model: &CompiledModel,
+    assignment: &HirAssignment,
+) -> JitResult<usize> {
+    let var_index = usize::from(assignment.target);
+    validate_assignment_target(model, var_index)?;
+    let Some(name) = model.variable_names.get(var_index) else {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical assignment target {var_index} has no compiled variable name"
+            )
+            .into(),
+        });
+    };
+    if name != &assignment.target_name {
+        return Err(JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical assignment target '{}' at slot {var_index} does not match compiled variable '{}'",
+                assignment.target_name, name
+            )
+            .into(),
+        });
+    }
+    Ok(var_index)
+}
+
+fn canonical_assignment_array_range(
+    model: &CompiledModel,
+    hir: &HirModel,
+    assignment: &HirAssignment,
+) -> JitResult<(usize, usize, i64)> {
+    let array = hir
+        .arrays
+        .iter()
+        .find(|array| array.base == assignment.target && array.name == assignment.target_name)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical indexed assignment '{}' has no matching array metadata",
+                assignment.target_name
+            )
+            .into(),
+        })?;
+    let base = usize::from(array.base);
+    let len = usize::try_from(array.len).map_err(|_| JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: format!(
+            "canonical indexed assignment '{}' length {} does not fit usize",
+            array.name, array.len
+        )
+        .into(),
+    })?;
+    let lower = array.lower;
+    super::validate_assignment_range(model, base, len)?;
+    for offset in 0..len {
+        let slot = base + offset;
+        let expected = format!("{}[{}]", array.name, lower + offset as i64);
+        let Some(actual) = model.variable_names.get(slot) else {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical indexed assignment '{}' slot {slot} has no compiled variable name",
+                    array.name
+                )
+                .into(),
+            });
+        };
+        if actual.as_str() != expected {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical indexed assignment '{}' slot {slot} expected compiled variable '{expected}', found '{actual}'",
+                    array.name
+                )
+                .into(),
+            });
+        }
+    }
+    Ok((base, len, lower))
+}
+
+fn native_assignment_roots(model: &CompiledModel) -> Vec<bool> {
+    let mut live = native_observable_assignment_roots(model);
+    mark_bytecode_entry_variable_roots(model, &mut live);
+    live
+}
+
+fn native_observable_assignment_roots(model: &CompiledModel) -> Vec<bool> {
+    let mut live = vec![false; model.num_variables];
+    for (index, name) in model.variable_names.iter().enumerate().take(live.len()) {
+        if native_assignment_root_is_externally_observable(name.as_str()) {
+            live[index] = true;
+        }
+    }
+    live
+}
+
+fn mark_bytecode_entry_variable_roots(model: &CompiledModel, live: &mut [bool]) {
+    for stamp in &model.stamp_programs {
+        if let Some(condition) = &stamp.static_condition {
+            mark_program_variable_reads(condition, live);
+        }
+        mark_program_variable_reads(&stamp.value_program, live);
+        for jacobian in &stamp.jacobian_programs {
+            mark_program_variable_reads(&jacobian.program, live);
+        }
+        for jacobian in &stamp.reactive_jacobians {
+            mark_program_variable_reads(&jacobian.program, live);
+        }
+    }
+    for source in &model.noise_sources {
+        mark_program_variable_reads(&source.psd_program, live);
+        if let Some(program) = &source.exponent_program {
+            mark_program_variable_reads(program, live);
+        }
+    }
+}
+
+fn mark_canonical_entry_variable_roots(
+    model: &CompiledModel,
+    mir: &MirModel,
+    limits: NativeLoweringLimits<'_>,
+    live: &mut [bool],
+) -> JitResult<()> {
+    let canonical_noise_plan = if model.noise_sources.is_empty() {
+        None
+    } else {
+        Some(build_canonical_noise_plan(model, mir)?)
+    };
+    let mut available_current_pairs = Vec::new();
+    let mut prior_current_probes = Vec::new();
+
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        if let Some(condition) = &stamp.static_condition {
+            let program =
+                lower_static_condition_program(model, Some(mir), stamp_index, condition, limits)?;
+            mark_native_program_variable_reads(&program, live);
+        }
+
+        let value_limits = limits
+            .with_available_current_pairs(&available_current_pairs)
+            .with_prior_current_probes(&prior_current_probes);
+        let program = lower_stamp_value_program(
+            model,
+            Some(mir),
+            stamp_index,
+            &stamp.value_program,
+            value_limits,
+        )?;
+        mark_native_program_variable_reads(&program, live);
+
+        let mut jacobian_current_pairs = available_current_pairs.clone();
+        if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
+            push_current_pair_indices(
+                model,
+                &mut jacobian_current_pairs,
+                model.num_terminals,
+                pos,
+                neg,
+            )?;
+        }
+        let mut jacobian_prior_current_probes = prior_current_probes.clone();
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+        {
+            push_prior_current_probe_aliases(
+                &mut jacobian_prior_current_probes,
+                stamp_index,
+                pos,
+                neg,
+            );
+        }
+        let jacobian_limits = limits
+            .with_available_current_pairs(&jacobian_current_pairs)
+            .with_prior_current_probes(&jacobian_prior_current_probes);
+
+        for jacobian in &stamp.jacobian_programs {
+            let program = lower_jacobian_program(
+                model,
+                Some(mir),
+                stamp_index,
+                &stamp.value_program,
+                jacobian,
+                jacobian_limits,
+            )?;
+            mark_native_program_variable_reads(&program, live);
+        }
+
+        for reactive_jacobian in &stamp.reactive_jacobians {
+            let program = lower_reactive_jacobian_program(
+                model,
+                Some(mir),
+                stamp_index,
+                reactive_jacobian,
+                limits,
+            )?;
+            mark_native_program_variable_reads(&program, live);
+        }
+
+        if let Some((pos, neg)) = infer_current_terminal_pair(stamp) {
+            push_current_pair_indices(
+                model,
+                &mut available_current_pairs,
+                model.num_terminals,
+                pos,
+                neg,
+            )?;
+        }
+        if stamp.branch_ordinal.is_none()
+            && let Some((pos, neg)) = infer_current_unified_pair(model, stamp)
+        {
+            push_prior_current_probe_aliases(&mut prior_current_probes, stamp_index, pos, neg);
+        }
+    }
+
+    let noise_limits = limits
+        .with_available_current_pairs(&available_current_pairs)
+        .with_prior_current_probes(&prior_current_probes);
+    for (source_index, source) in model.noise_sources.iter().enumerate() {
+        let psd_program = lower_noise_psd_program(
+            model,
+            canonical_noise_plan.as_ref(),
+            source_index,
+            source,
+            &source.psd_program,
+            noise_limits,
+        )?;
+        mark_native_program_variable_reads(&psd_program, live);
+
+        if let Some(program) = &source.exponent_program {
+            let exponent_program = lower_noise_exponent_program(
+                model,
+                canonical_noise_plan.as_ref(),
+                source_index,
+                source,
+                program,
+                noise_limits,
+            )?;
+            mark_native_program_variable_reads(&exponent_program, live);
+        }
+    }
+
+    Ok(())
+}
+
+fn mark_native_program_variable_reads(program: &NativeProgram, live: &mut [bool]) {
+    for op in program.ops() {
+        match op {
+            NativeOp::LoadVariable(index) => {
+                if *index < live.len() {
+                    live[*index] = true;
+                }
+            }
+            NativeOp::LoadVariableDyn { base, len, .. } => {
+                let end = base.saturating_add(*len).min(live.len());
+                for slot in live.iter_mut().take(end).skip(*base) {
+                    *slot = true;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn native_assignment_root_is_externally_observable(name: &str) -> bool {
+    !name.contains('@') && !name.starts_with("__guard")
+}
+
+fn propagate_assignment_liveness(steps: &[AssignmentStep], live: &mut [bool], changed: &mut bool) {
+    for step in steps.iter().rev() {
+        match step {
+            AssignmentStep::Assign(assignment) => {
+                if assignment.var_index < live.len() && live[assignment.var_index] {
+                    mark_program_variable_reads_changed(&assignment.program, live, changed);
+                }
+            }
+            AssignmentStep::AssignIndexed {
+                base,
+                len,
+                index,
+                value,
+                ..
+            } => {
+                if assignment_range_live(*base, *len, live) {
+                    mark_program_variable_reads_changed(index, live, changed);
+                    mark_program_variable_reads_changed(value, live, changed);
+                }
+            }
+            AssignmentStep::Loop { condition, body } => {
+                propagate_assignment_liveness(body, live, changed);
+                if assignment_steps_write_live(body, live) {
+                    mark_program_variable_reads_changed(condition, live, changed);
+                }
+            }
+        }
+    }
+}
+
+fn filter_live_assignment_steps(steps: &[AssignmentStep], live: &[bool]) -> Vec<AssignmentStep> {
+    steps
+        .iter()
+        .filter_map(|step| match step {
+            AssignmentStep::Assign(assignment) => (assignment.var_index < live.len()
+                && live[assignment.var_index])
+                .then(|| step.clone()),
+            AssignmentStep::AssignIndexed { base, len, .. } => {
+                assignment_range_live(*base, *len, live).then(|| step.clone())
+            }
+            AssignmentStep::Loop { condition, body } => {
+                let body = filter_live_assignment_steps(body, live);
+                (!body.is_empty()).then(|| AssignmentStep::Loop {
+                    condition: condition.clone(),
+                    body,
+                })
+            }
+        })
+        .collect()
+}
+
+fn assignment_steps_write_live(steps: &[AssignmentStep], live: &[bool]) -> bool {
+    steps.iter().any(|step| match step {
+        AssignmentStep::Assign(assignment) => {
+            assignment.var_index < live.len() && live[assignment.var_index]
+        }
+        AssignmentStep::AssignIndexed { base, len, .. } => assignment_range_live(*base, *len, live),
+        AssignmentStep::Loop { body, .. } => assignment_steps_write_live(body, live),
+    })
+}
+
+fn assignment_range_live(base: usize, len: usize, live: &[bool]) -> bool {
+    base.checked_add(len)
+        .and_then(|end| live.get(base..end))
+        .is_some_and(|range| range.iter().any(|slot| *slot))
+}
+
+fn mark_program_variable_reads(program: &BytecodeProgram, live: &mut [bool]) {
+    let mut changed = false;
+    mark_program_variable_reads_changed(program, live, &mut changed);
+}
+
+fn mark_program_variable_reads_changed(
+    program: &BytecodeProgram,
+    live: &mut [bool],
+    changed: &mut bool,
+) {
+    for instruction in &program.instructions {
+        match *instruction {
+            Instruction::PushVariable(index) => mark_variable_live(index, live, changed),
+            Instruction::PushVariableDyn { base, len, .. } => {
+                if let Some(end) = base.checked_add(len) {
+                    for index in base..end.min(live.len()) {
+                        mark_variable_live(index, live, changed);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn mark_variable_live(index: usize, live: &mut [bool], changed: &mut bool) {
+    if let Some(slot) = live.get_mut(index)
+        && !*slot
+    {
+        *slot = true;
+        *changed = true;
+    }
+}
+
+#[cfg(test)]
 fn lower_assignment_step(
     model: &CompiledModel,
     step: &AssignmentStep,
 ) -> JitResult<NativeAssignment> {
-    let limits = NativeLoweringLimits::for_model(model);
+    lower_assignment_step_with_limits(model, step, NativeLoweringLimits::for_model(model))
+}
+
+fn lower_assignment_step_with_limits(
+    model: &CompiledModel,
+    step: &AssignmentStep,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeAssignment> {
     match step {
         AssignmentStep::Assign(assignment) => {
             validate_assignment_target(model, assignment.var_index)?;
@@ -2995,7 +3982,7 @@ fn lower_assignment_step(
             )?;
             let body = body
                 .iter()
-                .map(|step| lower_assignment_step(model, step))
+                .map(|step| lower_assignment_step_with_limits(model, step, limits))
                 .collect::<JitResult<Vec<_>>>()?;
             Ok(NativeAssignment::Loop { condition, body })
         }
@@ -3198,15 +4185,17 @@ fn format_current_endpoint(endpoint: usize) -> String {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        NativeModel, compile_model_with_canonical_ir, lower_assignment_step,
-        lower_static_condition_program, validate_compiled_entry_shape,
+        NativeModel, compile_model_with_canonical_ir, live_native_assignment_steps,
+        lower_assignment_step, lower_static_condition_program, native_assignment_roots,
+        validate_compiled_entry_shape,
     };
     use crate::canonical_ir::{
         BranchUnknownId, CanonicalIrArtifact, HirContributionKind, HirExprKind, MirBranchUnknown,
         MirEquationKind, NodeId, OptModel,
     };
     use crate::codegen::{
-        AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, StampProgram,
+        AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, Instruction, JacobianEntry,
+        StampIndex, StampProgram,
     };
     use crate::device::VerilogADevice;
     use crate::native::expr::{
@@ -3863,6 +4852,67 @@ endmodule
             |axis| matches!(axis, ColumnAxis::Branch(0)),
             2.0,
             "canonical_branch_shadow_jacobian d/dI0",
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_assignments_from_hir_not_bytecode() {
+        let source = r#"
+module native_canonical_assignment_source(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = V(p, n) + 2.0;
+    I(p, n) <+ x;
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let x_index = model
+            .variable_names
+            .iter()
+            .position(|name| name.as_str() == "x")
+            .expect("fixture has x variable");
+        assert!(
+            !model.assignment_steps.is_empty(),
+            "fixture must exercise assignments"
+        );
+        let assignment = model
+            .assignment_steps
+            .iter_mut()
+            .find_map(|step| match step {
+                AssignmentStep::Assign(assignment) if assignment.var_index == x_index => {
+                    Some(assignment)
+                }
+                _ => None,
+            })
+            .expect("fixture has direct assignment to x");
+        assignment.program = BytecodeProgram {
+            instructions: vec![Instruction::PushConst(99.0)],
+        };
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical assignments compile to native x64");
+        let voltages = [5.0_f64, 1.0_f64];
+        let ctx = eval_context(&[], &voltages);
+        let mut vars = vec![0.0_f64; native.num_variables.max(1)];
+        native.run_assignments(&ctx, vars.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            panic!("native canonical assignment failed: {error}");
+        }
+
+        assert_eq!(vars[x_index].to_bits(), 6.0_f64.to_bits());
+        assert_eq!(
+            native
+                .run_stamp_value(0, &ctx, vars.as_ptr())
+                .expect("stamp value entry")
+                .to_bits(),
+            6.0_f64.to_bits()
         );
     }
 
@@ -4628,6 +5678,54 @@ endmodule
             error.to_string().contains("expression kind string"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn native_assignment_roots_excludes_internal_derivative_shadows_and_guards() {
+        let mut model = compiled_model_with_variables(4);
+        model.variable_names = vec![
+            SmolStr::new("x"),
+            SmolStr::new("x@d0"),
+            SmolStr::new("__guard0"),
+            SmolStr::new("array@d1[0]"),
+        ];
+
+        let live = native_assignment_roots(&model);
+
+        assert_eq!(live, vec![true, false, false, false]);
+    }
+
+    #[test]
+    fn native_assignment_roots_keeps_internal_shadow_reads_from_jacobians() {
+        let mut model = compiled_model_with_variables(3);
+        model.variable_names = vec![
+            SmolStr::new("x"),
+            SmolStr::new("x@d0"),
+            SmolStr::new("__guard0"),
+        ];
+        model.stamp_programs.push(StampProgram {
+            stamp_locations: Vec::new(),
+            value_program: BytecodeProgram {
+                instructions: vec![Instruction::PushConst(0.0)],
+            },
+            jacobian_programs: vec![JacobianEntry {
+                row: StampIndex::Ground,
+                col: StampIndex::Ground,
+                col_axis: ColumnAxis::Node(0),
+                sign: 1.0,
+                program: BytecodeProgram {
+                    instructions: vec![Instruction::PushVariable(1)],
+                },
+            }],
+            reactive_jacobians: Vec::new(),
+            branch_ordinal: None,
+            indirect: false,
+            static_condition: None,
+        });
+
+        let live = native_assignment_roots(&model);
+
+        assert_eq!(live, vec![true, true, false]);
     }
 
     #[test]
@@ -5584,7 +6682,8 @@ endmodule
         context.clear_currents();
         context.currents.resize(model.stamp_programs.len(), 0.0);
         let mut vm = Vm::new(&mut context);
-        execute_bytecode_assignment_steps(&mut vm, &model.assignment_steps)
+        let live_assignment_steps = live_native_assignment_steps(model);
+        execute_bytecode_assignment_steps(&mut vm, &live_assignment_steps)
             .map_err(|error| error.to_string())?;
 
         let mut prior_current_probes = Vec::new();

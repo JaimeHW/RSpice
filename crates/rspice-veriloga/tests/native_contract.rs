@@ -1087,6 +1087,40 @@ endmodule
     )
 }
 
+fn dead_assignment_current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_dead_assignment_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    real op_i;
+    analog begin
+        I(p, n) <+ V(p, n);
+        op_i = I(p, n);
+    end
+endmodule
+"#,
+    )
+}
+
+fn live_assignment_current_probe_model() -> rspice_veriloga::CompiledModel {
+    compile(
+        r#"
+`include "disciplines.vams"
+module native_live_assignment_current_probe(p, n);
+    inout p, n;
+    electrical p, n;
+    real sensed;
+    analog begin
+        sensed = I(p, n);
+        I(p, n) <+ sensed;
+    end
+endmodule
+"#,
+    )
+}
+
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn native_compile_accepts_simple_resistor_subset() {
@@ -4879,6 +4913,26 @@ fn native_device_executes_single_ended_current_probes_in_source_order() {
     assert_eq!(currents.len(), 2);
     assert!((currents[0] - 4.0).abs() < 1e-12, "currents: {currents:?}");
     assert!((currents[1] - 0.4).abs() < 1e-12, "currents: {currents:?}");
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn native_rejects_observable_assignment_current_probe_without_fallback() {
+    for (name, model) in [
+        ("otherwise-dead", dead_assignment_current_probe_model()),
+        ("live", live_assignment_current_probe_model()),
+    ] {
+        let err = compile_native(&model).expect_err(
+            "observable assignment current probe must not compile before currents exist",
+        );
+        let msg = err.to_string();
+
+        assert_native_hard_fail_message(&msg);
+        assert!(
+            msg.contains("PushCurrent terminal pair 0,1 unavailable"),
+            "{name}: unexpected error: {msg}"
+        );
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
