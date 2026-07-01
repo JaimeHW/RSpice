@@ -1,0 +1,81 @@
+name: Security
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "crates/**"
+      - ".github/workflows/security.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - "crates/**"
+      - ".github/workflows/security.yml"
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_TOOLCHAIN: "1.94.0"
+  CARGO_DENY_VERSION: "0.19.9"
+  CARGO_AUDIT_VERSION: "0.22.2"
+  CARGO_CYCLONEDX_VERSION: "0.5.9"
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+
+  rust-supply-chain:
+    name: Rust advisories, licenses, sources, SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - name: Install security tools
+        run: |
+          cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
+          cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+          cargo install cargo-cyclonedx --version "$CARGO_CYCLONEDX_VERSION" --locked
+      - name: Cargo deny policy
+        run: cargo deny check advisories bans licenses sources
+      - name: RustSec audit
+        run: cargo audit
+      - name: Generate CycloneDX SBOMs
+        run: |
+          cargo cyclonedx --format json --target all --override-filename bom
+          mkdir -p target/sbom
+          find . -name bom.json -not -path './target/*' -print0 | while IFS= read -r -d '' file; do
+            dir=$(dirname "$file")
+            name=$(printf '%s' "$dir" | sed 's#^\./##; s#/#-#g; s#^\.$#workspace#')
+            cp "$file" "target/sbom/${name}-bom.json"
+          done
+          find . -name bom.json -not -path './target/*' -delete
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cyclonedx-sboms
+          path: target/sbom/*.json
+          if-no-files-found: error
