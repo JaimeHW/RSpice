@@ -1801,7 +1801,8 @@ fn effective_delay(ctx: &CmContext) -> Value {
         ctx.param("delay").max(0.0)
     };
 
-    if ctx.timestep.is_finite() && ctx.timestep > 0.0 && delay < ctx.timestep {
+    let cutoff_step = ctx.transient_step_hint().unwrap_or(ctx.timestep);
+    if cutoff_step.is_finite() && cutoff_step > 0.0 && delay < cutoff_step {
         0.0
     } else {
         delay
@@ -1913,6 +1914,10 @@ impl CodeModel for AnalogDelayLine {
         };
         ctx.set_output_with_partial("out", output, partial);
         Ok(())
+    }
+
+    fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+        output_port.eq_ignore_ascii_case("out")
     }
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
