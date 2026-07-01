@@ -2588,6 +2588,16 @@ mod tests {
         let num_internal_nodes = model.internal_nodes;
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
+        let jacobian_entry_points = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .collect::<Vec<_>>();
+        let reactive_jacobian_entry_points = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.reactive_jacobians.len())
+            .collect::<Vec<_>>();
 
         let mut context = VmContext::with_internal_nodes(num_terminals, num_internal_nodes);
         context.port_connected = vec![1; num_terminals];
@@ -2615,8 +2625,8 @@ mod tests {
             native_model: Arc::new(NativeModel::new_for_test(
                 0,
                 num_stamp_programs,
-                vec![0; num_stamp_programs],
-                vec![0; num_stamp_programs],
+                jacobian_entry_points,
+                reactive_jacobian_entry_points,
             )),
             prev_discontinuity: false,
         };
@@ -2639,6 +2649,12 @@ mod tests {
             msg.contains("no interpreter fallback"),
             "error must state the hard-fail contract, got: {msg}"
         );
+    }
+
+    fn poisoned_bytecode_program() -> BytecodeProgram {
+        BytecodeProgram {
+            instructions: vec![Instruction::PushParam(999)],
+        }
     }
 
     #[test]
@@ -2908,6 +2924,51 @@ endmodule
             .expect_err("native mode must not execute dependent default bytecode fallback");
 
         assert_native_hard_fail(err, "missing parameter-default entry");
+    }
+
+    #[test]
+    fn native_evaluate_and_jacobian_use_native_entries_without_bytecode_execution() {
+        let mut model = compile(
+            r#"
+`include "disciplines.vams"
+module poison_value_paths(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n) * 2.0;
+endmodule
+"#,
+        );
+        assert_eq!(model.stamp_programs.len(), 1);
+        assert!(
+            !model.stamp_programs[0].jacobian_programs.is_empty(),
+            "fixture must contain Jacobian bytecode"
+        );
+
+        model.stamp_programs[0].value_program = poisoned_bytecode_program();
+        for jacobian in &mut model.stamp_programs[0].jacobian_programs {
+            jacobian.program = poisoned_bytecode_program();
+        }
+
+        let mut device = native_test_device(model);
+
+        let currents = device
+            .try_evaluate()
+            .expect("native evaluation must ignore poisoned stamp bytecode");
+        assert_eq!(currents, vec![1.0]);
+
+        let jacobians = device
+            .try_compute_jacobian()
+            .expect("native Jacobian evaluation must ignore poisoned bytecode");
+        assert!(
+            !jacobians.is_empty(),
+            "fixture should still expose native Jacobian entries"
+        );
+        assert!(
+            jacobians
+                .iter()
+                .all(|entry| entry.value.abs().to_bits() == 2.0_f64.to_bits()),
+            "native test Jacobian stubs should supply magnitude 2.0, got {jacobians:?}"
+        );
     }
 
     #[test]
