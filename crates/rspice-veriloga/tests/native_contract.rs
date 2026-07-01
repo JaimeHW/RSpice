@@ -1751,6 +1751,36 @@ endmodule
 
 #[cfg(target_arch = "x86_64")]
 #[test]
+fn native_device_with_canonical_ir_stamps_reactive_ddt_capacitance_without_fallback() {
+    let source = r#"
+`include "disciplines.vams"
+module native_canonical_reactive_cap(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1.0e-12;
+    analog I(p, n) <+ ddt(c * V(p, n));
+endmodule
+"#;
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler.compile(source).expect("compile bytecode model");
+    let artifact = compiler
+        .compile_canonical_ir(source)
+        .expect("compile canonical IR");
+    let mut device =
+        VerilogADevice::try_new_with_canonical_ir("CREACTCANON1", model, &artifact, &[1, 0])
+            .expect("canonical reactive capacitance uses native JIT path");
+    assert!(device.is_using_native());
+
+    let matrix = stamp_reactive_device(&mut device, &[2.0]);
+
+    assert!(
+        (matrix.get(&(0, 0)).copied().unwrap_or_default() - 1.0e-12).abs() < 1e-24,
+        "matrix: {matrix:?}"
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+#[test]
 fn native_device_with_canonical_ir_executes_idt_current_without_fallback() {
     let source = r#"
 `include "disciplines.vams"

@@ -19,8 +19,8 @@ use super::model::{
 use super::runtime::ExecutableMemory;
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
-    CanonicalIrArtifact, EquationId, ExprId, HirAnalogOperator, HirExprKind, HirExpression,
-    HirLaplaceKind, HirZiKind, MirEquationKind, MirModel, NodeId, SourceSpanRef,
+    CanonicalIrArtifact, EquationId, ExprId, HirAnalogOperator, HirExprKind, HirExprRef,
+    HirExpression, HirLaplaceKind, HirZiKind, MirEquationKind, MirModel, NodeId, SourceSpanRef,
 };
 use crate::codegen::{
     AssignmentStep, BytecodeProgram, ColumnAxis, CompiledModel, CompiledNoiseSource, JacobianEntry,
@@ -209,10 +209,11 @@ fn compile_model_inner(
         let mut stamp_reactive_jacobian_branch_unknown_dependencies =
             Vec::with_capacity(stamp.reactive_jacobians.len());
         for reactive_jacobian in &stamp.reactive_jacobians {
-            let program = NativeProgram::from_bytecode(
-                model.name.clone(),
-                EntryKind::ReactiveJacobian,
-                &reactive_jacobian.program,
+            let program = lower_reactive_jacobian_program(
+                model,
+                canonical_mir,
+                stamp_index,
+                reactive_jacobian,
                 base_limits,
             )?;
             stamp_reactive_jacobian_current_dependencies
@@ -431,6 +432,41 @@ fn lower_jacobian_program(
     )
 }
 
+fn lower_reactive_jacobian_program(
+    model: &CompiledModel,
+    canonical_mir: Option<&MirModel>,
+    stamp_index: usize,
+    reactive_jacobian: &JacobianEntry,
+    limits: NativeLoweringLimits<'_>,
+) -> JitResult<NativeProgram> {
+    if let Some(mir) = canonical_mir {
+        let equation_id = canonical_equation_id(model, stamp_index)?;
+        let axis = canonical_derivative_axis_for_column(model, mir, &reactive_jacobian.col_axis)?;
+        let reactive_mir = canonical_reactive_mir(model, mir, equation_id)?;
+        let table_lookup_slots = canonical_table_lookup_slots_for_equation(
+            model.name.clone(),
+            &reactive_mir,
+            equation_id,
+            &reactive_jacobian.program,
+        )?;
+        return NativeProgram::from_mir_derivative(
+            model.name.clone(),
+            EntryKind::ReactiveJacobian,
+            &reactive_mir,
+            equation_id,
+            axis,
+            limits.with_canonical_table_lookup_slots(&table_lookup_slots),
+        );
+    }
+
+    NativeProgram::from_bytecode(
+        model.name.clone(),
+        EntryKind::ReactiveJacobian,
+        &reactive_jacobian.program,
+        limits,
+    )
+}
+
 fn canonical_equation_id(model: &CompiledModel, stamp_index: usize) -> JitResult<EquationId> {
     u32::try_from(stamp_index)
         .map(EquationId::new)
@@ -438,6 +474,394 @@ fn canonical_equation_id(model: &CompiledModel, stamp_index: usize) -> JitResult
             model: model.name.clone(),
             detail: format!("stamp index {stamp_index} exceeds canonical equation id range").into(),
         })
+}
+
+fn canonical_reactive_mir(
+    model: &CompiledModel,
+    mir: &MirModel,
+    equation_id: EquationId,
+) -> JitResult<MirModel> {
+    let equation_index = usize::from(equation_id);
+    let equation = mir
+        .equations
+        .get(equation_index)
+        .filter(|equation| equation.id == equation_id)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!("canonical equation {equation_id} is outside equation arena").into(),
+        })?;
+    let mut reactive_mir = mir.clone();
+    let root =
+        canonical_extract_reactive_charge(model, &mut reactive_mir, equation.expression.id)?
+            .ok_or_else(|| JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "compiled reactive Jacobian for stamp {equation_index} has no canonical ddt charge expression"
+                )
+                .into(),
+            })?;
+    let root_ref = canonical_expr_ref(model, &reactive_mir, root)?;
+    reactive_mir.equations[equation_index].expression = root_ref;
+    Ok(reactive_mir)
+}
+
+fn canonical_is_ddt_call(name: &str) -> bool {
+    name.strip_prefix('$')
+        .unwrap_or(name)
+        .eq_ignore_ascii_case("ddt")
+}
+
+fn canonical_extract_reactive_charge(
+    model: &CompiledModel,
+    mir: &mut MirModel,
+    expr_id: ExprId,
+) -> JitResult<Option<ExprId>> {
+    let expression = canonical_expression(model, mir, expr_id)?.clone();
+    match expression.kind {
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Ddt { expr, .. },
+        } => Ok(Some(expr)),
+        HirExprKind::Call { name, args } if canonical_is_ddt_call(name.as_str()) => {
+            match args.as_slice() {
+                [expr] => Ok(Some(*expr)),
+                _ => Err(JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical ddt call {expr_id} has {} operands, expected 1",
+                        args.len()
+                    )
+                    .into(),
+                }),
+            }
+        }
+        HirExprKind::Binary { op, left, right } if op == "Add" || op == "Sub" => {
+            let left_charge = canonical_extract_reactive_charge(model, mir, left)?;
+            let right_charge = canonical_extract_reactive_charge(model, mir, right)?;
+            if left_charge.is_none() && right_charge.is_none() {
+                return Ok(None);
+            }
+            let zero = append_canonical_number(mir, 0.0, "0.0", expression.span);
+            let left = left_charge.unwrap_or(zero);
+            let right = right_charge.unwrap_or(zero);
+            Ok(Some(append_canonical_binary(
+                mir,
+                if op == "Add" { "Add" } else { "Sub" },
+                left,
+                right,
+                expression.span,
+            )))
+        }
+        HirExprKind::Binary { op, left, right } if op == "Mul" => {
+            let left_has_ddt = canonical_expr_contains_ddt(model, mir, left)?;
+            let right_has_ddt = canonical_expr_contains_ddt(model, mir, right)?;
+            match (left_has_ddt, right_has_ddt) {
+                (false, false) => Ok(None),
+                (false, true) => {
+                    let charge = canonical_extract_reactive_charge(model, mir, right)?;
+                    Ok(charge
+                        .map(|charge| append_canonical_binary(mir, "Mul", left, charge, expression.span)))
+                }
+                (true, false) => {
+                    let charge = canonical_extract_reactive_charge(model, mir, left)?;
+                    Ok(charge
+                        .map(|charge| append_canonical_binary(mir, "Mul", charge, right, expression.span)))
+                }
+                (true, true) => Err(JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical equation with reactive Jacobian places ddt on both sides of product {expr_id}"
+                    )
+                    .into(),
+                }),
+            }
+        }
+        HirExprKind::Binary { op, left, right } if op == "Div" => {
+            if canonical_expr_contains_ddt(model, mir, right)? {
+                return Err(JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical equation with reactive Jacobian places ddt in divisor {expr_id}"
+                    )
+                    .into(),
+                });
+            }
+            let charge = canonical_extract_reactive_charge(model, mir, left)?;
+            Ok(charge
+                .map(|charge| append_canonical_binary(mir, "Div", charge, right, expression.span)))
+        }
+        HirExprKind::Unary { op, operand } if op == "Neg" || op == "Pos" => {
+            let charge = canonical_extract_reactive_charge(model, mir, operand)?;
+            Ok(charge.map(|charge| {
+                append_canonical_expr(
+                    mir,
+                    HirExprKind::Unary {
+                        op: op.clone(),
+                        operand: charge,
+                    },
+                    expression.span,
+                )
+            }))
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            let then_charge = canonical_extract_reactive_charge(model, mir, then_expr)?;
+            let else_charge = canonical_extract_reactive_charge(model, mir, else_expr)?;
+            if then_charge.is_none() && else_charge.is_none() {
+                return Ok(None);
+            }
+            let zero = append_canonical_number(mir, 0.0, "0.0", expression.span);
+            Ok(Some(append_canonical_expr(
+                mir,
+                HirExprKind::Conditional {
+                    condition,
+                    then_expr: then_charge.unwrap_or(zero),
+                    else_expr: else_charge.unwrap_or(zero),
+                },
+                expression.span,
+            )))
+        }
+        _ => {
+            if canonical_expr_contains_ddt(model, mir, expr_id)? {
+                return Err(JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical equation with reactive Jacobian contains ddt in unsupported expression {}",
+                        canonical_expr_kind_name(&expression.kind)
+                    )
+                    .into(),
+                });
+            }
+            Ok(None)
+        }
+    }
+}
+
+fn canonical_expr_contains_ddt(
+    model: &CompiledModel,
+    mir: &MirModel,
+    expr_id: ExprId,
+) -> JitResult<bool> {
+    let expression = canonical_expression(model, mir, expr_id)?;
+    match &expression.kind {
+        HirExprKind::AnalogOperator {
+            op: HirAnalogOperator::Ddt { .. },
+        } => Ok(true),
+        HirExprKind::Call { name, .. } if canonical_is_ddt_call(name.as_str()) => Ok(true),
+        HirExprKind::Number { .. }
+        | HirExprKind::StringLiteral { .. }
+        | HirExprKind::Identifier { .. }
+        | HirExprKind::BranchAccess { .. }
+        | HirExprKind::NamedBranchAccess { .. } => Ok(false),
+        HirExprKind::SystemFunction { args, .. }
+        | HirExprKind::Call { args, .. }
+        | HirExprKind::ArrayLiteral { elements: args }
+        | HirExprKind::NoiseSource { operands: args, .. } => {
+            canonical_expr_list_contains_ddt(model, mir, args)
+        }
+        HirExprKind::Unary { operand, .. } | HirExprKind::ArrayAccess { index: operand, .. } => {
+            canonical_expr_contains_ddt(model, mir, *operand)
+        }
+        HirExprKind::Binary { left, right, .. } => {
+            Ok(canonical_expr_contains_ddt(model, mir, *left)?
+                || canonical_expr_contains_ddt(model, mir, *right)?)
+        }
+        HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => Ok(canonical_expr_contains_ddt(model, mir, *condition)?
+            || canonical_expr_contains_ddt(model, mir, *then_expr)?
+            || canonical_expr_contains_ddt(model, mir, *else_expr)?),
+        HirExprKind::AnalogOperator { op } => {
+            canonical_analog_operator_contains_ddt(model, mir, op)
+        }
+        HirExprKind::Laplace { expr, kind } => {
+            if canonical_expr_contains_ddt(model, mir, *expr)? {
+                return Ok(true);
+            }
+            canonical_laplace_kind_contains_ddt(model, mir, kind)
+        }
+        HirExprKind::Zi { expr, kind } => {
+            if canonical_expr_contains_ddt(model, mir, *expr)? {
+                return Ok(true);
+            }
+            canonical_zi_kind_contains_ddt(model, mir, kind)
+        }
+    }
+}
+
+fn canonical_expr_list_contains_ddt(
+    model: &CompiledModel,
+    mir: &MirModel,
+    exprs: &[ExprId],
+) -> JitResult<bool> {
+    for expr in exprs {
+        if canonical_expr_contains_ddt(model, mir, *expr)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn canonical_analog_operator_contains_ddt(
+    model: &CompiledModel,
+    mir: &MirModel,
+    op: &HirAnalogOperator,
+) -> JitResult<bool> {
+    match op {
+        HirAnalogOperator::Ddt { .. } => Ok(true),
+        HirAnalogOperator::Idt {
+            expr,
+            ic,
+            assert,
+            abstol,
+        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
+            || canonical_optional_expr_contains_ddt(model, mir, *ic)?
+            || canonical_optional_expr_contains_ddt(model, mir, *assert)?
+            || canonical_optional_expr_contains_ddt(model, mir, *abstol)?),
+        HirAnalogOperator::IdtMod {
+            expr,
+            ic,
+            modulus,
+            offset,
+            abstol,
+        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
+            || canonical_optional_expr_contains_ddt(model, mir, *ic)?
+            || canonical_optional_expr_contains_ddt(model, mir, *modulus)?
+            || canonical_optional_expr_contains_ddt(model, mir, *offset)?
+            || canonical_optional_expr_contains_ddt(model, mir, *abstol)?),
+        HirAnalogOperator::Ddx { expr, probe } => {
+            Ok(canonical_expr_contains_ddt(model, mir, *expr)?
+                || canonical_expr_contains_ddt(model, mir, *probe)?)
+        }
+        HirAnalogOperator::Limexp { expr } | HirAnalogOperator::LastCrossing { expr, .. } => {
+            canonical_expr_contains_ddt(model, mir, *expr)
+        }
+        HirAnalogOperator::Absdelay {
+            expr,
+            delay,
+            max_delay,
+        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
+            || canonical_expr_contains_ddt(model, mir, *delay)?
+            || canonical_optional_expr_contains_ddt(model, mir, *max_delay)?),
+        HirAnalogOperator::Transition {
+            expr,
+            delay,
+            rise,
+            fall,
+            tolerance,
+        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
+            || canonical_optional_expr_contains_ddt(model, mir, *delay)?
+            || canonical_optional_expr_contains_ddt(model, mir, *rise)?
+            || canonical_optional_expr_contains_ddt(model, mir, *fall)?
+            || canonical_optional_expr_contains_ddt(model, mir, *tolerance)?),
+        HirAnalogOperator::Slew {
+            expr,
+            max_rise,
+            max_fall,
+        } => Ok(canonical_expr_contains_ddt(model, mir, *expr)?
+            || canonical_optional_expr_contains_ddt(model, mir, *max_rise)?
+            || canonical_optional_expr_contains_ddt(model, mir, *max_fall)?),
+    }
+}
+
+fn canonical_laplace_kind_contains_ddt(
+    model: &CompiledModel,
+    mir: &MirModel,
+    kind: &HirLaplaceKind,
+) -> JitResult<bool> {
+    match kind {
+        HirLaplaceKind::ZeroPole { zeros, poles } => {
+            Ok(canonical_expr_list_contains_ddt(model, mir, zeros)?
+                || canonical_expr_list_contains_ddt(model, mir, poles)?)
+        }
+        HirLaplaceKind::ZeroDenominator { zeros, denominator } => {
+            Ok(canonical_expr_list_contains_ddt(model, mir, zeros)?
+                || canonical_expr_list_contains_ddt(model, mir, denominator)?)
+        }
+        HirLaplaceKind::NumeratorPole { numerator, poles } => {
+            Ok(canonical_expr_list_contains_ddt(model, mir, numerator)?
+                || canonical_expr_list_contains_ddt(model, mir, poles)?)
+        }
+        HirLaplaceKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => Ok(canonical_expr_list_contains_ddt(model, mir, numerator)?
+            || canonical_expr_list_contains_ddt(model, mir, denominator)?),
+    }
+}
+
+fn canonical_zi_kind_contains_ddt(
+    model: &CompiledModel,
+    mir: &MirModel,
+    kind: &HirZiKind,
+) -> JitResult<bool> {
+    match kind {
+        HirZiKind::ZeroPole { zeros, poles } => {
+            Ok(canonical_expr_list_contains_ddt(model, mir, zeros)?
+                || canonical_expr_list_contains_ddt(model, mir, poles)?)
+        }
+        HirZiKind::ZeroDenominator { zeros, denominator } => {
+            Ok(canonical_expr_list_contains_ddt(model, mir, zeros)?
+                || canonical_expr_list_contains_ddt(model, mir, denominator)?)
+        }
+        HirZiKind::NumeratorPole { numerator, poles } => {
+            Ok(canonical_expr_list_contains_ddt(model, mir, numerator)?
+                || canonical_expr_list_contains_ddt(model, mir, poles)?)
+        }
+        HirZiKind::NumeratorDenominator {
+            numerator,
+            denominator,
+        } => Ok(canonical_expr_list_contains_ddt(model, mir, numerator)?
+            || canonical_expr_list_contains_ddt(model, mir, denominator)?),
+    }
+}
+
+fn canonical_optional_expr_contains_ddt(
+    model: &CompiledModel,
+    mir: &MirModel,
+    expr: Option<ExprId>,
+) -> JitResult<bool> {
+    match expr {
+        Some(expr) => canonical_expr_contains_ddt(model, mir, expr),
+        None => Ok(false),
+    }
+}
+
+fn canonical_expr_ref(
+    model: &CompiledModel,
+    mir: &MirModel,
+    expr_id: ExprId,
+) -> JitResult<HirExprRef> {
+    let expression = canonical_expression(model, mir, expr_id)?;
+    Ok(HirExprRef {
+        id: expr_id,
+        kind: canonical_expr_ref_kind(&expression.kind).into(),
+        span: expression.span,
+    })
+}
+
+fn canonical_expr_ref_kind(kind: &HirExprKind) -> &'static str {
+    match kind {
+        HirExprKind::Number { .. } => "number",
+        HirExprKind::StringLiteral { .. } => "string",
+        HirExprKind::Identifier { .. } => "identifier",
+        HirExprKind::SystemFunction { .. } => "system_function",
+        HirExprKind::Binary { .. } => "binary",
+        HirExprKind::Unary { .. } => "unary",
+        HirExprKind::Conditional { .. } => "conditional",
+        HirExprKind::Call { .. } => "call",
+        HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => "branch_access",
+        HirExprKind::ArrayAccess { .. } => "array_access",
+        HirExprKind::ArrayLiteral { .. } => "array_literal",
+        HirExprKind::AnalogOperator { .. } => "analog_operator",
+        HirExprKind::Laplace { .. } => "laplace",
+        HirExprKind::Zi { .. } => "zi",
+        HirExprKind::NoiseSource { .. } => "noise_source",
+    }
 }
 
 fn canonical_derivative_axis_for_column(
@@ -3272,6 +3696,63 @@ endmodule
     }
 
     #[test]
+    fn compile_model_with_canonical_ir_lowers_reactive_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_reactive_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real c = 2.5e-12;
+  analog I(p, n) <+ ddt(c * V(p, n));
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model.stamp_programs[0]
+                .reactive_jacobians
+                .iter()
+                .any(|jacobian| matches!(jacobian.col_axis, ColumnAxis::Node(0))),
+            "fixture must include positive-node reactive Jacobian"
+        );
+        assert!(
+            model.stamp_programs[0]
+                .reactive_jacobians
+                .iter()
+                .any(|jacobian| matches!(jacobian.col_axis, ColumnAxis::Node(1))),
+            "fixture must include negative-node reactive Jacobian"
+        );
+        poison_reactive_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical reactive Jacobians compile to native x64");
+        let ctx = eval_context(&[2.5e-12], &[0.8, 0.0]);
+
+        assert_reactive_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            std::ptr::null(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            2.5e-12,
+            "canonical_reactive_jacobian dQ/dp",
+        );
+        assert_reactive_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            std::ptr::null(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -2.5e-12,
+            "canonical_reactive_jacobian dQ/dn",
+        );
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_lowers_branch_jacobians_from_mir() {
         for (name, body, expected) in [
             ("forward", "V(p, n) <+ r * I(p, n);", 2.0_f64),
@@ -4090,6 +4571,16 @@ endmodule
         }
     }
 
+    fn poison_reactive_jacobian_bytecode(model: &mut CompiledModel, value: f64) {
+        for stamp in &mut model.stamp_programs {
+            for jacobian in &mut stamp.reactive_jacobians {
+                jacobian.program = BytecodeProgram {
+                    instructions: vec![Instruction::PushConst(value)],
+                };
+            }
+        }
+    }
+
     fn assert_jacobian_axis_value(
         model: &CompiledModel,
         native: &NativeModel,
@@ -4109,6 +4600,28 @@ endmodule
         let actual = native
             .run_jacobian(stamp_index, entry_index, ctx, variables)
             .expect("Jacobian entry");
+        assert_close(&label, expected, actual);
+    }
+
+    fn assert_reactive_jacobian_axis_value(
+        model: &CompiledModel,
+        native: &NativeModel,
+        ctx: &EvalContext,
+        variables: *const f64,
+        stamp_index: usize,
+        matches_axis: impl Fn(&ColumnAxis) -> bool,
+        expected: f64,
+        label: impl std::fmt::Display,
+    ) {
+        let label = label.to_string();
+        let entry_index = model.stamp_programs[stamp_index]
+            .reactive_jacobians
+            .iter()
+            .position(|jacobian| matches_axis(&jacobian.col_axis))
+            .unwrap_or_else(|| panic!("{label}: missing matching reactive Jacobian axis"));
+        let actual = native
+            .run_reactive_jacobian(stamp_index, entry_index, ctx, variables)
+            .expect("reactive Jacobian entry");
         assert_close(&label, expected, actual);
     }
 
