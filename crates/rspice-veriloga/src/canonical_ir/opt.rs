@@ -80,6 +80,8 @@ pub enum OptUnaryOp {
     Tanh,
     Atan,
     Asinh,
+    Floor,
+    Ceil,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1032,6 +1034,8 @@ impl<'a> ScalarGraphBuilder<'a> {
                         OptUnaryOp::Tanh => Some(value.tanh()),
                         OptUnaryOp::Atan => Some(value.atan()),
                         OptUnaryOp::Asinh => Some(value.asinh()),
+                        OptUnaryOp::Floor => Some(value.floor()),
+                        OptUnaryOp::Ceil => Some(value.ceil()),
                         OptUnaryOp::Not => None,
                     };
                     if let Some(folded) = folded {
@@ -1467,6 +1471,8 @@ impl<'a> ScalarGraphBuilder<'a> {
                     self.push_binary_value(OptBinaryOp::Div, input_derivative, denominator)
                 }
                 OptUnaryOp::Abs
+                | OptUnaryOp::Floor
+                | OptUnaryOp::Ceil
                 | OptUnaryOp::Not
                 | OptUnaryOp::LimExpDerivative
                 | OptUnaryOp::LimitedExpDerivative => continue,
@@ -2063,6 +2069,8 @@ impl<'a> ScalarGraphBuilder<'a> {
                 "tanh" => OptUnaryOp::Tanh,
                 "atan" => OptUnaryOp::Atan,
                 "asinh" => OptUnaryOp::Asinh,
+                "floor" => OptUnaryOp::Floor,
+                "ceil" => OptUnaryOp::Ceil,
                 _ => return None,
             };
             return self.lower_intrinsic_unary(op, args[0]);

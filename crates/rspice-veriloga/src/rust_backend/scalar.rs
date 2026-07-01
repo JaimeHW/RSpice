@@ -2555,6 +2555,8 @@ fn emit_unary_expr(
         OptUnaryOp::Tanh => format!("{}.tanh()", f64_method_receiver(&input)),
         OptUnaryOp::Atan => format!("{}.atan()", f64_method_receiver(&input)),
         OptUnaryOp::Asinh => format!("{}.asinh()", f64_method_receiver(&input)),
+        OptUnaryOp::Floor => format!("{}.floor()", f64_method_receiver(&input)),
+        OptUnaryOp::Ceil => format!("{}.ceil()", f64_method_receiver(&input)),
     }
 }
 

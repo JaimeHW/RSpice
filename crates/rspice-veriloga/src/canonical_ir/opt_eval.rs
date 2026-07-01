@@ -281,6 +281,8 @@ impl<'a> OptEvaluator<'a> {
             OptUnaryOp::Tanh => Ok(OptEvalValue::Real(self.real_value(input)?.tanh())),
             OptUnaryOp::Atan => Ok(OptEvalValue::Real(self.real_value(input)?.atan())),
             OptUnaryOp::Asinh => Ok(OptEvalValue::Real(self.real_value(input)?.asinh())),
+            OptUnaryOp::Floor => Ok(OptEvalValue::Real(self.real_value(input)?.floor())),
+            OptUnaryOp::Ceil => Ok(OptEvalValue::Real(self.real_value(input)?.ceil())),
         })();
 
         result.map_err(|error| remap_type_mismatch(owner, error))
