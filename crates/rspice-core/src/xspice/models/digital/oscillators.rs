@@ -1,7 +1,10 @@
 use super::*;
 use crate::Value;
 use crate::xspice::{CmError, EvaluationPhase, PortDirection};
-use std::sync::{Arc, OnceLock};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
 
 #[derive(Debug, Default)]
 pub struct DigitalOscillator;
@@ -19,6 +22,8 @@ const FACTOR2: Value = 0.8;
 const TIME_EPSILON: Value = 1.0e-18;
 const NCO_BASE_FREQUENCY: Value = 8.17578;
 const NCO_SEMITONE_RATIO: Value = 1.059_463_094;
+const CONTROL_TABLE_UNSET_UPPER_INDEX: usize = usize::MAX;
+const CONTROL_TABLE_CURSOR_LINEAR_STEPS: usize = 8;
 
 const OSC_LAST_TIME: usize = 0;
 const OSC_LAST_STATE: usize = 0;
@@ -30,6 +35,12 @@ const NCO_OUTPUT_STATE: usize = 0;
 struct ControlTablePoint {
     control: Value,
     value: Value,
+}
+
+#[derive(Debug)]
+struct ControlTableData {
+    points: Vec<ControlTablePoint>,
+    last_upper_index: AtomicUsize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +55,7 @@ struct ControlTableSignature {
 #[derive(Debug, Clone)]
 struct ControlTableResource {
     signature: ControlTableSignature,
-    result: CmResult<Option<Arc<Vec<ControlTablePoint>>>>,
+    result: CmResult<Option<Arc<ControlTableData>>>,
 }
 
 fn digital_oscillator_ports() -> &'static [PortSpec] {
@@ -197,7 +208,7 @@ fn validate_table(
     control_name: &'static str,
     value_name: &'static str,
     sanitize_value: fn(Value) -> Value,
-) -> CmResult<Arc<Vec<ControlTablePoint>>> {
+) -> CmResult<Arc<ControlTableData>> {
     validate_table_optional(ctx, model, control_name, value_name, sanitize_value)?.ok_or_else(
         || {
             oscillator_error(
@@ -214,7 +225,7 @@ fn validate_table_optional(
     control_name: &'static str,
     value_name: &'static str,
     sanitize_value: fn(Value) -> Value,
-) -> CmResult<Option<Arc<Vec<ControlTablePoint>>>> {
+) -> CmResult<Option<Arc<ControlTableData>>> {
     if let Some(resource) = ctx.resource::<ControlTableResource>(CONTROL_TABLE_RESOURCE)
         && control_table_signature_matches(
             ctx,
@@ -247,7 +258,7 @@ fn validate_table_optional_uncached(
     control_name: &str,
     value_name: &str,
     sanitize_value: fn(Value) -> Value,
-) -> CmResult<Option<Vec<ControlTablePoint>>> {
+) -> CmResult<Option<ControlTableData>> {
     let controls = ctx
         .real_vector_param(control_name)
         .ok_or_else(|| CmError::MissingParameter(control_name.to_string()))?;
@@ -287,8 +298,8 @@ fn validate_table_optional_uncached(
         }
     }
 
-    Ok(Some(
-        controls
+    Ok(Some(ControlTableData {
+        points: controls
             .iter()
             .zip(values)
             .map(|(&control, &value)| ControlTablePoint {
@@ -296,23 +307,89 @@ fn validate_table_optional_uncached(
                 value: sanitize_value(value),
             })
             .collect(),
-    ))
+        last_upper_index: AtomicUsize::new(CONTROL_TABLE_UNSET_UPPER_INDEX),
+    }))
 }
 
-fn interpolate_table(table: &[ControlTablePoint], control: Value) -> Value {
-    let right_index = table.partition_point(|point| point.control <= control);
-    let left = if right_index == 0 {
-        0
-    } else if right_index == table.len() {
-        table.len() - 2
+fn control_table_upper_index_binary(points: &[ControlTablePoint], control: Value) -> usize {
+    let right_index = points.partition_point(|point| point.control <= control);
+    if right_index == 0 {
+        1
+    } else if right_index >= points.len() {
+        points.len() - 1
     } else {
-        right_index - 1
-    };
-    let right = left + 1;
-    let left_control = table[left].control;
-    let right_control = table[right].control;
-    let left_value = table[left].value;
-    let right_value = table[right].value;
+        right_index
+    }
+}
+
+fn control_table_interval_contains(
+    points: &[ControlTablePoint],
+    upper_index: usize,
+    control: Value,
+) -> bool {
+    debug_assert!(upper_index > 0);
+    debug_assert!(upper_index < points.len());
+    if upper_index == 1 && control < points[0].control {
+        return true;
+    }
+    if upper_index == points.len() - 1 && control >= points[upper_index].control {
+        return true;
+    }
+    points[upper_index - 1].control <= control && control < points[upper_index].control
+}
+
+fn control_table_upper_index_with_cursor(table: &ControlTableData, control: Value) -> usize {
+    let points = table.points.as_slice();
+    let point_count = points.len();
+    let mut upper_index = table.last_upper_index.load(Ordering::Relaxed);
+
+    if upper_index == CONTROL_TABLE_UNSET_UPPER_INDEX
+        || upper_index == 0
+        || upper_index >= point_count
+    {
+        upper_index = control_table_upper_index_binary(points, control);
+        table.last_upper_index.store(upper_index, Ordering::Relaxed);
+        return upper_index;
+    }
+
+    if control_table_interval_contains(points, upper_index, control) {
+        return upper_index;
+    }
+
+    let mut steps = 0;
+    if control >= points[upper_index].control {
+        while upper_index + 1 < point_count
+            && control >= points[upper_index].control
+            && steps < CONTROL_TABLE_CURSOR_LINEAR_STEPS
+        {
+            upper_index += 1;
+            steps += 1;
+        }
+    } else {
+        while upper_index > 1
+            && control < points[upper_index - 1].control
+            && steps < CONTROL_TABLE_CURSOR_LINEAR_STEPS
+        {
+            upper_index -= 1;
+            steps += 1;
+        }
+    }
+
+    if !control_table_interval_contains(points, upper_index, control) {
+        upper_index = control_table_upper_index_binary(points, control);
+    }
+    table.last_upper_index.store(upper_index, Ordering::Relaxed);
+    upper_index
+}
+
+fn interpolate_table(table: &ControlTableData, control: Value) -> Value {
+    let points = table.points.as_slice();
+    let right = control_table_upper_index_with_cursor(table, control);
+    let left = right - 1;
+    let left_control = points[left].control;
+    let right_control = points[right].control;
+    let left_value = points[left].value;
+    let right_value = points[right].value;
     let span = right_control - left_control;
     if span.abs() <= Value::EPSILON {
         return left_value;
@@ -320,7 +397,7 @@ fn interpolate_table(table: &[ControlTablePoint], control: Value) -> Value {
     left_value + (control - left_control) * ((right_value - left_value) / span)
 }
 
-fn d_osc_period_from_table(table: &[ControlTablePoint], control: Value) -> Value {
+fn d_osc_period_from_table(table: &ControlTableData, control: Value) -> Value {
     1.0 / interpolate_table(table, control)
 }
 
@@ -336,7 +413,7 @@ fn d_osc_period(ctx: &mut CmContext) -> CmResult<Value> {
     Ok(d_osc_period_from_table(&table, ctx.input("cntl_in")))
 }
 
-fn d_pwm_duty_cycle_from_table(table: &[ControlTablePoint], control: Value) -> Value {
+fn d_pwm_duty_cycle_from_table(table: &ControlTableData, control: Value) -> Value {
     sanitize_d_pwm_duty_cycle(interpolate_table(table, control))
 }
 
@@ -809,7 +886,7 @@ mod tests {
             Arc::ptr_eq(&first, &second),
             "unchanged digital oscillator table parameters should reuse the parsed table"
         );
-        assert_eq!(first[1].value, 2.0e6);
+        assert_eq!(first.points[1].value, 2.0e6);
 
         ctx.set_real_vector_param("unrelated", vec![1.0, 2.0]);
         let after_unrelated = validate_table(
@@ -838,7 +915,66 @@ mod tests {
             !Arc::ptr_eq(&first, &updated),
             "changed digital oscillator table parameters must refresh the parsed table"
         );
-        assert_eq!(updated[1].value, 3.0e6);
+        assert_eq!(updated.points[1].value, 3.0e6);
+    }
+
+    #[test]
+    fn digital_oscillator_table_lookup_reuses_monotonic_cursor() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0, 2.0, 3.0]);
+        ctx.set_real_vector_param("freq_array", vec![10.0, 20.0, 40.0, 80.0]);
+
+        let table = validate_table(
+            &mut ctx,
+            "d_osc",
+            "cntl_array",
+            "freq_array",
+            sanitize_d_osc_frequency,
+        )
+        .expect("control table loads");
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            CONTROL_TABLE_UNSET_UPPER_INDEX
+        );
+
+        assert_eq!(interpolate_table(&table, 0.5), 15.0);
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 1);
+        assert_eq!(interpolate_table(&table, 1.5), 30.0);
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 2);
+        assert_eq!(interpolate_table(&table, 1.0), 20.0);
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            2,
+            "exact breakpoints should keep ngspice's first segment above the control point"
+        );
+    }
+
+    #[test]
+    fn digital_oscillator_table_lookup_falls_back_for_large_control_jumps() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("cntl_array", (0..32).map(Value::from).collect());
+        ctx.set_real_vector_param(
+            "freq_array",
+            (0..32).map(|value| value as Value + 1.0).collect(),
+        );
+
+        let table = validate_table(
+            &mut ctx,
+            "d_osc",
+            "cntl_array",
+            "freq_array",
+            sanitize_d_osc_frequency,
+        )
+        .expect("control table loads");
+
+        assert_eq!(interpolate_table(&table, 2.5), 3.5);
+        assert_eq!(table.last_upper_index.load(Ordering::Relaxed), 3);
+        assert_eq!(interpolate_table(&table, 20.5), 21.5);
+        assert_eq!(
+            table.last_upper_index.load(Ordering::Relaxed),
+            21,
+            "large non-local control jumps should land on the binary-search bracket"
+        );
     }
 
     fn nco_context_for_bits(bits: [DigitalValue; 7]) -> CmContext {
