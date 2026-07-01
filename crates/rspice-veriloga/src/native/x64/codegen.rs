@@ -65,6 +65,7 @@ const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
 const DYNAMIC_READ_FRAME_BYTES: i32 = 16;
 const ROUND_TEMP_FRAME_BYTES: i32 = 16;
 const STATEFUL_SCRATCH_FRAME_BYTES: i32 = 16;
+const CALLEE_SAVED_XMM_BYTES: i32 = 16;
 #[cfg(test)]
 const CALL_RESULT_SLOT: usize = 6;
 #[cfg(windows)]
@@ -75,28 +76,46 @@ const LOCAL_SLOT_BYTES: i32 = 8;
 const LOCAL_FRAME_ALIGN_BYTES: i32 = 16;
 const INDEXED_ASSIGNMENT_SLOT_PTR_DISP: i32 = 0;
 const MAX_RUNTIME_LOOP_ITERATIONS: i32 = 100_000;
-const XMM_STACK: [Xmm; 6] = [
+#[cfg(windows)]
+const CALLER_SAVED_XMM_COUNT: usize = 6;
+#[cfg(not(windows))]
+const CALLER_SAVED_XMM_COUNT: usize = XMM_STACK.len();
+const XMM_STACK: [Xmm; 16] = [
     Xmm::Xmm0,
     Xmm::Xmm1,
     Xmm::Xmm2,
     Xmm::Xmm3,
     Xmm::Xmm4,
     Xmm::Xmm5,
+    Xmm::Xmm6,
+    Xmm::Xmm7,
+    Xmm::Xmm8,
+    Xmm::Xmm9,
+    Xmm::Xmm10,
+    Xmm::Xmm11,
+    Xmm::Xmm12,
+    Xmm::Xmm13,
+    Xmm::Xmm14,
+    Xmm::Xmm15,
 ];
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
     let needs_stateful_scratch = program_needs_stateful_stack_scratch(program);
-    let local_frame_bytes = if needs_stateful_scratch {
+    let local_slot_bytes = if needs_stateful_scratch {
         STATEFUL_SCRATCH_FRAME_BYTES
     } else {
         0
     };
+    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
+    let local_frame_bytes =
+        align_local_frame(local_slot_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
         value_program_needs_saved_entry_args(program),
         local_frame_bytes,
         None,
         needs_stateful_scratch.then_some(0),
+        callee_saved_xmm_count,
     );
     compiler.emit_program(program)?;
     compiler.finish_value_function()
@@ -108,17 +127,21 @@ pub(crate) fn compile_assignment_function(
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
     let needs_stateful_scratch = program_needs_stateful_stack_scratch(program);
-    let local_frame_bytes = if needs_stateful_scratch {
+    let local_slot_bytes = if needs_stateful_scratch {
         STATEFUL_SCRATCH_FRAME_BYTES
     } else {
         0
     };
+    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
+    let local_frame_bytes =
+        align_local_frame(local_slot_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
         program_uses_helper_calls(program),
         local_frame_bytes,
         None,
         needs_stateful_scratch.then_some(0),
+        callee_saved_xmm_count,
     );
     compiler.emit_program(program)?;
     compiler.finish_assignment_function(var_index)
@@ -152,6 +175,8 @@ pub(crate) fn compile_assignment_pass_function(
         .iter()
         .any(assignment_needs_stateful_stack_scratch);
     let uses_helper_calls = assignments.iter().any(assignment_uses_helper_calls);
+    let max_stack_depth = assignment_max_stack_depth(assignments);
+    let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(max_stack_depth);
     let indexed_slot_bytes = if has_indexed_assignment {
         LOCAL_SLOT_BYTES
     } else {
@@ -166,7 +191,10 @@ pub(crate) fn compile_assignment_pass_function(
         0
     };
     let local_frame_bytes = align_local_frame(
-        indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES + stateful_scratch_bytes,
+        indexed_slot_bytes
+            + loop_depth * LOCAL_SLOT_BYTES
+            + stateful_scratch_bytes
+            + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
     );
 
     let mut compiler = FunctionCompiler::new(
@@ -175,6 +203,7 @@ pub(crate) fn compile_assignment_pass_function(
         local_frame_bytes,
         loop_counter_base_disp,
         stateful_scratch_base_disp,
+        callee_saved_xmm_count,
     );
     for assignment in assignments {
         compiler.emit_assignment_step(assignment, 0)?;
@@ -193,6 +222,7 @@ struct FunctionCompiler {
     local_frame_bytes: i32,
     loop_counter_base_disp: Option<i32>,
     stateful_scratch_base_disp: Option<i32>,
+    callee_saved_xmm_count: usize,
     early_return_jumps: Vec<usize>,
 }
 
@@ -215,11 +245,13 @@ impl FunctionCompiler {
         local_frame_bytes: i32,
         loop_counter_base_disp: Option<i32>,
         stateful_scratch_base_disp: Option<i32>,
+        callee_saved_xmm_count: usize,
     ) -> Self {
         debug_assert_eq!(local_frame_bytes % 16, 0);
         if let Some(base_disp) = stateful_scratch_base_disp {
             debug_assert!(base_disp + STATEFUL_SCRATCH_FRAME_BYTES <= local_frame_bytes);
         }
+        debug_assert!(callee_saved_xmm_frame_bytes(callee_saved_xmm_count) <= local_frame_bytes);
         let mut compiler = Self {
             encoder: X64Encoder::new(),
             depth: 0,
@@ -230,6 +262,7 @@ impl FunctionCompiler {
             local_frame_bytes,
             loop_counter_base_disp,
             stateful_scratch_base_disp,
+            callee_saved_xmm_count,
             early_return_jumps: Vec::new(),
         };
         if compiler.has_stack_setup() {
@@ -436,9 +469,11 @@ impl FunctionCompiler {
         if self.local_frame_bytes > 0 {
             self.encoder.sub_rsp_imm32(self.local_frame_bytes);
         }
+        self.emit_callee_saved_xmm_stores();
     }
 
     fn emit_return(&mut self) {
+        self.emit_callee_saved_xmm_loads();
         if self.local_frame_bytes > 0 {
             self.encoder.add_rsp_imm32(self.local_frame_bytes);
         }
@@ -447,6 +482,30 @@ impl FunctionCompiler {
             self.encoder.pop_r64(Gpr::R12);
         }
         self.encoder.ret();
+    }
+
+    fn emit_callee_saved_xmm_stores(&mut self) {
+        for index in 0..self.callee_saved_xmm_count {
+            let register = callee_saved_xmm_register(index);
+            let disp = self.callee_saved_xmm_disp(index);
+            self.encoder
+                .movdqu_m128_base_disp32_xmm(Gpr::Rsp, disp, register);
+        }
+    }
+
+    fn emit_callee_saved_xmm_loads(&mut self) {
+        for index in (0..self.callee_saved_xmm_count).rev() {
+            let register = callee_saved_xmm_register(index);
+            let disp = self.callee_saved_xmm_disp(index);
+            self.encoder
+                .movdqu_xmm_m128_base_disp32(register, Gpr::Rsp, disp);
+        }
+    }
+
+    fn callee_saved_xmm_disp(&self, index: usize) -> i32 {
+        debug_assert!(index < self.callee_saved_xmm_count);
+        self.local_frame_bytes - callee_saved_xmm_frame_bytes(self.callee_saved_xmm_count)
+            + (index as i32 * CALLEE_SAVED_XMM_BYTES)
     }
 
     fn ctx_arg_reg(&self) -> Gpr {
@@ -3090,6 +3149,22 @@ fn assignment_needs_stateful_stack_scratch(assignment: &NativeAssignment) -> boo
     }
 }
 
+fn assignment_max_stack_depth(assignments: &[NativeAssignment]) -> usize {
+    assignments
+        .iter()
+        .map(|assignment| match assignment {
+            NativeAssignment::Direct { program, .. } => program.max_stack_depth(),
+            NativeAssignment::Indexed { index, value, .. } => {
+                index.max_stack_depth().max(value.max_stack_depth())
+            }
+            NativeAssignment::Loop { condition, body } => condition
+                .max_stack_depth()
+                .max(assignment_max_stack_depth(body)),
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 fn assignment_has_indexed(assignment: &NativeAssignment) -> bool {
     match assignment {
         NativeAssignment::Direct { .. } => false,
@@ -3115,6 +3190,20 @@ fn align_local_frame(bytes: i32) -> i32 {
     } else {
         ((bytes + LOCAL_FRAME_ALIGN_BYTES - 1) / LOCAL_FRAME_ALIGN_BYTES) * LOCAL_FRAME_ALIGN_BYTES
     }
+}
+
+fn callee_saved_xmm_count_for_depth(max_stack_depth: usize) -> usize {
+    max_stack_depth
+        .min(XMM_STACK.len())
+        .saturating_sub(CALLER_SAVED_XMM_COUNT)
+}
+
+fn callee_saved_xmm_frame_bytes(count: usize) -> i32 {
+    count as i32 * CALLEE_SAVED_XMM_BYTES
+}
+
+fn callee_saved_xmm_register(index: usize) -> Xmm {
+    XMM_STACK[CALLER_SAVED_XMM_COUNT + index]
 }
 
 fn unary_math_helper(op: UnaryMathOp) -> UnaryHelper {
@@ -3522,13 +3611,15 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        ABS_VALUE_MASK_HIGH, ABS_VALUE_MASK_LOW, BRANCH_CURRENTS_OFFSET, DYNAMIC_READ_FRAME_BYTES,
-        FunctionCompiler, Gpr, I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET,
-        K_BOLTZMANN, LITERAL_POOL_ALIGNMENT, NativeAssignment, PARAMS_OFFSET, Q_ELECTRON,
-        ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, VECTOR_LITERAL_ALIGNMENT,
-        VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls,
-        call_result_disp, compile_assignment_function, compile_assignment_pass_function,
-        compile_value_function, entry_ctx_arg_reg, entry_vars_arg_reg, rspice_exp,
+        ABS_VALUE_MASK_HIGH, ABS_VALUE_MASK_LOW, BRANCH_CURRENTS_OFFSET, ConditionCode,
+        ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
+        I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
+        LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
+        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, TableHelper, TimerHelper,
+        VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
+        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
+        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
+        entry_vars_arg_reg, rspice_exp,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -3545,7 +3636,7 @@ mod tests {
 
     #[test]
     fn literal_pool_reuses_identical_bit_patterns() {
-        let mut compiler = FunctionCompiler::new(false, false, 0, None, None);
+        let mut compiler = FunctionCompiler::new(false, false, 0, None, None, 0);
         compiler.encoder.ret();
         compiler.emit_literal_load(Xmm::Xmm0, 2.0);
         compiler.emit_literal_load(Xmm::Xmm1, 2.0);
@@ -3583,7 +3674,7 @@ mod tests {
 
     #[test]
     fn vector_literal_pool_reuses_abs_masks_and_aligns_to_16_bytes() {
-        let mut compiler = FunctionCompiler::new(false, false, 0, None, None);
+        let mut compiler = FunctionCompiler::new(false, false, 0, None, None, 0);
         compiler.encoder.ret();
         compiler.emit_abs_register(Xmm::Xmm0);
         compiler.emit_abs_register(Xmm::Xmm1);
@@ -3858,6 +3949,86 @@ mod tests {
     }
 
     #[test]
+    fn generated_helper_call_abi_sentinels_receive_mixed_arguments() {
+        let table = [
+            LookupTable::from_data(vec![0.0, 1.0], vec![2.0, 3.0]),
+            LookupTable::from_data(vec![0.0, 1.0], vec![4.0, 5.0]),
+        ];
+        ABI_EXPECTED_TABLE_PTR.store(table.as_ptr() as usize, std::sync::atomic::Ordering::SeqCst);
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.lookup_tables = table.as_ptr();
+        ctx.lookup_tables_len = table.len();
+        ctx.time = 12.0;
+        ctx.temperature = 315.0;
+        ctx.multiplicity = 3.0;
+
+        assert_f64_matches(
+            run_table_helper_sentinel(abi_sentinel_table_helper, &ctx),
+            101.0,
+            "table helper ABI sentinel",
+        );
+        assert_f64_matches(
+            run_context_filter_helper_sentinel(abi_sentinel_context_filter_helper, &ctx),
+            202.0,
+            "context filter helper ABI sentinel",
+        );
+        assert_f64_matches(
+            run_timer_helper_sentinel(abi_sentinel_timer_helper, &ctx),
+            303.0,
+            "timer helper ABI sentinel",
+        );
+        assert_f64_matches(
+            run_operand_context_filter_helper_sentinel(
+                abi_sentinel_operand_context_filter_helper,
+                &ctx,
+            ),
+            404.0,
+            "operand context filter helper ABI sentinel",
+        );
+    }
+
+    #[test]
+    fn generated_helper_call_abi_sentinels_enter_helpers_with_aligned_stack() {
+        let alignment_helper_memory = stack_alignment_helper_memory();
+        let helper_ptr = alignment_helper_memory
+            .ptr_at(0)
+            .expect("alignment helper entry point");
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.time = 12.0;
+        ctx.temperature = 315.0;
+        ctx.multiplicity = 3.0;
+
+        let table_helper: TableHelper = unsafe { std::mem::transmute(helper_ptr) };
+        assert_f64_matches(
+            run_table_helper_sentinel(table_helper, &ctx),
+            1.0,
+            "table helper stack alignment",
+        );
+
+        let context_filter_helper: ContextFilterHelper = unsafe { std::mem::transmute(helper_ptr) };
+        assert_f64_matches(
+            run_context_filter_helper_sentinel(context_filter_helper, &ctx),
+            1.0,
+            "context filter helper stack alignment",
+        );
+
+        let timer_helper: TimerHelper = unsafe { std::mem::transmute(helper_ptr) };
+        assert_f64_matches(
+            run_timer_helper_sentinel(timer_helper, &ctx),
+            1.0,
+            "timer helper stack alignment",
+        );
+
+        let operand_context_filter_helper: OperandContextFilterHelper =
+            unsafe { std::mem::transmute(helper_ptr) };
+        assert_f64_matches(
+            run_operand_context_filter_helper_sentinel(operand_context_filter_helper, &ctx),
+            1.0,
+            "operand context filter helper stack alignment",
+        );
+    }
+
+    #[test]
     fn generated_value_leaf_no_spill_unary_helper_omits_call_frame_base_register() {
         let program = native_program(
             EntryKind::StampValue,
@@ -3951,6 +4122,59 @@ mod tests {
         ctx.time = 3.0;
 
         assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 8.0_f64.to_bits());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn generated_value_leaf_preserves_win64_callee_saved_xmm_stack_slots() {
+        let prefix = variable_prefix(0, XMM_STACK.len());
+        let mut instructions = prefix.clone();
+        instructions.extend(add_reductions(prefix.len() - 1));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
+        assert_eq!(program.max_stack_depth(), XMM_STACK.len());
+
+        let bytes = compile_value_function(&program).expect("compile full-depth value function");
+        let callee_saved_count = super::callee_saved_xmm_count_for_depth(XMM_STACK.len());
+        let frame_bytes =
+            super::align_local_frame(super::callee_saved_xmm_frame_bytes(callee_saved_count));
+        assert!(
+            contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
+            "full-depth Win64 value leaf should reserve callee-saved XMM spill space"
+        );
+        assert!(
+            contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
+            "full-depth Win64 value leaf should release callee-saved XMM spill space"
+        );
+
+        for index in 0..callee_saved_count {
+            let register = super::callee_saved_xmm_register(index);
+            let disp = frame_bytes - super::callee_saved_xmm_frame_bytes(callee_saved_count)
+                + (index as i32 * super::CALLEE_SAVED_XMM_BYTES);
+            assert_eq!(
+                count_bytes(&bytes, &callee_saved_xmm_store_bytes(register, disp)),
+                1,
+                "{register:?} should be saved exactly once in the prologue"
+            );
+            assert_eq!(
+                count_bytes(&bytes, &callee_saved_xmm_load_bytes(register, disp)),
+                1,
+                "{register:?} should be restored exactly once in the epilogue"
+            );
+        }
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate full-depth value leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let ctx = eval_context(&[], &[], &[], &[]);
+        let vars = (0..prefix.len())
+            .map(|index| (index + 1) as f64)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            f(&ctx, vars.as_ptr()).to_bits(),
+            constant_prefix_sum(prefix.len()).to_bits()
+        );
     }
 
     #[test]
@@ -4262,25 +4486,15 @@ mod tests {
         ];
 
         for (name, instruction, input, folded_value) in cases {
-            let program = native_program(
-                EntryKind::StampValue,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushConst(5.0),
-                    Instruction::PushConst(10.0),
-                    Instruction::PushTemperature,
-                    instruction,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
-                0,
-            );
+            let prefix = constant_prefix(XMM_STACK.len() - 1);
+            let mut instructions = prefix.clone();
+            instructions.extend([
+                Instruction::PushConst(10.0),
+                Instruction::PushTemperature,
+                instruction,
+            ]);
+            instructions.extend(add_reductions(prefix.len()));
+            let program = native_program(EntryKind::StampValue, instructions, 0);
 
             assert_eq!(program.max_stack_depth(), XMM_STACK.len(), "{name}");
 
@@ -4307,7 +4521,7 @@ mod tests {
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.temperature = input;
 
-            let expected = 1.0 + 2.0 + 3.0 + 4.0 + 5.0 + folded_value;
+            let expected = constant_prefix_sum(prefix.len()) + folded_value;
             assert_eq!(
                 f(&ctx, std::ptr::null()).to_bits(),
                 expected.to_bits(),
@@ -4761,28 +4975,18 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_keeps_full_stack_dynamic_variable_read_on_spill_path() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushConst(5.0),
-                Instruction::PushParam(0),
-                Instruction::PushVariableDyn {
-                    base: 1,
-                    len: 3,
-                    lower: 1,
-                },
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let mut instructions = prefix.clone();
+        instructions.extend([
+            Instruction::PushParam(0),
+            Instruction::PushVariableDyn {
+                base: 1,
+                len: 3,
+                lower: 1,
+            },
+        ]);
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes =
             compile_value_function(&program).expect("compile full-stack dynamic variable leaf");
@@ -4807,7 +5011,10 @@ mod tests {
 
         let loaded = f(&ctx, vars.as_ptr());
 
-        assert_eq!(loaded.to_bits(), 19.0_f64.to_bits());
+        assert_eq!(
+            loaded.to_bits(),
+            (constant_prefix_sum(prefix.len()) + 4.0).to_bits()
+        );
         assert!(take_native_runtime_error().is_none());
     }
 
@@ -6266,24 +6473,11 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_omits_stateful_scratch_when_full_stack_occurs_after_stateful_op() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushVariable(0),
-                Instruction::DdtState(1),
-                Instruction::PushVariable(1),
-                Instruction::PushVariable(2),
-                Instruction::PushVariable(3),
-                Instruction::PushVariable(4),
-                Instruction::PushVariable(5),
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = variable_prefix(1, XMM_STACK.len() - 1);
+        let mut instructions = vec![Instruction::PushVariable(0), Instruction::DdtState(1)];
+        instructions.extend(prefix.clone());
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile spare-depth stateful leaf");
         assert!(
@@ -6297,7 +6491,7 @@ mod tests {
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
 
-        let vars = [2.0_f64, 1.0, 2.0, 3.0, 4.0, 5.0];
+        let vars = vars_with_prefix(2.0, prefix.len());
         let previous_state = [0.0_f64, 1.5_f64];
         let mut state_values = [0.0_f64, 0.0_f64];
         let mut ctx = eval_context(&[], &[], &[], &[]);
@@ -6307,7 +6501,10 @@ mod tests {
         ctx.state_values = state_values.as_mut_ptr();
         ctx.state_values_len = state_values.len();
 
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 17.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, vars.as_ptr()).to_bits(),
+            (2.0 + constant_prefix_sum(prefix.len())).to_bits()
+        );
         assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
     }
 
@@ -6316,8 +6513,14 @@ mod tests {
         let run = |program: NativeProgram, vars: &[f64], expected: f64, state_expected: f64| {
             assert_eq!(program.max_stack_depth(), XMM_STACK.len());
             let bytes = compile_value_function(&program).expect("compile full-stack stateful leaf");
+            let frame_bytes = super::align_local_frame(
+                STATEFUL_SCRATCH_FRAME_BYTES
+                    + super::callee_saved_xmm_frame_bytes(super::callee_saved_xmm_count_for_depth(
+                        XMM_STACK.len(),
+                    )),
+            );
             assert!(
-                contains_bytes(&bytes, &sub_rsp_bytes(STATEFUL_SCRATCH_FRAME_BYTES)),
+                contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
                 "full-stack stateful leaf should reserve a local scratch frame"
             );
 
@@ -6340,108 +6543,67 @@ mod tests {
             assert_eq!(state_values[1].to_bits(), state_expected.to_bits());
         };
 
+        let ddt_prefix = variable_prefix(1, XMM_STACK.len() - 1);
+        let mut ddt_instructions = ddt_prefix.clone();
+        ddt_instructions.extend([Instruction::PushVariable(0), Instruction::DdtState(1)]);
+        ddt_instructions.extend(add_reductions(ddt_prefix.len()));
+        let ddt_vars = vars_with_prefix(2.0, ddt_prefix.len());
         run(
-            native_program(
-                EntryKind::StampValue,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushConst(5.0),
-                    Instruction::PushVariable(0),
-                    Instruction::DdtState(1),
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
-                0,
-            ),
-            &[2.0],
-            17.0,
+            native_program(EntryKind::StampValue, ddt_instructions, 0),
+            &ddt_vars,
+            constant_prefix_sum(ddt_prefix.len()) + 2.0,
             2.0,
         );
 
+        let idt_prefix = variable_prefix(1, XMM_STACK.len() - 2);
+        let mut idt_instructions = idt_prefix.clone();
+        idt_instructions.extend([
+            Instruction::PushVariable(0),
+            Instruction::PushConst(0.5),
+            Instruction::IdtState(1),
+        ]);
+        idt_instructions.extend(add_reductions(idt_prefix.len()));
+        let idt_vars = vars_with_prefix(2.0, idt_prefix.len());
         run(
-            native_program(
-                EntryKind::StampValue,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushVariable(0),
-                    Instruction::PushConst(0.5),
-                    Instruction::IdtState(1),
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
-                0,
-            ),
-            &[2.0],
-            12.0,
+            native_program(EntryKind::StampValue, idt_instructions, 0),
+            &idt_vars,
+            constant_prefix_sum(idt_prefix.len()) + 2.0,
             2.0,
         );
 
+        let idtmod_prefix = variable_prefix(1, XMM_STACK.len() - 4);
+        let mut idtmod_instructions = idtmod_prefix.clone();
+        idtmod_instructions.extend([
+            Instruction::PushVariable(0),
+            Instruction::PushConst(0.5),
+            Instruction::PushConst(1.0),
+            Instruction::PushConst(0.25),
+            Instruction::IdtModState(1),
+        ]);
+        idtmod_instructions.extend(add_reductions(idtmod_prefix.len()));
+        let idtmod_vars = vars_with_prefix(2.0, idtmod_prefix.len());
         run(
-            native_program(
-                EntryKind::StampValue,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushVariable(0),
-                    Instruction::PushConst(0.5),
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(0.25),
-                    Instruction::IdtModState(1),
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
-                0,
-            ),
-            &[2.0],
-            4.0,
+            native_program(EntryKind::StampValue, idtmod_instructions, 0),
+            &idtmod_vars,
+            constant_prefix_sum(idtmod_prefix.len()) + 1.0,
             1.0,
         );
 
+        let jacobian_prefix = variable_prefix(1, XMM_STACK.len() - 1);
+        let mut ddt_jacobian = jacobian_prefix.clone();
+        ddt_jacobian.extend([Instruction::PushVariable(0), Instruction::DdtJacobian]);
+        ddt_jacobian.extend(add_reductions(jacobian_prefix.len()));
+        let mut idt_jacobian = jacobian_prefix.clone();
+        idt_jacobian.extend([Instruction::PushVariable(0), Instruction::IdtJacobian]);
+        idt_jacobian.extend(add_reductions(jacobian_prefix.len()));
         let jacobian_cases = [
             (
-                23.0_f64,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushConst(5.0),
-                    Instruction::PushVariable(0),
-                    Instruction::DdtJacobian,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
+                constant_prefix_sum(jacobian_prefix.len()) + 8.0,
+                ddt_jacobian,
             ),
             (
-                15.5_f64,
-                vec![
-                    Instruction::PushConst(1.0),
-                    Instruction::PushConst(2.0),
-                    Instruction::PushConst(3.0),
-                    Instruction::PushConst(4.0),
-                    Instruction::PushConst(5.0),
-                    Instruction::PushVariable(0),
-                    Instruction::IdtJacobian,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                    Instruction::Add,
-                ],
+                constant_prefix_sum(jacobian_prefix.len()) + 0.5,
+                idt_jacobian,
             ),
         ];
         for (expected, instructions) in jacobian_cases {
@@ -6449,8 +6611,14 @@ mod tests {
             assert_eq!(program.max_stack_depth(), XMM_STACK.len());
             let bytes =
                 compile_value_function(&program).expect("compile full-stack stateful jacobian");
+            let frame_bytes = super::align_local_frame(
+                STATEFUL_SCRATCH_FRAME_BYTES
+                    + super::callee_saved_xmm_frame_bytes(super::callee_saved_xmm_count_for_depth(
+                        XMM_STACK.len(),
+                    )),
+            );
             assert!(
-                contains_bytes(&bytes, &sub_rsp_bytes(STATEFUL_SCRATCH_FRAME_BYTES)),
+                contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
                 "full-stack stateful jacobian should reserve a local scratch frame"
             );
 
@@ -6462,7 +6630,7 @@ mod tests {
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.timestep = 0.25;
 
-            let vars = [2.0_f64];
+            let vars = vars_with_prefix(2.0, jacobian_prefix.len());
             assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), expected.to_bits());
         }
     }
@@ -6695,23 +6863,15 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_keeps_full_stack_limit_state_on_spill_path() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushVariable(0),
-                Instruction::PushConst(0.5),
-                Instruction::LimitState(1),
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 2);
+        let mut instructions = prefix.clone();
+        instructions.extend([
+            Instruction::PushVariable(0),
+            Instruction::PushConst(0.5),
+            Instruction::LimitState(1),
+        ]);
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile full-stack limit state leaf");
         assert!(
@@ -6723,11 +6883,17 @@ mod tests {
             "full-stack limit state must restore the positive-step spill fallback"
         );
         assert!(
-            contains_bytes(&bytes, &stack_spill_store_bytes(Xmm::Xmm5)),
+            contains_bytes(
+                &bytes,
+                &stack_spill_store_bytes(XMM_STACK[XMM_STACK.len() - 1])
+            ),
             "full-stack limit state must spill the positive step to the stack"
         );
         assert!(
-            contains_bytes(&bytes, &stack_spill_minsd_bytes(Xmm::Xmm4)),
+            contains_bytes(
+                &bytes,
+                &stack_spill_minsd_bytes(XMM_STACK[XMM_STACK.len() - 2])
+            ),
             "full-stack limit state must clamp from the spilled positive step"
         );
 
@@ -6746,7 +6912,10 @@ mod tests {
         ctx.state_initialized_len = state_initialized.len();
 
         let vars = [11.0_f64];
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 20.5_f64.to_bits());
+        assert_eq!(
+            f(&ctx, vars.as_ptr()).to_bits(),
+            (constant_prefix_sum(prefix.len()) + 10.5).to_bits()
+        );
         assert_eq!(state_values[1].to_bits(), 10.5_f64.to_bits());
     }
 
@@ -8543,24 +8712,11 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_keeps_full_stack_floor_on_spill_path() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushConst(5.0),
-                Instruction::PushParam(0),
-                Instruction::Floor,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let mut instructions = prefix.clone();
+        instructions.extend([Instruction::PushParam(0), Instruction::Floor]);
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile full-stack floor leaf");
         assert!(
@@ -8578,7 +8734,10 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
         let ctx = eval_context(&[3.75], &[], &[], &[]);
 
-        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 18.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (constant_prefix_sum(prefix.len()) + 3.0).to_bits()
+        );
     }
 
     #[test]
@@ -9054,24 +9213,11 @@ mod tests {
 
     #[test]
     fn generated_value_leaf_negates_at_full_xmm_stack_depth() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushConst(5.0),
-                Instruction::PushTemperature,
-                Instruction::Neg,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            0,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let mut instructions = prefix.clone();
+        instructions.extend([Instruction::PushTemperature, Instruction::Neg]);
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 0);
 
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
 
@@ -9089,28 +9235,19 @@ mod tests {
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.temperature = 6.0;
 
-        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 9.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (constant_prefix_sum(prefix.len()) - 6.0).to_bits()
+        );
     }
 
     #[test]
     fn generated_value_leaf_loads_differential_voltage_at_full_xmm_stack_depth_without_scratch() {
-        let program = native_program(
-            EntryKind::StampValue,
-            vec![
-                Instruction::PushConst(1.0),
-                Instruction::PushConst(2.0),
-                Instruction::PushConst(3.0),
-                Instruction::PushConst(4.0),
-                Instruction::PushConst(5.0),
-                Instruction::PushVoltage(0, 1),
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-                Instruction::Add,
-            ],
-            2,
-        );
+        let prefix = constant_prefix(XMM_STACK.len() - 1);
+        let mut instructions = prefix.clone();
+        instructions.push(Instruction::PushVoltage(0, 1));
+        instructions.extend(add_reductions(prefix.len()));
+        let program = native_program(EntryKind::StampValue, instructions, 2);
 
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
 
@@ -9132,7 +9269,10 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
         let ctx = eval_context(&[], &[9.0, 4.0], &[], &[]);
 
-        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 20.0_f64.to_bits());
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (constant_prefix_sum(prefix.len()) + 5.0).to_bits()
+        );
     }
 
     #[test]
@@ -9376,12 +9516,19 @@ mod tests {
         terminal_count: usize,
         internal_node_count: usize,
     ) -> NativeProgram {
+        let storage_limit = test_storage_limit();
         NativeProgram::from_bytecode(
             "x64-codegen-test",
             entry_kind,
             &BytecodeProgram { instructions },
-            NativeLoweringLimits::new(terminal_count, internal_node_count, 8, 8, 8)
-                .with_lookup_table_count(8),
+            NativeLoweringLimits::new(
+                terminal_count,
+                internal_node_count,
+                storage_limit,
+                storage_limit,
+                storage_limit,
+            )
+            .with_lookup_table_count(8),
         )
         .expect("lower bytecode to native program")
     }
@@ -9392,15 +9539,199 @@ mod tests {
         terminal_count: usize,
         available_current_pairs: &[usize],
     ) -> NativeProgram {
+        let storage_limit = test_storage_limit();
         NativeProgram::from_bytecode(
             "x64-codegen-test",
             entry_kind,
             &BytecodeProgram { instructions },
-            NativeLoweringLimits::new(terminal_count, 0, 8, 8, 8)
-                .with_lookup_table_count(8)
-                .with_available_current_pairs(available_current_pairs),
+            NativeLoweringLimits::new(
+                terminal_count,
+                0,
+                storage_limit,
+                storage_limit,
+                storage_limit,
+            )
+            .with_lookup_table_count(8)
+            .with_available_current_pairs(available_current_pairs),
         )
         .expect("lower bytecode to native program")
+    }
+
+    fn test_storage_limit() -> usize {
+        XMM_STACK.len().max(8) + 1
+    }
+
+    static ABI_EXPECTED_TABLE_PTR: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+
+    fn run_table_helper_sentinel(helper: TableHelper, ctx: &EvalContext) -> f64 {
+        let mut compiler = abi_sentinel_compiler();
+        push_abi_sentinel_const(&mut compiler, 3.25);
+        compiler
+            .emit_table_helper_call(7, helper)
+            .expect("emit table helper ABI sentinel");
+        run_abi_sentinel_value(compiler, ctx)
+    }
+
+    fn run_context_filter_helper_sentinel(helper: ContextFilterHelper, ctx: &EvalContext) -> f64 {
+        let mut compiler = abi_sentinel_compiler();
+        let target = push_abi_sentinel_const(&mut compiler, 4.5);
+        compiler
+            .emit_context_filter_helper_call(target, 9, helper)
+            .expect("emit context filter helper ABI sentinel");
+        run_abi_sentinel_value(compiler, ctx)
+    }
+
+    fn run_timer_helper_sentinel(helper: TimerHelper, ctx: &EvalContext) -> f64 {
+        let mut compiler = abi_sentinel_compiler();
+        let start = push_abi_sentinel_const(&mut compiler, 1.25);
+        let period = push_abi_sentinel_const(&mut compiler, 0.75);
+        compiler.emit_timer_helper_call(start, period, helper);
+        run_abi_sentinel_value(compiler, ctx)
+    }
+
+    fn run_operand_context_filter_helper_sentinel(
+        helper: OperandContextFilterHelper,
+        ctx: &EvalContext,
+    ) -> f64 {
+        let mut compiler = abi_sentinel_compiler();
+        push_abi_sentinel_const(&mut compiler, 99.0);
+        let input = push_abi_sentinel_const(&mut compiler, 2.0);
+        push_abi_sentinel_const(&mut compiler, 3.0);
+        push_abi_sentinel_const(&mut compiler, 4.0);
+        compiler.emit_operand_context_filter_helper_call(input, 3, 11, helper);
+        compiler.encoder.movsd_xmm_xmm(Xmm::Xmm0, input);
+        run_abi_sentinel_value(compiler, ctx)
+    }
+
+    fn abi_sentinel_compiler() -> FunctionCompiler {
+        FunctionCompiler::new(true, false, 0, None, None, 0)
+    }
+
+    fn push_abi_sentinel_const(compiler: &mut FunctionCompiler, value: f64) -> Xmm {
+        let register = compiler.push_register().expect("ABI sentinel stack slot");
+        compiler.emit_constant_load(register, value);
+        register
+    }
+
+    fn run_abi_sentinel_value(compiler: FunctionCompiler, ctx: &EvalContext) -> f64 {
+        let bytes = compiler
+            .finish_value_function()
+            .expect("finish ABI sentinel value function");
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate ABI sentinel function");
+        let entry = memory.ptr_at(0).expect("ABI sentinel entry point");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        f(ctx, std::ptr::null())
+    }
+
+    unsafe extern "C" fn abi_sentinel_table_helper(
+        input: f64,
+        tables: *const LookupTable,
+        table_count: usize,
+        table_id: usize,
+    ) -> f64 {
+        if input.to_bits() != 3.25_f64.to_bits() {
+            return -1.0;
+        }
+        let expected = ABI_EXPECTED_TABLE_PTR.load(std::sync::atomic::Ordering::SeqCst);
+        if tables as usize != expected {
+            return -2.0;
+        }
+        if table_count != 2 {
+            return -3.0;
+        }
+        if table_id != 7 {
+            return -4.0;
+        }
+        101.0
+    }
+
+    unsafe extern "C" fn abi_sentinel_context_filter_helper(
+        input: f64,
+        ctx: *const EvalContext,
+        filter_id: usize,
+    ) -> f64 {
+        if input.to_bits() != 4.5_f64.to_bits() {
+            return -10.0;
+        }
+        if filter_id != 9 {
+            return -11.0;
+        }
+        let Some(ctx) = (unsafe { ctx.as_ref() }) else {
+            return -12.0;
+        };
+        if ctx.time.to_bits() != 12.0_f64.to_bits()
+            || ctx.temperature.to_bits() != 315.0_f64.to_bits()
+            || ctx.multiplicity.to_bits() != 3.0_f64.to_bits()
+        {
+            return -13.0;
+        }
+        202.0
+    }
+
+    unsafe extern "C" fn abi_sentinel_timer_helper(
+        start: f64,
+        period: f64,
+        ctx: *const EvalContext,
+    ) -> f64 {
+        if start.to_bits() != 1.25_f64.to_bits() {
+            return -20.0;
+        }
+        if period.to_bits() != 0.75_f64.to_bits() {
+            return -21.0;
+        }
+        let Some(ctx) = (unsafe { ctx.as_ref() }) else {
+            return -22.0;
+        };
+        if ctx.time.to_bits() != 12.0_f64.to_bits()
+            || ctx.multiplicity.to_bits() != 3.0_f64.to_bits()
+        {
+            return -23.0;
+        }
+        303.0
+    }
+
+    unsafe extern "C" fn abi_sentinel_operand_context_filter_helper(
+        operands: *const f64,
+        ctx: *const EvalContext,
+        filter_id: usize,
+    ) -> f64 {
+        if filter_id != 11 {
+            return -30.0;
+        }
+        let Some(ctx) = (unsafe { ctx.as_ref() }) else {
+            return -31.0;
+        };
+        if ctx.temperature.to_bits() != 315.0_f64.to_bits()
+            || ctx.multiplicity.to_bits() != 3.0_f64.to_bits()
+        {
+            return -32.0;
+        }
+        if operands.is_null() {
+            return -33.0;
+        }
+        let operands = unsafe { std::slice::from_raw_parts(operands, 3) };
+        if operands[0].to_bits() != 2.0_f64.to_bits()
+            || operands[1].to_bits() != 3.0_f64.to_bits()
+            || operands[2].to_bits() != 4.0_f64.to_bits()
+        {
+            return -34.0;
+        }
+        404.0
+    }
+
+    fn stack_alignment_helper_memory() -> ExecutableMemory {
+        let mut encoder = X64Encoder::new();
+        encoder.mov_r64_r64(Gpr::Rax, Gpr::Rsp);
+        encoder.mov_r64_imm32(Gpr::R11, 15);
+        encoder.and_r64_r64(Gpr::Rax, Gpr::R11);
+        encoder.cmp_r64_imm32(Gpr::Rax, 8);
+        encoder.setcc_r8(ConditionCode::Equal, Gpr::R10);
+        encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        encoder.cvtsi2sd_xmm_r32(Xmm::Xmm0, Gpr::R10);
+        encoder.ret();
+        ExecutableMemory::allocate(&encoder.into_bytes()).expect("allocate stack helper sentinel")
     }
 
     fn eval_context(
@@ -9503,6 +9834,33 @@ mod tests {
 
     fn old_fixed_call_frame_bytes() -> i32 {
         call_frame_bytes(XMM_STACK.len() + 1)
+    }
+
+    fn constant_prefix(count: usize) -> Vec<Instruction> {
+        (0..count)
+            .map(|index| Instruction::PushConst((index + 1) as f64))
+            .collect()
+    }
+
+    fn variable_prefix(start: usize, count: usize) -> Vec<Instruction> {
+        (0..count)
+            .map(|index| Instruction::PushVariable(start + index))
+            .collect()
+    }
+
+    fn vars_with_prefix(first: f64, count: usize) -> Vec<f64> {
+        let mut vars = Vec::with_capacity(count + 1);
+        vars.push(first);
+        vars.extend((0..count).map(|index| (index + 1) as f64));
+        vars
+    }
+
+    fn add_reductions(count: usize) -> Vec<Instruction> {
+        (0..count).map(|_| Instruction::Add).collect()
+    }
+
+    fn constant_prefix_sum(count: usize) -> f64 {
+        (count * (count + 1) / 2) as f64
     }
 
     fn count_bytes(bytes: &[u8], needle: &[u8]) -> usize {
@@ -9661,6 +10019,18 @@ mod tests {
     fn call_frame_load_bytes(register: Xmm, index: usize) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.movsd_xmm_m64_base_disp32(register, Gpr::Rsp, super::call_spill_disp(index));
+        encoder.into_bytes()
+    }
+
+    fn callee_saved_xmm_store_bytes(register: Xmm, disp: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movdqu_m128_base_disp32_xmm(Gpr::Rsp, disp, register);
+        encoder.into_bytes()
+    }
+
+    fn callee_saved_xmm_load_bytes(register: Xmm, disp: i32) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.movdqu_xmm_m128_base_disp32(register, Gpr::Rsp, disp);
         encoder.into_bytes()
     }
 

@@ -44,6 +44,16 @@ pub(crate) enum Xmm {
     Xmm3,
     Xmm4,
     Xmm5,
+    Xmm6,
+    Xmm7,
+    Xmm8,
+    Xmm9,
+    Xmm10,
+    Xmm11,
+    Xmm12,
+    Xmm13,
+    Xmm14,
+    Xmm15,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +78,16 @@ impl Xmm {
             Self::Xmm3 => 3,
             Self::Xmm4 => 4,
             Self::Xmm5 => 5,
+            Self::Xmm6 => 6,
+            Self::Xmm7 => 7,
+            Self::Xmm8 => 8,
+            Self::Xmm9 => 9,
+            Self::Xmm10 => 10,
+            Self::Xmm11 => 11,
+            Self::Xmm12 => 12,
+            Self::Xmm13 => 13,
+            Self::Xmm14 => 14,
+            Self::Xmm15 => 15,
         }
     }
 }
@@ -279,6 +299,13 @@ impl X64Encoder {
         self.emit_base_disp32_modrm(dst.code(), base.code(), disp);
     }
 
+    pub(crate) fn movdqu_xmm_m128_base_disp32(&mut self, dst: Xmm, base: Gpr, disp: i32) {
+        self.emit_u8(0xF3);
+        self.emit_rex(false, dst.code(), 0, base.code());
+        self.emit_all(&[0x0F, 0x6F]);
+        self.emit_base_disp32_modrm(dst.code(), base.code(), disp);
+    }
+
     pub(crate) fn movzx_r32_m8_base_disp32(&mut self, dst: Gpr, base: Gpr, disp: i32) {
         self.emit_rex(false, dst.code(), 0, base.code());
         self.emit_all(&[0x0F, 0xB6]);
@@ -333,6 +360,13 @@ impl X64Encoder {
         self.emit_u8(0xF2);
         self.emit_rex(false, src.code(), 0, base.code());
         self.emit_all(&[0x0F, 0x11]);
+        self.emit_base_disp32_modrm(src.code(), base.code(), disp);
+    }
+
+    pub(crate) fn movdqu_m128_base_disp32_xmm(&mut self, base: Gpr, disp: i32, src: Xmm) {
+        self.emit_u8(0xF3);
+        self.emit_rex(false, src.code(), 0, base.code());
+        self.emit_all(&[0x0F, 0x7F]);
         self.emit_base_disp32_modrm(src.code(), base.code(), disp);
     }
 
