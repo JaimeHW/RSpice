@@ -313,7 +313,7 @@ impl FunctionCompiler {
                     self.emit_port_connected_load(index, &mut context_pointer_cache)?;
                 }
                 NativeOp::LoadVoltage { pos, neg } => {
-                    self.emit_voltage_load(pos, neg)?;
+                    self.emit_voltage_load(pos, neg, &mut context_pointer_cache)?;
                 }
                 NativeOp::LoadCurrent(pair_index) => {
                     self.emit_current_load(pair_index, &mut context_pointer_cache)?;
@@ -2678,7 +2678,12 @@ impl FunctionCompiler {
         self.encoder.setcc_r8(ConditionCode::Equal, dst);
     }
 
-    fn emit_voltage_load(&mut self, pos: VoltageNode, neg: VoltageNode) -> JitResult<()> {
+    fn emit_voltage_load(
+        &mut self,
+        pos: VoltageNode,
+        neg: VoltageNode,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         let dst = self.push_register()?;
 
         match (pos, neg) {
@@ -2686,21 +2691,33 @@ impl FunctionCompiler {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
             }
             (pos, VoltageNode::Ground) => {
-                self.emit_node_voltage_load(dst, pos)?;
+                self.emit_node_voltage_load(dst, pos, context_pointer_cache)?;
             }
             (VoltageNode::Ground, neg) => {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
-                self.emit_node_voltage_subtract(dst, neg)?;
+                self.emit_node_voltage_subtract(dst, neg, context_pointer_cache)?;
             }
             (VoltageNode::Terminal(pos), VoltageNode::Terminal(neg)) => {
-                self.emit_same_storage_voltage_difference(dst, VOLTAGES_OFFSET, pos, neg)?;
+                self.emit_same_storage_voltage_difference(
+                    dst,
+                    VOLTAGES_OFFSET,
+                    pos,
+                    neg,
+                    context_pointer_cache,
+                )?;
             }
             (VoltageNode::Internal(pos), VoltageNode::Internal(neg)) => {
-                self.emit_same_storage_voltage_difference(dst, INTERNAL_VOLTAGES_OFFSET, pos, neg)?;
+                self.emit_same_storage_voltage_difference(
+                    dst,
+                    INTERNAL_VOLTAGES_OFFSET,
+                    pos,
+                    neg,
+                    context_pointer_cache,
+                )?;
             }
             (pos, neg) => {
-                self.emit_node_voltage_load(dst, pos)?;
-                self.emit_node_voltage_subtract(dst, neg)?;
+                self.emit_node_voltage_load(dst, pos, context_pointer_cache)?;
+                self.emit_node_voltage_subtract(dst, neg, context_pointer_cache)?;
             }
         }
 
@@ -2713,8 +2730,9 @@ impl FunctionCompiler {
         ctx_field_offset: i32,
         pos_index: usize,
         neg_index: usize,
+        context_pointer_cache: &mut Option<i32>,
     ) -> JitResult<()> {
-        self.emit_context_pointer_load(ctx_field_offset);
+        self.emit_context_pointer_load_cached(ctx_field_offset, context_pointer_cache);
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(pos_index)?);
         if pos_index == neg_index {
@@ -2735,10 +2753,19 @@ impl FunctionCompiler {
         Ok(())
     }
 
-    fn emit_node_voltage_load(&mut self, dst: Xmm, node: VoltageNode) -> JitResult<()> {
+    fn emit_node_voltage_load(
+        &mut self,
+        dst: Xmm,
+        node: VoltageNode,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         match node {
-            VoltageNode::Terminal(index) => self.emit_terminal_voltage_load(dst, index),
-            VoltageNode::Internal(index) => self.emit_internal_voltage_load(dst, index),
+            VoltageNode::Terminal(index) => {
+                self.emit_terminal_voltage_load(dst, index, context_pointer_cache)
+            }
+            VoltageNode::Internal(index) => {
+                self.emit_internal_voltage_load(dst, index, context_pointer_cache)
+            }
             VoltageNode::Ground => {
                 self.encoder.xorpd_xmm_xmm(dst, dst);
                 Ok(())
@@ -2746,16 +2773,24 @@ impl FunctionCompiler {
         }
     }
 
-    fn emit_node_voltage_subtract(&mut self, dst: Xmm, node: VoltageNode) -> JitResult<()> {
+    fn emit_node_voltage_subtract(
+        &mut self,
+        dst: Xmm,
+        node: VoltageNode,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
         match node {
             VoltageNode::Terminal(index) => {
-                self.emit_context_pointer_load(VOLTAGES_OFFSET);
+                self.emit_context_pointer_load_cached(VOLTAGES_OFFSET, context_pointer_cache);
                 self.encoder
                     .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
                 Ok(())
             }
             VoltageNode::Internal(index) => {
-                self.emit_context_pointer_load(INTERNAL_VOLTAGES_OFFSET);
+                self.emit_context_pointer_load_cached(
+                    INTERNAL_VOLTAGES_OFFSET,
+                    context_pointer_cache,
+                );
                 self.encoder
                     .subsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
                 Ok(())
@@ -2764,15 +2799,25 @@ impl FunctionCompiler {
         }
     }
 
-    fn emit_terminal_voltage_load(&mut self, dst: Xmm, index: usize) -> JitResult<()> {
-        self.emit_context_pointer_load(VOLTAGES_OFFSET);
+    fn emit_terminal_voltage_load(
+        &mut self,
+        dst: Xmm,
+        index: usize,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
+        self.emit_context_pointer_load_cached(VOLTAGES_OFFSET, context_pointer_cache);
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
         Ok(())
     }
 
-    fn emit_internal_voltage_load(&mut self, dst: Xmm, index: usize) -> JitResult<()> {
-        self.emit_context_pointer_load(INTERNAL_VOLTAGES_OFFSET);
+    fn emit_internal_voltage_load(
+        &mut self,
+        dst: Xmm,
+        index: usize,
+        context_pointer_cache: &mut Option<i32>,
+    ) -> JitResult<()> {
+        self.emit_context_pointer_load_cached(INTERNAL_VOLTAGES_OFFSET, context_pointer_cache);
         self.encoder
             .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, byte_disp(index)?);
         Ok(())
@@ -3351,13 +3396,35 @@ fn native_op_reads_entry_args(op: NativeOp) -> bool {
 fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
     matches!(
         op,
-        NativeOp::LoadParam(_)
+        NativeOp::Const(_)
+            | NativeOp::LoadParam(_)
             | NativeOp::LoadParamGiven(_)
             | NativeOp::LoadPortConnected(_)
+            | NativeOp::LoadVoltage { .. }
+            | NativeOp::LoadTemperature
+            | NativeOp::LoadThermalVoltage
+            | NativeOp::LoadTime
+            | NativeOp::Analysis(_)
+            | NativeOp::LoadMfactor
             | NativeOp::LoadCurrent(_)
             | NativeOp::LoadPriorCurrent(_)
             | NativeOp::LoadInternalVoltage(_)
             | NativeOp::LoadBranchUnknown(_)
+            | NativeOp::LoadVariable(_)
+            | NativeOp::Add
+            | NativeOp::Sub
+            | NativeOp::Mul
+            | NativeOp::Div
+            | NativeOp::AddConst(_)
+            | NativeOp::SubConst(_)
+            | NativeOp::MulConst(_)
+            | NativeOp::DivConst(_)
+            | NativeOp::SubFromConst(_)
+            | NativeOp::DivFromConst(_)
+            | NativeOp::Square
+            | NativeOp::Sqrt
+            | NativeOp::WhiteNoise
+            | NativeOp::FlickerNoise
     )
 }
 
@@ -3782,6 +3849,124 @@ mod tests {
         );
 
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate adjacent param leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [1.25_f64, 3.5_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 4.75_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_pure_arithmetic() {
+        let program = native_program(
+            EntryKind::StampValue,
+            vec![
+                Instruction::PushParam(0),
+                Instruction::PushVariable(0),
+                Instruction::Mul,
+                Instruction::PushParam(1),
+                Instruction::PushVariable(1),
+                Instruction::Mul,
+                Instruction::Add,
+            ],
+            0,
+        );
+
+        let bytes = compile_value_function(&program).expect("compile fused param product leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across direct variable loads and pure arithmetic"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate fused param product leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [1.25_f64, 3.5_f64];
+        let vars = [7.0_f64, 10.0_f64];
+        let ctx = eval_context(&params, &[], &[], &[]);
+
+        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 43.75_f64.to_bits());
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_context_scalar_ops() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::LoadTemperature,
+                NativeOp::Add,
+                NativeOp::LoadThermalVoltage,
+                NativeOp::Add,
+                NativeOp::LoadTime,
+                NativeOp::Add,
+                NativeOp::Analysis(1),
+                NativeOp::Add,
+                NativeOp::LoadMfactor,
+                NativeOp::Add,
+                NativeOp::LoadParam(1),
+                NativeOp::Add,
+            ],
+            2,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile scalar context param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across scalar context loads"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate scalar context leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let params = [1.25_f64, 3.5_f64];
+        let mut ctx = eval_context(&params, &[], &[], &[]);
+        ctx.temperature = 300.0;
+        ctx.time = 2.0;
+        ctx.analysis_type = 1;
+        ctx.multiplicity = 4.0;
+
+        assert_eq!(
+            f(&ctx, std::ptr::null()).to_bits(),
+            (1.25_f64 + 300.0 + thermal_voltage(300.0) + 2.0 + 1.0 + 4.0 + 3.5).to_bits()
+        );
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_param_base_across_large_signal_noise_ops() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadParam(0),
+                NativeOp::Const(1.0),
+                NativeOp::WhiteNoise,
+                NativeOp::Add,
+                NativeOp::Const(2.0),
+                NativeOp::Const(3.0),
+                NativeOp::FlickerNoise,
+                NativeOp::Add,
+                NativeOp::LoadParam(1),
+                NativeOp::Add,
+            ],
+            3,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes = compile_value_function(&program).expect("compile noise param leaf");
+        assert_eq!(
+            count_bytes(&bytes, &context_pointer_load_bytes(PARAMS_OFFSET)),
+            1,
+            "param base should remain cached across large-signal noise ops"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate noise param leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
             unsafe { std::mem::transmute(entry) };
@@ -5734,6 +5919,68 @@ mod tests {
 
             let memory =
                 ExecutableMemory::allocate(&bytes).expect("allocate same-storage voltage leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+
+            assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_reuses_voltage_bases_across_pure_arithmetic() {
+        let cases = [
+            (
+                "terminal",
+                native_program(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushVoltage(0, 1),
+                        Instruction::PushVoltage(2, 3),
+                        Instruction::Add,
+                    ],
+                    4,
+                ),
+                eval_context(&[], &[9.0, 4.0, 12.0, 2.0], &[], &[]),
+                VOLTAGES_OFFSET,
+                INTERNAL_VOLTAGES_OFFSET,
+                15.0_f64,
+            ),
+            (
+                "internal",
+                native_program_with_internals(
+                    EntryKind::StampValue,
+                    vec![
+                        Instruction::PushVoltage(4, 5),
+                        Instruction::PushVoltage(6, 7),
+                        Instruction::Add,
+                    ],
+                    4,
+                    4,
+                ),
+                eval_context(&[], &[0.0, 0.0, 0.0, 0.0], &[8.0, 3.0, 11.0, 2.0], &[]),
+                INTERNAL_VOLTAGES_OFFSET,
+                VOLTAGES_OFFSET,
+                14.0_f64,
+            ),
+        ];
+
+        for (name, program, ctx, reused_offset, unused_offset, expected) in cases {
+            let bytes =
+                compile_value_function(&program).expect("compile repeated voltage expression leaf");
+            assert_eq!(
+                count_bytes(&bytes, &context_pointer_load_bytes(reused_offset)),
+                1,
+                "{name} repeated voltage loads should materialize their base pointer once"
+            );
+            assert_eq!(
+                count_bytes(&bytes, &context_pointer_load_bytes(unused_offset)),
+                0,
+                "{name} repeated voltage loads should not touch the other voltage storage"
+            );
+
+            let memory =
+                ExecutableMemory::allocate(&bytes).expect("allocate repeated voltage leaf");
             let entry = memory.ptr_at(0).expect("entry point inside image");
             let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
                 unsafe { std::mem::transmute(entry) };
@@ -9286,8 +9533,8 @@ mod tests {
         let samples = native_microbench_samples();
         eprintln!("native-x64-microbench iterations={iterations} samples={samples}");
 
-        let params = [1.25_f64, 3.5, 13.75, 6.25];
-        let vars = [7.0_f64, 10.0, 20.0, 30.0, 40.0];
+        let params = [1.25_f64, 3.5, 13.75, 6.25, 0.5, 1.5, 2.5, 3.5];
+        let vars = [7.0_f64, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0];
         let dyn_vars = [2.0_f64, 10.0, 20.0, 30.0, 40.0];
         let voltages = [9.0_f64, 4.0, 12.0, 2.0];
         let branch_currents = [f64::NAN, 4.0_f64, 6.5_f64];
@@ -9329,6 +9576,51 @@ mod tests {
             iterations,
             samples,
             19.375,
+        );
+        run_native_value_microbench(
+            "param_variable_dot8",
+            native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushVariable(0),
+                    Instruction::Mul,
+                    Instruction::PushParam(1),
+                    Instruction::PushVariable(1),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(2),
+                    Instruction::PushVariable(2),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(3),
+                    Instruction::PushVariable(3),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(4),
+                    Instruction::PushVariable(4),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(5),
+                    Instruction::PushVariable(5),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(6),
+                    Instruction::PushVariable(6),
+                    Instruction::Mul,
+                    Instruction::Add,
+                    Instruction::PushParam(7),
+                    Instruction::PushVariable(7),
+                    Instruction::Mul,
+                    Instruction::Add,
+                ],
+                0,
+            ),
+            &ctx,
+            vars.as_ptr(),
+            iterations,
+            samples,
+            996.25,
         );
         run_native_value_microbench(
             "same_storage_voltage_pair",
