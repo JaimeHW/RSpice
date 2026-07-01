@@ -107,6 +107,49 @@ pub(super) fn consume_quoted_or_token(input: &str) -> Option<(String, &str)> {
     Some((token, rest))
 }
 
+fn expect_xspice_instance_name(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    skip_commas(stream);
+
+    let first = stream.peek().clone();
+    let TokenKind::Ident(head) = first.kind else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected identifier, found {:?}", first.kind),
+        });
+    };
+
+    let mut name = head;
+    let mut end = first.span.end;
+    stream.advance();
+
+    while stream.peek().span.start == end {
+        let token = stream.peek().clone();
+        let fragment = match &token.kind {
+            TokenKind::Ident(s) => Some(s.clone()),
+            TokenKind::Number(_) => Some(token.lexeme.to_ascii_uppercase()),
+            TokenKind::Plus => Some("+".to_string()),
+            TokenKind::Minus => Some("-".to_string()),
+            TokenKind::Star => Some("*".to_string()),
+            TokenKind::Slash => Some("/".to_string()),
+            TokenKind::AtSign => Some("@".to_string()),
+            TokenKind::Tilde => Some("~".to_string()),
+            TokenKind::Other(c) => Some(c.to_string()),
+            _ => None,
+        };
+        let Some(fragment) = fragment else {
+            break;
+        };
+        name.push_str(&fragment);
+        end = token.span.end;
+        stream.advance();
+    }
+
+    Ok(name)
+}
+
 pub(super) fn process_line(
     line: &str,
     line_num: usize,
@@ -461,7 +504,7 @@ pub(super) fn parse_line(
         ),
         // XSPICE code model instance
         'A' => {
-            let name = expect_ident(&mut stream, line_num)?;
+            let name = expect_xspice_instance_name(&mut stream, line_num)?;
             xspice_parser::parse_xspice(
                 &mut stream,
                 line_num,

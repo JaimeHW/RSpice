@@ -1920,6 +1920,31 @@ mod tests {
     }
 
     #[test]
+    fn xspice_hyphenated_instance_names_do_not_become_ports() {
+        let netlist = Netlist::parse(
+            "xspice hyphenated instance name\n\
+             Abridge-fit [dout] [aout] dac1\n\
+             .end\n",
+        )
+        .expect("ngspice-style hyphenated XSPICE instance names parse");
+
+        assert_eq!(netlist.elements[0].name, "ABRIDGE-FIT");
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "DAC1");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::Digital("DOUT".to_string()),
+                        XspicePort::Digital("AOUT".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn xspice_other_punctuation_net_names_parse_like_ngspice_net_tokens() {
         let netlist = Netlist::parse(
             "xspice punctuation net names\n\
