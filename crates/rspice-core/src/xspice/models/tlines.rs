@@ -2352,7 +2352,7 @@ impl CodeModel for CoupledTransmissionLine {
             if ctx.time > delay {
                 cpline_delayed_outputs(ctx, delay).unwrap_or([0.0; 4])
             } else {
-                cpline_instant_outputs(ctx, cpline_reference_impedance(ctx)?)
+                [0.0; 4]
             }
         } else {
             cpline_instant_outputs(ctx, cpline_reference_impedance(ctx)?)
@@ -2388,10 +2388,7 @@ impl CodeModel for CoupledTransmissionLine {
             };
         }
 
-        let missing_delayed_sample = ctx.is_transient()
-            && matches!(cpline_delay(ctx), Ok(delay) if ctx.time > delay)
-            && !delayed;
-        if missing_delayed_sample {
+        if ctx.is_transient() && !delayed {
             return Vec::new();
         }
 
