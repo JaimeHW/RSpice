@@ -241,14 +241,6 @@ impl Engine {
                 }
             }
 
-            if instance.model_name().eq_ignore_ascii_case("pwlts")
-                && let Some(times) = instance.real_vector_param("x_array")
-            {
-                for &time in times {
-                    Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
-                }
-            }
-
             if instance.model_name().eq_ignore_ascii_case("d_source") {
                 let input_file = instance
                     .string_param("input_file")
@@ -590,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn pwlts_models_schedule_table_time_breakpoints() {
+    fn pwlts_models_schedule_smoothed_table_time_breakpoints() {
         use std::sync::Arc;
 
         let instance = crate::xspice::XspiceInstance::new(
@@ -612,7 +604,10 @@ mod tests {
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
         Engine::collect_transient_source_breakpoints(&circuit, 2.5e-9, 1.0e-9, &mut breakpoints);
 
-        assert_delays_close(breakpoints.times(), &[0.0, 1.0e-9, 2.0e-9]);
+        assert_delays_close(
+            breakpoints.times(),
+            &[0.99e-9, 1.0e-9, 1.01e-9, 1.99e-9, 2.0e-9, 2.01e-9],
+        );
     }
 
     #[test]

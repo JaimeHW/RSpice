@@ -4352,6 +4352,8 @@ vmid mid 0 dc 0.5
 vbreak break 0 dc 1
 vabove above 0 dc 3
 vlimbelow limbelow 0 dc -1
+vlimedgebelow limedgebelow 0 dc -0.005
+vlimedgeabove limedgeabove 0 dc 2.005
 vlimabove limabove 0 dc 3
 abelow below out_below lut
 afirst first out_first lut
@@ -4359,6 +4361,8 @@ amid mid out_mid lut
 abreak break out_break lut
 aabove above out_above lut
 alimbelow limbelow out_limbelow lutlim
+alimedgebelow limedgebelow out_limedgebelow lutlim
+alimedgeabove limedgeabove out_limedgeabove lutlim
 alimabove limabove out_limabove lutlim
 .model lut pwl (x_array=[0 1 2] y_array=[0 10 30] input_domain=0.01 fraction=false limit=false)
 .model lutlim pwl (x_array=[0 1 2] y_array=[0 10 30] input_domain=0.01 fraction=false limit=true)
@@ -4368,7 +4372,9 @@ r3 out_mid 0 1meg
 r4 out_break 0 1meg
 r5 out_above 0 1meg
 r6 out_limbelow 0 1meg
-r7 out_limabove 0 1meg
+r7 out_limedgebelow 0 1meg
+r8 out_limedgeabove 0 1meg
+r9 out_limabove 0 1meg
 .op
 .end
 ";
@@ -4379,6 +4385,8 @@ r7 out_limabove 0 1meg
     let break_point = op_voltage(deck, "out_break");
     let above = op_voltage(deck, "out_above");
     let lim_below = op_voltage(deck, "out_limbelow");
+    let lim_edge_below = op_voltage(deck, "out_limedgebelow");
+    let lim_edge_above = op_voltage(deck, "out_limedgeabove");
     let lim_above = op_voltage(deck, "out_limabove");
 
     assert!(
@@ -4404,6 +4412,14 @@ r7 out_limabove 0 1meg
     assert!(
         lim_below.abs() < 1e-9,
         "pwl limit=true lower clamp should match ngspice: got {lim_below}"
+    );
+    assert!(
+        (lim_edge_below - 0.00625).abs() < 1e-9,
+        "pwl limit=true lower edge smoothing should match ngspice: got {lim_edge_below}"
+    );
+    assert!(
+        (lim_edge_above - 29.9875).abs() < 1e-9,
+        "pwl limit=true upper edge smoothing should match ngspice: got {lim_edge_above}"
     );
     assert!(
         (lim_above - 30.0).abs() < 1e-9,

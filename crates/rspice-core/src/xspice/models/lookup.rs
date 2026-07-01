@@ -229,60 +229,74 @@ fn segment_slope(left: LookupPoint, right: LookupPoint) -> Value {
 }
 
 fn breakpoint_domain(
-    points: &[LookupPoint],
-    index: usize,
+    lower: LookupPoint,
+    center: LookupPoint,
+    upper: LookupPoint,
     input_domain: Value,
     fraction: bool,
 ) -> Value {
     if !fraction {
         return input_domain;
     }
-    let lower = points[index].x - points[index - 1].x;
-    let upper = points[index + 1].x - points[index].x;
-    input_domain * lower.min(upper)
+    let lower_width = center.x - lower.x;
+    let upper_width = upper.x - center.x;
+    input_domain * lower_width.min(upper_width)
 }
 
-fn smoothing_bounds(
-    points: &[LookupPoint],
-    index: usize,
-    input_domain: Value,
-    fraction: bool,
-) -> (Value, Value, Value) {
-    let domain = breakpoint_domain(points, index, input_domain, fraction);
-    (points[index].x - domain, points[index].x + domain, domain)
-}
-
-fn first_smoothing_index(
-    points: &[LookupPoint],
-    x: Value,
-    input_domain: Value,
-    fraction: bool,
-) -> Option<usize> {
-    if points.len() <= 2 {
-        return None;
+fn expanded_lookup_point(points: &[LookupPoint], index: usize, limit: bool) -> LookupPoint {
+    let original_len = points.len();
+    match index {
+        0 => {
+            let first = points[0];
+            let second = points[1];
+            LookupPoint {
+                x: 2.0 * first.x - second.x,
+                y: if limit {
+                    first.y
+                } else {
+                    2.0 * first.y - second.y
+                },
+            }
+        }
+        index if index == original_len + 1 => {
+            let last = points[original_len - 1];
+            let previous = points[original_len - 2];
+            LookupPoint {
+                x: 2.0 * last.x - previous.x,
+                y: if limit {
+                    last.y
+                } else {
+                    2.0 * last.y - previous.y
+                },
+            }
+        }
+        _ => points[index - 1],
     }
+}
 
-    let internal_count = points.len() - 2;
-    let mut low = 0;
-    let mut high = internal_count;
-    while low < high {
-        let offset = low + (high - low) / 2;
-        let index = offset + 1;
-        let (_, right, domain) = smoothing_bounds(points, index, input_domain, fraction);
-        if domain <= 0.0 || right < x {
-            low = offset + 1;
-        } else {
-            high = offset;
+fn lookup_midpoint(left: LookupPoint, right: LookupPoint) -> Value {
+    (left.x + right.x) / 2.0
+}
+
+fn lookup_breakpoint_times(
+    points: &[LookupPoint],
+    input_domain: Value,
+    fraction: bool,
+) -> Vec<Value> {
+    let expanded_len = points.len() + 2;
+    let mut breakpoints = Vec::with_capacity(points.len() * 3);
+    for index in 1..expanded_len - 1 {
+        let lower = expanded_lookup_point(points, index - 1, false);
+        let center = expanded_lookup_point(points, index, false);
+        let upper = expanded_lookup_point(points, index + 1, false);
+        let domain = breakpoint_domain(lower, center, upper, input_domain, fraction);
+        if domain > 0.0 && center.x - domain > 0.0 {
+            breakpoints.push(center.x - domain);
+            breakpoints.push(center.x);
+            breakpoints.push(center.x + domain);
         }
     }
-    let offset = low;
-    if offset == internal_count {
-        return None;
-    }
-
-    let index = offset + 1;
-    let (left, right, domain) = smoothing_bounds(points, index, input_domain, fraction);
-    (domain > 0.0 && x >= left && x <= right).then_some(index)
+    breakpoints
 }
 
 fn linear_value(point: LookupPoint, slope: Value, x: Value) -> LookupResult {
@@ -334,53 +348,40 @@ fn evaluate_lookup(
     fraction: bool,
     limit: bool,
 ) -> LookupResult {
-    let first = points[0];
-    let last = points[points.len() - 1];
+    let expanded_len = points.len() + 2;
+    let first_bound = expanded_lookup_point(points, 0, limit);
+    let first = expanded_lookup_point(points, 1, limit);
+    let last = expanded_lookup_point(points, expanded_len - 2, limit);
+    let last_bound = expanded_lookup_point(points, expanded_len - 1, limit);
 
-    if x <= first.x {
-        if limit {
-            return LookupResult {
-                value: first.y,
-                slope: 0.0,
+    if x <= lookup_midpoint(first_bound, first) {
+        return linear_value(first_bound, segment_slope(first_bound, first), x);
+    }
+    if x >= lookup_midpoint(last, last_bound) {
+        return linear_value(last, segment_slope(last, last_bound), x);
+    }
+
+    for index in 1..expanded_len - 1 {
+        let center = expanded_lookup_point(points, index, limit);
+        let upper = expanded_lookup_point(points, index + 1, limit);
+        if x < lookup_midpoint(center, upper) {
+            let lower = expanded_lookup_point(points, index - 1, limit);
+            let left_slope = segment_slope(lower, center);
+            let right_slope = segment_slope(center, upper);
+            let domain = breakpoint_domain(lower, center, upper, input_domain, fraction);
+            if domain > 0.0 && x >= center.x - domain && x < center.x + domain {
+                return smooth_corner(x, center.x, center.y, left_slope, right_slope, domain);
+            }
+            let slope = if x < center.x - domain {
+                left_slope
+            } else {
+                right_slope
             };
+            return linear_value(center, slope, x);
         }
-        return linear_value(first, segment_slope(points[0], points[1]), x);
-    }
-    if x >= last.x {
-        if limit {
-            return LookupResult {
-                value: last.y,
-                slope: 0.0,
-            };
-        }
-        return linear_value(
-            last,
-            segment_slope(points[points.len() - 2], points[points.len() - 1]),
-            x,
-        );
     }
 
-    if let Some(index) = first_smoothing_index(points, x, input_domain, fraction) {
-        let domain = breakpoint_domain(points, index, input_domain, fraction);
-        return smooth_corner(
-            x,
-            points[index].x,
-            points[index].y,
-            segment_slope(points[index - 1], points[index]),
-            segment_slope(points[index], points[index + 1]),
-            domain,
-        );
-    }
-
-    let upper = points
-        .partition_point(|point| point.x < x)
-        .clamp(1, points.len() - 1);
-    let lower = upper - 1;
-    linear_value(
-        points[lower],
-        segment_slope(points[lower], points[upper]),
-        x,
-    )
+    linear_value(last, segment_slope(last, last_bound), x)
 }
 
 fn evaluate_lookup_context(ctx: &CmContext, x: Value) -> CmResult<LookupResult> {
@@ -490,6 +491,14 @@ impl CodeModel for PiecewiseLinearTimeSeries {
     fn ac_gain(&self, _ctx: &CmContext) -> Vec<Value> {
         vec![0.0]
     }
+
+    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
+        let points = lookup_table(ctx)?;
+        let input_domain = effective_input_domain(ctx.param("input_domain"))?;
+        let fraction = ctx.param("fraction") > 0.5;
+        validate_smoothing_domain(&points, input_domain, fraction)?;
+        Ok(lookup_breakpoint_times(&points, input_domain, fraction))
+    }
 }
 
 #[cfg(test)]
@@ -521,16 +530,10 @@ mod tests {
     }
 
     #[test]
-    fn lookup_smoothing_index_preserves_first_overlapping_breakpoint() {
+    fn lookup_evaluation_preserves_first_overlapping_breakpoint() {
         let points = validate_lookup_table(&[0.0, 0.5, 1.0, 1.5], &[0.0, 10.0, 30.0, 60.0])
             .expect("strictly increasing lookup table");
         let x = 0.7;
-
-        assert_eq!(
-            first_smoothing_index(&points, x, 0.4, false),
-            Some(1),
-            "overlapping absolute smoothing domains should keep the first matching breakpoint"
-        );
 
         let result = evaluate_lookup(&points, x, 0.4, false, false);
         let first_breakpoint_result = smooth_corner(
@@ -556,5 +559,32 @@ mod tests {
             (result.value - second_breakpoint_result.value).abs() > 1.0e-6,
             "test fixture should distinguish the overlapping breakpoint choices"
         );
+    }
+
+    #[test]
+    fn lookup_limit_smooths_synthetic_edge_clamps() {
+        let points = validate_lookup_table(&[0.0, 1.0, 2.0], &[0.0, 10.0, 30.0])
+            .expect("strictly increasing lookup table");
+
+        let lower = evaluate_lookup(&points, -0.005, 0.01, false, true);
+        assert_near(lower.value, 0.00625);
+        assert_near(lower.slope, 2.5);
+
+        let upper = evaluate_lookup(&points, 2.005, 0.01, false, true);
+        assert_near(upper.value, 29.9875);
+        assert_near(upper.slope, 5.0);
+    }
+
+    #[test]
+    fn pwlts_breakpoints_cover_smoothed_table_corners() {
+        let points = validate_lookup_table(&[0.0, 1.0e-9, 2.0e-9], &[0.0, 10.0, 30.0])
+            .expect("strictly increasing lookup table");
+
+        let breakpoints = lookup_breakpoint_times(&points, 0.01, true);
+        let expected = [0.99e-9, 1.0e-9, 1.01e-9, 1.99e-9, 2.0e-9, 2.01e-9];
+        assert_eq!(breakpoints.len(), expected.len());
+        for (actual, expected) in breakpoints.into_iter().zip(expected) {
+            assert_near(actual, expected);
+        }
     }
 }
