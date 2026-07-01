@@ -170,6 +170,14 @@ fn level2_requests_self_consistent_thermal_resistor(
     has_l && has_a && (has_instance_material || has_model_material)
 }
 
+fn resistor_uses_xyce_default_value(instance_params: &[(String, f64)]) -> bool {
+    instance_param(
+        instance_params,
+        &[crate::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER],
+    )
+    .is_some()
+}
+
 fn resolve_level2_resistor_electrical_subset(
     element_name: &str,
     model_name: &str,
@@ -179,8 +187,9 @@ fn resolve_level2_resistor_electrical_subset(
     instance_params: &[(String, f64)],
     eval_ctx: &crate::netlist::ParamContext,
 ) -> Result<f64, SimulationError> {
+    let uses_xyce_default = resistor_uses_xyce_default_value(instance_params);
     let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
-    if resistance.is_none() && value.is_finite() && value > 0.0 {
+    if resistance.is_none() && !uses_xyce_default && value.is_finite() && value > 0.0 {
         resistance = Some(value);
     }
     if resistance.is_none()
@@ -197,13 +206,16 @@ fn resolve_level2_resistor_electrical_subset(
     }
 
     if resistance.is_none() {
-        let rsh = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "Resistor '{}' model '{}' requires instance R or RSH with L/W geometry for native Xyce LEVEL=2",
-                    element_name, model_name
-                ))
-            })?;
+        let Some(rsh) = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?
+        else {
+            if uses_xyce_default {
+                return Ok(1000.0);
+            }
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' model '{}' requires instance R or RSH with L/W geometry for native Xyce LEVEL=2",
+                element_name, model_name
+            )));
+        };
         if !rsh.is_finite() || rsh <= 0.0 {
             return Err(SimulationError::Circuit(format!(
                 "Resistor '{}' model '{}' has invalid RSH={} (must be finite and > 0)",
@@ -211,18 +223,20 @@ fn resolve_level2_resistor_electrical_subset(
             )));
         }
 
-        let l = instance_param(instance_params, &["L", "LENGTH"])
-            .or_else(|| {
-                resolve_model_param(model_def, &["L", "LENGTH"], eval_ctx)
-                    .ok()
-                    .flatten()
-            })
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    "Resistor '{}' model '{}' requires L/LENGTH when using RSH with native Xyce LEVEL=2",
-                    element_name, model_name
-                ))
-            })?;
+        let l = instance_param(instance_params, &["L", "LENGTH"]).or_else(|| {
+            resolve_model_param(model_def, &["L", "LENGTH"], eval_ctx)
+                .ok()
+                .flatten()
+        });
+        if uses_xyce_default && l.is_none() {
+            return Ok(1000.0);
+        }
+        let l = l.ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "Resistor '{}' model '{}' requires L/LENGTH when using RSH with native Xyce LEVEL=2",
+                element_name, model_name
+            ))
+        })?;
         let w = instance_param(instance_params, &["W", "WIDTH"])
             .or_else(|| {
                 resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], eval_ctx)
@@ -234,6 +248,9 @@ fn resolve_level2_resistor_electrical_subset(
         let l_eff = l - narrow;
         let w_eff = w - narrow;
         if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff < 0.0 {
+            if uses_xyce_default {
+                return Ok(1000.0);
+            }
             return Err(SimulationError::Circuit(format!(
                 "Resistor '{}' has invalid Xyce LEVEL=2 effective geometry (L={}, W={}, NARROW={})",
                 element_name, l, w, narrow
@@ -397,6 +414,7 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
 
     let (eval_ctx, current_temp_c, tnom_c) =
         resolve_resistor_eval_context(netlist, model_def, instance_params, temperature_kelvin)?;
+    let uses_xyce_default = resistor_uses_xyce_default_value(instance_params);
     let resistor_level = if let (Some(model_def), Some(model_name)) = (model_def, model_name) {
         let level = resolve_resistor_model_level(element_name, model_name, model_def, &eval_ctx)?;
         if level == 2
@@ -426,6 +444,9 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         )?)
     } else {
         let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
+        if resistance.is_none() && uses_xyce_default {
+            resistance = Some(1000.0);
+        }
         if resistance.is_none() && value.is_finite() {
             resistance = Some(value);
         }
@@ -672,5 +693,37 @@ R1 a 0 0
         .expect("zero-ohm resistor resolves before branch-form stamping");
 
         assert_eq!(resolved, 0.0);
+    }
+
+    #[test]
+    fn xyce_value_less_resistors_default_to_one_kilohm() {
+        let (plain, _) = resolve_resistor_from_source(
+            r#"value-less resistor
+R1 a 0
+.end
+"#,
+            "R1",
+        );
+        assert_eq!(plain, 1000.0);
+
+        let (level1, _) = resolve_resistor_from_source(
+            r#"value-less level1 resistor
+R2 a 0 rmod
+.model rmod R RSH=1 LEVEL=1
+.end
+"#,
+            "R2",
+        );
+        assert_eq!(level1, 1000.0);
+
+        let (level2, _) = resolve_resistor_from_source(
+            r#"value-less level2 resistor
+R3 a 0 rmod
+.model rmod R RSH=2 LEVEL=2
+.end
+"#,
+            "R3",
+        );
+        assert_eq!(level2, 1000.0);
     }
 }

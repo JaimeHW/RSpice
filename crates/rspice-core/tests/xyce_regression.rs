@@ -328,6 +328,33 @@ fn test_xyce_zero_resistance_branch_current_cases_run() {
 }
 
 #[test]
+fn test_xyce_resistor_default_value_warning_wrapper_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/RESISTOR/DefaultValueWarning.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain its removed upstream warning-wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce resistor-default warning and .prn comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_resistor_default_prn_dc",
+        "{relative} should report the native resistor-default wrapper contract"
+    );
+}
+
+#[test]
 fn test_xyce_diode_sidewall_cd_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

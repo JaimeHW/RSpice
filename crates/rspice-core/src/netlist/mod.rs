@@ -4364,6 +4364,55 @@ mod tests {
     }
 
     #[test]
+    fn xyce_value_less_resistors_parse_with_default_diagnostics() {
+        let netlist = Netlist::parse(
+            "xyce default resistor value\n\
+             R1 1 0\n\
+             R2 2 0 rmodel\n\
+             .model rmodel r rsh=1 level=1\n\
+             .end\n",
+        )
+        .expect("Xyce value-less resistors should parse with warnings");
+
+        assert!(
+            netlist.diagnostics.iter().any(|diagnostic| {
+                diagnostic.line == 2 && diagnostic.code == "xyce_resistor_missing_value"
+            }),
+            "plain value-less resistor should emit a missing-value diagnostic: {:?}",
+            netlist.diagnostics
+        );
+        assert!(
+            netlist.diagnostics.iter().any(|diagnostic| {
+                diagnostic.line == 3 && diagnostic.code == "xyce_resistor_model_missing_value"
+            }),
+            "model value-less resistor should emit a model-default diagnostic: {:?}",
+            netlist.diagnostics
+        );
+        for name in ["R1", "R2"] {
+            let element = netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .expect("resistor exists");
+            let ElementKind::Resistor {
+                value,
+                instance_params,
+                ..
+            } = &element.kind
+            else {
+                panic!("{name} is not a resistor");
+            };
+            assert_eq!(*value, 0.0);
+            assert!(
+                instance_params.iter().any(|(param, _)| {
+                    param.eq_ignore_ascii_case(XYCE_DEFAULT_RESISTOR_VALUE_MARKER)
+                }),
+                "{name} should carry the internal Xyce default marker"
+            );
+        }
+    }
+
+    #[test]
     fn resistor_model_followed_by_unit_suffix_value_parse() {
         let netlist = Netlist::parse(
             "modeled resistor with suffix value override\n\

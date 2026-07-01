@@ -420,6 +420,7 @@ pub(super) fn parse_line(
             line_num,
             elements,
             params,
+            diagnostics,
             defer_simple_param_refs,
         ),
         'C' => parse_capacitor(

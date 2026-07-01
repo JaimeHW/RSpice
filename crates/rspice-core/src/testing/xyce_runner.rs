@@ -167,6 +167,7 @@ struct XyceStaticDcPlan {
     print: XycePrintRequest,
     dc: XyceDcSweep,
     step: Option<StepCommand>,
+    diagnostics: Vec<crate::netlist::ParseDiagnostic>,
 }
 
 #[derive(Debug, Clone)]
@@ -182,6 +183,7 @@ enum XyceStaticDcContract {
     PlainStaticPrn,
     WrapperDefaultPrn,
     WrapperHspiceMathPrn,
+    WrapperResistorDefaultPrn,
 }
 
 impl XyceStaticDcContract {
@@ -193,6 +195,8 @@ impl XyceStaticDcContract {
             (Self::WrapperDefaultPrn, true) => "wrapper_static_prn_step_dc",
             (Self::WrapperHspiceMathPrn, false) => "wrapper_hspice_math_prn_dc",
             (Self::WrapperHspiceMathPrn, true) => "wrapper_hspice_math_prn_step_dc",
+            (Self::WrapperResistorDefaultPrn, false) => "wrapper_resistor_default_prn_dc",
+            (Self::WrapperResistorDefaultPrn, true) => "wrapper_resistor_default_prn_step_dc",
         }
     }
 
@@ -710,6 +714,7 @@ impl XyceTestRunner {
         let print = Self::single_dc_print_request(&source)?;
         let netlist = Self::parse_xyce_netlist(&source, deck_path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        let diagnostics = netlist.diagnostics.clone();
         let dc = Self::single_dc_sweep(&netlist)?;
         let step = Self::single_step_command(&netlist)?;
         Self::validate_static_dc_contract(&netlist, &dc, &print)?;
@@ -720,6 +725,7 @@ impl XyceTestRunner {
             print,
             dc,
             step,
+            diagnostics,
         })
     }
 
@@ -738,7 +744,34 @@ impl XyceTestRunner {
                 ));
             }
         }
+        if matches!(contract, XyceStaticDcContract::WrapperResistorDefaultPrn) {
+            Self::validate_resistor_default_wrapper_diagnostics(plan)?;
+        }
 
+        Ok(())
+    }
+
+    fn validate_resistor_default_wrapper_diagnostics(
+        plan: &XyceStaticDcPlan,
+    ) -> Result<(), String> {
+        let default_warning_count = plan
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic
+                    .code
+                    .eq_ignore_ascii_case("xyce_resistor_missing_value")
+                    || diagnostic
+                        .code
+                        .eq_ignore_ascii_case("xyce_resistor_model_missing_value")
+            })
+            .count();
+        if default_warning_count == 0 {
+            return Err(
+                "wrapper-origin resistor default contract requires native value-default diagnostics"
+                    .to_string(),
+            );
+        }
         Ok(())
     }
 
@@ -756,6 +789,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperHspiceMathPrn);
         }
 
+        if Self::is_native_resistor_default_wrapper_candidate(relative_path, source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperResistorDefaultPrn);
+        }
+
         Err(Self::upstream_wrapper_required_reason().to_string())
     }
 
@@ -769,6 +807,14 @@ impl XyceTestRunner {
         relative_path.starts_with("netlists/parser/")
             && normalized_source.contains("-hspice-ext math")
             && normalized_source.contains("-hspice-ext all")
+    }
+
+    fn is_native_resistor_default_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        let relative_path = Self::normalize_manifest_key(relative_path);
+        let normalized_source = source.to_ascii_lowercase();
+        relative_path.starts_with("netlists/resistor/")
+            && normalized_source.contains("default to 1000")
+            && normalized_source.contains("warning")
     }
 
     fn upstream_wrapper_required_reason() -> &'static str {
@@ -3920,6 +3966,11 @@ impl XyceTestRunner {
             return None;
         };
 
+        if Self::resistor_uses_xyce_default_marker(instance_params)
+            && let Some(resistance) = Self::effective_resistor_value(netlist, name)
+        {
+            return Some(resistance);
+        }
         if let Some(resistance) = Self::instance_param(instance_params, &["R", "VALUE"]) {
             return Some(resistance);
         }
@@ -3956,6 +4007,11 @@ impl XyceTestRunner {
             ));
         };
 
+        if Self::resistor_uses_xyce_default_marker(instance_params)
+            && let Some(resistance) = Self::effective_resistor_value(netlist, name)
+        {
+            return Ok(resistance);
+        }
         if let Some(resistance) = Self::instance_param(instance_params, &["R", "VALUE"]) {
             return Ok(resistance);
         }
@@ -3993,6 +4049,14 @@ impl XyceTestRunner {
         Err(format!(
             "resistor parameter probe '{name}:R' could not resolve a resistance value"
         ))
+    }
+
+    fn resistor_uses_xyce_default_marker(instance_params: &[(String, Value)]) -> bool {
+        Self::instance_param(
+            instance_params,
+            &[crate::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER],
+        )
+        .is_some()
     }
 
     fn resistor_parameter_r_value_from_parts(

@@ -11,6 +11,11 @@ use crate::Value;
 
 use super::expr::FunctionDef;
 
+/// Internal instance marker for Xyce resistor lines whose value field is
+/// omitted. Xyce parses those as zero and then applies a 1000 ohm default
+/// during resistor setup; explicit zero-ohm resistors must not use this path.
+pub(crate) const XYCE_DEFAULT_RESISTOR_VALUE_MARKER: &str = "__RSPICE_XYCE_DEFAULT_RESISTOR_VALUE";
+
 //=============================================================================
 // Parametric Values
 //=============================================================================

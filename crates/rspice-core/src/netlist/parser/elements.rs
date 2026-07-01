@@ -7,6 +7,7 @@ pub(super) fn parse_resistor(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    diagnostics: &mut Vec<ParseDiagnostic>,
     defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
@@ -214,11 +215,34 @@ pub(super) fn parse_resistor(
             .map(|(_, v)| *v);
     }
 
-    if value.is_none() && value_expr.is_none() && model.is_none() {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "Resistor requires either a value or a model".to_string(),
-        });
+    let missing_value = value.is_none() && value_expr.is_none();
+    if missing_value {
+        if model.is_none() {
+            diagnostics.push(ParseDiagnostic::warning(
+                line_num,
+                "xyce_resistor_missing_value",
+                format!(
+                    "Resistor '{name}' has no value or model field; using Xyce's default 1000 ohm resistance"
+                ),
+            ));
+        } else {
+            diagnostics.push(ParseDiagnostic::warning(
+                line_num,
+                "xyce_resistor_model_missing_value",
+                format!(
+                    "Resistor '{name}' has no explicit value; model resolution may use Xyce's default 1000 ohm resistance"
+                ),
+            ));
+        }
+        value = Some(0.0);
+        if !instance_params.iter().any(|(param, _)| {
+            param.eq_ignore_ascii_case(crate::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER)
+        }) {
+            instance_params.push((
+                crate::netlist::XYCE_DEFAULT_RESISTOR_VALUE_MARKER.to_string(),
+                1.0,
+            ));
+        }
     }
 
     let mut nodes = vec![node_pos, node_neg];
