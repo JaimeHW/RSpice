@@ -1,6 +1,7 @@
 //! Multi-input analog XSPICE code models.
 
 use crate::Value;
+use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType,
 };
@@ -55,6 +56,12 @@ struct EvalSignature {
     table: TableSignature,
     mode: MultiInputPwlMode,
     inputs: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EvalBaseSignature {
+    table: TableSignature,
+    mode: MultiInputPwlMode,
 }
 
 #[derive(Debug, Clone)]
@@ -223,31 +230,64 @@ fn table(ctx: &CmContext) -> CmResult<Arc<TableData>> {
     table_uncached(ctx).map(Arc::new)
 }
 
-fn eval_signature(ctx: &CmContext) -> CmResult<EvalSignature> {
-    let inputs = ctx
-        .input_analog_vector_values("in")
-        .unwrap_or(&[])
-        .iter()
-        .map(|input| input.value)
-        .collect();
-    Ok(EvalSignature {
+fn input_values(ctx: &CmContext) -> &[AnalogValue] {
+    ctx.input_analog_vector_values("in").unwrap_or(&[])
+}
+
+fn collect_input_values(inputs: &[AnalogValue]) -> Vec<Value> {
+    inputs.iter().map(|input| input.value).collect()
+}
+
+fn eval_base_signature(ctx: &CmContext) -> CmResult<EvalBaseSignature> {
+    Ok(EvalBaseSignature {
         table: table_signature(ctx),
         mode: mode(ctx)?,
-        inputs,
     })
 }
 
-fn controlling_input(inputs: &[Value], mode: MultiInputPwlMode) -> Option<(usize, Value)> {
+fn eval_signature_from_inputs(base: EvalBaseSignature, inputs: &[AnalogValue]) -> EvalSignature {
+    EvalSignature {
+        table: base.table,
+        mode: base.mode,
+        inputs: collect_input_values(inputs),
+    }
+}
+
+fn eval_signature(ctx: &CmContext) -> CmResult<EvalSignature> {
+    Ok(eval_signature_from_inputs(
+        eval_base_signature(ctx)?,
+        input_values(ctx),
+    ))
+}
+
+fn eval_inputs_match(cached: &[Value], inputs: &[AnalogValue]) -> bool {
+    cached.len() == inputs.len()
+        && cached
+            .iter()
+            .zip(inputs)
+            .all(|(cached, input)| *cached == input.value)
+}
+
+fn eval_resource_matches(
+    resource: &EvalResource,
+    base: EvalBaseSignature,
+    inputs: &[AnalogValue],
+) -> bool {
+    resource.signature.table == base.table
+        && resource.signature.mode == base.mode
+        && eval_inputs_match(&resource.signature.inputs, inputs)
+}
+
+fn controlling_input<I>(inputs: I, mode: MultiInputPwlMode) -> Option<(usize, Value)>
+where
+    I: IntoIterator<Item = (usize, Value)>,
+{
     match mode {
         MultiInputPwlMode::And | MultiInputPwlMode::Nand => inputs
-            .iter()
-            .copied()
-            .enumerate()
+            .into_iter()
             .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
         MultiInputPwlMode::Or | MultiInputPwlMode::Nor => inputs
-            .iter()
-            .copied()
-            .enumerate()
+            .into_iter()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
     }
 }
@@ -359,24 +399,28 @@ fn reverse_output_increasing(table: &[TablePoint], input: Value) -> TableEval {
     }
 }
 
-fn evaluate_multi_input_with_signature(
+fn evaluate_multi_input_from_values<I>(
     table: &TableData,
-    signature: &EvalSignature,
-) -> CmResult<Option<(usize, TableEval)>> {
-    if signature.inputs.len() < 2 {
+    mode: MultiInputPwlMode,
+    input_len: usize,
+    inputs: I,
+) -> CmResult<Option<(usize, TableEval)>>
+where
+    I: IntoIterator<Item = (usize, Value)>,
+{
+    if input_len < 2 {
         return Err(CmError::PortCountMismatch {
             expected: 2,
-            actual: signature.inputs.len(),
+            actual: input_len,
         });
     }
 
-    let Some((index, controlling_input)) = controlling_input(&signature.inputs, signature.mode)
-    else {
+    let Some((index, controlling_input)) = controlling_input(inputs, mode) else {
         return Ok(None);
     };
 
     let points = table.points.as_slice();
-    let result = match (signature.mode, table.strictly_increasing_x) {
+    let result = match (mode, table.strictly_increasing_x) {
         (MultiInputPwlMode::And | MultiInputPwlMode::Or, true) => {
             forward_output_increasing(points, controlling_input)
         }
@@ -394,26 +438,53 @@ fn evaluate_multi_input_with_signature(
     Ok(Some((index, result)))
 }
 
+fn evaluate_multi_input_with_signature(
+    table: &TableData,
+    signature: &EvalSignature,
+) -> CmResult<Option<(usize, TableEval)>> {
+    evaluate_multi_input_from_values(
+        table,
+        signature.mode,
+        signature.inputs.len(),
+        signature.inputs.iter().copied().enumerate(),
+    )
+}
+
+fn evaluate_multi_input_with_inputs(
+    table: &TableData,
+    mode: MultiInputPwlMode,
+    inputs: &[AnalogValue],
+) -> CmResult<Option<(usize, TableEval)>> {
+    evaluate_multi_input_from_values(
+        table,
+        mode,
+        inputs.len(),
+        inputs.iter().map(|input| input.value).enumerate(),
+    )
+}
+
 fn evaluate_multi_input(ctx: &CmContext) -> CmResult<Option<(usize, TableEval)>> {
-    let signature = eval_signature(ctx)?;
+    let base = eval_base_signature(ctx)?;
+    let inputs = input_values(ctx);
     if let Some(resource) = ctx.resource::<EvalResource>(EVAL_RESOURCE)
-        && resource.signature == signature
+        && eval_resource_matches(&resource, base, inputs)
     {
         return Ok(resource.result);
     }
 
     let table = table(ctx)?;
-    evaluate_multi_input_with_signature(&table, &signature)
+    evaluate_multi_input_with_inputs(&table, base.mode, inputs)
 }
 
 fn evaluate_multi_input_cached(ctx: &mut CmContext) -> CmResult<Option<(usize, TableEval)>> {
-    let signature = eval_signature(ctx)?;
+    let base = eval_base_signature(ctx)?;
     if let Some(resource) = ctx.resource::<EvalResource>(EVAL_RESOURCE)
-        && resource.signature == signature
+        && eval_resource_matches(&resource, base, input_values(ctx))
     {
         return Ok(resource.result);
     }
 
+    let signature = eval_signature_from_inputs(base, input_values(ctx));
     let table = cache_table(ctx)?;
     let result = evaluate_multi_input_with_signature(&table, &signature)?;
     ctx.set_resource(EVAL_RESOURCE, Arc::new(EvalResource { signature, result }));
@@ -564,6 +635,39 @@ mod tests {
                     slope: 10.0,
                 }
             ))
+        );
+    }
+
+    #[test]
+    fn multi_input_eval_resource_match_compares_current_input_slice() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x", vec![0.0, 1.0, 2.0]);
+        ctx.set_real_vector_param("y", vec![0.0, 10.0, 20.0]);
+        ctx.set_string_param("model", "or");
+        set_inputs(&mut ctx, &[0.5, 1.5, 1.0]);
+
+        let signature = eval_signature(&ctx).expect("current signature");
+        let base = eval_base_signature(&ctx).expect("current base signature");
+        let resource = EvalResource {
+            signature,
+            result: Some((
+                1,
+                TableEval {
+                    value: 15.0,
+                    slope: 10.0,
+                },
+            )),
+        };
+
+        assert!(
+            eval_resource_matches(&resource, base, input_values(&ctx)),
+            "matching inputs should hit the eval cache without building a new signature"
+        );
+
+        set_inputs(&mut ctx, &[0.5, 0.75, 1.0]);
+        assert!(
+            !eval_resource_matches(&resource, base, input_values(&ctx)),
+            "changed inputs must invalidate the eval cache"
         );
     }
 
