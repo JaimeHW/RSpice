@@ -2544,13 +2544,17 @@ impl FunctionCompiler {
                 self.emit_ordered_condition_result(target, ConditionCode::BelowOrEqual);
             }
             CompareOp::Eq => {
-                self.emit_literal_binary_op(target, value, BinaryOp::Sub);
+                if value != 0.0 {
+                    self.emit_literal_binary_op(target, value, BinaryOp::Sub);
+                }
                 self.emit_abs_register(target);
                 self.emit_literal_compare(target, BOOLEAN_EPSILON);
                 self.emit_ordered_condition_result(target, ConditionCode::Below);
             }
             CompareOp::Ne => {
-                self.emit_literal_binary_op(target, value, BinaryOp::Sub);
+                if value != 0.0 {
+                    self.emit_literal_binary_op(target, value, BinaryOp::Sub);
+                }
                 self.emit_abs_register(target);
                 self.emit_literal_compare(target, BOOLEAN_EPSILON);
                 self.emit_condition_result(target, ConditionCode::AboveOrEqual);
@@ -3837,8 +3841,8 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        ABS_VALUE_MASK_HIGH, ABS_VALUE_MASK_LOW, BRANCH_CURRENTS_OFFSET, ConditionCode,
-        ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
+        ABS_VALUE_MASK_HIGH, ABS_VALUE_MASK_LOW, BOOLEAN_EPSILON, BRANCH_CURRENTS_OFFSET,
+        ConditionCode, ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
         Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, THERMAL_VOLTAGE_PER_K,
@@ -5330,6 +5334,97 @@ mod tests {
             ctx.temperature = input;
 
             assert_eq!(f(&ctx, std::ptr::null()).to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_compares_zero_rhs_without_literal_subtract() {
+        let cases = [
+            ("eq-positive-zero", Instruction::Eq, CompareOp::Eq, 0.0),
+            ("eq-negative-zero", Instruction::Eq, CompareOp::Eq, -0.0),
+            ("ne-positive-zero", Instruction::Ne, CompareOp::Ne, 0.0),
+            ("ne-negative-zero", Instruction::Ne, CompareOp::Ne, -0.0),
+        ];
+        let inputs = [
+            ("positive-zero", 0.0_f64),
+            ("negative-zero", -0.0_f64),
+            ("within-epsilon", 0.5e-15_f64),
+            ("at-epsilon", 1.0e-15_f64),
+            ("infinity", f64::INFINITY),
+            ("unordered", f64::NAN),
+        ];
+
+        for (name, instruction, expected_op, literal) in cases {
+            let program = native_program(
+                EntryKind::StampValue,
+                vec![
+                    Instruction::PushParam(0),
+                    Instruction::PushConst(literal),
+                    instruction,
+                ],
+                0,
+            );
+
+            assert_eq!(
+                program.ops(),
+                &[
+                    NativeOp::LoadParam(0),
+                    NativeOp::CompareConst(expected_op, literal)
+                ],
+                "{name} should lower to a literal RHS comparison"
+            );
+            assert_eq!(
+                program.max_stack_depth(),
+                1,
+                "{name} should use a literal RHS compare, not a second stack slot"
+            );
+
+            let bytes =
+                compile_value_function(&program).expect("compile zero literal comparison leaf");
+            assert!(
+                !contains_bytes(&bytes, &subsd_xmm_m64_rip_prefix_bytes(Xmm::Xmm0)),
+                "{name} should not subtract a zero literal before the epsilon compare"
+            );
+            assert_eq!(
+                count_bytes(&bytes, &BOOLEAN_EPSILON.to_le_bytes()),
+                1,
+                "{name} should keep exactly one epsilon comparison literal"
+            );
+
+            let memory = ExecutableMemory::allocate(&bytes).expect("allocate zero comparison leaf");
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                unsafe { std::mem::transmute(entry) };
+
+            for (input_name, input) in inputs {
+                let params = [input];
+                let ctx = eval_context(&params, &[], &[], &[]);
+                let expected = match expected_op {
+                    CompareOp::Eq => {
+                        if input.is_nan() || input.abs() >= BOOLEAN_EPSILON {
+                            0.0_f64
+                        } else {
+                            1.0_f64
+                        }
+                    }
+                    CompareOp::Ne => {
+                        if input.is_nan() || input.abs() < BOOLEAN_EPSILON {
+                            0.0_f64
+                        } else {
+                            1.0_f64
+                        }
+                    }
+                    CompareOp::Gt | CompareOp::Ge | CompareOp::Lt | CompareOp::Le => {
+                        unreachable!("zero comparison test only covers equality operators")
+                    }
+                };
+
+                assert_eq!(
+                    f(&ctx, std::ptr::null()).to_bits(),
+                    expected.to_bits(),
+                    "{name}:{input_name}"
+                );
+            }
         }
     }
 
@@ -11512,6 +11607,14 @@ mod tests {
     fn mulsd_xmm_m64_rip_prefix_bytes(dst: Xmm) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.mulsd_xmm_m64_rip_disp32(dst, 0);
+        let mut bytes = encoder.into_bytes();
+        bytes.truncate(bytes.len() - std::mem::size_of::<i32>());
+        bytes
+    }
+
+    fn subsd_xmm_m64_rip_prefix_bytes(dst: Xmm) -> Vec<u8> {
+        let mut encoder = X64Encoder::new();
+        encoder.subsd_xmm_m64_rip_disp32(dst, 0);
         let mut bytes = encoder.into_bytes();
         bytes.truncate(bytes.len() - std::mem::size_of::<i32>());
         bytes
