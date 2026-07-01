@@ -461,7 +461,7 @@ impl CodeModel for Multiplier {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let transfer = cache_mult_transfer(ctx)?;
 
-        ctx.set_output("out", mult_output_from_transfer(&transfer));
+        ctx.set_output("out", mult_output_from_transfer(transfer.as_ref()));
         Ok(())
     }
 
@@ -477,7 +477,7 @@ impl CodeModel for Multiplier {
         let Ok(transfer) = mult_transfer_for_context(ctx) else {
             return Vec::new();
         };
-        mult_partials_from_transfer(&transfer)
+        mult_partials_from_transfer(transfer.as_ref())
     }
 }
 
@@ -509,7 +509,7 @@ struct MultTransfer {
 #[derive(Debug, Clone)]
 struct MultTransferResource {
     signature: MultTransferSignature,
-    transfer: MultTransfer,
+    transfer: Arc<MultTransfer>,
 }
 
 fn mult_transfer_base_signature(ctx: &CmContext) -> MultTransferBaseSignature {
@@ -563,7 +563,7 @@ fn mult_transfer_resource_matches(
 
 fn mult_transfer_from_context_with_signature(
     ctx: &CmContext,
-) -> CmResult<(MultTransferSignature, MultTransfer)> {
+) -> CmResult<(MultTransferSignature, Arc<MultTransfer>)> {
     let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if inputs.len() < 2 {
         return Err(CmError::EvaluationError(format!(
@@ -600,39 +600,39 @@ fn mult_transfer_from_context_with_signature(
             out_gain,
             out_offset,
         },
-        MultTransfer {
+        Arc::new(MultTransfer {
             accumulate_in,
             transfer_gain,
             out_offset,
             shifted_inputs,
-        },
+        }),
     ))
 }
 
-fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<MultTransfer> {
+fn mult_transfer_from_context(ctx: &CmContext) -> CmResult<Arc<MultTransfer>> {
     let (_, transfer) = mult_transfer_from_context_with_signature(ctx)?;
     Ok(transfer)
 }
 
-fn mult_transfer_for_context(ctx: &CmContext) -> CmResult<MultTransfer> {
+fn mult_transfer_for_context(ctx: &CmContext) -> CmResult<Arc<MultTransfer>> {
     let base = mult_transfer_base_signature(ctx);
     let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if let Some(resource) = ctx.resource::<MultTransferResource>(MULT_TRANSFER_RESOURCE)
         && mult_transfer_resource_matches(&resource, base, inputs)
     {
-        return Ok(resource.transfer.clone());
+        return Ok(Arc::clone(&resource.transfer));
     }
 
     mult_transfer_from_context(ctx)
 }
 
-fn cache_mult_transfer(ctx: &mut CmContext) -> CmResult<MultTransfer> {
+fn cache_mult_transfer(ctx: &mut CmContext) -> CmResult<Arc<MultTransfer>> {
     let base = mult_transfer_base_signature(ctx);
     let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
     if let Some(resource) = ctx.resource::<MultTransferResource>(MULT_TRANSFER_RESOURCE)
         && mult_transfer_resource_matches(&resource, base, inputs)
     {
-        return Ok(resource.transfer.clone());
+        return Ok(Arc::clone(&resource.transfer));
     }
 
     let (signature, transfer) = mult_transfer_from_context_with_signature(ctx)?;
@@ -640,7 +640,7 @@ fn cache_mult_transfer(ctx: &mut CmContext) -> CmResult<MultTransfer> {
         MULT_TRANSFER_RESOURCE,
         Arc::new(MultTransferResource {
             signature,
-            transfer: transfer.clone(),
+            transfer: Arc::clone(&transfer),
         }),
     );
     Ok(transfer)
@@ -652,7 +652,7 @@ fn mult_output_from_transfer(transfer: &MultTransfer) -> Value {
 
 fn mult_output_from_context(ctx: &CmContext) -> CmResult<Value> {
     let transfer = mult_transfer_for_context(ctx)?;
-    Ok(mult_output_from_transfer(&transfer))
+    Ok(mult_output_from_transfer(transfer.as_ref()))
 }
 
 fn mult_partials_from_transfer(transfer: &MultTransfer) -> Vec<(String, usize, Value)> {
@@ -674,7 +674,7 @@ fn mult_partials_from_transfer(transfer: &MultTransfer) -> Vec<(String, usize, V
 
 fn mult_partials_from_context(ctx: &CmContext) -> CmResult<Vec<(String, usize, Value)>> {
     let transfer = mult_transfer_for_context(ctx)?;
-    Ok(mult_partials_from_transfer(&transfer))
+    Ok(mult_partials_from_transfer(transfer.as_ref()))
 }
 
 //=============================================================================
@@ -2776,12 +2776,12 @@ mod tests {
         let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
         let resource = MultTransferResource {
             signature,
-            transfer: MultTransfer {
+            transfer: Arc::new(MultTransfer {
                 accumulate_in: -2.0,
                 transfer_gain: -3.0,
                 out_offset: -4.0,
                 shifted_inputs: vec![-5.0, -6.0, -7.0],
-            },
+            }),
         };
 
         assert!(
@@ -2811,15 +2811,17 @@ mod tests {
         ctx.set_param("out_offset", 1.0);
 
         let first = cache_mult_transfer(&mut ctx).expect("mult transfer caches");
-        assert_eq!(
-            mult_transfer_for_context(&ctx).expect("cached mult transfer"),
-            first
+        let cached = mult_transfer_for_context(&ctx).expect("cached mult transfer");
+        assert!(
+            Arc::ptr_eq(&cached, &first),
+            "cached immutable mult transfer should reuse the stored Arc"
         );
 
         ctx.set_param("unrelated", 42.0);
-        assert_eq!(
-            mult_transfer_for_context(&ctx).expect("unrelated param preserves mult cache"),
-            first,
+        let cached_after_unrelated =
+            mult_transfer_for_context(&ctx).expect("unrelated param preserves mult cache");
+        assert!(
+            Arc::ptr_eq(&cached_after_unrelated, &first),
             "unrelated context changes should not invalidate the mult transfer cache"
         );
 
@@ -2830,21 +2832,24 @@ mod tests {
             out_offset: -4.0,
             shifted_inputs: vec![-5.0, -6.0, -7.0],
         };
+        let sentinel = Arc::new(sentinel);
         ctx.set_resource(
             MULT_TRANSFER_RESOURCE,
             Arc::new(MultTransferResource {
                 signature,
-                transfer: sentinel.clone(),
+                transfer: Arc::clone(&sentinel),
             }),
         );
-        assert_eq!(
-            mult_transfer_for_context(&ctx).expect("matching signature reuses mult cache"),
-            sentinel,
+        let cached_sentinel =
+            mult_transfer_for_context(&ctx).expect("matching signature reuses mult cache");
+        assert!(
+            Arc::ptr_eq(&cached_sentinel, &sentinel),
             "matching signatures should reuse the cached mult transfer"
         );
-        assert_eq!(
-            cache_mult_transfer(&mut ctx).expect("matching signature reuses mutable mult cache"),
-            sentinel,
+        let mutable_cached_sentinel =
+            cache_mult_transfer(&mut ctx).expect("matching signature reuses mutable mult cache");
+        assert!(
+            Arc::ptr_eq(&mutable_cached_sentinel, &sentinel),
             "matching signatures should reuse the cached mult transfer in the mutable path"
         );
 
@@ -2853,12 +2858,15 @@ mod tests {
         });
         let updated = cache_mult_transfer(&mut ctx).expect("changed input recomputes transfer");
         assert_ne!(
-            updated, sentinel,
+            updated.as_ref(),
+            sentinel.as_ref(),
             "changed mult inputs must invalidate the cached transfer"
         );
         assert_eq!(
-            updated,
-            mult_transfer_from_context(&ctx).expect("direct mult transfer")
+            updated.as_ref(),
+            mult_transfer_from_context(&ctx)
+                .expect("direct mult transfer")
+                .as_ref()
         );
     }
 
