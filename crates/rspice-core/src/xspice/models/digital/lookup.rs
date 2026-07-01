@@ -16,7 +16,7 @@ pub struct DigitalGenericLookupTable;
 
 #[derive(Debug, Clone)]
 struct DLookupTableBytes {
-    table_values: String,
+    table_revision: u64,
     bytes: Arc<[u8]>,
 }
 
@@ -48,18 +48,18 @@ fn d_lookup_table_bytes(ctx: &mut CmContext, resource_key: &str) -> CmResult<Arc
     let table = ctx
         .string_param("table_values")
         .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
+    let table_revision = ctx.string_param_revision("table_values").unwrap_or(0);
     if let Some(resource) = ctx.resource::<DLookupTableBytes>(resource_key)
-        && resource.table_values == table
+        && resource.table_revision == table_revision
     {
         return Ok(Arc::clone(&resource.bytes));
     }
 
-    let table_values = table.to_string();
     let bytes: Arc<[u8]> = Arc::from(table.as_bytes());
     ctx.set_resource(
         resource_key,
         Arc::new(DLookupTableBytes {
-            table_values,
+            table_revision,
             bytes: Arc::clone(&bytes),
         }),
     );
@@ -624,6 +624,12 @@ mod tests {
             d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE).expect("table bytes reuse");
         assert!(Arc::ptr_eq(&first, &reused));
         assert_eq!(first.as_ref(), b"01");
+
+        ctx.set_string_param("other", "ignored");
+        let reused_after_unrelated_string_change =
+            d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE)
+                .expect("unrelated string params do not invalidate table bytes");
+        assert!(Arc::ptr_eq(&first, &reused_after_unrelated_string_change));
 
         ctx.set_string_param("table_values", "10");
         let updated =

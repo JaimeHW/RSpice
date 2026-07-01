@@ -436,6 +436,10 @@ pub struct CmContext {
     params: HashMap<String, Value>,
     /// String parameters (paths, etc.)
     string_params: HashMap<String, String>,
+    /// Monotonic revisions for string parameters by canonical name.
+    string_param_revisions: HashMap<String, u64>,
+    /// Next revision assigned by `set_string_param`.
+    next_string_param_revision: u64,
     /// String-vector parameters by name
     string_vector_params: HashMap<String, Vec<String>>,
     /// Real-vector parameters by name
@@ -526,6 +530,8 @@ impl CmContext {
             port_widths: HashMap::new(),
             params: HashMap::new(),
             string_params: HashMap::new(),
+            string_param_revisions: HashMap::new(),
+            next_string_param_revision: 1,
             string_vector_params: HashMap::new(),
             real_vector_params: HashMap::new(),
             integer_vector_params: HashMap::new(),
@@ -1583,6 +1589,12 @@ impl CmContext {
         self.string_params.get(key.as_ref()).map(|s| s.as_str())
     }
 
+    /// Get the revision assigned when a string parameter was last set.
+    pub(crate) fn string_param_revision(&self, name: &str) -> Option<u64> {
+        let key = Self::canonical_param_lookup_key(name);
+        self.string_param_revisions.get(key.as_ref()).copied()
+    }
+
     /// Get string-vector parameter
     pub fn string_vector_param(&self, name: &str) -> Option<&[String]> {
         let key = Self::canonical_param_lookup_key(name);
@@ -1625,8 +1637,14 @@ impl CmContext {
 
     /// Set string parameter
     pub fn set_string_param(&mut self, name: &str, value: &str) {
-        self.string_params
-            .insert(Self::canonical_param_key(name), value.to_string());
+        let key = Self::canonical_param_key(name);
+        let revision = self.next_string_param_revision;
+        self.next_string_param_revision = self.next_string_param_revision.wrapping_add(1);
+        if self.next_string_param_revision == 0 {
+            self.next_string_param_revision = 1;
+        }
+        self.string_params.insert(key.clone(), value.to_string());
+        self.string_param_revisions.insert(key, revision);
     }
 
     /// Set string-vector parameter
@@ -2307,6 +2325,15 @@ mod tests {
         assert_eq!(ctx.param("GAIN"), 2.5);
         assert_eq!(ctx.param_or("missing", 7.0), 7.0);
         assert_eq!(ctx.string_param("file"), Some("table.dat"));
+        let file_revision = ctx
+            .string_param_revision("FILE")
+            .expect("string parameter revision is tracked");
+        ctx.set_string_param("file", "updated.tbl");
+        assert_eq!(ctx.string_param("FILE"), Some("updated.tbl"));
+        assert!(
+            ctx.string_param_revision("file").unwrap() > file_revision,
+            "string parameter revisions advance when a parameter is replaced"
+        );
         assert_eq!(
             ctx.string_vector_param("LABELS"),
             Some(["a".to_string(), "b".to_string()].as_slice())
