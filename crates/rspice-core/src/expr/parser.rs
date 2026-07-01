@@ -700,7 +700,7 @@ impl<'a> Parser<'a> {
                 "TABLE" => Some(Function::Table),
                 "PWL" => Some(Function::Pwl),
                 "MOD" | "FMOD" => Some(Function::Mod),
-                "IF" => Some(Function::If),
+                "IF" | "TERNARY_FCN" => Some(Function::If),
                 _ => None,
             };
 
@@ -778,6 +778,12 @@ mod tests {
     #[test]
     fn pi_constant_matches_xyce_expression_semantics() {
         assert!((eval_const("sin(pi/2)") - 1.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn ternary_fcn_alias_matches_if_conditional() {
+        assert_eq!(eval_const("ternary_fcn(1 < 2, 3, 4)"), 3.0);
+        assert_eq!(eval_const("ternary_fcn(2 < 1, 3, 4)"), 4.0);
     }
 
     #[test]
