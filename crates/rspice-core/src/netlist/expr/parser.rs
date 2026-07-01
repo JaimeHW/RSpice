@@ -406,7 +406,7 @@ impl<'a> ExprParser<'a> {
 
         // Identifier (parameter or function)
         if let Some(c) = self.peek()
-            && (c.is_ascii_alphabetic() || c == '_')
+            && is_expr_ident_start(c)
         {
             return self.parse_ident_or_fn();
         }
@@ -501,9 +501,9 @@ impl<'a> ExprParser<'a> {
     fn parse_ident_or_fn(&mut self) -> Result<Expr, ExprError> {
         let start = self.pos;
 
-        // Consume identifier
+        self.advance();
         while let Some(c) = self.peek() {
-            if c.is_ascii_alphanumeric() || c == '_' {
+            if is_expr_ident_continue(c) {
                 self.advance();
             } else {
                 break;
@@ -547,4 +547,12 @@ impl<'a> ExprParser<'a> {
             }
         }
     }
+}
+
+fn is_expr_ident_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || matches!(c, '_' | '`' | '@' | '#' | '$')
+}
+
+fn is_expr_ident_continue(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '`' | '@' | '#' | '.' | '$')
 }

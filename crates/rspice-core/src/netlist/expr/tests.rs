@@ -33,6 +33,21 @@ fn function_arguments_accept_comparison_and_ternary_expressions() {
 }
 
 #[test]
+fn xyce_special_character_function_names_evaluate() {
+    let mut ctx = ParamContext::new();
+    for name in ["#func", "@func", "`func", "$func"] {
+        ctx.define_function(name, vec!["X".to_string()], "X+4");
+        assert_eq!(eval_with(&ctx, &format!("{name}(1)")), 5.0);
+    }
+
+    ctx.set("A", 0.0);
+    ctx.set("B", 2.0);
+    ctx.define_function("C", vec!["X".to_string()], "X+3");
+    assert_eq!(eval_with(&ctx, "A ? 1 : 2"), 2.0);
+    assert_eq!(eval_with(&ctx, "A?B:C(1)"), 4.0);
+}
+
+#[test]
 fn parameter_expression_pow_pwr_and_pwrs_keep_distinct_spice_sign_semantics() {
     let ctx = ParamContext::new();
     assert_eq!(eval_with(&ctx, "pow(-2,2)"), 4.0);
@@ -53,6 +68,18 @@ fn behavioral_preparation_expands_functions_without_substituting_probe_names() {
         .expect("behavioral expression prepares");
 
     assert_eq!(prepared, "((2*V(node))*I(vsense))");
+}
+
+#[test]
+fn behavioral_preparation_treats_xyce_function_names_as_identifiers() {
+    let mut ctx = ParamContext::new();
+    ctx.define_function("#V", vec!["X".to_string()], "X+2");
+    ctx.define_function("@I", vec!["X".to_string()], "X+3");
+
+    let prepared = prepare_behavioral_expression("#V(1)+@I(2)", &ctx)
+        .expect("special-character function expression prepares");
+
+    assert_eq!(prepared, "((1+2)+(2+3))");
 }
 
 #[test]

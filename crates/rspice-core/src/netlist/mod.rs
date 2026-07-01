@@ -4413,6 +4413,49 @@ mod tests {
     }
 
     #[test]
+    fn xyce_special_character_function_names_parse_and_evaluate() {
+        let netlist = Netlist::parse(
+            "xyce special character function names\n\
+             .func afunc(x) {4+x}\n\
+             .func _func(x) {4+x}\n\
+             .func #func(x) {4+x}\n\
+             .func @func(x) {4+x}\n\
+             .func `func(x) {4+x}\n\
+             .param p1=1\n\
+             R2 2 0 {afunc(p1)}\n\
+             R3 2 0 {_func(p1)}\n\
+             R4 2 0 {#func(p1)}\n\
+             R5 2 0 {@func(p1)}\n\
+             R6 2 0 {`func(p1)}\n\
+             .end\n",
+        )
+        .expect("Xyce special-character function names should parse");
+
+        for name in ["AFUNC", "_FUNC", "#FUNC", "@FUNC", "`FUNC"] {
+            assert!(
+                netlist.params.has_function(name),
+                "function {name} should be defined"
+            );
+        }
+
+        let values = netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Resistor {
+                    value, value_expr, ..
+                } => value_expr
+                    .as_deref()
+                    .map(|expr| crate::netlist::expr::eval_expression(expr, &netlist.params))
+                    .or_else(|| Some(Ok(*value))),
+                _ => None,
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Xyce special-character function expressions should evaluate");
+        assert_eq!(values, vec![5.0; 5]);
+    }
+
+    #[test]
     fn subckt_local_diode_model_expression_resolves_per_instance_when_flattened() {
         let netlist = Netlist::parse(
             "subckt local diode model scope\n\

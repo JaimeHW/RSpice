@@ -557,7 +557,11 @@ fn transform_rows(
     Ok(FileSourceRowsData::new(rows, values, width))
 }
 
-fn schedule_next_breakpoint(ctx: &mut CmContext, data: &FileSourceRowsData) {
+fn schedule_next_breakpoint_with_hint(
+    ctx: &mut CmContext,
+    data: &FileSourceRowsData,
+    monotonic_next_index: Option<usize>,
+) {
     if ctx.analysis != AnalysisType::Transient {
         return;
     }
@@ -566,7 +570,8 @@ fn schedule_next_breakpoint(ctx: &mut CmContext, data: &FileSourceRowsData) {
     }
 
     if data.strictly_increasing_time {
-        let index = data.rows.partition_point(|row| row.time <= ctx.time);
+        let index = monotonic_next_index
+            .unwrap_or_else(|| data.rows.partition_point(|row| row.time <= ctx.time));
         if let Some(row) = data.rows.get(index) {
             ctx.request_breakpoint(row.time);
         }
@@ -576,6 +581,10 @@ fn schedule_next_breakpoint(ctx: &mut CmContext, data: &FileSourceRowsData) {
     if let Some(time) = data.next_nonmonotonic_breakpoint(ctx.time) {
         ctx.request_breakpoint(time);
     }
+}
+
+fn schedule_next_breakpoint(ctx: &mut CmContext, data: &FileSourceRowsData) {
+    schedule_next_breakpoint_with_hint(ctx, data, None);
 }
 
 fn filesource_cursor(ctx: &CmContext, rows: &[FileSourceRow]) -> usize {
@@ -594,13 +603,30 @@ fn commit_filesource_cursor(ctx: &mut CmContext, cursor: usize) {
     }
 }
 
+fn locate_strictly_increasing_filesource_interval(
+    ctx: &mut CmContext,
+    rows: &[FileSourceRow],
+) -> usize {
+    let cursor = filesource_cursor(ctx, rows);
+    let lower = if rows[cursor].time < ctx.time {
+        if cursor + 1 >= rows.len() || ctx.time <= rows[cursor + 1].time {
+            cursor
+        } else {
+            let advanced = rows[cursor + 1..].partition_point(|row| row.time < ctx.time);
+            cursor + advanced
+        }
+    } else {
+        let upper = rows[..=cursor].partition_point(|row| row.time < ctx.time);
+        upper.saturating_sub(1).min(rows.len() - 1)
+    };
+    commit_filesource_cursor(ctx, lower);
+    lower
+}
+
 fn locate_filesource_interval(ctx: &mut CmContext, data: &FileSourceRowsData) -> usize {
     let rows = data.rows.as_slice();
     if data.strictly_increasing_time {
-        let upper = rows.partition_point(|row| row.time < ctx.time);
-        let lower = upper.saturating_sub(1).min(rows.len() - 1);
-        commit_filesource_cursor(ctx, lower);
-        return lower;
+        return locate_strictly_increasing_filesource_interval(ctx, rows);
     }
 
     let mut lower = filesource_cursor(ctx, rows);
@@ -624,17 +650,18 @@ fn set_filesource_output_from_row(ctx: &mut CmContext, data: &FileSourceRowsData
 }
 
 fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
-    schedule_next_breakpoint(ctx, data);
     let rows = data.rows.as_slice();
 
     let first = &rows[0];
     if ctx.time < first.time {
+        schedule_next_breakpoint_with_hint(ctx, data, Some(0));
         commit_filesource_cursor(ctx, 0);
         let row = if rows.len() > 1 { 1 } else { 0 };
         set_filesource_output_from_row(ctx, data, row);
         return;
     }
     if ctx.time == first.time {
+        schedule_next_breakpoint_with_hint(ctx, data, Some(1));
         commit_filesource_cursor(ctx, 0);
         set_filesource_output_from_row(ctx, data, 0);
         return;
@@ -642,6 +669,17 @@ fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
 
     let step_mode = bool_param(ctx, "amplstep");
     let lower = locate_filesource_interval(ctx, data);
+    if data.strictly_increasing_time {
+        let next = lower + 1;
+        let next = if rows.get(next).is_some_and(|row| row.time <= ctx.time) {
+            next + 1
+        } else {
+            next
+        };
+        schedule_next_breakpoint_with_hint(ctx, data, Some(next));
+    } else {
+        schedule_next_breakpoint(ctx, data);
+    }
     if lower + 1 >= rows.len() {
         set_filesource_output_from_row(ctx, data, lower);
         return;
@@ -989,6 +1027,11 @@ mod tests {
         let out = evaluate_rows(&mut ctx, &rows);
         assert_eq!(out, vec![0.0]);
         assert_eq!(ctx.int_state(FILESOURCE_ROW_CURSOR_STATE), 0);
+        assert_eq!(
+            ctx.take_requested_breakpoints(),
+            vec![2.0e-9],
+            "exact row times should hold the previous row while scheduling the next future row"
+        );
     }
 
     #[test]
