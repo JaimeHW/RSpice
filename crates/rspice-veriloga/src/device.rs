@@ -3188,6 +3188,75 @@ endmodule
     }
 
     #[test]
+    fn native_parameter_storage_preflights_before_dispatch() {
+        let context = VmContext::with_internal_nodes(2, 0);
+        let err = VerilogADevice::validate_native_parameter_storage(&context, 1)
+            .expect_err("missing parameter storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "parameter storage");
+    }
+
+    #[test]
+    fn native_param_given_storage_preflights_before_dispatch() {
+        let mut context = VmContext::with_internal_nodes(2, 0);
+        context.parameters = vec![1.0];
+        let err = VerilogADevice::validate_native_parameter_storage(&context, 1)
+            .expect_err("missing parameter-given storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "parameter-given storage");
+    }
+
+    #[test]
+    fn native_variable_storage_preflights_before_dispatch() {
+        let context = VmContext::with_internal_nodes(2, 0);
+        let err = VerilogADevice::validate_native_variable_storage(&context, 1)
+            .expect_err("missing variable storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "variable storage");
+    }
+
+    #[test]
+    fn native_terminal_voltage_storage_preflights_before_dispatch() {
+        let context = VmContext::with_internal_nodes(1, 0);
+        let err = VerilogADevice::validate_native_voltage_storage(&context, 2, 0)
+            .expect_err("missing terminal-voltage storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "voltage storage");
+    }
+
+    #[test]
+    fn native_internal_voltage_storage_preflights_before_dispatch() {
+        let context = VmContext::with_internal_nodes(2, 0);
+        let err = VerilogADevice::validate_native_voltage_storage(&context, 2, 1)
+            .expect_err("missing internal-voltage storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "internal-voltage storage");
+    }
+
+    #[test]
+    fn native_port_connected_storage_preflights_before_dispatch() {
+        let mut context = VmContext::with_internal_nodes(2, 0);
+        context.port_connected.clear();
+        let err = VerilogADevice::validate_native_voltage_storage(&context, 2, 0)
+            .expect_err("missing port-connected storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "port-connected storage");
+    }
+
+    #[test]
+    fn native_laplace_storage_preflights_before_dispatch() {
+        let context = VmContext::with_internal_nodes(2, 0);
+        let required = NativeRequiredStorage {
+            laplace_filters: 1,
+            ..NativeRequiredStorage::default()
+        };
+        let err = VerilogADevice::validate_native_runtime_storage(&context, required)
+            .expect_err("missing Laplace storage must hard-fail in native mode");
+
+        assert_native_hard_fail(err, "Laplace filter storage");
+    }
+
+    #[test]
     fn native_branch_unknown_preflight_errors_use_hard_fail_contract() {
         let context = VmContext::with_internal_nodes(0, 0);
         let err = VerilogADevice::validate_native_branch_unknowns(&context, &[0])

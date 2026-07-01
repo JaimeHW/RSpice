@@ -4977,6 +4977,436 @@ endmodule
     }
 
     #[test]
+    fn compile_model_with_canonical_ir_lowers_ddx_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_ddx_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ ddx(V(p, n) * V(p, n), V(p, n));
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(!model.stamp_programs[0].jacobian_programs.is_empty());
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical ddx Jacobians compile to native x64");
+        let mut context = native_model_benchmark_context(&model, "canonical_ddx_jacobian");
+        context.voltages[0] = 3.0;
+        context.voltages[1] = 0.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            2.0,
+            "canonical_ddx_jacobian d/dp",
+        );
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -2.0,
+            "canonical_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_math_ddx_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_math_ddx_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  analog I(p, n) <+ ddx(
+      sqrt(V(p, n) + 4.0)
+    + exp(0.1 * V(p, n))
+    + log(V(p, n) + 3.0)
+    + log10(V(p, n) + 3.0)
+    + sin(0.2 * V(p, n))
+    + cos(0.15 * V(p, n))
+    + tan(0.1 * V(p, n))
+    + sinh(0.2 * V(p, n))
+    + cosh(0.15 * V(p, n))
+    + tanh(0.3 * V(p, n))
+    + asinh(0.4 * V(p, n))
+    + acosh(V(p, n) + 2.0)
+    + atanh(0.1 * V(p, n))
+    + asin(0.07 * V(p, n))
+    + acos(0.05 * V(p, n))
+    + atan(0.2 * V(p, n))
+    + atan2(V(p, n), V(p, n) + 1.0)
+    + hypot(2.0 * V(p, n), V(p, n) + 3.0)
+    + pow(V(p, n) + 2.0, 2.5),
+    V(p, n));
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(!model.stamp_programs[0].jacobian_programs.is_empty());
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical math ddx Jacobians compile to native x64");
+        let x = 0.4_f64;
+        let expected = central_second_derivative(
+            |x| {
+                (x + 4.0).sqrt()
+                    + (0.1 * x).exp()
+                    + (x + 3.0).ln()
+                    + (x + 3.0).log10()
+                    + (0.2 * x).sin()
+                    + (0.15 * x).cos()
+                    + (0.1 * x).tan()
+                    + (0.2 * x).sinh()
+                    + (0.15 * x).cosh()
+                    + (0.3 * x).tanh()
+                    + (0.4 * x).asinh()
+                    + (x + 2.0).acosh()
+                    + (0.1 * x).atanh()
+                    + (0.07 * x).asin()
+                    + (0.05 * x).acos()
+                    + (0.2 * x).atan()
+                    + x.atan2(x + 1.0)
+                    + (2.0 * x).hypot(x + 3.0)
+                    + (x + 2.0).powf(2.5)
+            },
+            x,
+        );
+        let mut context = native_model_benchmark_context(&model, "canonical_math_ddx_jacobian");
+        context.voltages[0] = x;
+        context.voltages[1] = 0.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_jacobian_axis_approx(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            expected,
+            1.0e-5,
+            "canonical_math_ddx_jacobian d/dp",
+        );
+        assert_jacobian_axis_approx(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -expected,
+            1.0e-5,
+            "canonical_math_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_assignment_fed_ddx_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_assignment_ddx_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  real x;
+  analog begin
+    x = V(p, n) * V(p, n);
+    I(p, n) <+ ddx(x, V(p, n));
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            !model.variable_names.is_empty(),
+            "fixture must allocate assignment-fed derivative storage"
+        );
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical assignment-fed ddx Jacobians compile to native x64");
+        let mut context =
+            native_model_benchmark_context(&model, "canonical_assignment_ddx_jacobian");
+        context.voltages[0] = 3.0;
+        context.voltages[1] = 0.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+        clear_native_runtime_error();
+        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            panic!("native assignment failed before assignment-fed ddx Jacobian: {error}");
+        }
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_finite_close(
+            "canonical assignment-fed ddx current",
+            "stamp value",
+            6.0,
+            native
+                .run_stamp_value(0, &ctx, context.variables.as_ptr())
+                .expect("stamp value entry"),
+        )
+        .expect("assignment-fed ddx current matches expected value");
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            2.0,
+            "canonical_assignment_ddx_jacobian d/dp",
+        );
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -2.0,
+            "canonical_assignment_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_lowers_array_fed_ddx_jacobians_from_mir() {
+        let source = r#"
+module native_canonical_array_ddx_jacobian(p, n);
+  inout p, n;
+  electrical p, n;
+  real q[0:1];
+  integer idx;
+  analog begin
+    idx = 1;
+    q[idx] = V(p, n) * V(p, n);
+    I(p, n) <+ ddx(q[idx], V(p, n));
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let mut model = compiler.compile(source).expect("compile bytecode model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        assert!(
+            model
+                .variable_names
+                .iter()
+                .any(|name| name.starts_with("q[")),
+            "fixture must allocate array-fed derivative storage"
+        );
+        poison_jacobian_bytecode(&mut model, 99.0);
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("canonical array-fed ddx Jacobians compile to native x64");
+        let mut context = native_model_benchmark_context(&model, "canonical_array_ddx_jacobian");
+        context.voltages[0] = 3.0;
+        context.voltages[1] = 0.0;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let ctx = eval_context_from_vm_context(&mut context);
+        clear_native_runtime_error();
+        native.run_assignments(&ctx, context.variables.as_mut_ptr());
+        if let Some(error) = take_native_runtime_error() {
+            panic!("native assignment failed before array-fed ddx Jacobian: {error}");
+        }
+        let ctx = eval_context_from_vm_context(&mut context);
+
+        assert_finite_close(
+            "canonical array-fed ddx current",
+            "stamp value",
+            6.0,
+            native
+                .run_stamp_value(0, &ctx, context.variables.as_ptr())
+                .expect("stamp value entry"),
+        )
+        .expect("array-fed ddx current matches expected value");
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(0)),
+            2.0,
+            "canonical_array_ddx_jacobian d/dp",
+        );
+        assert_jacobian_axis_value(
+            &model,
+            &native,
+            &ctx,
+            context.variables.as_ptr(),
+            0,
+            |axis| matches!(axis, ColumnAxis::Node(1)),
+            -2.0,
+            "canonical_array_ddx_jacobian d/dn",
+        );
+    }
+
+    #[test]
+    fn native_x64_generated_model_plan_publishes_dense_entrypoint_surface() {
+        let source = r#"
+`include "disciplines.vams"
+module native_generated_plan_guard(p, n, ctrl);
+  inout p, n, ctrl;
+  electrical p, n, ctrl;
+  parameter real base = 1.5;
+  parameter real gain = base * 2.0;
+  parameter real enable_a = 1.0;
+  parameter real enable_b = 1.0;
+  real vp;
+  real vc;
+  real g0;
+  real g1;
+  real g2;
+  real g3;
+  real accum;
+  analog begin
+    vp = V(p, n);
+    vc = V(ctrl, n);
+    g0 = gain + vc * 0.1;
+    g1 = g0 * g0 + 0.25;
+    g2 = sqrt(g1) + exp(0.01 * vp);
+    g3 = sin(vc) - cos(vp);
+    accum = g0 + g1 + g2 + g3;
+    if (enable_a > 0.5) begin
+      I(p, n) <+ g0 * vp;
+      I(p, n) <+ g1 * vp;
+      I(ctrl, n) <+ 0.5 * vc;
+    end
+    if (enable_b > 0.5) begin
+      I(p, n) <+ accum * 0.125;
+    end
+    I(p, n) <+ g2 * vp + g3;
+    I(p, n) <+ ddt(1.0e-12 * vp);
+    I(p, n) <+ white_noise(1.0e-18 * (1.0 + abs(vp)), "thermal");
+    I(p, n) <+ flicker_noise(2.0e-18 * (1.0 + abs(vc)), 1.0, "flicker");
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile generated model");
+        let artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile generated canonical IR");
+
+        let expected_parameter_defaults = model
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.default_program.is_some())
+            .count();
+        let expected_static_conditions = model
+            .stamp_programs
+            .iter()
+            .filter(|stamp| stamp.static_condition.is_some())
+            .count();
+        let expected_jacobians = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.jacobian_programs.len())
+            .sum::<usize>();
+        let expected_reactive_jacobians = model
+            .stamp_programs
+            .iter()
+            .map(|stamp| stamp.reactive_jacobians.len())
+            .sum::<usize>();
+        let expected_noise_entries = model.noise_sources.len()
+            + model
+                .noise_sources
+                .iter()
+                .filter(|source| source.exponent_program.is_some())
+                .count();
+
+        assert!(
+            count_assignment_steps(&model.assignment_steps) >= 7,
+            "fixture must exercise a dense assignment pass"
+        );
+        assert!(
+            model.stamp_programs.len() >= 6,
+            "fixture must publish multiple stamp entry points"
+        );
+        assert!(
+            expected_parameter_defaults >= 1,
+            "fixture must include dependent parameter defaults"
+        );
+        assert!(
+            expected_static_conditions >= 2,
+            "fixture must include parameter-static contribution guards"
+        );
+        assert!(
+            expected_jacobians >= model.stamp_programs.len(),
+            "fixture must publish Jacobian coverage for every stamp"
+        );
+        assert!(
+            expected_reactive_jacobians >= 1,
+            "fixture must include reactive Jacobian coverage"
+        );
+        assert!(
+            expected_noise_entries >= 3,
+            "fixture must include white-noise PSD plus flicker PSD/exponent entries"
+        );
+
+        let native = compile_model_with_canonical_ir(&model, &artifact)
+            .expect("generated model compiles to native x64 without fallback");
+        let stats = native.plan_stats();
+        assert_eq!(stats.assignment_entry_points, 1);
+        assert_eq!(
+            stats.parameter_default_entry_points,
+            expected_parameter_defaults
+        );
+        assert_eq!(
+            stats.static_condition_entry_points,
+            expected_static_conditions
+        );
+        assert_eq!(stats.stamp_value_entry_points, model.stamp_programs.len());
+        assert_eq!(stats.jacobian_entry_points, expected_jacobians);
+        assert_eq!(
+            stats.reactive_jacobian_entry_points,
+            expected_reactive_jacobians
+        );
+        assert_eq!(stats.noise_source_entry_points, expected_noise_entries);
+        assert_eq!(native.native_stamp_count(), model.stamp_programs.len());
+
+        let mut context = native_model_benchmark_context(&model, "generated_plan_guard");
+        context.voltages[0] = 0.8;
+        context.voltages[1] = 0.0;
+        context.voltages[2] = 0.2;
+        resolve_native_parameter_defaults(&model, &native, &mut context);
+        let oracle_stats =
+            assert_native_matches_bytecode_finite_entries(&model, &native, context, "generated")
+                .expect("generated-model native values match bytecode oracle");
+        assert!(
+            oracle_stats.variables >= 7
+                && oracle_stats.stamps >= 6
+                && oracle_stats.jacobians >= expected_jacobians
+                && oracle_stats.reactive_jacobians >= expected_reactive_jacobians,
+            "oracle stats did not cover the dense surface: variables={} stamps={} jacobians={} reactive_jacobians={}",
+            oracle_stats.variables,
+            oracle_stats.stamps,
+            oracle_stats.jacobians,
+            oracle_stats.reactive_jacobians
+        );
+    }
+
+    #[test]
     fn compile_model_with_canonical_ir_maps_reversed_duplicate_branch_unknowns() {
         let source = r#"
 module native_canonical_reversed_duplicate_vsrc(p, n);
@@ -7334,6 +7764,43 @@ endmodule
             .run_jacobian(stamp_index, entry_index, ctx, variables)
             .expect("Jacobian entry");
         assert_close(&label, expected, actual);
+    }
+
+    fn assert_jacobian_axis_approx(
+        model: &CompiledModel,
+        native: &NativeModel,
+        ctx: &EvalContext,
+        variables: *const f64,
+        stamp_index: usize,
+        matches_axis: impl Fn(&ColumnAxis) -> bool,
+        expected: f64,
+        relative_tolerance: f64,
+        label: impl std::fmt::Display,
+    ) {
+        let label = label.to_string();
+        let entry_index = model.stamp_programs[stamp_index]
+            .jacobian_programs
+            .iter()
+            .position(|jacobian| matches_axis(&jacobian.col_axis))
+            .unwrap_or_else(|| panic!("{label}: missing matching Jacobian axis"));
+        let actual = native
+            .run_jacobian(stamp_index, entry_index, ctx, variables)
+            .expect("Jacobian entry");
+        assert!(
+            actual.is_finite(),
+            "{label}: native Jacobian is non-finite: {actual}"
+        );
+        let tolerance = relative_tolerance * expected.abs().max(actual.abs()).max(1.0);
+        let delta = (actual - expected).abs();
+        assert!(
+            delta <= tolerance,
+            "{label}: canonical Jacobian mismatch: expected={expected:.17e} actual={actual:.17e} delta={delta:.17e} tolerance={tolerance:.17e}"
+        );
+    }
+
+    fn central_second_derivative(f: impl Fn(f64) -> f64, x: f64) -> f64 {
+        let h = 1.0e-4_f64;
+        (f(x + h) - 2.0 * f(x) + f(x - h)) / (h * h)
     }
 
     fn assert_reactive_jacobian_axis_value(

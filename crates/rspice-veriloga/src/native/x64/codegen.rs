@@ -4403,6 +4403,94 @@ mod tests {
     }
 
     #[test]
+    fn helper_call_metadata_preserves_entry_args_for_context_helpers_after_prior_helper() {
+        let pure_helper_prefixes = [
+            (
+                "unary-math",
+                vec![NativeOp::Const(0.25), NativeOp::UnaryMath(UnaryMathOp::Exp)],
+            ),
+            (
+                "binary-math",
+                vec![
+                    NativeOp::Const(2.0),
+                    NativeOp::Const(3.0),
+                    NativeOp::BinaryMath(BinaryMathOp::Pow),
+                ],
+            ),
+        ];
+        let entry_arg_ops = [
+            ("load-param", NativeOp::LoadParam(0)),
+            ("load-var", NativeOp::LoadVariable(0)),
+            ("table-lookup", NativeOp::TableLookup(0)),
+            ("table-derivative", NativeOp::TableDerivative(0)),
+            ("laplace", NativeOp::LaplaceState(0)),
+            ("zi", NativeOp::ZiState(0)),
+            ("timer", NativeOp::TimerState(0)),
+            ("transition", NativeOp::TransitionState(0)),
+            ("slew", NativeOp::SlewState(0)),
+            ("absdelay", NativeOp::AbsDelayState(0)),
+            ("cross", NativeOp::CrossState(0)),
+            ("idtmod", NativeOp::IdtModState(0)),
+            (
+                "dynamic-variable-slow-path",
+                NativeOp::LoadVariableDyn {
+                    base: 0,
+                    len: 1,
+                    lower: super::INLINE_DYNAMIC_LOWER_ABS_LIMIT + 1,
+                },
+            ),
+        ];
+
+        for (prefix_name, prefix_ops) in pure_helper_prefixes {
+            for (op_name, op) in entry_arg_ops {
+                let mut ops = prefix_ops.clone();
+                ops.push(op);
+                let program = NativeProgram::from_ops_for_test(ops, 2, Vec::new(), Vec::new());
+                assert!(
+                    value_program_needs_saved_entry_args(&program),
+                    "{prefix_name} before {op_name} must preserve ctx/vars across the first helper"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generated_value_leaf_helper_before_table_helper_preserves_entry_args() {
+        let program = NativeProgram::from_ops_for_test(
+            vec![
+                NativeOp::LoadTemperature,
+                NativeOp::UnaryMath(UnaryMathOp::Exp),
+                NativeOp::TableLookup(0),
+            ],
+            1,
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let bytes =
+            compile_value_function(&program).expect("compile pure-helper before table-helper leaf");
+        assert!(
+            bytes.starts_with(&[0x41, 0x54, 0x41, 0x55]),
+            "table helper after an earlier helper must use saved ctx/vars registers"
+        );
+
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate helper table leaf");
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+            unsafe { std::mem::transmute(entry) };
+        let table = [LookupTable::from_data(
+            vec![0.0, 1.0, 2.0],
+            vec![10.0, 20.0, 40.0],
+        )];
+        let mut ctx = eval_context(&[], &[], &[], &[]);
+        ctx.temperature = 0.0;
+        ctx.lookup_tables = table.as_ptr();
+        ctx.lookup_tables_len = table.len();
+
+        assert_eq!(f(&ctx, std::ptr::null()).to_bits(), 20.0_f64.to_bits());
+    }
+
+    #[test]
     fn helper_call_metadata_keeps_error_return_loads_out_of_helper_class() {
         let entry_arg_loads = [
             ("param-given", NativeOp::LoadParamGiven(0)),

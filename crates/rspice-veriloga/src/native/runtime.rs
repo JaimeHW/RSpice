@@ -263,6 +263,37 @@ mod tests {
     }
 
     #[test]
+    fn executable_memory_owns_source_bytes_after_allocation() {
+        let mut enc = X64Encoder::new();
+        enc.mov_eax_imm32(42);
+        enc.ret();
+        let mut bytes = enc.into_bytes();
+        let memory = ExecutableMemory::allocate(&bytes).expect("allocate executable memory");
+
+        bytes.fill(0xcc);
+
+        let entry = memory.ptr_at(0).expect("entry point inside image");
+        let f: extern "C" fn() -> u32 = unsafe { std::mem::transmute(entry) };
+        assert_eq!(f(), 42);
+    }
+
+    #[test]
+    fn executable_memory_repeated_allocate_call_drop_stress() {
+        for iteration in 0..2048u32 {
+            let expected = iteration ^ 0x5a5a;
+            let mut enc = X64Encoder::new();
+            enc.mov_eax_imm32(expected);
+            enc.ret();
+            let memory =
+                ExecutableMemory::allocate(&enc.into_bytes()).expect("allocate executable memory");
+
+            let entry = memory.ptr_at(0).expect("entry point inside image");
+            let f: extern "C" fn() -> u32 = unsafe { std::mem::transmute(entry) };
+            assert_eq!(f(), expected);
+        }
+    }
+
+    #[test]
     fn instruction_cache_sync_accepts_executable_memory() {
         let mut enc = X64Encoder::new();
         enc.mov_eax_imm32(42);

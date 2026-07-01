@@ -8722,6 +8722,76 @@ endmodule
     }
 
     #[test]
+    fn mir_parameter_default_rejects_branch_unknown_load() {
+        let source = r#"
+module mir_parameter_default_branch_unknown(p, n);
+  inout p, n;
+  electrical p, n;
+  branch (p, n) probe;
+  analog begin
+    V(probe) <+ I(probe);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let equation_id = crate::canonical_ir::EquationId::new(0);
+        let root = artifact.mir.equations[0].expression.id;
+
+        let error = NativeProgram::from_mir_expression_for_equation(
+            "mir_parameter_default_branch_unknown",
+            EntryKind::ParameterDefault,
+            &artifact.mir,
+            equation_id,
+            root,
+            NativeLoweringLimits::new(2, 0, 0, 0, 1),
+        )
+        .expect_err("parameter defaults must not read branch-current unknowns");
+        let msg = error.to_string();
+        assert!(
+            msg.contains("ParameterDefault LoadBranchUnknown"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
+    fn mir_static_condition_rejects_current_pair_load() {
+        let source = r#"
+module mir_static_condition_current_pair(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    I(p, n) <+ I(p, n);
+  end
+endmodule
+"#;
+        let artifact = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let equation_id = crate::canonical_ir::EquationId::new(0);
+        let root = artifact.mir.equations[0].expression.id;
+        let available = [
+            current_pair_index("mir_static_condition_current_pair".into(), 0, 1, 2)
+                .expect("terminal current pair exists"),
+        ];
+
+        let error = NativeProgram::from_mir_expression_for_equation(
+            "mir_static_condition_current_pair",
+            EntryKind::StaticCondition,
+            &artifact.mir,
+            equation_id,
+            root,
+            NativeLoweringLimits::new(2, 0, 0, 0, 0).with_available_current_pairs(&available),
+        )
+        .expect_err("static conditions must not read terminal-pair currents");
+        let msg = error.to_string();
+        assert!(msg.contains("StaticCondition LoadCurrent"), "got: {msg}");
+        assert!(msg.contains("no interpreter fallback"), "got: {msg}");
+    }
+
+    #[test]
     fn lowers_canonical_ddt_with_abstol_metadata_to_state_op() {
         let mir = analyzed_two_terminal_mir(
             "mir_ddt_abstol",
@@ -11561,6 +11631,46 @@ endmodule
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 1);
+    }
+
+    #[test]
+    fn restricted_entries_accept_supported_limited_exp_without_fallback() {
+        let cases = [
+            (
+                "parameter-default",
+                EntryKind::ParameterDefault,
+                vec![Instruction::PushParam(0), Instruction::LimitedExp],
+                NativeLoweringLimits::new(0, 0, 1, 0, 0),
+                vec![
+                    NativeOp::LoadParam(0),
+                    NativeOp::UnaryMath(UnaryMathOp::LimitedExp),
+                ],
+            ),
+            (
+                "static-condition",
+                EntryKind::StaticCondition,
+                vec![Instruction::PushTemperature, Instruction::LimitedExp],
+                limits(0, 0),
+                vec![
+                    NativeOp::LoadTemperature,
+                    NativeOp::UnaryMath(UnaryMathOp::LimitedExp),
+                ],
+            ),
+        ];
+
+        for (case, entry_kind, instructions, limits, expected_ops) in cases {
+            let program = BytecodeProgram { instructions };
+            let lowered = NativeProgram::from_bytecode(
+                format!("limited-exp-{case}"),
+                entry_kind,
+                &program,
+                limits,
+            )
+            .expect("limited_exp is supported by restricted native entries");
+
+            assert_eq!(lowered.ops(), expected_ops.as_slice(), "{case}");
+            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
+        }
     }
 
     #[test]

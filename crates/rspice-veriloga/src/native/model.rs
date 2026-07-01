@@ -1164,6 +1164,7 @@ mod tests {
         CodeOffset, EvalContext, JitResult, NativeCurrentDependencies, NativeEntryOffsets,
         NativeEntryStarts, NativeModel, NativeRequiredStorage, append_test_value_stub,
     };
+    use std::sync::{Arc, Barrier};
 
     #[test]
     fn native_model_entry_points_are_not_optional() {
@@ -1252,6 +1253,47 @@ mod tests {
         assert_eq!(model.native_stamp_count(), 1);
         assert_eq!(model.plan_stats().jacobian_entry_points, 1);
         assert_eq!(model.plan_stats().reactive_jacobian_entry_points, 1);
+    }
+
+    #[test]
+    fn native_model_shared_image_survives_parallel_entrypoint_calls() {
+        let model = Arc::new(NativeModel::new_for_test(2, 1, vec![1], vec![1]));
+        let barrier = Arc::new(Barrier::new(8));
+        let mut handles = Vec::new();
+
+        for _ in 0..8 {
+            let model = Arc::clone(&model);
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                let ctx = empty_eval_context();
+                barrier.wait();
+                for _ in 0..2048 {
+                    model.run_assignments(&ctx, std::ptr::null_mut());
+                    assert_eq!(
+                        model
+                            .run_stamp_value(0, &ctx, std::ptr::null())
+                            .expect("stamp value entry"),
+                        1.0
+                    );
+                    assert_eq!(
+                        model
+                            .run_jacobian(0, 0, &ctx, std::ptr::null())
+                            .expect("Jacobian entry"),
+                        2.0
+                    );
+                    assert_eq!(
+                        model
+                            .run_reactive_jacobian(0, 0, &ctx, std::ptr::null())
+                            .expect("reactive-Jacobian entry"),
+                        3.0
+                    );
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("native entrypoint worker completed");
+        }
     }
 
     #[test]

@@ -298,6 +298,55 @@ endmodule
     );
 }
 
+#[test]
+#[cfg(all(feature = "veriloga-native", target_arch = "x86_64"))]
+fn veriloga_native_builder_runs_assignment_fed_canonical_ir_without_bytecode_fallback() {
+    let model = write_model(
+        "canonical_assignment_fed",
+        r#"
+`include "disciplines.vams"
+module va_canonical_assignment_fed(p, n);
+    inout p, n;
+    electrical p, n;
+    real g;
+    analog begin
+        g = 1.0e-3;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* native canonical IR path assignment-fed variable\n\
+         V1 in 0 DC 1\n\
+         R1 in out 1k\n\
+         X1 out 0 va_canonical_assignment_fed\n\
+         .VERILOGA \"{}\" va_canonical_assignment_fed\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("native builder must use canonical IR and solve assignment-fed model");
+
+    let _ = std::fs::remove_file(model);
+
+    let out_idx = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap_or_else(|| panic!("node out not found in {:?}", result.node_names));
+    let vout = result.node_voltages[out_idx];
+    let expected = 0.5;
+    assert!(
+        (vout - expected).abs() < 1.0e-9,
+        "canonical native assignment-fed conductance divider: got {vout}, want {expected}"
+    );
+}
+
 /// RC charging: native 1k resistor, Verilog-A 1uF capacitor (ddt-based).
 /// v(out) follows 1 - exp(-t/tau) with tau = 1 ms.
 #[test]
