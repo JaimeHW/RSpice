@@ -825,6 +825,34 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
 }
 
 #[test]
+fn test_xyce_supernode_wrapper_family_members_run_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    assert!(
+        runner.requires_upstream_wrapper("Netlists/SUPERNODE/supernode1.cir"),
+        "supernode1.cir should retain its removed upstream wrapper provenance"
+    );
+
+    for relative in [
+        "Netlists/SUPERNODE/supernode1.cir",
+        "Netlists/SUPERNODE/supernode1a.cir",
+        "Netlists/SUPERNODE/supernode1b.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run through the native SUPERNODE family contract, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, "supernode_family_wrapper",
+            "{relative} should not fall back to standalone static .prn comparison"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
