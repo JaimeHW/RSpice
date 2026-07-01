@@ -2581,9 +2581,14 @@ pub(super) fn parse_subckt_def(
     let mut idx = 2usize;
     while idx < fields.len() {
         let field = &fields[idx];
-        if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
+        if is_subckt_params_marker(field) {
             idx += 1;
             break;
+        }
+        if is_subckt_optional_marker(field) {
+            idx += 1;
+            skip_subckt_optional_defaults(&fields, &mut idx);
+            continue;
         }
         if field.contains('=') || matches!(fields.get(idx + 1).map(String::as_str), Some("=")) {
             break;
@@ -2597,8 +2602,13 @@ pub(super) fn parse_subckt_def(
     let mut assignments = Vec::new();
     while idx < fields.len() {
         let field = &fields[idx];
-        if field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:") {
+        if is_subckt_params_marker(field) {
             idx += 1;
+            continue;
+        }
+        if is_subckt_optional_marker(field) {
+            idx += 1;
+            skip_subckt_optional_defaults(&fields, &mut idx);
             continue;
         }
 
@@ -2649,6 +2659,29 @@ pub(super) fn parse_subckt_def(
         library_ref: None,
         nested_subcircuits: Vec::new(),
     })
+}
+
+fn is_subckt_params_marker(field: &str) -> bool {
+    field.eq_ignore_ascii_case("PARAMS") || field.eq_ignore_ascii_case("PARAMS:")
+}
+
+fn is_subckt_optional_marker(field: &str) -> bool {
+    field.eq_ignore_ascii_case("OPTIONAL") || field.eq_ignore_ascii_case("OPTIONAL:")
+}
+
+fn skip_subckt_optional_defaults(fields: &[String], idx: &mut usize) {
+    while *idx < fields.len() {
+        let field = &fields[*idx];
+        if is_subckt_params_marker(field) {
+            break;
+        }
+
+        if matches!(fields.get(*idx + 1).map(String::as_str), Some("=")) {
+            *idx += 3;
+        } else {
+            *idx += 1;
+        }
+    }
 }
 
 fn resolve_subckt_default_params(

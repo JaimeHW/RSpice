@@ -4575,6 +4575,51 @@ mod tests {
     }
 
     #[test]
+    fn subckt_header_skips_pspice_optional_defaults_before_params() {
+        let netlist = Netlist::parse(
+            "pspice optional subckt pins\n\
+             X1 a b y Gate PARAMS: td=2n\n\
+             .subckt Gate a b y\n\
+             + optional: DPWR=$G_DPWR DGND=$G_DGND\n\
+             + params: td=1n IO_LEVEL=0\n\
+             R1 y b 1k\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("PSpice optional subckt defaults should not be normal params");
+
+        let subckt = netlist
+            .subcircuits
+            .iter()
+            .find(|subckt| subckt.name.eq_ignore_ascii_case("Gate"))
+            .expect("subcircuit exists");
+
+        assert_eq!(subckt.ports, vec!["A", "B", "Y"]);
+        assert!(subckt.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("td") && (*value - 1.0e-9).abs() < 1.0e-21
+        }));
+        assert!(subckt.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("IO_LEVEL") && (*value - 0.0).abs() < f64::EPSILON
+        }));
+        assert!(
+            subckt
+                .params
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("DPWR")
+                    && !name.eq_ignore_ascii_case("DGND")),
+            "optional pin defaults must not be numeric subckt params"
+        );
+        assert!(
+            subckt
+                .string_params
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("DPWR")
+                    && !name.eq_ignore_ascii_case("DGND")),
+            "optional pin defaults must not be string subckt params"
+        );
+    }
+
+    #[test]
     fn subckt_lookup_is_case_insensitive_when_flattening() {
         let netlist = Netlist::parse(
             "case insensitive subckt lookup\n\
