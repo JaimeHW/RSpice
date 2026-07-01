@@ -6,7 +6,10 @@ use crate::xspice::{
 };
 use crate::{Complex64, Value};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{
+    Arc, Mutex, MutexGuard, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
 
 const BOUNDARY_DERIVATIVE_RAMP_FRACTION: Value = 0.125;
 const TABLE2D_RESOURCE: &str = "xspice.table2d.data";
@@ -14,6 +17,8 @@ const TABLE3D_RESOURCE: &str = "xspice.table3d.data";
 const TABLE2D_EVAL_RESOURCE: &str = "xspice.table2d.eval";
 const TABLE3D_EVAL_RESOURCE: &str = "xspice.table3d.eval";
 const TABLE_EVAL_SCRATCH_RESOURCE: &str = "xspice.table.eval_scratch";
+const AXIS_UNSET_ENO_INDEX: usize = usize::MAX;
+const AXIS_CURSOR_LINEAR_STEPS: usize = 8;
 
 #[derive(Debug, Default)]
 pub struct Table2D;
@@ -43,13 +48,27 @@ impl TableKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct TableAxis {
     values: Vec<Value>,
     local_diffs: Vec<Value>,
     inverse_spans: Vec<Value>,
     lower_ramp: Value,
     upper_ramp: Value,
+    last_eno_index: AtomicUsize,
+}
+
+impl Clone for TableAxis {
+    fn clone(&self) -> Self {
+        Self {
+            values: self.values.clone(),
+            local_diffs: self.local_diffs.clone(),
+            inverse_spans: self.inverse_spans.clone(),
+            lower_ramp: self.lower_ramp,
+            upper_ramp: self.upper_ramp,
+            last_eno_index: AtomicUsize::new(AXIS_UNSET_ENO_INDEX),
+        }
+    }
 }
 
 impl TableAxis {
@@ -84,6 +103,7 @@ impl TableAxis {
             inverse_spans,
             lower_ramp,
             upper_ramp,
+            last_eno_index: AtomicUsize::new(AXIS_UNSET_ENO_INDEX),
         }
     }
 
@@ -790,6 +810,59 @@ fn load_table3d_from_context(ctx: &CmContext, file: &str) -> CmResult<Arc<Table3
     table3d_resource(ctx, file).map_or_else(|| load_table3d(file).map(|(table, _)| table), Ok)
 }
 
+fn axis_eno_contains(values: &[Value], index: usize, clamped: Value) -> bool {
+    debug_assert!(index < values.len());
+    let last_index = values.len() - 1;
+    if index >= last_index {
+        clamped >= values[last_index]
+    } else {
+        values[index] <= clamped && clamped < values[index + 1]
+    }
+}
+
+fn axis_eno_index_binary(values: &[Value], clamped: Value) -> usize {
+    values
+        .partition_point(|value| *value <= clamped)
+        .saturating_sub(1)
+        .min(values.len() - 1)
+}
+
+fn axis_eno_index_with_cursor(axis: &TableAxis, clamped: Value) -> usize {
+    let values = axis.values();
+    let last_index = values.len() - 1;
+    let mut index = axis.last_eno_index.load(Ordering::Relaxed);
+
+    if index == AXIS_UNSET_ENO_INDEX || index > last_index {
+        index = axis_eno_index_binary(values, clamped);
+        axis.last_eno_index.store(index, Ordering::Relaxed);
+        return index;
+    }
+
+    if axis_eno_contains(values, index, clamped) {
+        return index;
+    }
+
+    let mut steps = 0;
+    if index < last_index && clamped >= values[index + 1] {
+        while index < last_index && clamped >= values[index + 1] && steps < AXIS_CURSOR_LINEAR_STEPS
+        {
+            index += 1;
+            steps += 1;
+        }
+    } else {
+        while index > 0 && clamped < values[index] && steps < AXIS_CURSOR_LINEAR_STEPS {
+            index -= 1;
+            steps += 1;
+        }
+    }
+
+    if !axis_eno_contains(values, index, clamped) {
+        index = axis_eno_index_binary(values, clamped);
+    }
+    axis.last_eno_index.store(index, Ordering::Relaxed);
+    index
+}
+
 fn axis_eval(axis: &TableAxis, input: Value) -> AxisEval {
     let values = axis.values();
     let last_index = values.len() - 1;
@@ -813,10 +886,7 @@ fn axis_eval(axis: &TableAxis, input: Value) -> AxisEval {
     };
 
     let clamped = input.clamp(first, last);
-    let eno_index = values
-        .partition_point(|value| *value <= clamped)
-        .saturating_sub(1)
-        .min(last_index);
+    let eno_index = axis_eno_index_with_cursor(axis, clamped);
     let eno_offset = clamped - values[eno_index];
     let local_diff = axis.local_diffs[eno_index];
 
@@ -1810,6 +1880,10 @@ mod tests {
 
         assert_eq!(axis.local_diffs, vec![1.0, 1.5, 2.5, 3.0]);
         assert_eq!(axis.inverse_spans, vec![1.0, 0.5, 1.0 / 3.0]);
+        assert_eq!(
+            axis.last_eno_index.load(Ordering::Relaxed),
+            AXIS_UNSET_ENO_INDEX
+        );
 
         let middle = axis_eval(&axis, 2.0);
         assert_eq!(middle.lower, 1);
@@ -1817,12 +1891,41 @@ mod tests {
         assert_eq!(middle.t, 0.5);
         assert_eq!(middle.local_diff, 1.5);
         assert_eq!(middle.derivative_scale, 1.0);
+        assert_eq!(axis.last_eno_index.load(Ordering::Relaxed), 1);
+
+        let exact = axis_eval(&axis, 3.0);
+        assert_eq!(exact.lower, 2);
+        assert_eq!(exact.upper, 3);
+        assert_eq!(exact.t, 0.0);
+        assert_eq!(
+            exact.eno_index, 2,
+            "exact interior knots must keep the original partition-point semantics"
+        );
+        assert_eq!(axis.last_eno_index.load(Ordering::Relaxed), 2);
 
         let near_upper = axis_eval(&axis, 6.25);
         assert_eq!(near_upper.lower, 2);
         assert_eq!(near_upper.upper, 3);
         assert_eq!(near_upper.t, 1.0);
         assert!((near_upper.derivative_scale - (1.0 / 3.0)).abs() < 1.0e-12);
+        assert_eq!(axis.last_eno_index.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    fn table_axis_cursor_falls_back_for_large_input_jumps() {
+        let axis = TableAxis::new((1..=24).map(|value| value as Value).collect());
+
+        let low = axis_eval(&axis, 2.5);
+        assert_eq!(low.eno_index, 1);
+        assert_eq!(axis.last_eno_index.load(Ordering::Relaxed), 1);
+
+        let high = axis_eval(&axis, 22.5);
+        assert_eq!(high.eno_index, 21);
+        assert_eq!(
+            axis.last_eno_index.load(Ordering::Relaxed),
+            21,
+            "large non-local axis jumps should land on the binary-search bracket"
+        );
     }
 
     #[test]
