@@ -239,6 +239,39 @@ fn compile_model_inner(
         noise_exponents.push(exponent_entry);
     }
 
+    let entries = NativeEntryOffsets {
+        assignment,
+        parameter_defaults,
+        static_conditions,
+        stamp_values,
+        jacobians,
+        reactive_jacobians,
+        noise_psd,
+        noise_exponents,
+    };
+    let current_dependencies = NativeCurrentDependencies {
+        assignment_current_pairs: assignment_dependencies.current_pairs,
+        assignment_prior_currents: assignment_dependencies.prior_currents,
+        assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
+        static_condition_branch_unknowns: static_condition_branch_unknown_dependencies,
+        stamp_values: stamp_value_current_dependencies,
+        stamp_value_prior_currents: stamp_value_prior_current_dependencies,
+        stamp_value_branch_unknowns: stamp_value_branch_unknown_dependencies,
+        jacobians: jacobian_current_dependencies,
+        jacobian_prior_currents: jacobian_prior_current_dependencies,
+        jacobian_branch_unknowns: jacobian_branch_unknown_dependencies,
+        reactive_jacobians: reactive_jacobian_current_dependencies,
+        reactive_jacobian_prior_currents: reactive_jacobian_prior_current_dependencies,
+        reactive_jacobian_branch_unknowns: reactive_jacobian_branch_unknown_dependencies,
+        noise_psd: noise_psd_current_dependencies,
+        noise_psd_prior_currents: noise_psd_prior_current_dependencies,
+        noise_psd_branch_unknowns: noise_psd_branch_unknown_dependencies,
+        noise_exponents: noise_exponent_current_dependencies,
+        noise_exponent_prior_currents: noise_exponent_prior_current_dependencies,
+        noise_exponent_branch_unknowns: noise_exponent_branch_unknown_dependencies,
+    };
+    validate_compiled_entry_shape(model, &entries, &current_dependencies)?;
+
     let executable = ExecutableMemory::allocate(&image)?;
     NativeModel::from_executable_image_with_dependencies(
         model.num_terminals,
@@ -246,39 +279,268 @@ fn compile_model_inner(
         model.num_variables,
         model.parameters.len(),
         executable,
-        NativeEntryOffsets {
-            assignment,
-            parameter_defaults,
-            static_conditions,
-            stamp_values,
-            jacobians,
-            reactive_jacobians,
-            noise_psd,
-            noise_exponents,
-        },
-        NativeCurrentDependencies {
-            assignment_current_pairs: assignment_dependencies.current_pairs,
-            assignment_prior_currents: assignment_dependencies.prior_currents,
-            assignment_branch_unknowns: assignment_dependencies.branch_unknowns,
-            static_condition_branch_unknowns: static_condition_branch_unknown_dependencies,
-            stamp_values: stamp_value_current_dependencies,
-            stamp_value_prior_currents: stamp_value_prior_current_dependencies,
-            stamp_value_branch_unknowns: stamp_value_branch_unknown_dependencies,
-            jacobians: jacobian_current_dependencies,
-            jacobian_prior_currents: jacobian_prior_current_dependencies,
-            jacobian_branch_unknowns: jacobian_branch_unknown_dependencies,
-            reactive_jacobians: reactive_jacobian_current_dependencies,
-            reactive_jacobian_prior_currents: reactive_jacobian_prior_current_dependencies,
-            reactive_jacobian_branch_unknowns: reactive_jacobian_branch_unknown_dependencies,
-            noise_psd: noise_psd_current_dependencies,
-            noise_psd_prior_currents: noise_psd_prior_current_dependencies,
-            noise_psd_branch_unknowns: noise_psd_branch_unknown_dependencies,
-            noise_exponents: noise_exponent_current_dependencies,
-            noise_exponent_prior_currents: noise_exponent_prior_current_dependencies,
-            noise_exponent_branch_unknowns: noise_exponent_branch_unknown_dependencies,
-        },
+        entries,
+        current_dependencies,
         NativeRequiredStorage::for_model(model),
     )
+}
+
+fn validate_compiled_entry_shape(
+    model: &CompiledModel,
+    entries: &NativeEntryOffsets,
+    dependencies: &NativeCurrentDependencies,
+) -> JitResult<()> {
+    validate_compiled_entry_count(
+        model,
+        "parameter-default",
+        entries.parameter_defaults.len(),
+        model.parameters.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "static-condition",
+        entries.static_conditions.len(),
+        model.stamp_programs.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "stamp-value",
+        entries.stamp_values.len(),
+        model.stamp_programs.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "jacobian stamp",
+        entries.jacobians.len(),
+        model.stamp_programs.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "reactive-jacobian stamp",
+        entries.reactive_jacobians.len(),
+        model.stamp_programs.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise PSD",
+        entries.noise_psd.len(),
+        model.noise_sources.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise exponent",
+        entries.noise_exponents.len(),
+        model.noise_sources.len(),
+    )?;
+
+    for (index, (entry, parameter)) in entries
+        .parameter_defaults
+        .iter()
+        .zip(&model.parameters)
+        .enumerate()
+    {
+        if entry.is_some() != parameter.default_program.is_some() {
+            return Err(compiled_entry_shape_error(
+                model,
+                format!("parameter-default {index} optional entry does not match compiled program"),
+            ));
+        }
+    }
+
+    for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
+        if entries.static_conditions[stamp_index].is_some() != stamp.static_condition.is_some() {
+            return Err(compiled_entry_shape_error(
+                model,
+                format!(
+                    "static-condition {stamp_index} optional entry does not match compiled guard"
+                ),
+            ));
+        }
+
+        validate_compiled_entry_count(
+            model,
+            format!("jacobian {stamp_index}"),
+            entries.jacobians[stamp_index].len(),
+            stamp.jacobian_programs.len(),
+        )?;
+        validate_compiled_entry_count(
+            model,
+            format!("reactive-jacobian {stamp_index}"),
+            entries.reactive_jacobians[stamp_index].len(),
+            stamp.reactive_jacobians.len(),
+        )?;
+    }
+
+    for (index, (entry, source)) in entries
+        .noise_exponents
+        .iter()
+        .zip(&model.noise_sources)
+        .enumerate()
+    {
+        if entry.is_some() != source.exponent_program.is_some() {
+            return Err(compiled_entry_shape_error(
+                model,
+                format!("noise exponent {index} optional entry does not match compiled program"),
+            ));
+        }
+    }
+
+    validate_current_dependency_shape(model, entries, dependencies)?;
+    Ok(())
+}
+
+fn validate_current_dependency_shape(
+    model: &CompiledModel,
+    entries: &NativeEntryOffsets,
+    dependencies: &NativeCurrentDependencies,
+) -> JitResult<()> {
+    validate_compiled_entry_count(
+        model,
+        "static-condition branch-unknown dependency",
+        dependencies.static_condition_branch_unknowns.len(),
+        entries.static_conditions.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "stamp-value current dependency",
+        dependencies.stamp_values.len(),
+        entries.stamp_values.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "stamp-value prior-current dependency",
+        dependencies.stamp_value_prior_currents.len(),
+        entries.stamp_values.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "stamp-value branch-unknown dependency",
+        dependencies.stamp_value_branch_unknowns.len(),
+        entries.stamp_values.len(),
+    )?;
+    validate_nested_current_dependency_shape(
+        model,
+        "jacobian current dependency",
+        &dependencies.jacobians,
+        &entries.jacobians,
+    )?;
+    validate_nested_current_dependency_shape(
+        model,
+        "jacobian prior-current dependency",
+        &dependencies.jacobian_prior_currents,
+        &entries.jacobians,
+    )?;
+    validate_nested_current_dependency_shape(
+        model,
+        "jacobian branch-unknown dependency",
+        &dependencies.jacobian_branch_unknowns,
+        &entries.jacobians,
+    )?;
+    validate_nested_current_dependency_shape(
+        model,
+        "reactive-jacobian current dependency",
+        &dependencies.reactive_jacobians,
+        &entries.reactive_jacobians,
+    )?;
+    validate_nested_current_dependency_shape(
+        model,
+        "reactive-jacobian prior-current dependency",
+        &dependencies.reactive_jacobian_prior_currents,
+        &entries.reactive_jacobians,
+    )?;
+    validate_nested_current_dependency_shape(
+        model,
+        "reactive-jacobian branch-unknown dependency",
+        &dependencies.reactive_jacobian_branch_unknowns,
+        &entries.reactive_jacobians,
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise PSD current dependency",
+        dependencies.noise_psd.len(),
+        entries.noise_psd.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise PSD prior-current dependency",
+        dependencies.noise_psd_prior_currents.len(),
+        entries.noise_psd.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise PSD branch-unknown dependency",
+        dependencies.noise_psd_branch_unknowns.len(),
+        entries.noise_psd.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise exponent current dependency",
+        dependencies.noise_exponents.len(),
+        entries.noise_exponents.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise exponent prior-current dependency",
+        dependencies.noise_exponent_prior_currents.len(),
+        entries.noise_exponents.len(),
+    )?;
+    validate_compiled_entry_count(
+        model,
+        "noise exponent branch-unknown dependency",
+        dependencies.noise_exponent_branch_unknowns.len(),
+        entries.noise_exponents.len(),
+    )?;
+    Ok(())
+}
+
+fn validate_nested_current_dependency_shape(
+    model: &CompiledModel,
+    label: &str,
+    dependencies: &[Vec<Vec<usize>>],
+    entries: &[Vec<CodeOffset>],
+) -> JitResult<()> {
+    validate_compiled_entry_count(
+        model,
+        format!("{label} stamp"),
+        dependencies.len(),
+        entries.len(),
+    )?;
+    for (stamp_index, (dependency_entries, entry_offsets)) in
+        dependencies.iter().zip(entries).enumerate()
+    {
+        validate_compiled_entry_count(
+            model,
+            format!("{label} {stamp_index}"),
+            dependency_entries.len(),
+            entry_offsets.len(),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_compiled_entry_count(
+    model: &CompiledModel,
+    label: impl std::fmt::Display,
+    actual: usize,
+    expected: usize,
+) -> JitResult<()> {
+    if actual != expected {
+        return Err(compiled_entry_shape_error(
+            model,
+            format!("{label} entry shape {actual} does not match compiled shape {expected}"),
+        ));
+    }
+    Ok(())
+}
+
+fn compiled_entry_shape_error(
+    model: &CompiledModel,
+    detail: impl Into<smol_str::SmolStr>,
+) -> JitError {
+    JitError::InternalCompilerError {
+        model: model.name.clone(),
+        detail: detail.into(),
+    }
 }
 
 fn validate_canonical_artifact_for_model(
@@ -740,11 +1002,15 @@ fn format_current_endpoint(endpoint: usize) -> String {
 
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
-    use super::{NativeModel, compile_model_with_canonical_ir, lower_assignment_step};
+    use super::{
+        NativeModel, compile_model_with_canonical_ir, lower_assignment_step,
+        validate_compiled_entry_shape,
+    };
     use crate::canonical_ir::{CanonicalIrArtifact, HirExprKind, OptModel};
     use crate::codegen::{AssignmentStep, BytecodeProgram, CompiledModel, Instruction};
     use crate::native::EvalContext;
     use crate::native::expr::{EntryKind, NativeLoweringLimits, NativeOp, NativeProgram};
+    use crate::native::model::{CodeOffset, NativeCurrentDependencies, NativeEntryOffsets};
     use crate::native::runtime::ExecutableMemory;
     use crate::native::x64::codegen::NativeAssignment;
     use crate::{CompilerOptions, VerilogACompiler};
@@ -921,6 +1187,52 @@ endmodule
         assert!(
             message.contains("no interpreter fallback"),
             "missing-digest error must preserve hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn native_x64_compiled_entry_shape_accepts_compiled_model_surface() {
+        let model = compile_shape_validator_model();
+        let (entries, dependencies) = expected_native_entry_shape(&model);
+        validate_compiled_entry_shape(&model, &entries, &dependencies)
+            .expect("compiled-model entry shape validates before publication");
+    }
+
+    #[test]
+    fn native_x64_compiled_entry_shape_rejects_backend_table_drift() {
+        let model = compile_shape_validator_model();
+        let (mut entries, dependencies) = expected_native_entry_shape(&model);
+        let stamp_index = entries
+            .jacobians
+            .iter()
+            .position(|entries| !entries.is_empty())
+            .expect("shape fixture has jacobian entries");
+        entries.jacobians[stamp_index].pop();
+
+        let error = validate_compiled_entry_shape(&model, &entries, &dependencies)
+            .expect_err("missing jacobian entry must fail before executable memory publication");
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!("jacobian {stamp_index}")),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "shape validation must keep the hard-JIT failure contract: {message}"
+        );
+
+        let (entries, mut dependencies) = expected_native_entry_shape(&model);
+        dependencies.reactive_jacobians.pop();
+        let error = validate_compiled_entry_shape(&model, &entries, &dependencies)
+            .expect_err("missing dependency table must fail before publication");
+        let message = error.to_string();
+        assert!(
+            message.contains("reactive-jacobian current dependency stamp"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "dependency validation must keep the hard-JIT failure contract: {message}"
         );
     }
 
@@ -1136,6 +1448,99 @@ endmodule
                 other => panic!("{name}: expected indexed helper path, got {other:?}"),
             }
         }
+    }
+
+    fn compile_shape_validator_model() -> CompiledModel {
+        let source = r#"
+`include "disciplines.vams"
+module native_shape_validator(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real base = 1.0;
+  parameter real gain = base * 2.0;
+  real v;
+  analog begin
+    v = V(p, n);
+    if (gain > 0.0) begin
+      I(p, n) <+ gain * v;
+    end
+    I(p, n) <+ ddt(1.0e-12 * v);
+    I(p, n) <+ flicker_noise(1.0e-18 * (1.0 + abs(v)), 1.0, "flicker");
+  end
+endmodule
+"#;
+        VerilogACompiler::new(CompilerOptions::default())
+            .compile(source)
+            .expect("compile native shape validator model")
+    }
+
+    fn expected_native_entry_shape(
+        model: &CompiledModel,
+    ) -> (NativeEntryOffsets, NativeCurrentDependencies) {
+        let offset = CodeOffset::new(0);
+        let entries = NativeEntryOffsets {
+            assignment: offset,
+            parameter_defaults: model
+                .parameters
+                .iter()
+                .map(|parameter| parameter.default_program.as_ref().map(|_| offset))
+                .collect(),
+            static_conditions: model
+                .stamp_programs
+                .iter()
+                .map(|stamp| stamp.static_condition.as_ref().map(|_| offset))
+                .collect(),
+            stamp_values: vec![offset; model.stamp_programs.len()],
+            jacobians: model
+                .stamp_programs
+                .iter()
+                .map(|stamp| vec![offset; stamp.jacobian_programs.len()])
+                .collect(),
+            reactive_jacobians: model
+                .stamp_programs
+                .iter()
+                .map(|stamp| vec![offset; stamp.reactive_jacobians.len()])
+                .collect(),
+            noise_psd: vec![offset; model.noise_sources.len()],
+            noise_exponents: model
+                .noise_sources
+                .iter()
+                .map(|source| source.exponent_program.as_ref().map(|_| offset))
+                .collect(),
+        };
+        let dependencies = NativeCurrentDependencies {
+            assignment_current_pairs: Vec::new(),
+            assignment_prior_currents: Vec::new(),
+            assignment_branch_unknowns: Vec::new(),
+            static_condition_branch_unknowns: vec![Vec::new(); entries.static_conditions.len()],
+            stamp_values: vec![Vec::new(); entries.stamp_values.len()],
+            stamp_value_prior_currents: vec![Vec::new(); entries.stamp_values.len()],
+            stamp_value_branch_unknowns: vec![Vec::new(); entries.stamp_values.len()],
+            jacobians: empty_nested_dependencies(&entries.jacobians),
+            jacobian_prior_currents: empty_nested_dependencies(&entries.jacobians),
+            jacobian_branch_unknowns: empty_nested_dependencies(&entries.jacobians),
+            reactive_jacobians: empty_nested_dependencies(&entries.reactive_jacobians),
+            reactive_jacobian_prior_currents: empty_nested_dependencies(
+                &entries.reactive_jacobians,
+            ),
+            reactive_jacobian_branch_unknowns: empty_nested_dependencies(
+                &entries.reactive_jacobians,
+            ),
+            noise_psd: vec![Vec::new(); entries.noise_psd.len()],
+            noise_psd_prior_currents: vec![Vec::new(); entries.noise_psd.len()],
+            noise_psd_branch_unknowns: vec![Vec::new(); entries.noise_psd.len()],
+            noise_exponents: vec![Vec::new(); entries.noise_exponents.len()],
+            noise_exponent_prior_currents: vec![Vec::new(); entries.noise_exponents.len()],
+            noise_exponent_branch_unknowns: vec![Vec::new(); entries.noise_exponents.len()],
+        };
+        (entries, dependencies)
+    }
+
+    fn empty_nested_dependencies(entries: &[Vec<CodeOffset>]) -> Vec<Vec<Vec<usize>>> {
+        entries
+            .iter()
+            .map(|stamp_entries| vec![Vec::new(); stamp_entries.len()])
+            .collect()
     }
 
     fn compile_native_microbench_model(source: &str) -> (CompiledModel, NativeModel) {
