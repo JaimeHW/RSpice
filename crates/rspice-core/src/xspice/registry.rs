@@ -41,6 +41,7 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "astate",
     "aswitch",
     "bidi_bridge",
+    "capacitor",
     "capacitoric",
     "climit",
     "cmeter",
@@ -89,6 +90,7 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "hyst",
     "icm_spice2poly",
     "ilimit",
+    "inductor",
     "inductoric",
     "int",
     "integrator",
@@ -113,6 +115,7 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "s_h",
     "s_xfer",
     "seegen",
+    "seegenerator",
     "sidiode",
     "sine",
     "slew",
@@ -228,13 +231,16 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::Zener));
         self.register(Arc::new(super::models::Memristor));
         self.register(Arc::new(super::models::Core));
+        self.register(Arc::new(super::models::CapacitorAlias));
         self.register(Arc::new(super::models::CapacitorIc));
+        self.register(Arc::new(super::models::InductorAlias));
         self.register(Arc::new(super::models::InductorIc));
         self.register(Arc::new(super::models::CapacitanceMeter));
         self.register(Arc::new(super::models::InductanceMeter));
         self.register(Arc::new(super::models::LcCouple));
         self.register(Arc::new(super::models::Ilimit));
         self.register(Arc::new(super::models::SeeGenerator));
+        self.register(Arc::new(super::models::SeeGeneratorAlias));
         self.register(Arc::new(super::models::CoupledMicrostripLine));
         self.register(Arc::new(super::models::CoupledTransmissionLine));
         self.register(Arc::new(super::models::GenericTransmissionLine));
@@ -345,7 +351,7 @@ mod tests {
         "astate",
         "aswitch",
         "bidi_bridge",
-        "capacitoric",
+        "capacitor",
         "climit",
         "cmeter",
         "core",
@@ -389,7 +395,7 @@ mod tests {
         "gain",
         "hyst",
         "ilimit",
-        "inductoric",
+        "inductor",
         "int",
         "lcouple",
         "limit",
@@ -409,7 +415,7 @@ mod tests {
         "real_gain",
         "real_to_v",
         "s_xfer",
-        "seegen",
+        "seegenerator",
         "sidiode",
         "sine",
         "slew",
@@ -455,6 +461,13 @@ mod tests {
 
         assert_eq!(lower.name(), "dac_bridge");
         assert_eq!(mixed.name(), "dac_bridge");
+        assert_eq!(
+            registry
+                .get("SEEGenerator")
+                .expect("mixed-case seegenerator resolves")
+                .name(),
+            "seegenerator"
+        );
         assert!(registry.contains("DAC_BRIDGE"));
         assert!(!registry.contains("d_rom"));
     }

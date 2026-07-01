@@ -52,6 +52,39 @@ fn op_error(deck: &str) -> String {
 }
 
 #[test]
+fn official_xtradev_reactive_aliases_build_through_native_resolution() {
+    let cap_deck = "\
+* Official ngspice xtradev capacitor name
+acap %hd[n 0] capmod
+.model capmod capacitor (c=1n ic=0.25)
+.end
+";
+    let cap_netlist = Netlist::parse(cap_deck).expect("official capacitor deck parses");
+    let cap_circuit = Engine::default()
+        .build_circuit(&cap_netlist)
+        .expect("official capacitor alias builds");
+    assert!(
+        !cap_circuit.has_xspice_devices(),
+        "official capacitor alias should use the native reactive lowering"
+    );
+
+    let ind_deck = "\
+* Official ngspice xtradev inductor name
+aind %gd[n 0] indmod
+.model indmod inductor (l=1u ic=0.1)
+.end
+";
+    let ind_netlist = Netlist::parse(ind_deck).expect("official inductor deck parses");
+    let ind_circuit = Engine::default()
+        .build_circuit(&ind_netlist)
+        .expect("official inductor alias builds");
+    assert!(
+        ind_circuit.has_xspice_devices(),
+        "official inductor alias should resolve to the XSPICE conductance-output model"
+    );
+}
+
+#[test]
 fn print_param_types_accepts_official_parameter_channels() {
     let deck = "\
 * ngspice print_param_types example contract

@@ -120,7 +120,8 @@ fn xtradev_two_terminal_nodes(
     match ports {
         [XspicePort::DifferentialVoltage { pos, neg }]
         | [XspicePort::DifferentialCurrent { pos, neg }]
-        | [XspicePort::DifferentialConductance { pos, neg }] => Ok((pos.clone(), neg.clone())),
+        | [XspicePort::DifferentialConductance { pos, neg }]
+        | [XspicePort::DifferentialHybrid { pos, neg }] => Ok((pos.clone(), neg.clone())),
         [first, second] => {
             let pos = xtradev_scalar_terminal_node(first);
             let neg = xtradev_scalar_terminal_node(second);

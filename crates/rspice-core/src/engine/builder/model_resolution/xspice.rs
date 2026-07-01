@@ -456,9 +456,13 @@ fn resolve_string_vector_params(
 }
 
 fn native_xtradev_kind(model_type: &str) -> Option<&'static str> {
-    if model_type.eq_ignore_ascii_case("capacitoric") {
+    if model_type.eq_ignore_ascii_case("capacitor")
+        || model_type.eq_ignore_ascii_case("capacitoric")
+    {
         Some("capacitoric")
-    } else if model_type.eq_ignore_ascii_case("inductoric") {
+    } else if model_type.eq_ignore_ascii_case("inductor")
+        || model_type.eq_ignore_ascii_case("inductoric")
+    {
         Some("inductoric")
     } else {
         None

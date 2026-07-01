@@ -3351,6 +3351,136 @@ impl CodeModel for SeeGenerator {
     }
 }
 
+macro_rules! xtradev_model_alias {
+    ($alias:ident, $target:ident, $name:literal) => {
+        #[derive(Debug, Default)]
+        pub struct $alias;
+
+        impl CodeModel for $alias {
+            fn name(&self) -> &str {
+                $name
+            }
+
+            fn description(&self) -> &str {
+                $target.description()
+            }
+
+            fn ports(&self) -> &[PortSpec] {
+                $target.ports()
+            }
+
+            fn parameters(&self) -> &[ParamSpec] {
+                $target.parameters()
+            }
+
+            fn requires_conservative_newton_damping(&self) -> bool {
+                $target.requires_conservative_newton_damping()
+            }
+
+            fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+                $target.init(ctx)
+            }
+
+            fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+                $target.evaluate(ctx)
+            }
+
+            fn ac_gain(&self, ctx: &CmContext) -> Vec<Value> {
+                $target.ac_gain(ctx)
+            }
+
+            fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
+                $target.excludes_output_from_transient_voltage_lte(output_port)
+            }
+
+            fn output_input_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+            ) -> Vec<(String, Value)> {
+                $target.output_input_partials(ctx, output_port)
+            }
+
+            fn output_input_vector_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+            ) -> Vec<(String, usize, Value)> {
+                $target.output_input_vector_partials(ctx, output_port)
+            }
+
+            fn output_vector_input_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                output_index: usize,
+            ) -> Vec<(String, Value)> {
+                $target.output_vector_input_partials(ctx, output_port, output_index)
+            }
+
+            fn output_vector_input_vector_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                output_index: usize,
+            ) -> Vec<(String, usize, Value)> {
+                $target.output_vector_input_vector_partials(ctx, output_port, output_index)
+            }
+
+            fn output_input_ac_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                frequency: Value,
+            ) -> Vec<(String, Complex64)> {
+                $target.output_input_ac_partials(ctx, output_port, frequency)
+            }
+
+            fn output_input_vector_ac_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                frequency: Value,
+            ) -> Vec<(String, usize, Complex64)> {
+                $target.output_input_vector_ac_partials(ctx, output_port, frequency)
+            }
+
+            fn output_vector_input_ac_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                output_index: usize,
+                frequency: Value,
+            ) -> Vec<(String, Complex64)> {
+                $target.output_vector_input_ac_partials(ctx, output_port, output_index, frequency)
+            }
+
+            fn output_vector_input_vector_ac_partials(
+                &self,
+                ctx: &CmContext,
+                output_port: &str,
+                output_index: usize,
+                frequency: Value,
+            ) -> Vec<(String, usize, Complex64)> {
+                $target.output_vector_input_vector_ac_partials(
+                    ctx,
+                    output_port,
+                    output_index,
+                    frequency,
+                )
+            }
+
+            fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
+                $target.transient_breakpoints(ctx)
+            }
+        }
+    };
+}
+
+xtradev_model_alias!(CapacitorAlias, CapacitorIc, "capacitor");
+xtradev_model_alias!(InductorAlias, InductorIc, "inductor");
+xtradev_model_alias!(SeeGeneratorAlias, SeeGenerator, "seegenerator");
+
 #[cfg(test)]
 mod tests {
     use super::*;

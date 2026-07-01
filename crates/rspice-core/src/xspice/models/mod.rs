@@ -168,8 +168,9 @@ pub use tlines::{
 
 pub(crate) use xtradev::XTRADEV_METER_MEASURED_VALUE_PARAM;
 pub use xtradev::{
-    AnalogSwitch, CapacitanceMeter, CapacitorIc, Core, Ilimit, InductanceMeter, InductorIc,
-    LcCouple, Memristor, Potentiometer, Pswitch, SeeGenerator, Sidiode, Zener,
+    AnalogSwitch, CapacitanceMeter, CapacitorAlias, CapacitorIc, Core, Ilimit, InductanceMeter,
+    InductorAlias, InductorIc, LcCouple, Memristor, Potentiometer, Pswitch, SeeGenerator,
+    SeeGeneratorAlias, Sidiode, Zener,
 };
 
 pub use xtraevt::{DigitalToReal, RealDelay, RealGain, RealToVoltage};

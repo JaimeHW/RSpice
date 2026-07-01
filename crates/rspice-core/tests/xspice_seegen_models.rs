@@ -114,6 +114,36 @@ rmon mon 0 1meg
 }
 
 #[test]
+fn seegenerator_alias_drives_current_output_like_seegen() {
+    let deck = "\
+* XSPICE official seegenerator alias
+asee null mon %id[out 0] see
+.model see seegenerator (tdelay=1n trise=0.5n tfall=2n inull=1m tperiod=10n)
+rout out 0 1k
+rmon mon 0 1meg
+.end
+";
+
+    let result = run_tran(deck, 4.0e-9, 0.01e-9);
+    let out = transient_node_series(&result, "out");
+    let mon = transient_node_series(&result, "mon");
+    let peak_time = 1.0e-9 + 2.0e-9 * 0.5e-9 * (0.5_f64 / 2.0).ln() / (0.5e-9 - 2.0e-9);
+    let peak_current =
+        1.0e-3 * ((-(peak_time - 1.0e-9) / 2.0e-9).exp() - (-(peak_time - 1.0e-9) / 0.5e-9).exp());
+    let peak_out = value_at_time(&result.time, out, peak_time);
+    let peak_mon = value_at_time(&result.time, mon, peak_time);
+
+    assert!(
+        (peak_out + peak_current * 1.0e3).abs() < 3.0e-3,
+        "seegenerator alias should drive the same current output as seegen, got {peak_out}"
+    );
+    assert!(
+        (peak_mon - peak_current).abs() < 3.0e-6,
+        "seegenerator alias monitor should mirror generated current, got {peak_mon}"
+    );
+}
+
+#[test]
 fn seegen_accepts_unbounded_negative_time_constants_like_ngspice() {
     let deck = "\
 * XSPICE seegen negative time constants oracle
