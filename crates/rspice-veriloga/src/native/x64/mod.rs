@@ -3080,7 +3080,7 @@ impl AssignmentShadowIndex {
                 continue;
             };
             for (offset, (logical_index, slot)) in accumulator.slots.iter().enumerate() {
-                let expected_index = lower + offset as i64;
+                let expected_index = checked_logical_index(model, key.0.as_str(), lower, offset)?;
                 let expected_slot = base + offset;
                 if *logical_index != expected_index || *slot != expected_slot {
                     return Err(JitError::InvalidCanonicalIr {
@@ -3133,10 +3133,59 @@ fn parse_array_variable_name(name: &str) -> Option<(&str, i64, &str)> {
     Some((array_name, index.parse::<i64>().ok()?, suffix))
 }
 
-fn ranges_overlap(left_lower: i64, left_len: usize, right_lower: i64, right_len: usize) -> bool {
-    let left_upper = left_lower + left_len as i64;
-    let right_upper = right_lower + right_len as i64;
-    left_lower < right_upper && right_lower < left_upper
+fn checked_logical_upper_bound(
+    model: &CompiledModel,
+    label: &str,
+    lower: i64,
+    len: usize,
+) -> JitResult<i64> {
+    let len = i64::try_from(len).map_err(|_| JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: format!("canonical indexed assignment '{label}' length {len} does not fit i64")
+            .into(),
+    })?;
+    lower.checked_add(len).ok_or_else(|| JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: format!(
+            "canonical indexed assignment '{label}' logical range {lower} plus length {len} overflows i64"
+        )
+        .into(),
+    })
+}
+
+fn checked_logical_index(
+    model: &CompiledModel,
+    label: &str,
+    lower: i64,
+    offset: usize,
+) -> JitResult<i64> {
+    let offset = i64::try_from(offset).map_err(|_| JitError::InvalidCanonicalIr {
+        model: model.name.clone(),
+        detail: format!("canonical indexed assignment '{label}' offset {offset} does not fit i64")
+            .into(),
+    })?;
+    lower
+        .checked_add(offset)
+        .ok_or_else(|| JitError::InvalidCanonicalIr {
+            model: model.name.clone(),
+            detail: format!(
+                "canonical indexed assignment '{label}' logical index {lower} plus offset {offset} overflows i64"
+            )
+            .into(),
+        })
+}
+
+fn ranges_overlap(
+    model: &CompiledModel,
+    label: &str,
+    left_lower: i64,
+    left_len: usize,
+    right_lower: i64,
+    right_len: usize,
+) -> JitResult<bool> {
+    let left_upper = checked_logical_upper_bound(model, label, left_lower, left_len)?;
+    let right_upper = checked_logical_upper_bound(model, label, right_lower, right_len)?;
+    Ok(left_lower < right_upper && right_lower < left_upper)
 }
 
 fn lower_live_canonical_assignment_statements(
@@ -3383,7 +3432,7 @@ fn canonical_array_shadow_assignments(
     limits: NativeLoweringLimits<'_>,
 ) -> JitResult<Vec<NativeAssignment>> {
     let mut assignments = Vec::new();
-    let source_upper = source_lower + source_len as i64;
+    let source_upper = checked_logical_upper_bound(model, array_name, source_lower, source_len)?;
     for malformed in shadow_index.malformed_array_shadows(array_name) {
         if malformed.logical_index >= source_lower && malformed.logical_index < source_upper {
             return Err(JitError::InvalidCanonicalIr {
@@ -3397,18 +3446,27 @@ fn canonical_array_shadow_assignments(
         }
     }
     for shadow in shadow_index.array_shadows(array_name) {
-        if !ranges_overlap(shadow.lower, shadow.len, source_lower, source_len) {
+        if !ranges_overlap(
+            model,
+            array_name,
+            shadow.lower,
+            shadow.len,
+            source_lower,
+            source_len,
+        )? {
             continue;
         }
         if shadow.len != source_len || shadow.lower != source_lower {
+            let shadow_upper =
+                checked_logical_upper_bound(model, array_name, shadow.lower, shadow.len)?;
             return Err(JitError::InvalidCanonicalIr {
                 model: model.name.clone(),
                 detail: format!(
                     "canonical indexed assignment '{array_name}' shadow suffix '{}' range {}..{} does not match source range {source_lower}..{}",
                     shadow.suffix,
                     shadow.lower,
-                    shadow.lower + shadow.len as i64,
-                    source_lower + source_len as i64
+                    shadow_upper,
+                    source_upper
                 )
                 .into(),
             });
@@ -3596,10 +3654,12 @@ fn canonical_assignment_array_range(
         .into(),
     })?;
     let lower = array.lower;
+    let _upper = checked_logical_upper_bound(model, array.name.as_str(), lower, len)?;
     super::validate_assignment_range(model, base, len)?;
     for offset in 0..len {
         let slot = base + offset;
-        let expected = format!("{}[{}]", array.name, lower + offset as i64);
+        let logical_index = checked_logical_index(model, array.name.as_str(), lower, offset)?;
+        let expected = format!("{}[{logical_index}]", array.name);
         let Some(actual) = model.variable_names.get(slot) else {
             return Err(JitError::InvalidCanonicalIr {
                 model: model.name.clone(),
@@ -5677,6 +5737,78 @@ endmodule
         assert!(
             error.to_string().contains("expression kind string"),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn canonical_logical_range_helpers_reject_overflow_without_wraparound() {
+        let model = compiled_model_with_variables(0);
+        let error = super::ranges_overlap(&model, "x", i64::MAX - 1, 2, 0, 1)
+            .expect_err("overflowing canonical range must hard-fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("logical range"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical range overflow must preserve hard-JIT contract: {message}"
+        );
+
+        let error = super::checked_logical_index(&model, "x", i64::MAX, 1)
+            .expect_err("overflowing logical index must hard-fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("logical index"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical logical-index overflow must preserve hard-JIT contract: {message}"
+        );
+    }
+
+    #[test]
+    fn compile_model_with_canonical_ir_rejects_indexed_assignment_logical_range_overflow() {
+        let source = r#"
+`include "disciplines.vams"
+module native_canonical_indexed_range_overflow(p, n);
+  inout p, n;
+  electrical p, n;
+  integer i;
+  real x[0:1];
+  analog begin
+    i = 0;
+    x[i] = V(p, n);
+    I(p, n) <+ x[0];
+  end
+endmodule
+"#;
+        let compiler = VerilogACompiler::new(CompilerOptions::default());
+        let model = compiler.compile(source).expect("compile bytecode model");
+        let mut artifact = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        let array = artifact
+            .hir
+            .arrays
+            .iter_mut()
+            .find(|array| array.name.as_str() == "x")
+            .expect("fixture has x array metadata");
+        array.lower = i64::MAX;
+        array.len = 2;
+        let artifact = rebuild_canonical_artifact(artifact);
+
+        let error = compile_model_with_canonical_ir(&model, &artifact)
+            .expect_err("overflowing canonical indexed-assignment range must hard-fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("logical range"),
+            "unexpected error: {message}"
+        );
+        assert!(
+            message.contains("no interpreter fallback"),
+            "canonical range overflow must preserve hard-JIT contract: {message}"
         );
     }
 
