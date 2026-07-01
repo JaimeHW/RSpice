@@ -3448,6 +3448,29 @@ rnor out_nor 0 1meg
 }
 
 #[test]
+fn multi_input_pwl_linearizes_controlling_vector_input_in_ac() {
+    let deck = "\
+* XSPICE multi_input_pwl AC vector-input linearization
+vlow low 0 dc 0.25 ac 2
+vmid mid 0 dc 0.75 ac 100
+vhi hi 0 dc 1.5 ac 100
+aand low mid hi out and_lut
+.model and_lut multi_input_pwl (x=[0 1 2] y=[0 10 20] model=\"and\")
+rload out 0 1meg
+.op
+.ac lin 1 1k 1k
+.end
+";
+
+    let ac_out = ac_voltage(deck, "out");
+
+    assert!(
+        (ac_out.re - 20.0).abs() < 1.0e-9 && ac_out.im.abs() < 1.0e-12,
+        "multi_input_pwl AC should use only the selected controlling input partial, got {ac_out}"
+    );
+}
+
+#[test]
 fn multi_input_pwl_accepts_descending_table_like_ngspice() {
     let deck = "\
 * XSPICE multi_input_pwl descending table oracle
