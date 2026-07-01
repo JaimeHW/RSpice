@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 r"""Build, verify, and assemble the public site into _site/.
 
-The single definition of a site build — used verbatim by
+The single definition of a site build - used verbatim by
 .github/workflows/deploy-site.yml and runnable locally as a dry run:
 
     python3 tools/deploy/build_site.py [--skip-headless] [--out DIR]
     # Windows:  py tools\deploy\build_site.py --skip-headless
 
 Stages:
-  1. toolchain gate    — wasm-bindgen CLI must match Cargo.lock
-  2. build             — rspice-ui (IDE, bin target) + rspice-wasm
+  1. toolchain gate    - wasm-bindgen CLI must match Cargo.lock
+  2. build             - rspice-ui (IDE, bin target) + rspice-wasm
                          (playground, lib) for wasm32, release
-  3. assemble          — site/ verbatim + both pkg/ bundles + build.json
-  4. static gates      — \0asm magic + wasm-bindgen export signature
-  5. headless gate     — serve _site, load play/ and the IDE worker smoke
+  3. assemble          - site/ verbatim + both pkg/ bundles + build.json
+  4. static gates      - \0asm magic + wasm-bindgen export signature
+  5. headless gate     - serve _site, load play/ and the IDE worker smoke
                          page in headless Chrome, require completed solves
 
 Any failed gate exits non-zero; the workflow only publishes on success.
-Pure stdlib, no third-party deps — runs the same on the Ubuntu CI runner
+Pure stdlib, no third-party deps - runs the same on the Ubuntu CI runner
 (python3) and on Windows (py). The local HTTP server uses this very
 interpreter (sys.executable), sidestepping the Windows python-stub probe
 the old shell script needed.
@@ -50,9 +50,9 @@ def capture(cmd):
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-# ── 1 · toolchain gate ──────────────────────────────────────────────────
+# 1. toolchain gate
 def locked_wasm_bindgen(root):
-    """Version pinned in Cargo.lock — the first wasm-bindgen package entry,
+    """Version pinned in Cargo.lock - the first wasm-bindgen package entry,
     matching the shell `grep -A1 '^name = "wasm-bindgen"$' | grep '^version'`."""
     lines = (root / "Cargo.lock").read_text(encoding="utf-8").splitlines()
     for i, line in enumerate(lines):
@@ -71,11 +71,11 @@ def installed_wasm_bindgen():
     except FileNotFoundError:
         fail("wasm-bindgen CLI not found on PATH "
              "(install the version Cargo.lock pins, or pass --skip-headless "
-             "only skips the solve gate — the build still needs it)")
+             "only skips the solve gate; the build still needs it)")
     return out.split()[1]  # "wasm-bindgen 0.2.114" -> "0.2.114"
 
 
-# ── 4 · static gates ────────────────────────────────────────────────────
+# 4. static gates
 def gate_bundle(out, stem):
     wasm = out / (stem + "_bg.wasm")
     js = out / (stem + ".js")
@@ -180,7 +180,7 @@ def gate_playground_worker(out):
     print("ok: playground engine worker")
 
 
-# ── 5 · headless solve gate ─────────────────────────────────────────────
+# 5. headless solve gate
 def find_chrome():
     env = os.environ.get("CHROME")
     if env and (Path(env).exists() or shutil.which(env)):
@@ -322,11 +322,12 @@ setTimeout(() => {
     return smoke
 
 
-def dump_chrome_dom(chrome, url):
+def dump_chrome_dom(chrome, url, width=1280, height=900):
     try:
         return subprocess.run(
             [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
              "--enable-unsafe-webgpu", "--ignore-gpu-blocklist",
+             "--window-size=%d,%d" % (width, height),
              "--virtual-time-budget=20000", "--dump-dom", url],
             capture_output=True, text=True, timeout=90).stdout
     except subprocess.TimeoutExpired as e:
@@ -348,8 +349,21 @@ def headless_solve_gate(out):
         time.sleep(1)
         # play/index.html runs a transient on load; a healthy bundle yields
         # the "worker ready" badge and a "solved in" log line in the DOM.
-        play_dom = dump_chrome_dom(chrome, "http://127.0.0.1:%d/play/" % port)
-        ide_dom = dump_chrome_dom(chrome, "http://127.0.0.1:%d/ide/" % port)
+        play_url = "http://127.0.0.1:%d/play/" % port
+        ide_url = "http://127.0.0.1:%d/ide/" % port
+        viewports = (
+            ("desktop", 1280, 900),
+            ("tablet", 820, 1180),
+            ("phone", 390, 844),
+        )
+        viewport_doms = [
+            (
+                label,
+                dump_chrome_dom(chrome, play_url, width, height),
+                dump_chrome_dom(chrome, ide_url, width, height),
+            )
+            for label, width, height in viewports
+        ]
         ide_smoke_dom = dump_chrome_dom(
             chrome, "http://127.0.0.1:%d/ide-worker-smoke.html" % port
         )
@@ -361,12 +375,11 @@ def headless_solve_gate(out):
             server.kill()
         smoke_page.unlink(missing_ok=True)
 
-    validate_playground_dom(play_dom)
-    print("ok: headless solve — worker ready, transient completed")
-
-
-    validate_ide_dom(ide_dom)
-    print("ok: headless IDE - route loaded without startup error")
+    for label, play_dom, ide_dom in viewport_doms:
+        validate_playground_dom(play_dom)
+        print("ok: headless solve (%s viewport) - worker ready, transient completed" % label)
+        validate_ide_dom(ide_dom)
+        print("ok: headless IDE (%s viewport) - route loaded without startup error" % label)
     validate_ide_worker_smoke_dom(ide_smoke_dom)
     print("ok: headless IDE worker - request solved")
 
@@ -383,22 +396,22 @@ def main():
     target = Path("target/wasm32-unknown-unknown/release")
     out = Path(args.out)
 
-    # ── 1 · toolchain gate ──────────────────────────────────────────────
+    # 1. toolchain gate
     locked = locked_wasm_bindgen(root)
     have = installed_wasm_bindgen()
     if locked != have:
         fail("wasm-bindgen CLI is %s but Cargo.lock pins %s" % (have, locked))
     print("ok: wasm-bindgen CLI %s matches Cargo.lock" % have)
 
-    # ── 2 · build ───────────────────────────────────────────────────────
+    # 2. build
     print("building rspice-ui (browser IDE, bin target)...")
-    run(["cargo", "build", "-p", "rspice-ui", "--bins",
+    run(["cargo", "build", "--locked", "-p", "rspice-ui", "--bins",
          "--target", "wasm32-unknown-unknown", "--release"])
     print("building rspice-wasm (engine playground)...")
-    run(["cargo", "build", "-p", "rspice-wasm", "--lib",
+    run(["cargo", "build", "--locked", "-p", "rspice-wasm", "--lib",
          "--target", "wasm32-unknown-unknown", "--release"])
 
-    # ── 3 · assemble ────────────────────────────────────────────────────
+    # 3. assemble
     shutil.rmtree(out, ignore_errors=True)
     shutil.copytree("site", out)              # site/ verbatim
     (out / "README.md").unlink(missing_ok=True)
@@ -416,14 +429,14 @@ def main():
         json.dumps({"source_sha": sha, "built_utc": built_utc, "wasm_bindgen": have},
                    separators=(",", ":")) + "\n", encoding="utf-8")
 
-    # ── 4 · static gates ────────────────────────────────────────────────
+    # 4. static gates
     for stem in ("ide/pkg/rspice-ui", "play/pkg/rspice_wasm"):
         gate_bundle(out, stem)
     gate_ide_worker(out)
     gate_ide_worker_sources(root)
     gate_playground_worker(out)
 
-    # ── 5 · headless solve gate ─────────────────────────────────────────
+    # 5. headless solve gate
     if args.skip_headless:
         print("skipped: headless solve gate (--skip-headless)")
     else:

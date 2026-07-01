@@ -1,11 +1,11 @@
 # Deliberate site deploys. main is a shared live-dev branch, so the site
 # never deploys per-push: run tools/deploy/deploy.py (git only, no gh)
-# or push a site-v* tag. The build is tools/deploy/build_site.py — both
+# or push a site-v* tag. The build is tools/deploy/build_site.py - both
 # wasm bundles compiled from the dispatched ref, bundle-integrity gates,
 # a live headless solve of the playground, and a browser-IDE boot smoke;
 # nothing publishes unless
 # every gate passes. tools/deploy/publish.py force-pushes _site to the cf-pages tree, which
-# is the Cloudflare Pages production branch — Cloudflare picks the push
+# is the Cloudflare Pages production branch; Cloudflare picks the push
 # up and serves it within about a minute. Rollback: re-run on an older
 # ref. The branch stays single-commit so the multi-MB wasm
 # bundles never accrete history.
@@ -26,18 +26,21 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  RUST_TOOLCHAIN: "1.94.0"
 
 jobs:
   deploy:
     name: Build, verify, publish
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    environment:
+      name: production
+      url: https://rspice.app
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.94.0
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
 
       - name: Install wasm-bindgen-cli (pinned to Cargo.lock)
         run: |
@@ -47,13 +50,20 @@ jobs:
           if curl -sSfL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${VERSION}/${DIST}.tar.gz" | tar -xz; then
             mv "${DIST}/wasm-bindgen" "$HOME/.cargo/bin/"
           else
-            echo "prebuilt download failed — building from source"
+            echo "prebuilt download failed; building from source"
             cargo install wasm-bindgen-cli --version "$VERSION" --locked
           fi
           wasm-bindgen --version
 
       - name: Build and verify (_site)
         run: python3 tools/deploy/build_site.py
+
+      - name: Upload verified site bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-site
+          path: _site
+          if-no-files-found: error
 
       - name: Publish to cf-pages (Cloudflare Pages production branch)
         env:

@@ -19,6 +19,7 @@ bare repo, so the publish path is exercised without touching the real remote).
 
 import argparse
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -65,6 +66,11 @@ def main():
     ap.add_argument("--remote", help="push URL override (default: built from env token+repo)")
     ap.add_argument("--message", help="commit message (default: 'deploy <GITHUB_SHA>')")
     args = ap.parse_args()
+
+    if args.branch in {"main", "master"}:
+        sys.exit("refusing to force-push deploy output to protected source branch '%s'" % args.branch)
+    if not re.fullmatch(r"[A-Za-z0-9._/-]+", args.branch):
+        sys.exit("invalid deploy branch name '%s'" % args.branch)
 
     site = os.path.abspath(args.dir)
     if not os.path.isdir(site):

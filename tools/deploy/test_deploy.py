@@ -64,7 +64,21 @@ class DeployScriptTest(unittest.TestCase):
             env=env,
         )
 
-    def test_ref_tags_the_requested_ref_commit(self):
+    def test_non_main_ref_requires_explicit_override(self):
+        git(self.repo, "switch", "-c", "site-work")
+        write_file(self.repo, "site/index.html", "site work\n")
+        git(self.repo, "add", "site/index.html")
+        git(self.repo, "commit", "-m", "site work")
+        git(self.repo, "switch", "main")
+
+        result = self.deploy("--ref", "site-work", "--tag", "site-v999")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("is not main", result.stderr)
+        tag = git(self.remote, "rev-parse", "--verify", "refs/tags/site-v999", check=False)
+        self.assertNotEqual(tag.returncode, 0)
+
+    def test_ref_tags_the_requested_ref_commit_when_override_is_explicit(self):
         main_commit = git(self.repo, "rev-parse", "HEAD").stdout.strip()
         git(self.repo, "switch", "-c", "site-work")
         write_file(self.repo, "site/index.html", "site work\n")
@@ -73,12 +87,18 @@ class DeployScriptTest(unittest.TestCase):
         target_commit = git(self.repo, "rev-parse", "HEAD").stdout.strip()
         git(self.repo, "switch", "main")
 
-        result = self.deploy("--ref", "site-work", "--tag", "site-v999")
+        result = self.deploy("--ref", "site-work", "--allow-non-main", "--tag", "site-v999")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         tag_commit = git(self.remote, "rev-parse", "refs/tags/site-v999^{}").stdout.strip()
         self.assertEqual(target_commit, tag_commit)
         self.assertNotEqual(main_commit, tag_commit)
+
+    def test_invalid_site_tag_is_rejected(self):
+        result = self.deploy("--tag", "prod-latest")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("deploy tag must match site-vN", result.stderr)
 
     def test_untracked_site_files_block_deploy(self):
         write_file(self.repo, "site/new-page.html", "untracked\n")
@@ -172,6 +192,20 @@ class PublishScriptTest(unittest.TestCase):
             (self.site / ".git").exists(),
             "failed publish must not leave a nested git repository in _site",
         )
+
+    def test_publish_refuses_source_branch_targets(self):
+        result = self.publish(
+            "--remote",
+            str(self.remote),
+            "--branch",
+            "main",
+            "--dir",
+            str(self.site),
+        )
+
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("refusing to force-push", result.stderr)
+        self.assertFalse((self.site / ".git").exists())
 
     def test_force_rmtree_keeps_git_directories_searchable_before_delete(self):
         write_file(self.site, ".git/objects/aa/object", "payload\n")

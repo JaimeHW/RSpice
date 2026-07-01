@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-r"""Take committed site/ changes live on rspice.app — git only, no gh.
+r"""Take committed site/ changes live on rspice.app - git only, no gh.
 
     python3 tools/deploy/deploy.py [--ref BRANCH] [--tag NAME] [--allow-dirty]
     # Windows:  py tools\deploy\deploy.py
@@ -8,7 +8,7 @@ The deploy-site workflow triggers on a `site-v*` tag push, so shipping needs
 nothing but `git`: this pushes your branch and a new `site-vN` tag. GitHub
 Actions then builds (tools/deploy/build_site.py), gates, and force-pushes
 cf-pages, which Cloudflare Pages serves as production. The build stays in CI
-for a clean-room, reproducible result — nothing is built or published locally.
+for a clean-room, reproducible result; nothing is built or published locally.
 
 It prints the Actions URL to watch the run; if you have the GitHub CLI you can
 stream it with `gh run watch`, but `gh` is never required.
@@ -54,6 +54,11 @@ def commit_for_ref(ref):
         sys.exit("ref '%s' does not resolve to a commit" % ref)
 
 
+def validate_site_tag(tag):
+    if not re.fullmatch(r"site-v[1-9][0-9]*", tag):
+        sys.exit("deploy tag must match site-vN with N >= 1, got '%s'" % tag)
+
+
 def is_site_path(path):
     norm = path.replace("\\", "/")
     return norm == "site" or norm.startswith("site/")
@@ -63,9 +68,11 @@ def main():
     ap = argparse.ArgumentParser(description="Push + tag to deploy the site (git only).")
     ap.add_argument("--ref", help="branch to push and deploy (default: current branch)")
     ap.add_argument("--tag", help="tag name to create (default: next site-vN)")
+    ap.add_argument("--allow-non-main", action="store_true",
+                    help="allow deploying a ref other than main")
     ap.add_argument("--allow-dirty", action="store_true",
                     help="proceed despite undeployed working-tree changes "
-                         "(they will NOT be included — CI builds the pushed commit)")
+                         "(they will NOT be included; CI builds the pushed commit)")
     args = ap.parse_args()
 
     if not shutil.which("git"):
@@ -94,10 +101,13 @@ def main():
         sys.exit("\ncommit them first, or re-run with --allow-dirty")
 
     if branch != "main":
+        if not args.allow_non_main:
+            sys.exit("ref '%s' is not main; pass --allow-non-main only for an intentional rollback or hotfix deploy" % branch)
         print("WARNING: deploying ref '%s' (not main). The site's source of truth "
               "is main; this will publish %s's site/ to production." % (branch, branch))
 
     tag = args.tag or next_site_tag()
+    validate_site_tag(tag)
     short = out(["git", "rev-parse", "--short", commit])
 
     print("-> pushing %s to origin..." % branch)
