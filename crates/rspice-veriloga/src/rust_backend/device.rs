@@ -44117,7 +44117,10 @@ fn padded_derivative_array_expr(
         ));
     }
     let mut padded = derivatives.to_vec();
-    padded.extend(std::iter::repeat("0.0".to_string()).take(axis_count - derivatives.len()));
+    padded.extend(std::iter::repeat_n(
+        "0.0".to_string(),
+        axis_count - derivatives.len(),
+    ));
     Ok(padded.join(", "))
 }
 
