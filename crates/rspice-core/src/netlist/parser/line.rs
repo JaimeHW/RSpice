@@ -484,7 +484,10 @@ fn capture_subckt_body_scope(line: &str, def: &mut SubcircuitDef, params: &Param
         return;
     };
 
-    if command.eq_ignore_ascii_case(".PARAM") || command.eq_ignore_ascii_case(".CSPARAM") {
+    if command.eq_ignore_ascii_case(".PARAM")
+        || command.eq_ignore_ascii_case(".CSPARAM")
+        || command.eq_ignore_ascii_case(".GLOBAL_PARAM")
+    {
         for name in subckt_body_param_names(&fields) {
             if let Some(value) = params.get(&name) {
                 upsert_case_insensitive(&mut def.body_params, name.clone(), value);

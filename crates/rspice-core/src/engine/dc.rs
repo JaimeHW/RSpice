@@ -313,6 +313,12 @@ impl Engine {
                 swept.options.temp = Some(outer_value);
                 swept.params.set("TEMP", outer_value);
                 swept.params.set("TEMPER", outer_value);
+                swept.params.set(
+                    "VT",
+                    crate::constants::thermal_voltage(
+                        crate::analysis::temperature::celsius_to_kelvin(outer_value),
+                    ),
+                );
             } else {
                 Self::override_independent_source_dc(&mut swept, &sweep2.source, outer_value)?;
             }
@@ -410,6 +416,12 @@ impl Engine {
                 swept.options.temp = Some(sweep_value);
                 swept.params.set("TEMP", sweep_value);
                 swept.params.set("TEMPER", sweep_value);
+                swept.params.set(
+                    "VT",
+                    crate::constants::thermal_voltage(
+                        crate::analysis::temperature::celsius_to_kelvin(sweep_value),
+                    ),
+                );
                 let (result, device_op_report) = self.run_dc_op_with_report(&swept)?;
                 results.push(DcSweepPointResult {
                     sweep_value,

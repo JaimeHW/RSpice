@@ -49,6 +49,16 @@ fn normalize_temperature_param_to_celsius(value: f64) -> f64 {
     }
 }
 
+fn set_temperature_scalars(ctx: &mut crate::netlist::ParamContext, temp_c: f64, tnom_c: f64) {
+    ctx.set("TEMP", temp_c);
+    ctx.set("TEMPER", temp_c);
+    ctx.set("TNOM", tnom_c);
+    ctx.set(
+        "VT",
+        crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(temp_c)),
+    );
+}
+
 /// Build the expression-evaluation context for a passive instance (R/C/L),
 /// honoring instance `TEMP`/`DTEMP` overrides and the model card's `TNOM`.
 ///
@@ -69,9 +79,7 @@ fn resolve_passive_eval_context(
     let base_tnom_c = netlist.options.tnom.unwrap_or(27.0);
     let Some(model_def) = model_def else {
         let mut ctx = netlist.params.clone();
-        ctx.set("TEMP", current_temp_c);
-        ctx.set("TEMPER", current_temp_c);
-        ctx.set("TNOM", base_tnom_c);
+        set_temperature_scalars(&mut ctx, current_temp_c, base_tnom_c);
         return Ok((ctx, current_temp_c, base_tnom_c));
     };
 
@@ -96,9 +104,7 @@ fn build_model_eval_context(
     tnom_c: f64,
 ) -> crate::netlist::ParamContext {
     let mut ctx = netlist.params.clone();
-    ctx.set("TEMP", current_temp_c);
-    ctx.set("TEMPER", current_temp_c);
-    ctx.set("TNOM", tnom_c);
+    set_temperature_scalars(&mut ctx, current_temp_c, tnom_c);
 
     for (name, value) in &model_def.params {
         ctx.set(name, *value);

@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -13,7 +14,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const DEFAULT_RANDOM_SEED: u64 = 1;
 
 const DEFAULT_TEMPERATURE_C: Value = 27.0;
+const MAX_FUNCTION_CALL_DEPTH: usize = 4096;
 const GOLDEN_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
+
+thread_local! {
+    static FUNCTION_CALL_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
 
 /// Finalizer from SplitMix64 (Steele, Lea, Flood 2014).
 #[inline]
@@ -145,10 +151,17 @@ impl ParamContext {
     /// Get a parameter value
     pub fn get(&self, name: &str) -> Option<Value> {
         let key = name.to_uppercase();
-        self.params
-            .get(&key)
+        if let Some(value) = self.params.get(&key) {
+            return Some(*value);
+        }
+
+        let temp_c = self
+            .params
+            .get("TEMP")
+            .or_else(|| self.params.get("TEMPER"))
             .copied()
-            .or_else(|| builtin_numeric_param(&key))
+            .unwrap_or(DEFAULT_TEMPERATURE_C);
+        builtin_numeric_param(&key, temp_c)
     }
 
     /// Get a string parameter value.
@@ -251,6 +264,8 @@ impl ParamContext {
             return Err(ExprError::WrongArgCount(name.to_string()));
         }
 
+        let _depth_guard = FunctionCallDepthGuard::enter(name)?;
+
         // Create temporary context with arguments bound
         let mut temp_ctx = self.clone();
         for (arg_name, &arg_value) in func.args.iter().zip(arg_values.iter()) {
@@ -263,9 +278,38 @@ impl ParamContext {
     }
 }
 
-fn builtin_numeric_param(name: &str) -> Option<Value> {
+struct FunctionCallDepthGuard;
+
+impl FunctionCallDepthGuard {
+    fn enter(name: &str) -> Result<Self, ExprError> {
+        FUNCTION_CALL_DEPTH.with(|depth| {
+            let current = depth.get();
+            if current >= MAX_FUNCTION_CALL_DEPTH {
+                return Err(ExprError::InvalidArgument(format!(
+                    "function nesting exceeds maximum depth of {} while calling {}",
+                    MAX_FUNCTION_CALL_DEPTH, name
+                )));
+            }
+            depth.set(current + 1);
+            Ok(Self)
+        })
+    }
+}
+
+impl Drop for FunctionCallDepthGuard {
+    fn drop(&mut self) {
+        FUNCTION_CALL_DEPTH.with(|depth| {
+            depth.set(depth.get().saturating_sub(1));
+        });
+    }
+}
+
+fn builtin_numeric_param(name: &str, temp_c: Value) -> Option<Value> {
     match name {
-        "TEMP" | "TEMPER" => Some(DEFAULT_TEMPERATURE_C),
+        "TEMP" | "TEMPER" => Some(temp_c),
+        "VT" => Some(crate::constants::thermal_voltage(
+            crate::analysis::temperature::celsius_to_kelvin(temp_c),
+        )),
         _ => None,
     }
 }

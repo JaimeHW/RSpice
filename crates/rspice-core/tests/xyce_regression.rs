@@ -379,6 +379,56 @@ fn test_xyce_dc_upgrade_sweep_modes_run() {
 }
 
 #[test]
+fn test_xyce_step_static_dc_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_606_SON/resistor.cir",
+        "Netlists/Certification_Tests/BUG_606_SON/global_params_step.cir",
+        "Netlists/Certification_Tests/BUG_1203_SON/dot_step.cir",
+        "Netlists/PARAM_REFACTOR/paramDep2.cir",
+        "Netlists/PARAM_REFACTOR/paramDep3.cir",
+        "Netlists/PARAM_REFACTOR/paramDep4.cir",
+        "Netlists/PARAM_REFACTOR/paramStep1.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce .STEP DC comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_step_dc",
+            "{relative} should run through the native stepped static DC contract"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_deep_function_parameter_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_1222_SON/bug_1222_son_2.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a numeric Xyce deep .FUNC parameter comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
 fn test_xyce_subckt_wrapper_family_members_run_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -464,8 +514,8 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
         result
             .error
             .as_deref()
-            .is_some_and(|error| error.contains(".STEP")),
-        "unsupported reason should name the missing feature, got {result:?}"
+            .is_some_and(|error| error.contains("netlist parser")),
+        "unsupported reason should name the parser capability boundary, got {result:?}"
     );
 
     for relative in [

@@ -86,9 +86,7 @@ fn resolve_resistor_eval_context(
     let base_tnom_c = netlist.options.tnom.unwrap_or(27.0);
     let Some(model_def) = model_def else {
         let mut ctx = netlist.params.clone();
-        ctx.set("TEMP", current_temp_c);
-        ctx.set("TEMPER", current_temp_c);
-        ctx.set("TNOM", base_tnom_c);
+        set_temperature_scalars(&mut ctx, current_temp_c, base_tnom_c);
         return Ok((ctx, current_temp_c, base_tnom_c));
     };
 
@@ -304,6 +302,71 @@ fn apply_resistor_instance_scaling(
     Ok(resistance)
 }
 
+fn resolve_level1_model_default_resistance(
+    element_name: &str,
+    model_def: &crate::netlist::ModelDef,
+    instance_params: &[(String, f64)],
+    eval_ctx: &crate::netlist::ParamContext,
+) -> Result<Option<f64>, SimulationError> {
+    let rsh = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?;
+    let Some(rsh) = rsh.filter(|value| value.is_finite() && *value != 0.0) else {
+        return Ok(Some(1000.0));
+    };
+
+    let squares = if let Some(nsq) =
+        instance_param(instance_params, &["NRS", "NRSQ", "NSQ", "SQUARES"])
+    {
+        nsq
+    } else if let Some(nsq) =
+        resolve_model_param(model_def, &["NRS", "NRSQ", "NSQ", "SQUARES"], eval_ctx)?
+    {
+        nsq
+    } else if let Some(l) = instance_param(instance_params, &["L", "LENGTH"])
+        .or_else(|| {
+            resolve_model_param(model_def, &["L", "LENGTH"], eval_ctx)
+                .ok()
+                .flatten()
+        })
+        .filter(|value| value.is_finite() && *value != 0.0)
+    {
+        let w = instance_param(instance_params, &["W", "WIDTH"])
+            .or_else(|| {
+                resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], eval_ctx)
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or(10.0e-6);
+        let narrow = resolve_model_param(model_def, &["NARROW"], eval_ctx)?.unwrap_or(0.0);
+        let short = resolve_model_param(model_def, &["SHORT"], eval_ctx)?.unwrap_or(0.0);
+        let l_eff = l - 2.0 * short;
+        let w_eff = w - 2.0 * narrow;
+        if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff < 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' has invalid effective geometry (L={}, W={}, SHORT={}, NARROW={})",
+                element_name, l, w, short, narrow
+            )));
+        }
+        if w_eff == 0.0 {
+            f64::INFINITY
+        } else {
+            l_eff / w_eff
+        }
+    } else {
+        return Ok(Some(1000.0));
+    };
+
+    if !(squares.is_infinite() && squares.is_sign_positive())
+        && (!squares.is_finite() || squares <= 0.0)
+    {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' has invalid number of squares {}",
+            element_name, squares
+        )));
+    }
+
+    Ok(Some(rsh * squares))
+}
+
 pub(in crate::engine::builder) fn resolve_resistor_instance_value(
     netlist: &Netlist,
     element_name: &str,
@@ -382,96 +445,24 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
     };
 
     if let Some(model_def) = model_def {
+        let resistance_multiplier = resolve_model_param(
+            model_def,
+            &["R", "RES", "R0", "VALUE", "RESISTANCE"],
+            &eval_ctx,
+        )?
+        .unwrap_or(1.0);
+
         if resistance.is_none() {
-            resistance = resolve_model_param(
+            resistance = resolve_level1_model_default_resistance(
+                element_name,
                 model_def,
-                &["R", "RES", "R0", "VALUE", "RESISTANCE"],
+                instance_params,
                 &eval_ctx,
             )?;
         }
 
-        if resistance.is_none() {
-            let rsh = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], &eval_ctx)?
-                .ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "Resistor '{}' model '{}' requires R/RES or RSH with geometry",
-                        element_name,
-                        model_name.unwrap_or_default()
-                    ))
-                })?;
-
-            if !rsh.is_finite() || rsh <= 0.0 {
-                return Err(SimulationError::Circuit(format!(
-                    "Resistor '{}' model '{}' has invalid RSH={} (must be finite and > 0)",
-                    element_name,
-                    model_name.unwrap_or_default(),
-                    rsh
-                )));
-            }
-
-            let squares = if let Some(nsq) =
-                instance_param(instance_params, &["NRS", "NRSQ", "NSQ", "SQUARES"])
-            {
-                nsq
-            } else if let Some(nsq) =
-                resolve_model_param(model_def, &["NRS", "NRSQ", "NSQ", "SQUARES"], &eval_ctx)?
-            {
-                nsq
-            } else {
-                let l = instance_param(instance_params, &["L", "LENGTH"])
-                    .or_else(|| {
-                        resolve_model_param(model_def, &["L", "LENGTH"], &eval_ctx)
-                            .ok()
-                            .flatten()
-                    })
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            "Resistor '{}' model '{}' requires L/LENGTH when using RSH",
-                            element_name,
-                            model_name.unwrap_or_default()
-                        ))
-                    })?;
-                let w = instance_param(instance_params, &["W", "WIDTH"])
-                    .or_else(|| {
-                        resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], &eval_ctx)
-                            .ok()
-                            .flatten()
-                    })
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            "Resistor '{}' model '{}' requires W/WIDTH (or DEFW) when using RSH",
-                            element_name,
-                            model_name.unwrap_or_default()
-                        ))
-                    })?;
-                let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
-                let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
-                // ngspice RESupdate_conduct subtracts process bias from both
-                // drawn edges: (L - 2*SHORT) / (W - 2*NARROW).
-                let l_eff = l - 2.0 * short;
-                let w_eff = w - 2.0 * narrow;
-                if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff < 0.0 {
-                    return Err(SimulationError::Circuit(format!(
-                        "Resistor '{}' has invalid effective geometry (L={}, W={}, SHORT={}, NARROW={})",
-                        element_name, l, w, short, narrow
-                    )));
-                }
-                if w_eff == 0.0 {
-                    f64::INFINITY
-                } else {
-                    l_eff / w_eff
-                }
-            };
-
-            if !(squares.is_infinite() && squares.is_sign_positive())
-                && (!squares.is_finite() || squares <= 0.0)
-            {
-                return Err(SimulationError::Circuit(format!(
-                    "Resistor '{}' has invalid number of squares {}",
-                    element_name, squares
-                )));
-            }
-            resistance = Some(rsh * squares);
+        if resistor_level != Some(2) {
+            resistance = resistance.map(|value| value * resistance_multiplier);
         }
     }
 
@@ -489,10 +480,10 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         }
     })?;
 
-    let tc1 = instance_param(instance_params, &["TC1"])
+    let tc1 = instance_param(instance_params, &["TC1", "TC"])
         .or_else(|| {
             model_def.and_then(|model_def| {
-                resolve_model_param(model_def, &["TC1"], &eval_ctx)
+                resolve_model_param(model_def, &["TC1", "TC"], &eval_ctx)
                     .ok()
                     .flatten()
             })

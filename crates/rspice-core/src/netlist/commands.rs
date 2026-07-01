@@ -131,7 +131,7 @@ pub fn parse_command(
                 integer_vector_params: Vec::new(),
             });
         }
-        ".PARAM" => {
+        ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
             parse_param_statement(stream, line_num, params)?;
         }
         ".STEP" => {
@@ -379,6 +379,7 @@ pub fn parse_step_command(
             let name = expect_ident(stream, line_num)?;
             (None, first_upper, name)
         }
+        _ if params.get(&first).is_some() => (None, "PARAM".to_string(), first),
         _ => {
             // Assume device parameter: .STEP R1(value) or .STEP R1 start stop step
             (None, "DEVICE".to_string(), first)

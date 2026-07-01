@@ -140,7 +140,7 @@ pub(super) fn parse_command(
             let model = parse_model_definition(stream, line_num, params, models, false)?;
             models.push(model);
         }
-        ".PARAM" | ".CSPARAM" => {
+        ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
             parse_param_statement(stream, line_num, params)?;
         }
         ".STEP" => {

@@ -62,6 +62,116 @@ impl Engine {
         }
     }
 
+    pub(crate) fn step_netlists_for_command(
+        &self,
+        netlist: &Netlist,
+        step_cmd: &StepCommand,
+        values: &[Value],
+    ) -> Result<Vec<(Value, Netlist)>, SimulationError> {
+        validate_step_values(values)?;
+
+        let mut stepped = Vec::with_capacity(values.len());
+        let mut any_binding = false;
+        for &value in values {
+            let (netlist, bindings) =
+                Self::step_netlist_for_command_value(netlist, step_cmd, value)?;
+            any_binding |= bindings > 0;
+            stepped.push((value, netlist));
+        }
+
+        if step_cmd.target == StepTarget::Param && netlist.source_text.is_some() && !any_binding {
+            return Err(SimulationError::Circuit(format!(
+                "Parameter '{}' is not bound to any netlist expression",
+                step_cmd.name
+            )));
+        }
+
+        Ok(stepped)
+    }
+
+    fn step_netlist_for_command_value(
+        netlist: &Netlist,
+        step_cmd: &StepCommand,
+        value: Value,
+    ) -> Result<(Netlist, usize), SimulationError> {
+        match step_cmd.target {
+            StepTarget::Param => Self::create_perturbed_netlist(netlist, &step_cmd.name, value),
+            StepTarget::Device => {
+                let mut stepped = netlist.clone();
+                let device_idx = stepped
+                    .elements
+                    .iter()
+                    .position(|e| e.name.eq_ignore_ascii_case(&step_cmd.name))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            ".STEP DEVICE target '{}' not found in netlist",
+                            step_cmd.name
+                        ))
+                    })?;
+                let element = stepped.elements.get_mut(device_idx).ok_or_else(|| {
+                    SimulationError::Circuit("Internal step device index error".to_string())
+                })?;
+                Self::apply_device_step_value(
+                    &mut element.kind,
+                    step_cmd.param_name.as_deref(),
+                    value,
+                )?;
+                Ok((stepped, 1))
+            }
+            StepTarget::Model => {
+                let param_name = step_cmd.param_name.as_deref().ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        ".STEP MODEL {} requires an explicit parameter name",
+                        step_cmd.name
+                    ))
+                })?;
+
+                let mut stepped = netlist.clone();
+                let model_idx = stepped
+                    .models
+                    .iter()
+                    .position(|m| m.name.eq_ignore_ascii_case(&step_cmd.name))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            ".STEP MODEL target '{}' not found in netlist",
+                            step_cmd.name
+                        ))
+                    })?;
+                let model = stepped.models.get_mut(model_idx).ok_or_else(|| {
+                    SimulationError::Circuit("Internal step model index error".to_string())
+                })?;
+
+                let param_upper = param_name.to_ascii_uppercase();
+                if let Some((_, v)) = model
+                    .params
+                    .iter_mut()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(&param_upper))
+                {
+                    *v = value;
+                } else {
+                    model.params.push((param_upper, value));
+                }
+                Ok((stepped, 1))
+            }
+            StepTarget::Temp => Self::step_temperature_netlist(netlist, value),
+        }
+    }
+
+    fn step_temperature_netlist(
+        netlist: &Netlist,
+        value: Value,
+    ) -> Result<(Netlist, usize), SimulationError> {
+        let vt = thermal_voltage_celsius(value);
+        let overrides = [
+            ("TEMP".to_string(), value),
+            ("TEMPER".to_string(), value),
+            ("VT".to_string(), vt),
+        ];
+        let (mut stepped, bindings) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
+        apply_temperature_scalars(&mut stepped, value, vt);
+        Ok((stepped, bindings.max(1)))
+    }
+
     pub(in crate::engine::advanced) fn run_step_temp(
         &self,
         netlist: &Netlist,
@@ -73,10 +183,7 @@ impl Engine {
 
         let mut results = Vec::with_capacity(values.len());
         for &value in values {
-            let mut stepped = netlist.clone();
-            stepped.options.temp = Some(value);
-            stepped.params.set("TEMP", value);
-            stepped.params.set("TEMPER", value);
+            let (stepped, _) = Self::step_temperature_netlist(netlist, value)?;
 
             match self.run_dc_op(&stepped) {
                 Ok(result) => results.push((value, result)),
@@ -346,6 +453,17 @@ impl Engine {
             )),
         }
     }
+}
+
+fn apply_temperature_scalars(netlist: &mut Netlist, temp_c: Value, vt: Value) {
+    netlist.options.temp = Some(temp_c);
+    netlist.params.set("TEMP", temp_c);
+    netlist.params.set("TEMPER", temp_c);
+    netlist.params.set("VT", vt);
+}
+
+fn thermal_voltage_celsius(temp_c: Value) -> Value {
+    crate::constants::thermal_voltage(crate::analysis::temperature::celsius_to_kelvin(temp_c))
 }
 
 fn step_point_error(

@@ -258,11 +258,15 @@ impl Engine {
     ) -> bool {
         let trimmed = line.trim();
         let upper = trimmed.to_ascii_uppercase();
-        if !upper.starts_with(".PARAM") {
+        if !Self::is_parameter_assignment_command(&upper) {
             return false;
         }
 
-        let mut idx = ".PARAM".len();
+        let mut idx = trimmed
+            .split_whitespace()
+            .next()
+            .map(str::len)
+            .unwrap_or_default();
         let bytes = trimmed.as_bytes();
         while idx < bytes.len() {
             while idx < bytes.len() && (bytes[idx].is_ascii_whitespace() || bytes[idx] == b',') {
@@ -294,6 +298,12 @@ impl Engine {
         false
     }
 
+    fn is_parameter_assignment_command(upper_trimmed_line: &str) -> bool {
+        upper_trimmed_line.starts_with(".PARAM")
+            || upper_trimmed_line.starts_with(".CSPARAM")
+            || upper_trimmed_line.starts_with(".GLOBAL_PARAM")
+    }
+
     pub(in crate::engine::advanced) fn source_references_param(
         source: &str,
         param_name: &str,
@@ -302,7 +312,7 @@ impl Engine {
 
         Self::logical_lines_after_title(source).iter().any(|line| {
             let upper = line.to_ascii_uppercase();
-            if upper.starts_with(".PARAM")
+            if Self::is_parameter_assignment_command(upper.trim_start())
                 || upper.starts_with(".IC")
                 || upper.starts_with(".NODESET")
             {

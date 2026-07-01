@@ -71,6 +71,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         state.params.set_random_seed(seed);
         log::info!("statistical expression functions seeded with {seed} (.options seed)");
     }
+    prescan_temperature_options(&lines, &mut state)?;
 
     let mut line_num = 1;
     let mut continuation = String::new();
@@ -170,6 +171,109 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     }
 
     state.into_netlist(title, input, line_num)
+}
+
+fn prescan_temperature_options(lines: &[&str], state: &mut ParseState) -> Result<(), ParseError> {
+    let mut continuation = String::new();
+    let mut in_options = false;
+    let mut line_num = 1usize;
+
+    for line in lines.iter().skip(1) {
+        line_num += 1;
+        let stripped = strip_inline_semicolon_comment(line);
+        let trimmed = stripped.trim();
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix('+') {
+            if in_options {
+                continuation.push(' ');
+                continuation.push_str(rest.trim());
+            }
+            continue;
+        }
+
+        if !continuation.is_empty() {
+            scan_temperature_option_line(&continuation, line_num - 1, state)?;
+            continuation.clear();
+        }
+
+        let head = trimmed.split_whitespace().next().unwrap_or("");
+        if head.eq_ignore_ascii_case(".options")
+            || head.eq_ignore_ascii_case(".option")
+            || head.eq_ignore_ascii_case(".opt")
+        {
+            in_options = true;
+            continuation.push_str(trimmed);
+        } else {
+            in_options = false;
+        }
+    }
+
+    if !continuation.is_empty() {
+        scan_temperature_option_line(&continuation, line_num, state)?;
+    }
+
+    Ok(())
+}
+
+fn scan_temperature_option_line(
+    line: &str,
+    line_num: usize,
+    state: &mut ParseState,
+) -> Result<(), ParseError> {
+    let tokens = tokenize(line).map_err(|err| lex_to_parse_error(err, line_num))?;
+    let mut stream = TokenStream::new(tokens);
+    stream.advance();
+
+    while !stream.is_eof() {
+        skip_commas(&mut stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            stream.advance();
+            continue;
+        };
+        let key_upper = key.to_ascii_uppercase();
+        stream.advance();
+
+        let has_equals = stream.consume(&TokenKind::Equals);
+        if !has_equals && matches!(key_upper.as_str(), "DEVICE" | "TOPOLOGY") {
+            continue;
+        }
+        if !matches!(key_upper.as_str(), "TEMP" | "TNOM") {
+            if has_equals && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                stream.advance();
+            }
+            continue;
+        }
+
+        let value = expect_value(&mut stream, line_num, &state.params)?;
+        let parsed = parse_celsius_option(&key_upper, value, line_num)?;
+        match key_upper.as_str() {
+            "TEMP" => {
+                state.options.temp = Some(parsed);
+                state.params.set("TEMP", parsed);
+                state.params.set("TEMPER", parsed);
+                state.params.set(
+                    "VT",
+                    crate::constants::thermal_voltage(
+                        crate::analysis::temperature::celsius_to_kelvin(parsed),
+                    ),
+                );
+            }
+            "TNOM" => {
+                state.options.tnom = Some(parsed);
+                state.params.set("TNOM", parsed);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
 }
 
 /// Dispatch one logical line through the conditional gate: conditional

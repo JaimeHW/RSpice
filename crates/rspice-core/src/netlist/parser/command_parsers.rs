@@ -27,6 +27,7 @@ pub(super) fn parse_step_command(
             (None, first_upper, name)
         }
         "TEMP" => (None, first_upper, "TEMP".to_string()),
+        _ if params.get(&first).is_some() => (None, "PARAM".to_string(), first),
         _ => {
             // Assume device parameter: .STEP R1(value) or .STEP R1 start stop step
             (None, "DEVICE".to_string(), first)

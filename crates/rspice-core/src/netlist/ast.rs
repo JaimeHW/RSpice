@@ -1502,6 +1502,33 @@ pub enum StepSweep {
     List(Vec<Value>),
 }
 
+impl StepSweep {
+    pub fn values(&self) -> Vec<Value> {
+        match self {
+            StepSweep::Linear { start, stop, step } => {
+                DcSweepSpec::linear(*start, *stop, *step).points()
+            }
+            StepSweep::Decade {
+                points_per_decade,
+                start,
+                stop,
+            } => DcSweepSpec::decade(*start, *stop, *points_per_decade).points(),
+            StepSweep::Octave {
+                points_per_octave,
+                start,
+                stop,
+            } => DcSweepSpec::octave(*start, *stop, *points_per_octave).points(),
+            StepSweep::List(values) => {
+                if values.iter().all(|value| value.is_finite()) {
+                    values.clone()
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+    }
+}
+
 /// Frequency variation type for AC/noise analysis
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FreqVariation {

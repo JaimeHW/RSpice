@@ -1,108 +1,271 @@
 use super::*;
 
+const MAX_EVAL_FUNCTION_CALL_DEPTH: usize = 4096;
+
 /// Evaluate an expression with the given context
 pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
-    match expr {
-        Expr::Number(v) => Ok(*v),
+    evaluate_iterative(expr, ctx)
+}
 
-        Expr::Param(name) => ctx
-            .get(name)
-            .ok_or_else(|| ExprError::UndefinedParam(name.clone())),
+enum EvalFrame {
+    Eval(Expr, ParamContext),
+    ApplyUnary(UnaryOpKind),
+    ApplyBinary(BinOpKind),
+    ApplyIf {
+        then_expr: Expr,
+        else_expr: Expr,
+        ctx: ParamContext,
+    },
+    ApplyBuiltin {
+        name: String,
+        argc: usize,
+        ctx: ParamContext,
+    },
+    ApplyUserFunction {
+        name: String,
+        argc: usize,
+        ctx: ParamContext,
+    },
+    PopUserFunction,
+}
 
-        Expr::BinOp { op, left, right } => {
-            let l = evaluate(left, ctx)?;
-            let r = evaluate(right, ctx)?;
+fn evaluate_iterative(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
+    let mut frames = vec![EvalFrame::Eval(expr.clone(), ctx.clone())];
+    let mut values = Vec::<Value>::new();
+    let mut call_stack = Vec::<String>::new();
 
-            Ok(match op {
-                // Arithmetic
-                BinOpKind::Add => l + r,
-                BinOpKind::Sub => l - r,
-                BinOpKind::Mul => l * r,
-                BinOpKind::Div => {
-                    if r.abs() < 1e-300 {
-                        return Err(ExprError::DivisionByZero);
-                    }
-                    l / r
+    while let Some(frame) = frames.pop() {
+        match frame {
+            EvalFrame::Eval(expr, ctx) => match expr {
+                Expr::Number(value) => values.push(value),
+                Expr::Param(name) => values.push(
+                    ctx.get(&name)
+                        .ok_or_else(|| ExprError::UndefinedParam(name.clone()))?,
+                ),
+                Expr::UnaryOp { op, operand } => {
+                    frames.push(EvalFrame::ApplyUnary(op));
+                    frames.push(EvalFrame::Eval(*operand, ctx));
                 }
-                BinOpKind::Pow => l.powf(r),
-                // Comparison (return 1.0 for true, 0.0 for false)
-                BinOpKind::Gt => {
-                    if l > r {
-                        1.0
+                Expr::BinOp { op, left, right } => {
+                    frames.push(EvalFrame::ApplyBinary(op));
+                    frames.push(EvalFrame::Eval(*right, ctx.clone()));
+                    frames.push(EvalFrame::Eval(*left, ctx));
+                }
+                Expr::FnCall { name, args } => {
+                    let upper = name.to_ascii_uppercase();
+                    if ctx.has_function(&upper) {
+                        frames.push(EvalFrame::ApplyUserFunction {
+                            name: upper,
+                            argc: args.len(),
+                            ctx: ctx.clone(),
+                        });
+                        for arg in args.into_iter().rev() {
+                            frames.push(EvalFrame::Eval(arg, ctx.clone()));
+                        }
+                    } else if upper == "IF" {
+                        if args.len() != 3 {
+                            return Err(ExprError::WrongArgCount(upper));
+                        }
+                        let mut args = args.into_iter();
+                        let cond = args.next().expect("IF arg count checked");
+                        let then_expr = args.next().expect("IF arg count checked");
+                        let else_expr = args.next().expect("IF arg count checked");
+                        frames.push(EvalFrame::ApplyIf {
+                            then_expr,
+                            else_expr,
+                            ctx: ctx.clone(),
+                        });
+                        frames.push(EvalFrame::Eval(cond, ctx));
                     } else {
-                        0.0
+                        frames.push(EvalFrame::ApplyBuiltin {
+                            name: upper,
+                            argc: args.len(),
+                            ctx: ctx.clone(),
+                        });
+                        for arg in args.into_iter().rev() {
+                            frames.push(EvalFrame::Eval(arg, ctx.clone()));
+                        }
                     }
                 }
-                BinOpKind::Lt => {
-                    if l < r {
-                        1.0
-                    } else {
-                        0.0
-                    }
+            },
+            EvalFrame::ApplyUnary(op) => {
+                let value = pop_value(&mut values)?;
+                values.push(apply_unary(op, value));
+            }
+            EvalFrame::ApplyBinary(op) => {
+                let right = pop_value(&mut values)?;
+                let left = pop_value(&mut values)?;
+                values.push(apply_binary(op, left, right)?);
+            }
+            EvalFrame::ApplyIf {
+                then_expr,
+                else_expr,
+                ctx,
+            } => {
+                let cond = pop_value(&mut values)?;
+                frames.push(EvalFrame::Eval(
+                    if cond != 0.0 { then_expr } else { else_expr },
+                    ctx,
+                ));
+            }
+            EvalFrame::ApplyBuiltin { name, argc, ctx } => {
+                let args = pop_args(&mut values, argc)?;
+                values.push(eval_builtin_function_values(&name, &args, &ctx)?);
+            }
+            EvalFrame::ApplyUserFunction { name, argc, ctx } => {
+                let arg_values = pop_args(&mut values, argc)?;
+                let func = ctx
+                    .get_function(&name)
+                    .cloned()
+                    .ok_or_else(|| ExprError::UnknownFunction(name.clone()))?;
+                if arg_values.len() != func.args.len() {
+                    return Err(ExprError::WrongArgCount(name));
                 }
-                BinOpKind::Ge => {
-                    if l >= r {
-                        1.0
-                    } else {
-                        0.0
-                    }
+                if call_stack.iter().any(|active| active == &func.name) {
+                    return Err(ExprError::InvalidArgument(format!(
+                        "recursive user-defined function call to {}",
+                        func.name
+                    )));
                 }
-                BinOpKind::Le => {
-                    if l <= r {
-                        1.0
-                    } else {
-                        0.0
-                    }
+                if call_stack.len() >= MAX_EVAL_FUNCTION_CALL_DEPTH {
+                    return Err(ExprError::InvalidArgument(format!(
+                        "function nesting exceeds maximum depth of {} while calling {}",
+                        MAX_EVAL_FUNCTION_CALL_DEPTH, func.name
+                    )));
                 }
-                BinOpKind::Eq => {
-                    if (l - r).abs() < 1e-12 {
-                        1.0
-                    } else {
-                        0.0
-                    }
+
+                let mut body_ctx = ctx.clone();
+                for (arg_name, arg_value) in func.args.iter().zip(arg_values.iter()) {
+                    body_ctx.set(arg_name, *arg_value);
                 }
-                BinOpKind::Ne => {
-                    if (l - r).abs() >= 1e-12 {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                // Boolean (0.0 is false, anything else is true)
-                BinOpKind::And => {
-                    if l != 0.0 && r != 0.0 {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-                BinOpKind::Or => {
-                    if l != 0.0 || r != 0.0 {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-            })
+                let body = parse_expression(&func.body)?;
+                call_stack.push(func.name);
+                frames.push(EvalFrame::PopUserFunction);
+                frames.push(EvalFrame::Eval(body, body_ctx));
+            }
+            EvalFrame::PopUserFunction => {
+                call_stack.pop();
+            }
         }
-
-        Expr::UnaryOp { op, operand } => {
-            let v = evaluate(operand, ctx)?;
-            Ok(match op {
-                UnaryOpKind::Neg => -v,
-                UnaryOpKind::Pos => v,
-                UnaryOpKind::Not => {
-                    if v == 0.0 {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                }
-            })
-        }
-
-        Expr::FnCall { name, args } => eval_function(name, args, ctx),
     }
+
+    if values.len() == 1 {
+        Ok(values.pop().expect("length checked"))
+    } else {
+        Err(ExprError::InvalidArgument(format!(
+            "expression evaluation produced {} values",
+            values.len()
+        )))
+    }
+}
+
+fn pop_value(values: &mut Vec<Value>) -> Result<Value, ExprError> {
+    values.pop().ok_or_else(|| {
+        ExprError::InvalidArgument("expression evaluation stack underflow".to_string())
+    })
+}
+
+fn pop_args(values: &mut Vec<Value>, argc: usize) -> Result<Vec<Value>, ExprError> {
+    if values.len() < argc {
+        return Err(ExprError::InvalidArgument(
+            "expression function argument stack underflow".to_string(),
+        ));
+    }
+    Ok(values.split_off(values.len() - argc))
+}
+
+fn apply_unary(op: UnaryOpKind, value: Value) -> Value {
+    match op {
+        UnaryOpKind::Neg => -value,
+        UnaryOpKind::Pos => value,
+        UnaryOpKind::Not => {
+            if value == 0.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
+fn apply_binary(op: BinOpKind, left: Value, right: Value) -> Result<Value, ExprError> {
+    Ok(match op {
+        BinOpKind::Add => left + right,
+        BinOpKind::Sub => left - right,
+        BinOpKind::Mul => left * right,
+        BinOpKind::Div => {
+            if right.abs() < 1e-300 {
+                return Err(ExprError::DivisionByZero);
+            }
+            left / right
+        }
+        BinOpKind::Pow => left.powf(right),
+        BinOpKind::Gt => {
+            if left > right {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        BinOpKind::Lt => {
+            if left < right {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        BinOpKind::Ge => {
+            if left >= right {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        BinOpKind::Le => {
+            if left <= right {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        BinOpKind::Eq => {
+            if (left - right).abs() < 1e-12 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        BinOpKind::Ne => {
+            if (left - right).abs() >= 1e-12 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        BinOpKind::And => {
+            if left != 0.0 && right != 0.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        BinOpKind::Or => {
+            if left != 0.0 || right != 0.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+    })
+}
+
+fn eval_builtin_function_values(
+    name: &str,
+    args: &[Value],
+    ctx: &ParamContext,
+) -> Result<Value, ExprError> {
+    let expr_args = args.iter().copied().map(Expr::Number).collect::<Vec<_>>();
+    eval_function(name, &expr_args, ctx)
 }
 
 /// Evaluate a built-in or user-defined function
