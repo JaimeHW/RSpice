@@ -153,10 +153,13 @@ fn xfer_params() -> &'static [ParamSpec] {
                 .with_description("Interpret table magnitude values as dB"),
             ParamSpec::boolean("rad", false).with_description("Interpret phase values as radians"),
             ParamSpec::integer("span", 3)
+                .with_min(3.0)
                 .with_description("Number of values per source row, clamped to at least 3"),
-            ParamSpec::integer("offset", 1).with_description(
-                "One-based offset of the selected value pair, clamped to at least 1",
-            ),
+            ParamSpec::integer("offset", 1)
+                .with_min(1.0)
+                .with_description(
+                    "One-based offset of the selected value pair, clamped to at least 1",
+                ),
         ]
     })
 }
@@ -1310,6 +1313,284 @@ impl CodeModel for SXfer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::xspice::ParamType;
+
+    fn port_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        PortDirection,
+        PortType,
+        Vec<PortType>,
+        bool,
+        bool,
+        Option<usize>,
+        Option<usize>,
+    )> {
+        model
+            .ports()
+            .iter()
+            .map(|port| {
+                (
+                    port.name.as_str(),
+                    port.direction,
+                    port.default_type,
+                    port.allowed_types.clone(),
+                    port.is_vector,
+                    port.null_allowed,
+                    port.vector_min_len,
+                    port.vector_max_len,
+                )
+            })
+            .collect()
+    }
+
+    fn param_summary(
+        model: &dyn CodeModel,
+    ) -> Vec<(
+        &str,
+        ParamType,
+        Value,
+        Option<&str>,
+        bool,
+        Option<Value>,
+        Option<Value>,
+        Option<usize>,
+        Option<usize>,
+        Option<Vec<Value>>,
+    )> {
+        model
+            .parameters()
+            .iter()
+            .map(|param| {
+                (
+                    param.name.as_str(),
+                    param.param_type,
+                    param.default,
+                    param.string_default.as_deref(),
+                    param.required,
+                    param.min,
+                    param.max,
+                    param.vector_min_len,
+                    param.vector_max_len,
+                    param.real_vector_default.clone(),
+                )
+            })
+            .collect()
+    }
+
+    fn transfer_port_summary() -> Vec<(
+        &'static str,
+        PortDirection,
+        PortType,
+        Vec<PortType>,
+        bool,
+        bool,
+        Option<usize>,
+        Option<usize>,
+    )> {
+        let analog_types = vec![
+            PortType::Voltage,
+            PortType::DifferentialVoltage,
+            PortType::Current,
+            PortType::DifferentialCurrent,
+        ];
+        vec![
+            (
+                "in",
+                PortDirection::In,
+                PortType::Voltage,
+                analog_types.clone(),
+                false,
+                false,
+                None,
+                None,
+            ),
+            (
+                "out",
+                PortDirection::Out,
+                PortType::Voltage,
+                analog_types,
+                false,
+                false,
+                None,
+                None,
+            ),
+        ]
+    }
+
+    #[test]
+    fn transfer_metadata_matches_ngspice46_interfaces() {
+        assert_eq!(port_summary(&Xfer), transfer_port_summary());
+        assert_eq!(
+            param_summary(&Xfer),
+            vec![
+                (
+                    "table",
+                    ParamType::RealVector,
+                    0.0,
+                    None,
+                    false,
+                    None,
+                    None,
+                    Some(3),
+                    None,
+                    Some(vec![0.0, 0.0, 0.0]),
+                ),
+                (
+                    "file",
+                    ParamType::String,
+                    0.0,
+                    Some(""),
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    "r_i",
+                    ParamType::Boolean,
+                    0.0,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    "db",
+                    ParamType::Boolean,
+                    1.0,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    "rad",
+                    ParamType::Boolean,
+                    0.0,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    "span",
+                    ParamType::Integer,
+                    3.0,
+                    None,
+                    false,
+                    Some(3.0),
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    "offset",
+                    ParamType::Integer,
+                    1.0,
+                    None,
+                    false,
+                    Some(1.0),
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ]
+        );
+
+        assert_eq!(port_summary(&SXfer), transfer_port_summary());
+        assert_eq!(
+            param_summary(&SXfer),
+            vec![
+                (
+                    "in_offset",
+                    ParamType::Real,
+                    0.0,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    "gain",
+                    ParamType::Real,
+                    1.0,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    "num_coeff",
+                    ParamType::RealVector,
+                    0.0,
+                    None,
+                    true,
+                    None,
+                    None,
+                    Some(1),
+                    None,
+                    Some(Vec::new()),
+                ),
+                (
+                    "den_coeff",
+                    ParamType::RealVector,
+                    0.0,
+                    None,
+                    true,
+                    None,
+                    None,
+                    Some(1),
+                    None,
+                    Some(Vec::new()),
+                ),
+                (
+                    "int_ic",
+                    ParamType::RealVector,
+                    0.0,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(Vec::new()),
+                ),
+                (
+                    "denormalized_freq",
+                    ParamType::Real,
+                    1.0,
+                    None,
+                    false,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ]
+        );
+    }
 
     fn xfer_point(frequency: Value, gain: Value) -> XferPoint {
         XferPoint {
