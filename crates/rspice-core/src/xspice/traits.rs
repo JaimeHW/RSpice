@@ -542,6 +542,15 @@ pub trait CodeModel: Send + Sync {
             .all(|p| p.default_type.is_event_driven())
     }
 
+    /// Whether transient evaluation may be skipped when event-driven inputs
+    /// have the same accepted event/value signature as the previous call.
+    ///
+    /// Pure combinational event models can opt in. Stateful devices, sources,
+    /// oscillators, memories, and analog/hybrid models should keep the default.
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        false
+    }
+
     /// Whether this code model needs global conservative Newton damping.
     ///
     /// Most XSPICE models are behavioral sources with explicit operating-point

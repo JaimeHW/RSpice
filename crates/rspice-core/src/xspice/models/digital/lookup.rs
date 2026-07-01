@@ -437,6 +437,10 @@ impl CodeModel for DigitalLookupTable {
         })
     }
 
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(1);
         ctx.set_int_state(0, D_LUT_INITIAL_STATE);
@@ -512,6 +516,10 @@ impl CodeModel for DigitalGenericLookupTable {
                 ParamSpec::string("table_values", "").required(),
             ]
         })
+    }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {

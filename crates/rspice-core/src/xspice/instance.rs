@@ -490,6 +490,18 @@ impl DigitalPortConnection {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EventInputSignatureValue {
+    Digital(DigitalValue),
+    Real(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct EventInputSignatureEntry {
+    event_time: Option<Value>,
+    value: EventInputSignatureValue,
+}
+
 /// Connection for a single port
 #[derive(Debug, Clone)]
 pub enum PortConnection {
@@ -605,6 +617,8 @@ pub struct XspiceInstance {
     solution_num_nodes: usize,
     /// Node-voltage count used to build the current context port bindings.
     port_context_solution_num_nodes: Option<usize>,
+    /// Last accepted event-input signature for combinational event models.
+    last_event_input_signature: Option<Vec<EventInputSignatureEntry>>,
     /// Has been initialized
     initialized: bool,
 }
@@ -916,6 +930,7 @@ impl XspiceInstance {
             output_vector_branches: HashMap::new(),
             solution_num_nodes: 0,
             port_context_solution_num_nodes: None,
+            last_event_input_signature: None,
             initialized: false,
         })
     }
@@ -1206,9 +1221,24 @@ impl XspiceInstance {
             _ => CallType::DcAnalysis,
         };
 
+        let event_input_signature = self.event_input_signature_for_skip(analysis);
+        if event_input_signature
+            .as_deref()
+            .is_some_and(|signature| self.last_event_input_signature.as_deref() == Some(signature))
+        {
+            return Ok(());
+        }
+
         let context_before_evaluate = self.context.clone();
         match catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context))) {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(())) => {
+                if phase != EvaluationPhase::RollbackableProbe
+                    && let Some(signature) = event_input_signature
+                {
+                    self.last_event_input_signature = Some(signature);
+                }
+                Ok(())
+            }
             Ok(Err(err)) => {
                 self.port_context_solution_num_nodes = None;
                 Err(err)
@@ -1218,6 +1248,95 @@ impl XspiceInstance {
                 Err(self.model_panic_error("evaluation", payload))
             }
         }
+    }
+
+    fn event_input_signature_for_skip(
+        &self,
+        analysis: AnalysisType,
+    ) -> Option<Vec<EventInputSignatureEntry>> {
+        if analysis != AnalysisType::Transient || !self.model.can_skip_unchanged_event_inputs() {
+            return None;
+        }
+        Some(self.event_input_signature())
+    }
+
+    fn event_input_signature(&self) -> Vec<EventInputSignatureEntry> {
+        let mut signature = Vec::new();
+        for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
+            if port.direction != super::PortDirection::In
+                && port.direction != super::PortDirection::InOut
+            {
+                continue;
+            }
+
+            match connection {
+                PortConnection::Digital(_) | PortConnection::DigitalInverted(_) => {
+                    signature.push(EventInputSignatureEntry {
+                        event_time: self.context.input_digital_event_time(&port.name),
+                        value: EventInputSignatureValue::Digital(
+                            self.context.input_digital(&port.name).unwrap_or_default(),
+                        ),
+                    });
+                }
+                PortConnection::DigitalVector(nodes) => {
+                    let values = self.context.input_digital_vector_values(&port.name);
+                    for index in 0..nodes.len() {
+                        signature.push(EventInputSignatureEntry {
+                            event_time: self
+                                .context
+                                .input_digital_vector_event_time(&port.name, index),
+                            value: EventInputSignatureValue::Digital(
+                                values
+                                    .and_then(|values| values.get(index))
+                                    .copied()
+                                    .unwrap_or_default(),
+                            ),
+                        });
+                    }
+                }
+                PortConnection::DigitalVectorMapped(nodes) => {
+                    let values = self.context.input_digital_vector_values(&port.name);
+                    for index in 0..nodes.len() {
+                        signature.push(EventInputSignatureEntry {
+                            event_time: self
+                                .context
+                                .input_digital_vector_event_time(&port.name, index),
+                            value: EventInputSignatureValue::Digital(
+                                values
+                                    .and_then(|values| values.get(index))
+                                    .copied()
+                                    .unwrap_or_default(),
+                            ),
+                        });
+                    }
+                }
+                PortConnection::Real(_) => {
+                    signature.push(EventInputSignatureEntry {
+                        event_time: self.context.input_real_event_time(&port.name),
+                        value: EventInputSignatureValue::Real(
+                            self.context.input_real(&port.name).unwrap_or(0.0).to_bits(),
+                        ),
+                    });
+                }
+                PortConnection::RealVector(nodes) => {
+                    let values = self.context.input_real_vector_values(&port.name);
+                    for index in 0..nodes.len() {
+                        signature.push(EventInputSignatureEntry {
+                            event_time: None,
+                            value: EventInputSignatureValue::Real(
+                                values
+                                    .and_then(|values| values.get(index))
+                                    .copied()
+                                    .unwrap_or(0.0)
+                                    .to_bits(),
+                            ),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        signature
     }
 
     fn refresh_port_context_bindings(&mut self) {
