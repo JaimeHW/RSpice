@@ -188,6 +188,7 @@ impl Engine {
                     step_cmd.param_name.as_deref(),
                     value,
                 )?;
+                Self::mark_ast_stepped_netlist(&mut stepped);
                 Ok((stepped, 1))
             }
             StepTarget::Model => {
@@ -223,6 +224,7 @@ impl Engine {
                 } else {
                     model.params.push((param_upper, value));
                 }
+                Self::mark_ast_stepped_netlist(&mut stepped);
                 Ok((stepped, 1))
             }
             StepTarget::Temp => Self::step_temperature_netlist(netlist, value),
@@ -301,6 +303,7 @@ impl Engine {
             );
             Self::apply_device_step_value(&mut element.kind, param_name, value)
                 .map_err(|e| step_point_error("DEVICE", &target, value, e))?;
+            Self::mark_ast_stepped_netlist(&mut stepped);
 
             match self.run_dc_op(&stepped) {
                 Ok(result) => results.push((value, result)),
@@ -357,6 +360,7 @@ impl Engine {
             } else {
                 model.params.push((param_upper.clone(), value));
             }
+            Self::mark_ast_stepped_netlist(&mut stepped);
 
             match self.run_dc_op(&stepped) {
                 Ok(result) => results.push((value, result)),
@@ -368,6 +372,11 @@ impl Engine {
         }
 
         Ok(results)
+    }
+
+    fn mark_ast_stepped_netlist(netlist: &mut Netlist) {
+        netlist.source_text = None;
+        netlist.source_path = None;
     }
 
     pub(in crate::engine::advanced) fn apply_device_step_value(
@@ -382,6 +391,17 @@ impl Engine {
                 Some(name) => aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias)),
             }
         };
+        let set_instance_param =
+            |instance_params: &mut Vec<(String, Value)>, name: &str, value: Value| {
+                if let Some((_, existing)) = instance_params
+                    .iter_mut()
+                    .find(|(param, _)| param.eq_ignore_ascii_case(name))
+                {
+                    *existing = value;
+                } else {
+                    instance_params.push((name.to_ascii_uppercase(), value));
+                }
+            };
 
         match kind {
             ElementKind::Resistor {
@@ -390,20 +410,15 @@ impl Engine {
                 instance_params,
                 ..
             } => {
-                if !matches_param(&["R", "VALUE"]) {
-                    return Err(SimulationError::Circuit(
-                        "Unsupported resistor step parameter; use R or VALUE".to_string(),
-                    ));
-                }
-                *r = value;
-                if model.is_some() {
-                    if let Some((_, existing)) = instance_params
-                        .iter_mut()
-                        .find(|(name, _)| name.eq_ignore_ascii_case("R"))
-                    {
-                        *existing = value;
-                    } else {
-                        instance_params.push(("R".to_string(), value));
+                match param_upper.as_deref() {
+                    None | Some("R") | Some("VALUE") => {
+                        *r = value;
+                        if model.is_some() {
+                            set_instance_param(instance_params, "R", value);
+                        }
+                    }
+                    Some(param_name) => {
+                        set_instance_param(instance_params, param_name, value);
                     }
                 }
                 Ok(())

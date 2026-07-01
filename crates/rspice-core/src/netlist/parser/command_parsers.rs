@@ -26,7 +26,7 @@ pub(super) fn parse_step_command(
         });
     }
 
-    let (sweep_prefix, target_str, name) = match first_upper.as_str() {
+    let (sweep_prefix, target_str, mut name) = match first_upper.as_str() {
         "DEC" | "OCT" | "LIN" => {
             let target = expect_ident(stream, line_num)?;
             let target_upper = target.to_uppercase();
@@ -57,6 +57,22 @@ pub(super) fn parse_step_command(
     };
 
     let mut param_name: Option<String> = None;
+    if target == StepTarget::Device
+        && let Some((device_name, device_param)) = name
+            .split_once(':')
+            .map(|(device_name, device_param)| (device_name.to_string(), device_param.to_string()))
+    {
+        if device_name.is_empty() || device_param.is_empty() || device_param.contains(':') {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Malformed .STEP device parameter target; expected device:param"
+                    .to_string(),
+            });
+        }
+        name = device_name.to_string();
+        param_name = Some(device_param.to_string());
+    }
+
     match target {
         StepTarget::Model => {
             param_name = Some(expect_ident(stream, line_num)?);
@@ -65,7 +81,7 @@ pub(super) fn parse_step_command(
             // Optional device-parameter spec:
             // - .STEP R1(<param>) ...
             // - .STEP R1 <param> ...
-            if stream.consume(&TokenKind::LParen) {
+            if param_name.is_none() && stream.consume(&TokenKind::LParen) {
                 let pname = expect_ident(stream, line_num)?;
                 if !stream.consume(&TokenKind::RParen) {
                     return Err(ParseError::Syntax {
@@ -74,7 +90,9 @@ pub(super) fn parse_step_command(
                     });
                 }
                 param_name = Some(pname);
-            } else if let TokenKind::Ident(candidate) = &stream.peek().kind {
+            } else if param_name.is_none()
+                && let TokenKind::Ident(candidate) = &stream.peek().kind
+            {
                 let candidate_upper = candidate.to_ascii_uppercase();
                 let reserved = ["LIST", "LIN", "DEC", "OCT", "PARAM", "MODEL", "TEMP"];
                 let next_is_value_like = matches!(

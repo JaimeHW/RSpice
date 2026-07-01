@@ -185,6 +185,41 @@ fn xyce_resistor_level2_explicit_r_participates_in_bare_device_step() {
 }
 
 #[test]
+fn xyce_colon_resistor_instance_parameter_step_updates_multiplier() {
+    let deck = "* Xyce-style .STEP over a resistor instance parameter\n\
+                v1 in 0 dc 1\n\
+                r1 in out rmod l=1000u w=1u\n\
+                rload out 0 1k\n\
+                .model rmod R (RSH=1)\n\
+                .step r1:m 1 2 1\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("colon device-parameter .STEP deck parses");
+    let step = step_command(&netlist);
+    assert_eq!(step.target, StepTarget::Device);
+    assert!(step.name.eq_ignore_ascii_case("r1"));
+    assert!(
+        step.param_name
+            .as_deref()
+            .is_some_and(|param| param.eq_ignore_ascii_case("m"))
+    );
+
+    let stepped = Engine::default()
+        .run_step_command(&netlist, step, &[1.0, 2.0])
+        .expect(".STEP R1:M should run modeled resistor OPs");
+    assert_eq!(stepped.len(), 2);
+
+    for ((value, result), expected_resistance) in stepped.iter().zip([1000.0, 500.0]) {
+        let expected_vout = 1000.0 / (1000.0 + expected_resistance);
+        let vout = result_voltage(result, "out");
+        assert!(
+            (vout - expected_vout).abs() < 1e-12,
+            ".STEP R1:M={value} should solve V(out)={expected_vout}, got {vout}"
+        );
+    }
+}
+
+#[test]
 fn resistor_level1_geometry_still_uses_plain_rsh_path() {
     let deck = "* ordinary level-1 resistor geometry remains supported\n\
                 v1 in 0 dc 1\n\

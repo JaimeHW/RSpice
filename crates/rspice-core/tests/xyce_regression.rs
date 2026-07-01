@@ -1162,6 +1162,36 @@ fn test_xyce_controlled_source_branch_current_probe_case_runs() {
 }
 
 #[test]
+fn test_xyce_multiplicity_factor_resistor_wrapper_cases_run_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/MULTIPLICITY_FACTOR/resistor.cir",
+        "Netlists/MULTIPLICITY_FACTOR/semic_resistor.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native multiplicity-factor resistor .prn comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_step_dc",
+            "{relative} should report the native wrapper-origin stepped .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_rf_port_static_dc_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

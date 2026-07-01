@@ -877,7 +877,9 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperGnuplotSplotPrn);
         }
 
-        if Self::is_native_default_prn_wrapper_candidate_path(relative_path) {
+        if Self::is_native_default_prn_wrapper_candidate_path(relative_path)
+            || Self::is_native_multiplicity_static_prn_wrapper_candidate_path(relative_path)
+        {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperDefaultPrn);
         }
@@ -912,6 +914,10 @@ impl XyceTestRunner {
 
     fn is_native_default_prn_wrapper_candidate_path(relative_path: &str) -> bool {
         Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dc/")
+    }
+
+    fn is_native_multiplicity_static_prn_wrapper_candidate_path(relative_path: &str) -> bool {
+        Self::normalize_manifest_key(relative_path).starts_with("netlists/multiplicity_factor/")
     }
 
     fn is_native_hspice_math_wrapper_candidate(relative_path: &str, source: &str) -> bool {
@@ -3223,11 +3229,26 @@ impl XyceTestRunner {
                     if Self::find_inductor_element(netlist, &element_name).is_some() {
                         return Ok(());
                     }
+                    if Self::resistor_instance_parameter_probe_is_supported(
+                        netlist,
+                        &element_name,
+                        &parameter,
+                    ) {
+                        return Ok(());
+                    }
                 }
                 "temp" if Self::resistor_temperature_value(netlist, &element_name).is_some() => {
                     return Ok(());
                 }
-                _ => {}
+                _ => {
+                    if Self::resistor_instance_parameter_probe_is_supported(
+                        netlist,
+                        &element_name,
+                        &parameter,
+                    ) {
+                        return Ok(());
+                    }
+                }
             }
             if Self::model_parameter_probe_is_supported(netlist, &element_name, &parameter) {
                 return Ok(());
@@ -3262,6 +3283,23 @@ impl XyceTestRunner {
             }
             return Err(format!(
                 "current probe '{}' targets an unsupported branch/device",
+                original
+            ));
+        }
+        if let Some(element_name) = Self::parse_power_probe(normalized) {
+            if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
+                if resistance.is_finite()
+                    || (resistance.is_infinite() && resistance.is_sign_positive())
+                {
+                    return Ok(());
+                }
+                return Err(format!(
+                    "power probe '{}' targets a resistor with invalid resistance {}",
+                    original, resistance
+                ));
+            }
+            return Err(format!(
+                "power probe '{}' targets an unsupported branch/device",
                 original
             ));
         }
@@ -3399,6 +3437,12 @@ impl XyceTestRunner {
             if let Some(resistance) = Self::effective_resistor_value(netlist, &element_name) {
                 return Self::evaluate_resistor_current(netlist, result, &element_name, resistance);
             }
+        }
+
+        if let Some(element_name) = Self::parse_power_probe(normalized)
+            && let Some(resistance) = Self::effective_resistor_value(netlist, &element_name)
+        {
+            return Self::evaluate_resistor_power(netlist, result, &element_name, resistance);
         }
 
         Err(format!("unsupported DC probe '{}'", normalized))
@@ -3549,6 +3593,7 @@ impl XyceTestRunner {
         let variable = args[1].trim();
         if Self::parse_voltage_probe(variable).is_none()
             && Self::parse_current_probe(variable).is_none()
+            && Self::parse_power_probe(variable).is_none()
             && Self::parse_lead_current_probe(variable).is_none()
             && Self::parse_device_operating_point_probe(variable).is_none()
             && Self::parse_device_parameter_probe(variable).is_none()
@@ -3676,7 +3721,7 @@ impl XyceTestRunner {
 
         if placeholder_index == 0 {
             return Err(format!(
-                ".PRINT DC expression '{{{expression}}}' does not contain a supported voltage, current, or device probe"
+                ".PRINT DC expression '{{{expression}}}' does not contain a supported voltage, current, power, or device probe"
             ));
         }
 
@@ -3778,6 +3823,8 @@ impl XyceTestRunner {
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_current_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+            || Self::parse_power_probe(normalized_expression)
+                .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
     }
 
     fn probe_call_covers_entire_expression(expression: &str) -> bool {
@@ -3802,7 +3849,7 @@ impl XyceTestRunner {
 
         let rest = &expression[index..];
         for prefix in [
-            "id", "ig", "is", "ib", "ic", "ie", "vr", "vi", "vm", "vp", "v", "i", "n",
+            "id", "ig", "is", "ib", "ic", "ie", "vr", "vi", "vm", "vp", "v", "i", "p", "n",
         ] {
             let next_index = index + prefix.len();
             if rest.len() <= prefix.len()
@@ -3891,7 +3938,38 @@ impl XyceTestRunner {
                 Self::evaluate_capacitor_parameter_c_value(netlist, dc, sweep_point, element_name)
             }
             "l" => {
-                Self::evaluate_inductor_parameter_l_value(netlist, dc, sweep_point, element_name)
+                if Self::find_inductor_element(netlist, element_name).is_some() {
+                    return Self::evaluate_inductor_parameter_l_value(
+                        netlist,
+                        dc,
+                        sweep_point,
+                        element_name,
+                    );
+                }
+                if Self::resistor_instance_parameter_probe_is_supported(
+                    netlist,
+                    element_name,
+                    parameter,
+                ) {
+                    return Self::evaluate_resistor_instance_parameter_probe(
+                        netlist,
+                        element_name,
+                        parameter,
+                    );
+                }
+                Self::evaluate_model_parameter_probe(
+                    netlist,
+                    dc,
+                    sweep_point,
+                    element_name,
+                    parameter,
+                )
+                .unwrap_or_else(|| {
+                    Err(format!(
+                        "device parameter probe '{}:{}' is not supported",
+                        element_name, parameter
+                    ))
+                })
             }
             "temp" => Self::resistor_temperature_value(netlist, element_name).ok_or_else(|| {
                 format!(
@@ -3899,19 +3977,32 @@ impl XyceTestRunner {
                     element_name
                 )
             }),
-            _ => Self::evaluate_model_parameter_probe(
-                netlist,
-                dc,
-                sweep_point,
-                element_name,
-                parameter,
-            )
-            .unwrap_or_else(|| {
-                Err(format!(
-                    "device parameter probe '{}:{}' is not supported",
-                    element_name, parameter
-                ))
-            }),
+            _ => {
+                if Self::resistor_instance_parameter_probe_is_supported(
+                    netlist,
+                    element_name,
+                    parameter,
+                ) {
+                    return Self::evaluate_resistor_instance_parameter_probe(
+                        netlist,
+                        element_name,
+                        parameter,
+                    );
+                }
+                Self::evaluate_model_parameter_probe(
+                    netlist,
+                    dc,
+                    sweep_point,
+                    element_name,
+                    parameter,
+                )
+                .unwrap_or_else(|| {
+                    Err(format!(
+                        "device parameter probe '{}:{}' is not supported",
+                        element_name, parameter
+                    ))
+                })
+            }
         }
     }
 
@@ -4642,6 +4733,30 @@ impl XyceTestRunner {
         if resistance.is_infinite() && resistance.is_sign_positive() {
             return Ok(0.0);
         }
+        Ok(Self::resistor_voltage_drop(netlist, result, resistor_name)? / resistance)
+    }
+
+    fn evaluate_resistor_power(
+        netlist: &Netlist,
+        result: &crate::SimulationResult,
+        resistor_name: &str,
+        resistance: Value,
+    ) -> Result<f64, String> {
+        let voltage_drop = Self::resistor_voltage_drop(netlist, result, resistor_name)?;
+        let current =
+            if let Some(current) = Self::result_branch_current_named(result, resistor_name) {
+                current
+            } else {
+                Self::evaluate_resistor_current(netlist, result, resistor_name, resistance)?
+            };
+        Ok(voltage_drop * current)
+    }
+
+    fn resistor_voltage_drop(
+        netlist: &Netlist,
+        result: &crate::SimulationResult,
+        resistor_name: &str,
+    ) -> Result<Value, String> {
         let element = Self::find_resistor_element(netlist, resistor_name)
             .ok_or_else(|| format!("resistor '{}' not found", resistor_name))?;
         let node_pos = element
@@ -4656,7 +4771,7 @@ impl XyceTestRunner {
             .ok_or_else(|| format!("node '{}' not found in DC result", node_pos))?;
         let v_neg = Self::result_voltage_named(result, node_neg)
             .ok_or_else(|| format!("node '{}' not found in DC result", node_neg))?;
-        Ok((v_pos - v_neg) / resistance)
+        Ok(v_pos - v_neg)
     }
 
     fn result_voltage_named(result: &crate::SimulationResult, node_name: &str) -> Option<Value> {
@@ -4940,6 +5055,46 @@ impl XyceTestRunner {
             return Some(Self::netlist_temperature_c(netlist) + dtemp);
         }
         Some(Self::netlist_temperature_c(netlist))
+    }
+
+    fn resistor_instance_parameter_probe_is_supported(
+        netlist: &Netlist,
+        name: &str,
+        parameter: &str,
+    ) -> bool {
+        Self::resistor_instance_parameter_value(netlist, name, parameter).is_some()
+    }
+
+    fn evaluate_resistor_instance_parameter_probe(
+        netlist: &Netlist,
+        name: &str,
+        parameter: &str,
+    ) -> Result<Value, String> {
+        Self::resistor_instance_parameter_value(netlist, name, parameter).ok_or_else(|| {
+            format!(
+                "resistor parameter probe '{}:{}' targets an unknown or unset resistor instance parameter",
+                name, parameter
+            )
+        })
+    }
+
+    fn resistor_instance_parameter_value(
+        netlist: &Netlist,
+        name: &str,
+        parameter: &str,
+    ) -> Option<Value> {
+        let element = Self::find_resistor_element(netlist, name)?;
+        let ElementKind::Resistor {
+            instance_params, ..
+        } = &element.kind
+        else {
+            return None;
+        };
+
+        if parameter.eq_ignore_ascii_case("M") {
+            return Some(Self::instance_param(instance_params, &[parameter]).unwrap_or(1.0));
+        }
+        Self::instance_param(instance_params, &[parameter])
     }
 
     fn find_resistor_element(netlist: &Netlist, name: &str) -> Option<crate::netlist::Element> {
@@ -5841,6 +5996,15 @@ impl XyceTestRunner {
     fn parse_current_probe(probe: &str) -> Option<String> {
         let normalized = Self::normalize_probe(probe);
         if !normalized.starts_with("i(") || !normalized.ends_with(')') {
+            return None;
+        }
+        let inner = &normalized[2..normalized.len() - 1];
+        (!inner.is_empty()).then(|| inner.to_string())
+    }
+
+    fn parse_power_probe(probe: &str) -> Option<String> {
+        let normalized = Self::normalize_probe(probe);
+        if !normalized.starts_with("p(") || !normalized.ends_with(')') {
             return None;
         }
         let inner = &normalized[2..normalized.len() - 1];
