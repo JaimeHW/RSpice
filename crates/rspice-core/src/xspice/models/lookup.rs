@@ -151,19 +151,21 @@ fn lookup_table_uncached(ctx: &CmContext) -> CmResult<LookupTable> {
     validate_lookup_table(x_values, y_values)
 }
 
-fn cache_lookup_table(ctx: &mut CmContext) {
+fn cache_lookup_table(ctx: &mut CmContext) -> CmResult<Arc<LookupTable>> {
     if let Some(resource) = ctx.resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
         && lookup_table_signature_matches(ctx, &resource.signature)
     {
-        return;
+        return resource.table.clone();
     }
 
     let signature = lookup_table_signature(ctx);
     let table = lookup_table_uncached(ctx).map(Arc::new);
+    let cached = table.clone();
     ctx.set_resource(
         LOOKUP_TABLE_RESOURCE,
         Arc::new(LookupTableResource { signature, table }),
     );
+    cached
 }
 
 fn lookup_table(ctx: &CmContext) -> CmResult<Arc<LookupTable>> {
@@ -451,8 +453,7 @@ fn cache_lookup_eval(ctx: &mut CmContext, x: Value) -> CmResult<LookupResult> {
         return Ok(resource.result);
     }
 
-    cache_lookup_table(ctx);
-    let points = lookup_table(ctx)?;
+    let points = cache_lookup_table(ctx)?;
 
     validate_smoothing_domain(&points, signature.input_domain, signature.fraction)?;
     let result = evaluate_lookup(
@@ -492,8 +493,7 @@ impl CodeModel for PiecewiseLinear {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        cache_lookup_table(ctx);
-        let points = lookup_table(ctx)?;
+        let points = cache_lookup_table(ctx)?;
         validate_smoothing_domain(
             &points,
             ctx.param("input_domain"),
@@ -549,8 +549,7 @@ impl CodeModel for PiecewiseLinearTimeSeries {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        cache_lookup_table(ctx);
-        let points = lookup_table(ctx)?;
+        let points = cache_lookup_table(ctx)?;
         validate_smoothing_domain(
             &points,
             ctx.param("input_domain"),
@@ -638,27 +637,18 @@ mod tests {
         let mut ctx = CmContext::new();
         ctx.set_real_vector_param("x_array", vec![0.0, 1.0]);
         ctx.set_real_vector_param("y_array", vec![0.0, 10.0]);
-        cache_lookup_table(&mut ctx);
-
-        let cached = ctx
-            .resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
-            .expect("cached lookup table");
+        let cached = cache_lookup_table(&mut ctx).expect("cached lookup table");
         let before = evaluate_lookup_context(&ctx, 0.5).expect("initial table");
         assert_near(before.value, 5.0);
         assert_near(before.slope, 10.0);
 
         ctx.set_real_vector_param("unrelated", vec![1.0, 2.0, 3.0]);
-        cache_lookup_table(&mut ctx);
-        let still_cached = ctx
-            .resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
-            .expect("lookup table after unrelated vector update");
+        let still_cached =
+            cache_lookup_table(&mut ctx).expect("lookup table after unrelated vector update");
         assert!(Arc::ptr_eq(&cached, &still_cached));
 
         ctx.set_real_vector_param("y_array", vec![0.0, 20.0]);
-        cache_lookup_table(&mut ctx);
-        let reloaded = ctx
-            .resource::<LookupTableResource>(LOOKUP_TABLE_RESOURCE)
-            .expect("lookup table after y_array update");
+        let reloaded = cache_lookup_table(&mut ctx).expect("lookup table after y_array update");
         assert!(!Arc::ptr_eq(&cached, &reloaded));
 
         let after = evaluate_lookup_context(&ctx, 0.5).expect("updated table");
