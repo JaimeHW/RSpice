@@ -444,6 +444,9 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         )?)
     } else {
         let mut resistance = instance_param(instance_params, &["R", "VALUE"]);
+        if resistance.is_none() && uses_xyce_default && model_def.is_none() {
+            resistance = Some(1000.0);
+        }
         if resistance.is_none() && !uses_xyce_default && value.is_finite() {
             resistance = Some(value);
         }
