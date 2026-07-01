@@ -306,6 +306,33 @@ fn integer_param(ctx: &CmContext, name: &str, default: i64) -> i64 {
     ctx.param_or(name, default as Value).round() as i64
 }
 
+fn delay_boundary_breakpoints(ctx: &CmContext, delay: Value) -> CmResult<Vec<Value>> {
+    if !delay.is_finite() || delay <= 0.0 {
+        return Ok(Vec::new());
+    }
+
+    let Some(tstop) = ctx.transient_stop_time() else {
+        return Ok(vec![delay]);
+    };
+    if !tstop.is_finite() || tstop < delay {
+        return Ok(Vec::new());
+    }
+
+    let max_points = 4096usize;
+    let estimated = (tstop / delay).floor();
+    if !estimated.is_finite() || estimated as usize > max_points {
+        return Ok(vec![delay]);
+    }
+
+    let mut points = Vec::with_capacity((estimated as usize).min(max_points));
+    let mut time = delay;
+    while time <= tstop && points.len() < max_points {
+        points.push(time);
+        time += delay;
+    }
+    Ok(points)
+}
+
 fn microstrip_propagation_signature(
     ctx: &CmContext,
     frequency: Value,
@@ -2145,6 +2172,10 @@ impl CodeModel for GenericTransmissionLine {
         }
     }
 
+    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
+        delay_boundary_breakpoints(ctx, tline_delay(ctx)?)
+    }
+
     fn output_input_ac_partials(
         &self,
         ctx: &CmContext,
@@ -2246,6 +2277,14 @@ impl CodeModel for MicrostripLine {
         }
     }
 
+    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
+        if mlin_tran_model(ctx)? == TRAN_FULL {
+            delay_boundary_breakpoints(ctx, mlin_delay(ctx)?)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
     fn output_input_ac_partials(
         &self,
         ctx: &CmContext,
@@ -2313,7 +2352,7 @@ impl CodeModel for CoupledTransmissionLine {
             if ctx.time > delay {
                 cpline_delayed_outputs(ctx, delay).unwrap_or([0.0; 4])
             } else {
-                [0.0; 4]
+                cpline_instant_outputs(ctx, cpline_reference_impedance(ctx)?)
             }
         } else {
             cpline_instant_outputs(ctx, cpline_reference_impedance(ctx)?)
@@ -2330,7 +2369,8 @@ impl CodeModel for CoupledTransmissionLine {
         let Ok(z) = cpline_reference_impedance(ctx) else {
             return Vec::new();
         };
-        if cpline_has_delayed_sample(ctx) {
+        let delayed = cpline_has_delayed_sample(ctx);
+        if delayed {
             let Ok(ze) = cpline_even_impedance(ctx) else {
                 return Vec::new();
             };
@@ -2348,7 +2388,10 @@ impl CodeModel for CoupledTransmissionLine {
             };
         }
 
-        if ctx.is_transient() {
+        let missing_delayed_sample = ctx.is_transient()
+            && matches!(cpline_delay(ctx), Ok(delay) if ctx.time > delay)
+            && !delayed;
+        if missing_delayed_sample {
             return Vec::new();
         }
 
@@ -2375,6 +2418,10 @@ impl CodeModel for CoupledTransmissionLine {
             ],
             _ => Vec::new(),
         }
+    }
+
+    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
+        delay_boundary_breakpoints(ctx, cpline_delay(ctx)?)
     }
 
     fn output_input_ac_partials(
@@ -2525,6 +2572,14 @@ impl CodeModel for CoupledMicrostripLine {
                 ("p4".to_string(), z),
             ],
             _ => Vec::new(),
+        }
+    }
+
+    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
+        if cpmlin_tran_model(ctx)? == TRAN_FULL {
+            delay_boundary_breakpoints(ctx, cpmlin_delay(ctx)?)
+        } else {
+            Ok(Vec::new())
         }
     }
 
