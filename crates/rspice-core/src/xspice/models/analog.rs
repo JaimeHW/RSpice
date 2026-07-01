@@ -1767,10 +1767,10 @@ struct OneShotTableData {
     strictly_increasing_control: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OneShotTableSignature {
-    controls: Vec<Value>,
-    widths: Vec<Value>,
+    controls_revision: Option<u64>,
+    widths_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1856,14 +1856,13 @@ fn oneshot_invalid_param(name: &str, message: impl Into<String>) -> CmError {
 
 fn oneshot_table_signature(ctx: &CmContext) -> OneShotTableSignature {
     OneShotTableSignature {
-        controls: ctx.real_vector_param("cntl_array").unwrap_or(&[]).to_vec(),
-        widths: ctx.real_vector_param("pw_array").unwrap_or(&[]).to_vec(),
+        controls_revision: ctx.real_vector_param_revision("cntl_array"),
+        widths_revision: ctx.real_vector_param_revision("pw_array"),
     }
 }
 
 fn oneshot_table_signature_matches(ctx: &CmContext, signature: &OneShotTableSignature) -> bool {
-    ctx.real_vector_param("cntl_array").unwrap_or(&[]) == signature.controls.as_slice()
-        && ctx.real_vector_param("pw_array").unwrap_or(&[]) == signature.widths.as_slice()
+    oneshot_table_signature(ctx) == *signature
 }
 
 fn oneshot_table_optional_uncached(ctx: &CmContext) -> CmResult<Option<Vec<OneShotPoint>>> {
@@ -2288,6 +2287,15 @@ mod tests {
             "unchanged oneshot table parameters should reuse the parsed table"
         );
         assert!((interpolate_oneshot_pulse_width(&first, 0.5) - 1.5e-9).abs() < 1.0e-21);
+
+        ctx.set_real_vector_param("unrelated", vec![42.0]);
+        let after_unrelated = oneshot_table_optional(&mut ctx)
+            .expect("unrelated vector preserves oneshot table")
+            .expect("table is present");
+        assert!(
+            Arc::ptr_eq(&first, &after_unrelated),
+            "unrelated vector parameters should not refresh the parsed oneshot table"
+        );
 
         ctx.set_real_vector_param("pw_array", vec![2.0e-9, 4.0e-9]);
         let updated = oneshot_table_optional(&mut ctx)
