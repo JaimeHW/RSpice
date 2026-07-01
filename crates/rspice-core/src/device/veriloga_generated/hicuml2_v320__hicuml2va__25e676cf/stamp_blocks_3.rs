@@ -5453,28 +5453,6 @@ impl Instance {
             [],
             1.0,
         );
-        let eq11_e228: f64 = (-p.p148);
-        let eq11_e230: f64 = (eq11_e228 * locals.var_ibcbtb);
-        let eq11_e230_d_n0: f64 = (eq11_e228 * locals.var_ibcbtb_dn0);
-        let eq11_e230_d_n1: f64 = (eq11_e228 * locals.var_ibcbtb_dn1);
-        let eq11_e230_d_n3: f64 = (eq11_e228 * locals.var_ibcbtb_dn3);
-        let eq11_e230_d_n4: f64 = (eq11_e228 * locals.var_ibcbtb_dn4);
-        let eq11_e230_d_n5: f64 = (eq11_e228 * locals.var_ibcbtb_dn5);
-        let eq11_e230_d_n6: f64 = (eq11_e228 * locals.var_ibcbtb_dn6);
-        let eq11_e230_d_n7: f64 = (eq11_e228 * locals.var_ibcbtb_dn7);
-        let eq11_e230_d_n8: f64 = (eq11_e228 * locals.var_ibcbtb_dn8);
-        let eq11_e230_d_n9: f64 = (eq11_e228 * locals.var_ibcbtb_dn9);
-        let eq11_value: f64 = eq11_e230;
-        stamper.stamp_current_sparse_local::<9, 0>(
-            Some(8),
-            Some(5),
-            multiplicity * (eq11_value),
-            [0, 1, 3, 4, 5, 6, 7, 8, 9],
-            [multiplicity * (eq11_e230_d_n0), multiplicity * (eq11_e230_d_n1), multiplicity * (eq11_e230_d_n3), multiplicity * (eq11_e230_d_n4), multiplicity * (eq11_e230_d_n5), multiplicity * (eq11_e230_d_n6), multiplicity * (eq11_e230_d_n7), multiplicity * (eq11_e230_d_n8), multiplicity * (eq11_e230_d_n9)],
-            [],
-            [],
-            1.0,
-        );
         let (eq36_e363, eq36_e363_d_n3, eq36_e363_d_n9,) = {
     if ((locals.var_guard242 != 0.0) && (locals.var_guard243 != 0.0)) {
         let eq36_e360: f64 = (p.p103 * (nv9 - nv3));

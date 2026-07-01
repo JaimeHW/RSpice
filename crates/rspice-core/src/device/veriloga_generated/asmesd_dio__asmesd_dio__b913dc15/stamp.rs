@@ -282,501 +282,497 @@ impl Instance {
         let v275: f64 = (v12 + v274);
         let v276: f64 = (v247 / v275);
         let v277: f64 = (if self.scalar_v268 { v276 } else { v247 });
-        let v279: f64 = (if self.scalar_v278 { v277 } else { v277 });
-        let v280: f64 = (-v95);
-        let v282: f64 = (v280 * self.scalar_v281);
-        let v283: f64 = (v108 + v282);
-        let v284: bool = (v283 > v13);
-        let v290: f64 = (if v284 { self.scalar_v289 } else { v13 });
-        let v291: f64 = (self.scalar_v286 * v290);
-        let v292: f64 = (self.scalar_v286 * v291);
-        let v293: f64 = (v12 - v292);
-        let v294: f64 = (v95 * v293);
-        let v296: f64 = (v294 / self.scalar_v295);
-        let v297: f64 = (if v284 { v296 } else { v13 });
-        let v300: f64 = (v283 * self.scalar_v299);
-        let v301: f64 = (v300 / v95);
-        let v302: f64 = (self.scalar_v286 + v301);
-        let v303: f64 = (v283 * v302);
-        let v304: f64 = (v290 * v303);
-        let v305: f64 = (if v284 { v304 } else { v13 });
-        let v306: bool = (!v284);
-        let v307: f64 = (v108 / v95);
-        let v308: f64 = (v12 - v307);
-        let v309: f64 = ((v308) as f64).ln();
-        let v310: f64 = (self.scalar_v295 * v309);
-        let v311: f64 = ((v310) as f64).exp();
-        let v312: f64 = (v12 - v311);
-        let v313: f64 = (v95 * v312);
-        let v314: f64 = (v313 / self.scalar_v295);
-        let v315: f64 = (if v306 { v314 } else { v297 });
-        let v316: f64 = (if v306 { v13 } else { v305 });
-        let v317: f64 = (v315 + v316);
-        let v318: f64 = (v103 * v317);
-        let v341: f64 = (v279 / self.scalar_v16);
-        let v345: f64 = (v250 / self.scalar_v16);
-        let v346: f64 = (-v182);
-        let v347: f64 = (v265 * v346);
-        let v348: f64 = (if self.scalar_v268 { v347 } else { v13 });
-        let v349: f64 = (if self.scalar_v268 { v269 } else { v13 });
-        let v350: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, v269);
-        let v351: f64 = (v265 * v350);
-        let v352: f64 = (if self.scalar_v268 { v351 } else { v13 });
-        let v354: f64 = (v214 * v251);
-        let v355: f64 = ((v354) as f64).abs();
-        let v356: f64 = (-v355);
-        let v357: f64 = (if self.scalar_v323 { v356 } else { v13 });
-        let v358: f64 = (v1 / self.scalar_v321);
-        let v359: f64 = (if self.scalar_v323 { v358 } else { v13 });
-        let v361: f64 = (v1 * self.scalar_v360);
-        let v362: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, v361);
-        let v363: f64 = (if self.scalar_v323 { v362 } else { v13 });
-        let v367: f64 = (if self.scalar_v366 { v356 } else { v13 });
-        let v368: f64 = ctx.node_voltage(nodes[5]);
-        let v369: f64 = (v1 - v368);
-        let v370: f64 = (v369 / self.scalar_v321);
-        let v371: f64 = (if self.scalar_v366 { v370 } else { v13 });
-        let v372: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, v361);
-        let v373: f64 = (if self.scalar_v366 { v372 } else { v13 });
-        let v374: f64 = (v368 / self.scalar_v327);
-        let v375: f64 = (if self.scalar_v366 { v374 } else { v13 });
-        let v377: f64 = (v368 * self.scalar_v376);
-        let v378: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, v377);
-        let v379: f64 = (if self.scalar_v366 { v378 } else { v13 });
-        let v383: f64 = (if self.scalar_v382 { v356 } else { v13 });
-        let v388: f64 = (v13 * v107);
-        let v389: bool = (v341 > self.scalar_v338);
-        let v390: f64 = (if v389 { v341 } else { self.scalar_v338 });
-        let v391: f64 = (v110 / v390);
-        let v392: f64 = (if self.scalar_v340 { v391 } else { v13 });
-        let v396: bool = (v345 > self.scalar_v338);
-        let v397: f64 = (if v396 { v345 } else { self.scalar_v338 });
-        let v398: f64 = (v113 / v397);
-        let v399: f64 = (if self.scalar_v344 { v398 } else { v13 });
-        let v403: f64 = (self.scalar_v104 * v214);
-        let v404: f64 = (self.scalar_v16 * v403);
-        let v405: f64 = (self.scalar_v104 * v318);
-        let v406: f64 = (self.scalar_v16 * v405);
-        let v407: f64 = (self.scalar_v104 * v266);
-        let v408: f64 = (self.scalar_v16 * v407);
-        let v409: f64 = (if v8 { v12 } else { v13 });
-        let v410: f64 = (if v10 { v13 } else { v409 });
-        let v411: f64 = (v19 * v410);
-        let v412: f64 = (v410 / self.scalar_v18);
-        let v413: f64 = (v412 / v21);
-        let v414: f64 = (self.scalar_v23 * v413);
-        let v415: f64 = (self.scalar_v25 * v412);
-        let v416: f64 = (v20 * v415);
-        let v417: f64 = (v27 * v411);
-        let v418: f64 = (v416 - v417);
-        let v419: f64 = (v20 * v20);
-        let v420: f64 = (v418 / v419);
-        let v421: f64 = (v414 + v420);
-        let v422: f64 = (self.scalar_v30 * v413);
-        let v423: f64 = (v33 * v421);
-        let v424: f64 = (self.scalar_v32 * v423);
-        let v425: f64 = (v36 * v422);
-        let v426: f64 = (self.scalar_v35 * v425);
-        let v427: f64 = (self.scalar_v39 * v412);
-        let v428: f64 = (self.scalar_v38 * v427);
-        let v429: f64 = (self.scalar_v44 * v412);
-        let v430: f64 = (self.scalar_v43 * v429);
-        let v431: f64 = (self.scalar_v49 * v412);
-        let v432: f64 = (self.scalar_v48 * v431);
-        let v433: f64 = (v410 / v54);
-        let v434: f64 = (v58 * v410);
-        let v435: f64 = (v59 * v410);
-        let v436: f64 = (v11 * v434);
-        let v437: f64 = (v435 + v436);
-        let v438: f64 = (v62 * v437);
-        let v439: f64 = (v60 * v410);
-        let v440: f64 = (v438 - v439);
-        let v441: f64 = (v62 * v62);
-        let v442: f64 = (v440 / v441);
-        let v443: f64 = (v410 + v410);
-        let v444: f64 = (v66 * v443);
-        let v445: f64 = (v68 * v442);
-        let v446: f64 = (v65 * v444);
-        let v447: f64 = (v445 - v446);
-        let v448: f64 = (v68 * v68);
-        let v449: f64 = (v447 / v448);
-        let v450: f64 = (v411 + v411);
-        let v451: f64 = (-v450);
-        let v452: f64 = (v433 / v56);
-        let v453: f64 = (v74 * v452);
-        let v454: f64 = (v77 * v449);
-        let v455: f64 = (v453 + v454);
-        let v456: f64 = (v79 * v451);
-        let v457: f64 = (v73 * v455);
-        let v458: f64 = (v456 + v457);
-        let v459: f64 = (-v458);
-        let v460: f64 = (v459 / self.scalar_v55);
-        let v461: f64 = (-v460);
-        let v462: f64 = (v83 * v461);
-        let v463: f64 = (v84 * v460);
-        let v464: f64 = (v462 - v463);
-        let v465: f64 = (v83 * v83);
-        let v466: f64 = (v464 / v465);
-        let v467: f64 = (-v466);
-        let v468: f64 = (self.scalar_v86 * v467);
-        let v469: f64 = (self.scalar_v53 * v468);
-        let v470: f64 = (-v469);
-        let v471: f64 = (v92 * v92);
-        let v472: f64 = (v470 / v471);
-        let v473: f64 = (v83 * v433);
-        let v474: f64 = (v56 * v460);
-        let v475: f64 = (v473 + v474);
-        let v476: f64 = (v458 + v475);
-        let v477: f64 = (v476 - v460);
-        let v478: f64 = (v83 * v477);
-        let v479: f64 = (v96 * v460);
-        let v480: f64 = (v478 - v479);
-        let v481: f64 = (v480 / v465);
-        let v482: f64 = (v87 * v410);
-        let v483: f64 = (v482 - v481);
-        let v484: f64 = (self.scalar_v86 * v483);
-        let v485: f64 = (v102 * v472);
-        let v486: f64 = (v93 * v484);
-        let v487: f64 = (v485 + v486);
-        let v489: f64 = (self.scalar_v116 * v411);
-        let v490: f64 = (v108 * v489);
-        let v491: f64 = (-v490);
-        let v492: f64 = (v117 * v117);
-        let v493: f64 = (v491 / v492);
-        let v494: f64 = (self.scalar_v104 / v117);
-        let v495: f64 = (self.scalar_v488 / v117);
+        let v278: f64 = (-v95);
+        let v280: f64 = (v278 * self.scalar_v279);
+        let v281: f64 = (v108 + v280);
+        let v282: bool = (v281 > v13);
+        let v288: f64 = (if v282 { self.scalar_v287 } else { v13 });
+        let v289: f64 = (self.scalar_v284 * v288);
+        let v290: f64 = (self.scalar_v284 * v289);
+        let v291: f64 = (v12 - v290);
+        let v292: f64 = (v95 * v291);
+        let v294: f64 = (v292 / self.scalar_v293);
+        let v295: f64 = (if v282 { v294 } else { v13 });
+        let v298: f64 = (v281 * self.scalar_v297);
+        let v299: f64 = (v298 / v95);
+        let v300: f64 = (self.scalar_v284 + v299);
+        let v301: f64 = (v281 * v300);
+        let v302: f64 = (v288 * v301);
+        let v303: f64 = (if v282 { v302 } else { v13 });
+        let v304: bool = (!v282);
+        let v305: f64 = (v108 / v95);
+        let v306: f64 = (v12 - v305);
+        let v307: f64 = ((v306) as f64).ln();
+        let v308: f64 = (self.scalar_v293 * v307);
+        let v309: f64 = ((v308) as f64).exp();
+        let v310: f64 = (v12 - v309);
+        let v311: f64 = (v95 * v310);
+        let v312: f64 = (v311 / self.scalar_v293);
+        let v313: f64 = (if v304 { v312 } else { v295 });
+        let v314: f64 = (if v304 { v13 } else { v303 });
+        let v315: f64 = (v313 + v314);
+        let v316: f64 = (v103 * v315);
+        let v339: f64 = (v277 / self.scalar_v16);
+        let v343: f64 = (v250 / self.scalar_v16);
+        let v344: f64 = (-v182);
+        let v345: f64 = (v265 * v344);
+        let v346: f64 = (if self.scalar_v268 { v345 } else { v13 });
+        let v347: f64 = (if self.scalar_v268 { v269 } else { v13 });
+        let v348: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, v269);
+        let v349: f64 = (v265 * v348);
+        let v350: f64 = (if self.scalar_v268 { v349 } else { v13 });
+        let v351: f64 = (v214 * v251);
+        let v352: f64 = ((v351) as f64).abs();
+        let v353: f64 = (-v352);
+        let v354: f64 = (if self.scalar_v321 { v353 } else { v13 });
+        let v355: f64 = (v1 / self.scalar_v319);
+        let v356: f64 = (if self.scalar_v321 { v355 } else { v13 });
+        let v358: f64 = (v1 * self.scalar_v357);
+        let v359: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, v358);
+        let v360: f64 = (if self.scalar_v321 { v359 } else { v13 });
+        let v363: f64 = (if self.scalar_v362 { v353 } else { v13 });
+        let v364: f64 = ctx.node_voltage(nodes[5]);
+        let v365: f64 = (v1 - v364);
+        let v366: f64 = (v365 / self.scalar_v319);
+        let v367: f64 = (if self.scalar_v362 { v366 } else { v13 });
+        let v368: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, v358);
+        let v369: f64 = (if self.scalar_v362 { v368 } else { v13 });
+        let v370: f64 = (v364 / self.scalar_v325);
+        let v371: f64 = (if self.scalar_v362 { v370 } else { v13 });
+        let v373: f64 = (v364 * self.scalar_v372);
+        let v374: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, v373);
+        let v375: f64 = (if self.scalar_v362 { v374 } else { v13 });
+        let v379: f64 = (if self.scalar_v378 { v353 } else { v13 });
+        let v380: f64 = (v13 * v107);
+        let v381: bool = (v339 > self.scalar_v336);
+        let v382: f64 = (if v381 { v339 } else { self.scalar_v336 });
+        let v383: f64 = (v110 / v382);
+        let v384: f64 = (if self.scalar_v338 { v383 } else { v13 });
+        let v385: bool = (v343 > self.scalar_v336);
+        let v386: f64 = (if v385 { v343 } else { self.scalar_v336 });
+        let v387: f64 = (v113 / v386);
+        let v388: f64 = (if self.scalar_v342 { v387 } else { v13 });
+        let v389: f64 = (self.scalar_v104 * v214);
+        let v390: f64 = (self.scalar_v16 * v389);
+        let v391: f64 = (self.scalar_v104 * v316);
+        let v392: f64 = (self.scalar_v16 * v391);
+        let v393: f64 = (self.scalar_v104 * v266);
+        let v394: f64 = (self.scalar_v16 * v393);
+        let v395: f64 = (if v8 { v12 } else { v13 });
+        let v396: f64 = (if v10 { v13 } else { v395 });
+        let v397: f64 = (v19 * v396);
+        let v398: f64 = (v396 / self.scalar_v18);
+        let v399: f64 = (v398 / v21);
+        let v400: f64 = (self.scalar_v23 * v399);
+        let v401: f64 = (self.scalar_v25 * v398);
+        let v402: f64 = (v20 * v401);
+        let v403: f64 = (v27 * v397);
+        let v404: f64 = (v402 - v403);
+        let v405: f64 = (v20 * v20);
+        let v406: f64 = (v404 / v405);
+        let v407: f64 = (v400 + v406);
+        let v408: f64 = (self.scalar_v30 * v399);
+        let v409: f64 = (v33 * v407);
+        let v410: f64 = (self.scalar_v32 * v409);
+        let v411: f64 = (v36 * v408);
+        let v412: f64 = (self.scalar_v35 * v411);
+        let v413: f64 = (self.scalar_v39 * v398);
+        let v414: f64 = (self.scalar_v38 * v413);
+        let v415: f64 = (self.scalar_v44 * v398);
+        let v416: f64 = (self.scalar_v43 * v415);
+        let v417: f64 = (self.scalar_v49 * v398);
+        let v418: f64 = (self.scalar_v48 * v417);
+        let v419: f64 = (v396 / v54);
+        let v420: f64 = (v58 * v396);
+        let v421: f64 = (v59 * v396);
+        let v422: f64 = (v11 * v420);
+        let v423: f64 = (v421 + v422);
+        let v424: f64 = (v62 * v423);
+        let v425: f64 = (v60 * v396);
+        let v426: f64 = (v424 - v425);
+        let v427: f64 = (v62 * v62);
+        let v428: f64 = (v426 / v427);
+        let v429: f64 = (v396 + v396);
+        let v430: f64 = (v66 * v429);
+        let v431: f64 = (v68 * v428);
+        let v432: f64 = (v65 * v430);
+        let v433: f64 = (v431 - v432);
+        let v434: f64 = (v68 * v68);
+        let v435: f64 = (v433 / v434);
+        let v436: f64 = (v397 + v397);
+        let v437: f64 = (-v436);
+        let v438: f64 = (v419 / v56);
+        let v439: f64 = (v74 * v438);
+        let v440: f64 = (v77 * v435);
+        let v441: f64 = (v439 + v440);
+        let v442: f64 = (v79 * v437);
+        let v443: f64 = (v73 * v441);
+        let v444: f64 = (v442 + v443);
+        let v445: f64 = (-v444);
+        let v446: f64 = (v445 / self.scalar_v55);
+        let v447: f64 = (-v446);
+        let v448: f64 = (v83 * v447);
+        let v449: f64 = (v84 * v446);
+        let v450: f64 = (v448 - v449);
+        let v451: f64 = (v83 * v83);
+        let v452: f64 = (v450 / v451);
+        let v453: f64 = (-v452);
+        let v454: f64 = (self.scalar_v86 * v453);
+        let v455: f64 = (self.scalar_v53 * v454);
+        let v456: f64 = (-v455);
+        let v457: f64 = (v92 * v92);
+        let v458: f64 = (v456 / v457);
+        let v459: f64 = (v83 * v419);
+        let v460: f64 = (v56 * v446);
+        let v461: f64 = (v459 + v460);
+        let v462: f64 = (v444 + v461);
+        let v463: f64 = (v462 - v446);
+        let v464: f64 = (v83 * v463);
+        let v465: f64 = (v96 * v446);
+        let v466: f64 = (v464 - v465);
+        let v467: f64 = (v466 / v451);
+        let v468: f64 = (v87 * v396);
+        let v469: f64 = (v468 - v467);
+        let v470: f64 = (self.scalar_v86 * v469);
+        let v471: f64 = (v102 * v458);
+        let v472: f64 = (v93 * v470);
+        let v473: f64 = (v471 + v472);
+        let v475: f64 = (self.scalar_v116 * v397);
+        let v476: f64 = (v108 * v475);
+        let v477: f64 = (-v476);
+        let v478: f64 = (v117 * v117);
+        let v479: f64 = (v477 / v478);
+        let v480: f64 = (self.scalar_v104 / v117);
+        let v481: f64 = (self.scalar_v474 / v117);
+        let v482: f64 = (if v115 { v479 } else { v13 });
+        let v483: f64 = (if v115 { v480 } else { v13 });
+        let v484: f64 = (if v115 { v481 } else { v13 });
+        let v485: f64 = (-v416);
+        let v486: f64 = (self.scalar_v122 * v397);
+        let v487: f64 = (v123 * v485);
+        let v488: f64 = (v121 * v486);
+        let v489: f64 = (v487 - v488);
+        let v490: f64 = (v123 * v123);
+        let v491: f64 = (v489 / v490);
+        let v492: f64 = (self.scalar_v474 / v123);
+        let v493: f64 = (self.scalar_v104 / v123);
+        let v494: f64 = (if v115 { v491 } else { v13 });
+        let v495: f64 = (if v115 { v492 } else { v13 });
         let v496: f64 = (if v115 { v493 } else { v13 });
-        let v497: f64 = (if v115 { v494 } else { v13 });
-        let v498: f64 = (if v115 { v495 } else { v13 });
-        let v499: f64 = (-v430);
-        let v500: f64 = (self.scalar_v122 * v411);
-        let v501: f64 = (v123 * v499);
-        let v502: f64 = (v121 * v500);
-        let v503: f64 = (v501 - v502);
-        let v504: f64 = (v123 * v123);
-        let v505: f64 = (v503 / v504);
-        let v506: f64 = (self.scalar_v488 / v123);
-        let v507: f64 = (self.scalar_v104 / v123);
-        let v508: f64 = (if v115 { v505 } else { v13 });
-        let v509: f64 = (if v115 { v506 } else { v13 });
-        let v510: f64 = (if v115 { v507 } else { v13 });
-        let v511: f64 = (v126 * v500);
-        let v512: f64 = (v501 - v511);
-        let v513: f64 = (v512 / v504);
-        let v514: f64 = (if v115 { v513 } else { v13 });
-        let v515: f64 = (if v131 { v496 } else { v13 });
-        let v516: f64 = (if v131 { v497 } else { v13 });
-        let v517: f64 = (if v131 { v498 } else { v13 });
-        let v518: f64 = (if v131 { v13 } else { v496 });
-        let v519: f64 = (if v131 { v13 } else { v497 });
-        let v520: f64 = (if v131 { v13 } else { v498 });
-        let v521: f64 = (if v137 { v13 } else { v515 });
-        let v522: f64 = (if v137 { v13 } else { v516 });
-        let v523: f64 = (if v137 { v13 } else { v517 });
-        let v524: f64 = (v139 * v518);
-        let v525: f64 = (v139 * v519);
-        let v526: f64 = (v139 * v520);
-        let v527: f64 = (v139 * v521);
-        let v528: f64 = (v138 * v524);
-        let v529: f64 = (v527 + v528);
-        let v530: f64 = (v139 * v522);
-        let v531: f64 = (v138 * v525);
-        let v532: f64 = (v530 + v531);
-        let v533: f64 = (v139 * v523);
-        let v534: f64 = (v138 * v526);
-        let v535: f64 = (v533 + v534);
-        let v536: f64 = (if v115 { v529 } else { v521 });
-        let v537: f64 = (if v115 { v532 } else { v522 });
-        let v538: f64 = (if v115 { v535 } else { v523 });
-        let v539: f64 = (v149 * v508);
-        let v540: f64 = (v149 * v509);
-        let v541: f64 = (v149 * v510);
-        let v542: f64 = (v539 / v150);
-        let v543: f64 = (v540 / v150);
-        let v544: f64 = (v541 / v150);
-        let v545: f64 = (if v143 { v508 } else { v13 });
-        let v546: f64 = (if v143 { v509 } else { v13 });
-        let v547: f64 = (if v143 { v510 } else { v13 });
-        let v548: f64 = (if v152 { v539 } else { v545 });
-        let v549: f64 = (if v152 { v540 } else { v546 });
-        let v550: f64 = (if v152 { v541 } else { v547 });
-        let v551: f64 = (if v148 { v542 } else { v548 });
-        let v552: f64 = (if v148 { v543 } else { v549 });
-        let v553: f64 = (if v148 { v544 } else { v550 });
-        let v554: f64 = (v161 * v514);
-        let v555: f64 = (v554 / v162);
-        let v556: f64 = (if v156 { v514 } else { v13 });
-        let v557: f64 = (if v164 { v554 } else { v556 });
-        let v558: f64 = (if v160 { v555 } else { v557 });
-        let v559: f64 = (v551 - v558);
-        let v560: f64 = (if v115 { v559 } else { v13 });
-        let v561: f64 = (if v115 { v552 } else { v13 });
-        let v562: f64 = (if v115 { v553 } else { v13 });
-        let v563: f64 = (v170 * v424);
-        let v564: f64 = (v34 * v536);
-        let v565: f64 = (v563 + v564);
-        let v566: f64 = (v34 * v537);
-        let v567: f64 = (v34 * v538);
-        let v568: f64 = (v169 * v428);
-        let v569: f64 = (v42 * v560);
-        let v570: f64 = (v568 + v569);
-        let v571: f64 = (v42 * v561);
-        let v572: f64 = (v42 * v562);
-        let v573: f64 = ((v174) as f64).ln();
-        let v574: f64 = (v175 * v573);
-        let v575: f64 = (v432 * v574);
-        let v576: f64 = (self.scalar_v173 * v575);
-        let v577: f64 = (v177 * v570);
-        let v578: f64 = (v172 * v576);
-        let v579: f64 = (v577 - v578);
-        let v580: f64 = (v177 * v177);
-        let v581: f64 = (v579 / v580);
-        let v582: f64 = (v571 / v177);
-        let v583: f64 = (v572 / v177);
-        let v584: f64 = (v565 - v581);
-        let v585: f64 = (v566 - v582);
-        let v586: f64 = (v567 - v583);
-        let v587: f64 = (if v115 { v584 } else { v13 });
-        let v588: f64 = (if v115 { v585 } else { v13 });
-        let v589: f64 = (if v115 { v586 } else { v13 });
-        let v590: f64 = (if v181 { v13 } else { v587 });
-        let v591: f64 = (if v181 { v13 } else { v588 });
-        let v592: f64 = (if v181 { v13 } else { v589 });
-        let v593: f64 = (if v187 { self.scalar_v488 } else { v13 });
-        let v594: f64 = (if v187 { self.scalar_v104 } else { v13 });
-        let v595: f64 = (if v183 { v593 } else { v13 });
-        let v596: f64 = (if v183 { v594 } else { v13 });
-        let v599: f64 = (self.scalar_v192 * v411);
-        let v600: f64 = (v189 * v599);
-        let v601: f64 = (v193 * v595);
-        let v602: f64 = (v193 * v596);
-        let v603: f64 = (v191 * v600);
-        let v604: f64 = (-v603);
-        let v605: f64 = (v194 * v194);
-        let v606: f64 = (v604 / v605);
-        let v607: f64 = (v194 * self.scalar_v597);
-        let v608: f64 = (v191 * v601);
-        let v609: f64 = (v607 - v608);
-        let v610: f64 = (v609 / v605);
-        let v611: f64 = (v194 * self.scalar_v598);
-        let v612: f64 = (v191 * v602);
-        let v613: f64 = (v611 - v612);
-        let v614: f64 = (v613 / v605);
-        let v615: f64 = (if v183 { v606 } else { v518 });
-        let v616: f64 = (if v183 { v610 } else { v519 });
-        let v617: f64 = (if v183 { v614 } else { v520 });
-        let v618: f64 = (if v198 { v615 } else { v536 });
-        let v619: f64 = (if v198 { v616 } else { v537 });
-        let v620: f64 = (if v198 { v617 } else { v538 });
-        let v621: f64 = (if v198 { v13 } else { v615 });
-        let v622: f64 = (if v198 { v13 } else { v616 });
-        let v623: f64 = (if v198 { v13 } else { v617 });
-        let v624: f64 = (if v204 { v13 } else { v618 });
-        let v625: f64 = (if v204 { v13 } else { v619 });
-        let v626: f64 = (if v204 { v13 } else { v620 });
-        let v627: f64 = (v206 * v621);
-        let v628: f64 = (v206 * v622);
-        let v629: f64 = (v206 * v623);
-        let v630: f64 = (v206 * v624);
-        let v631: f64 = (v205 * v627);
-        let v632: f64 = (v630 + v631);
-        let v633: f64 = (v206 * v625);
-        let v634: f64 = (v205 * v628);
-        let v635: f64 = (v633 + v634);
-        let v636: f64 = (v206 * v626);
-        let v637: f64 = (v205 * v629);
-        let v638: f64 = (v636 + v637);
-        let v639: f64 = (if v183 { v632 } else { v624 });
-        let v640: f64 = (if v183 { v635 } else { v625 });
-        let v641: f64 = (if v183 { v638 } else { v626 });
-        let v642: f64 = (v209 * v426);
-        let v643: f64 = (v37 * v639);
-        let v644: f64 = (v642 + v643);
-        let v645: f64 = (v37 * v640);
-        let v646: f64 = (v37 * v641);
-        let v647: f64 = (if v183 { v644 } else { v13 });
-        let v648: f64 = (if v183 { v645 } else { v13 });
-        let v649: f64 = (if v183 { v646 } else { v13 });
-        let v650: f64 = (if v212 { v13 } else { v647 });
-        let v651: f64 = (if v212 { v13 } else { v648 });
-        let v652: f64 = (if v212 { v13 } else { v649 });
-        let v653: f64 = (v590 - v650);
-        let v654: f64 = (v591 - v651);
-        let v655: f64 = (v592 - v652);
-        let v656: f64 = (self.scalar_v228 * v413);
-        let v657: f64 = (v230 * v656);
-        let v658: f64 = (self.scalar_v227 * v657);
-        let v659: f64 = (v233 * v658);
-        let v660: f64 = (self.scalar_v236 * v413);
-        let v661: f64 = (v238 * v660);
-        let v662: f64 = (self.scalar_v235 * v661);
-        let v663: f64 = (v241 * v662);
-        let v664: f64 = (if self.scalar_v244 { v659 } else { v659 });
-        let v665: f64 = (if self.scalar_v244 { v663 } else { v663 });
-        let v666: f64 = (v265 * v590);
-        let v667: f64 = (v265 * v591);
-        let v668: f64 = (v265 * v592);
-        let v669: f64 = (v664 / v275);
-        let v670: f64 = (if self.scalar_v268 { v669 } else { v664 });
-        let v671: f64 = (if self.scalar_v278 { v670 } else { v670 });
-        let v672: f64 = (-v476);
-        let v673: f64 = (self.scalar_v281 * v672);
-        let v674: f64 = (v293 * v476);
-        let v675: f64 = (v674 / self.scalar_v295);
-        let v676: f64 = (if v284 { v675 } else { v13 });
-        let v677: f64 = (self.scalar_v299 * v673);
-        let v680: f64 = (v95 * v677);
-        let v681: f64 = (v300 * v476);
-        let v682: f64 = (v680 - v681);
-        let v683: f64 = (v95 * v95);
-        let v684: f64 = (v682 / v683);
-        let v685: f64 = (self.scalar_v678 / v95);
-        let v686: f64 = (self.scalar_v679 / v95);
-        let v687: f64 = (v302 * v673);
-        let v688: f64 = (v283 * v684);
-        let v689: f64 = (v687 + v688);
-        let v690: f64 = (self.scalar_v104 * v302);
-        let v691: f64 = (v283 * v685);
-        let v692: f64 = (v690 + v691);
-        let v693: f64 = (v302 * self.scalar_v488);
-        let v694: f64 = (v283 * v686);
-        let v695: f64 = (v693 + v694);
-        let v696: f64 = (v290 * v689);
-        let v697: f64 = (v290 * v692);
-        let v698: f64 = (v290 * v695);
-        let v699: f64 = (if v284 { v696 } else { v13 });
-        let v700: f64 = (if v284 { v697 } else { v13 });
-        let v701: f64 = (if v284 { v698 } else { v13 });
-        let v702: f64 = (v108 * v476);
-        let v703: f64 = (-v702);
-        let v704: f64 = (v703 / v683);
-        let v705: f64 = (self.scalar_v104 / v95);
-        let v706: f64 = (self.scalar_v488 / v95);
-        let v707: f64 = (-v704);
-        let v708: f64 = (-v705);
-        let v709: f64 = (-v706);
-        let v710: f64 = (v707 / v308);
-        let v711: f64 = (v708 / v308);
-        let v712: f64 = (v709 / v308);
-        let v713: f64 = (self.scalar_v295 * v710);
-        let v714: f64 = (self.scalar_v295 * v711);
-        let v715: f64 = (self.scalar_v295 * v712);
-        let v716: f64 = (v311 * v713);
-        let v717: f64 = (v311 * v714);
-        let v718: f64 = (v311 * v715);
-        let v719: f64 = (-v716);
-        let v720: f64 = (-v717);
-        let v721: f64 = (-v718);
-        let v722: f64 = (v312 * v476);
-        let v723: f64 = (v95 * v719);
+        let v497: f64 = (v126 * v486);
+        let v498: f64 = (v487 - v497);
+        let v499: f64 = (v498 / v490);
+        let v500: f64 = (if v115 { v499 } else { v13 });
+        let v501: f64 = (if v131 { v482 } else { v13 });
+        let v502: f64 = (if v131 { v483 } else { v13 });
+        let v503: f64 = (if v131 { v484 } else { v13 });
+        let v504: f64 = (if v131 { v13 } else { v482 });
+        let v505: f64 = (if v131 { v13 } else { v483 });
+        let v506: f64 = (if v131 { v13 } else { v484 });
+        let v507: f64 = (if v137 { v13 } else { v501 });
+        let v508: f64 = (if v137 { v13 } else { v502 });
+        let v509: f64 = (if v137 { v13 } else { v503 });
+        let v510: f64 = (v139 * v504);
+        let v511: f64 = (v139 * v505);
+        let v512: f64 = (v139 * v506);
+        let v513: f64 = (v139 * v507);
+        let v514: f64 = (v138 * v510);
+        let v515: f64 = (v513 + v514);
+        let v516: f64 = (v139 * v508);
+        let v517: f64 = (v138 * v511);
+        let v518: f64 = (v516 + v517);
+        let v519: f64 = (v139 * v509);
+        let v520: f64 = (v138 * v512);
+        let v521: f64 = (v519 + v520);
+        let v522: f64 = (if v115 { v515 } else { v507 });
+        let v523: f64 = (if v115 { v518 } else { v508 });
+        let v524: f64 = (if v115 { v521 } else { v509 });
+        let v525: f64 = (v149 * v494);
+        let v526: f64 = (v149 * v495);
+        let v527: f64 = (v149 * v496);
+        let v528: f64 = (v525 / v150);
+        let v529: f64 = (v526 / v150);
+        let v530: f64 = (v527 / v150);
+        let v531: f64 = (if v143 { v494 } else { v13 });
+        let v532: f64 = (if v143 { v495 } else { v13 });
+        let v533: f64 = (if v143 { v496 } else { v13 });
+        let v534: f64 = (if v152 { v525 } else { v531 });
+        let v535: f64 = (if v152 { v526 } else { v532 });
+        let v536: f64 = (if v152 { v527 } else { v533 });
+        let v537: f64 = (if v148 { v528 } else { v534 });
+        let v538: f64 = (if v148 { v529 } else { v535 });
+        let v539: f64 = (if v148 { v530 } else { v536 });
+        let v540: f64 = (v161 * v500);
+        let v541: f64 = (v540 / v162);
+        let v542: f64 = (if v156 { v500 } else { v13 });
+        let v543: f64 = (if v164 { v540 } else { v542 });
+        let v544: f64 = (if v160 { v541 } else { v543 });
+        let v545: f64 = (v537 - v544);
+        let v546: f64 = (if v115 { v545 } else { v13 });
+        let v547: f64 = (if v115 { v538 } else { v13 });
+        let v548: f64 = (if v115 { v539 } else { v13 });
+        let v549: f64 = (v170 * v410);
+        let v550: f64 = (v34 * v522);
+        let v551: f64 = (v549 + v550);
+        let v552: f64 = (v34 * v523);
+        let v553: f64 = (v34 * v524);
+        let v554: f64 = (v169 * v414);
+        let v555: f64 = (v42 * v546);
+        let v556: f64 = (v554 + v555);
+        let v557: f64 = (v42 * v547);
+        let v558: f64 = (v42 * v548);
+        let v559: f64 = ((v174) as f64).ln();
+        let v560: f64 = (v175 * v559);
+        let v561: f64 = (v418 * v560);
+        let v562: f64 = (self.scalar_v173 * v561);
+        let v563: f64 = (v177 * v556);
+        let v564: f64 = (v172 * v562);
+        let v565: f64 = (v563 - v564);
+        let v566: f64 = (v177 * v177);
+        let v567: f64 = (v565 / v566);
+        let v568: f64 = (v557 / v177);
+        let v569: f64 = (v558 / v177);
+        let v570: f64 = (v551 - v567);
+        let v571: f64 = (v552 - v568);
+        let v572: f64 = (v553 - v569);
+        let v573: f64 = (if v115 { v570 } else { v13 });
+        let v574: f64 = (if v115 { v571 } else { v13 });
+        let v575: f64 = (if v115 { v572 } else { v13 });
+        let v576: f64 = (if v181 { v13 } else { v573 });
+        let v577: f64 = (if v181 { v13 } else { v574 });
+        let v578: f64 = (if v181 { v13 } else { v575 });
+        let v579: f64 = (if v187 { self.scalar_v474 } else { v13 });
+        let v580: f64 = (if v187 { self.scalar_v104 } else { v13 });
+        let v581: f64 = (if v183 { v579 } else { v13 });
+        let v582: f64 = (if v183 { v580 } else { v13 });
+        let v585: f64 = (self.scalar_v192 * v397);
+        let v586: f64 = (v189 * v585);
+        let v587: f64 = (v193 * v581);
+        let v588: f64 = (v193 * v582);
+        let v589: f64 = (v191 * v586);
+        let v590: f64 = (-v589);
+        let v591: f64 = (v194 * v194);
+        let v592: f64 = (v590 / v591);
+        let v593: f64 = (v194 * self.scalar_v583);
+        let v594: f64 = (v191 * v587);
+        let v595: f64 = (v593 - v594);
+        let v596: f64 = (v595 / v591);
+        let v597: f64 = (v194 * self.scalar_v584);
+        let v598: f64 = (v191 * v588);
+        let v599: f64 = (v597 - v598);
+        let v600: f64 = (v599 / v591);
+        let v601: f64 = (if v183 { v592 } else { v504 });
+        let v602: f64 = (if v183 { v596 } else { v505 });
+        let v603: f64 = (if v183 { v600 } else { v506 });
+        let v604: f64 = (if v198 { v601 } else { v522 });
+        let v605: f64 = (if v198 { v602 } else { v523 });
+        let v606: f64 = (if v198 { v603 } else { v524 });
+        let v607: f64 = (if v198 { v13 } else { v601 });
+        let v608: f64 = (if v198 { v13 } else { v602 });
+        let v609: f64 = (if v198 { v13 } else { v603 });
+        let v610: f64 = (if v204 { v13 } else { v604 });
+        let v611: f64 = (if v204 { v13 } else { v605 });
+        let v612: f64 = (if v204 { v13 } else { v606 });
+        let v613: f64 = (v206 * v607);
+        let v614: f64 = (v206 * v608);
+        let v615: f64 = (v206 * v609);
+        let v616: f64 = (v206 * v610);
+        let v617: f64 = (v205 * v613);
+        let v618: f64 = (v616 + v617);
+        let v619: f64 = (v206 * v611);
+        let v620: f64 = (v205 * v614);
+        let v621: f64 = (v619 + v620);
+        let v622: f64 = (v206 * v612);
+        let v623: f64 = (v205 * v615);
+        let v624: f64 = (v622 + v623);
+        let v625: f64 = (if v183 { v618 } else { v610 });
+        let v626: f64 = (if v183 { v621 } else { v611 });
+        let v627: f64 = (if v183 { v624 } else { v612 });
+        let v628: f64 = (v209 * v412);
+        let v629: f64 = (v37 * v625);
+        let v630: f64 = (v628 + v629);
+        let v631: f64 = (v37 * v626);
+        let v632: f64 = (v37 * v627);
+        let v633: f64 = (if v183 { v630 } else { v13 });
+        let v634: f64 = (if v183 { v631 } else { v13 });
+        let v635: f64 = (if v183 { v632 } else { v13 });
+        let v636: f64 = (if v212 { v13 } else { v633 });
+        let v637: f64 = (if v212 { v13 } else { v634 });
+        let v638: f64 = (if v212 { v13 } else { v635 });
+        let v639: f64 = (v576 - v636);
+        let v640: f64 = (v577 - v637);
+        let v641: f64 = (v578 - v638);
+        let v642: f64 = (self.scalar_v228 * v399);
+        let v643: f64 = (v230 * v642);
+        let v644: f64 = (self.scalar_v227 * v643);
+        let v645: f64 = (v233 * v644);
+        let v646: f64 = (self.scalar_v236 * v399);
+        let v647: f64 = (v238 * v646);
+        let v648: f64 = (self.scalar_v235 * v647);
+        let v649: f64 = (v241 * v648);
+        let v650: f64 = (v265 * v576);
+        let v651: f64 = (v265 * v577);
+        let v652: f64 = (v265 * v578);
+        let v653: f64 = (v645 / v275);
+        let v654: f64 = (if self.scalar_v268 { v653 } else { v645 });
+        let v655: f64 = (-v462);
+        let v656: f64 = (self.scalar_v279 * v655);
+        let v657: f64 = (v291 * v462);
+        let v658: f64 = (v657 / self.scalar_v293);
+        let v659: f64 = (if v282 { v658 } else { v13 });
+        let v660: f64 = (self.scalar_v297 * v656);
+        let v663: f64 = (v95 * v660);
+        let v664: f64 = (v298 * v462);
+        let v665: f64 = (v663 - v664);
+        let v666: f64 = (v95 * v95);
+        let v667: f64 = (v665 / v666);
+        let v668: f64 = (self.scalar_v661 / v95);
+        let v669: f64 = (self.scalar_v662 / v95);
+        let v670: f64 = (v300 * v656);
+        let v671: f64 = (v281 * v667);
+        let v672: f64 = (v670 + v671);
+        let v673: f64 = (self.scalar_v104 * v300);
+        let v674: f64 = (v281 * v668);
+        let v675: f64 = (v673 + v674);
+        let v676: f64 = (v300 * self.scalar_v474);
+        let v677: f64 = (v281 * v669);
+        let v678: f64 = (v676 + v677);
+        let v679: f64 = (v288 * v672);
+        let v680: f64 = (v288 * v675);
+        let v681: f64 = (v288 * v678);
+        let v682: f64 = (if v282 { v679 } else { v13 });
+        let v683: f64 = (if v282 { v680 } else { v13 });
+        let v684: f64 = (if v282 { v681 } else { v13 });
+        let v685: f64 = (v108 * v462);
+        let v686: f64 = (-v685);
+        let v687: f64 = (v686 / v666);
+        let v688: f64 = (self.scalar_v104 / v95);
+        let v689: f64 = (self.scalar_v474 / v95);
+        let v690: f64 = (-v687);
+        let v691: f64 = (-v688);
+        let v692: f64 = (-v689);
+        let v693: f64 = (v690 / v306);
+        let v694: f64 = (v691 / v306);
+        let v695: f64 = (v692 / v306);
+        let v696: f64 = (self.scalar_v293 * v693);
+        let v697: f64 = (self.scalar_v293 * v694);
+        let v698: f64 = (self.scalar_v293 * v695);
+        let v699: f64 = (v309 * v696);
+        let v700: f64 = (v309 * v697);
+        let v701: f64 = (v309 * v698);
+        let v702: f64 = (-v699);
+        let v703: f64 = (-v700);
+        let v704: f64 = (-v701);
+        let v705: f64 = (v310 * v462);
+        let v706: f64 = (v95 * v702);
+        let v707: f64 = (v705 + v706);
+        let v708: f64 = (v95 * v703);
+        let v709: f64 = (v95 * v704);
+        let v710: f64 = (v707 / self.scalar_v293);
+        let v711: f64 = (v708 / self.scalar_v293);
+        let v712: f64 = (v709 / self.scalar_v293);
+        let v713: f64 = (if v304 { v710 } else { v659 });
+        let v714: f64 = (if v304 { v711 } else { v13 });
+        let v715: f64 = (if v304 { v712 } else { v13 });
+        let v716: f64 = (if v304 { v13 } else { v682 });
+        let v717: f64 = (if v304 { v13 } else { v683 });
+        let v718: f64 = (if v304 { v13 } else { v684 });
+        let v719: f64 = (v713 + v716);
+        let v720: f64 = (v714 + v717);
+        let v721: f64 = (v715 + v718);
+        let v722: f64 = (v315 * v473);
+        let v723: f64 = (v103 * v719);
         let v724: f64 = (v722 + v723);
-        let v725: f64 = (v95 * v720);
-        let v726: f64 = (v95 * v721);
-        let v727: f64 = (v724 / self.scalar_v295);
-        let v728: f64 = (v725 / self.scalar_v295);
-        let v729: f64 = (v726 / self.scalar_v295);
-        let v730: f64 = (if v306 { v727 } else { v676 });
-        let v731: f64 = (if v306 { v728 } else { v13 });
-        let v732: f64 = (if v306 { v729 } else { v13 });
-        let v733: f64 = (if v306 { v13 } else { v699 });
-        let v734: f64 = (if v306 { v13 } else { v700 });
-        let v735: f64 = (if v306 { v13 } else { v701 });
-        let v736: f64 = (v730 + v733);
-        let v737: f64 = (v731 + v734);
-        let v738: f64 = (v732 + v735);
-        let v739: f64 = (v317 * v487);
-        let v740: f64 = (v103 * v736);
-        let v741: f64 = (v739 + v740);
-        let v742: f64 = (v103 * v737);
-        let v743: f64 = (v103 * v738);
-        let v744: f64 = (v671 / self.scalar_v16);
-        let v745: f64 = (v665 / self.scalar_v16);
-        let v746: f64 = (-v590);
-        let v747: f64 = (-v591);
-        let v748: f64 = (-v592);
-        let v749: f64 = (v265 * v746);
-        let v750: f64 = (v265 * v747);
-        let v751: f64 = (v265 * v748);
-        let v752: f64 = (if self.scalar_v268 { v749 } else { v13 });
-        let v753: f64 = (if self.scalar_v268 { v750 } else { v13 });
-        let v754: f64 = (if self.scalar_v268 { v751 } else { v13 });
-        let v756: f64 = ddt_scale;
-        let v757: f64 = (v265 * v756);
-        let v758: f64 = (if self.scalar_v268 { v757 } else { v13 });
-        let v761: f64 = (self.scalar_v360 * v756);
-        let v762: f64 = (if self.scalar_v323 { v761 } else { v13 });
-        let v766: f64 = (if self.scalar_v366 { v761 } else { v13 });
-        let v769: f64 = (self.scalar_v376 * v756);
-        let v770: f64 = (if self.scalar_v366 { v769 } else { v13 });
-        let v771: f64 = -0.0;
-        let v772: f64 = (if v389 { v744 } else { v13 });
-        let v773: f64 = (v12 / v390);
-        let v774: f64 = (v110 * v772);
-        let v775: f64 = (-v774);
-        let v776: f64 = (v390 * v390);
-        let v777: f64 = (v775 / v776);
-        let v778: f64 = (v190 / v390);
-        let v779: f64 = (if self.scalar_v340 { v773 } else { v13 });
-        let v780: f64 = (if self.scalar_v340 { v777 } else { v13 });
-        let v781: f64 = (if self.scalar_v340 { v778 } else { v13 });
-        let v782: f64 = (if v396 { v745 } else { v13 });
-        let v783: f64 = (v12 / v397);
-        let v784: f64 = (v113 * v782);
-        let v785: f64 = (-v784);
-        let v786: f64 = (v397 * v397);
-        let v787: f64 = (v785 / v786);
-        let v788: f64 = (v190 / v397);
-        let v789: f64 = (if self.scalar_v344 { v783 } else { v13 });
-        let v790: f64 = (if self.scalar_v344 { v787 } else { v13 });
-        let v791: f64 = (if self.scalar_v344 { v788 } else { v13 });
-        let v792: f64 = (self.scalar_v104 * v653);
-        let v793: f64 = (self.scalar_v104 * v654);
-        let v794: f64 = (self.scalar_v104 * v655);
-        let v795: f64 = (self.scalar_v16 * v792);
-        let v796: f64 = (self.scalar_v16 * v793);
-        let v797: f64 = (self.scalar_v16 * v794);
-        let v798: f64 = (self.scalar_v104 * v741);
-        let v799: f64 = (self.scalar_v104 * v742);
-        let v800: f64 = (self.scalar_v104 * v743);
-        let v801: f64 = (self.scalar_v16 * v798);
-        let v802: f64 = (self.scalar_v16 * v799);
-        let v803: f64 = (self.scalar_v16 * v800);
-        let v804: f64 = (self.scalar_v104 * v666);
-        let v805: f64 = (self.scalar_v104 * v667);
-        let v806: f64 = (self.scalar_v104 * v668);
-        let v807: f64 = (self.scalar_v16 * v804);
-        let v808: f64 = (self.scalar_v16 * v805);
-        let v809: f64 = (self.scalar_v16 * v806);
+        let v725: f64 = (v103 * v720);
+        let v726: f64 = (v103 * v721);
+        let v727: f64 = (v654 / self.scalar_v16);
+        let v728: f64 = (v649 / self.scalar_v16);
+        let v729: f64 = (-v576);
+        let v730: f64 = (-v577);
+        let v731: f64 = (-v578);
+        let v732: f64 = (v265 * v729);
+        let v733: f64 = (v265 * v730);
+        let v734: f64 = (v265 * v731);
+        let v735: f64 = (if self.scalar_v268 { v732 } else { v13 });
+        let v736: f64 = (if self.scalar_v268 { v733 } else { v13 });
+        let v737: f64 = (if self.scalar_v268 { v734 } else { v13 });
+        let v739: f64 = ddt_scale;
+        let v740: f64 = (v265 * v739);
+        let v741: f64 = (if self.scalar_v268 { v740 } else { v13 });
+        let v744: f64 = (self.scalar_v357 * v739);
+        let v745: f64 = (if self.scalar_v321 { v744 } else { v13 });
+        let v749: f64 = (if self.scalar_v362 { v744 } else { v13 });
+        let v752: f64 = (self.scalar_v372 * v739);
+        let v753: f64 = (if self.scalar_v362 { v752 } else { v13 });
+        let v754: f64 = -0.0;
+        let v755: f64 = (if v381 { v727 } else { v13 });
+        let v756: f64 = (v12 / v382);
+        let v757: f64 = (v110 * v755);
+        let v758: f64 = (-v757);
+        let v759: f64 = (v382 * v382);
+        let v760: f64 = (v758 / v759);
+        let v761: f64 = (v190 / v382);
+        let v762: f64 = (if self.scalar_v338 { v756 } else { v13 });
+        let v763: f64 = (if self.scalar_v338 { v760 } else { v13 });
+        let v764: f64 = (if self.scalar_v338 { v761 } else { v13 });
+        let v765: f64 = (if v385 { v728 } else { v13 });
+        let v766: f64 = (v12 / v386);
+        let v767: f64 = (v113 * v765);
+        let v768: f64 = (-v767);
+        let v769: f64 = (v386 * v386);
+        let v770: f64 = (v768 / v769);
+        let v771: f64 = (v190 / v386);
+        let v772: f64 = (if self.scalar_v342 { v766 } else { v13 });
+        let v773: f64 = (if self.scalar_v342 { v770 } else { v13 });
+        let v774: f64 = (if self.scalar_v342 { v771 } else { v13 });
+        let v775: f64 = (self.scalar_v104 * v639);
+        let v776: f64 = (self.scalar_v104 * v640);
+        let v777: f64 = (self.scalar_v104 * v641);
+        let v778: f64 = (self.scalar_v16 * v775);
+        let v779: f64 = (self.scalar_v16 * v776);
+        let v780: f64 = (self.scalar_v16 * v777);
+        let v781: f64 = (self.scalar_v104 * v724);
+        let v782: f64 = (self.scalar_v104 * v725);
+        let v783: f64 = (self.scalar_v104 * v726);
+        let v784: f64 = (self.scalar_v16 * v781);
+        let v785: f64 = (self.scalar_v16 * v782);
+        let v786: f64 = (self.scalar_v16 * v783);
+        let v787: f64 = (self.scalar_v104 * v650);
+        let v788: f64 = (self.scalar_v104 * v651);
+        let v789: f64 = (self.scalar_v104 * v652);
+        let v790: f64 = (self.scalar_v16 * v787);
+        let v791: f64 = (self.scalar_v16 * v788);
+        let v792: f64 = (self.scalar_v16 * v789);
 
-        let d348_dn2: f64 = v752;
-        let d348_dn3: f64 = v753;
-        let d348_dn4: f64 = v754;
+        let d346_dn2: f64 = v735;
+        let d346_dn3: f64 = v736;
+        let d346_dn4: f64 = v737;
         stamper.stamp_current_node3_local(
             Some(6),
             None,
-            multiplicity * (v348),
+            multiplicity * (v346),
             2,
-            multiplicity * (d348_dn2),
+            multiplicity * (d346_dn2),
             3,
-            multiplicity * (d348_dn3),
+            multiplicity * (d346_dn3),
             4,
-            multiplicity * (d348_dn4),
+            multiplicity * (d346_dn4),
         );
-        let d349_dn6: f64 = self.scalar_v755;
+        let d347_dn6: f64 = self.scalar_v738;
         stamper.stamp_current_node1_local(
             Some(6),
             None,
-            multiplicity * (v349),
+            multiplicity * (v347),
             6,
-            multiplicity * (d349_dn6),
+            multiplicity * (d347_dn6),
         );
-        let d352_dn6: f64 = v758;
+        let d350_dn6: f64 = v741;
         stamper.stamp_current_node1_local(
             Some(6),
             None,
-            multiplicity * (v352),
+            multiplicity * (v350),
             6,
-            multiplicity * (d352_dn6),
+            multiplicity * (d350_dn6),
         );
         stamper.stamp_potential_branch_local(
             Some(6),
@@ -786,64 +782,72 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             0,
-            self.scalar_v353,
+            v13,
         );
         stamper.stamp_current_const_local(
             Some(2),
             None,
-            multiplicity * (v357),
+            multiplicity * (v354),
         );
-        let d359_dn2: f64 = self.scalar_v760;
+        let d356_dn2: f64 = self.scalar_v743;
         stamper.stamp_current_node1_local(
             Some(2),
             None,
-            multiplicity * (v359),
+            multiplicity * (v356),
             2,
-            multiplicity * (d359_dn2),
+            multiplicity * (d356_dn2),
         );
-        let d363_dn2: f64 = v762;
+        let d360_dn2: f64 = v745;
         stamper.stamp_current_node1_local(
+            Some(2),
+            None,
+            multiplicity * (v360),
+            2,
+            multiplicity * (d360_dn2),
+        );
+        stamper.stamp_potential_branch_local(
+            Some(5),
+            None,
+            1,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            1,
+            v13,
+        );
+        stamper.stamp_current_const_local(
             Some(2),
             None,
             multiplicity * (v363),
-            2,
-            multiplicity * (d363_dn2),
         );
-        stamper.stamp_potential_branch_local(
-            Some(5),
-            None,
-            1,
-            multiplicity,
-        );
-        stamper.stamp_potential_const_local(
-            1,
-            self.scalar_v364,
-        );
-        stamper.stamp_current_const_local(
-            Some(2),
-            None,
-            multiplicity * (v367),
-        );
-        let d371_dn2: f64 = self.scalar_v764;
-        let d371_dn5: f64 = self.scalar_v765;
+        let d367_dn2: f64 = self.scalar_v747;
+        let d367_dn5: f64 = self.scalar_v748;
         stamper.stamp_current_node2_local(
             Some(2),
             Some(5),
-            multiplicity * (v371),
+            multiplicity * (v367),
             2,
-            multiplicity * (d371_dn2),
+            multiplicity * (d367_dn2),
             5,
-            multiplicity * (d371_dn5),
+            multiplicity * (d367_dn5),
         );
-        let d373_dn2: f64 = v766;
+        let d369_dn2: f64 = v749;
         stamper.stamp_current_node1_local(
             Some(2),
             None,
-            multiplicity * (v373),
+            multiplicity * (v369),
             2,
-            multiplicity * (d373_dn2),
+            multiplicity * (d369_dn2),
         );
-        let d375_dn5: f64 = self.scalar_v768;
+        let d371_dn5: f64 = self.scalar_v751;
+        stamper.stamp_current_node1_local(
+            Some(5),
+            None,
+            multiplicity * (v371),
+            5,
+            multiplicity * (d371_dn5),
+        );
+        let d375_dn5: f64 = v753;
         stamper.stamp_current_node1_local(
             Some(5),
             None,
@@ -851,18 +855,10 @@ impl Instance {
             5,
             multiplicity * (d375_dn5),
         );
-        let d379_dn5: f64 = v770;
-        stamper.stamp_current_node1_local(
-            Some(5),
-            None,
-            multiplicity * (v379),
-            5,
-            multiplicity * (d379_dn5),
-        );
         stamper.stamp_current_const_local(
             Some(2),
             None,
-            multiplicity * (v383),
+            multiplicity * (v379),
         );
         stamper.stamp_potential_branch_local(
             Some(5),
@@ -872,7 +868,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             2,
-            self.scalar_v384,
+            v13,
         );
         stamper.stamp_potential_branch_local(
             Some(2),
@@ -882,7 +878,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             3,
-            self.scalar_v387,
+            v13,
         );
         stamper.stamp_potential_branch_local(
             Some(5),
@@ -892,66 +888,66 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             4,
-            self.scalar_v387,
+            v13,
         );
-        let d388_dn3: f64 = v13;
-        let d388_dn4: f64 = v771;
+        let d380_dn3: f64 = v13;
+        let d380_dn4: f64 = v754;
         stamper.stamp_current_node2_local(
             Some(3),
             Some(4),
-            multiplicity * (v388),
+            multiplicity * (v380),
             3,
-            multiplicity * (d388_dn3),
+            multiplicity * (d380_dn3),
+            4,
+            multiplicity * (d380_dn4),
+        );
+        let d384_dn0: f64 = v762;
+        let d384_dn2: f64 = v763;
+        let d384_dn3: f64 = v764;
+        stamper.stamp_current_node3_local(
+            Some(0),
+            Some(3),
+            multiplicity * (v384),
+            0,
+            multiplicity * (d384_dn0),
+            2,
+            multiplicity * (d384_dn2),
+            3,
+            multiplicity * (d384_dn3),
+        );
+        stamper.stamp_current_const_local(
+            Some(0),
+            Some(3),
+            multiplicity * (v13),
+        );
+        stamper.stamp_potential_branch_local(
+            Some(0),
+            Some(3),
+            5,
+            multiplicity,
+        );
+        stamper.stamp_potential_const_local(
+            5,
+            v13,
+        );
+        let d388_dn1: f64 = v772;
+        let d388_dn2: f64 = v773;
+        let d388_dn4: f64 = v774;
+        stamper.stamp_current_node3_local(
+            Some(1),
+            Some(4),
+            multiplicity * (v388),
+            1,
+            multiplicity * (d388_dn1),
+            2,
+            multiplicity * (d388_dn2),
             4,
             multiplicity * (d388_dn4),
         );
-        let d392_dn0: f64 = v779;
-        let d392_dn2: f64 = v780;
-        let d392_dn3: f64 = v781;
-        stamper.stamp_current_node3_local(
-            Some(0),
-            Some(3),
-            multiplicity * (v392),
-            0,
-            multiplicity * (d392_dn0),
-            2,
-            multiplicity * (d392_dn2),
-            3,
-            multiplicity * (d392_dn3),
-        );
-        stamper.stamp_current_const_local(
-            Some(0),
-            Some(3),
-            multiplicity * (self.scalar_v393),
-        );
-        stamper.stamp_potential_branch_local(
-            Some(0),
-            Some(3),
-            5,
-            multiplicity,
-        );
-        stamper.stamp_potential_const_local(
-            5,
-            self.scalar_v395,
-        );
-        let d399_dn1: f64 = v789;
-        let d399_dn2: f64 = v790;
-        let d399_dn4: f64 = v791;
-        stamper.stamp_current_node3_local(
-            Some(1),
-            Some(4),
-            multiplicity * (v399),
-            1,
-            multiplicity * (d399_dn1),
-            2,
-            multiplicity * (d399_dn2),
-            4,
-            multiplicity * (d399_dn4),
-        );
         stamper.stamp_current_const_local(
             Some(1),
             Some(4),
-            multiplicity * (self.scalar_v400),
+            multiplicity * (v13),
         );
         stamper.stamp_potential_branch_local(
             Some(1),
@@ -961,51 +957,51 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             6,
-            self.scalar_v402,
+            v13,
         );
-        let d404_dn2: f64 = v795;
-        let d404_dn3: f64 = v796;
-        let d404_dn4: f64 = v797;
+        let d390_dn2: f64 = v778;
+        let d390_dn3: f64 = v779;
+        let d390_dn4: f64 = v780;
         stamper.stamp_current_node3_local(
             Some(3),
             Some(4),
-            multiplicity * (v404),
+            multiplicity * (v390),
             2,
-            multiplicity * (d404_dn2),
+            multiplicity * (d390_dn2),
             3,
-            multiplicity * (d404_dn3),
+            multiplicity * (d390_dn3),
             4,
-            multiplicity * (d404_dn4),
+            multiplicity * (d390_dn4),
         );
-        let d406_dn2: f64 = v801;
-        let d406_dn3: f64 = v802;
-        let d406_dn4: f64 = v803;
-        let v406_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, v406);
+        let d392_dn2: f64 = v784;
+        let d392_dn3: f64 = v785;
+        let d392_dn4: f64 = v786;
+        let v392_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, v392);
         stamper.stamp_current_node3_local(
             Some(3),
             Some(4),
-            multiplicity * (v406_ddt),
+            multiplicity * (v392_ddt),
             2,
-            multiplicity * (((d406_dn2) * ddt_scale)),
+            multiplicity * (((d392_dn2) * ddt_scale)),
             3,
-            multiplicity * (((d406_dn3) * ddt_scale)),
+            multiplicity * (((d392_dn3) * ddt_scale)),
             4,
-            multiplicity * (((d406_dn4) * ddt_scale)),
+            multiplicity * (((d392_dn4) * ddt_scale)),
         );
-        let d408_dn2: f64 = v807;
-        let d408_dn3: f64 = v808;
-        let d408_dn4: f64 = v809;
-        let v408_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 5, v408);
+        let d394_dn2: f64 = v790;
+        let d394_dn3: f64 = v791;
+        let d394_dn4: f64 = v792;
+        let v394_ddt: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 5, v394);
         stamper.stamp_current_node3_local(
             Some(3),
             Some(4),
-            multiplicity * (v408_ddt),
+            multiplicity * (v394_ddt),
             2,
-            multiplicity * (((d408_dn2) * ddt_scale)),
+            multiplicity * (((d394_dn2) * ddt_scale)),
             3,
-            multiplicity * (((d408_dn3) * ddt_scale)),
+            multiplicity * (((d394_dn3) * ddt_scale)),
             4,
-            multiplicity * (((d408_dn4) * ddt_scale)),
+            multiplicity * (((d394_dn4) * ddt_scale)),
         );
         stamper.stamp_current_const_local(
             Some(3),
@@ -1184,379 +1180,379 @@ impl Instance {
         let v265: f64 = (self.scalar_v261 * v264);
         let v266: f64 = (v182 * v265);
         let v269: f64 = ctx.node_voltage(nodes[6]);
-        let v280: f64 = (-v95);
-        let v282: f64 = (v280 * self.scalar_v281);
-        let v283: f64 = (v108 + v282);
-        let v284: bool = (v283 > v13);
-        let v290: f64 = (if v284 { self.scalar_v289 } else { v13 });
-        let v291: f64 = (self.scalar_v286 * v290);
-        let v292: f64 = (self.scalar_v286 * v291);
-        let v293: f64 = (v12 - v292);
-        let v294: f64 = (v95 * v293);
-        let v296: f64 = (v294 / self.scalar_v295);
-        let v297: f64 = (if v284 { v296 } else { v13 });
-        let v300: f64 = (v283 * self.scalar_v299);
-        let v301: f64 = (v300 / v95);
-        let v302: f64 = (self.scalar_v286 + v301);
-        let v303: f64 = (v283 * v302);
-        let v304: f64 = (v290 * v303);
-        let v305: f64 = (if v284 { v304 } else { v13 });
-        let v306: bool = (!v284);
-        let v307: f64 = (v108 / v95);
-        let v308: f64 = (v12 - v307);
-        let v309: f64 = ((v308) as f64).ln();
-        let v310: f64 = (self.scalar_v295 * v309);
-        let v311: f64 = ((v310) as f64).exp();
-        let v312: f64 = (v12 - v311);
-        let v313: f64 = (v95 * v312);
-        let v314: f64 = (v313 / self.scalar_v295);
-        let v315: f64 = (if v306 { v314 } else { v297 });
-        let v316: f64 = (if v306 { v13 } else { v305 });
-        let v317: f64 = (v315 + v316);
-        let v318: f64 = (v103 * v317);
-        let v350: f64 = 0.0;
-        let v351: f64 = (v265 * v350);
-        let v352: f64 = (if self.scalar_v268 { v351 } else { v13 });
-        let v361: f64 = (v1 * self.scalar_v360);
-        let v362: f64 = 0.0;
-        let v363: f64 = (if self.scalar_v323 { v362 } else { v13 });
-        let v368: f64 = ctx.node_voltage(nodes[5]);
-        let v372: f64 = 0.0;
-        let v373: f64 = (if self.scalar_v366 { v372 } else { v13 });
-        let v377: f64 = (v368 * self.scalar_v376);
-        let v378: f64 = 0.0;
-        let v379: f64 = (if self.scalar_v366 { v378 } else { v13 });
-        let v405: f64 = (self.scalar_v104 * v318);
-        let v406: f64 = (self.scalar_v16 * v405);
-        let v407: f64 = (self.scalar_v104 * v266);
-        let v408: f64 = (self.scalar_v16 * v407);
-        let v409: f64 = (if v8 { v12 } else { v13 });
-        let v410: f64 = (if v10 { v13 } else { v409 });
-        let v411: f64 = (v19 * v410);
-        let v412: f64 = (v410 / self.scalar_v18);
-        let v413: f64 = (v412 / v21);
-        let v414: f64 = (self.scalar_v23 * v413);
-        let v415: f64 = (self.scalar_v25 * v412);
-        let v416: f64 = (v20 * v415);
-        let v417: f64 = (v27 * v411);
-        let v418: f64 = (v416 - v417);
-        let v419: f64 = (v20 * v20);
-        let v420: f64 = (v418 / v419);
-        let v421: f64 = (v414 + v420);
-        let v423: f64 = (v33 * v421);
-        let v424: f64 = (self.scalar_v32 * v423);
-        let v427: f64 = (self.scalar_v39 * v412);
-        let v428: f64 = (self.scalar_v38 * v427);
-        let v429: f64 = (self.scalar_v44 * v412);
-        let v430: f64 = (self.scalar_v43 * v429);
-        let v431: f64 = (self.scalar_v49 * v412);
-        let v432: f64 = (self.scalar_v48 * v431);
-        let v433: f64 = (v410 / v54);
-        let v434: f64 = (v58 * v410);
-        let v435: f64 = (v59 * v410);
-        let v436: f64 = (v11 * v434);
-        let v437: f64 = (v435 + v436);
-        let v438: f64 = (v62 * v437);
-        let v439: f64 = (v60 * v410);
-        let v440: f64 = (v438 - v439);
-        let v441: f64 = (v62 * v62);
-        let v442: f64 = (v440 / v441);
-        let v443: f64 = (v410 + v410);
-        let v444: f64 = (v66 * v443);
-        let v445: f64 = (v68 * v442);
-        let v446: f64 = (v65 * v444);
-        let v447: f64 = (v445 - v446);
-        let v448: f64 = (v68 * v68);
-        let v449: f64 = (v447 / v448);
-        let v450: f64 = (v411 + v411);
-        let v451: f64 = (-v450);
-        let v452: f64 = (v433 / v56);
-        let v453: f64 = (v74 * v452);
-        let v454: f64 = (v77 * v449);
-        let v455: f64 = (v453 + v454);
-        let v456: f64 = (v79 * v451);
-        let v457: f64 = (v73 * v455);
-        let v458: f64 = (v456 + v457);
-        let v459: f64 = (-v458);
-        let v460: f64 = (v459 / self.scalar_v55);
-        let v461: f64 = (-v460);
-        let v462: f64 = (v83 * v461);
-        let v463: f64 = (v84 * v460);
-        let v464: f64 = (v462 - v463);
-        let v465: f64 = (v83 * v83);
-        let v466: f64 = (v464 / v465);
-        let v467: f64 = (-v466);
-        let v468: f64 = (self.scalar_v86 * v467);
-        let v469: f64 = (self.scalar_v53 * v468);
-        let v470: f64 = (-v469);
-        let v471: f64 = (v92 * v92);
-        let v472: f64 = (v470 / v471);
-        let v473: f64 = (v83 * v433);
-        let v474: f64 = (v56 * v460);
-        let v475: f64 = (v473 + v474);
-        let v476: f64 = (v458 + v475);
-        let v477: f64 = (v476 - v460);
-        let v478: f64 = (v83 * v477);
-        let v479: f64 = (v96 * v460);
-        let v480: f64 = (v478 - v479);
-        let v481: f64 = (v480 / v465);
-        let v482: f64 = (v87 * v410);
-        let v483: f64 = (v482 - v481);
-        let v484: f64 = (self.scalar_v86 * v483);
-        let v485: f64 = (v102 * v472);
-        let v486: f64 = (v93 * v484);
-        let v487: f64 = (v485 + v486);
-        let v489: f64 = (self.scalar_v116 * v411);
-        let v490: f64 = (v108 * v489);
-        let v491: f64 = (-v490);
-        let v492: f64 = (v117 * v117);
-        let v493: f64 = (v491 / v492);
-        let v494: f64 = (self.scalar_v104 / v117);
-        let v495: f64 = (self.scalar_v488 / v117);
+        let v278: f64 = (-v95);
+        let v280: f64 = (v278 * self.scalar_v279);
+        let v281: f64 = (v108 + v280);
+        let v282: bool = (v281 > v13);
+        let v288: f64 = (if v282 { self.scalar_v287 } else { v13 });
+        let v289: f64 = (self.scalar_v284 * v288);
+        let v290: f64 = (self.scalar_v284 * v289);
+        let v291: f64 = (v12 - v290);
+        let v292: f64 = (v95 * v291);
+        let v294: f64 = (v292 / self.scalar_v293);
+        let v295: f64 = (if v282 { v294 } else { v13 });
+        let v298: f64 = (v281 * self.scalar_v297);
+        let v299: f64 = (v298 / v95);
+        let v300: f64 = (self.scalar_v284 + v299);
+        let v301: f64 = (v281 * v300);
+        let v302: f64 = (v288 * v301);
+        let v303: f64 = (if v282 { v302 } else { v13 });
+        let v304: bool = (!v282);
+        let v305: f64 = (v108 / v95);
+        let v306: f64 = (v12 - v305);
+        let v307: f64 = ((v306) as f64).ln();
+        let v308: f64 = (self.scalar_v293 * v307);
+        let v309: f64 = ((v308) as f64).exp();
+        let v310: f64 = (v12 - v309);
+        let v311: f64 = (v95 * v310);
+        let v312: f64 = (v311 / self.scalar_v293);
+        let v313: f64 = (if v304 { v312 } else { v295 });
+        let v314: f64 = (if v304 { v13 } else { v303 });
+        let v315: f64 = (v313 + v314);
+        let v316: f64 = (v103 * v315);
+        let v348: f64 = 0.0;
+        let v349: f64 = (v265 * v348);
+        let v350: f64 = (if self.scalar_v268 { v349 } else { v13 });
+        let v358: f64 = (v1 * self.scalar_v357);
+        let v359: f64 = 0.0;
+        let v360: f64 = (if self.scalar_v321 { v359 } else { v13 });
+        let v364: f64 = ctx.node_voltage(nodes[5]);
+        let v368: f64 = 0.0;
+        let v369: f64 = (if self.scalar_v362 { v368 } else { v13 });
+        let v373: f64 = (v364 * self.scalar_v372);
+        let v374: f64 = 0.0;
+        let v375: f64 = (if self.scalar_v362 { v374 } else { v13 });
+        let v391: f64 = (self.scalar_v104 * v316);
+        let v392: f64 = (self.scalar_v16 * v391);
+        let v393: f64 = (self.scalar_v104 * v266);
+        let v394: f64 = (self.scalar_v16 * v393);
+        let v395: f64 = (if v8 { v12 } else { v13 });
+        let v396: f64 = (if v10 { v13 } else { v395 });
+        let v397: f64 = (v19 * v396);
+        let v398: f64 = (v396 / self.scalar_v18);
+        let v399: f64 = (v398 / v21);
+        let v400: f64 = (self.scalar_v23 * v399);
+        let v401: f64 = (self.scalar_v25 * v398);
+        let v402: f64 = (v20 * v401);
+        let v403: f64 = (v27 * v397);
+        let v404: f64 = (v402 - v403);
+        let v405: f64 = (v20 * v20);
+        let v406: f64 = (v404 / v405);
+        let v407: f64 = (v400 + v406);
+        let v409: f64 = (v33 * v407);
+        let v410: f64 = (self.scalar_v32 * v409);
+        let v413: f64 = (self.scalar_v39 * v398);
+        let v414: f64 = (self.scalar_v38 * v413);
+        let v415: f64 = (self.scalar_v44 * v398);
+        let v416: f64 = (self.scalar_v43 * v415);
+        let v417: f64 = (self.scalar_v49 * v398);
+        let v418: f64 = (self.scalar_v48 * v417);
+        let v419: f64 = (v396 / v54);
+        let v420: f64 = (v58 * v396);
+        let v421: f64 = (v59 * v396);
+        let v422: f64 = (v11 * v420);
+        let v423: f64 = (v421 + v422);
+        let v424: f64 = (v62 * v423);
+        let v425: f64 = (v60 * v396);
+        let v426: f64 = (v424 - v425);
+        let v427: f64 = (v62 * v62);
+        let v428: f64 = (v426 / v427);
+        let v429: f64 = (v396 + v396);
+        let v430: f64 = (v66 * v429);
+        let v431: f64 = (v68 * v428);
+        let v432: f64 = (v65 * v430);
+        let v433: f64 = (v431 - v432);
+        let v434: f64 = (v68 * v68);
+        let v435: f64 = (v433 / v434);
+        let v436: f64 = (v397 + v397);
+        let v437: f64 = (-v436);
+        let v438: f64 = (v419 / v56);
+        let v439: f64 = (v74 * v438);
+        let v440: f64 = (v77 * v435);
+        let v441: f64 = (v439 + v440);
+        let v442: f64 = (v79 * v437);
+        let v443: f64 = (v73 * v441);
+        let v444: f64 = (v442 + v443);
+        let v445: f64 = (-v444);
+        let v446: f64 = (v445 / self.scalar_v55);
+        let v447: f64 = (-v446);
+        let v448: f64 = (v83 * v447);
+        let v449: f64 = (v84 * v446);
+        let v450: f64 = (v448 - v449);
+        let v451: f64 = (v83 * v83);
+        let v452: f64 = (v450 / v451);
+        let v453: f64 = (-v452);
+        let v454: f64 = (self.scalar_v86 * v453);
+        let v455: f64 = (self.scalar_v53 * v454);
+        let v456: f64 = (-v455);
+        let v457: f64 = (v92 * v92);
+        let v458: f64 = (v456 / v457);
+        let v459: f64 = (v83 * v419);
+        let v460: f64 = (v56 * v446);
+        let v461: f64 = (v459 + v460);
+        let v462: f64 = (v444 + v461);
+        let v463: f64 = (v462 - v446);
+        let v464: f64 = (v83 * v463);
+        let v465: f64 = (v96 * v446);
+        let v466: f64 = (v464 - v465);
+        let v467: f64 = (v466 / v451);
+        let v468: f64 = (v87 * v396);
+        let v469: f64 = (v468 - v467);
+        let v470: f64 = (self.scalar_v86 * v469);
+        let v471: f64 = (v102 * v458);
+        let v472: f64 = (v93 * v470);
+        let v473: f64 = (v471 + v472);
+        let v475: f64 = (self.scalar_v116 * v397);
+        let v476: f64 = (v108 * v475);
+        let v477: f64 = (-v476);
+        let v478: f64 = (v117 * v117);
+        let v479: f64 = (v477 / v478);
+        let v480: f64 = (self.scalar_v104 / v117);
+        let v481: f64 = (self.scalar_v474 / v117);
+        let v482: f64 = (if v115 { v479 } else { v13 });
+        let v483: f64 = (if v115 { v480 } else { v13 });
+        let v484: f64 = (if v115 { v481 } else { v13 });
+        let v485: f64 = (-v416);
+        let v486: f64 = (self.scalar_v122 * v397);
+        let v487: f64 = (v123 * v485);
+        let v488: f64 = (v121 * v486);
+        let v489: f64 = (v487 - v488);
+        let v490: f64 = (v123 * v123);
+        let v491: f64 = (v489 / v490);
+        let v492: f64 = (self.scalar_v474 / v123);
+        let v493: f64 = (self.scalar_v104 / v123);
+        let v494: f64 = (if v115 { v491 } else { v13 });
+        let v495: f64 = (if v115 { v492 } else { v13 });
         let v496: f64 = (if v115 { v493 } else { v13 });
-        let v497: f64 = (if v115 { v494 } else { v13 });
-        let v498: f64 = (if v115 { v495 } else { v13 });
-        let v499: f64 = (-v430);
-        let v500: f64 = (self.scalar_v122 * v411);
-        let v501: f64 = (v123 * v499);
-        let v502: f64 = (v121 * v500);
-        let v503: f64 = (v501 - v502);
-        let v504: f64 = (v123 * v123);
-        let v505: f64 = (v503 / v504);
-        let v506: f64 = (self.scalar_v488 / v123);
-        let v507: f64 = (self.scalar_v104 / v123);
-        let v508: f64 = (if v115 { v505 } else { v13 });
-        let v509: f64 = (if v115 { v506 } else { v13 });
-        let v510: f64 = (if v115 { v507 } else { v13 });
-        let v511: f64 = (v126 * v500);
-        let v512: f64 = (v501 - v511);
-        let v513: f64 = (v512 / v504);
-        let v514: f64 = (if v115 { v513 } else { v13 });
-        let v515: f64 = (if v131 { v496 } else { v13 });
-        let v516: f64 = (if v131 { v497 } else { v13 });
-        let v517: f64 = (if v131 { v498 } else { v13 });
-        let v518: f64 = (if v131 { v13 } else { v496 });
-        let v519: f64 = (if v131 { v13 } else { v497 });
-        let v520: f64 = (if v131 { v13 } else { v498 });
-        let v521: f64 = (if v137 { v13 } else { v515 });
-        let v522: f64 = (if v137 { v13 } else { v516 });
-        let v523: f64 = (if v137 { v13 } else { v517 });
-        let v524: f64 = (v139 * v518);
-        let v525: f64 = (v139 * v519);
-        let v526: f64 = (v139 * v520);
-        let v527: f64 = (v139 * v521);
-        let v528: f64 = (v138 * v524);
-        let v529: f64 = (v527 + v528);
-        let v530: f64 = (v139 * v522);
-        let v531: f64 = (v138 * v525);
-        let v532: f64 = (v530 + v531);
-        let v533: f64 = (v139 * v523);
-        let v534: f64 = (v138 * v526);
-        let v535: f64 = (v533 + v534);
-        let v536: f64 = (if v115 { v529 } else { v521 });
-        let v537: f64 = (if v115 { v532 } else { v522 });
-        let v538: f64 = (if v115 { v535 } else { v523 });
-        let v539: f64 = (v149 * v508);
-        let v540: f64 = (v149 * v509);
-        let v541: f64 = (v149 * v510);
-        let v542: f64 = (v539 / v150);
-        let v543: f64 = (v540 / v150);
-        let v544: f64 = (v541 / v150);
-        let v545: f64 = (if v143 { v508 } else { v13 });
-        let v546: f64 = (if v143 { v509 } else { v13 });
-        let v547: f64 = (if v143 { v510 } else { v13 });
-        let v548: f64 = (if v152 { v539 } else { v545 });
-        let v549: f64 = (if v152 { v540 } else { v546 });
-        let v550: f64 = (if v152 { v541 } else { v547 });
-        let v551: f64 = (if v148 { v542 } else { v548 });
-        let v552: f64 = (if v148 { v543 } else { v549 });
-        let v553: f64 = (if v148 { v544 } else { v550 });
-        let v554: f64 = (v161 * v514);
-        let v555: f64 = (v554 / v162);
-        let v556: f64 = (if v156 { v514 } else { v13 });
-        let v557: f64 = (if v164 { v554 } else { v556 });
-        let v558: f64 = (if v160 { v555 } else { v557 });
-        let v559: f64 = (v551 - v558);
-        let v560: f64 = (if v115 { v559 } else { v13 });
-        let v561: f64 = (if v115 { v552 } else { v13 });
-        let v562: f64 = (if v115 { v553 } else { v13 });
-        let v563: f64 = (v170 * v424);
-        let v564: f64 = (v34 * v536);
-        let v565: f64 = (v563 + v564);
-        let v566: f64 = (v34 * v537);
-        let v567: f64 = (v34 * v538);
-        let v568: f64 = (v169 * v428);
-        let v569: f64 = (v42 * v560);
-        let v570: f64 = (v568 + v569);
-        let v571: f64 = (v42 * v561);
-        let v572: f64 = (v42 * v562);
-        let v573: f64 = ((v174) as f64).ln();
-        let v574: f64 = (v175 * v573);
-        let v575: f64 = (v432 * v574);
-        let v576: f64 = (self.scalar_v173 * v575);
-        let v577: f64 = (v177 * v570);
-        let v578: f64 = (v172 * v576);
-        let v579: f64 = (v577 - v578);
-        let v580: f64 = (v177 * v177);
-        let v581: f64 = (v579 / v580);
-        let v582: f64 = (v571 / v177);
-        let v583: f64 = (v572 / v177);
-        let v584: f64 = (v565 - v581);
-        let v585: f64 = (v566 - v582);
-        let v586: f64 = (v567 - v583);
-        let v587: f64 = (if v115 { v584 } else { v13 });
-        let v588: f64 = (if v115 { v585 } else { v13 });
-        let v589: f64 = (if v115 { v586 } else { v13 });
-        let v590: f64 = (if v181 { v13 } else { v587 });
-        let v591: f64 = (if v181 { v13 } else { v588 });
-        let v592: f64 = (if v181 { v13 } else { v589 });
-        let v666: f64 = (v265 * v590);
-        let v667: f64 = (v265 * v591);
-        let v668: f64 = (v265 * v592);
-        let v672: f64 = (-v476);
-        let v673: f64 = (self.scalar_v281 * v672);
-        let v674: f64 = (v293 * v476);
-        let v675: f64 = (v674 / self.scalar_v295);
-        let v676: f64 = (if v284 { v675 } else { v13 });
-        let v677: f64 = (self.scalar_v299 * v673);
-        let v680: f64 = (v95 * v677);
-        let v681: f64 = (v300 * v476);
-        let v682: f64 = (v680 - v681);
-        let v683: f64 = (v95 * v95);
-        let v684: f64 = (v682 / v683);
-        let v685: f64 = (self.scalar_v678 / v95);
-        let v686: f64 = (self.scalar_v679 / v95);
-        let v687: f64 = (v302 * v673);
-        let v688: f64 = (v283 * v684);
-        let v689: f64 = (v687 + v688);
-        let v690: f64 = (self.scalar_v104 * v302);
-        let v691: f64 = (v283 * v685);
-        let v692: f64 = (v690 + v691);
-        let v693: f64 = (v302 * self.scalar_v488);
-        let v694: f64 = (v283 * v686);
-        let v695: f64 = (v693 + v694);
-        let v696: f64 = (v290 * v689);
-        let v697: f64 = (v290 * v692);
-        let v698: f64 = (v290 * v695);
-        let v699: f64 = (if v284 { v696 } else { v13 });
-        let v700: f64 = (if v284 { v697 } else { v13 });
-        let v701: f64 = (if v284 { v698 } else { v13 });
-        let v702: f64 = (v108 * v476);
-        let v703: f64 = (-v702);
-        let v704: f64 = (v703 / v683);
-        let v705: f64 = (self.scalar_v104 / v95);
-        let v706: f64 = (self.scalar_v488 / v95);
-        let v707: f64 = (-v704);
-        let v708: f64 = (-v705);
-        let v709: f64 = (-v706);
-        let v710: f64 = (v707 / v308);
-        let v711: f64 = (v708 / v308);
-        let v712: f64 = (v709 / v308);
-        let v713: f64 = (self.scalar_v295 * v710);
-        let v714: f64 = (self.scalar_v295 * v711);
-        let v715: f64 = (self.scalar_v295 * v712);
-        let v716: f64 = (v311 * v713);
-        let v717: f64 = (v311 * v714);
-        let v718: f64 = (v311 * v715);
-        let v719: f64 = (-v716);
-        let v720: f64 = (-v717);
-        let v721: f64 = (-v718);
-        let v722: f64 = (v312 * v476);
-        let v723: f64 = (v95 * v719);
+        let v497: f64 = (v126 * v486);
+        let v498: f64 = (v487 - v497);
+        let v499: f64 = (v498 / v490);
+        let v500: f64 = (if v115 { v499 } else { v13 });
+        let v501: f64 = (if v131 { v482 } else { v13 });
+        let v502: f64 = (if v131 { v483 } else { v13 });
+        let v503: f64 = (if v131 { v484 } else { v13 });
+        let v504: f64 = (if v131 { v13 } else { v482 });
+        let v505: f64 = (if v131 { v13 } else { v483 });
+        let v506: f64 = (if v131 { v13 } else { v484 });
+        let v507: f64 = (if v137 { v13 } else { v501 });
+        let v508: f64 = (if v137 { v13 } else { v502 });
+        let v509: f64 = (if v137 { v13 } else { v503 });
+        let v510: f64 = (v139 * v504);
+        let v511: f64 = (v139 * v505);
+        let v512: f64 = (v139 * v506);
+        let v513: f64 = (v139 * v507);
+        let v514: f64 = (v138 * v510);
+        let v515: f64 = (v513 + v514);
+        let v516: f64 = (v139 * v508);
+        let v517: f64 = (v138 * v511);
+        let v518: f64 = (v516 + v517);
+        let v519: f64 = (v139 * v509);
+        let v520: f64 = (v138 * v512);
+        let v521: f64 = (v519 + v520);
+        let v522: f64 = (if v115 { v515 } else { v507 });
+        let v523: f64 = (if v115 { v518 } else { v508 });
+        let v524: f64 = (if v115 { v521 } else { v509 });
+        let v525: f64 = (v149 * v494);
+        let v526: f64 = (v149 * v495);
+        let v527: f64 = (v149 * v496);
+        let v528: f64 = (v525 / v150);
+        let v529: f64 = (v526 / v150);
+        let v530: f64 = (v527 / v150);
+        let v531: f64 = (if v143 { v494 } else { v13 });
+        let v532: f64 = (if v143 { v495 } else { v13 });
+        let v533: f64 = (if v143 { v496 } else { v13 });
+        let v534: f64 = (if v152 { v525 } else { v531 });
+        let v535: f64 = (if v152 { v526 } else { v532 });
+        let v536: f64 = (if v152 { v527 } else { v533 });
+        let v537: f64 = (if v148 { v528 } else { v534 });
+        let v538: f64 = (if v148 { v529 } else { v535 });
+        let v539: f64 = (if v148 { v530 } else { v536 });
+        let v540: f64 = (v161 * v500);
+        let v541: f64 = (v540 / v162);
+        let v542: f64 = (if v156 { v500 } else { v13 });
+        let v543: f64 = (if v164 { v540 } else { v542 });
+        let v544: f64 = (if v160 { v541 } else { v543 });
+        let v545: f64 = (v537 - v544);
+        let v546: f64 = (if v115 { v545 } else { v13 });
+        let v547: f64 = (if v115 { v538 } else { v13 });
+        let v548: f64 = (if v115 { v539 } else { v13 });
+        let v549: f64 = (v170 * v410);
+        let v550: f64 = (v34 * v522);
+        let v551: f64 = (v549 + v550);
+        let v552: f64 = (v34 * v523);
+        let v553: f64 = (v34 * v524);
+        let v554: f64 = (v169 * v414);
+        let v555: f64 = (v42 * v546);
+        let v556: f64 = (v554 + v555);
+        let v557: f64 = (v42 * v547);
+        let v558: f64 = (v42 * v548);
+        let v559: f64 = ((v174) as f64).ln();
+        let v560: f64 = (v175 * v559);
+        let v561: f64 = (v418 * v560);
+        let v562: f64 = (self.scalar_v173 * v561);
+        let v563: f64 = (v177 * v556);
+        let v564: f64 = (v172 * v562);
+        let v565: f64 = (v563 - v564);
+        let v566: f64 = (v177 * v177);
+        let v567: f64 = (v565 / v566);
+        let v568: f64 = (v557 / v177);
+        let v569: f64 = (v558 / v177);
+        let v570: f64 = (v551 - v567);
+        let v571: f64 = (v552 - v568);
+        let v572: f64 = (v553 - v569);
+        let v573: f64 = (if v115 { v570 } else { v13 });
+        let v574: f64 = (if v115 { v571 } else { v13 });
+        let v575: f64 = (if v115 { v572 } else { v13 });
+        let v576: f64 = (if v181 { v13 } else { v573 });
+        let v577: f64 = (if v181 { v13 } else { v574 });
+        let v578: f64 = (if v181 { v13 } else { v575 });
+        let v650: f64 = (v265 * v576);
+        let v651: f64 = (v265 * v577);
+        let v652: f64 = (v265 * v578);
+        let v655: f64 = (-v462);
+        let v656: f64 = (self.scalar_v279 * v655);
+        let v657: f64 = (v291 * v462);
+        let v658: f64 = (v657 / self.scalar_v293);
+        let v659: f64 = (if v282 { v658 } else { v13 });
+        let v660: f64 = (self.scalar_v297 * v656);
+        let v663: f64 = (v95 * v660);
+        let v664: f64 = (v298 * v462);
+        let v665: f64 = (v663 - v664);
+        let v666: f64 = (v95 * v95);
+        let v667: f64 = (v665 / v666);
+        let v668: f64 = (self.scalar_v661 / v95);
+        let v669: f64 = (self.scalar_v662 / v95);
+        let v670: f64 = (v300 * v656);
+        let v671: f64 = (v281 * v667);
+        let v672: f64 = (v670 + v671);
+        let v673: f64 = (self.scalar_v104 * v300);
+        let v674: f64 = (v281 * v668);
+        let v675: f64 = (v673 + v674);
+        let v676: f64 = (v300 * self.scalar_v474);
+        let v677: f64 = (v281 * v669);
+        let v678: f64 = (v676 + v677);
+        let v679: f64 = (v288 * v672);
+        let v680: f64 = (v288 * v675);
+        let v681: f64 = (v288 * v678);
+        let v682: f64 = (if v282 { v679 } else { v13 });
+        let v683: f64 = (if v282 { v680 } else { v13 });
+        let v684: f64 = (if v282 { v681 } else { v13 });
+        let v685: f64 = (v108 * v462);
+        let v686: f64 = (-v685);
+        let v687: f64 = (v686 / v666);
+        let v688: f64 = (self.scalar_v104 / v95);
+        let v689: f64 = (self.scalar_v474 / v95);
+        let v690: f64 = (-v687);
+        let v691: f64 = (-v688);
+        let v692: f64 = (-v689);
+        let v693: f64 = (v690 / v306);
+        let v694: f64 = (v691 / v306);
+        let v695: f64 = (v692 / v306);
+        let v696: f64 = (self.scalar_v293 * v693);
+        let v697: f64 = (self.scalar_v293 * v694);
+        let v698: f64 = (self.scalar_v293 * v695);
+        let v699: f64 = (v309 * v696);
+        let v700: f64 = (v309 * v697);
+        let v701: f64 = (v309 * v698);
+        let v702: f64 = (-v699);
+        let v703: f64 = (-v700);
+        let v704: f64 = (-v701);
+        let v705: f64 = (v310 * v462);
+        let v706: f64 = (v95 * v702);
+        let v707: f64 = (v705 + v706);
+        let v708: f64 = (v95 * v703);
+        let v709: f64 = (v95 * v704);
+        let v710: f64 = (v707 / self.scalar_v293);
+        let v711: f64 = (v708 / self.scalar_v293);
+        let v712: f64 = (v709 / self.scalar_v293);
+        let v713: f64 = (if v304 { v710 } else { v659 });
+        let v714: f64 = (if v304 { v711 } else { v13 });
+        let v715: f64 = (if v304 { v712 } else { v13 });
+        let v716: f64 = (if v304 { v13 } else { v682 });
+        let v717: f64 = (if v304 { v13 } else { v683 });
+        let v718: f64 = (if v304 { v13 } else { v684 });
+        let v719: f64 = (v713 + v716);
+        let v720: f64 = (v714 + v717);
+        let v721: f64 = (v715 + v718);
+        let v722: f64 = (v315 * v473);
+        let v723: f64 = (v103 * v719);
         let v724: f64 = (v722 + v723);
-        let v725: f64 = (v95 * v720);
-        let v726: f64 = (v95 * v721);
-        let v727: f64 = (v724 / self.scalar_v295);
-        let v728: f64 = (v725 / self.scalar_v295);
-        let v729: f64 = (v726 / self.scalar_v295);
-        let v730: f64 = (if v306 { v727 } else { v676 });
-        let v731: f64 = (if v306 { v728 } else { v13 });
-        let v732: f64 = (if v306 { v729 } else { v13 });
-        let v733: f64 = (if v306 { v13 } else { v699 });
-        let v734: f64 = (if v306 { v13 } else { v700 });
-        let v735: f64 = (if v306 { v13 } else { v701 });
-        let v736: f64 = (v730 + v733);
-        let v737: f64 = (v731 + v734);
-        let v738: f64 = (v732 + v735);
-        let v739: f64 = (v317 * v487);
-        let v740: f64 = (v103 * v736);
-        let v741: f64 = (v739 + v740);
-        let v742: f64 = (v103 * v737);
-        let v743: f64 = (v103 * v738);
-        let v756: f64 = 1.0;
-        let v757: f64 = (v265 * v756);
-        let v758: f64 = (if self.scalar_v268 { v757 } else { v13 });
-        let v761: f64 = (self.scalar_v360 * v756);
-        let v762: f64 = (if self.scalar_v323 { v761 } else { v13 });
-        let v766: f64 = (if self.scalar_v366 { v761 } else { v13 });
-        let v769: f64 = (self.scalar_v376 * v756);
-        let v770: f64 = (if self.scalar_v366 { v769 } else { v13 });
-        let v798: f64 = (self.scalar_v104 * v741);
-        let v799: f64 = (self.scalar_v104 * v742);
-        let v800: f64 = (self.scalar_v104 * v743);
-        let v801: f64 = (self.scalar_v16 * v798);
-        let v802: f64 = (self.scalar_v16 * v799);
-        let v803: f64 = (self.scalar_v16 * v800);
-        let v804: f64 = (self.scalar_v104 * v666);
-        let v805: f64 = (self.scalar_v104 * v667);
-        let v806: f64 = (self.scalar_v104 * v668);
-        let v807: f64 = (self.scalar_v16 * v804);
-        let v808: f64 = (self.scalar_v16 * v805);
-        let v809: f64 = (self.scalar_v16 * v806);
+        let v725: f64 = (v103 * v720);
+        let v726: f64 = (v103 * v721);
+        let v739: f64 = 1.0;
+        let v740: f64 = (v265 * v739);
+        let v741: f64 = (if self.scalar_v268 { v740 } else { v13 });
+        let v744: f64 = (self.scalar_v357 * v739);
+        let v745: f64 = (if self.scalar_v321 { v744 } else { v13 });
+        let v749: f64 = (if self.scalar_v362 { v744 } else { v13 });
+        let v752: f64 = (self.scalar_v372 * v739);
+        let v753: f64 = (if self.scalar_v362 { v752 } else { v13 });
+        let v781: f64 = (self.scalar_v104 * v724);
+        let v782: f64 = (self.scalar_v104 * v725);
+        let v783: f64 = (self.scalar_v104 * v726);
+        let v784: f64 = (self.scalar_v16 * v781);
+        let v785: f64 = (self.scalar_v16 * v782);
+        let v786: f64 = (self.scalar_v16 * v783);
+        let v787: f64 = (self.scalar_v104 * v650);
+        let v788: f64 = (self.scalar_v104 * v651);
+        let v789: f64 = (self.scalar_v104 * v652);
+        let v790: f64 = (self.scalar_v16 * v787);
+        let v791: f64 = (self.scalar_v16 * v788);
+        let v792: f64 = (self.scalar_v16 * v789);
 
-        let d352_dn6: f64 = v758;
+        let d350_dn6: f64 = v741;
         stamper.stamp_current_reactive_node1(
             Some(nodes[6]),
             None,
             nodes[6],
-            multiplicity * (d352_dn6),
+            multiplicity * (d350_dn6),
         );
-        let d363_dn2: f64 = v762;
+        let d360_dn2: f64 = v745;
         stamper.stamp_current_reactive_node1(
             Some(nodes[2]),
             None,
             nodes[2],
-            multiplicity * (d363_dn2),
+            multiplicity * (d360_dn2),
         );
-        let d373_dn2: f64 = v766;
+        let d369_dn2: f64 = v749;
         stamper.stamp_current_reactive_node1(
             Some(nodes[2]),
             None,
             nodes[2],
-            multiplicity * (d373_dn2),
+            multiplicity * (d369_dn2),
         );
-        let d379_dn5: f64 = v770;
+        let d375_dn5: f64 = v753;
         stamper.stamp_current_reactive_node1(
             Some(nodes[5]),
             None,
             nodes[5],
-            multiplicity * (d379_dn5),
+            multiplicity * (d375_dn5),
         );
-        let d406_dn2: f64 = v801;
-        let d406_dn3: f64 = v802;
-        let d406_dn4: f64 = v803;
+        let d392_dn2: f64 = v784;
+        let d392_dn3: f64 = v785;
+        let d392_dn4: f64 = v786;
         stamper.stamp_current_reactive_node3(
             Some(nodes[3]),
             Some(nodes[4]),
             nodes[2],
-            multiplicity * (d406_dn2),
+            multiplicity * (d392_dn2),
             nodes[3],
-            multiplicity * (d406_dn3),
+            multiplicity * (d392_dn3),
             nodes[4],
-            multiplicity * (d406_dn4),
+            multiplicity * (d392_dn4),
         );
-        let d408_dn2: f64 = v807;
-        let d408_dn3: f64 = v808;
-        let d408_dn4: f64 = v809;
+        let d394_dn2: f64 = v790;
+        let d394_dn3: f64 = v791;
+        let d394_dn4: f64 = v792;
         stamper.stamp_current_reactive_node3(
             Some(nodes[3]),
             Some(nodes[4]),
             nodes[2],
-            multiplicity * (d408_dn2),
+            multiplicity * (d394_dn2),
             nodes[3],
-            multiplicity * (d408_dn3),
+            multiplicity * (d394_dn3),
             nodes[4],
-            multiplicity * (d408_dn4),
+            multiplicity * (d394_dn4),
         );
     }
 }
