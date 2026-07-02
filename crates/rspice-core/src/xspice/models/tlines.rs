@@ -306,6 +306,32 @@ fn integer_param(ctx: &CmContext, name: &str, default: i64) -> i64 {
     ctx.param_or(name, default as Value).round() as i64
 }
 
+fn finite_integer_param(ctx: &CmContext, name: &str, default: i64) -> CmResult<i64> {
+    let value = ctx.param_or(name, default as Value);
+    if value.is_finite() {
+        Ok(value.round() as i64)
+    } else {
+        Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("expected finite integer value, got {value}"),
+        })
+    }
+}
+
+fn microstrip_selector_params(ctx: &CmContext) -> CmResult<(i64, i64)> {
+    Ok((
+        finite_integer_param(ctx, "model", HAMMERSTAD)?,
+        finite_integer_param(ctx, "disp", DISP_KIRSCHING)?,
+    ))
+}
+
+fn coupled_microstrip_selector_params(ctx: &CmContext) -> CmResult<(i64, i64)> {
+    Ok((
+        finite_integer_param(ctx, "model", HAMMERSTAD)?,
+        finite_integer_param(ctx, "disp", DISP_KIRSCHING)?,
+    ))
+}
+
 fn delay_boundary_breakpoints(ctx: &CmContext, delay: Value) -> CmResult<Vec<Value>> {
     if !delay.is_finite() || delay <= 0.0 {
         return Ok(Vec::new());
@@ -776,8 +802,7 @@ fn microstrip_propagation_uncached(
     let tan_delta = finite_param(ctx, "tand", 2.0e-4)?;
     let rho = nonnegative_param(ctx, "rho", 0.022e-6)?;
     let roughness = finite_param(ctx, "d", 0.15e-6)?;
-    let substrate_model = integer_param(ctx, "model", HAMMERSTAD);
-    let dispersion_model = integer_param(ctx, "disp", DISP_KIRSCHING);
+    let (substrate_model, dispersion_model) = microstrip_selector_params(ctx)?;
 
     let quasi = msline_analyse_quasi_static(w, h, t, er, substrate_model);
     let dispersion = msline_analyse_dispersion(
@@ -815,6 +840,7 @@ fn cache_microstrip_propagation(
     ctx: &mut CmContext,
     frequency: Value,
 ) -> CmResult<Arc<MicrostripPropagation>> {
+    microstrip_selector_params(ctx)?;
     if let Some(resource) =
         ctx.resource::<MicrostripPropagationResource>(MICROSTRIP_PROPAGATION_RESOURCE)
         && microstrip_propagation_signature_matches(ctx, &resource.signature, frequency)
@@ -838,6 +864,7 @@ fn microstrip_propagation(
     ctx: &CmContext,
     frequency: Value,
 ) -> CmResult<Arc<MicrostripPropagation>> {
+    microstrip_selector_params(ctx)?;
     if let Some(resource) =
         ctx.resource::<MicrostripPropagationResource>(MICROSTRIP_PROPAGATION_RESOURCE)
         && microstrip_propagation_signature_matches(ctx, &resource.signature, frequency)
@@ -1127,8 +1154,7 @@ fn coupled_microstrip_propagation_uncached(
     let tan_delta = finite_param(ctx, "tand", 2.0e-4)?;
     let rho = nonnegative_param(ctx, "rho", 0.022e-6)?;
     let roughness = finite_param(ctx, "d", 0.15e-6)?;
-    let substrate_model = integer_param(ctx, "model", HAMMERSTAD);
-    let dispersion_model = integer_param(ctx, "disp", DISP_KIRSCHING);
+    let (substrate_model, dispersion_model) = coupled_microstrip_selector_params(ctx)?;
 
     let quasi = cpmsline_analyse_quasi_static(w, h, s, t, er, substrate_model);
     let dispersion =
@@ -1175,6 +1201,7 @@ fn cache_coupled_microstrip_propagation(
     ctx: &mut CmContext,
     frequency: Value,
 ) -> CmResult<Arc<CoupledMicrostripPropagation>> {
+    coupled_microstrip_selector_params(ctx)?;
     if let Some(resource) = ctx
         .resource::<CoupledMicrostripPropagationResource>(COUPLED_MICROSTRIP_PROPAGATION_RESOURCE)
         && coupled_microstrip_propagation_signature_matches(ctx, &resource.signature, frequency)
@@ -1198,6 +1225,7 @@ fn coupled_microstrip_propagation(
     ctx: &CmContext,
     frequency: Value,
 ) -> CmResult<Arc<CoupledMicrostripPropagation>> {
+    coupled_microstrip_selector_params(ctx)?;
     if let Some(resource) = ctx
         .resource::<CoupledMicrostripPropagationResource>(COUPLED_MICROSTRIP_PROPAGATION_RESOURCE)
         && coupled_microstrip_propagation_signature_matches(ctx, &resource.signature, frequency)
@@ -1263,9 +1291,8 @@ fn msopen_admittance(ctx: &CmContext, frequency: Value) -> CmResult<Complex64> {
     let t = nonnegative_param(ctx, "t", 35.0e-6)?;
     let er = positive_param(ctx, "er", 9.8)?;
 
-    let substrate_model = integer_param(ctx, "model", HAMMERSTAD);
-    let dispersion_model = integer_param(ctx, "disp", DISP_KIRSCHING);
-    let open_model = integer_param(ctx, "msopen_model", MSOPEN_KIRSCHNING);
+    let (substrate_model, dispersion_model) = microstrip_selector_params(ctx)?;
+    let open_model = finite_integer_param(ctx, "msopen_model", MSOPEN_KIRSCHNING)?;
 
     let omega = std::f64::consts::TAU * frequency;
     if open_model == MSOPEN_ALEXOPOULOS {
@@ -1547,7 +1574,7 @@ fn mlin_length(ctx: &CmContext) -> CmResult<Value> {
 }
 
 fn mlin_tran_model(ctx: &CmContext) -> CmResult<i64> {
-    Ok(integer_param(ctx, "tranmodel", TRAN_DC))
+    finite_integer_param(ctx, "tranmodel", TRAN_DC)
 }
 
 fn mlin_ac_impedances_uncached(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
@@ -1559,6 +1586,7 @@ fn mlin_ac_impedances_uncached(ctx: &CmContext, frequency: Value) -> CmResult<Tw
 }
 
 fn mlin_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
+    microstrip_selector_params(ctx)?;
     let signature = mline_ac_impedance_signature(ctx, frequency);
     let Some(cache) = ctx.resource::<MlineAcImpedanceCache>(MLINE_AC_IMPEDANCE_RESOURCE) else {
         return mlin_ac_impedances_uncached(ctx, frequency);
@@ -1939,7 +1967,7 @@ fn cpmlin_length(ctx: &CmContext) -> CmResult<Value> {
 }
 
 fn cpmlin_tran_model(ctx: &CmContext) -> CmResult<i64> {
-    Ok(integer_param(ctx, "tranmodel", TRAN_DC))
+    finite_integer_param(ctx, "tranmodel", TRAN_DC)
 }
 
 fn cpmlin_ac_impedances_uncached(
@@ -1961,6 +1989,7 @@ fn cpmlin_ac_impedances_uncached(
 }
 
 fn cpmlin_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<FourPortAcImpedances> {
+    coupled_microstrip_selector_params(ctx)?;
     let signature = cpmlin_ac_impedance_signature(ctx, frequency);
     let Some(cache) = ctx.resource::<CpmlinAcImpedanceCache>(CPMLIN_AC_IMPEDANCE_RESOURCE) else {
         return cpmlin_ac_impedances_uncached(ctx, frequency);
@@ -2770,6 +2799,53 @@ mod tests {
             !Arc::ptr_eq(&ac, &changed),
             "changed cpmlin physical parameters must refresh derived propagation"
         );
+    }
+
+    #[test]
+    fn microstrip_integer_selectors_reject_nonfinite_values_before_cache_reuse() {
+        let mut mline = microstrip_cache_context();
+        cache_microstrip_propagation(&mut mline, 0.0).expect("populate mlin cache");
+        mline.set_param("model", f64::NAN);
+        assert!(matches!(
+            cache_microstrip_propagation(&mut mline, 0.0),
+            Err(CmError::InvalidParameter { name, .. }) if name == "model"
+        ));
+
+        let mut mline_ac = microstrip_cache_context();
+        mline_ac.set_param("disp", f64::INFINITY);
+        assert!(matches!(
+            mlin_ac_impedances(&mline_ac, 1.0e9),
+            Err(CmError::InvalidParameter { name, .. }) if name == "disp"
+        ));
+
+        let mut mline_tran = microstrip_cache_context();
+        mline_tran.set_param("tranmodel", f64::NAN);
+        assert!(matches!(
+            MicrostripLine.init(&mut mline_tran),
+            Err(CmError::InvalidParameter { name, .. }) if name == "tranmodel"
+        ));
+
+        let mut cpmlin = coupled_microstrip_cache_context();
+        cache_coupled_microstrip_propagation(&mut cpmlin, 0.0).expect("populate cpmlin cache");
+        cpmlin.set_param("disp", f64::NEG_INFINITY);
+        assert!(matches!(
+            cache_coupled_microstrip_propagation(&mut cpmlin, 0.0),
+            Err(CmError::InvalidParameter { name, .. }) if name == "disp"
+        ));
+
+        let mut cpmlin_tran = coupled_microstrip_cache_context();
+        cpmlin_tran.set_param("tranmodel", f64::INFINITY);
+        assert!(matches!(
+            CoupledMicrostripLine.init(&mut cpmlin_tran),
+            Err(CmError::InvalidParameter { name, .. }) if name == "tranmodel"
+        ));
+
+        let mut msopen = microstrip_cache_context();
+        msopen.set_param("msopen_model", f64::NAN);
+        assert!(matches!(
+            MicrostripOpenEnd.init(&mut msopen),
+            Err(CmError::InvalidParameter { name, .. }) if name == "msopen_model"
+        ));
     }
 
     #[test]
