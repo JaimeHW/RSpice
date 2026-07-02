@@ -12,6 +12,8 @@ use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
     TransientResult, extract_dc_value,
 };
+use crate::expr::{Expr, parse_expression_strict};
+use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, Netlist, NetlistParseOptions,
     StatisticalParamMode, StepCommand, StepSweep, StepTarget, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
@@ -225,34 +227,34 @@ impl XyceBaselineFamilyKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticDcContract {
-    PlainStaticPrn,
-    WrapperDefaultPrn,
-    WrapperGnuplotSplotPrn,
-    WrapperHspiceMathPrn,
-    WrapperResistorDefaultPrn,
-    WrapperVoltageAccessorPrn,
+    PlainStatic,
+    WrapperDefault,
+    WrapperGnuplotSplot,
+    WrapperHspiceMath,
+    WrapperResistorDefault,
+    WrapperVoltageAccessor,
 }
 
 impl XyceStaticDcContract {
     fn result_contract(self, stepped: bool) -> &'static str {
         match (self, stepped) {
-            (Self::PlainStaticPrn, false) => "static_prn_dc",
-            (Self::PlainStaticPrn, true) => "static_prn_step_dc",
-            (Self::WrapperDefaultPrn, false) => "wrapper_static_prn_dc",
-            (Self::WrapperDefaultPrn, true) => "wrapper_static_prn_step_dc",
-            (Self::WrapperGnuplotSplotPrn, false) => "wrapper_gnuplot_splot_prn_dc",
-            (Self::WrapperGnuplotSplotPrn, true) => "wrapper_gnuplot_splot_prn_step_dc",
-            (Self::WrapperHspiceMathPrn, false) => "wrapper_hspice_math_prn_dc",
-            (Self::WrapperHspiceMathPrn, true) => "wrapper_hspice_math_prn_step_dc",
-            (Self::WrapperResistorDefaultPrn, false) => "wrapper_resistor_default_prn_dc",
-            (Self::WrapperResistorDefaultPrn, true) => "wrapper_resistor_default_prn_step_dc",
-            (Self::WrapperVoltageAccessorPrn, false) => "wrapper_voltage_accessor_prn_dc",
-            (Self::WrapperVoltageAccessorPrn, true) => "wrapper_voltage_accessor_prn_step_dc",
+            (Self::PlainStatic, false) => "static_prn_dc",
+            (Self::PlainStatic, true) => "static_prn_step_dc",
+            (Self::WrapperDefault, false) => "wrapper_static_prn_dc",
+            (Self::WrapperDefault, true) => "wrapper_static_prn_step_dc",
+            (Self::WrapperGnuplotSplot, false) => "wrapper_gnuplot_splot_prn_dc",
+            (Self::WrapperGnuplotSplot, true) => "wrapper_gnuplot_splot_prn_step_dc",
+            (Self::WrapperHspiceMath, false) => "wrapper_hspice_math_prn_dc",
+            (Self::WrapperHspiceMath, true) => "wrapper_hspice_math_prn_step_dc",
+            (Self::WrapperResistorDefault, false) => "wrapper_resistor_default_prn_dc",
+            (Self::WrapperResistorDefault, true) => "wrapper_resistor_default_prn_step_dc",
+            (Self::WrapperVoltageAccessor, false) => "wrapper_voltage_accessor_prn_dc",
+            (Self::WrapperVoltageAccessor, true) => "wrapper_voltage_accessor_prn_step_dc",
         }
     }
 
     fn compares_step_res_reference(self) -> bool {
-        matches!(self, Self::WrapperDefaultPrn)
+        matches!(self, Self::WrapperDefault)
     }
 }
 
@@ -814,7 +816,7 @@ impl XyceTestRunner {
             )?;
             contract
         } else {
-            XyceStaticDcContract::PlainStaticPrn
+            XyceStaticDcContract::PlainStatic
         };
 
         Ok(XyceExecutionPlan {
@@ -910,7 +912,7 @@ impl XyceTestRunner {
         plan: &XyceStaticDcPlan,
         _reference_path: &Path,
     ) -> Result<(), String> {
-        if matches!(contract, XyceStaticDcContract::WrapperResistorDefaultPrn) {
+        if matches!(contract, XyceStaticDcContract::WrapperResistorDefault) {
             Self::validate_resistor_default_wrapper_diagnostics(plan)?;
         }
 
@@ -947,44 +949,44 @@ impl XyceTestRunner {
         source: &str,
     ) -> Result<XyceStaticDcContract, String> {
         if Self::is_native_gnuplot_splot_wrapper_candidate(source) {
-            return Ok(XyceStaticDcContract::WrapperGnuplotSplotPrn);
+            return Ok(XyceStaticDcContract::WrapperGnuplotSplot);
         }
 
         if Self::is_native_default_prn_wrapper_candidate_path(relative_path)
             || Self::is_native_multiplicity_static_prn_wrapper_candidate_path(relative_path)
         {
             Self::validate_default_prn_wrapper_source(source)?;
-            return Ok(XyceStaticDcContract::WrapperDefaultPrn);
+            return Ok(XyceStaticDcContract::WrapperDefault);
         }
 
         if Self::is_native_hspice_math_wrapper_candidate(relative_path, source) {
             Self::validate_hspice_math_wrapper_source(source)?;
-            return Ok(XyceStaticDcContract::WrapperHspiceMathPrn);
+            return Ok(XyceStaticDcContract::WrapperHspiceMath);
         }
 
         if Self::is_native_hspice_random_wrapper_candidate(relative_path, source) {
             Self::validate_default_prn_wrapper_source(source)?;
-            return Ok(XyceStaticDcContract::WrapperDefaultPrn);
+            return Ok(XyceStaticDcContract::WrapperDefault);
         }
 
         if Self::is_native_resistor_default_wrapper_candidate(relative_path, source) {
             Self::validate_default_prn_wrapper_source(source)?;
-            return Ok(XyceStaticDcContract::WrapperResistorDefaultPrn);
+            return Ok(XyceStaticDcContract::WrapperResistorDefault);
         }
 
         if Self::is_native_step_data_wrapper_candidate(source) {
             Self::validate_default_prn_wrapper_source(source)?;
-            return Ok(XyceStaticDcContract::WrapperDefaultPrn);
+            return Ok(XyceStaticDcContract::WrapperDefault);
         }
 
         if Self::is_native_empty_wildcard_lead_current_wrapper_candidate(deck_path, source) {
             Self::validate_default_prn_wrapper_source(source)?;
-            return Ok(XyceStaticDcContract::WrapperDefaultPrn);
+            return Ok(XyceStaticDcContract::WrapperDefault);
         }
 
         if Self::is_native_voltage_accessor_wrapper_candidate(source) {
             Self::validate_default_prn_wrapper_source(source)?;
-            return Ok(XyceStaticDcContract::WrapperVoltageAccessorPrn);
+            return Ok(XyceStaticDcContract::WrapperVoltageAccessor);
         }
 
         Err(Self::upstream_wrapper_required_reason().to_string())
@@ -1358,7 +1360,7 @@ impl XyceTestRunner {
         };
 
         if mismatches.is_empty()
-            && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn)
+            && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplot)
         {
             let batches = [XyceDcResultBatch {
                 netlist: netlist.clone(),
@@ -1392,7 +1394,7 @@ impl XyceTestRunner {
         }
 
         if mismatches.is_empty()
-            && !matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn)
+            && !matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplot)
         {
             let batches = [XyceDcResultBatch {
                 netlist: netlist.clone(),
@@ -1804,7 +1806,7 @@ impl XyceTestRunner {
         };
 
         if mismatches.is_empty()
-            && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn)
+            && matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplot)
         {
             let side_mismatches =
                 match self.compare_gnuplot_splot_side_output_batches(&plan, &batches) {
@@ -1834,7 +1836,7 @@ impl XyceTestRunner {
         }
 
         if mismatches.is_empty() {
-            if !matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplotPrn) {
+            if !matches!(plan.contract, XyceStaticDcContract::WrapperGnuplotSplot) {
                 let side_mismatches =
                     match self.compare_prn_compatible_side_output_batches(&plan, &batches) {
                         Ok(mismatches) => mismatches,
@@ -2486,10 +2488,10 @@ impl XyceTestRunner {
             .first()
             .is_some_and(|column| column.eq_ignore_ascii_case("Index"));
         let time_column = usize::from(has_index_column);
-        if !reference
+        if reference
             .columns
             .get(time_column)
-            .is_some_and(|column| Self::normalize_probe(column) == "time")
+            .is_none_or(|column| Self::normalize_probe(column) != "time")
         {
             return Err("expected Xyce transient .prn table to contain a TIME column".to_string());
         }
@@ -3340,15 +3342,23 @@ impl XyceTestRunner {
         for probe in &print.probes {
             Self::validate_tran_probe(probe, netlist)?;
         }
-        Self::validate_resistive_transient_contract(netlist)?;
+        Self::validate_native_transient_contract(netlist)?;
 
         Ok(())
     }
 
-    fn validate_resistive_transient_contract(netlist: &Netlist) -> Result<(), String> {
+    fn validate_native_transient_contract(netlist: &Netlist) -> Result<(), String> {
         for element in &netlist.elements {
             match &element.kind {
                 ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_) => {}
+                ElementKind::BehavioralVoltage { expression, .. }
+                | ElementKind::BehavioralCurrent { expression, .. } => {
+                    Self::validate_transient_behavioral_expression(
+                        &element.name,
+                        expression,
+                        &netlist.params,
+                    )?;
+                }
                 ElementKind::Resistor { value_expr, .. } => {
                     if value_expr
                         .as_deref()
@@ -3362,13 +3372,58 @@ impl XyceTestRunner {
                 }
                 _ => {
                     return Err(format!(
-                        "native static .PRINT TRAN comparison currently supports source/resistor-only transient decks; element '{}' requires a broader transient oracle contract",
+                        "native static .PRINT TRAN comparison currently supports independent, behavioral, and static-resistor transient decks; element '{}' requires a broader transient oracle contract",
                         element.name
                     ));
                 }
             }
         }
         Ok(())
+    }
+
+    fn validate_transient_behavioral_expression(
+        element_name: &str,
+        expression: &str,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<(), String> {
+        let prepared = prepare_behavioral_expression(expression, params).map_err(|err| {
+            format!(
+                "native static .PRINT TRAN comparison could not prepare behavioral expression '{}' on element '{}': {err}",
+                expression, element_name
+            )
+        })?;
+        let ast = parse_expression_strict(&prepared).map_err(|err| {
+            format!(
+                "native static .PRINT TRAN comparison does not yet support behavioral expression '{}' on element '{}': {err}",
+                expression, element_name
+            )
+        })?;
+        if Self::behavioral_expression_depends_on_time_or_frequency(&ast) {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not yet support time-dependent behavioral expression '{}' on element '{}'",
+                expression, element_name
+            ));
+        }
+        Ok(())
+    }
+
+    fn behavioral_expression_depends_on_time_or_frequency(expression: &Expr) -> bool {
+        match expression {
+            Expr::Const(_) | Expr::NodeVoltage(_) | Expr::BranchCurrent(_) | Expr::Temperature => {
+                false
+            }
+            Expr::Time | Expr::Frequency => true,
+            Expr::Unary { operand, .. } => {
+                Self::behavioral_expression_depends_on_time_or_frequency(operand)
+            }
+            Expr::Binary { left, right, .. } => {
+                Self::behavioral_expression_depends_on_time_or_frequency(left)
+                    || Self::behavioral_expression_depends_on_time_or_frequency(right)
+            }
+            Expr::Function { args, .. } => args
+                .iter()
+                .any(Self::behavioral_expression_depends_on_time_or_frequency),
+        }
     }
 
     fn expression_references_time_symbol(expression: &str) -> bool {
