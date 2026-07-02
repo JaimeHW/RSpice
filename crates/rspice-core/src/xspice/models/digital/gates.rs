@@ -85,6 +85,22 @@ fn digital_logic_code(value: DigitalValue) -> i64 {
     }
 }
 
+fn base_digital_state(value: DigitalValue) -> DigitalState {
+    match value.state.logic_level() {
+        Some(false) => DigitalState::Zero,
+        Some(true) => DigitalState::One,
+        None => DigitalState::Unknown,
+    }
+}
+
+fn inverted_base_digital_state(value: DigitalValue) -> DigitalState {
+    match value.state.logic_level() {
+        Some(false) => DigitalState::One,
+        Some(true) => DigitalState::Zero,
+        None => DigitalState::Unknown,
+    }
+}
+
 fn strong_value_from_logic_code(code: i64) -> DigitalValue {
     match code {
         0 => DigitalValue::zero(),
@@ -154,12 +170,13 @@ fn tristate_params() -> &'static [ParamSpec] {
 }
 
 fn tristate_output(input: DigitalValue, enable: DigitalValue) -> DigitalValue {
+    let state = base_digital_state(input);
     let strength = match enable.state.logic_level() {
         Some(false) => DigitalStrength::HighZ,
         Some(true) => DigitalStrength::Strong,
         None => DigitalStrength::Undetermined,
     };
-    DigitalValue::new(input.state, strength)
+    DigitalValue::new(state, strength)
 }
 
 fn tristate_value_from_codes(state_code: i64, strength_code: i64) -> DigitalValue {
@@ -844,7 +861,7 @@ impl CodeModel for DigitalInverter {
         let fall = official_digital_delay(ctx, "fall_delay");
         let input = ctx.input_digital("in").unwrap_or_default();
         let prev = ctx.int_state(0);
-        let result = input.state.invert();
+        let result = inverted_base_digital_state(input);
         let new_state = if result.is_high() {
             1
         } else if result.is_low() {
@@ -901,7 +918,7 @@ impl CodeModel for DigitalBuffer {
         let fall = official_digital_delay(ctx, "fall_delay");
         let input = ctx.input_digital("in").unwrap_or_default();
         let prev = ctx.int_state(0);
-        let result = input.state;
+        let result = base_digital_state(input);
         let new_state = if result.is_high() {
             1
         } else if result.is_low() {
@@ -1521,6 +1538,87 @@ mod tests {
         assert_eq!(and_op(&[]), DigitalState::One);
         assert_eq!(or_op(&[]), DigitalState::Zero);
         assert_eq!(xor_op(&[]), DigitalState::Zero);
+    }
+
+    #[test]
+    fn one_bit_gates_normalize_extended_input_state_like_ngspice() {
+        let mut buffer_ctx = CmContext::new();
+        buffer_ctx.set_input_digital(
+            "in",
+            DigitalValue::new(DigitalState::OneR, DigitalStrength::Resistive),
+        );
+        DigitalBuffer.init(&mut buffer_ctx).expect("d_buffer init");
+        DigitalBuffer
+            .evaluate(&mut buffer_ctx)
+            .expect("d_buffer evaluates");
+        assert_eq!(
+            buffer_ctx.output_digital_vector_value("out", 0),
+            Some(DigitalValue::one())
+        );
+
+        let mut inverter_ctx = CmContext::new();
+        inverter_ctx.set_input_digital(
+            "in",
+            DigitalValue::new(DigitalState::ZeroZ, DigitalStrength::HighZ),
+        );
+        DigitalInverter
+            .init(&mut inverter_ctx)
+            .expect("d_inverter init");
+        DigitalInverter
+            .evaluate(&mut inverter_ctx)
+            .expect("d_inverter evaluates");
+        assert_eq!(
+            inverter_ctx.output_digital_vector_value("out", 0),
+            Some(DigitalValue::one())
+        );
+
+        let mut high_z_ctx = CmContext::new();
+        high_z_ctx.set_input_digital("in", DigitalValue::high_z());
+        DigitalBuffer.init(&mut high_z_ctx).expect("d_buffer init");
+        DigitalBuffer
+            .evaluate(&mut high_z_ctx)
+            .expect("d_buffer evaluates");
+        assert_eq!(
+            high_z_ctx.output_digital_vector_value("out", 0),
+            Some(DigitalValue::unknown())
+        );
+    }
+
+    #[test]
+    fn tristate_normalizes_input_state_and_uses_enable_strength_like_ngspice() {
+        let mut enabled_ctx = CmContext::new();
+        enabled_ctx.set_input_digital("in", DigitalValue::high_z());
+        enabled_ctx.set_input_digital("enable", DigitalValue::one());
+        DigitalTristate
+            .init(&mut enabled_ctx)
+            .expect("d_tristate init");
+        DigitalTristate
+            .evaluate(&mut enabled_ctx)
+            .expect("d_tristate evaluates");
+        assert_eq!(
+            enabled_ctx.output_digital_vector_value("out", 0),
+            Some(DigitalValue::new(
+                DigitalState::Unknown,
+                DigitalStrength::Strong
+            ))
+        );
+
+        let mut disabled_ctx = CmContext::new();
+        disabled_ctx.set_input_digital(
+            "in",
+            DigitalValue::new(DigitalState::OneR, DigitalStrength::Resistive),
+        );
+        disabled_ctx.set_input_digital("enable", DigitalValue::zero());
+        DigitalTristate
+            .init(&mut disabled_ctx)
+            .expect("d_tristate init");
+        DigitalTristate
+            .evaluate(&mut disabled_ctx)
+            .expect("d_tristate evaluates");
+        assert_eq!(
+            disabled_ctx.output_digital_vector_value("out", 0),
+            Some(DigitalValue::new(DigitalState::One, DigitalStrength::HighZ))
+        );
     }
 
     #[test]
