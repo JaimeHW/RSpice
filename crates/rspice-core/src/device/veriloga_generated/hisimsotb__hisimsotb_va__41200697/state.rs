@@ -797,8 +797,8 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) scalar_static_f64: Box<[f64; 61]>,
-    pub(crate) scalar_static_bool: Box<[bool; 6]>,
+    pub(crate) scalar_static_f64: Box<[f64; 76]>,
+    pub(crate) scalar_static_bool: Box<[bool; 9]>,
 }
 
 impl Clone for Instance {
@@ -864,8 +864,8 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            scalar_static_f64: boxed_zero_f64_array::<61>(),
-            scalar_static_bool: boxed_zero_bool_array::<6>(),
+            scalar_static_f64: boxed_zero_f64_array::<76>(),
+            scalar_static_bool: boxed_zero_bool_array::<9>(),
         };
         instance.recompute_instance_static();
         instance
@@ -1410,8 +1410,26 @@ impl Instance {
         self.scalar_static_f64[56]=(if self.scalar_static_bool[4]{1000.0}else{self.scalar_static_f64[55]});
         self.scalar_static_bool[5]=(!(self.scalar_static_f64[38]!=0.0));
         self.scalar_static_f64[57]=(if self.scalar_static_bool[5]{1000.0}else{self.scalar_static_f64[56]});
-        self.scalar_static_f64[58]=(-self.scalar_static_f64[57]);
-        self.scalar_static_f64[59]=(if (self.scalar_static_f64[37]!=0.0){self.scalar_static_f64[57]}else{0.0});
-        self.scalar_static_f64[60]=(if (self.scalar_static_f64[37]!=0.0){self.scalar_static_f64[58]}else{0.0});
+        self.scalar_static_f64[58]=p.p312;
+        self.scalar_static_bool[6]=(1.0==self.scalar_static_f64[58]);
+        self.scalar_static_f64[59]=(if self.scalar_static_bool[6]{1.0}else{0.0});
+        self.scalar_static_f64[60]=p.p313;
+        self.scalar_static_bool[7]=(1.0==self.scalar_static_f64[60]);
+        self.scalar_static_f64[61]=(if self.scalar_static_bool[7]{1.0}else{0.0});
+        self.scalar_static_bool[8]=(true&&(self.scalar_static_f64[61]!=0.0));
+        self.scalar_static_f64[62]=(if self.scalar_static_bool[8]{0.0001}else{0.0});
+        self.scalar_static_f64[63]=(if (self.scalar_static_f64[59]!=0.0){self.scalar_static_f64[62]}else{0.0});
+        self.scalar_static_f64[64]=(if (self.scalar_static_f64[61]!=0.0){self.scalar_static_f64[62]}else{0.0});
+        self.scalar_static_f64[65]=(-1.0/self.scalar_static_f64[63]);
+        self.scalar_static_f64[66]=(1.0/self.scalar_static_f64[63]);
+        self.scalar_static_f64[67]=(if (self.scalar_static_f64[58]!=0.0){self.scalar_static_f64[65]}else{0.0});
+        self.scalar_static_f64[68]=(if (self.scalar_static_f64[58]!=0.0){self.scalar_static_f64[66]}else{0.0});
+        self.scalar_static_f64[69]=(1.0/self.scalar_static_f64[64]);
+        self.scalar_static_f64[70]=(-1.0/self.scalar_static_f64[64]);
+        self.scalar_static_f64[71]=(if (self.scalar_static_f64[60]!=0.0){self.scalar_static_f64[69]}else{0.0});
+        self.scalar_static_f64[72]=(if (self.scalar_static_f64[60]!=0.0){self.scalar_static_f64[70]}else{0.0});
+        self.scalar_static_f64[73]=(-self.scalar_static_f64[57]);
+        self.scalar_static_f64[74]=(if (self.scalar_static_f64[37]!=0.0){self.scalar_static_f64[57]}else{0.0});
+        self.scalar_static_f64[75]=(if (self.scalar_static_f64[37]!=0.0){self.scalar_static_f64[73]}else{0.0});
     }
 }

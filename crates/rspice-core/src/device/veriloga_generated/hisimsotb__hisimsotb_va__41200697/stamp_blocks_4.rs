@@ -3003,15 +3003,11 @@ impl Instance {
         ddt_derivative_previous: &mut [f64; Instance::DDT_STATE_COUNT],
         locals: &mut StampLocals,
     ) {
-        let nv0 = ctx.node_voltage(nodes[0]);
-        let nv2 = ctx.node_voltage(nodes[2]);
         let nv4 = ctx.node_voltage(nodes[4]);
         let nv7 = ctx.node_voltage(nodes[7]);
         let nv8 = ctx.node_voltage(nodes[8]);
         let nv9 = ctx.node_voltage(nodes[9]);
         let nv10 = ctx.node_voltage(nodes[10]);
-        let nv11 = ctx.node_voltage(nodes[11]);
-        let nv12 = ctx.node_voltage(nodes[12]);
         let eq0_e342: f64 = (p.p33 * locals.var_ids);
         let eq0_e342_d_n0: f64 = (p.p33 * locals.var_ids_dn0);
         let eq0_e342_d_n2: f64 = (p.p33 * locals.var_ids_dn2);
@@ -3154,62 +3150,6 @@ impl Instance {
             multiplicity * (eq5_value),
             [0, 2, 4, 5, 6, 8, 10, 11, 12],
             [multiplicity * (eq5_e361_d_n0), multiplicity * (eq5_e361_d_n2), multiplicity * (eq5_e361_d_n4), multiplicity * (eq5_e361_d_n5), multiplicity * (eq5_e361_d_n6), multiplicity * (eq5_e361_d_n8), multiplicity * (eq5_e361_d_n10), multiplicity * (eq5_e361_d_n11), multiplicity * (eq5_e361_d_n12)],
-            [],
-            [],
-            1.0,
-        );
-        let (eq6_e367, eq6_e367_d_n0, eq6_e367_d_n2, eq6_e367_d_n4, eq6_e367_d_n5, eq6_e367_d_n6, eq6_e367_d_n8, eq6_e367_d_n10, eq6_e367_d_n11, eq6_e367_d_n12,) = {
-    if (p.p312 != 0.0) {
-        let eq6_e365: f64 = ((nv12 - nv2) / locals.var_rsd);
-        let eq6_e365_d_n0: f64 = (-(((nv12 - nv2) * locals.var_rsd_dn0) / (locals.var_rsd * locals.var_rsd)));
-        let eq6_e365_d_n2: f64 = (((-locals.var_rsd) - ((nv12 - nv2) * locals.var_rsd_dn2)) / (locals.var_rsd * locals.var_rsd));
-        let eq6_e365_d_n4: f64 = (-(((nv12 - nv2) * locals.var_rsd_dn4) / (locals.var_rsd * locals.var_rsd)));
-        let eq6_e365_d_n5: f64 = (-(((nv12 - nv2) * locals.var_rsd_dn5) / (locals.var_rsd * locals.var_rsd)));
-        let eq6_e365_d_n6: f64 = (-(((nv12 - nv2) * locals.var_rsd_dn6) / (locals.var_rsd * locals.var_rsd)));
-        let eq6_e365_d_n8: f64 = (-(((nv12 - nv2) * locals.var_rsd_dn8) / (locals.var_rsd * locals.var_rsd)));
-        let eq6_e365_d_n10: f64 = (-(((nv12 - nv2) * locals.var_rsd_dn10) / (locals.var_rsd * locals.var_rsd)));
-        let eq6_e365_d_n11: f64 = (-(((nv12 - nv2) * locals.var_rsd_dn11) / (locals.var_rsd * locals.var_rsd)));
-        let eq6_e365_d_n12: f64 = ((locals.var_rsd - ((nv12 - nv2) * locals.var_rsd_dn12)) / (locals.var_rsd * locals.var_rsd));
-        (eq6_e365, eq6_e365_d_n0, eq6_e365_d_n2, eq6_e365_d_n4, eq6_e365_d_n5, eq6_e365_d_n6, eq6_e365_d_n8, eq6_e365_d_n10, eq6_e365_d_n11, eq6_e365_d_n12,)
-    } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
-    }
-};
-        let eq6_value: f64 = eq6_e367;
-        stamper.stamp_current_sparse_local::<9, 0>(
-            Some(12),
-            Some(2),
-            multiplicity * (eq6_value),
-            [0, 2, 4, 5, 6, 8, 10, 11, 12],
-            [multiplicity * (eq6_e367_d_n0), multiplicity * (eq6_e367_d_n2), multiplicity * (eq6_e367_d_n4), multiplicity * (eq6_e367_d_n5), multiplicity * (eq6_e367_d_n6), multiplicity * (eq6_e367_d_n8), multiplicity * (eq6_e367_d_n10), multiplicity * (eq6_e367_d_n11), multiplicity * (eq6_e367_d_n12)],
-            [],
-            [],
-            1.0,
-        );
-        let (eq8_e378, eq8_e378_d_n0, eq8_e378_d_n2, eq8_e378_d_n4, eq8_e378_d_n5, eq8_e378_d_n6, eq8_e378_d_n8, eq8_e378_d_n10, eq8_e378_d_n11, eq8_e378_d_n12,) = {
-    if (p.p313 != 0.0) {
-        let eq8_e376: f64 = ((nv0 - nv11) / locals.var_rdd);
-        let eq8_e376_d_n0: f64 = ((locals.var_rdd - ((nv0 - nv11) * locals.var_rdd_dn0)) / (locals.var_rdd * locals.var_rdd));
-        let eq8_e376_d_n2: f64 = (-(((nv0 - nv11) * locals.var_rdd_dn2) / (locals.var_rdd * locals.var_rdd)));
-        let eq8_e376_d_n4: f64 = (-(((nv0 - nv11) * locals.var_rdd_dn4) / (locals.var_rdd * locals.var_rdd)));
-        let eq8_e376_d_n5: f64 = (-(((nv0 - nv11) * locals.var_rdd_dn5) / (locals.var_rdd * locals.var_rdd)));
-        let eq8_e376_d_n6: f64 = (-(((nv0 - nv11) * locals.var_rdd_dn6) / (locals.var_rdd * locals.var_rdd)));
-        let eq8_e376_d_n8: f64 = (-(((nv0 - nv11) * locals.var_rdd_dn8) / (locals.var_rdd * locals.var_rdd)));
-        let eq8_e376_d_n10: f64 = (-(((nv0 - nv11) * locals.var_rdd_dn10) / (locals.var_rdd * locals.var_rdd)));
-        let eq8_e376_d_n11: f64 = (((-locals.var_rdd) - ((nv0 - nv11) * locals.var_rdd_dn11)) / (locals.var_rdd * locals.var_rdd));
-        let eq8_e376_d_n12: f64 = (-(((nv0 - nv11) * locals.var_rdd_dn12) / (locals.var_rdd * locals.var_rdd)));
-        (eq8_e376, eq8_e376_d_n0, eq8_e376_d_n2, eq8_e376_d_n4, eq8_e376_d_n5, eq8_e376_d_n6, eq8_e376_d_n8, eq8_e376_d_n10, eq8_e376_d_n11, eq8_e376_d_n12,)
-    } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
-    }
-};
-        let eq8_value: f64 = eq8_e378;
-        stamper.stamp_current_sparse_local::<9, 0>(
-            Some(0),
-            Some(11),
-            multiplicity * (eq8_value),
-            [0, 2, 4, 5, 6, 8, 10, 11, 12],
-            [multiplicity * (eq8_e378_d_n0), multiplicity * (eq8_e378_d_n2), multiplicity * (eq8_e378_d_n4), multiplicity * (eq8_e378_d_n5), multiplicity * (eq8_e378_d_n6), multiplicity * (eq8_e378_d_n8), multiplicity * (eq8_e378_d_n10), multiplicity * (eq8_e378_d_n11), multiplicity * (eq8_e378_d_n12)],
             [],
             [],
             1.0,
