@@ -2,6 +2,8 @@ use super::*;
 use std::collections::HashMap;
 
 const MAX_EVAL_FUNCTION_CALL_DEPTH: usize = 4096;
+const XYCE_ATANH_EPSILON: Value = 1.0e-12;
+const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 
 /// Evaluate an expression with the given context
 pub fn evaluate(expr: &Expr, ctx: &ParamContext) -> Result<Value, ExprError> {
@@ -701,10 +703,22 @@ fn eval_complex_builtin_function(
         "TABLE" | "PWL" => eval_real_table_function(name, args),
         "SINH" => real_unary(name, args, |x| x.sinh()),
         "COSH" => real_unary(name, args, |x| x.cosh()),
-        "TANH" => real_unary(name, args, |x| x.tanh()),
+        "TANH" => {
+            if ctx.expression_dialect() == ExpressionDialect::Xyce {
+                real_unary(name, args, xyce_tanh)
+            } else {
+                real_unary(name, args, |x| x.tanh())
+            }
+        }
         "ASINH" => real_unary(name, args, |x| x.asinh()),
         "ACOSH" => real_unary(name, args, |x| x.acosh()),
-        "ATANH" => real_unary(name, args, |x| x.atanh()),
+        "ATANH" => {
+            if ctx.expression_dialect() == ExpressionDialect::Xyce {
+                real_unary(name, args, xyce_atanh)
+            } else {
+                real_unary(name, args, |x| x.atanh())
+            }
+        }
         "ARCTAN" => real_unary(name, args, |x| x.atan()),
         "INT" | "TRUNC" => real_unary(name, args, |x| x.trunc()),
         "NINT" => {
@@ -803,6 +817,21 @@ fn real_binary(
         checked_real_arg(name, args, 0)?,
         checked_real_arg(name, args, 1)?,
     )))
+}
+
+fn xyce_tanh(x: Value) -> Value {
+    if x > XYCE_TANH_SATURATION_THRESHOLD {
+        1.0
+    } else if x < -XYCE_TANH_SATURATION_THRESHOLD {
+        -1.0
+    } else {
+        x.tanh()
+    }
+}
+
+fn xyce_atanh(x: Value) -> Value {
+    x.clamp(XYCE_ATANH_EPSILON - 1.0, 1.0 - XYCE_ATANH_EPSILON)
+        .atanh()
 }
 
 fn eval_real_table_function(name: &str, args: &[ComplexValue]) -> Result<ComplexValue, ExprError> {

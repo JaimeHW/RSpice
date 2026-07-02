@@ -764,6 +764,23 @@ fn log_function_follows_expression_dialect() {
 }
 
 #[test]
+fn xyce_hyperbolic_functions_follow_expression_dialect() {
+    let mut ctx = ParamContext::new();
+    assert!(eval_with(&ctx, "atanh(1)").is_infinite());
+    assert_eq!(eval_with(&ctx, "tanh(21)"), 21.0_f64.tanh());
+
+    ctx.set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+
+    let upper_saturated_atanh = (1.0 - 1.0e-12_f64).atanh();
+    let lower_saturated_atanh = (1.0e-12_f64 - 1.0).atanh();
+    assert!((eval_with(&ctx, "atanh(1)") - upper_saturated_atanh).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "atanh(2)") - upper_saturated_atanh).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "atanh(-2)") - lower_saturated_atanh).abs() < 1.0e-14);
+    assert_eq!(eval_with(&ctx, "tanh(21)"), 1.0);
+    assert_eq!(eval_with(&ctx, "tanh(-21)"), -1.0);
+}
+
+#[test]
 fn xyce_complex_literals_and_projection_functions() {
     let ctx = ParamContext::new();
     let literal = eval_expression_complex("3.0+2.0J", &ctx)

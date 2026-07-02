@@ -867,6 +867,20 @@ mod tests {
     }
 
     #[test]
+    fn hyperbolic_functions_follow_expression_dialect() {
+        assert!(eval_const("atanh(1)").is_infinite());
+        assert_eq!(eval_const("tanh(21)"), 21.0_f64.tanh());
+
+        let upper_saturated_atanh = (1.0 - 1.0e-12_f64).atanh();
+        let lower_saturated_atanh = (1.0e-12_f64 - 1.0).atanh();
+        assert!((eval_const_xyce("atanh(1)") - upper_saturated_atanh).abs() < 1.0e-14);
+        assert!((eval_const_xyce("atanh(2)") - upper_saturated_atanh).abs() < 1.0e-14);
+        assert!((eval_const_xyce("atanh(-2)") - lower_saturated_atanh).abs() < 1.0e-14);
+        assert_eq!(eval_const_xyce("tanh(21)"), 1.0);
+        assert_eq!(eval_const_xyce("tanh(-21)"), -1.0);
+    }
+
+    #[test]
     fn spice_pulse_expression_follows_time_axis_edges() {
         let expr = "spice_pulse(1.1, 2.0, 0.5p, 0.3p, 0.4p, 10p)";
         assert_eq!(eval_tran(expr, 0.0), 1.1);

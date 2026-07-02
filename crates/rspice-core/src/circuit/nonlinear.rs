@@ -655,4 +655,21 @@ impl CircuitData {
             && self.iswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.xspice_converged(criteria.voltage_tolerance())
     }
+
+    pub fn behavioral_linearizations_converged(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+        reltol: Value,
+        voltage_abstol: Value,
+        current_abstol: Value,
+    ) -> bool {
+        self.behavioral_sources.linearizations_converged(
+            solution,
+            time,
+            reltol,
+            voltage_abstol,
+            current_abstol,
+        )
+    }
 }

@@ -15,6 +15,25 @@ use std::path::Path;
 
 const DERIVATIVE_REL_STEP: Value = 1e-6;
 const DERIVATIVE_ABS_STEP: Value = 1e-9;
+const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
+const XYCE_ATANH_EPSILON: Value = 1.0e-12;
+const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
+
+#[derive(Clone, Copy)]
+enum DerivativeTarget {
+    Node(usize),
+    Branch(usize),
+}
+
+struct BehavioralDerivativeContext<'a> {
+    program: &'a CompiledExpr,
+    node_values: &'a [Value],
+    branch_values: &'a [Value],
+    time: Value,
+    temperature: Value,
+    expression_dialect: ExpressionDialect,
+    target: DerivativeTarget,
+}
 
 /// Compiled behavioral voltage source
 #[derive(Debug, Clone)]
@@ -45,6 +64,8 @@ pub struct BehavioralVoltageSource {
     node_partials: Vec<Value>,
     /// Linearization partials d(expr)/d(branch_values[idx])
     branch_partials: Vec<Value>,
+    /// Affine term for the most recent expression linearization.
+    linearized_affine: Value,
     /// Circuit temperature in degrees Celsius, surfaced as `temper`.
     temperature: Value,
     /// Dialect-specific expression-function semantics.
@@ -96,6 +117,7 @@ impl BehavioralVoltageSource {
             branch_values: Vec::new(),
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
+            linearized_affine: 0.0,
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
@@ -269,19 +291,40 @@ impl BehavioralVoltageSource {
         if !f0.is_finite() {
             self.node_partials.fill(0.0);
             self.branch_partials.fill(0.0);
+            self.linearized_affine = 0.0;
             return 0.0;
         }
 
         for idx in 0..self.node_bindings.len() {
             self.node_partials[idx] = if self.node_bindings[idx].is_some() {
-                self.estimate_node_partial(idx, f0, time)
+                analytic_expression_partial(
+                    &self.ast,
+                    &self.program,
+                    &self.node_values,
+                    &self.branch_values,
+                    time,
+                    self.temperature,
+                    self.expression_dialect,
+                    DerivativeTarget::Node(idx),
+                )
+                .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))
             } else {
                 0.0
             };
         }
         for idx in 0..self.branch_bindings.len() {
             self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
-                self.estimate_branch_partial(idx, f0, time)
+                analytic_expression_partial(
+                    &self.ast,
+                    &self.program,
+                    &self.node_values,
+                    &self.branch_values,
+                    time,
+                    self.temperature,
+                    self.expression_dialect,
+                    DerivativeTarget::Branch(idx),
+                )
+                .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))
             } else {
                 0.0
             };
@@ -298,7 +341,9 @@ impl BehavioralVoltageSource {
                 affine -= self.branch_partials[idx] * solution[*global_idx];
             }
         }
-        if !affine.is_finite() { 0.0 } else { affine }
+        let affine = if !affine.is_finite() { 0.0 } else { affine };
+        self.linearized_affine = affine;
+        affine
     }
 
     /// Refresh the linearization (value and partials) at the given
@@ -316,6 +361,38 @@ impl BehavioralVoltageSource {
             .zip(&self.node_partials)
             .chain(self.branch_bindings.iter().zip(&self.branch_partials))
             .filter_map(|(binding, df)| binding.map(|idx| (idx, *df)))
+    }
+
+    fn linearized_expression_value(&self, solution: &[Value]) -> Value {
+        let node_value = self
+            .node_bindings
+            .iter()
+            .zip(&self.node_partials)
+            .filter_map(|(binding, df)| {
+                binding.and_then(|idx| solution.get(idx).map(|value| *df * *value))
+            })
+            .sum::<Value>();
+        let branch_value = self
+            .branch_bindings
+            .iter()
+            .zip(&self.branch_partials)
+            .filter_map(|(binding, df)| {
+                binding.and_then(|idx| solution.get(idx).map(|value| *df * *value))
+            })
+            .sum::<Value>();
+        self.linearized_affine + node_value + branch_value
+    }
+
+    fn linearization_converged(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+        reltol: Value,
+        abstol: Value,
+    ) -> bool {
+        let actual = self.evaluate(solution, time);
+        let linearized = self.linearized_expression_value(solution);
+        linearization_values_converged(actual, linearized, reltol, abstol)
     }
 
     /// Stamp into the matrix (MNA voltage source with computed value)
@@ -575,6 +652,508 @@ fn finite_nonnegative(value: Value, default: Value) -> Value {
     }
 }
 
+fn analytic_expression_partial(
+    expr: &Expr,
+    program: &CompiledExpr,
+    node_values: &[Value],
+    branch_values: &[Value],
+    time: Value,
+    temperature: Value,
+    expression_dialect: ExpressionDialect,
+    target: DerivativeTarget,
+) -> Option<Value> {
+    let context = BehavioralDerivativeContext {
+        program,
+        node_values,
+        branch_values,
+        time,
+        temperature,
+        expression_dialect,
+        target,
+    };
+    let (_, derivative) = eval_behavioral_expr_with_derivative(expr, &context)?;
+    derivative.is_finite().then_some(derivative)
+}
+
+fn eval_behavioral_expr_with_derivative(
+    expr: &Expr,
+    context: &BehavioralDerivativeContext<'_>,
+) -> Option<(Value, Value)> {
+    match expr {
+        Expr::Const(value) => Some((*value, 0.0)),
+        Expr::Time => Some((context.time, 0.0)),
+        Expr::Frequency => Some((0.0, 0.0)),
+        Expr::Temperature => Some((context.temperature, 0.0)),
+        Expr::StringLiteral(_) => Some((0.0, 0.0)),
+        Expr::LookupTable(table) => {
+            let value = eval_lookup_table(table.points.as_ref(), context.time)?;
+            Some((value, 0.0))
+        }
+        Expr::NodeVoltage(name) => {
+            let idx = *context.program.node_map.get(name)?;
+            let value = *context.node_values.get(idx)?;
+            let derivative = match context.target {
+                DerivativeTarget::Node(target_idx) if target_idx == idx => 1.0,
+                _ => 0.0,
+            };
+            Some((value, derivative))
+        }
+        Expr::BranchCurrent(name) => {
+            let idx = *context.program.branch_map.get(name)?;
+            let value = *context.branch_values.get(idx)?;
+            let derivative = match context.target {
+                DerivativeTarget::Branch(target_idx) if target_idx == idx => 1.0,
+                _ => 0.0,
+            };
+            Some((value, derivative))
+        }
+        Expr::Unary { op, operand } => {
+            let (value, derivative) = eval_behavioral_expr_with_derivative(operand, context)?;
+            match op {
+                UnaryOp::Neg => Some((-value, -derivative)),
+                UnaryOp::Not => Some((if value == 0.0 { 1.0 } else { 0.0 }, 0.0)),
+            }
+        }
+        Expr::Binary { op, left, right } => {
+            let (left_value, left_derivative) =
+                eval_behavioral_expr_with_derivative(left, context)?;
+            let (right_value, right_derivative) =
+                eval_behavioral_expr_with_derivative(right, context)?;
+            eval_binary_with_derivative(
+                *op,
+                left_value,
+                left_derivative,
+                right_value,
+                right_derivative,
+            )
+        }
+        Expr::Function { func, args } => eval_function_with_derivative(*func, args, context),
+    }
+}
+
+fn eval_binary_with_derivative(
+    op: BinaryOp,
+    left: Value,
+    d_left: Value,
+    right: Value,
+    d_right: Value,
+) -> Option<(Value, Value)> {
+    match op {
+        BinaryOp::Add => Some((left + right, d_left + d_right)),
+        BinaryOp::Sub => Some((left - right, d_left - d_right)),
+        BinaryOp::Mul => Some((left * right, d_left * right + left * d_right)),
+        BinaryOp::Div => {
+            if right == 0.0 {
+                None
+            } else {
+                Some((
+                    left / right,
+                    (d_left * right - left * d_right) / (right * right),
+                ))
+            }
+        }
+        BinaryOp::Pow => eval_pow_with_derivative(left, d_left, right, d_right),
+        BinaryOp::Lt => Some((bool_value(left < right), 0.0)),
+        BinaryOp::Le => Some((bool_value(left <= right), 0.0)),
+        BinaryOp::Gt => Some((bool_value(left > right), 0.0)),
+        BinaryOp::Ge => Some((bool_value(left >= right), 0.0)),
+        BinaryOp::Eq => Some((bool_value((left - right).abs() < EXPR_ZERO_TOLERANCE), 0.0)),
+        BinaryOp::Ne => Some((bool_value((left - right).abs() >= EXPR_ZERO_TOLERANCE), 0.0)),
+        BinaryOp::And => Some((bool_value(left != 0.0 && right != 0.0), 0.0)),
+        BinaryOp::Or => Some((bool_value(left != 0.0 || right != 0.0), 0.0)),
+    }
+}
+
+fn eval_function_with_derivative(
+    func: Function,
+    args: &[Expr],
+    context: &BehavioralDerivativeContext<'_>,
+) -> Option<(Value, Value)> {
+    let eval_arg = |index: usize| {
+        args.get(index)
+            .and_then(|arg| eval_behavioral_expr_with_derivative(arg, context))
+    };
+
+    match func {
+        Function::Abs => {
+            let (x, dx) = eval_arg(0)?;
+            Some((x.abs(), x.signum() * dx))
+        }
+        Function::Sqrt => {
+            let (x, dx) = eval_arg(0)?;
+            let value = x.max(0.0).sqrt();
+            if value == 0.0 {
+                Some((value, 0.0))
+            } else {
+                Some((value, 0.5 * dx / value))
+            }
+        }
+        Function::Exp => unary_derivative(eval_arg(0)?, |x| x.exp(), |x| x.exp()),
+        Function::Log => {
+            let (x, dx) = eval_arg(0)?;
+            let clamped = x.max(1.0e-38);
+            if context.expression_dialect == ExpressionDialect::Xyce {
+                Some((clamped.log10(), dx / (std::f64::consts::LN_10 * clamped)))
+            } else {
+                Some((clamped.ln(), dx / clamped))
+            }
+        }
+        Function::Ln => {
+            let (x, dx) = eval_arg(0)?;
+            let clamped = x.max(1.0e-38);
+            Some((clamped.ln(), dx / clamped))
+        }
+        Function::Log10 => {
+            let (x, dx) = eval_arg(0)?;
+            let clamped = x.max(1.0e-38);
+            Some((clamped.log10(), dx / (std::f64::consts::LN_10 * clamped)))
+        }
+        Function::Sin => unary_derivative(eval_arg(0)?, |x| x.sin(), |x| x.cos()),
+        Function::Cos => unary_derivative(eval_arg(0)?, |x| x.cos(), |x| -x.sin()),
+        Function::Tan => unary_derivative(
+            eval_arg(0)?,
+            |x| x.tan(),
+            |x| {
+                let cos_x = x.cos();
+                1.0 / (cos_x * cos_x)
+            },
+        ),
+        Function::Asin => unary_derivative(
+            eval_arg(0)?,
+            |x| x.clamp(-1.0, 1.0).asin(),
+            |x| 1.0 / (1.0 - x * x).sqrt(),
+        ),
+        Function::Acos => unary_derivative(
+            eval_arg(0)?,
+            |x| x.clamp(-1.0, 1.0).acos(),
+            |x| -1.0 / (1.0 - x * x).sqrt(),
+        ),
+        Function::Atan => unary_derivative(eval_arg(0)?, |x| x.atan(), |x| 1.0 / (1.0 + x * x)),
+        Function::Atan2 => {
+            let (y, dy) = eval_arg(0)?;
+            let (x, dx) = eval_arg(1)?;
+            let denom = x * x + y * y;
+            if denom == 0.0 {
+                None
+            } else {
+                Some((y.atan2(x), (x * dy - y * dx) / denom))
+            }
+        }
+        Function::Sinh => unary_derivative(eval_arg(0)?, |x| x.sinh(), |x| x.cosh()),
+        Function::Cosh => unary_derivative(eval_arg(0)?, |x| x.cosh(), |x| x.sinh()),
+        Function::Tanh => {
+            let (x, dx) = eval_arg(0)?;
+            if context.expression_dialect == ExpressionDialect::Xyce {
+                let value = xyce_tanh_behavioral(x);
+                let derivative = if (-XYCE_TANH_SATURATION_THRESHOLD
+                    ..=XYCE_TANH_SATURATION_THRESHOLD)
+                    .contains(&x)
+                {
+                    let cosh_x = x.cosh();
+                    dx / (cosh_x * cosh_x)
+                } else {
+                    0.0
+                };
+                Some((value, derivative))
+            } else {
+                let value = x.tanh();
+                Some((value, dx * (1.0 - value * value)))
+            }
+        }
+        Function::Asinh => {
+            unary_derivative(eval_arg(0)?, |x| x.asinh(), |x| 1.0 / (x * x + 1.0).sqrt())
+        }
+        Function::Acosh => unary_derivative(
+            eval_arg(0)?,
+            |x| x.acosh(),
+            |x| 1.0 / ((x - 1.0).sqrt() * (x + 1.0).sqrt()),
+        ),
+        Function::Atanh => {
+            let (x, dx) = eval_arg(0)?;
+            if context.expression_dialect == ExpressionDialect::Xyce {
+                let lower = XYCE_ATANH_EPSILON - 1.0;
+                let upper = 1.0 - XYCE_ATANH_EPSILON;
+                let clamped = x.clamp(lower, upper);
+                let derivative = if x >= lower && x <= upper {
+                    dx / (1.0 - x * x)
+                } else {
+                    0.0
+                };
+                Some((clamped.atanh(), derivative))
+            } else {
+                Some((x.atanh(), dx / (1.0 - x * x)))
+            }
+        }
+        Function::Floor => {
+            let (x, _) = eval_arg(0)?;
+            Some((x.floor(), 0.0))
+        }
+        Function::Ceil => {
+            let (x, _) = eval_arg(0)?;
+            Some((x.ceil(), 0.0))
+        }
+        Function::Round => {
+            let (x, _) = eval_arg(0)?;
+            Some((x.round_ties_even(), 0.0))
+        }
+        Function::Sqr => {
+            let (x, dx) = eval_arg(0)?;
+            Some((x * x, 2.0 * x * dx))
+        }
+        Function::Pwr => {
+            let (base, d_base) = eval_arg(0)?;
+            let (exponent, d_exponent) = eval_arg(1)?;
+            let abs_base = base.abs();
+            if d_exponent == 0.0 {
+                let value = abs_base.powf(exponent);
+                Some((
+                    value,
+                    exponent * abs_base.powf(exponent - 1.0) * base.signum() * d_base,
+                ))
+            } else if abs_base > 0.0 {
+                let value = abs_base.powf(exponent);
+                Some((
+                    value,
+                    value
+                        * (d_exponent * abs_base.ln()
+                            + exponent * base.signum() * d_base / abs_base),
+                ))
+            } else {
+                None
+            }
+        }
+        Function::Pwrs => {
+            let (base, d_base) = eval_arg(0)?;
+            let (exponent, d_exponent) = eval_arg(1)?;
+            let abs_base = base.abs();
+            let sign = base.signum();
+            if d_exponent == 0.0 {
+                let value = sign * abs_base.powf(exponent);
+                Some((value, exponent * abs_base.powf(exponent - 1.0) * d_base))
+            } else if abs_base > 0.0 {
+                let magnitude = abs_base.powf(exponent);
+                Some((
+                    sign * magnitude,
+                    sign * magnitude
+                        * (d_exponent * abs_base.ln()
+                            + exponent * base.signum() * d_base / abs_base),
+                ))
+            } else {
+                None
+            }
+        }
+        Function::Limit => match args.len() {
+            2 => {
+                let (nom, d_nom) = eval_arg(0)?;
+                Some((nom, d_nom))
+            }
+            3 => {
+                let (x, dx) = eval_arg(0)?;
+                let (min, _) = eval_arg(1)?;
+                let (max, _) = eval_arg(2)?;
+                Some((
+                    x.clamp(min, max),
+                    if x >= min && x <= max { dx } else { 0.0 },
+                ))
+            }
+            _ => None,
+        },
+        Function::Min => {
+            let (left, d_left) = eval_arg(0)?;
+            let (right, d_right) = eval_arg(1)?;
+            Some(if left <= right {
+                (left, d_left)
+            } else {
+                (right, d_right)
+            })
+        }
+        Function::Max => {
+            let (left, d_left) = eval_arg(0)?;
+            let (right, d_right) = eval_arg(1)?;
+            Some(if left >= right {
+                (left, d_left)
+            } else {
+                (right, d_right)
+            })
+        }
+        Function::Sign => {
+            let (x, _) = eval_arg(0)?;
+            Some((x.signum(), 0.0))
+        }
+        Function::Uramp => {
+            let (x, dx) = eval_arg(0)?;
+            Some((x.max(0.0), if x > 0.0 { dx } else { 0.0 }))
+        }
+        Function::Stp => {
+            let (x, _) = eval_arg(0)?;
+            Some((bool_value(x > EXPR_ZERO_TOLERANCE), 0.0))
+        }
+        Function::U2 => {
+            let (x, dx) = eval_arg(0)?;
+            Some((x.clamp(0.0, 1.0), if x > 0.0 && x < 1.0 { dx } else { 0.0 }))
+        }
+        Function::Eq0 => {
+            let (x, _) = eval_arg(0)?;
+            Some((bool_value(x.abs() < EXPR_ZERO_TOLERANCE), 0.0))
+        }
+        Function::Ne0 => {
+            let (x, _) = eval_arg(0)?;
+            Some((bool_value(x.abs() >= EXPR_ZERO_TOLERANCE), 0.0))
+        }
+        Function::Gt0 => {
+            let (x, _) = eval_arg(0)?;
+            Some((bool_value(x > 0.0), 0.0))
+        }
+        Function::Lt0 => {
+            let (x, _) = eval_arg(0)?;
+            Some((bool_value(x < 0.0), 0.0))
+        }
+        Function::Ge0 => {
+            let (x, _) = eval_arg(0)?;
+            Some((bool_value(x >= 0.0), 0.0))
+        }
+        Function::Le0 => {
+            let (x, _) = eval_arg(0)?;
+            Some((bool_value(x <= 0.0), 0.0))
+        }
+        Function::Pow => {
+            let (left, d_left) = eval_arg(0)?;
+            let (right, d_right) = eval_arg(1)?;
+            eval_pow_with_derivative(left, d_left, right, d_right)
+        }
+        Function::Mod => {
+            let (left, d_left) = eval_arg(0)?;
+            let (right, _) = eval_arg(1)?;
+            if right == 0.0 {
+                None
+            } else {
+                Some((left % right, d_left))
+            }
+        }
+        Function::Table | Function::Pwl => eval_table_function_with_derivative(args, context),
+        Function::TableFile | Function::FastTable | Function::FastTableFile => Some((0.0, 0.0)),
+        Function::SpicePulse => None,
+        Function::If => {
+            let (condition, _) = eval_arg(0)?;
+            if condition != 0.0 {
+                eval_arg(1)
+            } else {
+                eval_arg(2)
+            }
+        }
+    }
+}
+
+fn unary_derivative(
+    input: (Value, Value),
+    value_fn: impl FnOnce(Value) -> Value,
+    derivative_fn: impl FnOnce(Value) -> Value,
+) -> Option<(Value, Value)> {
+    let (x, dx) = input;
+    Some((value_fn(x), derivative_fn(x) * dx))
+}
+
+fn eval_pow_with_derivative(
+    base: Value,
+    d_base: Value,
+    exponent: Value,
+    d_exponent: Value,
+) -> Option<(Value, Value)> {
+    let value = base.powf(exponent);
+    if d_exponent == 0.0 {
+        return Some((value, exponent * base.powf(exponent - 1.0) * d_base));
+    }
+    if base > 0.0 {
+        Some((
+            value,
+            value * (d_exponent * base.ln() + exponent * d_base / base),
+        ))
+    } else {
+        None
+    }
+}
+
+fn eval_table_function_with_derivative(
+    args: &[Expr],
+    context: &BehavioralDerivativeContext<'_>,
+) -> Option<(Value, Value)> {
+    if args.len() < 3 {
+        return None;
+    }
+    let (x, dx) = eval_behavioral_expr_with_derivative(&args[0], context)?;
+    let mut points = Vec::new();
+    for pair in args[1..].chunks(2) {
+        let x_expr = pair.first()?;
+        let y_expr = pair.get(1)?;
+        let (px, _) = eval_behavioral_expr_with_derivative(x_expr, context)?;
+        let (py, _) = eval_behavioral_expr_with_derivative(y_expr, context)?;
+        points.push((px, py));
+    }
+    eval_table_points_with_derivative(x, dx, &points)
+}
+
+fn eval_lookup_table(points: &[(Value, Value)], x: Value) -> Option<Value> {
+    eval_table_points_with_derivative(x, 0.0, points).map(|(value, _)| value)
+}
+
+fn eval_table_points_with_derivative(
+    x: Value,
+    dx: Value,
+    points: &[(Value, Value)],
+) -> Option<(Value, Value)> {
+    if points.is_empty() {
+        return Some((0.0, 0.0));
+    }
+    if points.len() == 1 {
+        return Some((points[0].1, 0.0));
+    }
+    let mut segment = (points[0], points[1]);
+    if x > points[0].0 {
+        for pair in points.windows(2) {
+            let left = pair[0];
+            let right = pair[1];
+            segment = (left, right);
+            if x <= right.0 {
+                break;
+            }
+        }
+    }
+    let ((x0, y0), (x1, y1)) = segment;
+    let span = x1 - x0;
+    if !span.is_finite() || span == 0.0 {
+        return Some((y0, 0.0));
+    }
+    let slope = (y1 - y0) / span;
+    Some((y0 + (x - x0) * slope, slope * dx))
+}
+
+fn xyce_tanh_behavioral(value: Value) -> Value {
+    if value > XYCE_TANH_SATURATION_THRESHOLD {
+        1.0
+    } else if value < -XYCE_TANH_SATURATION_THRESHOLD {
+        -1.0
+    } else {
+        value.tanh()
+    }
+}
+
+fn bool_value(value: bool) -> Value {
+    if value { 1.0 } else { 0.0 }
+}
+
+fn linearization_values_converged(
+    actual: Value,
+    linearized: Value,
+    reltol: Value,
+    abstol: Value,
+) -> bool {
+    if !actual.is_finite() || !linearized.is_finite() {
+        return false;
+    }
+    let scale = actual.abs().max(linearized.abs()).max(1.0);
+    (actual - linearized).abs() <= abstol + reltol * scale
+}
+
 /// Compiled behavioral current source
 #[derive(Debug, Clone)]
 pub struct BehavioralCurrentSource {
@@ -602,6 +1181,8 @@ pub struct BehavioralCurrentSource {
     node_partials: Vec<Value>,
     /// Linearization partials d(expr)/d(branch_values[idx])
     branch_partials: Vec<Value>,
+    /// Affine term for the most recent expression linearization.
+    linearized_affine: Value,
     /// Circuit temperature in degrees Celsius, surfaced as `temper`.
     temperature: Value,
     /// Dialect-specific expression-function semantics.
@@ -646,6 +1227,7 @@ impl BehavioralCurrentSource {
             branch_values: Vec::new(),
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
+            linearized_affine: 0.0,
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
@@ -813,19 +1395,40 @@ impl BehavioralCurrentSource {
         if !f0.is_finite() {
             self.node_partials.fill(0.0);
             self.branch_partials.fill(0.0);
+            self.linearized_affine = 0.0;
             return 0.0;
         }
 
         for idx in 0..self.node_bindings.len() {
             self.node_partials[idx] = if self.node_bindings[idx].is_some() {
-                self.estimate_node_partial(idx, f0, time)
+                analytic_expression_partial(
+                    &self.ast,
+                    &self.program,
+                    &self.node_values,
+                    &self.branch_values,
+                    time,
+                    self.temperature,
+                    self.expression_dialect,
+                    DerivativeTarget::Node(idx),
+                )
+                .unwrap_or_else(|| self.estimate_node_partial(idx, f0, time))
             } else {
                 0.0
             };
         }
         for idx in 0..self.branch_bindings.len() {
             self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
-                self.estimate_branch_partial(idx, f0, time)
+                analytic_expression_partial(
+                    &self.ast,
+                    &self.program,
+                    &self.node_values,
+                    &self.branch_values,
+                    time,
+                    self.temperature,
+                    self.expression_dialect,
+                    DerivativeTarget::Branch(idx),
+                )
+                .unwrap_or_else(|| self.estimate_branch_partial(idx, f0, time))
             } else {
                 0.0
             };
@@ -842,7 +1445,9 @@ impl BehavioralCurrentSource {
                 affine -= self.branch_partials[idx] * solution[*global_idx];
             }
         }
-        if !affine.is_finite() { 0.0 } else { affine }
+        let affine = if !affine.is_finite() { 0.0 } else { affine };
+        self.linearized_affine = affine;
+        affine
     }
 
     /// Refresh the linearization (value and partials) at the given
@@ -860,6 +1465,38 @@ impl BehavioralCurrentSource {
             .zip(&self.node_partials)
             .chain(self.branch_bindings.iter().zip(&self.branch_partials))
             .filter_map(|(binding, df)| binding.map(|idx| (idx, *df)))
+    }
+
+    fn linearized_expression_value(&self, solution: &[Value]) -> Value {
+        let node_value = self
+            .node_bindings
+            .iter()
+            .zip(&self.node_partials)
+            .filter_map(|(binding, df)| {
+                binding.and_then(|idx| solution.get(idx).map(|value| *df * *value))
+            })
+            .sum::<Value>();
+        let branch_value = self
+            .branch_bindings
+            .iter()
+            .zip(&self.branch_partials)
+            .filter_map(|(binding, df)| {
+                binding.and_then(|idx| solution.get(idx).map(|value| *df * *value))
+            })
+            .sum::<Value>();
+        self.linearized_affine + node_value + branch_value
+    }
+
+    fn linearization_converged(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+        reltol: Value,
+        abstol: Value,
+    ) -> bool {
+        let actual = self.evaluate(solution, time);
+        let linearized = self.linearized_expression_value(solution);
+        linearization_values_converged(actual, linearized, reltol, abstol)
     }
 
     /// Stamp linearized behavioral current source into matrix and RHS.
@@ -966,6 +1603,22 @@ impl BehavioralSources {
                 .current_sources
                 .iter()
                 .any(BehavioralCurrentSource::is_solution_dependent)
+    }
+
+    pub(crate) fn linearizations_converged(
+        &mut self,
+        solution: &[Value],
+        time: Value,
+        reltol: Value,
+        voltage_abstol: Value,
+        current_abstol: Value,
+    ) -> bool {
+        self.voltage_sources
+            .iter_mut()
+            .all(|source| source.linearization_converged(solution, time, reltol, voltage_abstol))
+            && self.current_sources.iter_mut().all(|source| {
+                source.linearization_converged(solution, time, reltol, current_abstol)
+            })
     }
 
     pub(crate) fn transient_breakpoints(&self, tstop: Value, tstep_hint: Value) -> Vec<Value> {

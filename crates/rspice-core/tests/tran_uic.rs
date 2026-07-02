@@ -1,12 +1,16 @@
 //! `.TRAN ... UIC`: skip the operating point and integrate from user
 //! initial conditions, ngspice-style.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 
 fn out_waveform(deck: &str) -> (Vec<f64>, Vec<f64>) {
+    out_waveform_with_config(deck, SimulationConfig::default())
+}
+
+fn out_waveform_with_config(deck: &str, config: SimulationConfig) -> (Vec<f64>, Vec<f64>) {
     let netlist = Netlist::parse(deck).expect("deck parses");
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(config);
     let result = engine
         .run_tran(&netlist, 5e-3, 1e-5)
         .expect("transient solves");
@@ -106,6 +110,43 @@ c1 out 0 1u ic=2
     assert!(
         (v_out[0] - 2.0).abs() < 0.01,
         "IC=2 must seed the capacitor under UIC, got {}",
+        v_out[0]
+    );
+}
+
+#[test]
+fn xyce_without_uic_honors_capacitor_ic_value() {
+    let deck = "\
+* Xyce capacitor IC without uic
+r1 out 0 1k
+c1 out 0 1u ic=1
+.tran 10u 1m
+.end
+";
+    let (_, v_out) = out_waveform_with_config(
+        deck,
+        SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce),
+    );
+    assert!(
+        (v_out[0] - 1.0).abs() < 0.01,
+        "Xyce dialect should seed capacitor IC=1 without UIC, got {}",
+        v_out[0]
+    );
+}
+
+#[test]
+fn default_dialect_without_uic_uses_operating_point_over_capacitor_ic() {
+    let deck = "\
+* ngspice-style capacitor IC without uic
+r1 out 0 1k
+c1 out 0 1u ic=1
+.tran 10u 1m
+.end
+";
+    let (_, v_out) = out_waveform(deck);
+    assert!(
+        v_out[0].abs() < 0.01,
+        "default dialect should keep the operating-point startup without UIC, got {}",
         v_out[0]
     );
 }

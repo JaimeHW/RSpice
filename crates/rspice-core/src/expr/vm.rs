@@ -7,6 +7,8 @@ use crate::{Value, netlist::ExpressionDialect};
 use std::collections::HashMap;
 
 const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
+const XYCE_ATANH_EPSILON: Value = 1.0e-12;
+const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
 
 /// Bytecode instruction
 #[derive(Debug, Clone)]
@@ -309,10 +311,28 @@ impl Vm {
                 Instruction::Atan2 => self.binary_op(|y, x| y.atan2(x)),
                 Instruction::Sinh => self.unary_op(|a| a.sinh()),
                 Instruction::Cosh => self.unary_op(|a| a.cosh()),
-                Instruction::Tanh => self.unary_op(|a| a.tanh()),
+                Instruction::Tanh => {
+                    let dialect = ctx.expression_dialect;
+                    self.unary_op(|a| {
+                        if dialect == ExpressionDialect::Xyce {
+                            xyce_tanh(a)
+                        } else {
+                            a.tanh()
+                        }
+                    });
+                }
                 Instruction::Asinh => self.unary_op(|a| a.asinh()),
                 Instruction::Acosh => self.unary_op(|a| a.acosh()),
-                Instruction::Atanh => self.unary_op(|a| a.atanh()),
+                Instruction::Atanh => {
+                    let dialect = ctx.expression_dialect;
+                    self.unary_op(|a| {
+                        if dialect == ExpressionDialect::Xyce {
+                            xyce_atanh(a)
+                        } else {
+                            a.atanh()
+                        }
+                    });
+                }
                 Instruction::Floor => self.unary_op(|a| a.floor()),
                 Instruction::Ceil => self.unary_op(|a| a.ceil()),
                 Instruction::Round => self.unary_op(|a| a.round_ties_even()),
@@ -567,4 +587,20 @@ fn finite_nonnegative(value: Value, default: Value) -> Value {
     } else {
         default
     }
+}
+
+fn xyce_tanh(value: Value) -> Value {
+    if value > XYCE_TANH_SATURATION_THRESHOLD {
+        1.0
+    } else if value < -XYCE_TANH_SATURATION_THRESHOLD {
+        -1.0
+    } else {
+        value.tanh()
+    }
+}
+
+fn xyce_atanh(value: Value) -> Value {
+    value
+        .clamp(XYCE_ATANH_EPSILON - 1.0, 1.0 - XYCE_ATANH_EPSILON)
+        .atanh()
 }

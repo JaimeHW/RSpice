@@ -7,7 +7,7 @@
 //! - Cooperative abort for responsive cancellation
 
 #![allow(clippy::too_many_arguments)]
-use super::{Engine, SimulationError, TransientResult};
+use super::{Engine, SimulationError, SpiceDialect, TransientResult};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::{
     BreakpointManager, CompanionCoefficients, IntegrationMethod, LteEstimator, TimestepController,
@@ -54,6 +54,24 @@ mod history;
 pub(self) use history::*;
 
 impl Engine {
+    fn apply_capacitor_element_initial_conditions(
+        circuit: &crate::circuit::CircuitData,
+        solution: &mut [Value],
+    ) {
+        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            if let Some(ic) = circuit.capacitors.ic[cap_idx] {
+                let np = cap.pp.row;
+                let nn = cap.nn.row;
+                if np != 0 {
+                    let base = if nn != 0 { solution[nn - 1] } else { 0.0 };
+                    solution[np - 1] = base + ic;
+                } else if nn != 0 {
+                    solution[nn - 1] = -ic;
+                }
+            }
+        }
+    }
+
     /// Run transient time-domain analysis
     ///
     /// Uses adaptive integration with automatic method switching (TrapGear).
@@ -327,18 +345,7 @@ impl Engine {
         // one consistent state (ngspice holds UIC capacitors at their IC
         // value at the first instant).
         if uic_requested {
-            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-                if let Some(ic) = circuit.capacitors.ic[cap_idx] {
-                    let np = cap.pp.row;
-                    let nn = cap.nn.row;
-                    if np != 0 {
-                        let base = if nn != 0 { solution[nn - 1] } else { 0.0 };
-                        solution[np - 1] = base + ic;
-                    } else if nn != 0 {
-                        solution[nn - 1] = -ic;
-                    }
-                }
-            }
+            Self::apply_capacitor_element_initial_conditions(&circuit, &mut solution);
             let num_nodes = circuit.num_nodes();
             for (ind_idx, ic) in circuit.inductors.ic.iter().enumerate() {
                 let Some(ic) = ic else {
@@ -352,6 +359,8 @@ impl Engine {
                     *slot = *ic;
                 }
             }
+        } else if self.config.spice_dialect == SpiceDialect::Xyce {
+            Self::apply_capacitor_element_initial_conditions(&circuit, &mut solution);
         }
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&solution);
@@ -1429,9 +1438,20 @@ impl Engine {
 
                         let device_converged = !circuit.has_nonlinear_devices()
                             || circuit.nonlinear_converged(self.device_convergence_criteria());
+                        let behavioral_converged = circuit.behavioral_linearizations_converged(
+                            &new_solution,
+                            t + dt,
+                            self.voltage_reltol(),
+                            self.voltage_abstol(),
+                            self.current_abstol(),
+                        );
                         total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
 
-                        if voltage_converged && device_converged && residual_converged {
+                        if voltage_converged
+                            && device_converged
+                            && behavioral_converged
+                            && residual_converged
+                        {
                             converged = true;
                             break;
                         }

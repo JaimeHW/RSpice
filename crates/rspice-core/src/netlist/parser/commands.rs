@@ -543,11 +543,11 @@ pub(super) fn parse_options_command(
             break;
         }
 
-        let key = expect_ident(stream, line_num)?;
+        let key = expect_option_key(stream, line_num)?;
         let key_upper = key.to_uppercase();
         let has_equals = stream.consume(&TokenKind::Equals);
 
-        if !has_equals && matches!(key_upper.as_str(), "TOPOLOGY" | "DEVICE" | "XSPICE") {
+        if !has_equals && option_package_key_is_known(&key_upper) {
             option_package = Some(key_upper);
             continue;
         }
@@ -735,6 +735,48 @@ pub(super) fn parse_options_command(
     }
 
     Ok(())
+}
+
+fn expect_option_key(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
+    skip_commas(stream);
+
+    let TokenKind::Ident(first) = &stream.peek().kind else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Expected identifier, found {:?}", stream.peek().kind),
+        });
+    };
+    let mut key = first.clone();
+    stream.advance();
+
+    while matches!(stream.peek().kind, TokenKind::Minus)
+        && matches!(stream.peek_n(1).kind, TokenKind::Ident(_))
+    {
+        stream.advance();
+        let TokenKind::Ident(part) = &stream.peek().kind else {
+            unreachable!("peek_n verified identifier after option-key hyphen")
+        };
+        key.push('-');
+        key.push_str(part);
+        stream.advance();
+    }
+
+    Ok(key)
+}
+
+fn option_package_key_is_known(key_upper: &str) -> bool {
+    matches!(
+        key_upper,
+        "TOPOLOGY"
+            | "DEVICE"
+            | "XSPICE"
+            | "TIMEINT"
+            | "NONLIN"
+            | "NONLIN-TRAN"
+            | "NONLIN-TRANSIENT"
+            | "NONLIN-CONTINUATION"
+            | "LOCA"
+    )
 }
 
 fn parse_boolean_option(
@@ -2113,6 +2155,18 @@ mod tests {
         .expect("Xyce numeric TIMEINT method selector parses");
 
         assert_eq!(netlist.options.method.as_deref(), Some("7"));
+    }
+
+    #[test]
+    fn options_parse_xyce_hyphenated_solver_package() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options nonlin-tran reltol=1e-3\n\
+             .options timeint method=gear",
+        ))
+        .expect("Xyce hyphenated solver option package parses");
+
+        assert_eq!(netlist.options.reltol, Some(1.0e-3));
+        assert_eq!(netlist.options.method.as_deref(), Some("GEAR"));
     }
 
     #[test]
