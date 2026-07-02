@@ -263,18 +263,20 @@ pub(in crate::engine::builder) fn coerce_xspice_connections(
         }
 
         if port_spec.is_vector && !parsed_ports[cursor].is_vector_connection() {
-            let remaining_required_specs = port_specs[spec_idx + 1..]
+            let remaining_ports = parsed_ports.len() - cursor;
+            let remaining_specs = port_specs.len() - spec_idx - 1;
+            let required_remaining_specs = port_specs[spec_idx + 1..]
                 .iter()
                 .filter(|spec| !spec.null_allowed)
                 .count();
-            let remaining_ports = parsed_ports.len() - cursor;
-            if remaining_ports <= remaining_required_specs {
+            if remaining_ports == 0 || remaining_ports - 1 < required_remaining_specs {
                 return Err(SimulationError::Circuit(format!(
                     "XSPICE element '{}' vector port '{}' has no connections",
                     element_name, port_spec.name
                 )));
             }
-            let take = remaining_ports - remaining_required_specs;
+            let reserved_for_later = (remaining_ports - 1).min(remaining_specs);
+            let take = remaining_ports - reserved_for_later;
             connections.push(coerce_xspice_vector_connection(
                 circuit,
                 port_spec,
@@ -833,6 +835,30 @@ mod tests {
             PortConnection::DigitalVector(_)
         ));
         assert!(matches!(scalar_connections[2], PortConnection::Null));
+
+        let mut single_bit_circuit = CircuitData::new();
+        let single_bit_connections = coerce_xspice_connections(
+            &mut single_bit_circuit,
+            &ports,
+            &[
+                XspicePort::Digital("DIN".to_string()),
+                XspicePort::Digital("DOUT".to_string()),
+            ],
+            "A3",
+            "d_cosim",
+        )
+        .expect("single-bit input and output vectors should split across ports");
+
+        assert_eq!(single_bit_connections.len(), 3);
+        match &single_bit_connections[0] {
+            PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 1),
+            other => panic!("expected one digital input bit, got {other:?}"),
+        }
+        match &single_bit_connections[1] {
+            PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 1),
+            other => panic!("expected one digital output bit, got {other:?}"),
+        }
+        assert!(matches!(single_bit_connections[2], PortConnection::Null));
     }
 
     #[test]
