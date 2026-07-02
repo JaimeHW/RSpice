@@ -128,10 +128,11 @@ fn d_source_cache_key(
 }
 
 fn is_digital_table_data_line(line: &str) -> bool {
-    !line.starts_with('*')
-        && !line
-            .trim_start_matches(|ch: char| ch.is_ascii_whitespace() || ch == '*')
-            .is_empty()
+    let trimmed = line.trim_start();
+    !trimmed.is_empty()
+        && !trimmed.starts_with('*')
+        && !trimmed.starts_with('#')
+        && !trimmed.starts_with(';')
 }
 
 fn tokenize_digital_table_line<'line>(line: &'line str, tokens: &mut Vec<&'line str>) {
