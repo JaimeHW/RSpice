@@ -1,6 +1,6 @@
 use super::*;
 use crate::Value;
-use crate::xspice::EvaluationPhase;
+use crate::xspice::{CmError, EvaluationPhase};
 
 //=============================================================================
 // Basic Gates
@@ -23,8 +23,15 @@ fn gate_delay(ctx: &CmContext, new_state: i64, prev_state: i64, rise: Value, fal
     }
 }
 
-fn official_digital_delay(ctx: &CmContext, name: &str) -> Value {
-    ctx.param(name).max(OFFICIAL_DIGITAL_DELAY_MIN)
+fn official_digital_delay(ctx: &CmContext, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("digital gate delay must be finite, got {value}"),
+        });
+    }
+    Ok(value.max(OFFICIAL_DIGITAL_DELAY_MIN))
 }
 
 fn gate_commits_state(ctx: &CmContext) -> bool {
@@ -547,8 +554,8 @@ macro_rules! define_gate {
             }
 
             fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-                let rise = official_digital_delay(ctx, "rise_delay");
-                let fall = official_digital_delay(ctx, "fall_delay");
+                let rise = official_digital_delay(ctx, "rise_delay")?;
+                let fall = official_digital_delay(ctx, "fall_delay")?;
                 let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
                 let prev = ctx.int_state(0);
 
@@ -673,8 +680,8 @@ impl CodeModel for DigitalNand {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let rise = official_digital_delay(ctx, "rise_delay");
-        let fall = official_digital_delay(ctx, "fall_delay");
+        let rise = official_digital_delay(ctx, "rise_delay")?;
+        let fall = official_digital_delay(ctx, "fall_delay")?;
         let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let prev = ctx.int_state(0);
 
@@ -734,8 +741,8 @@ impl CodeModel for DigitalNor {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let rise = official_digital_delay(ctx, "rise_delay");
-        let fall = official_digital_delay(ctx, "fall_delay");
+        let rise = official_digital_delay(ctx, "rise_delay")?;
+        let fall = official_digital_delay(ctx, "fall_delay")?;
         let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let prev = ctx.int_state(0);
         let result = or_op(inputs).invert();
@@ -791,8 +798,8 @@ impl CodeModel for DigitalXnor {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let rise = official_digital_delay(ctx, "rise_delay");
-        let fall = official_digital_delay(ctx, "fall_delay");
+        let rise = official_digital_delay(ctx, "rise_delay")?;
+        let fall = official_digital_delay(ctx, "fall_delay")?;
         let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let prev = ctx.int_state(0);
         let result = xor_op(inputs).invert();
@@ -857,8 +864,8 @@ impl CodeModel for DigitalInverter {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let rise = official_digital_delay(ctx, "rise_delay");
-        let fall = official_digital_delay(ctx, "fall_delay");
+        let rise = official_digital_delay(ctx, "rise_delay")?;
+        let fall = official_digital_delay(ctx, "fall_delay")?;
         let input = ctx.input_digital("in").unwrap_or_default();
         let prev = ctx.int_state(0);
         let result = inverted_base_digital_state(input);
@@ -914,8 +921,8 @@ impl CodeModel for DigitalBuffer {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let rise = official_digital_delay(ctx, "rise_delay");
-        let fall = official_digital_delay(ctx, "fall_delay");
+        let rise = official_digital_delay(ctx, "rise_delay")?;
+        let fall = official_digital_delay(ctx, "fall_delay")?;
         let input = ctx.input_digital("in").unwrap_or_default();
         let prev = ctx.int_state(0);
         let result = base_digital_state(input);
@@ -987,7 +994,7 @@ impl CodeModel for DigitalTristate {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let delay = official_digital_delay(ctx, "delay");
+        let delay = official_digital_delay(ctx, "delay")?;
         let input = ctx.input_digital("in").unwrap_or_default();
         let enable = ctx.input_digital("enable").unwrap_or_default();
 
@@ -1159,22 +1166,24 @@ fn open_emitter_output_from_code(code: i64) -> DigitalValue {
     }
 }
 
-fn open_collector_delay(ctx: &CmContext, new_state: i64, prev_state: i64) -> Value {
-    match new_state {
-        0 => official_digital_delay(ctx, "fall_delay"),
-        1 => official_digital_delay(ctx, "open_delay"),
-        _ if prev_state == 0 => official_digital_delay(ctx, "open_delay"),
-        _ => official_digital_delay(ctx, "fall_delay"),
-    }
+fn open_collector_delay(ctx: &CmContext, new_state: i64, prev_state: i64) -> CmResult<Value> {
+    let name = match new_state {
+        0 => "fall_delay",
+        1 => "open_delay",
+        _ if prev_state == 0 => "open_delay",
+        _ => "fall_delay",
+    };
+    official_digital_delay(ctx, name)
 }
 
-fn open_emitter_delay(ctx: &CmContext, new_state: i64, prev_state: i64) -> Value {
-    match new_state {
-        0 => official_digital_delay(ctx, "open_delay"),
-        1 => official_digital_delay(ctx, "rise_delay"),
-        _ if prev_state == 0 => official_digital_delay(ctx, "rise_delay"),
-        _ => official_digital_delay(ctx, "open_delay"),
-    }
+fn open_emitter_delay(ctx: &CmContext, new_state: i64, prev_state: i64) -> CmResult<Value> {
+    let name = match new_state {
+        0 => "open_delay",
+        1 => "rise_delay",
+        _ if prev_state == 0 => "rise_delay",
+        _ => "open_delay",
+    };
+    official_digital_delay(ctx, name)
 }
 
 /// Open-collector buffer
@@ -1215,7 +1224,7 @@ impl CodeModel for DigitalOpenCollector {
         let prev = ctx.int_state(0);
 
         if new_state != prev {
-            let delay = open_collector_delay(ctx, new_state, prev);
+            let delay = open_collector_delay(ctx, new_state, prev)?;
             set_gate_output_with_unknown_delays(
                 ctx,
                 "out",
@@ -1223,8 +1232,8 @@ impl CodeModel for DigitalOpenCollector {
                 open_collector_output_from_code(prev),
                 delay,
                 Some((
-                    official_digital_delay(ctx, "open_delay"),
-                    official_digital_delay(ctx, "fall_delay"),
+                    official_digital_delay(ctx, "open_delay")?,
+                    official_digital_delay(ctx, "fall_delay")?,
                 )),
             );
         }
@@ -1271,7 +1280,7 @@ impl CodeModel for DigitalOpenEmitter {
         let prev = ctx.int_state(0);
 
         if new_state != prev {
-            let delay = open_emitter_delay(ctx, new_state, prev);
+            let delay = open_emitter_delay(ctx, new_state, prev)?;
             set_gate_output_with_unknown_delays(
                 ctx,
                 "out",
@@ -1279,8 +1288,8 @@ impl CodeModel for DigitalOpenEmitter {
                 open_emitter_output_from_code(prev),
                 delay,
                 Some((
-                    official_digital_delay(ctx, "rise_delay"),
-                    official_digital_delay(ctx, "open_delay"),
+                    official_digital_delay(ctx, "rise_delay")?,
+                    official_digital_delay(ctx, "open_delay")?,
                 )),
             );
         }
@@ -1492,6 +1501,39 @@ mod tests {
             .copied()
             .map(|state| DigitalValue::new(state, DigitalStrength::Strong))
             .collect()
+    }
+
+    fn assert_invalid_param(result: CmResult<()>, expected_name: &str) {
+        match result {
+            Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected_name),
+            other => panic!("expected InvalidParameter for {expected_name}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn digital_gates_reject_nonfinite_delay_params() {
+        let mut buffer_ctx = CmContext::new();
+        buffer_ctx.set_param("rise_delay", f64::INFINITY);
+        buffer_ctx.set_input_digital("in", DigitalValue::one());
+        DigitalBuffer.init(&mut buffer_ctx).expect("d_buffer init");
+        assert_invalid_param(DigitalBuffer.evaluate(&mut buffer_ctx), "rise_delay");
+
+        let mut tristate_ctx = CmContext::new();
+        tristate_ctx.set_param("delay", f64::NAN);
+        tristate_ctx.set_input_digital("in", DigitalValue::one());
+        tristate_ctx.set_input_digital("enable", DigitalValue::one());
+        DigitalTristate
+            .init(&mut tristate_ctx)
+            .expect("d_tristate init");
+        assert_invalid_param(DigitalTristate.evaluate(&mut tristate_ctx), "delay");
+
+        let mut open_ctx = CmContext::new();
+        open_ctx.set_param("open_delay", f64::INFINITY);
+        open_ctx.set_input_digital("in", DigitalValue::one());
+        DigitalOpenCollector
+            .init(&mut open_ctx)
+            .expect("d_open_c init");
+        assert_invalid_param(DigitalOpenCollector.evaluate(&mut open_ctx), "open_delay");
     }
 
     #[test]
