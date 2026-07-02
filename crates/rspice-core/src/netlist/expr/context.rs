@@ -115,6 +115,21 @@ impl Default for StatisticalParamMode {
     }
 }
 
+/// Dialect-specific expression-function semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpressionDialect {
+    /// ngspice-compatible expression functions: `log(x)` is natural log.
+    Ngspice,
+    /// Xyce-compatible expression functions: `log(x)` is base-10 log.
+    Xyce,
+}
+
+impl Default for ExpressionDialect {
+    fn default() -> Self {
+        Self::Ngspice
+    }
+}
+
 /// User-defined function definition
 #[derive(Debug, Clone)]
 pub struct FunctionDef {
@@ -149,6 +164,8 @@ pub struct ParamContext {
     random: RandomState,
     /// Statistical-function evaluation policy for this parse/evaluation scope.
     statistical_mode: StatisticalParamMode,
+    /// Dialect-specific expression-function behavior.
+    expression_dialect: ExpressionDialect,
 }
 
 impl ParamContext {
@@ -264,6 +281,16 @@ impl ParamContext {
     /// Current statistical-function evaluation policy.
     pub fn statistical_mode(&self) -> StatisticalParamMode {
         self.statistical_mode
+    }
+
+    /// Set dialect-specific expression-function semantics.
+    pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
+        self.expression_dialect = dialect;
+    }
+
+    /// Current dialect-specific expression-function semantics.
+    pub fn expression_dialect(&self) -> ExpressionDialect {
+        self.expression_dialect
     }
 
     /// Get all parameters as a vector of (name, value) tuples

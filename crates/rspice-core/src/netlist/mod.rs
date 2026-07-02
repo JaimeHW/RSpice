@@ -27,7 +27,7 @@ mod topology;
 mod xspice_parser;
 
 pub use ast::*;
-pub use expr::{ParamContext, RandomState, StatisticalParamMode};
+pub use expr::{ExpressionDialect, ParamContext, RandomState, StatisticalParamMode};
 pub use flattener::{
     FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, flatten_netlist,
     flatten_netlist_with_models,

@@ -15,13 +15,14 @@ use crate::engine::{
 use crate::expr::{Expr, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
-    AnalysisCommand, DcSecondSweep, ElementKind, Netlist, NetlistParseOptions,
+    AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
     StatisticalParamMode, StepCommand, StepSweep, StepTarget, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
@@ -30,6 +31,7 @@ const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
 const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 50_000.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
+const XYCE_DEFAULT_PRN_FRACTION_DIGITS: f64 = 8.0;
 
 /// Configuration for the Xyce corpus runner.
 #[derive(Debug, Clone)]
@@ -159,6 +161,7 @@ struct XyceExecutionPlan {
     deck_path: PathBuf,
     reference_path: PathBuf,
     source: String,
+    expression_dialect: ExpressionDialect,
     print: XycePrintRequest,
     dc: XyceDcSweep,
     steps: Vec<StepCommand>,
@@ -169,6 +172,7 @@ struct XyceExecutionPlan {
 struct XyceStaticDcPlan {
     deck_path: PathBuf,
     source: String,
+    expression_dialect: ExpressionDialect,
     print: XycePrintRequest,
     dc: XyceDcSweep,
     steps: Vec<StepCommand>,
@@ -544,11 +548,20 @@ impl XyceTestRunner {
         source: &str,
         deck_path: &Path,
     ) -> Result<Netlist, crate::netlist::ParseError> {
+        Self::parse_netlist_with_expression_dialect(source, deck_path, ExpressionDialect::Xyce)
+    }
+
+    fn parse_netlist_with_expression_dialect(
+        source: &str,
+        deck_path: &Path,
+        expression_dialect: ExpressionDialect,
+    ) -> Result<Netlist, crate::netlist::ParseError> {
         Netlist::parse_with_path_and_options(
             source,
             deck_path,
             NetlistParseOptions {
                 statistical_mode: StatisticalParamMode::Nominal,
+                expression_dialect,
             },
         )
     }
@@ -808,7 +821,15 @@ impl XyceTestRunner {
             None
         };
 
-        let static_plan = self.static_dc_plan_for_path(&deck.path)?;
+        let expression_dialect = if matches!(
+            wrapper_contract,
+            Some(XyceStaticDcContract::WrapperHspiceMath)
+        ) {
+            ExpressionDialect::Ngspice
+        } else {
+            ExpressionDialect::Xyce
+        };
+        let static_plan = self.static_dc_plan_for_path(&deck.path, expression_dialect)?;
         let contract = if let Some(contract) = wrapper_contract {
             self.validate_native_static_prn_wrapper_contract(
                 contract,
@@ -824,6 +845,7 @@ impl XyceTestRunner {
             deck_path: deck.path.clone(),
             reference_path,
             source: static_plan.source,
+            expression_dialect,
             print: static_plan.print,
             dc: static_plan.dc,
             steps: static_plan.steps,
@@ -878,7 +900,11 @@ impl XyceTestRunner {
         })
     }
 
-    fn static_dc_plan_for_path(&self, deck_path: &Path) -> Result<XyceStaticDcPlan, String> {
+    fn static_dc_plan_for_path(
+        &self,
+        deck_path: &Path,
+        expression_dialect: ExpressionDialect,
+    ) -> Result<XyceStaticDcPlan, String> {
         let source =
             fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
         if Self::contains_control_block(&source) {
@@ -890,8 +916,11 @@ impl XyceTestRunner {
         Self::reject_unsupported_source_directives(&source)?;
 
         let print = Self::single_dc_print_request(&source)?;
-        let netlist = Self::parse_xyce_netlist(&source, deck_path)
-            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        let netlist =
+            Self::parse_netlist_with_expression_dialect(&source, deck_path, expression_dialect)
+                .map_err(|err| {
+                    format!("netlist parser does not yet accept this Xyce deck: {err}")
+                })?;
         let diagnostics = netlist.diagnostics.clone();
         let dc = Self::single_dc_sweep(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
@@ -900,6 +929,7 @@ impl XyceTestRunner {
         Ok(XyceStaticDcPlan {
             deck_path: deck_path.to_path_buf(),
             source,
+            expression_dialect,
             print,
             dc,
             steps,
@@ -1259,7 +1289,11 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract(false);
-        let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
+        let netlist = match Self::parse_netlist_with_expression_dialect(
+            &plan.source,
+            &plan.deck_path,
+            plan.expression_dialect,
+        ) {
             Ok(netlist) => netlist,
             Err(err) => {
                 return self.failure_result(
@@ -1473,6 +1507,18 @@ impl XyceTestRunner {
                 );
             }
         };
+        let reference_time_grid = match Self::reference_time_grid(&reference) {
+            Ok(grid) => grid,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("reference time-grid error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
 
         let max_step =
             match Self::transient_max_step_for_reference(&netlist, &plan.tran, &reference) {
@@ -1551,16 +1597,45 @@ impl XyceTestRunner {
         };
 
         if mismatches.is_empty() {
-            self.passed_result(deck, start, contract)
-        } else {
-            self.failure_result(
-                deck,
-                start,
-                contract,
-                format!("{} Xyce transient reference mismatch(es)", mismatches.len()),
-                mismatches,
-            )
+            return self.passed_result(deck, start, contract);
         }
+
+        let locked_engine =
+            self.create_xyce_engine_with_locked_time_grid(Some(reference_time_grid));
+        if let Ok(locked_result) =
+            locked_engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort)
+            && let Ok(locked_mismatches) = self.compare_tran_prn_reference(
+                &reference,
+                &plan.print,
+                &netlist,
+                &plan.source,
+                &locked_result,
+            )
+        {
+            if locked_mismatches.is_empty() {
+                return self.passed_result(deck, start, contract);
+            }
+            if locked_mismatches.len() < mismatches.len() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce transient reference mismatch(es)",
+                        locked_mismatches.len()
+                    ),
+                    locked_mismatches,
+                );
+            }
+        }
+
+        self.failure_result(
+            deck,
+            start,
+            contract,
+            format!("{} Xyce transient reference mismatch(es)", mismatches.len()),
+            mismatches,
+        )
     }
 
     fn compare_gnuplot_splot_side_output_batches(
@@ -1942,7 +2017,9 @@ impl XyceTestRunner {
         let kind_name = contract.kind.name();
         let wrapper_contract = contract.kind.wrapper_contract();
         let baseline_contract = contract.kind.baseline_contract();
-        let baseline_plan = match self.static_dc_plan_for_path(&contract.baseline_path) {
+        let baseline_plan = match self
+            .static_dc_plan_for_path(&contract.baseline_path, ExpressionDialect::Xyce)
+        {
             Ok(plan) => plan,
             Err(reason) => {
                 return self.expected_unsupported_result(
@@ -2086,7 +2163,9 @@ impl XyceTestRunner {
 
         let mut all_mismatches = Vec::new();
         for target_path in targets {
-            let target_plan = match self.static_dc_plan_for_path(&target_path) {
+            let target_plan = match self
+                .static_dc_plan_for_path(&target_path, ExpressionDialect::Xyce)
+            {
                 Ok(plan) => plan,
                 Err(reason) => {
                     return self.expected_unsupported_result(
@@ -2206,8 +2285,12 @@ impl XyceTestRunner {
                 ".STEP static DC execution requires the stepped .prn contract".to_string(),
             ));
         }
-        let netlist = Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
-            .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
+        let netlist = Self::parse_netlist_with_expression_dialect(
+            &plan.source,
+            &plan.deck_path,
+            plan.expression_dialect,
+        )
+        .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
         let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let results = engine.run_dc_sweep2_spec_with_report_and_abort(
@@ -2282,6 +2365,13 @@ impl XyceTestRunner {
     }
 
     fn create_xyce_engine(&self) -> Engine {
+        self.create_xyce_engine_with_locked_time_grid(None)
+    }
+
+    fn create_xyce_engine_with_locked_time_grid(
+        &self,
+        locked_time_grid: Option<Vec<Value>>,
+    ) -> Engine {
         let defaults = SimulationConfig::default();
         Engine::new(SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),
@@ -2289,6 +2379,7 @@ impl XyceTestRunner {
             spice_dialect: SpiceDialect::Xyce,
             // Xyce and ngspice regression decks use 27 C unless overridden.
             temperature: 300.15,
+            locked_time_grid: locked_time_grid.map(Arc::new),
             ..defaults
         })
     }
@@ -2548,6 +2639,21 @@ impl XyceTestRunner {
                     .copied()
                     .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
                 if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    let time_tolerance = Self::default_prn_time_quantization_tolerance(time);
+                    if time_tolerance > 0.0
+                        && self.transient_probe_matches_within_time_quantization(
+                            probe,
+                            netlist,
+                            result,
+                            time,
+                            expected,
+                            actual,
+                            tolerance,
+                            time_tolerance,
+                        )?
+                    {
+                        continue;
+                    }
                     mismatches.push(XyceValueMismatch {
                         row: row_index,
                         probe: probe.clone(),
@@ -2563,6 +2669,46 @@ impl XyceTestRunner {
         }
 
         Ok(mismatches)
+    }
+
+    fn transient_probe_matches_within_time_quantization(
+        &self,
+        probe: &str,
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        expected: Value,
+        actual: Value,
+        tolerance: XyceComparisonTolerance,
+        time_tolerance: Value,
+    ) -> Result<bool, String> {
+        let Some((&first_time, &last_time)) = result.time.first().zip(result.time.last()) else {
+            return Ok(false);
+        };
+        let mut min_actual = actual;
+        let mut max_actual = actual;
+        for candidate_time in [time - time_tolerance, time + time_tolerance] {
+            if candidate_time < first_time || candidate_time > last_time {
+                continue;
+            }
+            let candidate = Self::evaluate_tran_probe(probe, netlist, result, candidate_time)?;
+            if self
+                .value_mismatch(expected, candidate, tolerance)
+                .is_none()
+            {
+                return Ok(true);
+            }
+            if candidate.is_finite() {
+                min_actual = min_actual.min(candidate);
+                max_actual = max_actual.max(candidate);
+            }
+        }
+
+        Ok(expected.is_finite()
+            && min_actual.is_finite()
+            && max_actual.is_finite()
+            && expected >= min_actual.min(max_actual)
+            && expected <= min_actual.max(max_actual))
     }
 
     fn reference_tran_data_columns(
@@ -2610,8 +2756,7 @@ impl XyceTestRunner {
         let reference_step = Self::reference_min_positive_time_step(reference)?;
         let source_step = Self::source_transient_max_step(netlist, tran);
         let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
-        let reference_limited_step =
-            Self::feasible_reference_limited_step(netlist, tran, reference_step);
+        let reference_limited_step = Self::feasible_reference_limited_step(tran, reference_step);
         let fallback_limit = reference_limited_step.is_none().then_some(fallback);
         let max_step = [
             requested,
@@ -2640,22 +2785,18 @@ impl XyceTestRunner {
     }
 
     fn feasible_reference_limited_step(
-        netlist: &Netlist,
         tran: &XyceTranAnalysis,
         reference_step: Option<Value>,
     ) -> Option<Value> {
         let reference_step =
             reference_step.filter(|step| step.is_finite() && *step > f64::MIN_POSITIVE)?;
-        if !Self::netlist_has_passive_energy_storage(netlist) {
-            return Some(reference_step);
-        }
 
-        // For passive-storage decks the Xyce accepted cadence is part of the
-        // oracle: changing dt changes the numerical trajectory even for a
-        // linear L/R or R/C network. Use the reference minimum spacing when
-        // it is affordable, but fall back to source/final-time limits for long
-        // pulse decks whose dense Xyce rows would require millions of native
-        // steps.
+        // The Xyce accepted cadence can be part of the oracle for dynamic
+        // decks, so use the reference minimum spacing when it is affordable.
+        // Some Xyce references contain a tiny adaptive gap in an otherwise
+        // coarse table; those must fall back to source/requested/final-time
+        // limits and be compared by interpolation instead of forcing millions
+        // of native steps.
         let estimated_reference_steps = (tran.stop / reference_step).ceil();
         (estimated_reference_steps <= MAX_NATIVE_TRAN_ORACLE_STEPS).then_some(reference_step)
     }
@@ -2842,6 +2983,31 @@ impl XyceTestRunner {
         Ok(min_step)
     }
 
+    fn reference_time_grid(reference: &XycePrnTable) -> Result<Vec<Value>, String> {
+        let time_column = Self::reference_time_column_index(reference)
+            .ok_or_else(|| "reference table has no TIME column".to_string())?;
+        let mut previous = None;
+        let mut grid = Vec::with_capacity(reference.rows.len());
+        for (row_index, row) in reference.rows.iter().enumerate() {
+            let time = *row.get(time_column).ok_or_else(|| {
+                format!("row {row_index} has no TIME column at index {time_column}")
+            })?;
+            if !time.is_finite() {
+                return Err(format!("row {row_index} has non-finite TIME value {time}"));
+            }
+            if let Some(previous_time) = previous
+                && time < previous_time
+            {
+                return Err(format!(
+                    "reference TIME column is not monotonic at row {row_index}"
+                ));
+            }
+            grid.push(time);
+            previous = Some(time);
+        }
+        Ok(grid)
+    }
+
     fn reference_time_column_index(reference: &XycePrnTable) -> Option<usize> {
         let has_index_column = reference
             .columns
@@ -2855,13 +3021,11 @@ impl XyceTestRunner {
             .then_some(time_column)
     }
 
-    fn netlist_has_passive_energy_storage(netlist: &Netlist) -> bool {
-        netlist.elements.iter().any(|element| {
-            matches!(
-                element.kind,
-                ElementKind::Capacitor { .. } | ElementKind::Inductor { .. }
-            )
-        })
+    fn default_prn_time_quantization_tolerance(time: Value) -> Value {
+        if !time.is_finite() || time == 0.0 {
+            return 0.0;
+        }
+        0.5 * 10.0_f64.powf(time.abs().log10().floor() - XYCE_DEFAULT_PRN_FRACTION_DIGITS)
     }
 
     fn compare_step_res_reference(
@@ -7359,6 +7523,46 @@ End of Xyce(TM) Simulation
     }
 
     #[test]
+    fn reference_time_grid_uses_transient_prn_time_column() {
+        let table = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0],
+                vec![1.0, 1.0e-9, 2.0],
+                vec![2.0, 4.0e-9, 3.0],
+            ],
+        };
+
+        let grid = XyceTestRunner::reference_time_grid(&table)
+            .expect("transient PRN time grid should parse");
+
+        assert_eq!(grid, vec![0.0, 1.0e-9, 4.0e-9]);
+    }
+
+    #[test]
+    fn reference_time_grid_rejects_nonmonotonic_time() {
+        let table = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0],
+                vec![1.0, 2.0e-9, 2.0],
+                vec![2.0, 1.0e-9, 3.0],
+            ],
+        };
+
+        let err = XyceTestRunner::reference_time_grid(&table)
+            .expect_err("nonmonotonic transient PRN time grid must fail");
+
+        assert!(err.contains("not monotonic"), "unexpected error: {err}");
+    }
+
+    #[test]
     fn reference_columns_accept_primary_sweep_and_branch_labels() {
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
         let netlist = Netlist::default();
@@ -7447,6 +7651,38 @@ End of Xyce(TM) Simulation
         assert!(
             runner.value_mismatch(1.0e-24, 1.8e-12, tolerance).is_none(),
             "zerotol should accept near-zero values on both sides"
+        );
+    }
+
+    #[test]
+    fn transient_comparison_accounts_for_printed_time_quantization() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let result = TransientResult {
+            time: vec![2.99999996, 3.0],
+            voltages: vec![vec![1.7336955179822779e-3, 0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+        };
+        let tolerance = runner.default_comparison_tolerance("v(1)");
+        let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(2.99999996);
+
+        assert!(
+            runner
+                .transient_probe_matches_within_time_quantization(
+                    "V(1)",
+                    &Netlist::default(),
+                    &result,
+                    2.99999996,
+                    1.52218075e-3,
+                    1.7336955179822779e-3,
+                    tolerance,
+                    time_tolerance,
+                )
+                .expect("time-window comparison should evaluate"),
+            "expected value falls inside the waveform interval induced by printed PRN time precision"
         );
     }
 

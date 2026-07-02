@@ -122,13 +122,14 @@ pub(in crate::engine::builder) fn add_behavioral_resistor(
         )
     };
 
-    let bcs = crate::device::BehavioralCurrentSource::new(
+    let mut bcs = crate::device::BehavioralCurrentSource::new(
         element.name.clone(),
         np,
         nn,
         &current_expression,
     )
     .map_err(SimulationError::Circuit)?;
+    bcs.set_expression_dialect(netlist.params.expression_dialect());
     circuit.behavioral_sources.add_current(bcs);
     Ok(())
 }

@@ -662,7 +662,8 @@ impl<'a> Parser<'a> {
                 "ABS" | "M" => Some(Function::Abs),
                 "SQRT" => Some(Function::Sqrt),
                 "EXP" => Some(Function::Exp),
-                "LOG" | "LN" => Some(Function::Log),
+                "LOG" => Some(Function::Log),
+                "LN" => Some(Function::Ln),
                 "LOG10" => Some(Function::Log10),
                 "SIN" => Some(Function::Sin),
                 "COS" => Some(Function::Cos),
@@ -759,6 +760,16 @@ mod tests {
         vm.execute(&program, &Context::dc(&[], &[]))
     }
 
+    fn eval_const_xyce(input: &str) -> f64 {
+        let ast = parse_expression_strict(input)
+            .unwrap_or_else(|e| panic!("parse `{input}` failed: {e}"));
+        let program = compile(&ast);
+        let mut vm = Vm::new();
+        let ctx =
+            Context::dc(&[], &[]).with_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+        vm.execute(&program, &ctx)
+    }
+
     #[test]
     fn power_operator_matches_ngspice_b_sources() {
         // Pinned against ngspice-46 B-source oracle runs: chains fold
@@ -778,6 +789,17 @@ mod tests {
     #[test]
     fn pi_constant_matches_xyce_expression_semantics() {
         assert!((eval_const("sin(pi/2)") - 1.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn log_function_follows_expression_dialect() {
+        assert!((eval_const("log(100)") - 100.0_f64.ln()).abs() < 1.0e-15);
+        assert!((eval_const("ln(100)") - 100.0_f64.ln()).abs() < 1.0e-15);
+        assert!((eval_const("log10(100)") - 2.0).abs() < 1.0e-15);
+
+        assert!((eval_const_xyce("log(100)") - 2.0).abs() < 1.0e-15);
+        assert!((eval_const_xyce("ln(100)") - 100.0_f64.ln()).abs() < 1.0e-15);
+        assert!((eval_const_xyce("log10(100)") - 2.0).abs() < 1.0e-15);
     }
 
     #[test]

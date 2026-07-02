@@ -67,6 +67,7 @@ pub enum Function {
     Sqrt,
     Exp,
     Log,
+    Ln,
     Log10,
     // Trigonometric
     Sin,

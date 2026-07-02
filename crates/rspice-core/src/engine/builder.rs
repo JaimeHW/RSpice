@@ -2132,6 +2132,7 @@ impl Engine {
                     bvs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
                         self.config.temperature,
                     ));
+                    bvs.set_expression_dialect(netlist.params.expression_dialect());
                     circuit.behavioral_sources.add_voltage(bvs);
                 }
                 ElementKind::BehavioralCurrent {
@@ -2166,6 +2167,7 @@ impl Engine {
                     bcs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
                         self.config.temperature,
                     ));
+                    bcs.set_expression_dialect(netlist.params.expression_dialect());
                     circuit.behavioral_sources.add_current(bcs);
                 }
                 // Flattened tree leaves external subcircuit-backed devices here

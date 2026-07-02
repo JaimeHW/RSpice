@@ -177,6 +177,7 @@ impl Engine {
 
         let parse_options = crate::netlist::NetlistParseOptions {
             statistical_mode: netlist.params.statistical_mode(),
+            expression_dialect: netlist.params.expression_dialect(),
         };
         let mut reparsed = if let Some(source_path) = netlist.source_path.as_deref() {
             Netlist::parse_with_path_and_options(&overridden_source, source_path, parse_options)

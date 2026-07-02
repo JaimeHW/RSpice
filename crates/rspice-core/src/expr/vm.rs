@@ -2,7 +2,7 @@
 //!
 //! Fast execution of compiled expressions without parsing overhead.
 
-use crate::Value;
+use crate::{Value, netlist::ExpressionDialect};
 use std::collections::HashMap;
 
 const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
@@ -51,6 +51,7 @@ pub enum Instruction {
     Sqrt,
     Exp,
     Log,
+    Ln,
     Log10,
     Sin,
     Cos,
@@ -146,6 +147,8 @@ pub struct Context<'a> {
     pub frequency: Value,
     /// Circuit temperature in degrees Celsius (`temper`)
     pub temperature: Value,
+    /// Dialect-specific expression-function semantics.
+    pub expression_dialect: ExpressionDialect,
 }
 
 impl<'a> Context<'a> {
@@ -159,6 +162,7 @@ impl<'a> Context<'a> {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            expression_dialect: ExpressionDialect::Ngspice,
         }
     }
 
@@ -172,12 +176,19 @@ impl<'a> Context<'a> {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            expression_dialect: ExpressionDialect::Ngspice,
         }
     }
 
     /// Set the circuit temperature (degrees Celsius) for `temper`.
     pub fn with_temperature(mut self, temperature: Value) -> Self {
         self.temperature = temperature;
+        self
+    }
+
+    /// Set dialect-specific expression-function semantics.
+    pub fn with_expression_dialect(mut self, dialect: ExpressionDialect) -> Self {
+        self.expression_dialect = dialect;
         self
     }
 }
@@ -265,7 +276,17 @@ impl Vm {
                 Instruction::Abs => self.unary_op(|a| a.abs()),
                 Instruction::Sqrt => self.unary_op(|a| a.max(0.0).sqrt()),
                 Instruction::Exp => self.unary_op(|a| a.exp()),
-                Instruction::Log => self.unary_op(|a| a.max(1e-38).ln()),
+                Instruction::Log => {
+                    let dialect = ctx.expression_dialect;
+                    self.unary_op(|a| {
+                        if dialect == ExpressionDialect::Xyce {
+                            a.max(1e-38).log10()
+                        } else {
+                            a.max(1e-38).ln()
+                        }
+                    });
+                }
+                Instruction::Ln => self.unary_op(|a| a.max(1e-38).ln()),
                 Instruction::Log10 => self.unary_op(|a| a.max(1e-38).log10()),
                 Instruction::Sin => self.unary_op(|a| a.sin()),
                 Instruction::Cos => self.unary_op(|a| a.cos()),

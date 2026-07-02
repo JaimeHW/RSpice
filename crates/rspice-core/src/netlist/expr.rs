@@ -27,7 +27,8 @@ pub use api::{
 };
 pub use behavioral::prepare_behavioral_expression;
 pub use context::{
-    DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, RandomState, StatisticalParamMode,
+    DEFAULT_RANDOM_SEED, ExpressionDialect, FunctionDef, ParamContext, RandomState,
+    StatisticalParamMode,
 };
 pub use error::ExprError;
 pub use eval::{evaluate, evaluate_complex};

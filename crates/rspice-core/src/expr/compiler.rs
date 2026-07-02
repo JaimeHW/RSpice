@@ -86,6 +86,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 Function::Sqrt => Instruction::Sqrt,
                 Function::Exp => Instruction::Exp,
                 Function::Log => Instruction::Log,
+                Function::Ln => Instruction::Ln,
                 Function::Log10 => Instruction::Log10,
                 Function::Sin => Instruction::Sin,
                 Function::Cos => Instruction::Cos,

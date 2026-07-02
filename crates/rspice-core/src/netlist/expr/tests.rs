@@ -732,6 +732,19 @@ fn xyce_complex_log10_negative_param_projects_components() {
 }
 
 #[test]
+fn log_function_follows_expression_dialect() {
+    let mut ctx = ParamContext::new();
+    assert!((eval_with(&ctx, "log(100)") - 100.0_f64.ln()).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "ln(100)") - 100.0_f64.ln()).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "log10(100)") - 2.0).abs() < 1.0e-14);
+
+    ctx.set_expression_dialect(crate::netlist::ExpressionDialect::Xyce);
+    assert!((eval_with(&ctx, "log(100)") - 2.0).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "ln(100)") - 100.0_f64.ln()).abs() < 1.0e-14);
+    assert!((eval_with(&ctx, "log10(100)") - 2.0).abs() < 1.0e-14);
+}
+
+#[test]
 fn xyce_complex_literals_and_projection_functions() {
     let ctx = ParamContext::new();
     let literal = eval_expression_complex("3.0+2.0J", &ctx)

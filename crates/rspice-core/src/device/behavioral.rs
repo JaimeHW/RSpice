@@ -8,6 +8,7 @@ use crate::Value;
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
 };
+use crate::netlist::ExpressionDialect;
 use crate::solver::StaticMatrix;
 
 const DERIVATIVE_REL_STEP: Value = 1e-6;
@@ -42,6 +43,8 @@ pub struct BehavioralVoltageSource {
     branch_partials: Vec<Value>,
     /// Circuit temperature in degrees Celsius, surfaced as `temper`.
     temperature: Value,
+    /// Dialect-specific expression-function semantics.
+    expression_dialect: ExpressionDialect,
     /// True when the expression can jump discontinuously as its inputs cross a predicate.
     transient_voltage_lte_excluded: bool,
 }
@@ -77,6 +80,7 @@ impl BehavioralVoltageSource {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            expression_dialect: ExpressionDialect::Ngspice,
             transient_voltage_lte_excluded,
         })
     }
@@ -161,13 +165,19 @@ impl BehavioralVoltageSource {
     #[inline]
     fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
         let ctx = Context::transient(&self.node_values, &self.branch_values, time)
-            .with_temperature(self.temperature);
+            .with_temperature(self.temperature)
+            .with_expression_dialect(self.expression_dialect);
         self.vm.execute(&self.program, &ctx)
     }
 
     /// Set the circuit temperature (degrees Celsius) surfaced as `temper`.
     pub fn set_temperature(&mut self, temperature: Value) {
         self.temperature = temperature;
+    }
+
+    /// Set dialect-specific expression-function semantics.
+    pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
+        self.expression_dialect = dialect;
     }
 
     #[inline]
@@ -405,6 +415,8 @@ pub struct BehavioralCurrentSource {
     branch_partials: Vec<Value>,
     /// Circuit temperature in degrees Celsius, surfaced as `temper`.
     temperature: Value,
+    /// Dialect-specific expression-function semantics.
+    expression_dialect: ExpressionDialect,
 }
 
 impl BehavioralCurrentSource {
@@ -434,6 +446,7 @@ impl BehavioralCurrentSource {
             temperature: crate::analysis::temperature::kelvin_to_celsius(
                 crate::constants::TEMP_REFERENCE,
             ),
+            expression_dialect: ExpressionDialect::Ngspice,
         })
     }
 
@@ -512,13 +525,19 @@ impl BehavioralCurrentSource {
     #[inline]
     fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
         let ctx = Context::transient(&self.node_values, &self.branch_values, time)
-            .with_temperature(self.temperature);
+            .with_temperature(self.temperature)
+            .with_expression_dialect(self.expression_dialect);
         self.vm.execute(&self.program, &ctx)
     }
 
     /// Set the circuit temperature (degrees Celsius) surfaced as `temper`.
     pub fn set_temperature(&mut self, temperature: Value) {
         self.temperature = temperature;
+    }
+
+    /// Set dialect-specific expression-function semantics.
+    pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
+        self.expression_dialect = dialect;
     }
 
     #[inline]

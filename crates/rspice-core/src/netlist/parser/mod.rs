@@ -10,12 +10,12 @@ use super::expr::{eval_expression, eval_expression_complex};
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::xspice_parser;
 use super::{
-    AnalysisCommand, BjtType, DataTable, Element, ElementKind, FreqVariation, InitialCondition,
-    JfetType, MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist,
-    NodeSet, ParamContext, ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType,
-    PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal,
-    SensitivityAcSweep, SimulationOptions, SourceSpec, StatisticalParamMode, StepCommand,
-    StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    AnalysisCommand, BjtType, DataTable, Element, ElementKind, ExpressionDialect, FreqVariation,
+    InitialCondition, JfetType, MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution,
+    MosType, Netlist, NodeSet, ParamContext, ParametricValue, ParseDiagnostic, ParseError,
+    PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
+    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec, StatisticalParamMode,
+    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -57,12 +57,14 @@ type MeasureStatement = crate::analysis::MeasureStatement;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NetlistParseOptions {
     pub statistical_mode: StatisticalParamMode,
+    pub expression_dialect: ExpressionDialect,
 }
 
 impl Default for NetlistParseOptions {
     fn default() -> Self {
         Self {
             statistical_mode: StatisticalParamMode::Sample,
+            expression_dialect: ExpressionDialect::Ngspice,
         }
     }
 }
@@ -217,6 +219,9 @@ pub fn parse_netlist_with_options(
     let title = lines[0].to_string();
     let mut state = ParseState::new();
     state.params.set_statistical_mode(options.statistical_mode);
+    state
+        .params
+        .set_expression_dialect(options.expression_dialect);
 
     // Seed the statistical expression functions before any parameter
     // evaluation so the deck behaves identically regardless of where the

@@ -550,7 +550,19 @@ fn eval_complex_builtin_function(
             require_arg_count(name, args, 1)?;
             Ok(complex_exp(args[0]))
         }
-        "LOG" | "LN" => {
+        "LOG" => {
+            require_arg_count(name, args, 1)?;
+            let value = complex_ln(args[0]);
+            if ctx.expression_dialect() == ExpressionDialect::Xyce {
+                Ok(ComplexValue::new(
+                    value.re / std::f64::consts::LN_10,
+                    value.im / std::f64::consts::LN_10,
+                ))
+            } else {
+                Ok(value)
+            }
+        }
+        "LN" => {
             require_arg_count(name, args, 1)?;
             Ok(complex_ln(args[0]))
         }
