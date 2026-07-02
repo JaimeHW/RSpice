@@ -1,9 +1,11 @@
+use rspice_core::testing::{TestResult, TestRunner, TestRunnerConfig};
 use rspice_core::xspice::CodeModelRegistry;
 use rspice_core::xspice::conformance::{
     ConformanceIssue, ConformanceSeverity, IfSpecConformancePolicy, audit_ngspice_ifspec_tree,
-    audit_ngspice_xspice_examples,
+    audit_ngspice_xspice_examples, materialize_ngspice_xspice_smoke_suite,
 };
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_MAX_ISSUES: usize = 200;
 
@@ -31,7 +33,7 @@ fn run() -> Result<(), String> {
     print_ifspec_report(&args, &report.issues, report.checked_models);
     let mut failed = report.has_errors();
 
-    if args.audit_examples {
+    if args.audit_examples || args.run_examples {
         let corpus = audit_ngspice_xspice_examples(&args.ngspice_source_root)
             .map_err(|err| err.to_string())?;
         let needs_adjudication = corpus.needs_adjudication();
@@ -41,6 +43,7 @@ fn run() -> Result<(), String> {
         println!("runnable: {}", corpus.runnable_count());
         println!("scripted control: {}", corpus.scripted_control_count());
         println!("reusable fragments: {}", corpus.reusable_fragment_count());
+        println!("expected invalid: {}", corpus.expected_invalid_count());
         println!("third-party excluded: {}", corpus.excluded_count());
         println!("needs adjudication: {}", needs_adjudication.len());
 
@@ -57,6 +60,38 @@ fn run() -> Result<(), String> {
         failed |= !needs_adjudication.is_empty();
     }
 
+    if args.run_examples {
+        let suite_root = args
+            .example_suite_root
+            .clone()
+            .unwrap_or_else(unique_example_suite_root);
+        let smoke_suite =
+            materialize_ngspice_xspice_smoke_suite(&args.ngspice_source_root, &suite_root)
+                .map_err(|err| err.to_string())?;
+        let run_count = args
+            .example_limit
+            .unwrap_or(smoke_suite.runnable_decks.len())
+            .min(smoke_suite.runnable_decks.len());
+        let runner = TestRunner::new(&smoke_suite.root, example_runner_config(&args));
+        let mut results = Vec::new();
+        for (relative, deck) in smoke_suite
+            .runnable_relative_decks
+            .iter()
+            .zip(smoke_suite.runnable_decks.iter())
+            .take(run_count)
+        {
+            results.push((relative.clone(), runner.run_test(deck)));
+        }
+        print_example_run_report(&results, smoke_suite.runnable_decks.len());
+        failed |= results.iter().any(|(_, result)| !result.passed);
+
+        if !args.keep_example_suite && args.example_suite_root.is_none() {
+            let _ = std::fs::remove_dir_all(&smoke_suite.root);
+        } else {
+            println!("materialized example suite: {}", smoke_suite.root.display());
+        }
+    }
+
     if failed {
         Err("XSPICE conformance audit failed".to_string())
     } else {
@@ -69,6 +104,11 @@ struct Args {
     ngspice_source_root: PathBuf,
     max_issues: usize,
     audit_examples: bool,
+    run_examples: bool,
+    example_limit: Option<usize>,
+    example_max_time_ms: u128,
+    example_suite_root: Option<PathBuf>,
+    keep_example_suite: bool,
 }
 
 impl Args {
@@ -79,6 +119,11 @@ impl Args {
         let mut ngspice_source_root = None;
         let mut max_issues = DEFAULT_MAX_ISSUES;
         let mut audit_examples = false;
+        let mut run_examples = false;
+        let mut example_limit = None;
+        let mut example_max_time_ms = TestRunnerConfig::default().max_time_per_test_ms;
+        let mut example_suite_root = None;
+        let mut keep_example_suite = false;
 
         while let Some(flag) = args.next() {
             match flag.as_str() {
@@ -90,6 +135,21 @@ impl Args {
                 }
                 "--examples" => {
                     audit_examples = true;
+                }
+                "--run-examples" => {
+                    run_examples = true;
+                }
+                "--example-limit" => {
+                    example_limit = Some(next_parse(&mut args, &flag)?);
+                }
+                "--example-max-time-ms" => {
+                    example_max_time_ms = next_parse(&mut args, &flag)?;
+                }
+                "--example-suite-root" => {
+                    example_suite_root = Some(next_path(&mut args, &flag)?);
+                }
+                "--keep-example-suite" => {
+                    keep_example_suite = true;
                 }
                 "--help" | "-h" => {
                     print_help();
@@ -107,15 +167,21 @@ impl Args {
             ngspice_source_root,
             max_issues,
             audit_examples,
+            run_examples,
+            example_limit,
+            example_max_time_ms,
+            example_suite_root,
+            keep_example_suite,
         })
     }
 }
 
 fn print_help() {
     println!(
-        "Usage: xspice_ifspec_audit --ngspice-source-root <path> [--examples] [--max-issues <n>]\n\
+        "Usage: xspice_ifspec_audit --ngspice-source-root <path> [--examples] [--run-examples] [--max-issues <n>]\n\
          Compares RSpice builtin XSPICE metadata against ngspice src/xspice/icm/**/ifspec.ifs.\n\
-         With --examples, also adjudicates ngspice examples/xspice decks without running third-party cosimulation."
+         With --examples, also adjudicates ngspice examples/xspice decks without running third-party cosimulation.\n\
+         With --run-examples, materializes runnable examples into a smoke suite and executes them through RSpice."
     );
 }
 
@@ -178,5 +244,45 @@ fn format_issue(issue: &ConformanceIssue) -> String {
             path.display()
         ),
         None => format!("{:?} {}: {}", issue.severity, issue.model, issue.message),
+    }
+}
+
+fn unique_example_suite_root() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "rspice-xspice-examples-{}-{nanos}",
+        std::process::id()
+    ))
+}
+
+fn example_runner_config(args: &Args) -> TestRunnerConfig {
+    TestRunnerConfig {
+        max_time_per_test_ms: args.example_max_time_ms.max(1),
+        ..TestRunnerConfig::default()
+    }
+}
+
+fn print_example_run_report(results: &[(PathBuf, TestResult)], total_runnable: usize) {
+    let passed = results.iter().filter(|(_, result)| result.passed).count();
+    let failed = results.len().saturating_sub(passed);
+    println!();
+    println!("XSPICE runnable example smoke run");
+    println!("runnable decks: {total_runnable}");
+    println!("executed: {}", results.len());
+    println!("passed: {passed}");
+    println!("failed: {failed}");
+
+    for (relative, result) in results.iter().filter(|(_, result)| !result.passed) {
+        println!(
+            "- {}: {}",
+            relative.display(),
+            result
+                .error
+                .as_deref()
+                .unwrap_or("failed without diagnostic")
+        );
     }
 }

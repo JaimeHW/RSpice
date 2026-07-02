@@ -515,6 +515,7 @@ pub enum XspiceExampleDisposition {
     ScriptedControl,
     ReusableInclude,
     ReusableSubcircuit,
+    ExpectedInvalid { reason: String },
     ExcludedThirdParty { reason: String },
     NeedsAdjudication { reason: String },
 }
@@ -553,6 +554,18 @@ impl XspiceExampleCorpusReport {
                 matches!(
                     deck.disposition,
                     XspiceExampleDisposition::ExcludedThirdParty { .. }
+                )
+            })
+            .count()
+    }
+
+    pub fn expected_invalid_count(&self) -> usize {
+        self.decks
+            .iter()
+            .filter(|deck| {
+                matches!(
+                    deck.disposition,
+                    XspiceExampleDisposition::ExpectedInvalid { .. }
                 )
             })
             .count()
@@ -609,6 +622,59 @@ pub fn audit_ngspice_xspice_examples(
     Ok(report)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XspiceSmokeSuite {
+    pub root: PathBuf,
+    pub manifest_path: PathBuf,
+    pub runnable_decks: Vec<PathBuf>,
+    pub runnable_relative_decks: Vec<PathBuf>,
+}
+
+pub fn materialize_ngspice_xspice_smoke_suite(
+    ngspice_source_root: &Path,
+    destination_root: &Path,
+) -> Result<XspiceSmokeSuite, ConformanceError> {
+    let examples_root = ngspice_source_root.join("examples").join("xspice");
+    let report = audit_ngspice_xspice_examples(ngspice_source_root)?;
+    fs::create_dir_all(destination_root).map_err(|source| ConformanceError::Io {
+        path: destination_root.to_path_buf(),
+        source,
+    })?;
+    copy_tree(&examples_root, destination_root)?;
+
+    let mut manifest = String::new();
+    let mut runnable_decks = Vec::new();
+    let mut runnable_relative_decks = Vec::new();
+    for deck in report
+        .decks
+        .iter()
+        .filter(|deck| deck.disposition == XspiceExampleDisposition::Runnable)
+    {
+        let normalized = deck
+            .relative_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase();
+        manifest.push_str(&normalized);
+        manifest.push_str("\tsmoke\n");
+        runnable_relative_decks.push(deck.relative_path.clone());
+        runnable_decks.push(destination_root.join(&deck.relative_path));
+    }
+
+    let manifest_path = destination_root.join("validation-manifest.tsv");
+    fs::write(&manifest_path, manifest).map_err(|source| ConformanceError::Io {
+        path: manifest_path.clone(),
+        source,
+    })?;
+
+    Ok(XspiceSmokeSuite {
+        root: destination_root.to_path_buf(),
+        manifest_path,
+        runnable_decks,
+        runnable_relative_decks,
+    })
+}
+
 fn collect_example_decks(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), ConformanceError> {
     let entries = fs::read_dir(dir).map_err(|source| ConformanceError::Io {
         path: dir.to_path_buf(),
@@ -629,6 +695,33 @@ fn collect_example_decks(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Con
     Ok(())
 }
 
+fn copy_tree(source: &Path, destination: &Path) -> Result<(), ConformanceError> {
+    fs::create_dir_all(destination).map_err(|err| ConformanceError::Io {
+        path: destination.to_path_buf(),
+        source: err,
+    })?;
+    for entry in fs::read_dir(source).map_err(|err| ConformanceError::Io {
+        path: source.to_path_buf(),
+        source: err,
+    })? {
+        let entry = entry.map_err(|err| ConformanceError::Io {
+            path: source.to_path_buf(),
+            source: err,
+        })?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_tree(&source_path, &destination_path)?;
+        } else if source_path.is_file() {
+            fs::copy(&source_path, &destination_path).map_err(|err| ConformanceError::Io {
+                path: source_path,
+                source: err,
+            })?;
+        }
+    }
+    Ok(())
+}
+
 fn is_example_deck(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -639,6 +732,9 @@ fn is_example_deck(path: &Path) -> bool {
 fn classify_xspice_example(relative_path: &Path, source: &str) -> XspiceExampleDisposition {
     if let Some(reason) = third_party_example_reason(relative_path, source) {
         return XspiceExampleDisposition::ExcludedThirdParty { reason };
+    }
+    if let Some(reason) = expected_invalid_example_reason(relative_path) {
+        return XspiceExampleDisposition::ExpectedInvalid { reason };
     }
     if has_control_block(source) {
         return XspiceExampleDisposition::ScriptedControl;
@@ -683,6 +779,29 @@ fn third_party_example_reason(relative_path: &Path, source: &str) -> Option<Stri
         }
     }
     None
+}
+
+fn expected_invalid_example_reason(relative_path: &Path) -> Option<String> {
+    let normalized = relative_path
+        .iter()
+        .map(|part| part.to_string_lossy().to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join("/");
+    match normalized.as_str() {
+        "original-examples/bad_io.deck" => {
+            Some("intentionally exercises an instance/model port-count mismatch".to_string())
+        }
+        "original-examples/bad_io_type.deck" => {
+            Some("intentionally connects a digital node to an analog-only model port".to_string())
+        }
+        "original-examples/bad_name.deck" => {
+            Some("intentionally references an unknown XSPICE model".to_string())
+        }
+        "original-examples/mixed_io_size.deck" => {
+            Some("intentionally supplies a vector parameter with the wrong input width".to_string())
+        }
+        _ => None,
+    }
 }
 
 fn has_control_block(source: &str) -> bool {

@@ -99,6 +99,10 @@ fn ngspice46_xspice_example_corpus_is_adjudicated() {
         "third-party XSPICE example decks should be explicitly excluded, not silently mixed into parity coverage"
     );
     assert!(
+        report.expected_invalid_count() > 0,
+        "intentionally invalid upstream XSPICE example decks should be explicitly classified"
+    );
+    assert!(
         report.reusable_fragment_count() > 0,
         "analysis-free reusable subcircuit/include decks should be explicitly classified"
     );
