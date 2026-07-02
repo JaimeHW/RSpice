@@ -227,6 +227,32 @@ struct BidiAnalogSegment {
     interval: Value,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BidiAnalogSegments {
+    segments: [BidiAnalogSegment; 2],
+    len: usize,
+}
+
+impl BidiAnalogSegments {
+    fn one(segment: BidiAnalogSegment) -> Self {
+        Self {
+            segments: [segment, segment],
+            len: 1,
+        }
+    }
+
+    fn two(first: BidiAnalogSegment, second: BidiAnalogSegment) -> Self {
+        Self {
+            segments: [first, second],
+            len: 2,
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = BidiAnalogSegment> + '_ {
+        self.segments[..self.len].iter().copied()
+    }
+}
+
 fn node_row(node: usize) -> Option<usize> {
     node.checked_sub(1)
 }
@@ -590,13 +616,13 @@ fn bidi_analog_segments(
     index: usize,
     drive: DigitalValue,
     width: usize,
-) -> Vec<BidiAnalogSegment> {
+) -> BidiAnalogSegments {
     let step = bidi_analog_step(ctx);
     let Some(event_time) = ctx.input_digital_vector_event_time("d", index) else {
-        return vec![BidiAnalogSegment {
+        return BidiAnalogSegments::one(BidiAnalogSegment {
             drive,
             interval: step,
-        }];
+        });
     };
     let previous_drive = bidi_previous_drive(ctx, index, width);
     let step_start = ctx.time_prev;
@@ -604,17 +630,17 @@ fn bidi_analog_segments(
     let iota = step.abs() * 1.0e-6;
 
     if step_end - event_time < iota {
-        vec![BidiAnalogSegment {
+        BidiAnalogSegments::one(BidiAnalogSegment {
             drive: previous_drive,
             interval: step,
-        }]
+        })
     } else if event_time - step_start < iota {
-        vec![BidiAnalogSegment {
+        BidiAnalogSegments::one(BidiAnalogSegment {
             drive,
             interval: step,
-        }]
+        })
     } else if event_time > step_start && event_time < step_end {
-        vec![
+        BidiAnalogSegments::two(
             BidiAnalogSegment {
                 drive: previous_drive,
                 interval: (event_time - step_start).max(0.0),
@@ -623,12 +649,12 @@ fn bidi_analog_segments(
                 drive,
                 interval: (step_end - event_time).max(0.0),
             },
-        ]
+        )
     } else {
-        vec![BidiAnalogSegment {
+        BidiAnalogSegments::one(BidiAnalogSegment {
             drive,
             interval: step,
-        }]
+        })
     }
 }
 
@@ -836,7 +862,8 @@ fn bidi_drive_current(
     let mut partial = 0.0;
     let mut last_target = current;
     let mut last_range = 0.0;
-    for segment in bidi_analog_segments(ctx, index, drive, width) {
+    let segments = bidi_analog_segments(ctx, index, drive, width);
+    for segment in segments.iter() {
         svoc = bidi_advance_svoc(svoc, segment.drive, segment.interval, params);
         let (target, segment_partial, range) =
             bidi_current_target(voltage, segment.drive, svoc, params);
