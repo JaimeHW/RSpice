@@ -436,6 +436,21 @@ impl Engine {
                     instance_params.push((name.to_ascii_uppercase(), value));
                 }
             };
+        let set_instance_param_alias = |instance_params: &mut Vec<(String, Value)>,
+                                        aliases: &[&str],
+                                        canonical_name: &str,
+                                        value: Value| {
+            if let Some((name, existing)) = instance_params.iter_mut().find(|(param, _)| {
+                aliases
+                    .iter()
+                    .any(|alias| param.eq_ignore_ascii_case(alias))
+            }) {
+                *name = canonical_name.to_ascii_uppercase();
+                *existing = value;
+            } else {
+                instance_params.push((canonical_name.to_ascii_uppercase(), value));
+            }
+        };
 
         match kind {
             ElementKind::Resistor {
@@ -457,13 +472,49 @@ impl Engine {
                 }
                 Ok(())
             }
-            ElementKind::Capacitor { value: c, .. } => {
-                if !matches_param(&["C", "VALUE"]) {
-                    return Err(SimulationError::Circuit(
-                        "Unsupported capacitor step parameter; use C or VALUE".to_string(),
-                    ));
+            ElementKind::Capacitor {
+                value: c,
+                initial_voltage,
+                instance_params,
+                ..
+            } => {
+                match param_upper.as_deref() {
+                    None | Some("C") | Some("CAP") | Some("VALUE") | Some("CAPACITANCE") => {
+                        *c = value;
+                        set_instance_param_alias(
+                            instance_params,
+                            &["C", "CAP", "VALUE", "CAPACITANCE"],
+                            "C",
+                            value,
+                        );
+                    }
+                    Some("IC") => {
+                        *initial_voltage = Some(value);
+                        set_instance_param(instance_params, "IC", value);
+                    }
+                    Some("L") | Some("LENGTH") => {
+                        set_instance_param_alias(instance_params, &["L", "LENGTH"], "L", value);
+                    }
+                    Some("W") | Some("WIDTH") => {
+                        set_instance_param_alias(instance_params, &["W", "WIDTH"], "W", value);
+                    }
+                    Some("M") | Some("MULT") => {
+                        set_instance_param_alias(instance_params, &["M", "MULT"], "M", value);
+                    }
+                    Some("SCALE") | Some("TEMP") | Some("DTEMP") | Some("TC1") | Some("TC2") => {
+                        set_instance_param(
+                            instance_params,
+                            param_upper.as_deref().expect("param is present"),
+                            value,
+                        );
+                    }
+                    Some(_) => {
+                        return Err(SimulationError::Circuit(
+                            "Unsupported capacitor step parameter; use C, VALUE, CAP, CAPACITANCE, M, MULT, SCALE, L, W, TEMP, DTEMP, TC1, TC2, or IC"
+                                .to_string(),
+                        ));
+                    }
                 }
-                *c = value;
                 Ok(())
             }
             ElementKind::Inductor {
@@ -720,4 +771,88 @@ fn validate_step_values(values: &[Value]) -> Result<(), SimulationError> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{SimulationConfig, SpiceDialect};
+    use crate::netlist::{AnalysisCommand, Netlist};
+
+    fn first_step_command(netlist: &Netlist) -> &StepCommand {
+        netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Step(step) => Some(step),
+                _ => None,
+            })
+            .expect("step command parsed")
+    }
+
+    #[test]
+    fn device_step_updates_capacitor_multiplicity_parameter() {
+        let netlist = Netlist::parse(
+            "\
+capacitor m step
+V1 in 0 0
+C3 in 0 C=32u M=1.25
+.STEP C3:M 1.25 2.5 1.25
+.END
+",
+        )
+        .expect("deck parses");
+        let step = first_step_command(&netlist);
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+
+        let stepped = engine
+            .step_netlists_for_command(&netlist, step, &[2.5])
+            .expect("capacitor multiplicity step materializes");
+        let stepped_netlist = &stepped[0].1;
+        let capacitance = engine
+            .resolved_capacitor_value(stepped_netlist, "C3")
+            .expect("capacitance resolves")
+            .expect("C3 exists");
+
+        assert!(
+            (capacitance - 80.0e-6).abs() < 1.0e-18,
+            "resolved capacitance {capacitance}"
+        );
+    }
+
+    #[test]
+    fn device_step_capacitor_value_replaces_existing_alias() {
+        let netlist = Netlist::parse(
+            "\
+capacitor value alias step
+V1 in 0 0
+C3 in 0 C=32u M=2
+.STEP C3:VALUE 16u 16u 1u
+.END
+",
+        )
+        .expect("deck parses");
+        let step = first_step_command(&netlist);
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+
+        let stepped = engine
+            .step_netlists_for_command(&netlist, step, &[16.0e-6])
+            .expect("capacitor value step materializes");
+        let stepped_netlist = &stepped[0].1;
+        let capacitance = engine
+            .resolved_capacitor_value(stepped_netlist, "C3")
+            .expect("capacitance resolves")
+            .expect("C3 exists");
+
+        assert!(
+            (capacitance - 32.0e-6).abs() < 1.0e-18,
+            "resolved capacitance {capacitance}"
+        );
+    }
 }
