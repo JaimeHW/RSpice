@@ -192,6 +192,7 @@ struct XyceStaticTranPlan {
     tran: XyceTranAnalysis,
     steps: Vec<StepCommand>,
     contract: XyceStaticTranContract,
+    wrapper_tolerance: Option<XyceComparisonTolerance>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -927,7 +928,9 @@ impl XyceTestRunner {
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let tran = Self::single_tran_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
-        if steps.is_empty() && requires_wrapper {
+        let native_default_prn_wrapper =
+            Self::is_native_default_prn_tran_wrapper_candidate(&deck.relative_path, &source);
+        if steps.is_empty() && requires_wrapper && !native_default_prn_wrapper {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
         if !steps.is_empty() {
@@ -945,6 +948,7 @@ impl XyceTestRunner {
             print,
             tran,
             steps,
+            wrapper_tolerance: Self::native_default_prn_tran_wrapper_tolerance(&deck.relative_path),
             contract: if requires_wrapper {
                 XyceStaticTranContract::WrapperStatic
             } else {
@@ -1175,8 +1179,7 @@ impl XyceTestRunner {
                 .trim()
                 .to_ascii_lowercase();
             if trimmed.starts_with(".step ") {
-                has_resistor_geometry_step |=
-                    trimmed.contains("r1:l") || trimmed.contains("r2:l");
+                has_resistor_geometry_step |= trimmed.contains("r1:l") || trimmed.contains("r2:l");
                 has_resistor_default_step |= trimmed
                     .split_whitespace()
                     .nth(1)
@@ -1473,6 +1476,26 @@ impl XyceTestRunner {
             _ => Err(format!(
                 "wrapper-origin transient .prn contract requires one primary .PRINT TRAN statement, found {primary_tran_print_count}"
             )),
+        }
+    }
+
+    fn is_native_default_prn_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        matches!(
+            Self::normalize_manifest_key(relative_path).as_str(),
+            "netlists/output/tran/tran-prn-noindex.cir"
+        ) && Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
+    }
+
+    fn native_default_prn_tran_wrapper_tolerance(
+        relative_path: &str,
+    ) -> Option<XyceComparisonTolerance> {
+        match Self::normalize_manifest_key(relative_path).as_str() {
+            "netlists/output/tran/tran-prn-noindex.cir" => Some(XyceComparisonTolerance {
+                relative: 1.0e-3,
+                absolute: 1.0e-5,
+                zero: Some(1.0e-8),
+            }),
+            _ => None,
         }
     }
 
@@ -1824,6 +1847,7 @@ impl XyceTestRunner {
                     &netlist,
                     &plan.source,
                     &result,
+                    plan.wrapper_tolerance,
                 ) {
                     Ok(mismatches) => mismatches,
                     Err(err) => {
@@ -1882,6 +1906,7 @@ impl XyceTestRunner {
                     &netlist,
                     &plan.source,
                     &locked_result,
+                    plan.wrapper_tolerance,
                 ) {
                     Ok(locked_mismatches) => {
                         if locked_mismatches.is_empty() {
@@ -1932,6 +1957,7 @@ impl XyceTestRunner {
                         &netlist,
                         &plan.source,
                         &backward_euler_result,
+                        plan.wrapper_tolerance,
                     ) {
                         Ok(backward_euler_mismatches) => {
                             if backward_euler_mismatches.is_empty() {
@@ -2174,6 +2200,7 @@ impl XyceTestRunner {
                     &run.netlist,
                     &plan.source,
                     &result,
+                    plan.wrapper_tolerance,
                 )
                 .map_err(|err| {
                     format!("reference comparison error: step {}: {err}", step_index + 1)
@@ -3347,6 +3374,7 @@ impl XyceTestRunner {
         netlist: &Netlist,
         source: &str,
         result: &TransientResult,
+        wrapper_tolerance: Option<XyceComparisonTolerance>,
     ) -> Result<Vec<XyceValueMismatch>, String> {
         if reference.columns.is_empty() {
             return Err("reference table has no columns".to_string());
@@ -3413,6 +3441,7 @@ impl XyceTestRunner {
                 let tolerance = comp_tolerances
                     .get(&normalized_probe)
                     .copied()
+                    .or(wrapper_tolerance)
                     .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
                 if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
                     let time_tolerance = Self::default_prn_time_quantization_tolerance(time);
