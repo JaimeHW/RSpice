@@ -4690,6 +4690,7 @@ fn table_transfer_expression(input_expr: &str, pairs: &[(Value, Value)]) -> Stri
     sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let x_min = sorted.first().map(|(x, _)| *x).unwrap_or(0.0);
     let x_max = sorted.last().map(|(x, _)| *x).unwrap_or(0.0);
+    let input_expr = input_expr.trim();
 
     let mut args = Vec::with_capacity(1 + sorted.len() * 2);
     args.push(format!("limit(({}), {}, {})", input_expr, x_min, x_max));
@@ -5173,6 +5174,8 @@ pub(super) fn parse_behavioral(
             message: "Behavioral source requires a non-empty expression".to_string(),
         });
     }
+    let expression =
+        lower_behavioral_table_expression(&expression, line_num, params)?.unwrap_or(expression);
 
     let mut tc1 = 0.0;
     let mut tc2 = 0.0;
@@ -5220,6 +5223,44 @@ pub(super) fn parse_behavioral(
     });
 
     Ok(())
+}
+
+fn lower_behavioral_table_expression(
+    expression: &str,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<Option<String>, ParseError> {
+    let tokens = match tokenize(expression) {
+        Ok(tokens) => tokens,
+        Err(_) => return Ok(None),
+    };
+    let mut stream = TokenStream::new(tokens);
+    let TokenKind::Ident(keyword) = &stream.peek().kind else {
+        return Ok(None);
+    };
+    if !keyword.eq_ignore_ascii_case("TABLE") {
+        return Ok(None);
+    }
+    if !matches!(stream.peek_n(1).kind, TokenKind::Expression(_)) {
+        return Ok(None);
+    }
+
+    stream.advance();
+    let input_expr = collect_expression_argument(&mut stream, line_num, None)?;
+    stream.consume(&TokenKind::Equals);
+    let flat = collect_numeric_tail(&mut stream, line_num, params, "Behavioral TABLE")?;
+    if flat.len() < 4 || !flat.len().is_multiple_of(2) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Behavioral TABLE requires at least two (x,y) pairs".to_string(),
+        });
+    }
+
+    let pairs = flat
+        .chunks_exact(2)
+        .map(|c| (c[0], c[1]))
+        .collect::<Vec<_>>();
+    Ok(Some(table_transfer_expression(&input_expr, &pairs)))
 }
 
 pub(super) fn behavioral_trailing_assignment(stream: &TokenStream) -> bool {

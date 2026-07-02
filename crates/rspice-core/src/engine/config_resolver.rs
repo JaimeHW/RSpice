@@ -237,6 +237,8 @@ fn parse_integration_method_option(method: &str) -> Option<IntegrationMethod> {
     if method.eq_ignore_ascii_case("TRAP")
         || method.eq_ignore_ascii_case("TRAPEZOIDAL")
         || method.eq_ignore_ascii_case("TRAPEZOID")
+        || method.eq_ignore_ascii_case("ONESTEP")
+        || method == "7"
     {
         Some(IntegrationMethod::Trapezoidal)
     } else if method.eq_ignore_ascii_case("EULER")
@@ -247,6 +249,7 @@ fn parse_integration_method_option(method: &str) -> Option<IntegrationMethod> {
     } else if method.eq_ignore_ascii_case("GEAR")
         || method.eq_ignore_ascii_case("BDF")
         || method.eq_ignore_ascii_case("GEAR2")
+        || method == "8"
     {
         Some(IntegrationMethod::Gear2)
     } else if method.eq_ignore_ascii_case("TRAPGEAR") || method.eq_ignore_ascii_case("AUTO") {
@@ -310,6 +313,22 @@ mod tests {
             resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
 
         assert_eq!(resolved.transient_trtol, 2.25);
+    }
+
+    #[test]
+    fn xyce_numeric_timeint_method_selectors_resolve_to_active_methods() {
+        assert_eq!(
+            parse_integration_method_option("7"),
+            Some(IntegrationMethod::Trapezoidal)
+        );
+        assert_eq!(
+            parse_integration_method_option("ONESTEP"),
+            Some(IntegrationMethod::Trapezoidal)
+        );
+        assert_eq!(
+            parse_integration_method_option("8"),
+            Some(IntegrationMethod::Gear2)
+        );
     }
 
     #[test]

@@ -28,10 +28,11 @@ use std::time::{Duration, Instant};
 const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
 const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
-const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 50_000.0;
+const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 250_000.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
 const XYCE_DEFAULT_PRN_FRACTION_DIGITS: f64 = 8.0;
+const PRN_TIME_NEIGHBOR_HALF_ULPS: f64 = 4.0;
 
 /// Configuration for the Xyce corpus runner.
 #[derive(Debug, Clone)]
@@ -2693,6 +2694,32 @@ impl XyceTestRunner {
                 continue;
             }
             let candidate = Self::evaluate_tran_probe(probe, netlist, result, candidate_time)?;
+            if self
+                .value_mismatch(expected, candidate, tolerance)
+                .is_none()
+            {
+                return Ok(true);
+            }
+            if candidate.is_finite() {
+                min_actual = min_actual.min(candidate);
+                max_actual = max_actual.max(candidate);
+            }
+        }
+
+        // A Xyce PRN timestamp is already rounded text. Around very steep
+        // transitions, the oracle value can belong to the same printed-time
+        // neighborhood while the closest simulator samples sit on adjacent
+        // printed ticks. Bound the comparison with those immediate local
+        // samples without accepting coarse-grid timing drift.
+        let sample_window = time_tolerance * PRN_TIME_NEIGHBOR_HALF_ULPS;
+        let lower_time = time - sample_window;
+        let upper_time = time + sample_window;
+        let first_sample = result.time.partition_point(|sample| *sample < lower_time);
+        for &sample_time in result.time.iter().skip(first_sample) {
+            if sample_time > upper_time {
+                break;
+            }
+            let candidate = Self::evaluate_tran_probe(probe, netlist, result, sample_time)?;
             if self
                 .value_mismatch(expected, candidate, tolerance)
                 .is_none()
@@ -7825,6 +7852,42 @@ End of Xyce(TM) Simulation
                 )
                 .expect("time-window comparison should evaluate"),
             "expected value falls inside the waveform interval induced by printed PRN time precision"
+        );
+    }
+
+    #[test]
+    fn transient_comparison_uses_local_samples_inside_prn_time_neighborhood() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let time = 2.96913385e-6;
+        let result = TransientResult {
+            time: vec![time, 2.96913387e-6],
+            voltages: vec![vec![3.984804681e-4, 0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["3".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+        };
+        let tolerance = runner
+            .default_comparison_tolerance("v(3)")
+            .with_relative(0.02)
+            .with_absolute(1.0e-6);
+        let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(time);
+
+        assert!(
+            runner
+                .transient_probe_matches_within_time_quantization(
+                    "V(3)",
+                    &Netlist::default(),
+                    &result,
+                    time,
+                    2.38339292e-4,
+                    3.984804681e-4,
+                    tolerance,
+                    time_tolerance,
+                )
+                .expect("time-neighborhood comparison should evaluate"),
+            "expected value falls inside adjacent PRN-rounded transition samples"
         );
     }
 

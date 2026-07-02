@@ -690,8 +690,7 @@ pub(super) fn parse_options_command(
                 options.itl6 = Some(parse_usize_option("ITL6", value, line_num)?);
             }
             (_, "METHOD") => {
-                let method = expect_ident(stream, line_num)?;
-                options.method = Some(method.to_uppercase());
+                options.method = Some(parse_method_option(stream, line_num, params)?);
             }
             (_, "INTERP" | "NOACCT") => {
                 // Ngspice compatibility flags. INTERP affects rawfile storage
@@ -787,6 +786,39 @@ fn parse_auto_bridge_option(
 
     let value = expect_value(stream, line_num, params)?;
     Ok((value != 0.0, value >= 2.0))
+}
+
+fn parse_method_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<String, ParseError> {
+    match &stream.peek().kind {
+        TokenKind::Ident(method) => {
+            let method = method.to_uppercase();
+            stream.advance();
+            Ok(method)
+        }
+        TokenKind::Number(_) | TokenKind::Expression(_) => {
+            let value = expect_value(stream, line_num, params)?;
+            if !value.is_finite() || value.fract() != 0.0 {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        ".OPTIONS METHOD expects an integer selector or method name, found {value}"
+                    ),
+                });
+            }
+            Ok(format!("{value:.0}"))
+        }
+        _ => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected .OPTIONS METHOD value, found {:?}",
+                stream.peek().kind
+            ),
+        }),
+    }
 }
 
 pub(super) fn parse_global_command(
@@ -2071,5 +2103,15 @@ mod tests {
         let netlist = Netlist::parse(&deck_with_options(".options ramptime=10n"))
             .expect("ramptime option parses");
         assert_eq!(netlist.options.ramptime, Some(10.0e-9));
+    }
+
+    #[test]
+    fn options_parse_xyce_numeric_timeint_method() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options timeint method=7 newlte=1 newbpstepping=1",
+        ))
+        .expect("Xyce numeric TIMEINT method selector parses");
+
+        assert_eq!(netlist.options.method.as_deref(), Some("7"));
     }
 }

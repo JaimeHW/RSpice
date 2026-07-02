@@ -3467,6 +3467,24 @@ mod tests {
     }
 
     #[test]
+    fn behavioral_source_lowers_xyce_braced_table_form() {
+        let netlist = Netlist::parse(
+            "behavioral Xyce table source\n\
+             B1 out 0 V={TABLE { V(in) + 1 } (0, 0) (1, 2) (2, 3)}\n\
+             .end\n",
+        )
+        .expect("Xyce braced TABLE behavioral source should parse");
+
+        let ElementKind::BehavioralVoltage { expression, .. } = &netlist.elements[0].kind else {
+            panic!("expected behavioral voltage source");
+        };
+        assert_eq!(
+            expression,
+            "table(limit((V(in) + 1), 0, 2), 0, 0, 1, 2, 2, 3)"
+        );
+    }
+
+    #[test]
     fn multi_input_vcvs_gate_lowers_to_xspice_pwl() {
         let netlist = Netlist::parse(
             "multi-input VCVS gate\n\
