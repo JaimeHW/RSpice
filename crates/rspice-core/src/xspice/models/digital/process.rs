@@ -304,7 +304,7 @@ impl CodeModel for DigitalProcess {
                     ctx.time
                 };
 
-                let exchange_ok = {
+                {
                     let runtime = ctx
                         .resource::<DigitalProcessRuntimeResource>(RESOURCE_RUNTIME)
                         .ok_or_else(|| d_process_error("runtime is not initialized"))?;
@@ -315,30 +315,24 @@ impl CodeModel for DigitalProcess {
                         input_bytes,
                         output_bytes,
                     } = scratch;
-                    match runtime.exchange(signed_time, input_bytes, output_bytes) {
-                        Ok(()) => true,
-                        Err(err) => {
-                            log::warn!(
-                                "d_process external exchange failed at {signed_time:.16e}; preserving current outputs like ngspice: {err}"
-                            );
-                            false
-                        }
+                    if let Err(err) = runtime.exchange(signed_time, input_bytes, output_bytes) {
+                        log::warn!(
+                            "d_process external exchange failed at {signed_time:.16e}; applying the returned output buffer like ngspice: {err}"
+                        );
                     }
-                };
+                }
 
-                if exchange_ok {
-                    let clk_delay = d_process_delay(ctx, "clk_delay", 1.0e-9)?;
-                    for index in 0..output_width {
-                        let new_code = output_code(&scratch.output_bytes, index);
-                        if new_code != ctx.int_state(STATE_DOUT_START + index) {
-                            ctx.set_output_digital_vector_element(
-                                "out",
-                                index,
-                                output_value_from_code(new_code),
-                                clk_delay,
-                            );
-                            ctx.set_int_state(STATE_DOUT_START + index, new_code);
-                        }
+                let clk_delay = d_process_delay(ctx, "clk_delay", 1.0e-9)?;
+                for index in 0..output_width {
+                    let new_code = output_code(&scratch.output_bytes, index);
+                    if new_code != ctx.int_state(STATE_DOUT_START + index) {
+                        ctx.set_output_digital_vector_element(
+                            "out",
+                            index,
+                            output_value_from_code(new_code),
+                            clk_delay,
+                        );
+                        ctx.set_int_state(STATE_DOUT_START + index, new_code);
                     }
                 }
 
@@ -370,6 +364,21 @@ mod tests {
         ) -> CmResult<()> {
             output_bytes.fill(1);
             Ok(())
+        }
+    }
+
+    struct FailingProcessRuntime;
+
+    impl DigitalProcessRuntime for FailingProcessRuntime {
+        fn exchange(
+            &mut self,
+            _signed_time: f64,
+            _input_bytes: &[u8],
+            _output_bytes: &mut [u8],
+        ) -> CmResult<()> {
+            Err(CmError::EvaluationError(
+                "synthetic process error".to_string(),
+            ))
         }
     }
 
@@ -568,5 +577,39 @@ mod tests {
         assert_eq!(events[0].port_name, "out");
         assert_eq!(events[0].delay, 0.0);
         assert_eq!(events[0].values, vec![unknown_high_z(), unknown_high_z()]);
+    }
+
+    #[test]
+    fn d_process_failed_exchange_applies_zeroed_output_buffer_like_ngspice() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.time = 1.0e-9;
+        ctx.set_port_width("in", 0);
+        ctx.set_port_width("out", 1);
+        ctx.allocate_int_states(STATE_DOUT_START + 1);
+        ctx.set_int_state(STATE_PREV_CLK, STATE_ZERO);
+        ctx.set_int_state(STATE_PREV_RESET, STATE_ZERO);
+        ctx.set_int_state(STATE_RNG, D_PROCESS_RNG_SEED);
+        ctx.set_int_state(STATE_DOUT_START, STATE_UNKNOWN);
+        ctx.set_input_digital("clk", DigitalValue::one());
+        ctx.set_input_digital("reset", DigitalValue::zero());
+        let runtime: Arc<DigitalProcessRuntimeResource> =
+            Arc::new(Mutex::new(Box::new(FailingProcessRuntime)));
+        ctx.set_resource(RESOURCE_RUNTIME, runtime);
+        ctx.set_resource(
+            RESOURCE_IO_SCRATCH,
+            Arc::new(DigitalProcessIoScratch::default()),
+        );
+
+        DigitalProcess
+            .evaluate(&mut ctx)
+            .expect("ngspice keeps evaluating d_process output buffer after exchange errors");
+
+        assert_eq!(ctx.int_state(STATE_DOUT_START), STATE_ZERO);
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].port_name, "out");
+        assert_eq!(events[0].values, vec![DigitalValue::zero()]);
+        assert_eq!(events[0].delay, 1.0e-9);
     }
 }
