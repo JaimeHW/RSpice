@@ -3427,6 +3427,28 @@ mod tests {
     }
 
     #[test]
+    fn behavioral_source_preserves_logical_operators() {
+        let netlist = Netlist::parse(
+            "behavioral logical source\n\
+             Bcross cross 0 V=(V(live) > -2 && V(live) < 2) ? 5 : 0\n\
+             .end\n",
+        )
+        .expect("behavioral logical expression should parse");
+
+        let ElementKind::BehavioralVoltage { expression, .. } = &netlist.elements[0].kind else {
+            panic!("expected behavioral voltage source");
+        };
+        assert!(
+            expression.contains("&&"),
+            "logical and operator was not preserved: {expression}"
+        );
+        assert!(
+            !expression.contains("& &"),
+            "logical and operator was split: {expression}"
+        );
+    }
+
+    #[test]
     fn multi_input_vcvs_gate_lowers_to_xspice_pwl() {
         let netlist = Netlist::parse(
             "multi-input VCVS gate\n\

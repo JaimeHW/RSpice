@@ -4527,20 +4527,18 @@ fn collect_expression_argument(
         return Ok(inner);
     }
 
-    let mut parts = Vec::new();
+    let mut expression = String::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         if let Some(term) = terminator
             && std::mem::discriminant(&stream.peek().kind) == std::mem::discriminant(term)
         {
             break;
         }
-        if let Some(fragment) = behavioral_expr_token_fragment(&stream.peek().kind) {
-            parts.push(fragment);
-        }
+        append_behavioral_expr_token(&mut expression, &stream.peek().kind);
         stream.advance();
     }
 
-    let expression = parts.join(" ").trim().to_string();
+    let expression = expression.trim().to_string();
     if expression.is_empty() {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -4586,7 +4584,9 @@ fn try_controlled_source_behavioral_assignment(
         if tail.is_empty() {
             inline_expr
         } else {
-            format!("{inline_expr} {tail}")
+            let mut expression = inline_expr;
+            append_behavioral_expr_fragment(&mut expression, &tail);
+            expression
         }
     };
     Ok(Some(expression))
@@ -5155,20 +5155,18 @@ pub(super) fn parse_behavioral(
     // Collect the expression text with token-aware reconstruction.
     // Important: TokenKind::Expression already stores the inner content and must
     // not be wrapped back into braces.
-    let mut expr_parts = Vec::new();
+    let mut expression = String::new();
     if !inline_expr.is_empty() {
-        expr_parts.push(inline_expr.to_string());
+        expression.push_str(inline_expr);
     }
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         if behavioral_trailing_assignment(stream) {
             break;
         }
-        if let Some(fragment) = behavioral_expr_token_fragment(&stream.peek().kind) {
-            expr_parts.push(fragment);
-        }
+        append_behavioral_expr_token(&mut expression, &stream.peek().kind);
         stream.advance();
     }
-    let expression = expr_parts.join(" ").trim().to_string();
+    let expression = expression.trim().to_string();
     if expression.is_empty() {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -5254,6 +5252,34 @@ pub(super) fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String
         TokenKind::Other(c) => Some(c.to_string()),
         TokenKind::Newline | TokenKind::Eof => None,
     }
+}
+
+fn append_behavioral_expr_token(expression: &mut String, token: &TokenKind) {
+    if let Some(fragment) = behavioral_expr_token_fragment(token) {
+        append_behavioral_expr_fragment(expression, &fragment);
+    }
+}
+
+fn append_behavioral_expr_fragment(expression: &mut String, fragment: &str) {
+    if behavioral_expr_needs_space(expression, fragment) {
+        expression.push(' ');
+    }
+    expression.push_str(fragment);
+}
+
+fn behavioral_expr_needs_space(expression: &str, fragment: &str) -> bool {
+    let Some(prev) = expression.chars().rev().find(|ch| !ch.is_whitespace()) else {
+        return false;
+    };
+    let Some(next) = fragment.chars().find(|ch| !ch.is_whitespace()) else {
+        return false;
+    };
+
+    behavioral_expr_atom_char(prev) && behavioral_expr_atom_char(next)
+}
+
+fn behavioral_expr_atom_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '#' | '%')
 }
 
 /// Parse subcircuit definition: .SUBCKT name ports [PARAMS: p1=v1 p2=v2] or .SUBCKT name ports p1=v1
