@@ -597,8 +597,10 @@ pub(super) fn parse_options_command(
             }
             (Some("XSPICE"), "AUTO_BRIDGE" | "AUTOBRIDGE")
             | (None, "AUTO_BRIDGE" | "AUTOBRIDGE" | "XSPICE_AUTO_BRIDGE") => {
-                options.auto_bridge =
-                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+                let (enabled, show_generated) =
+                    parse_auto_bridge_option(stream, line_num, params, has_equals)?;
+                options.auto_bridge = Some(enabled);
+                options.auto_bridge_show_generated = Some(show_generated);
             }
             (_, "RELTOL") => {
                 let value = expect_value(stream, line_num, params)?;
@@ -759,6 +761,32 @@ fn parse_boolean_option(
     }
 
     Ok(expect_value(stream, line_num, params)? != 0.0)
+}
+
+fn parse_auto_bridge_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    has_equals: bool,
+) -> Result<(bool, bool), ParseError> {
+    if !has_equals {
+        return Ok((true, false));
+    }
+
+    if let TokenKind::Ident(word) = &stream.peek().kind {
+        let enabled = match word.to_ascii_lowercase().as_str() {
+            "true" | "yes" | "on" => Some(true),
+            "false" | "no" | "off" => Some(false),
+            _ => None,
+        };
+        if let Some(enabled) = enabled {
+            stream.advance();
+            return Ok((enabled, false));
+        }
+    }
+
+    let value = expect_value(stream, line_num, params)?;
+    Ok((value != 0.0, value >= 2.0))
 }
 
 pub(super) fn parse_global_command(

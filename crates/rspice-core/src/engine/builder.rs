@@ -731,15 +731,58 @@ fn xspice_auto_bridge_vcc(netlist: &Netlist) -> crate::Value {
         .unwrap_or(3.3)
 }
 
+fn xspice_auto_bridge_node_label(node_names: Option<&[String]>, node: usize) -> String {
+    if node == 0 {
+        return "0".to_string();
+    }
+
+    node_names
+        .and_then(|names| names.get(node - 1))
+        .cloned()
+        .unwrap_or_else(|| node.to_string())
+}
+
+fn xspice_auto_bridge_generated_card(
+    bridge: PlannedXspiceAutoBridge,
+    instance_name: &str,
+    node_label: &str,
+    vcc: crate::Value,
+) -> String {
+    let half_vcc = vcc / 2.0;
+    match bridge.kind {
+        XspiceAutoBridgeKind::Adc => format!(
+            "{instance_name} [ {node_label} ] [ {node_label} ] adc_bridge(in_low={half_vcc} in_high={half_vcc})"
+        ),
+        XspiceAutoBridgeKind::Dac => format!(
+            "{instance_name} [ {node_label} ] [ {node_label} ] dac_bridge(out_low=0 out_high={vcc})"
+        ),
+        XspiceAutoBridgeKind::Bidi => format!(
+            "{instance_name} [ {node_label} ] [ {node_label} ] null bidi_bridge(out_high={vcc} in_low={half_vcc} in_high={half_vcc})"
+        ),
+        XspiceAutoBridgeKind::RealToV => {
+            format!("{instance_name} {node_label} null {node_label} r_to_v")
+        }
+    }
+}
+
 fn add_planned_xspice_auto_bridges(
     circuit: &mut CircuitData,
     bridges: &[PlannedXspiceAutoBridge],
     vcc: crate::Value,
     temperature: crate::Value,
     ramptime: crate::Value,
+    show_generated: bool,
 ) -> Result<(), SimulationError> {
+    let node_names = show_generated.then(|| circuit.node_names_sorted());
     for bridge in bridges {
-        add_planned_xspice_auto_bridge(circuit, *bridge, vcc, temperature, ramptime)?;
+        add_planned_xspice_auto_bridge(
+            circuit,
+            *bridge,
+            vcc,
+            temperature,
+            ramptime,
+            node_names.as_deref(),
+        )?;
     }
     Ok(())
 }
@@ -750,6 +793,7 @@ fn add_planned_xspice_auto_bridge(
     vcc: crate::Value,
     temperature: crate::Value,
     ramptime: crate::Value,
+    node_names: Option<&[String]>,
 ) -> Result<(), SimulationError> {
     use crate::xspice::PortConnection;
 
@@ -880,6 +924,13 @@ fn add_planned_xspice_auto_bridge(
         instance_name,
         bridge.node
     );
+    if node_names.is_some() {
+        let node_label = xspice_auto_bridge_node_label(node_names, bridge.node);
+        log::info!(
+            "Generated XSPICE auto-bridge card: {}",
+            xspice_auto_bridge_generated_card(bridge, &instance_name, &node_label, vcc)
+        );
+    }
     circuit.add_xspice_instance(instance);
     Ok(())
 }
@@ -3542,6 +3593,7 @@ impl Engine {
                     xspice_auto_bridge_vcc(netlist),
                     self.config.temperature,
                     self.config.ramptime,
+                    netlist.options.auto_bridge_show_generated.unwrap_or(false),
                 )?;
             }
         }

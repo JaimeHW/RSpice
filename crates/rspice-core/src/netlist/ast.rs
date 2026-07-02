@@ -1725,6 +1725,8 @@ pub struct SimulationOptions {
     /// Ngspice-compatible XSPICE automatic analog/digital bridge insertion.
     /// Enabled by default; set `.options auto_bridge=0` to disable.
     pub auto_bridge: Option<bool>,
+    /// Ngspice-compatible `.options auto_bridge=2` generated bridge diagnostics.
+    pub auto_bridge_show_generated: Option<bool>,
     /// Xyce `.options topology supernode=...`: collapse nodes connected by
     /// explicit zero/near-zero resistors before device construction.
     pub topology_supernode: Option<bool>,
@@ -1804,6 +1806,9 @@ impl SimulationOptions {
         }
         if other.auto_bridge.is_some() {
             self.auto_bridge = other.auto_bridge;
+        }
+        if other.auto_bridge_show_generated.is_some() {
+            self.auto_bridge_show_generated = other.auto_bridge_show_generated;
         }
         if other.topology_supernode.is_some() {
             self.topology_supernode = other.topology_supernode;
