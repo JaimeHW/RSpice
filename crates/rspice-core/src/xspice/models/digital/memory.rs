@@ -195,13 +195,23 @@ fn d_ram_value_from_code(code: i64, strength: DigitalStrength) -> DigitalValue {
     DigitalValue::new(state, strength)
 }
 
-fn d_ram_fill_vector_state_codes(ctx: &CmContext, name: &str, width: usize, codes: &mut Vec<i64>) {
-    let values = ctx.input_digital_vector_values(name).unwrap_or(&[]);
-    codes.clear();
+fn d_ram_fill_vector_state_codes(
+    ctx: &CmContext,
+    name: &str,
+    width: usize,
+    codes: &mut Vec<i64>,
+) -> CmResult<()> {
     if codes.capacity() < width {
-        codes.reserve(width - codes.capacity());
+        let additional = width - codes.capacity();
+        codes.try_reserve_exact(additional).map_err(|err| {
+            d_ram_error(format!(
+                "unable to reserve {width} {name} input state code(s): {err}"
+            ))
+        })?;
     }
 
+    let values = ctx.input_digital_vector_values(name).unwrap_or(&[]);
+    codes.clear();
     for index in 0..width {
         codes.push(
             values
@@ -211,12 +221,18 @@ fn d_ram_fill_vector_state_codes(ctx: &CmContext, name: &str, width: usize, code
                 .unwrap_or_else(|| d_ram_state_code(DigitalValue::default())),
         );
     }
+    Ok(())
 }
 
-fn d_ram_fill_input_codes(ctx: &CmContext, shape: DMemoryShape, codes: &mut DMemoryInputCodes) {
-    d_ram_fill_vector_state_codes(ctx, "address", shape.address_width, &mut codes.address);
-    d_ram_fill_vector_state_codes(ctx, "data_in", shape.word_width, &mut codes.data);
-    d_ram_fill_vector_state_codes(ctx, "select", shape.select_width, &mut codes.select);
+fn d_ram_fill_input_codes(
+    ctx: &CmContext,
+    shape: DMemoryShape,
+    codes: &mut DMemoryInputCodes,
+) -> CmResult<()> {
+    d_ram_fill_vector_state_codes(ctx, "address", shape.address_width, &mut codes.address)?;
+    d_ram_fill_vector_state_codes(ctx, "data_in", shape.word_width, &mut codes.data)?;
+    d_ram_fill_vector_state_codes(ctx, "select", shape.select_width, &mut codes.select)?;
+    Ok(())
 }
 
 fn d_ram_take_input_codes(ctx: &mut CmContext) -> DMemoryInputCodes {
@@ -276,12 +292,25 @@ fn d_ram_state_len(shape: DMemoryShape) -> usize {
     shape.memory_start + shape.memory_states
 }
 
-fn d_ram_fill_state_snapshot(ctx: &CmContext, shape: DMemoryShape, state: &mut Vec<i64>) {
+fn d_ram_fill_state_snapshot(
+    ctx: &CmContext,
+    shape: DMemoryShape,
+    state: &mut Vec<i64>,
+) -> CmResult<()> {
     let len = d_ram_state_len(shape);
+    if state.capacity() < len {
+        let additional = len - state.capacity();
+        state.try_reserve_exact(additional).map_err(|err| {
+            d_ram_error(format!(
+                "unable to reserve {len} scratch state entries: {err}"
+            ))
+        })?;
+    }
     state.resize(len, 0);
     for (index, slot) in state.iter_mut().enumerate() {
         *slot = ctx.int_state(index);
     }
+    Ok(())
 }
 
 fn d_ram_state(ctx: &CmContext, scratch_state: Option<&[i64]>, index: usize) -> i64 {
@@ -632,23 +661,47 @@ impl CodeModel for DigitalRam {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let shape = d_ram_cached_shape(ctx)?;
         let mut inputs = d_ram_take_input_codes(ctx);
-        d_ram_fill_input_codes(ctx, shape, &mut inputs);
-        let write_en = d_ram_state_code(ctx.input_digital("write_en").unwrap_or_default());
-        let select = d_ram_select_code(ctx, shape, &inputs.select)?;
-        let address_index = d_ram_address_index(&inputs.address);
-        let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX)?;
-        let read_delay = d_ram_read_delay(ctx)?;
+        let result = (|| {
+            d_ram_fill_input_codes(ctx, shape, &mut inputs)?;
+            let write_en = d_ram_state_code(ctx.input_digital("write_en").unwrap_or_default());
+            let select = d_ram_select_code(ctx, shape, &inputs.select)?;
+            let address_index = d_ram_address_index(&inputs.address);
+            let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX)?;
+            let read_delay = d_ram_read_delay(ctx)?;
 
-        let result = if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
-            (|| {
+            if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
                 let mut scratch = {
                     let scratch = ctx
                         .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
                         .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
                     std::mem::take(scratch)
                 };
-                d_ram_fill_state_snapshot(ctx, shape, &mut scratch);
-                let result = d_ram_evaluate_with_state(
+                let result = d_ram_fill_state_snapshot(ctx, shape, &mut scratch).and_then(|()| {
+                    d_ram_evaluate_with_state(
+                        ctx,
+                        shape,
+                        write_en,
+                        select,
+                        address_index,
+                        &inputs,
+                        ic,
+                        read_delay,
+                        Some(scratch.as_mut_slice()),
+                    )
+                });
+                let restore = ctx
+                    .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+                    .ok_or_else(|| d_ram_error("scratch state is not initialized"))
+                    .map(|scratch_slot| {
+                        *scratch_slot = scratch;
+                    });
+                match (result, restore) {
+                    (Ok(()), Ok(())) => Ok(()),
+                    (Err(err), Ok(())) => Err(err),
+                    (_, Err(err)) => Err(err),
+                }
+            } else {
+                d_ram_evaluate_with_state(
                     ctx,
                     shape,
                     write_en,
@@ -657,27 +710,10 @@ impl CodeModel for DigitalRam {
                     &inputs,
                     ic,
                     read_delay,
-                    Some(scratch.as_mut_slice()),
-                );
-                let scratch_slot = ctx
-                    .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
-                    .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
-                *scratch_slot = scratch;
-                result
-            })()
-        } else {
-            d_ram_evaluate_with_state(
-                ctx,
-                shape,
-                write_en,
-                select,
-                address_index,
-                &inputs,
-                ic,
-                read_delay,
-                None,
-            )
-        };
+                    None,
+                )
+            }
+        })();
         d_ram_restore_input_codes(ctx, inputs);
         result
     }
