@@ -67,22 +67,26 @@ fn with_input_scratch<R>(
     }
 }
 
-fn official_cosim_delay(ctx: &CmContext) -> Value {
+fn official_cosim_delay(ctx: &CmContext) -> CmResult<Value> {
     let delay = ctx.param_or("delay", 1.0e-9);
-    if delay.is_finite() {
-        delay.max(COSIM_DELAY_MIN)
-    } else {
-        COSIM_DELAY_MIN
+    if !delay.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: "delay".to_string(),
+            message: format!("value must be finite, got {delay}"),
+        });
     }
+    Ok(delay.max(COSIM_DELAY_MIN))
 }
 
-fn official_cosim_queue_size(ctx: &CmContext) -> usize {
+fn official_cosim_queue_size(ctx: &CmContext) -> CmResult<usize> {
     let queue_size = ctx.param_or("queue_size", 128.0).round();
-    if queue_size.is_finite() {
-        (queue_size as i64).max(COSIM_QUEUE_SIZE_MIN) as usize
-    } else {
-        COSIM_QUEUE_SIZE_MIN as usize
+    if !queue_size.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: "queue_size".to_string(),
+            message: format!("value must be finite, got {queue_size}"),
+        });
     }
+    Ok((queue_size as i64).max(COSIM_QUEUE_SIZE_MIN) as usize)
 }
 
 fn d_cosim_inout_port() -> PortSpec {
@@ -203,12 +207,12 @@ fn collect_input_events(
     });
 }
 
-fn effective_output_delay(ctx: &CmContext, vtime: Value) -> Value {
-    let delay = official_cosim_delay(ctx) - (ctx.time - vtime);
+fn effective_output_delay(ctx: &CmContext, vtime: Value) -> CmResult<Value> {
+    let delay = official_cosim_delay(ctx)? - (ctx.time - vtime);
     if delay <= 0.0 || !delay.is_finite() {
-        COSIM_DELAY_MIN
+        Ok(COSIM_DELAY_MIN)
     } else {
-        delay
+        Ok(delay)
     }
 }
 
@@ -258,7 +262,7 @@ fn apply_cosim_step(
 ) -> CmResult<()> {
     let output_width = ctx.port_width("d_out");
     let inout_width = ctx.port_width("d_inout");
-    let delay = effective_output_delay(ctx, result.vtime);
+    let delay = effective_output_delay(ctx, result.vtime)?;
 
     if output_width > 0 {
         schedule_normalized_runtime_outputs(
@@ -363,7 +367,7 @@ impl CodeModel for DigitalCosim {
         let output_count = ctx.port_width("d_out");
         let inout_count = ctx.port_width("d_inout");
         let connected_input_count = input_count + inout_count;
-        let mut queue_size = official_cosim_queue_size(ctx);
+        let mut queue_size = official_cosim_queue_size(ctx)?;
         if connected_input_count > queue_size {
             queue_size = connected_input_count + 16;
         }
@@ -397,7 +401,7 @@ impl CodeModel for DigitalCosim {
             RESOURCE_INPUT_SCRATCH,
             Arc::new(DigitalCosimInputScratch::default()),
         );
-        set_initial_outputs(ctx, official_cosim_delay(ctx));
+        set_initial_outputs(ctx, official_cosim_delay(ctx)?);
         Ok(())
     }
 
@@ -527,24 +531,28 @@ mod tests {
     fn d_cosim_limit_helpers_follow_ngspice46_lower_bounds() {
         let mut ctx = CmContext::new();
 
-        assert_eq!(official_cosim_delay(&ctx), 1.0e-9);
-        assert_eq!(official_cosim_queue_size(&ctx), 128);
+        assert_eq!(official_cosim_delay(&ctx).unwrap(), 1.0e-9);
+        assert_eq!(official_cosim_queue_size(&ctx).unwrap(), 128);
 
         ctx.set_param("delay", 0.0);
         ctx.set_param("queue_size", 0.0);
-        assert_eq!(official_cosim_delay(&ctx), COSIM_DELAY_MIN);
+        assert_eq!(official_cosim_delay(&ctx).unwrap(), COSIM_DELAY_MIN);
         assert_eq!(
-            official_cosim_queue_size(&ctx),
+            official_cosim_queue_size(&ctx).unwrap(),
             COSIM_QUEUE_SIZE_MIN as usize
         );
 
         ctx.set_param("delay", Value::NAN);
         ctx.set_param("queue_size", Value::NAN);
-        assert_eq!(official_cosim_delay(&ctx), COSIM_DELAY_MIN);
-        assert_eq!(
-            official_cosim_queue_size(&ctx),
-            COSIM_QUEUE_SIZE_MIN as usize
-        );
+        assert_invalid_param(official_cosim_delay(&ctx), "delay");
+        assert_invalid_param(official_cosim_queue_size(&ctx), "queue_size");
+    }
+
+    fn assert_invalid_param<T: std::fmt::Debug>(result: CmResult<T>, expected_name: &str) {
+        match result {
+            Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected_name),
+            other => panic!("expected InvalidParameter for {expected_name}, got {other:?}"),
+        }
     }
 
     #[test]
