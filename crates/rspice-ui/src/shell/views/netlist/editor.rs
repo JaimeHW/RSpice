@@ -416,7 +416,7 @@ mod tests {
 
     #[test]
     fn parse_buffer_maps_syntax_error_to_structured_diagnostic() {
-        let (diagnostics, symbols) = parse_buffer("title\nR1 out 0\n");
+        let (diagnostics, symbols) = parse_buffer("title\n.enddata\n");
 
         assert!(symbols.is_none());
         assert_eq!(diagnostics.len(), 1);
