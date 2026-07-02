@@ -457,6 +457,18 @@ struct XyceStepRun {
 }
 
 #[derive(Debug, Clone)]
+struct XyceStepRunBuilder {
+    step_values: Vec<Value>,
+    bindings: Vec<XyceStepBinding>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceStepBinding {
+    step: StepCommand,
+    value: Value,
+}
+
+#[derive(Debug, Clone)]
 enum XyceReferenceColumn {
     PrimarySweep { name: String },
     Probe { name: String },
@@ -2313,56 +2325,137 @@ impl XyceTestRunner {
         netlist: &Netlist,
         steps: &[StepCommand],
     ) -> Result<Vec<XyceStepRun>, SimulationError> {
-        let mut runs = vec![XyceStepRun {
+        let mut runs = vec![XyceStepRunBuilder {
             step_values: Vec::new(),
-            netlist: netlist.clone(),
+            bindings: Vec::new(),
         }];
 
         for step in steps {
-            let values = step.sweep.values();
-            let mut expanded_by_run = Vec::with_capacity(runs.len());
-            let mut expected_step_len = None;
-
-            for run in &runs {
-                let expanded = engine.step_netlists_for_command(&run.netlist, step, &values)?;
-                match expected_step_len {
-                    Some(expected) if expected != expanded.len() => {
-                        return Err(SimulationError::Circuit(format!(
-                            ".STEP expansion for {} produced {} value(s), expected {}",
-                            Self::step_res_variable_name(step),
-                            expanded.len(),
-                            expected
-                        )));
-                    }
-                    None => expected_step_len = Some(expanded.len()),
-                    _ => {}
-                }
-                expanded_by_run.push(expanded);
-            }
-
-            let step_len = expected_step_len.unwrap_or(0);
-            if step_len == 0 {
+            let values = Self::step_values_for_expansion(netlist, step)?;
+            if values.is_empty() {
                 return Err(SimulationError::Circuit(
                     ".STEP produced no sweep values".to_string(),
                 ));
             }
 
-            let mut next_runs = Vec::with_capacity(runs.len() * step_len);
-            for value_index in 0..step_len {
-                for (run_index, run) in runs.iter().enumerate() {
-                    let (value, stepped_netlist) = expanded_by_run[run_index][value_index].clone();
+            let mut next_runs = Vec::with_capacity(runs.len() * values.len());
+            for value in values {
+                for run in &runs {
                     let mut step_values = run.step_values.clone();
                     step_values.push(value);
-                    next_runs.push(XyceStepRun {
+                    let mut bindings = run.bindings.clone();
+                    bindings.push(XyceStepBinding {
+                        step: step.clone(),
+                        value,
+                    });
+                    next_runs.push(XyceStepRunBuilder {
                         step_values,
-                        netlist: stepped_netlist,
+                        bindings,
                     });
                 }
             }
             runs = next_runs;
         }
 
-        Ok(runs)
+        runs.into_iter()
+            .map(|run| {
+                let netlist = Self::materialize_nested_step_run(engine, netlist, &run.bindings)?;
+                Ok(XyceStepRun {
+                    step_values: run.step_values,
+                    netlist,
+                })
+            })
+            .collect()
+    }
+
+    fn step_values_for_expansion(
+        netlist: &Netlist,
+        step: &StepCommand,
+    ) -> Result<Vec<Value>, SimulationError> {
+        match &step.sweep {
+            StepSweep::Data { table_name } => {
+                let table = netlist
+                    .data_tables
+                    .iter()
+                    .find(|table| table.name.eq_ignore_ascii_case(table_name))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            ".STEP DATA table '{table_name}' not found"
+                        ))
+                    })?;
+                if table.params.is_empty() {
+                    return Err(SimulationError::Circuit(format!(
+                        ".STEP DATA table '{}' has no parameter columns",
+                        table.name
+                    )));
+                }
+                if table.rows.is_empty() {
+                    return Err(SimulationError::Circuit(format!(
+                        ".STEP DATA table '{}' has no rows",
+                        table.name
+                    )));
+                }
+                Ok((0..table.rows.len()).map(|idx| idx as Value).collect())
+            }
+            _ => Ok(step.sweep.values()),
+        }
+    }
+
+    fn materialize_nested_step_run(
+        engine: &Engine,
+        netlist: &Netlist,
+        bindings: &[XyceStepBinding],
+    ) -> Result<Netlist, SimulationError> {
+        let param_overrides = bindings
+            .iter()
+            .filter(|binding| {
+                binding.step.target == StepTarget::Param
+                    && !matches!(binding.step.sweep, StepSweep::Data { .. })
+            })
+            .map(|binding| (binding.step.name.clone(), binding.value))
+            .collect::<Vec<_>>();
+
+        let mut run_netlist = if param_overrides.is_empty() {
+            netlist.clone()
+        } else {
+            Engine::create_perturbed_netlist_multi(netlist, &param_overrides)?.0
+        };
+
+        for binding in bindings {
+            if binding.step.target == StepTarget::Param
+                && !matches!(binding.step.sweep, StepSweep::Data { .. })
+            {
+                continue;
+            }
+            run_netlist = Self::materialize_nonparam_step_binding(engine, &run_netlist, binding)?;
+        }
+
+        Ok(run_netlist)
+    }
+
+    fn materialize_nonparam_step_binding(
+        engine: &Engine,
+        netlist: &Netlist,
+        binding: &XyceStepBinding,
+    ) -> Result<Netlist, SimulationError> {
+        let expanded = if matches!(binding.step.sweep, StepSweep::Data { .. }) {
+            engine.step_netlists_for_command(netlist, &binding.step, &[])?
+        } else {
+            engine.step_netlists_for_command(netlist, &binding.step, &[binding.value])?
+        };
+
+        if let Some((_, stepped_netlist)) = expanded
+            .into_iter()
+            .find(|(value, _)| (*value - binding.value).abs() <= Value::EPSILON)
+        {
+            return Ok(stepped_netlist);
+        }
+
+        Err(SimulationError::Circuit(format!(
+            ".STEP expansion for {} did not produce requested value {}",
+            Self::step_res_variable_name(&binding.step),
+            binding.value
+        )))
     }
 
     fn run_baseline_family_contract(
@@ -7146,6 +7239,12 @@ impl XyceTestRunner {
         source: &str,
         time: Value,
     ) -> Option<Value> {
+        if Self::tran_uses_uic(netlist)
+            && Self::time_is_transient_initial_sample(result, time)
+            && Self::netlist_has_independent_current_source(netlist, source)
+        {
+            return Some(0.0);
+        }
         if let Some(value) = Self::evaluate_current_source_probe_from_elements(
             &netlist.elements,
             result,
@@ -7157,6 +7256,22 @@ impl XyceTestRunner {
 
         let flattened = crate::netlist::flatten_netlist_with_models(netlist).ok()?;
         Self::evaluate_current_source_probe_from_elements(&flattened.elements, result, source, time)
+    }
+
+    fn tran_uses_uic(netlist: &Netlist) -> bool {
+        netlist.analyses.iter().any(|analysis| {
+            matches!(
+                analysis,
+                crate::netlist::AnalysisCommand::Tran { uic: true, .. }
+            )
+        })
+    }
+
+    fn time_is_transient_initial_sample(result: &TransientResult, time: Value) -> bool {
+        let Some(first) = result.time.first().copied() else {
+            return false;
+        };
+        (time - first).abs() <= 1.0e-30
     }
 
     fn evaluate_current_source_probe_from_elements(
@@ -8911,6 +9026,84 @@ End of Xyce(TM) Simulation
                 XyceTestRunner::dc_probe_is_omitted_empty_wildcard(probe, &netlist),
                 "{probe} should be classified as an omitted empty wildcard"
             );
+        }
+    }
+
+    #[test]
+    fn uic_initial_current_source_probe_reports_zero() {
+        let netlist = Netlist::parse(
+            "uic current source probe\n\
+             I1 1 0 10\n\
+             R1 1 0 1\n\
+             .tran 1m 2m uic\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0e-3],
+            voltages: vec![vec![0.0, -10.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+        };
+
+        let initial = XyceTestRunner::evaluate_tran_probe("i(i1)", &netlist, &result, 0.0)
+            .expect("initial current-source probe evaluates");
+        let running = XyceTestRunner::evaluate_tran_probe("i(i1)", &netlist, &result, 1.0e-3)
+            .expect("running current-source probe evaluates");
+
+        assert_eq!(initial, 0.0);
+        assert_eq!(running, 10.0);
+    }
+
+    #[test]
+    fn nested_device_then_param_step_rebinds_source_expression() {
+        let netlist = Netlist::parse(
+            "nested mixed step source binding\n\
+             R1 a 0 10\n\
+             Va a 0 SIN(0 {v_amplitude} 1)\n\
+             .global_param v_amplitude=2\n\
+             .step R1 10 11 1\n\
+             .step v_amplitude 1 2 1\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let steps = XyceTestRunner::step_commands(&netlist).expect("steps parse");
+        let engine = Engine::new(SimulationConfig::default());
+
+        let runs = XyceTestRunner::nested_step_runs_for_commands(&engine, &netlist, &steps)
+            .expect("nested steps expand");
+
+        assert_eq!(runs.len(), 4);
+        for (run, (expected_r, expected_amp)) in
+            runs.iter()
+                .zip([(10.0, 1.0), (11.0, 1.0), (10.0, 2.0), (11.0, 2.0)])
+        {
+            let resistor = run
+                .netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("R1"))
+                .expect("R1 is present");
+            match &resistor.kind {
+                ElementKind::Resistor { value, .. } => assert_eq!(*value, expected_r),
+                other => panic!("unexpected R1 kind: {other:?}"),
+            }
+
+            let source = run
+                .netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case("Va"))
+                .expect("Va is present");
+            match &source.kind {
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Sin {
+                    amplitude, ..
+                }) => assert_eq!(*amplitude, expected_amp),
+                other => panic!("unexpected Va kind: {other:?}"),
+            }
         }
     }
 

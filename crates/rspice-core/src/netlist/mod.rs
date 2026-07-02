@@ -6979,6 +6979,46 @@ mod tests {
     }
 
     #[test]
+    fn top_level_source_values_resolve_after_later_params() {
+        let netlist = Netlist::parse(
+            "top-level source parameter order\n\
+             V1 in 0 PULSE(0 {V_HI} 0 1n 1n 1u 2u)\n\
+             I1 out 0 {I_BIAS}\n\
+             .param I_BIAS=25u V_HI=3\n\
+             .end\n",
+        )
+        .expect("top-level source values should resolve after later .param cards");
+
+        let pulse_high = netlist
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::VoltageSource(SourceSpec::Pulse { v2, .. })
+                    if element.name.eq_ignore_ascii_case("V1") =>
+                {
+                    Some(*v2)
+                }
+                _ => None,
+            })
+            .expect("pulse source exists");
+        let current = netlist
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::CurrentSource(SourceSpec::Dc(value))
+                    if element.name.eq_ignore_ascii_case("I1") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("current source exists");
+
+        assert_eq!(pulse_high, 3.0);
+        assert!((current - 25e-6).abs() < 1e-18);
+    }
+
+    #[test]
     fn passive_unit_words_after_numeric_values_are_consumed() {
         let netlist = Netlist::parse(
             "passive unit words\n\

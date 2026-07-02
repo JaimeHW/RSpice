@@ -531,26 +531,53 @@ fn test_xyce_sin_source_step_transient_output_cases_run() {
 }
 
 #[test]
-fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
+fn test_xyce_mixed_device_param_source_step_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/Certification_Tests/BUG_201_SON/bug201b.cir";
+    let relative = "Netlists/Certification_Tests/BUG_466_SON/bug_466.cir";
 
     let result = runner.run_test(root.join(relative));
 
     assert!(
         result.passed && !result.expected_unsupported,
-        "{relative} should run as a native Xyce inductor IC transient operating-point comparison, got {result:?}"
+        "{relative} should run as a native mixed device/parameter stepped Xyce SIN transient comparison, got {result:?}"
     );
     assert!(
         result.mismatches.is_empty(),
         "{relative} should match the checked-in Xyce .prn oracle"
     );
     assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
+        result.contract, "static_prn_step_tran",
+        "{relative} should report the native stepped transient .prn contract"
     );
+}
+
+#[test]
+fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_201_SON/bug201a.cir",
+        "Netlists/Certification_Tests/BUG_201_SON/bug201b.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce inductor IC transient operating-point comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
 }
 
 #[test]

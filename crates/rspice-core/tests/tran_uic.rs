@@ -128,3 +128,30 @@ c1 out 0 1u
         v_out[0]
     );
 }
+
+#[test]
+fn uic_honors_inductor_ic_branch_current() {
+    let deck = "\
+* inductor IC under uic
+i1 in 0 10
+r1 in mid 3
+r2 mid 0 3
+l1 mid 0 1 ic=2
+.tran 10m 20m uic
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let result = engine
+        .run_tran(&netlist, 20e-3, 10e-3)
+        .expect("transient solves");
+    let initial = result
+        .try_branch_current_waveform_named("l1")
+        .and_then(|waveform| waveform.first().copied())
+        .expect("inductor branch current waveform exists");
+
+    assert!(
+        (initial - 2.0).abs() < 1e-12,
+        "inductor IC=2 must seed the branch current under UIC, got {initial}"
+    );
+}

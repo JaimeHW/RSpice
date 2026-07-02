@@ -343,9 +343,46 @@ pub fn parse_netlist_with_options(
     }
 
     normalize_pspice_u_timing_aliases(&mut state);
+    resolve_top_level_deferred_source_specs(&mut state.elements, &state.params)?;
     validate_resistor_model_references(&state)?;
 
     state.into_netlist(title, input, line_num)
+}
+
+fn resolve_top_level_deferred_source_specs(
+    elements: &mut [Element],
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    for element in elements {
+        let replacement = match &element.kind {
+            ElementKind::VoltageSourceDeferred(raw_spec) => Some(ElementKind::VoltageSource(
+                resolve_top_level_source_spec(&element.name, raw_spec, params)?,
+            )),
+            ElementKind::CurrentSourceDeferred(raw_spec) => Some(ElementKind::CurrentSource(
+                resolve_top_level_source_spec(&element.name, raw_spec, params)?,
+            )),
+            _ => None,
+        };
+
+        if let Some(kind) = replacement {
+            element.kind = kind;
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_top_level_source_spec(
+    element_name: &str,
+    raw_spec: &str,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    parse_source_spec_text(raw_spec, 0, params).map_err(|err| {
+        ParseError::InvalidValue(format!(
+            "source {element_name} specification '{}' could not be resolved after .PARAM processing: {err}",
+            raw_spec.trim()
+        ))
+    })
 }
 
 fn normalize_pspice_u_timing_aliases(state: &mut ParseState) {

@@ -339,6 +339,19 @@ impl Engine {
                     }
                 }
             }
+            let num_nodes = circuit.num_nodes();
+            for (ind_idx, ic) in circuit.inductors.ic.iter().enumerate() {
+                let Some(ic) = ic else {
+                    continue;
+                };
+                let branch = circuit.inductors.branch_indices[ind_idx];
+                if branch == 0 {
+                    continue;
+                }
+                if let Some(slot) = solution.get_mut(num_nodes + branch - 1) {
+                    *slot = *ic;
+                }
+            }
         }
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&solution);

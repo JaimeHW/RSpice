@@ -2029,11 +2029,11 @@ fn expect_positive_integer_value(
     }
 }
 
-/// Consume a trailing `UIC` keyword on a `.TRAN` card.
+/// Consume a trailing operating-point bypass keyword on a `.TRAN` card.
 pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
     skip_commas(stream);
     if let TokenKind::Ident(word) = &stream.peek().kind
-        && word.eq_ignore_ascii_case("UIC")
+        && (word.eq_ignore_ascii_case("UIC") || word.eq_ignore_ascii_case("NOOP"))
     {
         stream.advance();
         return true;
@@ -2113,5 +2113,24 @@ mod tests {
         .expect("Xyce numeric TIMEINT method selector parses");
 
         assert_eq!(netlist.options.method.as_deref(), Some("7"));
+    }
+
+    #[test]
+    fn tran_noop_alias_sets_uic() {
+        let netlist = Netlist::parse(
+            "tran noop alias\n\
+             V1 1 0 1\n\
+             R1 1 0 1k\n\
+             .tran 1n 10n noop\n\
+             .end\n",
+        )
+        .expect(".TRAN NOOP should parse as an operating-point bypass");
+
+        let Some(crate::netlist::AnalysisCommand::Tran { uic, .. }) = netlist.analyses.first()
+        else {
+            panic!("expected transient analysis");
+        };
+
+        assert!(*uic);
     }
 }

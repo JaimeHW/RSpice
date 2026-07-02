@@ -649,7 +649,27 @@ pub(super) fn parse_voltage_source(
         return Ok(());
     }
 
-    let source_spec = parse_source_spec(stream, line_num, params)?;
+    let raw_spec = collect_deferred_source_spec(&mut stream.clone());
+    let mut parsed_stream = stream.clone();
+    let source_spec = match parse_source_spec(&mut parsed_stream, line_num, params) {
+        Ok(source_spec) => {
+            *stream = parsed_stream;
+            source_spec
+        }
+        Err(err)
+            if source_spec_error_can_defer(&err, &raw_spec, params)
+                && !raw_spec.trim().is_empty() =>
+        {
+            stream.collect_line();
+            elements.push(Element {
+                name,
+                kind: ElementKind::VoltageSourceDeferred(raw_spec),
+                nodes: vec![node_pos, node_neg],
+            });
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
 
     elements.push(Element {
         name,
@@ -685,7 +705,27 @@ pub(super) fn parse_current_source(
         return Ok(());
     }
 
-    let source_spec = parse_source_spec(stream, line_num, params)?;
+    let raw_spec = collect_deferred_source_spec(&mut stream.clone());
+    let mut parsed_stream = stream.clone();
+    let source_spec = match parse_source_spec(&mut parsed_stream, line_num, params) {
+        Ok(source_spec) => {
+            *stream = parsed_stream;
+            source_spec
+        }
+        Err(err)
+            if source_spec_error_can_defer(&err, &raw_spec, params)
+                && !raw_spec.trim().is_empty() =>
+        {
+            stream.collect_line();
+            elements.push(Element {
+                name,
+                kind: ElementKind::CurrentSourceDeferred(raw_spec),
+                nodes: vec![node_pos, node_neg],
+            });
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
 
     elements.push(Element {
         name,
@@ -5532,6 +5572,47 @@ fn resolve_subckt_default_params(
 
 pub(super) fn parameter_error_can_defer(err: &ParseError) -> bool {
     matches!(err, ParseError::InvalidValue(message) if message.contains("Undefined parameter"))
+}
+
+fn source_spec_error_can_defer(err: &ParseError, raw_spec: &str, params: &ParamContext) -> bool {
+    parameter_error_can_defer(err)
+        || matches!(err, ParseError::Syntax { message, .. } if message.contains("Undefined parameter"))
+        || raw_source_spec_has_unresolved_parameter(raw_spec, params)
+}
+
+fn raw_source_spec_has_unresolved_parameter(raw_spec: &str, params: &ParamContext) -> bool {
+    let Ok(tokens) = tokenize(raw_spec) else {
+        return false;
+    };
+
+    tokens.into_iter().any(|token| match token.kind {
+        TokenKind::Expression(expr) => eval_expression(&expr, params)
+            .is_err_and(|err| err.to_string().contains("Undefined parameter")),
+        TokenKind::Ident(name) => source_ident_could_be_later_parameter(&name, params),
+        _ => false,
+    })
+}
+
+fn source_ident_could_be_later_parameter(name: &str, params: &ParamContext) -> bool {
+    params.get(name).is_none()
+        && crate::netlist::lexer::parse_spice_value(name).is_err()
+        && !matches!(
+            name.to_ascii_uppercase().as_str(),
+            "DC" | "AC"
+                | "PULSE"
+                | "SIN"
+                | "SINE"
+                | "PWL"
+                | "PAT"
+                | "EXP"
+                | "SFFM"
+                | "AM"
+                | "TRNOISE"
+                | "DISTOF1"
+                | "DISTOF2"
+                | "PORTNUM"
+                | "Z0"
+        )
 }
 
 pub(super) fn upsert_param_expression(
