@@ -4805,9 +4805,11 @@ impl XyceTestRunner {
                         )?;
                     }
                 }
+                ElementKind::Mosfet { .. }
+                    if Self::netlist_device_is_native_b3soi_mosfet(netlist, &element.name) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT TRAN comparison currently supports independent, behavioral, and static R/L/C transient decks; element '{}' requires a broader transient oracle contract",
+                        "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, and native B3SOI transient decks; element '{}' requires a broader transient oracle contract",
                         element.name
                     ));
                 }
