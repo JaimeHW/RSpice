@@ -94,6 +94,10 @@ fn validate_analog_scalar_params(
     Ok(())
 }
 
+fn analog_boolean_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResult<bool> {
+    Ok(finite_analog_scalar_param(ctx, model_name, name)? > 0.5)
+}
+
 //=============================================================================
 // Gain Block
 //=============================================================================
@@ -860,7 +864,9 @@ impl CodeModel for Divider {
                 "out_gain",
                 "out_offset",
             ],
-        )
+        )?;
+        analog_boolean_param(ctx, "divide", "fraction")?;
+        Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -930,7 +936,7 @@ fn divide_transfer_signature(ctx: &CmContext) -> CmResult<DivideTransferSignatur
         den_gain: finite_analog_scalar_param(ctx, "divide", "den_gain")?,
         den_lower_limit: finite_analog_scalar_param(ctx, "divide", "den_lower_limit")?,
         den_domain: finite_analog_scalar_param(ctx, "divide", "den_domain")?,
-        fraction: ctx.param("fraction") > 0.5,
+        fraction: analog_boolean_param(ctx, "divide", "fraction")?,
         out_gain: finite_analog_scalar_param(ctx, "divide", "out_gain")?,
         out_offset: finite_analog_scalar_param(ctx, "divide", "out_offset")?,
     })
@@ -1133,7 +1139,9 @@ impl CodeModel for Limiter {
                 "out_upper_limit",
                 "limit_range",
             ],
-        )
+        )?;
+        analog_boolean_param(ctx, "limit", "fraction")?;
+        Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -1189,7 +1197,7 @@ fn limit_transfer_signature(ctx: &CmContext) -> CmResult<LimitTransferSignature>
         out_upper_limit: finite_analog_scalar_param(ctx, "limit", "out_upper_limit")?,
         limit_range: finite_analog_scalar_param(ctx, "limit", "limit_range")?,
         gain: finite_analog_scalar_param(ctx, "limit", "gain")?,
-        fraction: ctx.param("fraction") > 0.5,
+        fraction: analog_boolean_param(ctx, "limit", "fraction")?,
     })
 }
 
@@ -1342,7 +1350,9 @@ impl CodeModel for ControlledLimiter {
                 "lower_delta",
                 "limit_range",
             ],
-        )
+        )?;
+        analog_boolean_param(ctx, "climit", "fraction")?;
+        Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -1431,7 +1441,7 @@ fn hyst_params(ctx: &CmContext) -> CmResult<HystParams> {
     }
     let hyst = raw_hyst;
 
-    if ctx.param("fraction") > 0.5 {
+    if analog_boolean_param(ctx, "hyst", "fraction")? {
         input_domain *= in_high - in_low;
     }
 
@@ -1887,7 +1897,7 @@ fn interpolate_delay_history(ctx: &CmContext, buffer_size: usize, target_time: V
 }
 
 fn effective_delay(ctx: &CmContext) -> CmResult<Value> {
-    let delay = if ctx.param("has_delay_cnt") > 0.5 {
+    let delay = if analog_boolean_param(ctx, "delay", "has_delay_cnt")? {
         let raw_delmax_provided = ctx.param_was_provided("delmax");
         let raw_delmax = if raw_delmax_provided {
             finite_analog_scalar_param(ctx, "delay", "delmax")?
@@ -1997,6 +2007,7 @@ impl CodeModel for AnalogDelayLine {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         validate_analog_scalar_params(ctx, "delay", &["delay", "delmin", "delmax"])?;
+        analog_boolean_param(ctx, "delay", "has_delay_cnt")?;
         let buffer_size = delay_buffer_size(ctx)?;
         ctx.allocate_states(delay_state_count(buffer_size)?);
         ctx.allocate_int_states(3);
@@ -2609,6 +2620,8 @@ impl CodeModel for AnalogOneShot {
         ] {
             oneshot_finite_param(ctx, name)?;
         }
+        analog_boolean_param(ctx, "oneshot", "pos_edge_trig")?;
+        analog_boolean_param(ctx, "oneshot", "retrig")?;
         ctx.allocate_states(ONESHOT_STATE_COUNT);
         reset_oneshot_state(ctx, output_low);
         for index in 0..ONESHOT_STATE_COUNT {
@@ -2668,8 +2681,8 @@ impl CodeModel for AnalogOneShot {
         } else {
             let control = oneshot_control_input(ctx)?;
             let pulse_width = interpolate_oneshot_pulse_width(table.as_ref(), control);
-            let positive_edge = ctx.param("pos_edge_trig") > 0.5;
-            let retrigger = ctx.param("retrig") > 0.5;
+            let positive_edge = analog_boolean_param(ctx, "oneshot", "pos_edge_trig")?;
+            let retrigger = analog_boolean_param(ctx, "oneshot", "retrig")?;
 
             if positive_edge {
                 if !set {
@@ -3034,6 +3047,50 @@ mod tests {
         Divider
             .evaluate(&mut ctx)
             .expect_err("mutated nonfinite divide params must fail at evaluation time");
+    }
+
+    #[test]
+    fn analog_boolean_params_reject_nonfinite_values() {
+        assert_boolean_param_rejected_by_init(&Divider, "fraction", CmContext::new());
+        assert_boolean_param_rejected_by_init(&Limiter, "fraction", CmContext::new());
+        assert_boolean_param_rejected_by_init(&ControlledLimiter, "fraction", CmContext::new());
+
+        let mut hyst_ctx = CmContext::new();
+        hyst_ctx.set_param("in_high", 1.0);
+        assert_boolean_param_rejected_by_init(&HysteresisBlock, "fraction", hyst_ctx);
+
+        assert_boolean_param_rejected_by_init(&AnalogDelayLine, "has_delay_cnt", CmContext::new());
+
+        let mut oneshot_ctx = CmContext::new();
+        oneshot_ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        oneshot_ctx.set_real_vector_param("pw_array", vec![1.0e-6, 1.0e-6]);
+        assert_boolean_param_rejected_by_init(&AnalogOneShot, "pos_edge_trig", oneshot_ctx);
+
+        let mut oneshot_ctx = CmContext::new();
+        oneshot_ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        oneshot_ctx.set_real_vector_param("pw_array", vec![1.0e-6, 1.0e-6]);
+        assert_boolean_param_rejected_by_init(&AnalogOneShot, "retrig", oneshot_ctx);
+    }
+
+    fn assert_boolean_param_rejected_by_init(
+        model: &dyn CodeModel,
+        param: &str,
+        mut ctx: CmContext,
+    ) {
+        ctx.set_param(param, f64::NAN);
+        let err = model
+            .init(&mut ctx)
+            .expect_err("nonfinite analog boolean parameter must be rejected");
+        assert!(
+            matches!(&err, CmError::InvalidParameter { .. }),
+            "{} {param} produced {err:?}",
+            model.name()
+        );
+        assert!(
+            err.to_string().contains(param),
+            "{} error should name rejected boolean parameter {param}: {err}",
+            model.name()
+        );
     }
 
     #[test]
@@ -4646,7 +4703,7 @@ fn climit_transfer_signature(ctx: &CmContext) -> CmResult<ClimitTransferSignatur
         upper_delta: finite_analog_scalar_param(ctx, "climit", "upper_delta")?,
         limit_range: finite_analog_scalar_param(ctx, "climit", "limit_range")?,
         gain: finite_analog_scalar_param(ctx, "climit", "gain")?,
-        fraction: ctx.param("fraction") > 0.5,
+        fraction: analog_boolean_param(ctx, "climit", "fraction")?,
     })
 }
 
