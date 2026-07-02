@@ -3361,10 +3361,27 @@ impl<'a> ScalarGraphBuilder<'a> {
             return variables;
         }
         if let Some(variable) = self.variable_identifier(expr) {
-            return BTreeSet::from([variable]);
+            return (variable != target)
+                .then(|| BTreeSet::from([variable]))
+                .unwrap_or_default();
+        }
+        if self.expr_references_variable(expr, target)
+            && let Some(variables) = self.self_assignment_alias_snapshot_variables(target, expr)
+        {
+            return variables;
         }
         self.simple_assignment_alias_snapshot_variables(expr)
             .unwrap_or_default()
+    }
+
+    fn self_assignment_alias_snapshot_variables(
+        &self,
+        target: VariableId,
+        expr: ExprId,
+    ) -> Option<BTreeSet<VariableId>> {
+        let mut variables = self.simple_assignment_alias_variables(expr)?;
+        variables.remove(&target);
+        self.simple_assignment_alias_snapshot_variables_from_set(variables)
     }
 
     fn simple_assignment_alias_snapshot_variables(
@@ -3372,6 +3389,13 @@ impl<'a> ScalarGraphBuilder<'a> {
         expr: ExprId,
     ) -> Option<BTreeSet<VariableId>> {
         let variables = self.simple_assignment_alias_variables(expr)?;
+        self.simple_assignment_alias_snapshot_variables_from_set(variables)
+    }
+
+    fn simple_assignment_alias_snapshot_variables_from_set(
+        &self,
+        variables: BTreeSet<VariableId>,
+    ) -> Option<BTreeSet<VariableId>> {
         let history_backed_unresolved = variables
             .iter()
             .filter(|variable| {
@@ -3777,6 +3801,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             else_expr,
         } = &expression.kind
         else {
+            if self.expr_references_variable(entry.expr, variable) {
+                return None;
+            }
             return self.lower_expression_with_assignment_snapshot(entry, entry.expr);
         };
         let condition_truth = self.condition_truth_in_current_path(*condition)?;

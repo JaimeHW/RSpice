@@ -1075,6 +1075,59 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_snapshots_non_target_operands_for_self_alias_history_replay() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module self_alias_operand_history_snapshot(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real a, b, c, d, total;
+    analog begin
+        a = V(p, n);
+        b = 2.0 * V(p, n);
+        c = 3.0 * V(p, n);
+        d = 4.0 * V(p, n);
+        total = 1.0;
+        total = total + a + b + c + d;
+
+        a = $simparam("unused_later_a");
+        b = $simparam("unused_later_b");
+        c = $simparam("unused_later_c");
+        d = $simparam("unused_later_d");
+
+        if (mode == 0) begin
+            total = $simparam("inactive_total");
+        end
+
+        if (mode == 1) begin
+            I(p, n) <+ total;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("self alias history should replay from assignment-time operand snapshots");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_uses_binary_switch_range_for_guard_complements() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
