@@ -501,6 +501,36 @@ fn test_xyce_pat_pattern_source_step_cases_run() {
 }
 
 #[test]
+fn test_xyce_sin_source_step_transient_output_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Output/TRAN/tran-step-prn.cir",
+        "Netlists/Output/TRAN/tran-step-tecplot.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream .STEP TRAN wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native stepped Xyce SIN transient output comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_step_tran",
+            "{relative} should report the native wrapper-origin stepped transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
