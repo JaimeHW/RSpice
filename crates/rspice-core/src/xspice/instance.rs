@@ -1007,7 +1007,11 @@ impl XspiceInstance {
         self.context.call_type = CallType::Init;
         let context_before_init = self.context.clone();
         match catch_unwind(AssertUnwindSafe(|| self.model.init(&mut self.context))) {
-            Ok(result) => result?,
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                self.context = context_before_init;
+                return Err(err);
+            }
             Err(payload) => {
                 self.context = context_before_init;
                 return Err(self.model_panic_error("initialization", payload));
@@ -1244,6 +1248,7 @@ impl XspiceInstance {
                 Ok(())
             }
             Ok(Err(err)) => {
+                self.context = context_before_evaluate;
                 self.port_context_solution_num_nodes = None;
                 Err(err)
             }
