@@ -215,6 +215,30 @@ fn s_xfer_error(message: impl Into<String>) -> CmError {
     }
 }
 
+fn reserve_s_xfer_values(context: &str, len: usize) -> CmResult<Vec<Value>> {
+    let mut values = Vec::new();
+    values.try_reserve_exact(len).map_err(|err| {
+        s_xfer_error(format!(
+            "{context}: unable to reserve {len} value(s): {err}"
+        ))
+    })?;
+    values.resize(len, 0.0);
+    Ok(values)
+}
+
+fn resize_s_xfer_values(context: &str, values: &mut Vec<Value>, len: usize) -> CmResult<()> {
+    if values.capacity() < len {
+        let additional = len - values.capacity();
+        values.try_reserve_exact(additional).map_err(|err| {
+            s_xfer_error(format!(
+                "{context}: unable to reserve {len} value(s): {err}"
+            ))
+        })?;
+    }
+    values.resize(len, 0.0);
+    Ok(())
+}
+
 fn s_xfer_param_error(name: &str, message: impl Into<String>) -> CmError {
     CmError::InvalidParameter {
         name: name.to_string(),
@@ -958,7 +982,8 @@ fn s_xfer_feedthrough_and_remainder(coefficients: &SXferCoefficients) -> (Value,
 
 fn factor_linear_system(mut matrix: Vec<Vec<Value>>) -> Option<LinearFactorization> {
     let n = matrix.len();
-    let mut pivots = Vec::with_capacity(n);
+    let mut pivots = Vec::new();
+    pivots.try_reserve_exact(n).ok()?;
     for pivot_col in 0..n {
         let mut pivot_row = pivot_col;
         let mut pivot_abs = matrix[pivot_col][pivot_col].abs();
@@ -1047,9 +1072,20 @@ fn solve_factorized_system_in_place(
     Some(())
 }
 
-fn s_xfer_backward_euler_matrix(coefficients: &SXferCoefficients, dt: Value) -> Vec<Vec<Value>> {
+fn s_xfer_backward_euler_matrix(
+    coefficients: &SXferCoefficients,
+    dt: Value,
+) -> CmResult<Vec<Vec<Value>>> {
     let order = coefficients.denominator.len() - 1;
-    let mut matrix = vec![vec![0.0; order]; order];
+    let mut matrix = Vec::new();
+    matrix.try_reserve_exact(order).map_err(|err| {
+        s_xfer_error(format!(
+            "backward-Euler matrix: unable to reserve {order} row(s): {err}"
+        ))
+    })?;
+    for _ in 0..order {
+        matrix.push(reserve_s_xfer_values("backward-Euler matrix row", order)?);
+    }
     for (row, values) in matrix.iter_mut().enumerate() {
         values[row] = 1.0;
     }
@@ -1059,20 +1095,20 @@ fn s_xfer_backward_euler_matrix(coefficients: &SXferCoefficients, dt: Value) -> 
     for col in 0..order {
         matrix[order - 1][col] += dt * coefficients.denominator[col];
     }
-    matrix
+    Ok(matrix)
 }
 
 fn build_s_xfer_transient_system(
     coefficients: &SXferCoefficients,
     timestep: Value,
 ) -> CmResult<Arc<SXferTransientSystem>> {
-    let matrix = s_xfer_backward_euler_matrix(coefficients, timestep);
+    let matrix = s_xfer_backward_euler_matrix(coefficients, timestep)?;
     let factorization = factor_linear_system(matrix).ok_or_else(|| {
         CmError::EvaluationError("s_xfer transient state solve is singular".to_string())
     })?;
 
     let order = coefficients.denominator.len() - 1;
-    let mut sensitivity_rhs = vec![0.0; order];
+    let mut sensitivity_rhs = reserve_s_xfer_values("transient sensitivity RHS", order)?;
     sensitivity_rhs[order - 1] = timestep;
     let sensitivity =
         solve_factorized_system(&factorization, sensitivity_rhs).ok_or_else(|| {
@@ -1235,7 +1271,7 @@ fn s_xfer_transient_eval(
 
     let system = s_xfer_transient_system_for_context(ctx, coefficients)?;
     with_s_xfer_transient_scratch(ctx, |ctx, state| {
-        state.resize(order, 0.0);
+        resize_s_xfer_values("transient state scratch", state, order)?;
         for index in 0..order {
             state[index] = ctx.state_prev(index);
         }
