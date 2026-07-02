@@ -99,16 +99,16 @@ impl Toasts {
                         ToastKind::Warn => c.warn,
                         ToastKind::Error => c.err,
                     };
-                    Frame::none()
+                    Frame::NONE
                         .fill(c.bg_elevated.gamma_multiply(opacity))
                         .stroke(Stroke::new(1.0, c.border_strong.gamma_multiply(opacity)))
                         .rounding(t.radius_lg)
                         .shadow(t.shadow())
                         .inner_margin(egui::Margin {
-                            left: 13.0,
-                            right: 13.0,
-                            top: 9.0,
-                            bottom: 9.0,
+                            left: 13,
+                            right: 13,
+                            top: 9,
+                            bottom: 9,
                         })
                         .show(ui, |ui| {
                             ui.set_max_width(360.0);

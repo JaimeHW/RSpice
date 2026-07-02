@@ -6,7 +6,7 @@
 //! system, and installs the tokens for custom widgets to read.
 
 use egui::{
-    Color32, Context, FontFamily, FontId, Rounding, Stroke, TextStyle,
+    Color32, Context, CornerRadius, FontFamily, FontId, Stroke, TextStyle,
     style::{ScrollStyle, Selection, TextCursorStyle, WidgetVisuals, Widgets},
 };
 use serde::{Deserialize, Serialize};
@@ -106,8 +106,8 @@ fn build_style(t: &Tokens) -> egui::Style {
     let m = &t.metrics;
     style.spacing.item_spacing = egui::vec2(tokens::SP_2, 4.0);
     style.spacing.button_padding = egui::vec2(12.0, (m.ctl_h - 17.0).max(2.0) * 0.5);
-    style.spacing.menu_margin = egui::Margin::same(5.0);
-    style.spacing.window_margin = egui::Margin::same(tokens::SP_3);
+    style.spacing.menu_margin = egui::Margin::same(5);
+    style.spacing.window_margin = egui::Margin::same(tokens::SP_3 as i8);
     style.spacing.indent = 16.0;
     style.spacing.interact_size = egui::vec2(40.0, m.ctl_h);
     style.spacing.combo_height = 260.0;
@@ -124,7 +124,7 @@ fn build_style(t: &Tokens) -> egui::Style {
     };
 
     // --------------------------------------------------------------- visuals
-    let radius = Rounding::same(t.radius);
+    let radius = corner_radius(t.radius);
     let visuals = &mut style.visuals;
     visuals.dark_mode = t.mode == Mode::Dark;
     visuals.override_text_color = None;
@@ -132,10 +132,10 @@ fn build_style(t: &Tokens) -> egui::Style {
     visuals.panel_fill = c.bg_panel;
     visuals.window_fill = c.bg_elevated;
     visuals.window_stroke = Stroke::new(1.0, c.border_strong);
-    visuals.window_rounding = Rounding::same(t.radius_lg);
+    visuals.window_corner_radius = corner_radius(t.radius_lg);
     visuals.window_shadow = t.shadow();
     visuals.popup_shadow = t.shadow();
-    visuals.menu_rounding = Rounding::same(t.radius_lg);
+    visuals.menu_corner_radius = corner_radius(t.radius_lg);
 
     visuals.extreme_bg_color = c.bg_inset;
     visuals.code_bg_color = c.bg_inset;
@@ -147,7 +147,7 @@ fn build_style(t: &Tokens) -> egui::Style {
             weak_bg_fill: c.bg_panel,
             bg_stroke: Stroke::new(1.0, c.border),
             fg_stroke: Stroke::new(1.0, c.text),
-            rounding: radius,
+            corner_radius: radius,
             expansion: 0.0,
         },
         inactive: WidgetVisuals {
@@ -155,7 +155,7 @@ fn build_style(t: &Tokens) -> egui::Style {
             weak_bg_fill: c.bg_panel,
             bg_stroke: Stroke::new(1.0, c.border),
             fg_stroke: Stroke::new(1.0, c.text_dim),
-            rounding: radius,
+            corner_radius: radius,
             expansion: 0.0,
         },
         hovered: WidgetVisuals {
@@ -163,7 +163,7 @@ fn build_style(t: &Tokens) -> egui::Style {
             weak_bg_fill: c.bg_hover,
             bg_stroke: Stroke::new(1.0, c.border_strong),
             fg_stroke: Stroke::new(1.0, c.text),
-            rounding: radius,
+            corner_radius: radius,
             expansion: 0.0,
         },
         active: WidgetVisuals {
@@ -171,7 +171,7 @@ fn build_style(t: &Tokens) -> egui::Style {
             weak_bg_fill: c.bg_active,
             bg_stroke: Stroke::new(1.0, c.border_strong),
             fg_stroke: Stroke::new(1.0, c.text),
-            rounding: radius,
+            corner_radius: radius,
             expansion: 0.0,
         },
         open: WidgetVisuals {
@@ -179,7 +179,7 @@ fn build_style(t: &Tokens) -> egui::Style {
             weak_bg_fill: c.bg_active,
             bg_stroke: Stroke::new(1.0, c.border),
             fg_stroke: Stroke::new(1.0, c.text),
-            rounding: radius,
+            corner_radius: radius,
             expansion: 0.0,
         },
     };
@@ -206,6 +206,10 @@ fn build_style(t: &Tokens) -> egui::Style {
     style.animation_time = 0.16;
 
     style
+}
+
+fn corner_radius(radius: f32) -> CornerRadius {
+    CornerRadius::same(radius.round().clamp(0.0, u8::MAX as f32) as u8)
 }
 
 /// Resolve a [`FontId`] for UI text at a given size and weight.

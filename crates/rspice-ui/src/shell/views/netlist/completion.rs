@@ -161,7 +161,7 @@ pub fn show(
     }
 
     let cursor = range.primary;
-    let Some((token_start, token, line_start)) = token_at(buffer, cursor.ccursor.index) else {
+    let Some((token_start, token, line_start)) = token_at(buffer, cursor.index) else {
         state.completion_open = false;
         return None;
     };
@@ -181,7 +181,7 @@ pub fn show(
 
     if let Some(index) = take {
         let chosen = &candidates[index];
-        let end = cursor.ccursor.index;
+        let end = cursor.index;
         let byte_start = char_to_byte(buffer, token_start);
         let byte_end = char_to_byte(buffer, end);
         let caret = token_start + chosen.insert.chars().count();
@@ -333,7 +333,7 @@ fn draw_popover(
 
     // Anchor at the caret's baseline.
     let range = output.cursor_range?;
-    let caret_rect = output.galley.pos_from_cursor(&range.primary);
+    let caret_rect = output.galley.pos_from_cursor(range.primary);
     let anchor = output.galley_pos + caret_rect.left_bottom().to_vec2() + egui::vec2(0.0, 4.0);
     let geometry = completion_popover_geometry(anchor, ui.ctx().screen_rect());
 
@@ -341,14 +341,14 @@ fn draw_popover(
         .order(egui::Order::Foreground)
         .fixed_pos(geometry.position)
         .show(ui.ctx(), |ui| {
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(c.bg_elevated)
                 .stroke(egui::Stroke::new(1.0, c.border_strong))
                 .rounding(3.0)
                 .shadow(egui::epaint::Shadow {
-                    offset: egui::vec2(0.0, 6.0),
-                    blur: 24.0,
-                    spread: 0.0,
+                    offset: [0, 6],
+                    blur: 24,
+                    spread: 0,
                     color: egui::Color32::from_black_alpha(115),
                 })
                 .show(ui, |ui| {

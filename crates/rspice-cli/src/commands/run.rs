@@ -1180,6 +1180,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         charge_abstol: args.charge_abstol,
         residual_reltol: args.residual_reltol,
         gmin_initial: args.gmin,
+        digital_delay_type: None,
         spice_dialect: None,
         jfet_level2_model: None,
     };

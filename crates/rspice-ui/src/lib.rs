@@ -20,6 +20,7 @@
 
 // Temporary allowance for existing external/SPICE naming conventions.
 #![allow(non_snake_case)]
+#![allow(deprecated)]
 #![cfg_attr(
     test,
     allow(

@@ -48,13 +48,13 @@ pub fn left(
     // The place strip owns the bottom edge; everything else fills above it.
     egui::TopBottomPanel::bottom("volta.rail.place")
         .frame(
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(c.bg_panel)
                 .inner_margin(egui::Margin {
-                    left: 12.0,
-                    right: 12.0,
-                    top: 8.0,
-                    bottom: 10.0,
+                    left: 12,
+                    right: 12,
+                    top: 8,
+                    bottom: 10,
                 }),
         )
         .show_separator_line(false)
@@ -148,7 +148,12 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
         tabs_rect.y_range(),
         egui::Stroke::new(1.0, c.border),
     );
-    painter.rect_stroke(tabs_rect, t.radius, egui::Stroke::new(1.0, c.border));
+    painter.rect_stroke(
+        tabs_rect,
+        t.radius,
+        egui::Stroke::new(1.0, c.border),
+        egui::StrokeKind::Inside,
+    );
     painter.hline(
         rect.x_range(),
         rect.bottom(),
@@ -176,22 +181,22 @@ fn navigator(ui: &mut Ui, state: &mut AppState) {
     nav_segments(ui, state);
 
     let c = Tokens::get(ui.ctx()).color;
-    egui::Frame::none()
+    egui::Frame::NONE
         .inner_margin(egui::Margin {
-            left: 10.0,
-            right: 10.0,
-            top: 0.0,
-            bottom: 0.0,
+            left: 10,
+            right: 10,
+            top: 0,
+            bottom: 0,
         })
         .show(ui, |ui| {
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(c.bg_inset)
                 .stroke(egui::Stroke::new(1.0, c.border))
                 .inner_margin(egui::Margin {
-                    left: 4.0,
-                    right: 4.0,
-                    top: 5.0,
-                    bottom: 5.0,
+                    left: 4,
+                    right: 4,
+                    top: 5,
+                    bottom: 5,
                 })
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical()
@@ -251,6 +256,7 @@ fn rail_search_input(
         t.radius,
         c.bg_inset,
         egui::Stroke::new(1.0, if hovered { c.border_strong } else { c.border }),
+        egui::StrokeKind::Inside,
     );
 
     let icon_center = egui::pos2(rect.left() + 14.0, rect.center().y - 1.0);
@@ -275,6 +281,7 @@ fn rail_search_input(
         2.0,
         theme::mix(c.bg_panel, c.bg_inset, 0.55),
         egui::Stroke::new(1.0, c.border),
+        egui::StrokeKind::Inside,
     );
     painter.text(
         key_rect.center(),
@@ -301,8 +308,8 @@ fn rail_search_input(
         egui::TextEdit::singleline(value)
             .font(egui::TextStyle::Monospace)
             .hint_text(hint)
-            .frame(false)
-            .margin(egui::Margin::symmetric(0.0, 4.0)),
+            .frame(egui::Frame::NONE)
+            .margin(egui::Margin::symmetric(0, 4)),
     );
     if field_response.clicked() {
         response.request_focus();
@@ -420,6 +427,7 @@ fn premium_nameplate(ui: &mut Ui, state: &mut AppState) {
         card_rect,
         t.radius_lg,
         egui::Stroke::new(1.0, c.border_strong),
+        egui::StrokeKind::Inside,
     );
 
     let lib_font = theme::mono(tokens::FS_0, FontWeight::Regular);
@@ -544,7 +552,8 @@ fn paint_premium_view_chip(ui: &Ui, rect: egui::Rect, text: &str, hovered: bool,
     } else {
         egui::Stroke::new(1.0, c.border_strong)
     };
-    ui.painter().rect(rect, t.radius, fill, stroke);
+    ui.painter()
+        .rect(rect, t.radius, fill, stroke, egui::StrokeKind::Inside);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -567,9 +576,9 @@ fn pathbar(ui: &mut Ui, state: &mut AppState) {
 
     let mut focus: Option<usize> = None;
     let mut ascend = false;
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(c.accent_dim)
-        .inner_margin(egui::Margin::symmetric(12.0, 5.0))
+        .inner_margin(egui::Margin::symmetric(12, 5))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
@@ -719,7 +728,13 @@ fn nav_segments(ui: &mut Ui, state: &mut AppState) {
                 );
                 let painter = ui.painter();
                 if active {
-                    painter.rect(rect, t.radius, c.bg_inset, egui::Stroke::new(1.0, c.border));
+                    painter.rect(
+                        rect,
+                        t.radius,
+                        c.bg_inset,
+                        egui::Stroke::new(1.0, c.border),
+                        egui::StrokeKind::Inside,
+                    );
                 } else if hover > 0.0 {
                     painter.rect_filled(
                         rect,
@@ -1173,12 +1188,12 @@ fn empty_note(ui: &mut Ui, text: &str) {
 fn nav_no_match(ui: &mut Ui, state: &mut AppState, query: &str) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(14.0);
-    egui::Frame::none()
+    egui::Frame::NONE
         .inner_margin(egui::Margin {
-            left: 18.0,
-            right: 18.0,
-            top: 10.0,
-            bottom: 10.0,
+            left: 18,
+            right: 18,
+            top: 10,
+            bottom: 10,
         })
         .show(ui, |ui| {
             ui.label(
@@ -1372,12 +1387,12 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
 
     ui.add_space(2.0);
     let mut fields_focused = false;
-    egui::Frame::none()
+    egui::Frame::NONE
         .inner_margin(egui::Margin {
-            left: 12.0,
-            right: 12.0,
-            top: 0.0,
-            bottom: 12.0,
+            left: 12,
+            right: 12,
+            top: 0,
+            bottom: 12,
         })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;

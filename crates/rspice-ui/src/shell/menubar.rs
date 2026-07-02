@@ -52,7 +52,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     TopBottomPanel::top("volta.menubar")
         .exact_height(MENUBAR_HEIGHT)
-        .frame(Frame::none().fill(c.bg_panel))
+        .frame(Frame::NONE.fill(c.bg_panel))
         .show_separator_line(false)
         .show(ctx, |ui| {
             let panel_rect = ui.max_rect();
@@ -91,7 +91,7 @@ fn brand(ui: &mut Ui) {
                 ..Default::default()
             },
         );
-        ui.fonts(|f| f.layout_job(job))
+        ui.fonts_mut(|f| f.layout_job(job))
     };
     let width = 12.0 + galley.size().x + 12.0;
     let (rect, _) = ui.allocate_exact_size(vec2(width, MENUBAR_HEIGHT), Sense::hover());
@@ -224,7 +224,7 @@ fn top_menu(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui)) {
                     &mut style.visuals.widgets.active,
                     &mut style.visuals.widgets.open,
                 ] {
-                    w.rounding = egui::Rounding::ZERO;
+                    w.corner_radius = egui::CornerRadius::ZERO;
                     w.bg_stroke = egui::Stroke::NONE;
                 }
                 style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
@@ -305,7 +305,7 @@ fn item_impl(ui: &mut Ui, label: &str, kbd: Option<&str>, enabled: bool) -> (boo
     }
 
     if enabled && response.clicked() {
-        ui.close_menu();
+        ui.close();
         return (true, response);
     }
     (false, response)
@@ -333,7 +333,7 @@ fn submenu(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui)) {
         let style = ui.style_mut();
         style.spacing.button_padding = vec2(9.0, 0.0);
         style.spacing.interact_size.y = 26.0;
-        let rounding: egui::Rounding = t.radius.into();
+        let corner_radius = egui::CornerRadius::same(t.radius.round() as u8);
         for visuals in [
             &mut style.visuals.widgets.inactive,
             &mut style.visuals.widgets.hovered,
@@ -342,7 +342,7 @@ fn submenu(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui)) {
         ] {
             visuals.fg_stroke.color = c.text;
             visuals.bg_stroke = egui::Stroke::NONE;
-            visuals.rounding = rounding;
+            visuals.corner_radius = corner_radius;
         }
         style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
         style.visuals.widgets.hovered.weak_bg_fill = c.bg_hover;

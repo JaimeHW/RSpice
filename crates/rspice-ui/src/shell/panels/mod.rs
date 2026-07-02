@@ -70,7 +70,7 @@ pub fn show(
             .default_width(left_default_width(state.shell.view))
             .width_range(PANEL_MIN..=PANEL_MAX)
             .resizable(true)
-            .frame(Frame::none().fill(c.bg_panel))
+            .frame(Frame::NONE.fill(c.bg_panel))
             .show_separator_line(false)
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
@@ -103,7 +103,7 @@ pub fn show(
             .default_width(RIGHT_WIDTH)
             .width_range(PANEL_MIN..=PANEL_MAX)
             .resizable(true)
-            .frame(Frame::none().fill(c.bg_panel))
+            .frame(Frame::NONE.fill(c.bg_panel))
             .show_separator_line(false)
             .show(ctx, |ui| {
                 let rect = ui.max_rect();

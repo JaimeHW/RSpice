@@ -18,7 +18,7 @@ impl RSpiceApp {
     pub(super) fn handle_image_export(&mut self, ctx: &Context) {
         if std::mem::take(&mut self.state.shell.export_png_requested) {
             #[cfg(not(target_arch = "wasm32"))]
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             #[cfg(target_arch = "wasm32")]
             self.save_browser_canvas_png(ctx);
         }

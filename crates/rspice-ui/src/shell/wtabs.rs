@@ -82,7 +82,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
 
     TopBottomPanel::top("volta.wtabs")
         .exact_height(WTABS_HEIGHT)
-        .frame(Frame::none().fill(c.bg_app))
+        .frame(Frame::NONE.fill(c.bg_app))
         .show_separator_line(false)
         .show(ctx, |ui| {
             let panel_rect = ui.max_rect();
@@ -162,7 +162,7 @@ fn tab(
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let galley = ui.fonts(|f| {
+    let galley = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_owned(),
             theme::sans(tokens::FS_1, FontWeight::Regular),
@@ -170,7 +170,7 @@ fn tab(
         )
     });
     let badge_galley = badge.map(|count| {
-        ui.fonts(|f| {
+        ui.fonts_mut(|f| {
             f.layout_no_wrap(
                 count.to_string(),
                 theme::mono(10.0, FontWeight::Medium),

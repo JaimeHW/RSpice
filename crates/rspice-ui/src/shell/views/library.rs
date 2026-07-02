@@ -558,14 +558,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ("Checked out", "you"),
         ("Technology", technology.as_str()),
     ] {
-        let key_galley = ui.fonts(|f| {
+        let key_galley = ui.fonts_mut(|f| {
             f.layout_no_wrap(
                 format!("{key} "),
                 theme::sans(tokens::FS_1, FontWeight::Regular),
                 c.text_dim,
             )
         });
-        let value_galley = ui.fonts(|f| {
+        let value_galley = ui.fonts_mut(|f| {
             f.layout_no_wrap(
                 value.to_owned(),
                 theme::mono(tokens::FS_1, FontWeight::Medium),
@@ -589,7 +589,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Library path, right-aligned and faint — drawn only when it fits.
     if let Some(path) = lib_path {
-        let path_galley = ui.fonts(|f| {
+        let path_galley = ui.fonts_mut(|f| {
             f.layout_no_wrap(
                 path,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -621,18 +621,18 @@ fn cell_row_menu(
         ui.set_min_width(200.0);
         if item(ui, "Open", None) {
             open_view_if_editable(state, library, cell, "schematic");
-            ui.close_menu();
+            ui.close();
         }
         separator(ui);
         if item(ui, "Copy cell…", None) {
             state.open_copy_cell_dialog(library, cell);
-            ui.close_menu();
+            ui.close();
         }
         if read_only {
             item_disabled(ui, "Rename cell…", None);
         } else if item(ui, "Rename cell…", None) {
             state.open_rename_cell_dialog(library, cell);
-            ui.close_menu();
+            ui.close();
         }
         separator(ui);
         if read_only {
@@ -642,7 +642,7 @@ fn cell_row_menu(
                 library: library.to_owned(),
                 cell: cell.to_owned(),
             });
-            ui.close_menu();
+            ui.close();
         }
     });
 }
@@ -709,7 +709,7 @@ fn column(
                     ..Default::default()
                 },
             );
-            let galley = ui.fonts(|f| f.layout_job(job));
+            let galley = ui.fonts_mut(|f| f.layout_job(job));
             painter.galley(
                 egui::pos2(
                     head_rect.left() + 12.0,
@@ -725,8 +725,8 @@ fn column(
                 .show(ui, |ui| {
                     ui.add_space(4.0);
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    egui::Frame::none()
-                        .inner_margin(egui::Margin::symmetric(6.0, 0.0))
+                    egui::Frame::NONE
+                        .inner_margin(egui::Margin::symmetric(6, 0))
                         .show(ui, add_contents);
                 });
         },

@@ -329,13 +329,14 @@ fn source_dc_bias(spec: &SourceSpec) -> Value {
         SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
         SourceSpec::Pulse { v1, .. } => *v1,
         SourceSpec::Sin { offset, .. } => *offset,
-        SourceSpec::Pwl { points } => points.first().map(|(_, value)| *value).unwrap_or(0.0),
+        SourceSpec::Pwl { points, .. } => points.first().map(|(_, value)| *value).unwrap_or(0.0),
         SourceSpec::PwlFile { .. } => 0.0,
         SourceSpec::Exp { v1, .. } => *v1,
         SourceSpec::Sffm { offset, .. } => *offset,
         SourceSpec::Am { offset, .. } => *offset,
         // Zero-mean noise contributes nothing to the operating point.
         SourceSpec::TrNoise { .. } => 0.0,
+        SourceSpec::Pat { .. } => 0.0,
     }
 }
 

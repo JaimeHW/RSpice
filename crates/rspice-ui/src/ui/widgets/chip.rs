@@ -12,7 +12,7 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let c = &t.color;
 
-    let galley = ui.fonts(|f| {
+    let galley = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_owned(),
             theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -40,7 +40,13 @@ pub fn chip(ui: &mut Ui, label: &str, on: bool) -> Response {
     };
 
     let painter = ui.painter();
-    painter.rect(rect, t.radius, fill, Stroke::new(1.0, border));
+    painter.rect(
+        rect,
+        t.radius,
+        fill,
+        Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
     painter.galley(
         egui::pos2(
             rect.center().x - galley.size().x * 0.5,

@@ -622,7 +622,7 @@ fn problem_row(ui: &mut Ui, err: &super::types::CompileErrorDisplay) {
     let mut x = rect.left() + 16.0;
     let location = err.location_str();
     if !location.is_empty() {
-        let galley = ui.fonts(|f| {
+        let galley = ui.fonts_mut(|f| {
             f.layout_no_wrap(
                 location,
                 theme::mono(tokens::FS_0, FontWeight::Medium),
@@ -638,7 +638,7 @@ fn problem_row(ui: &mut Ui, err: &super::types::CompileErrorDisplay) {
     }
 
     let remaining = (rect.right() - x).max(20.0);
-    let message = ui.fonts(|f| {
+    let message = ui.fonts_mut(|f| {
         let mut job = egui::text::LayoutJob::simple_singleline(
             err.message.clone(),
             theme::sans(tokens::FS_0, FontWeight::Regular),
@@ -684,11 +684,11 @@ fn caption(ui: &mut Ui, text: &str) {
 fn inset(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(c.bg_inset)
         .stroke(Stroke::new(1.0, c.border))
         .rounding(t.radius)
-        .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+        .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             add_contents(ui);
@@ -709,7 +709,7 @@ fn badge(ui: &mut Ui, label: &str, color: egui::Color32) {
             ..Default::default()
         },
     );
-    let galley = ui.fonts(|f| f.layout_job(job));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
     let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x + 12.0, 14.0), Sense::hover());
     let painter = ui.painter();
     painter.rect(
@@ -717,6 +717,7 @@ fn badge(ui: &mut Ui, label: &str, color: egui::Color32) {
         t.radius,
         egui::Color32::TRANSPARENT,
         Stroke::new(1.0, color.gamma_multiply(0.5)),
+        egui::StrokeKind::Inside,
     );
     painter.galley(
         egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y * 0.5),

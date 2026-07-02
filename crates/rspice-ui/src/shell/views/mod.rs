@@ -19,7 +19,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     let c = t.color;
 
     egui::CentralPanel::default()
-        .frame(Frame::none().fill(c.bg_app))
+        .frame(Frame::NONE.fill(c.bg_app))
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
             match app.state.shell.view {

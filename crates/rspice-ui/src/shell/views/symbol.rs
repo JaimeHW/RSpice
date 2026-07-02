@@ -236,9 +236,7 @@ fn update_viewport(
         state.shell.symbol.needs_fit = false;
     }
     if response.hovered() {
-        let factor = ui.input(|input| {
-            symbol_scroll_zoom_factor(input.raw_scroll_delta.y, input.smooth_scroll_delta.y)
-        });
+        let factor = ui.input(|input| symbol_scroll_zoom_factor(input.smooth_scroll_delta.y));
         if let Some(factor) = factor {
             state.shell.symbol.zoom = (state.shell.symbol.zoom * factor).clamp(1.0, 18.0);
         }
@@ -255,14 +253,10 @@ fn update_viewport(
     }
 }
 
-fn symbol_scroll_zoom_factor(raw_scroll_y: f32, smooth_scroll_y: f32) -> Option<f32> {
-    let scroll = if raw_scroll_y.abs() > f32::EPSILON {
-        raw_scroll_y
-    } else if smooth_scroll_y.abs() > f32::EPSILON {
-        smooth_scroll_y
-    } else {
+fn symbol_scroll_zoom_factor(scroll: f32) -> Option<f32> {
+    if scroll.abs() <= f32::EPSILON {
         return None;
-    };
+    }
     Some((scroll * SCROLL_ZOOM_SENSITIVITY).exp().clamp(0.5, 2.0))
 }
 
@@ -279,7 +273,7 @@ fn fit_symbol_view(state: &mut AppState, rect: Rect, document: &SymbolDocument) 
 }
 
 fn handle_symbol_keys(ui: &mut Ui, state: &mut AppState, document: &mut SymbolDocument) -> bool {
-    if ui.ctx().wants_keyboard_input() {
+    if ui.ctx().egui_wants_keyboard_input() {
         return false;
     }
     let mut changed = false;
@@ -826,7 +820,7 @@ fn draw_pins(
         } else {
             stroke
         };
-        painter.rect_stroke(pad, 0.0, pad_stroke);
+        painter.rect_stroke(pad, 0.0, pad_stroke, egui::StrokeKind::Inside);
         let label_pos = pin_label_pos(position, viewport);
         painter.text(
             label_pos,
@@ -937,7 +931,12 @@ fn draw_preview_tile(
     let rect = preview_tile_rect(canvas);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, t.radius_lg, t.color.bg_panel);
-    painter.rect_stroke(rect, t.radius_lg, Stroke::new(1.0, t.color.border_strong));
+    painter.rect_stroke(
+        rect,
+        t.radius_lg,
+        Stroke::new(1.0, t.color.border_strong),
+        egui::StrokeKind::Inside,
+    );
     let header = Rect::from_min_max(
         rect.min,
         pos2(rect.right(), rect.top() + PREVIEW_TILE_HEADER),
@@ -1502,13 +1501,13 @@ mod tests {
 
     #[test]
     fn smooth_scroll_zoom_factor_is_proportional_not_binary() {
-        let tiny = symbol_scroll_zoom_factor(0.0, 1.0).expect("tiny smooth scroll should zoom");
+        let tiny = symbol_scroll_zoom_factor(1.0).expect("tiny smooth scroll should zoom");
         assert!(
             tiny > 1.0 && tiny < 1.01,
             "tiny smooth-scroll residue must not apply a full wheel notch: {tiny}"
         );
 
-        let wheel = symbol_scroll_zoom_factor(120.0, 1.0).expect("wheel scroll should zoom");
+        let wheel = symbol_scroll_zoom_factor(120.0).expect("wheel scroll should zoom");
         assert!(
             wheel > tiny && wheel < 1.2,
             "a normal wheel notch should be noticeable but restrained: {wheel}"

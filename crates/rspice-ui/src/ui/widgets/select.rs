@@ -28,6 +28,7 @@ pub fn select(
         t.radius,
         c.bg_inset,
         Stroke::new(1.0, theme::mix(c.border, c.border_strong, hover)),
+        egui::StrokeKind::Inside,
     );
     painter.text(
         egui::pos2(rect.left() + 8.0, rect.center().y),
@@ -53,7 +54,7 @@ pub fn select(
     }
 
     let mut picked = None;
-    egui::popup::popup_below_widget(
+    egui::popup_below_widget(
         ui,
         popup_id,
         &response,

@@ -18,7 +18,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
 
     TopBottomPanel::bottom("volta.statusbar")
         .exact_height(STATUSBAR_HEIGHT)
-        .frame(Frame::none().fill(c.bg_panel))
+        .frame(Frame::NONE.fill(c.bg_panel))
         .show_separator_line(false)
         .show(ctx, |ui| {
             let panel_rect = ui.max_rect();

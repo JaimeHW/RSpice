@@ -127,10 +127,12 @@ impl<'a> Button<'a> {
                     ..Default::default()
                 },
             );
-            ui.fonts(|f| f.layout_job(job))
+            ui.fonts_mut(|f| f.layout_job(job))
         };
         let hint_galley = self.hint.map(|h| {
-            ui.fonts(|f| f.layout_no_wrap(h.to_owned(), font_id.clone(), fg.gamma_multiply(0.65)))
+            ui.fonts_mut(|f| {
+                f.layout_no_wrap(h.to_owned(), font_id.clone(), fg.gamma_multiply(0.65))
+            })
         });
 
         let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
@@ -187,6 +189,7 @@ impl<'a> Button<'a> {
             t.radius,
             fill.gamma_multiply(opacity),
             Stroke::new(1.0, stroke_color.gamma_multiply(opacity)),
+            egui::StrokeKind::Inside,
         );
 
         let mut x = rect.left() + 12.0;

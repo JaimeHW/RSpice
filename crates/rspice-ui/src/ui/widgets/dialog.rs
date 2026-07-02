@@ -181,7 +181,7 @@ impl<'a> Dialog<'a> {
                 );
                 surface.set_width(width);
 
-                Frame::none()
+                Frame::NONE
                     .fill(c.bg_panel)
                     .stroke(Stroke::new(1.0, c.border_strong))
                     .rounding(t.radius_lg)
@@ -196,8 +196,8 @@ impl<'a> Dialog<'a> {
                             .max_height(max_height - 2.0 * 46.0)
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
-                                Frame::none()
-                                    .inner_margin(Margin::symmetric(16.0, 14.0))
+                                Frame::NONE
+                                    .inner_margin(Margin::symmetric(16, 14))
                                     .show(ui, body);
                             });
                         match self.footer(ui, &t) {
@@ -214,8 +214,8 @@ impl<'a> Dialog<'a> {
     fn header(&self, ui: &mut Ui, t: &Tokens) -> bool {
         let c = t.color;
         let mut closed = false;
-        Frame::none()
-            .inner_margin(Margin::symmetric(16.0, 11.0))
+        Frame::NONE
+            .inner_margin(Margin::symmetric(16, 11))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
@@ -264,8 +264,8 @@ impl<'a> Dialog<'a> {
         let line_y = ui.cursor().top();
         ui.painter()
             .hline(ui.max_rect().x_range(), line_y, Stroke::new(1.0, c.border));
-        Frame::none()
-            .inner_margin(Margin::symmetric(16.0, 11.0))
+        Frame::NONE
+            .inner_margin(Margin::symmetric(16, 11))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
@@ -325,7 +325,7 @@ pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
                     ..Default::default()
                 },
             );
-            let galley = ui.fonts(|f| f.layout_job(job));
+            let galley = ui.fonts_mut(|f| f.layout_job(job));
             let (rect, response) =
                 ui.allocate_exact_size(vec2(galley.size().x + 22.0, 24.0), Sense::click());
             let hover =

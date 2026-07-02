@@ -171,7 +171,7 @@ pub(super) fn draw_component(
             _ => {
                 // Generic component: draw a rectangle
                 let rect = Rect::from_center_size(pos, Vec2::splat(30.0 * scale));
-                painter.rect_stroke(rect, 2.0, stroke);
+                painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
             }
         }
     }

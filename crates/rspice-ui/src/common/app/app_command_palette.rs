@@ -190,17 +190,17 @@ impl RSpiceApp {
             ))
             .show(ctx, |ui| {
                 ui.set_width(width);
-                egui::Frame::none()
+                egui::Frame::NONE
                     .fill(c.bg_panel)
                     .stroke(egui::Stroke::new(1.0, c.border_strong))
                     .rounding(6.0)
                     .shadow(egui::epaint::Shadow {
-                        offset: egui::vec2(0.0, 10.0),
-                        blur: 32.0,
-                        spread: 0.0,
+                        offset: [0, 10],
+                        blur: 32,
+                        spread: 0,
                         color: egui::Color32::from_black_alpha(110),
                     })
-                    .inner_margin(egui::Margin::same(8.0))
+                    .inner_margin(egui::Margin::same(8))
                     .show(ui, |ui| {
                         let palette = &mut self.state.dialogs.command_palette;
                         let response = ui.add(
@@ -360,7 +360,7 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
         let mut buffer = [0u8; 4];
         job.append(ch.encode_utf8(&mut buffer), 0.0, format);
     }
-    let galley = ui.fonts(|f| f.layout_job(job));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
     painter.galley(
         egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y * 0.5),
         galley,

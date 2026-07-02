@@ -265,6 +265,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                         cell_rect.shrink(0.75),
                                         2.0,
                                         egui::Stroke::new(1.5, c.err),
+                                        egui::StrokeKind::Inside,
                                     );
                                 }
                             }

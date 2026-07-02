@@ -25,7 +25,7 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
                 ..Default::default()
             },
         );
-        ui.fonts(|f| f.layout_job(job))
+        ui.fonts_mut(|f| f.layout_job(job))
     };
 
     let width = ui.available_width();
@@ -44,7 +44,7 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
     );
 
     let action_label = action?;
-    let action_galley = ui.fonts(|f| {
+    let action_galley = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             action_label.to_owned(),
             theme::sans(tokens::FS_0, FontWeight::Regular),

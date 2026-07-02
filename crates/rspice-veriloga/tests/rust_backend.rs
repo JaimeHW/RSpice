@@ -50,6 +50,7 @@ fn generated_device_report_records_backend_selection() {
             files: Vec::new(),
             source_digest: "0000000000000000".to_string(),
         },
+        fallback_reason: None,
     };
 
     assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
