@@ -172,7 +172,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             let top = mapper.y(bin.count as f64);
             let bottom = mapper.y(0.0);
             let rect = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom));
-            painter.rect(rect, 0.0, accent_dim, egui::Stroke::new(1.0, accent));
+            painter.rect(
+                rect,
+                0.0,
+                accent_dim,
+                egui::Stroke::new(1.0, accent),
+                egui::StrokeKind::Inside,
+            );
         }
     }));
 

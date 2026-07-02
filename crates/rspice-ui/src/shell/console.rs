@@ -21,7 +21,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
 
     let collapsed = state.shell.console.collapsed;
     let panel = TopBottomPanel::bottom("volta.console")
-        .frame(Frame::none().fill(c.bg_panel))
+        .frame(Frame::NONE.fill(c.bg_panel))
         .show_separator_line(false);
     let panel = if collapsed {
         panel.exact_height(HEADER_HEIGHT).resizable(false)
@@ -137,7 +137,7 @@ fn console_tab(ui: &mut Ui, label: &str, count: Option<usize>, active: bool) -> 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let label_galley = ui.fonts(|f| {
+    let label_galley = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_owned(),
             theme::sans(tokens::FS_1, FontWeight::Regular),
@@ -145,7 +145,7 @@ fn console_tab(ui: &mut Ui, label: &str, count: Option<usize>, active: bool) -> 
         )
     });
     let count_galley = count.map(|n| {
-        ui.fonts(|f| {
+        ui.fonts_mut(|f| {
             f.layout_no_wrap(
                 n.to_string(),
                 theme::mono(10.0, FontWeight::Regular),
@@ -240,7 +240,7 @@ fn script_body(ui: &mut Ui, state: &mut AppState) {
                     egui::TextEdit::singleline(&mut state.script_console.input_buffer)
                         .font(egui::TextStyle::Monospace)
                         .hint_text("run tran · plot v(out) · help")
-                        .margin(egui::Margin::symmetric(8.0, 4.0))
+                        .margin(egui::Margin::symmetric(8, 4))
                         .lock_focus(true),
                 )
             })

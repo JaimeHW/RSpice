@@ -1190,15 +1190,15 @@ fn cursor_block(
 ) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(c.bg_inset)
         .stroke(egui::Stroke::new(1.0, c.border))
         .rounding(t.radius)
         .outer_margin(egui::Margin {
-            left: 12.0,
-            right: 12.0,
-            top: 2.0,
-            bottom: 6.0,
+            left: 12,
+            right: 12,
+            top: 2,
+            bottom: 6,
         })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;

@@ -206,11 +206,11 @@ fn summary_card(ui: &mut egui::Ui, info: &LicenseInfo) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let frame = egui::Frame::none()
+    let frame = egui::Frame::NONE
         .fill(c.bg_elevated)
         .stroke(egui::Stroke::new(1.0, c.border))
         .rounding(t.radius)
-        .inner_margin(egui::Margin::symmetric(12.0, 10.0));
+        .inner_margin(egui::Margin::symmetric(12, 10));
     frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
         row(ui, "Licensed to", &info.licensed_to, c.text);
@@ -257,11 +257,11 @@ fn row(ui: &mut egui::Ui, key: &str, value: &str, value_color: egui::Color32) {
 fn feature_chip(ui: &mut egui::Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(c.bg_panel)
         .stroke(egui::Stroke::new(1.0, c.border_strong))
         .rounding(t.radius)
-        .inner_margin(egui::Margin::symmetric(8.0, 3.0))
+        .inner_margin(egui::Margin::symmetric(8, 3))
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(label)

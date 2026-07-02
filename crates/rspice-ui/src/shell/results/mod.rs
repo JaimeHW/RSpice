@@ -558,6 +558,7 @@ pub(super) fn point_card(
         t.radius,
         c.bg_elevated,
         egui::Stroke::new(1.0, c.border_strong),
+        egui::StrokeKind::Inside,
     );
     painter.galley(
         egui::pos2(origin.x + pad_x, origin.y + pad_y),
@@ -615,12 +616,12 @@ pub(super) fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
 /// A faint explanatory note under a right-panel section.
 pub(super) fn panel_note(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::none()
+    egui::Frame::NONE
         .inner_margin(egui::Margin {
-            left: 12.0,
-            right: 12.0,
-            top: 4.0,
-            bottom: 10.0,
+            left: 12,
+            right: 12,
+            top: 4,
+            bottom: 10,
         })
         .show(ui, |ui| {
             ui.label(
@@ -733,11 +734,11 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
             ui.menu_button("Export…", |ui| {
                 if ui.button("Waveform data (CSV)…").clicked() {
                     state.shell.export_csv_requested = true;
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Viewer image (PNG)…").clicked() {
                     state.shell.export_png_requested = true;
-                    ui.close_menu();
+                    ui.close();
                 }
             });
             // Viewer-local controls.
@@ -882,7 +883,7 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
                         .clicked()
                     {
                         select_run = Some(index);
-                        ui.close_menu();
+                        ui.close();
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -913,7 +914,7 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
                 ui.separator();
                 if ui.button("Clear overlays").clicked() {
                     clear_overlays = true;
-                    ui.close_menu();
+                    ui.close();
                 }
             }
         },
@@ -988,7 +989,7 @@ fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) ->
             ..Default::default()
         },
     );
-    let galley = ui.fonts(|f| f.layout_job(job));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
 
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(galley.size().x + 22.0, 24.0),

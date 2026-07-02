@@ -29,6 +29,13 @@ fn editor_id() -> egui::Id {
     egui::Id::new("volta.netlist.editor.text")
 }
 
+fn line_for_char_index(text: &str, char_index: usize) -> usize {
+    text.chars()
+        .take(char_index)
+        .filter(|ch| *ch == '\n')
+        .count()
+}
+
 /// Render the editor and diagnostics strip.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
@@ -62,9 +69,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let mut buffer = std::mem::take(&mut state.simulation.netlist_content);
 
     let layouter_font = font.clone();
-    let mut layouter = |ui: &Ui, text: &str, _wrap_width: f32| {
-        let job = highlight::layout_job(text, layouter_font.clone(), &c, &diagnostics);
-        ui.fonts(|fonts| fonts.layout_job(job))
+    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
+        let job = highlight::layout_job(text.as_str(), layouter_font.clone(), &c, &diagnostics);
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
     };
 
     let mut changed = false;
@@ -83,18 +90,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .font(font.clone())
                     .desired_width(f32::INFINITY)
                     .desired_rows(30)
-                    .frame(false)
+                    .frame(egui::Frame::NONE)
                     .margin(egui::Margin {
-                        left: GUTTER_W,
-                        right: 12.0,
-                        top: 6.0,
-                        bottom: 6.0,
+                        left: GUTTER_W as i8,
+                        right: 12,
+                        top: 6,
+                        bottom: 6,
                     })
                     .layouter(&mut layouter)
                     .show(ui);
 
                 if let Some(range) = output.cursor_range {
-                    cursor_line = range.primary.rcursor.row;
+                    cursor_line = line_for_char_index(&buffer, range.primary.index);
                 }
                 changed = output.response.changed();
 
@@ -104,7 +111,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 let origin = output.galley_pos;
                 let gutter_font = theme::mono(FONT_SIZE - 1.5, FontWeight::Regular);
                 for (idx, row) in output.galley.rows.iter().enumerate() {
-                    let y = origin.y + row.rect.center().y;
+                    let y = origin.y + row.rect().center().y;
                     if !ui.clip_rect().y_range().contains(y) {
                         continue;
                     }

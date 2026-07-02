@@ -177,10 +177,7 @@ fn rasterize_density(
             egui::Color32::from_rgba_unmultiplied(r, g, b, alpha)
         })
         .collect();
-    egui::ColorImage {
-        size: [width, height],
-        pixels,
-    }
+    egui::ColorImage::new([width, height], pixels)
 }
 
 /// Anti-aliased DDA: walk the segment one pixel-step at a time, splitting

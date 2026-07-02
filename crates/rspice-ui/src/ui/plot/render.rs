@@ -370,6 +370,7 @@ pub fn show(
             t.radius,
             c.bg_elevated,
             Stroke::new(1.0, c.border_strong),
+            egui::StrokeKind::Inside,
         );
         painter.galley(
             pos2(tx + pad, ty + (tag_h - galley.size().y) * 0.5),
@@ -499,6 +500,7 @@ fn handle_navigation(
                 0.0,
                 c.accent.gamma_multiply(0.08),
                 Stroke::new(1.0, c.accent),
+                egui::StrokeKind::Inside,
             );
         }
         if stopped {
@@ -549,7 +551,6 @@ fn handle_navigation(
             // Consume the wheel so an enclosing ScrollArea doesn't also
             // scroll the strip list while the user zooms a plot.
             ui.input_mut(|i| {
-                i.raw_scroll_delta = egui::Vec2::ZERO;
                 i.smooth_scroll_delta = egui::Vec2::ZERO;
             });
             let factor = (f64::from(-scroll) * 0.002).exp().clamp(0.05, 20.0);
@@ -616,6 +617,7 @@ fn draw_readout(
         t.radius,
         c.bg_elevated,
         Stroke::new(1.0, c.border_strong),
+        egui::StrokeKind::Inside,
     );
     for (i, (kg, vg)) in galleys.into_iter().enumerate() {
         let y = origin.y + pad_y + i as f32 * line_h;

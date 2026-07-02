@@ -16,7 +16,7 @@ pub fn mono_input(ui: &mut Ui, value: &mut String, width: f32) -> Response {
         vec2(width, t.metrics.ctl_h),
         TextEdit::singleline(value)
             .font(egui::TextStyle::Monospace)
-            .margin(egui::Margin::symmetric(8.0, 4.0)),
+            .margin(egui::Margin::symmetric(8, 4)),
     )
 }
 
@@ -72,7 +72,7 @@ pub fn input_row_readonly(ui: &mut Ui, label: &str, value: &str) -> Response {
                     .font(egui::TextStyle::Monospace)
                     .text_color(c.text_dim)
                     .interactive(false)
-                    .margin(egui::Margin::symmetric(8.0, 4.0)),
+                    .margin(egui::Margin::symmetric(8, 4)),
             )
         },
     )

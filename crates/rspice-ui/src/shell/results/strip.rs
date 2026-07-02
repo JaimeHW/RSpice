@@ -172,7 +172,7 @@ impl<'a> StripHeader<'a> {
                             response.context_menu(|ui| {
                                 if ui.button("Remove expression").clicked() {
                                     out.legend_removed = Some(index);
-                                    ui.close_menu();
+                                    ui.close();
                                 }
                             });
                         }
@@ -240,7 +240,7 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let galley = ui.fonts(|f| {
+    let galley = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             label.to_owned(),
             theme::mono(tokens::FS_0, FontWeight::Medium),
@@ -262,6 +262,7 @@ fn action_chip(ui: &mut Ui, label: &str, tooltip: &str) -> egui::Response {
         t.radius,
         mix(c.bg_panel, c.bg_hover, hover),
         Stroke::new(1.0, c.accent_dim),
+        egui::StrokeKind::Inside,
     );
     painter.galley(
         egui::pos2(
@@ -282,7 +283,7 @@ fn legend_chip(ui: &mut Ui, chip: &LegendChip<'_>) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let galley = ui.fonts(|f| {
+    let galley = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             chip.name.to_owned(),
             theme::mono(tokens::FS_0, FontWeight::Regular),

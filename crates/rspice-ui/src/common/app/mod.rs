@@ -544,12 +544,13 @@ impl RSpiceApp {
 
 impl eframe::App for RSpiceApp {
     /// Called on each frame
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        self.prepare_frame(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        self.prepare_frame(&ctx);
         #[cfg(not(target_arch = "wasm32"))]
-        self.autosave_tick(ctx);
-        self.render_frame_chrome(ctx);
-        self.render_frame_dialogs(ctx);
+        self.autosave_tick(&ctx);
+        self.render_frame_chrome(&ctx);
+        self.render_frame_dialogs(&ctx);
     }
 
     /// Called by eframe when the application is shutting down.

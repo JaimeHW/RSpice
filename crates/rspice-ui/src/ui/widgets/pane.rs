@@ -8,7 +8,7 @@
 //! `available_width()` being the pane width regardless of the layout the
 //! dialog body happens to be in.
 
-use egui::{Align, Layout, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
+use egui::{Align, CornerRadius, Layout, Rect, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -58,11 +58,11 @@ pub fn two_pane(
     if detail_rect.width() > 0.0 {
         painter.rect_filled(
             detail_rect,
-            Rounding {
-                nw: 0.0,
-                sw: 0.0,
-                ne: t.radius,
-                se: t.radius,
+            CornerRadius {
+                nw: 0,
+                sw: 0,
+                ne: t.radius.round() as u8,
+                se: t.radius.round() as u8,
             },
             c.bg_elevated,
         );
@@ -86,7 +86,12 @@ pub fn two_pane(
         outer.y_range(),
         Stroke::new(1.0, c.border),
     );
-    painter.rect_stroke(outer, t.radius, Stroke::new(1.0, c.border));
+    painter.rect_stroke(
+        outer,
+        t.radius,
+        Stroke::new(1.0, c.border),
+        egui::StrokeKind::Inside,
+    );
 }
 
 /// The `.hd` strip at the top of a pane: 36 pt, contents centered
@@ -149,7 +154,7 @@ pub fn pane_section_label(ui: &mut Ui, text: &str) {
             ..Default::default()
         },
     );
-    let galley = ui.fonts(|f| f.layout_job(job));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
     ui.painter().galley(
         pos2(rect.left() + 10.0, rect.bottom() - galley.size().y - 2.0),
         galley,

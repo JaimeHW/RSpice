@@ -37,7 +37,7 @@ impl<'a> Pill<'a> {
         let t = Tokens::get(ui.ctx());
         let c = &t.color;
 
-        let galley = ui.fonts(|f| {
+        let galley = ui.fonts_mut(|f| {
             f.layout_no_wrap(
                 self.label.to_owned(),
                 theme::mono(tokens::FS_0, FontWeight::Regular),

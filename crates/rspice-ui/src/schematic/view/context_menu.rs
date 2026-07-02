@@ -60,7 +60,7 @@ pub(super) fn handle_context_menu(
     response.clone().context_menu(|ui| {
         ui.set_min_width(224.0);
         let Some((target, (x, y))) = state.dialogs.interaction.context_target else {
-            ui.close_menu();
+            ui.close();
             return;
         };
         let click_pos = Point::new(x, y);
@@ -119,7 +119,7 @@ fn instance_menu(
         .map(|c| (c.name.clone(), c.kind))
     else {
         // Deleted out from under the open menu.
-        ui.close_menu();
+        ui.close();
         return;
     };
 
@@ -127,39 +127,39 @@ fn instance_menu(
     menu_header(ui, &format!("{name} · {}", kind.display_name()));
     if edit_item(ui, ro, "Properties…", Some("E")) {
         crate::common::app::open_property_editor(state, id);
-        ui.close_menu();
+        ui.close();
     }
     if edit_item(ui, ro, "Rotate", Some("R")) {
         state
             .schematic
             .rotate_selection_resolved(|component| symbol_context.terminal_points(component));
-        ui.close_menu();
+        ui.close();
     }
     if edit_item(ui, ro, "Mirror horizontal", Some("H")) {
         state
             .schematic
             .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component));
-        ui.close_menu();
+        ui.close();
     }
     if edit_item(ui, ro, "Mirror vertical", Some("Y")) {
         state
             .schematic
             .mirror_selection_v_resolved(|component| symbol_context.terminal_points(component));
-        ui.close_menu();
+        ui.close();
     }
     separator(ui);
     if edit_item(ui, ro, "Cut", Some("Ctrl+X")) {
         state.schematic.copy_selection();
         state.schematic.delete_selection();
-        ui.close_menu();
+        ui.close();
     }
     if item(ui, "Copy", Some("Ctrl+C")) {
         state.schematic.copy_selection();
-        ui.close_menu();
+        ui.close();
     }
     if edit_item(ui, ro, "Delete", Some("Del")) {
         state.schematic.delete_selection();
-        ui.close_menu();
+        ui.close();
     }
     separator(ui);
     // Only cell instances have a master to enter; the row stays visible on
@@ -167,7 +167,7 @@ fn instance_menu(
     if kind == ComponentType::CellInstance {
         if item(ui, "Descend into master", Some("Shift+E")) {
             state.open_selected_instance_master();
-            ui.close_menu();
+            ui.close();
         }
     } else {
         item_disabled(ui, "Descend into master", Some("Shift+E"));
@@ -191,7 +191,7 @@ fn wire_menu(ui: &mut Ui, state: &mut AppState, id: u64, click_pos: Point) {
             schematic.add_net_label(click_pos, name);
         });
         state.schematic.is_dirty = true;
-        ui.close_menu();
+        ui.close();
     }
     if item(ui, "Highlight net", Some("P")) {
         let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
@@ -202,12 +202,12 @@ fn wire_menu(ui: &mut Ui, state: &mut AppState, id: u64, click_pos: Point) {
             "Highlighted net with {} wires",
             state.schematic.net_highlight.highlighted_wires.len()
         )));
-        ui.close_menu();
+        ui.close();
     }
     separator(ui);
     if edit_item(ui, ro, "Delete segment", Some("Del")) {
         state.schematic.delete_selection();
-        ui.close_menu();
+        ui.close();
     }
 }
 
@@ -217,27 +217,27 @@ fn canvas_menu(ui: &mut Ui, state: &mut AppState, click_pos: Point) {
         // Paste lands where the menu was summoned — the user already
         // pointed at the destination.
         state.schematic.paste_at(click_pos);
-        ui.close_menu();
+        ui.close();
     }
     if item(ui, "Select all", Some("Ctrl+A")) {
         let schematic = &mut state.schematic;
         schematic.selection.clear();
         schematic.selection.components = schematic.components.iter().map(|c| c.id).collect();
         schematic.selection.wires = schematic.wires.iter().map(|w| w.id).collect();
-        ui.close_menu();
+        ui.close();
     }
     separator(ui);
     if item(ui, "Zoom to fit", Some("F")) {
         state.schematic.needs_fit = true;
-        ui.close_menu();
+        ui.close();
     }
     if item(ui, "Zoom 100 %", Some("Ctrl+0")) {
         state.schematic.zoom = 1.0;
-        ui.close_menu();
+        ui.close();
     }
     separator(ui);
     if item(ui, "Run design checks", Some("Ctrl+E")) {
         crate::common::menu_bar::run_design_rule_check(state);
-        ui.close_menu();
+        ui.close();
     }
 }

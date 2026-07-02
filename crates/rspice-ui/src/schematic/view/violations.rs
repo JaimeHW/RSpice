@@ -276,6 +276,7 @@ fn draw_hover_card(painter: &Painter, viewport: &Viewport, marker: Pos2, violati
         3.0,
         palette.bg_elevated,
         Stroke::new(1.0, palette.border_strong),
+        egui::StrokeKind::Inside,
     );
 
     let mut y = origin.y + pad_y;

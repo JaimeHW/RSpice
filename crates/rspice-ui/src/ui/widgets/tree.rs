@@ -210,6 +210,7 @@ impl<'a> TreeRow<'a> {
                     t.radius.min(2.0),
                     c.bg_inset,
                     Stroke::new(1.0, c.border_strong),
+                    egui::StrokeKind::Inside,
                 );
             }
             x += 13.0 + 6.0;
@@ -233,7 +234,7 @@ impl<'a> TreeRow<'a> {
             if self.dim { 26 } else { 54 },
         );
         let meta_galley = self.meta.map(|m| {
-            ui.fonts(|f| {
+            ui.fonts_mut(|f| {
                 f.layout_job(highlighted_singleline_job(
                     m,
                     theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -251,7 +252,7 @@ impl<'a> TreeRow<'a> {
         // Truncate (never wrap): rows are fixed-height, and a long name
         // spilling onto a second line corrupts the list rhythm. The full
         // name surfaces as a tooltip instead.
-        let label_galley = ui.fonts(|f| {
+        let label_galley = ui.fonts_mut(|f| {
             let mut job = highlighted_singleline_job(
                 self.label,
                 label_font,

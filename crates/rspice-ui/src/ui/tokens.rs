@@ -266,9 +266,9 @@ impl Tokens {
     pub fn shadow(&self) -> egui::epaint::Shadow {
         let (offset_y, blur) = self.color.shadow_geom;
         egui::epaint::Shadow {
-            offset: egui::vec2(0.0, f32::from(offset_y) * 0.5),
-            blur: f32::from(blur) * 0.5,
-            spread: 0.0,
+            offset: [0, offset_y / 2],
+            blur: blur / 2,
+            spread: 0,
             color: self.color.shadow_color,
         }
     }

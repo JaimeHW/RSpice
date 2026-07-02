@@ -226,7 +226,7 @@ impl RSpiceApp {
                             theme::sans(tokens::FS_1, FontWeight::Regular),
                             c.text_dim,
                         );
-                        let key_galley = ui.fonts(|f| {
+                        let key_galley = ui.fonts_mut(|f| {
                             f.layout_no_wrap(
                                 shortcut.to_owned(),
                                 theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -246,6 +246,7 @@ impl RSpiceApp {
                             t.radius,
                             c.bg_inset,
                             egui::Stroke::new(1.0, c.border_strong),
+                            egui::StrokeKind::Inside,
                         );
                         painter.galley(key_rect.min + pad, key_galley, c.text);
                     }

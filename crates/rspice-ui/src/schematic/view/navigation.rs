@@ -42,7 +42,7 @@ pub(super) fn handle_viewport_navigation(
 
     // Cursor-centered zoom, matching professional CAD tools.
     if response.hovered() {
-        let scroll = ui.input(|i| i.raw_scroll_delta.y);
+        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll != 0.0
             && let Some(cursor_pos) = response.hover_pos()
         {

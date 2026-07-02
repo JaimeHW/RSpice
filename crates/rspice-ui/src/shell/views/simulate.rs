@@ -81,7 +81,7 @@ fn open_palette(setup: &mut crate::common::app::SimSetupState) {
 fn card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(c.bg_panel)
         .stroke(egui::Stroke::new(1.0, c.border))
         .rounding(t.radius_lg)
@@ -108,7 +108,7 @@ fn card_header(
         rect.bottom() - 0.5,
         egui::Stroke::new(1.0, c.border),
     );
-    let title_galley = ui.fonts(|f| {
+    let title_galley = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             title.to_owned(),
             theme::sans(tokens::FS_2, FontWeight::SemiBold),
@@ -137,7 +137,7 @@ fn card_header(
     }
 
     let action_label = action?;
-    let galley = ui.fonts(|f| {
+    let galley = ui.fonts_mut(|f| {
         f.layout_no_wrap(
             action_label.to_owned(),
             theme::sans(tokens::FS_1, FontWeight::Regular),
@@ -251,6 +251,7 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
                     t.radius.min(2.0),
                     c.bg_inset,
                     egui::Stroke::new(1.0, c.border_strong),
+                    egui::StrokeKind::Inside,
                 );
             }
             if box_response.clicked() {
@@ -437,7 +438,13 @@ fn flag(ui: &Ui, rect: egui::Rect, label: &str, on: bool) {
     } else {
         (egui::Color32::TRANSPARENT, c.border, c.text_faint)
     };
-    painter.rect(rect, t.radius, fill, egui::Stroke::new(1.0, border));
+    painter.rect(
+        rect,
+        t.radius,
+        fill,
+        egui::Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
     painter.text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -571,7 +578,7 @@ fn analysis_palette(ui: &Ui, state: &mut AppState, anchor: egui::Rect, just_open
         .fixed_pos(egui::pos2(anchor.right(), anchor.bottom() + 4.0))
         .pivot(egui::Align2::RIGHT_TOP)
         .show(&ctx, |ui| {
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(c.bg_elevated)
                 .stroke(egui::Stroke::new(1.0, c.border_strong))
                 .rounding(t.radius_lg)
@@ -602,8 +609,8 @@ fn pointer_press(ctx: &egui::Context) -> egui::Pos2 {
 /// The filter field strip at the palette top.
 fn palette_search_strip(ui: &mut Ui, state: &mut AppState, just_opened: bool) {
     let c = Tokens::get(ui.ctx()).color;
-    egui::Frame::none()
-        .inner_margin(egui::Margin::same(8.0))
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::same(8))
         .show(ui, |ui| {
             let edit = ui.add(
                 egui::TextEdit::singleline(&mut state.sim_setup.palette_query)
@@ -632,8 +639,8 @@ fn palette_list(ui: &mut Ui, state: &mut AppState, items: &[(usize, &'static str
     let c = Tokens::get(ui.ctx()).color;
 
     if items.is_empty() {
-        egui::Frame::none()
-            .inner_margin(egui::Margin::symmetric(10.0, 12.0))
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(10, 12))
             .show(ui, |ui| {
                 ui.label(
                     egui::RichText::new(format!(
@@ -702,7 +709,7 @@ fn palette_section_label(ui: &mut Ui, text: &str) {
             ..Default::default()
         },
     );
-    let galley = ui.fonts(|f| f.layout_job(job));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
     ui.painter().galley(
         egui::pos2(rect.left() + 10.0, rect.bottom() - galley.size().y - 3.0),
         galley,
@@ -756,7 +763,7 @@ fn palette_row(ui: &mut Ui, state: &AppState, index: usize, active: bool) -> egu
     };
     let mut desc_right = rect.right() - 10.0;
     if !meta.is_empty() {
-        let galley = ui.fonts(|f| {
+        let galley = ui.fonts_mut(|f| {
             f.layout_no_wrap(
                 meta.to_owned(),
                 theme::mono(10.0, FontWeight::Regular),
@@ -774,7 +781,7 @@ fn palette_row(ui: &mut Ui, state: &AppState, index: usize, active: bool) -> egu
         desc_right -= galley.size().x + 8.0;
     }
     let desc_left = rect.left() + 80.0;
-    let desc_galley = ui.fonts(|f| {
+    let desc_galley = ui.fonts_mut(|f| {
         let mut job = egui::text::LayoutJob::simple_singleline(
             description.to_owned(),
             theme::sans(tokens::FS_0, FontWeight::Regular),
@@ -816,11 +823,11 @@ fn run_bar(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(c.bg_panel)
         .stroke(egui::Stroke::new(1.0, c.border))
         .rounding(t.radius_lg)
-        .inner_margin(egui::Margin::symmetric(14.0, 12.0))
+        .inner_margin(egui::Margin::symmetric(14, 12))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;

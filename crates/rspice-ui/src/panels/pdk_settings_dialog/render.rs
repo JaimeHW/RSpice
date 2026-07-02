@@ -360,6 +360,7 @@ fn source_row(
                         t.radius.min(2.0),
                         c.bg_inset,
                         Stroke::new(1.0, c.border_strong),
+                        egui::StrokeKind::Inside,
                     );
                 }
             }
@@ -381,7 +382,7 @@ fn source_row(
             } else {
                 "—".to_owned()
             };
-            let meta_galley = ui.fonts(|f| {
+            let meta_galley = ui.fonts_mut(|f| {
                 f.layout_no_wrap(
                     meta,
                     theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -393,7 +394,7 @@ fn source_row(
 
             let (name_rect, name_response) =
                 ui.allocate_exact_size(vec2(name_w, ROW_H), Sense::click());
-            let name_galley = ui.fonts(|f| {
+            let name_galley = ui.fonts_mut(|f| {
                 let mut job = egui::text::LayoutJob::simple_singleline(
                     entry.path.clone(),
                     theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -469,7 +470,7 @@ fn source_edit_row(ui: &mut Ui, idx: usize, buffer: &mut String) -> Option<Sourc
                 egui::TextEdit::singleline(buffer)
                     .id(path_edit_id(idx))
                     .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                    .margin(egui::Margin::symmetric(5.0, 2.0))
+                    .margin(egui::Margin::symmetric(5, 2))
                     .desired_width((ui.available_width() - 8.0).max(40.0)),
             );
             if response.lost_focus() {
@@ -495,7 +496,7 @@ fn source_add_row(ui: &mut Ui, buffer: &mut String) -> Option<SourceAction> {
                     .id(add_path_id())
                     .font(theme::mono(tokens::FS_1, FontWeight::Regular))
                     .hint_text("Add library path…")
-                    .margin(egui::Margin::symmetric(5.0, 2.0))
+                    .margin(egui::Margin::symmetric(5, 2))
                     .desired_width((ui.available_width() - 8.0).max(40.0)),
             );
             if response.lost_focus() {
@@ -545,7 +546,7 @@ fn env_row(
 
             ui.add_space(10.0);
             let name_w = (rect.width() * 0.45).max(40.0);
-            let name_galley = ui.fonts(|f| {
+            let name_galley = ui.fonts_mut(|f| {
                 let mut job = egui::text::LayoutJob::simple_singleline(
                     format!("${name}"),
                     theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -568,7 +569,7 @@ fn env_row(
             let value_w = (ui.available_width() - 22.0).max(10.0);
             let (value_rect, value_response) =
                 ui.allocate_exact_size(vec2(value_w, ENV_ROW_H), Sense::hover());
-            let value_galley = ui.fonts(|f| {
+            let value_galley = ui.fonts_mut(|f| {
                 let mut job = egui::text::LayoutJob::simple_singleline(
                     value.to_owned(),
                     theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -655,14 +656,14 @@ fn env_add_row(ui: &mut Ui, name: &mut String, value: &mut String) -> Option<Env
                     .id(env_name_id())
                     .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                     .hint_text("NAME")
-                    .margin(egui::Margin::symmetric(5.0, 2.0))
+                    .margin(egui::Margin::symmetric(5, 2))
                     .desired_width(72.0),
             );
             let value_response = ui.add(
                 egui::TextEdit::singleline(value)
                     .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                     .hint_text("value or path")
-                    .margin(egui::Margin::symmetric(5.0, 2.0))
+                    .margin(egui::Margin::symmetric(5, 2))
                     .desired_width((ui.available_width() - 24.0).max(40.0)),
             );
             if IconButton::new(Icon::Close)
@@ -722,7 +723,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
             None => ("all sources".to_owned(), c.text_faint),
         };
         let (path_rect, path_response) = ui.allocate_exact_size(vec2(path_w, 24.0), Sense::hover());
-        let galley = ui.fonts(|f| {
+        let galley = ui.fonts_mut(|f| {
             let mut job = egui::text::LayoutJob::simple_singleline(
                 text,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -831,7 +832,7 @@ fn table_header(ui: &mut Ui) {
                 ..Default::default()
             },
         );
-        let galley = ui.fonts(|f| f.layout_job(job));
+        let galley = ui.fonts_mut(|f| f.layout_job(job));
         let y = rect.center().y - galley.size().y * 0.5;
         ui.painter().galley(egui::pos2(x, y), galley, c.text_faint);
     }
@@ -882,7 +883,7 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
 
     let sections_x = rect.right() - SECTIONS_W;
     let name_w = (sections_x - rect.left() - FILE_COL_X - 8.0).max(24.0);
-    let name_galley = ui.fonts(|f| {
+    let name_galley = ui.fonts_mut(|f| {
         let mut job = egui::text::LayoutJob::simple_singleline(
             file.file_name().to_owned(),
             theme::mono(tokens::FS_1, FontWeight::Regular),
@@ -906,7 +907,7 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
         file.sections.join(" ")
     };
     let sections_w = SECTIONS_W - 10.0;
-    let sections_galley = ui.fonts(|f| {
+    let sections_galley = ui.fonts_mut(|f| {
         let mut job = egui::text::LayoutJob::simple_singleline(
             sections,
             theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -940,7 +941,7 @@ fn paint_badge(ui: &Ui, left: f32, center_y: f32, label: &str, color: egui::Colo
             ..Default::default()
         },
     );
-    let galley = ui.fonts(|f| f.layout_job(job));
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
     let rect = Rect::from_min_size(
         egui::pos2(left, center_y - 7.0),
         vec2(galley.size().x + 12.0, 14.0),
@@ -951,6 +952,7 @@ fn paint_badge(ui: &Ui, left: f32, center_y: f32, label: &str, color: egui::Colo
         t.radius,
         egui::Color32::TRANSPARENT,
         Stroke::new(1.0, color.gamma_multiply(0.5)),
+        egui::StrokeKind::Inside,
     );
     painter.galley(
         egui::pos2(rect.left() + 6.0, center_y - galley.size().y * 0.5),

@@ -166,13 +166,13 @@ pub(super) fn library(
     // never shift the list layout.
     egui::TopBottomPanel::bottom("volta.rail.preview")
         .frame(
-            egui::Frame::none()
+            egui::Frame::NONE
                 .fill(c.bg_panel)
                 .inner_margin(egui::Margin {
-                    left: 12.0,
-                    right: 12.0,
-                    top: 8.0,
-                    bottom: 4.0,
+                    left: 12,
+                    right: 12,
+                    top: 8,
+                    bottom: 4,
                 }),
         )
         .show_separator_line(false)
@@ -316,11 +316,11 @@ pub(super) fn library(
                                 .clicked()
                             {
                                 toggle_pin = Some(entry_ref.clone());
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui.button("Place").clicked() {
                                 place = Some(entry_ref.clone());
-                                ui.close_menu();
+                                ui.close();
                             }
                         });
                     });
@@ -381,7 +381,13 @@ fn paint_entry_thumb(
     let c = t.color;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(34.0, 22.0), egui::Sense::hover());
     let painter = ui.painter();
-    painter.rect(rect, t.radius, c.bg_inset, egui::Stroke::new(1.0, c.border));
+    painter.rect(
+        rect,
+        t.radius,
+        c.bg_inset,
+        egui::Stroke::new(1.0, c.border),
+        egui::StrokeKind::Inside,
+    );
     let inner = rect.shrink(2.0);
     match entry {
         CellEntry::Primitive(kind, _) => {
@@ -395,7 +401,12 @@ fn paint_entry_thumb(
         }
         CellEntry::LibraryCell(..) => {
             let block = egui::Rect::from_center_size(inner.center(), egui::vec2(14.0, 12.0));
-            painter.rect_stroke(block, 0.0, egui::Stroke::new(1.0, c.symbol));
+            painter.rect_stroke(
+                block,
+                0.0,
+                egui::Stroke::new(1.0, c.symbol),
+                egui::StrokeKind::Inside,
+            );
             for dy in [-3.0, 3.0] {
                 painter.hline(
                     egui::Rangef::new(block.left() - 5.0, block.left()),
@@ -433,8 +444,13 @@ fn preview_card(
     let Some(entry) = entry else {
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.0), egui::Sense::hover());
-        ui.painter()
-            .rect(rect, t.radius, c.bg_inset, egui::Stroke::new(1.0, c.border));
+        ui.painter().rect(
+            rect,
+            t.radius,
+            c.bg_inset,
+            egui::Stroke::new(1.0, c.border),
+            egui::StrokeKind::Inside,
+        );
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -450,7 +466,13 @@ fn preview_card(
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.0), egui::Sense::hover());
     let painter = ui.painter();
-    painter.rect(rect, t.radius, c.bg_inset, egui::Stroke::new(1.0, c.border));
+    painter.rect(
+        rect,
+        t.radius,
+        c.bg_inset,
+        egui::Stroke::new(1.0, c.border),
+        egui::StrokeKind::Inside,
+    );
     let stage = rect.shrink(6.0);
     let (name, meta) = match &entry {
         CellEntry::Primitive(kind, label) => {
@@ -563,6 +585,7 @@ fn paint_generated_preview(
         egui::Rect::from_min_max(to_screen(-20.0, -hh_body), to_screen(20.0, hh_body)),
         0.0,
         stroke,
+        egui::StrokeKind::Inside,
     );
     for pin in &symbol.pins {
         let (px, py) = (pin.offset.x as f32, pin.offset.y as f32);
@@ -612,7 +635,7 @@ fn arm_ref(state: &mut AppState, entry_ref: &str) {
 
 /// Pixel width of `text` at `font`.
 pub(super) fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
-    ui.fonts(|f| {
+    ui.fonts_mut(|f| {
         f.layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::WHITE)
             .size()
             .x
@@ -713,17 +736,17 @@ pub(super) fn place_strip(
                 .pivot(egui::Align2::LEFT_BOTTOM)
                 .fixed_pos(input.rect.left_top() - egui::vec2(0.0, 4.0))
                 .show(ui.ctx(), |ui| {
-                    egui::Frame::none()
+                    egui::Frame::NONE
                         .fill(c.bg_elevated)
                         .stroke(egui::Stroke::new(1.0, c.border_strong))
                         .rounding(t.radius_lg)
                         .shadow(egui::epaint::Shadow {
-                            offset: egui::vec2(0.0, 4.0),
-                            blur: 16.0,
-                            spread: 0.0,
+                            offset: [0, 4],
+                            blur: 16,
+                            spread: 0,
                             color: egui::Color32::from_black_alpha(96),
                         })
-                        .inner_margin(egui::Margin::same(3.0))
+                        .inner_margin(egui::Margin::same(3))
                         .show(ui, |ui| {
                             ui.set_width(input.rect.width() - 6.0);
                             ui.spacing_mut().item_spacing.y = 0.0;

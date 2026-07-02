@@ -158,11 +158,11 @@ fn options_preview(ui: &mut Ui, setup: &SimSetupState) {
     );
     ui.label(header);
     ui.add_space(4.0);
-    egui::Frame::none()
+    egui::Frame::NONE
         .fill(c.bg_inset)
         .stroke(egui::Stroke::new(1.0, c.border))
         .rounding(t.radius)
-        .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+        .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(

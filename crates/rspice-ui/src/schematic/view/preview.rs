@@ -244,7 +244,7 @@ pub(super) fn draw_procedural_component_preview(
         }
         _ => {
             let rect = Rect::from_center_size(preview_pos, Vec2::splat(30.0 * zoom));
-            painter.rect_stroke(rect, 2.0, preview_stroke);
+            painter.rect_stroke(rect, 2.0, preview_stroke, egui::StrokeKind::Inside);
         }
     }
 }
@@ -358,6 +358,11 @@ fn draw_selection_rect(painter: &Painter, state: &AppState, tool_viewport: &View
 
         let accent = crate::ui::tokens::active_palette().accent;
         painter.rect_filled(selection_rect, 0.0, accent.gamma_multiply(0.14));
-        painter.rect_stroke(selection_rect, 0.0, Stroke::new(1.0, accent));
+        painter.rect_stroke(
+            selection_rect,
+            0.0,
+            Stroke::new(1.0, accent),
+            egui::StrokeKind::Inside,
+        );
     }
 }

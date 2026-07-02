@@ -97,12 +97,12 @@ fn run_history_row_text(run: &SimulationRun) -> RunHistoryRowText {
 
 fn engine_section(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Engine", None);
-    egui::Frame::none()
+    egui::Frame::NONE
         .inner_margin(egui::Margin {
-            left: 12.0,
-            right: 12.0,
-            top: 0.0,
-            bottom: 12.0,
+            left: 12,
+            right: 12,
+            top: 0,
+            bottom: 12,
         })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -179,12 +179,12 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
 
     section_header(ui, &format!("Analysis · {name}"), None);
 
-    egui::Frame::none()
+    egui::Frame::NONE
         .inner_margin(egui::Margin {
-            left: 12.0,
-            right: 12.0,
-            top: 0.0,
-            bottom: 12.0,
+            left: 12,
+            right: 12,
+            top: 0,
+            bottom: 12,
         })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
