@@ -16,10 +16,11 @@ use crate::expr::{Expr, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Engine, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1087,6 +1088,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperDefault);
         }
 
+        if Self::is_native_subcircuit_node_probe_wrapper_candidate(source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperDefault);
+        }
+
         if Self::is_native_voltage_accessor_wrapper_candidate(source) {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperVoltageAccessor);
@@ -1251,6 +1257,48 @@ impl XyceTestRunner {
         wildcard_probes
             .iter()
             .all(|probe| Self::lead_current_probe_is_omitted_empty_wildcard(&netlist, probe))
+    }
+
+    fn is_native_subcircuit_node_probe_wrapper_candidate(source: &str) -> bool {
+        if Self::validate_default_prn_wrapper_source(source).is_err() {
+            return false;
+        }
+        let Ok(print) = Self::single_dc_print_request(source) else {
+            return false;
+        };
+
+        print
+            .probes
+            .iter()
+            .any(|probe| Self::print_probe_contains_subcircuit_node_voltage_probe(probe))
+    }
+
+    fn print_probe_contains_subcircuit_node_voltage_probe(probe: &str) -> bool {
+        let expression = Self::print_expression_inner(probe).unwrap_or(probe);
+        let normalized = Self::normalize_probe(expression);
+        if Self::voltage_probe_targets_subcircuit_node(&normalized) {
+            return true;
+        }
+
+        let context = crate::netlist::ParamContext::new();
+        let mut found = false;
+        let _ = Self::rewrite_print_expression_calls_maybe(expression, context, |call| {
+            if Self::voltage_probe_targets_subcircuit_node(&Self::normalize_probe(call)) {
+                found = true;
+            }
+            Ok(0.0)
+        });
+        found
+    }
+
+    fn voltage_probe_targets_subcircuit_node(normalized_probe: &str) -> bool {
+        Self::parse_voltage_probe(normalized_probe).is_some_and(|probe| {
+            probe.node_pos.contains(':')
+                || probe
+                    .node_neg
+                    .as_deref()
+                    .is_some_and(|node| node.contains(':'))
+        })
     }
 
     fn is_native_voltage_accessor_wrapper_candidate(source: &str) -> bool {
@@ -5820,12 +5868,12 @@ impl XyceTestRunner {
         op_report: &crate::circuit::DeviceOpReport,
     ) -> Result<f64, String> {
         if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
-            let pos =
-                Self::result_voltage_named(result, &voltage_probe.node_pos).ok_or_else(|| {
+            let pos = Self::result_voltage_named(result, netlist, &voltage_probe.node_pos)
+                .ok_or_else(|| {
                     format!("node '{}' not found in DC result", voltage_probe.node_pos)
                 })?;
             let neg = match voltage_probe.node_neg {
-                Some(node) => Self::result_voltage_named(result, &node)
+                Some(node) => Self::result_voltage_named(result, netlist, &node)
                     .ok_or_else(|| format!("node '{}' not found in DC result", node))?,
                 None => 0.0,
             };
@@ -5972,9 +6020,10 @@ impl XyceTestRunner {
         }
 
         if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
-            let pos = Self::transient_voltage_named(result, &voltage_probe.node_pos, time)?;
+            let pos =
+                Self::transient_voltage_named(result, netlist, &voltage_probe.node_pos, time)?;
             let neg = match voltage_probe.node_neg {
-                Some(node) => Self::transient_voltage_named(result, &node, time)?,
+                Some(node) => Self::transient_voltage_named(result, netlist, &node, time)?,
                 None => 0.0,
             };
             return Ok(voltage_probe.accessor.evaluate_dc(pos - neg));
@@ -6177,11 +6226,13 @@ impl XyceTestRunner {
 
     fn transient_voltage_named(
         result: &TransientResult,
+        netlist: &Netlist,
         node_name: &str,
         time: Value,
     ) -> Result<Value, String> {
-        let node = result
-            .node_index_named(node_name)
+        let node = Self::node_lookup_candidates(netlist, node_name)
+            .into_iter()
+            .find_map(|candidate| result.node_index_named(&candidate))
             .ok_or_else(|| format!("node '{}' not found in transient result", node_name))?;
         if node == 0 {
             return Ok(0.0);
@@ -7755,6 +7806,124 @@ impl XyceTestRunner {
         Self::normalize_probe(name).replace(':', ".")
     }
 
+    fn node_lookup_candidates(netlist: &Netlist, node_name: &str) -> Vec<String> {
+        let mut candidates = Vec::new();
+        Self::push_unique_node_lookup_candidate(&mut candidates, node_name.to_string());
+
+        let normalized = Self::normalize_device_instance_name(node_name);
+        Self::push_unique_node_lookup_candidate(&mut candidates, normalized);
+
+        if let Some(resolved) = Self::resolve_xyce_hierarchical_node_name(netlist, node_name) {
+            Self::push_unique_node_lookup_candidate(&mut candidates, resolved);
+        }
+
+        candidates
+    }
+
+    fn push_unique_node_lookup_candidate(candidates: &mut Vec<String>, candidate: String) {
+        if !candidates
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&candidate))
+        {
+            candidates.push(candidate);
+        }
+    }
+
+    fn resolve_xyce_hierarchical_node_name(netlist: &Netlist, node_name: &str) -> Option<String> {
+        let normalized = Self::normalize_probe(node_name);
+        let parts = normalized.split(':').collect::<Vec<_>>();
+        if parts.len() < 2 || parts.iter().any(|part| part.is_empty()) {
+            return None;
+        }
+
+        let local_node = *parts.last()?;
+        let mut elements = netlist.elements.as_slice();
+        let mut subcircuits = netlist.subcircuits.as_slice();
+        let mut prefix = String::new();
+        let mut node_map: HashMap<String, String> = HashMap::new();
+
+        for instance_name in &parts[..parts.len() - 1] {
+            let instance = elements.iter().find(|element| {
+                element.name.eq_ignore_ascii_case(instance_name)
+                    && matches!(element.kind, ElementKind::Subcircuit { .. })
+            })?;
+            let ElementKind::Subcircuit { subckt_name, .. } = &instance.kind else {
+                return None;
+            };
+            let subckt = Self::find_subcircuit_definition(subcircuits, subckt_name)?;
+
+            let mut child_node_map = HashMap::new();
+            for (port, external_node) in subckt.ports.iter().zip(instance.nodes.iter()) {
+                child_node_map.insert(
+                    Self::normalize_probe(port),
+                    Self::remap_hierarchical_node_name(
+                        external_node,
+                        &prefix,
+                        &node_map,
+                        &netlist.global_nodes,
+                    ),
+                );
+            }
+
+            prefix = if prefix.is_empty() {
+                instance.name.clone()
+            } else {
+                format!("{}.{}", prefix, instance.name)
+            };
+            node_map = child_node_map;
+            elements = subckt.elements.as_slice();
+            subcircuits = subckt.nested_subcircuits.as_slice();
+        }
+
+        Some(Self::remap_hierarchical_node_name(
+            local_node,
+            &prefix,
+            &node_map,
+            &netlist.global_nodes,
+        ))
+    }
+
+    fn find_subcircuit_definition<'a>(
+        subcircuits: &'a [SubcircuitDef],
+        name: &str,
+    ) -> Option<&'a SubcircuitDef> {
+        for subckt in subcircuits {
+            if subckt.name.eq_ignore_ascii_case(name) {
+                return Some(subckt);
+            }
+            if let Some(nested) = Self::find_subcircuit_definition(&subckt.nested_subcircuits, name)
+            {
+                return Some(nested);
+            }
+        }
+        None
+    }
+
+    fn remap_hierarchical_node_name(
+        node: &str,
+        prefix: &str,
+        node_map: &HashMap<String, String>,
+        global_nodes: &HashSet<String>,
+    ) -> String {
+        if node == "0" || node.eq_ignore_ascii_case("gnd") {
+            return "0".to_string();
+        }
+
+        if global_nodes.contains(&node.to_ascii_uppercase()) {
+            return node.to_string();
+        }
+
+        if let Some(mapped) = node_map.get(&Self::normalize_probe(node)) {
+            return mapped.clone();
+        }
+
+        if prefix.is_empty() {
+            node.to_string()
+        } else {
+            format!("{prefix}.{node}")
+        }
+    }
+
     fn evaluate_scalar_parameter_probe(
         netlist: &Netlist,
         dc: &XyceDcSweep,
@@ -7927,18 +8096,21 @@ impl XyceTestRunner {
             .nodes
             .get(1)
             .ok_or_else(|| format!("resistor '{}' has no negative node", resistor_name))?;
-        let v_pos = Self::result_voltage_named(result, node_pos)
+        let v_pos = Self::result_voltage_named(result, netlist, node_pos)
             .ok_or_else(|| format!("node '{}' not found in DC result", node_pos))?;
-        let v_neg = Self::result_voltage_named(result, node_neg)
+        let v_neg = Self::result_voltage_named(result, netlist, node_neg)
             .ok_or_else(|| format!("node '{}' not found in DC result", node_neg))?;
         Ok(v_pos - v_neg)
     }
 
-    fn result_voltage_named(result: &crate::SimulationResult, node_name: &str) -> Option<Value> {
-        result.try_voltage_named(node_name).or_else(|| {
-            let normalized = Self::normalize_device_instance_name(node_name);
-            (normalized != node_name).then(|| result.try_voltage_named(&normalized))?
-        })
+    fn result_voltage_named(
+        result: &crate::SimulationResult,
+        netlist: &Netlist,
+        node_name: &str,
+    ) -> Option<Value> {
+        Self::node_lookup_candidates(netlist, node_name)
+            .into_iter()
+            .find_map(|candidate| result.try_voltage_named(&candidate))
     }
 
     fn result_branch_current_named(
