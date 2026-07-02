@@ -34,6 +34,17 @@ fn official_digital_delay(ctx: &CmContext, name: &str) -> CmResult<Value> {
     Ok(value.max(OFFICIAL_DIGITAL_DELAY_MIN))
 }
 
+fn gate_boolean_param(ctx: &CmContext, name: &str) -> CmResult<bool> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("digital gate boolean must be finite, got {value}"),
+        });
+    }
+    Ok(value > 0.5)
+}
+
 fn gate_commits_state(ctx: &CmContext) -> bool {
     ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe
 }
@@ -48,6 +59,13 @@ fn gate_set_state(ctx: &mut CmContext, index: usize, value: Value) {
     if gate_commits_state(ctx) {
         ctx.set_state(index, value);
     }
+}
+
+fn init_basic_gate_state(ctx: &mut CmContext) -> CmResult<()> {
+    gate_boolean_param(ctx, "inertial_delay")?;
+    ctx.allocate_int_states(1);
+    ctx.set_int_state(0, INITIAL_GATE_STATE);
+    Ok(())
 }
 
 fn gate_params() -> &'static [ParamSpec] {
@@ -142,8 +160,8 @@ fn set_basic_gate_output(
     delay: Value,
     rise: Value,
     fall: Value,
-) {
-    set_gate_output_with_unknown_delays(ctx, name, value, previous, delay, Some((rise, fall)));
+) -> CmResult<()> {
+    set_gate_output_with_unknown_delays(ctx, name, value, previous, delay, Some((rise, fall)))
 }
 
 fn set_gate_output_with_unknown_delays(
@@ -153,12 +171,13 @@ fn set_gate_output_with_unknown_delays(
     previous: DigitalValue,
     delay: Value,
     unknown_transition_delays: Option<(Value, Value)>,
-) {
-    if ctx.param("inertial_delay") > 0.5 {
+) -> CmResult<()> {
+    if gate_boolean_param(ctx, "inertial_delay")? {
         ctx.set_output_digital_inertial(name, value, delay, previous, unknown_transition_delays);
     } else {
         ctx.set_output_digital(name, value, delay);
     }
+    Ok(())
 }
 
 fn tristate_params() -> &'static [ParamSpec] {
@@ -271,19 +290,19 @@ fn set_tristate_output(
     delay: Value,
     out_state: i64,
     out_strength: i64,
-) {
+) -> CmResult<()> {
     let mut state = digital_logic_code(value);
     let mut strength = digital_strength_code(value.strength);
 
     if state == out_state && strength == out_strength {
-        return;
+        return Ok(());
     }
 
-    if ctx.param("inertial_delay") <= 0.5 || !ctx.is_transient() {
+    if !gate_boolean_param(ctx, "inertial_delay")? || !ctx.is_transient() {
         ctx.set_output_digital("out", value, delay);
         gate_set_int_state(ctx, 0, state);
         gate_set_int_state(ctx, 1, strength);
-        return;
+        return Ok(());
     }
 
     let time = ctx.time;
@@ -513,6 +532,7 @@ fn set_tristate_output(
     );
     gate_set_int_state(ctx, 0, state);
     gate_set_int_state(ctx, 1, strength);
+    Ok(())
 }
 
 macro_rules! define_gate {
@@ -548,9 +568,7 @@ macro_rules! define_gate {
             }
 
             fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-                ctx.allocate_int_states(1);
-                ctx.set_int_state(0, INITIAL_GATE_STATE);
-                Ok(())
+                init_basic_gate_state(ctx)
             }
 
             fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -579,7 +597,7 @@ macro_rules! define_gate {
                         delay,
                         rise,
                         fall,
-                    );
+                    )?;
                 }
                 gate_set_int_state(ctx, 0, new_state);
                 Ok(())
@@ -674,9 +692,7 @@ impl CodeModel for DigitalNand {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_int_states(1);
-        ctx.set_int_state(0, INITIAL_GATE_STATE);
-        Ok(())
+        init_basic_gate_state(ctx)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -705,7 +721,7 @@ impl CodeModel for DigitalNand {
                 delay,
                 rise,
                 fall,
-            );
+            )?;
         }
         gate_set_int_state(ctx, 0, new_state);
         Ok(())
@@ -735,9 +751,7 @@ impl CodeModel for DigitalNor {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_int_states(1);
-        ctx.set_int_state(0, INITIAL_GATE_STATE);
-        Ok(())
+        init_basic_gate_state(ctx)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -762,7 +776,7 @@ impl CodeModel for DigitalNor {
                 gate_delay(ctx, new_state, prev, rise, fall),
                 rise,
                 fall,
-            );
+            )?;
         }
         gate_set_int_state(ctx, 0, new_state);
         Ok(())
@@ -792,9 +806,7 @@ impl CodeModel for DigitalXnor {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_int_states(1);
-        ctx.set_int_state(0, INITIAL_GATE_STATE);
-        Ok(())
+        init_basic_gate_state(ctx)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -819,7 +831,7 @@ impl CodeModel for DigitalXnor {
                 gate_delay(ctx, new_state, prev, rise, fall),
                 rise,
                 fall,
-            );
+            )?;
         }
         gate_set_int_state(ctx, 0, new_state);
         Ok(())
@@ -858,9 +870,7 @@ impl CodeModel for DigitalInverter {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_int_states(1);
-        ctx.set_int_state(0, INITIAL_GATE_STATE);
-        Ok(())
+        init_basic_gate_state(ctx)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -885,7 +895,7 @@ impl CodeModel for DigitalInverter {
                 gate_delay(ctx, new_state, prev, rise, fall),
                 rise,
                 fall,
-            );
+            )?;
         }
         gate_set_int_state(ctx, 0, new_state);
         Ok(())
@@ -915,9 +925,7 @@ impl CodeModel for DigitalBuffer {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_int_states(1);
-        ctx.set_int_state(0, INITIAL_GATE_STATE);
-        Ok(())
+        init_basic_gate_state(ctx)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -942,7 +950,7 @@ impl CodeModel for DigitalBuffer {
                 gate_delay(ctx, new_state, prev, rise, fall),
                 rise,
                 fall,
-            );
+            )?;
         }
         gate_set_int_state(ctx, 0, new_state);
         Ok(())
@@ -982,6 +990,7 @@ impl CodeModel for DigitalTristate {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        gate_boolean_param(ctx, "inertial_delay")?;
         ctx.allocate_states(2);
         ctx.set_initial_state(0, -1.0);
         ctx.set_initial_state(1, -1.0);
@@ -1002,7 +1011,7 @@ impl CodeModel for DigitalTristate {
         let prev_state = ctx.int_state(0);
         let prev_strength = ctx.int_state(1);
 
-        set_tristate_output(ctx, result, delay, prev_state, prev_strength);
+        set_tristate_output(ctx, result, delay, prev_state, prev_strength)?;
         Ok(())
     }
 }
@@ -1212,9 +1221,7 @@ impl CodeModel for DigitalOpenCollector {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_int_states(1);
-        ctx.set_int_state(0, INITIAL_GATE_STATE);
-        Ok(())
+        init_basic_gate_state(ctx)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -1235,7 +1242,7 @@ impl CodeModel for DigitalOpenCollector {
                     official_digital_delay(ctx, "open_delay")?,
                     official_digital_delay(ctx, "fall_delay")?,
                 )),
-            );
+            )?;
         }
         gate_set_int_state(ctx, 0, new_state);
         Ok(())
@@ -1268,9 +1275,7 @@ impl CodeModel for DigitalOpenEmitter {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_int_states(1);
-        ctx.set_int_state(0, INITIAL_GATE_STATE);
-        Ok(())
+        init_basic_gate_state(ctx)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -1291,7 +1296,7 @@ impl CodeModel for DigitalOpenEmitter {
                     official_digital_delay(ctx, "rise_delay")?,
                     official_digital_delay(ctx, "open_delay")?,
                 )),
-            );
+            )?;
         }
         gate_set_int_state(ctx, 0, new_state);
         Ok(())
@@ -1534,6 +1539,21 @@ mod tests {
             .init(&mut open_ctx)
             .expect("d_open_c init");
         assert_invalid_param(DigitalOpenCollector.evaluate(&mut open_ctx), "open_delay");
+    }
+
+    #[test]
+    fn digital_gates_reject_nonfinite_inertial_delay_param() {
+        for model in [
+            &DigitalBuffer as &dyn CodeModel,
+            &DigitalAnd,
+            &DigitalTristate,
+            &DigitalOpenCollector,
+            &DigitalOpenEmitter,
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_param("inertial_delay", f64::NAN);
+            assert_invalid_param(model.init(&mut ctx), "inertial_delay");
+        }
     }
 
     #[test]
