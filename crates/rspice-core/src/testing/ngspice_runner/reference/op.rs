@@ -75,9 +75,11 @@ impl TestRunner {
             match section {
                 Section::Node => {
                     if parts[0].contains("#branch") {
-                        reference
-                            .branch_currents
-                            .insert(Self::normalize_op_reference_branch(parts[0]), value);
+                        if !is_private_ngspice_op_branch(parts[0]) {
+                            reference
+                                .branch_currents
+                                .insert(Self::normalize_op_reference_branch(parts[0]), value);
+                        }
                     } else if !Self::is_internal_device_op_probe(parts[0]) {
                         reference
                             .node_voltages
@@ -85,9 +87,11 @@ impl TestRunner {
                     }
                 }
                 Section::Source => {
-                    reference
-                        .branch_currents
-                        .insert(Self::normalize_op_reference_branch(parts[0]), value);
+                    if !is_private_ngspice_op_branch(parts[0]) {
+                        reference
+                            .branch_currents
+                            .insert(Self::normalize_op_reference_branch(parts[0]), value);
+                    }
                 }
                 Section::None => {}
             }
@@ -192,4 +196,8 @@ impl TestRunner {
 
         Ok(mismatches)
     }
+}
+
+fn is_private_ngspice_op_branch(name: &str) -> bool {
+    TestRunner::normalize_variable_name(name).contains("#branch_")
 }

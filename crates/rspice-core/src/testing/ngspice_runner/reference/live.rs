@@ -45,20 +45,58 @@ enum RawBinaryEncoding {
 }
 
 impl TestRunner {
-    pub(in crate::testing::ngspice_runner) fn live_ngspice_reference_config_from_env()
-    -> Result<Option<LiveNgspiceReferenceConfig>, String> {
+    pub(in crate::testing::ngspice_runner) fn live_ngspice_reference_config(
+        runner_config: &TestRunnerConfig,
+    ) -> Result<Option<LiveNgspiceReferenceConfig>, String> {
+        if let (Some(source_root), Some(ngspice_exe)) = (
+            runner_config.live_ngspice_source_root.as_ref(),
+            runner_config.live_ngspice_exe.as_ref(),
+        ) {
+            return Ok(Some(Self::build_live_ngspice_reference_config(
+                source_root.clone(),
+                ngspice_exe.clone(),
+                runner_config.live_ngspice_timeout_ms,
+                runner_config.live_ngspice_direct_decks,
+            )?));
+        }
+        if runner_config.live_ngspice_source_root.is_some()
+            || runner_config.live_ngspice_exe.is_some()
+        {
+            return Err(
+                "live ngspice references require both live_ngspice_source_root and live_ngspice_exe"
+                    .to_string(),
+            );
+        }
+
         if !Self::live_ngspice_references_requested()? {
             return Ok(None);
         }
 
         let source_root = Self::path_env(SOURCE_ROOT_ENV)
-            .ok_or_else(|| format!("{LIVE_REFERENCES_ENV}=1 requires {SOURCE_ROOT_ENV}"))?
+            .ok_or_else(|| format!("{LIVE_REFERENCES_ENV}=1 requires {SOURCE_ROOT_ENV}"))?;
+        let ngspice_exe = Self::path_env(NGSPICE_EXE_ENV)
+            .ok_or_else(|| format!("{LIVE_REFERENCES_ENV}=1 requires {NGSPICE_EXE_ENV}"))?;
+        Ok(Some(Self::build_live_ngspice_reference_config(
+            source_root,
+            ngspice_exe,
+            None,
+            false,
+        )?))
+    }
+
+    fn build_live_ngspice_reference_config(
+        source_root: PathBuf,
+        ngspice_exe: PathBuf,
+        timeout_ms: Option<u128>,
+        direct_decks: bool,
+    ) -> Result<LiveNgspiceReferenceConfig, String> {
+        let source_root = source_root
             .canonicalize()
             .map_err(|err| format!("failed to resolve {SOURCE_ROOT_ENV}: {err}"))?;
-        let ngspice_exe = Self::path_env(NGSPICE_EXE_ENV)
-            .ok_or_else(|| format!("{LIVE_REFERENCES_ENV}=1 requires {NGSPICE_EXE_ENV}"))?
+        let ngspice_exe = ngspice_exe
             .canonicalize()
             .map_err(|err| format!("failed to resolve {NGSPICE_EXE_ENV}: {err}"))?;
+        let ngspice_exe = conventional_windows_path(ngspice_exe);
         let ngspice_exe = prefer_windows_console_ngspice_exe(ngspice_exe)?;
 
         if !source_root.join("tests").is_dir() {
@@ -74,11 +112,20 @@ impl TestRunner {
             ));
         }
 
-        Ok(Some(LiveNgspiceReferenceConfig {
+        Ok(LiveNgspiceReferenceConfig {
             source_root,
             ngspice_exe,
-            timeout_ms: Self::reference_timeout_ms_from_env()?,
-        }))
+            timeout_ms: match timeout_ms {
+                Some(timeout_ms) if timeout_ms > 0 => timeout_ms,
+                Some(_) => {
+                    return Err(
+                        "live ngspice reference timeout must be greater than zero".to_string()
+                    );
+                }
+                None => Self::reference_timeout_ms_from_env()?,
+            },
+            direct_decks,
+        })
     }
 
     pub(in crate::testing::ngspice_runner) fn authoritative_circuit_path(
@@ -168,6 +215,17 @@ impl TestRunner {
         config: &LiveNgspiceReferenceConfig,
         cir_path: &Path,
     ) -> Result<PathBuf, String> {
+        if config.direct_decks {
+            let deck = cir_path.to_path_buf();
+            if deck.is_file() {
+                return Ok(deck);
+            }
+            return Err(format!(
+                "live ngspice direct-deck reference is missing: {}",
+                deck.display()
+            ));
+        }
+
         let source_tests_dir = config.source_root.join("tests");
         let normalized_cir_path = cir_path
             .canonicalize()
@@ -284,21 +342,26 @@ impl LiveNgspiceReferenceConfig {
         })?;
 
         let source_parent = source_cir.parent().unwrap_or(&self.source_root);
-        let mut child = Command::new(&self.ngspice_exe)
+        let mut command = Command::new(&self.ngspice_exe);
+        command
             .arg("--batch")
             .arg(source_cir)
             .current_dir(source_parent)
-            .env("SPICE_SCRIPTS", self.source_root.join("tests").join("bin"))
-            .env("ngspice_vpath", source_parent)
             .stdout(Stdio::from(stdout_file))
-            .stderr(Stdio::from(stderr_file))
-            .spawn()
-            .map_err(|err| {
-                format!(
-                    "failed to spawn local ngspice '{}': {err}",
-                    self.ngspice_exe.display()
-                )
-            })?;
+            .stderr(Stdio::from(stderr_file));
+        if !self.direct_decks {
+            command
+                .env("SPICE_SCRIPTS", self.source_root.join("tests").join("bin"))
+                .env("ngspice_vpath", source_parent);
+        } else {
+            command.env_remove("SPICE_SCRIPTS").env_remove("ngspice_vpath");
+        }
+        let mut child = command.spawn().map_err(|err| {
+            format!(
+                "failed to spawn local ngspice '{}': {err}",
+                self.ngspice_exe.display()
+            )
+        })?;
 
         let timeout = Duration::from_millis(self.timeout_ms.min(u64::MAX as u128) as u64);
         let status = loop {
@@ -394,23 +457,28 @@ impl LiveNgspiceReferenceConfig {
         })?;
 
         let source_parent = source_cir.parent().unwrap_or(&self.source_root);
-        let mut child = Command::new(&self.ngspice_exe)
+        let mut command = Command::new(&self.ngspice_exe);
+        command
             .arg("--batch")
             .arg("-r")
             .arg(&raw_path)
             .arg(source_cir)
             .current_dir(source_parent)
-            .env("SPICE_SCRIPTS", self.source_root.join("tests").join("bin"))
-            .env("ngspice_vpath", source_parent)
             .stdout(Stdio::from(stdout_file))
-            .stderr(Stdio::from(stderr_file))
-            .spawn()
-            .map_err(|err| {
-                format!(
-                    "failed to spawn local ngspice '{}' for raw references: {err}",
-                    self.ngspice_exe.display()
-                )
-            })?;
+            .stderr(Stdio::from(stderr_file));
+        if !self.direct_decks {
+            command
+                .env("SPICE_SCRIPTS", self.source_root.join("tests").join("bin"))
+                .env("ngspice_vpath", source_parent);
+        } else {
+            command.env_remove("SPICE_SCRIPTS").env_remove("ngspice_vpath");
+        }
+        let mut child = command.spawn().map_err(|err| {
+            format!(
+                "failed to spawn local ngspice '{}' for raw references: {err}",
+                self.ngspice_exe.display()
+            )
+        })?;
 
         let timeout = Duration::from_millis(self.timeout_ms.min(u64::MAX as u128) as u64);
         let status = loop {
@@ -589,7 +657,12 @@ fn raw_reference_tables_from_plots(
         }
 
         let requested_vars = if request.include_all {
-            plot.variables.iter().skip(1).cloned().collect::<Vec<_>>()
+            plot.variables
+                .iter()
+                .skip(1)
+                .filter(|var| raw_all_variable_is_comparable(var))
+                .cloned()
+                .collect::<Vec<_>>()
         } else {
             request.variables.clone()
         };
@@ -636,6 +709,15 @@ fn raw_reference_tables_from_plots(
         }
     }
     tables
+}
+
+fn raw_all_variable_is_comparable(var: &str) -> bool {
+    let normalized = TestRunner::normalize_variable_name(var);
+    normalized.starts_with("v(")
+        || matches!(
+            normalized.as_str(),
+            "onoise_spectrum" | "inoise_spectrum" | "onoise" | "inoise"
+        )
 }
 
 fn raw_axis_name_for_plot(plot: &RawReferencePlot) -> String {
@@ -1044,6 +1126,20 @@ fn prefer_windows_console_ngspice_exe(ngspice_exe: PathBuf) -> Result<PathBuf, S
         }
     }
     Ok(ngspice_exe)
+}
+
+fn conventional_windows_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path
 }
 
 #[cfg(test)]

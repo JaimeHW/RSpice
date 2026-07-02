@@ -630,6 +630,15 @@ pub struct XspiceSmokeSuite {
     pub runnable_relative_decks: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XspiceParitySuite {
+    pub root: PathBuf,
+    pub manifest_path: PathBuf,
+    pub parity_decks: Vec<PathBuf>,
+    pub parity_relative_decks: Vec<PathBuf>,
+    pub skipped_relative_decks: Vec<PathBuf>,
+}
+
 pub fn materialize_ngspice_xspice_smoke_suite(
     ngspice_source_root: &Path,
     destination_root: &Path,
@@ -672,6 +681,65 @@ pub fn materialize_ngspice_xspice_smoke_suite(
         manifest_path,
         runnable_decks,
         runnable_relative_decks,
+    })
+}
+
+pub fn materialize_ngspice_xspice_parity_suite(
+    ngspice_source_root: &Path,
+    destination_root: &Path,
+) -> Result<XspiceParitySuite, ConformanceError> {
+    let examples_root = ngspice_source_root.join("examples").join("xspice");
+    let report = audit_ngspice_xspice_examples(ngspice_source_root)?;
+    fs::create_dir_all(destination_root).map_err(|source| ConformanceError::Io {
+        path: destination_root.to_path_buf(),
+        source,
+    })?;
+    copy_tree(&examples_root, destination_root)?;
+
+    let mut manifest = String::new();
+    let mut parity_decks = Vec::new();
+    let mut parity_relative_decks = Vec::new();
+    let mut skipped_relative_decks = Vec::new();
+
+    for deck in report
+        .decks
+        .iter()
+        .filter(|deck| deck.disposition == XspiceExampleDisposition::Runnable)
+    {
+        let destination_deck = destination_root.join(&deck.relative_path);
+        let source = read_to_string(&destination_deck)?;
+        let Some(instrumented) = instrument_xspice_parity_deck(&source) else {
+            skipped_relative_decks.push(deck.relative_path.clone());
+            continue;
+        };
+        fs::write(&destination_deck, instrumented).map_err(|source| ConformanceError::Io {
+            path: destination_deck.clone(),
+            source,
+        })?;
+
+        let normalized = deck
+            .relative_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase();
+        manifest.push_str(&normalized);
+        manifest.push_str("\tlocked_grid\n");
+        parity_relative_decks.push(deck.relative_path.clone());
+        parity_decks.push(destination_deck);
+    }
+
+    let manifest_path = destination_root.join("validation-manifest.tsv");
+    fs::write(&manifest_path, manifest).map_err(|source| ConformanceError::Io {
+        path: manifest_path.clone(),
+        source,
+    })?;
+
+    Ok(XspiceParitySuite {
+        root: destination_root.to_path_buf(),
+        manifest_path,
+        parity_decks,
+        parity_relative_decks,
+        skipped_relative_decks,
     })
 }
 
@@ -720,6 +788,135 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), ConformanceError> 
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum XspiceParityAnalysisKind {
+    Op,
+    Dc,
+    Tran,
+    Ac,
+    Noise,
+    Pz,
+    Sens,
+    Tf,
+}
+
+impl XspiceParityAnalysisKind {
+    fn print_directive(self) -> Option<&'static str> {
+        match self {
+            Self::Dc => Some(".print dc all"),
+            Self::Tran => Some(".print tran all"),
+            Self::Ac => Some(".print ac all"),
+            Self::Noise => Some(".print noise all"),
+            Self::Op | Self::Pz | Self::Sens | Self::Tf => None,
+        }
+    }
+}
+
+fn instrument_xspice_parity_deck(source: &str) -> Option<String> {
+    let analyses = xspice_parity_analysis_kinds(source);
+    if analyses.is_empty() {
+        return None;
+    }
+
+    let prints = analyses
+        .iter()
+        .filter_map(|analysis| analysis.print_directive())
+        .filter(|directive| !xspice_source_has_line(source, directive))
+        .collect::<Vec<_>>();
+    if prints.is_empty() {
+        return Some(source.to_string());
+    }
+
+    let mut output = String::new();
+    let mut inserted = false;
+    for line in source.lines() {
+        let trimmed = strip_inline_comment(line).trim();
+        if !inserted && trimmed.eq_ignore_ascii_case(".end") {
+            output.push_str("* RSpice XSPICE parity instrumentation\n");
+            for directive in &prints {
+                output.push_str(directive);
+                output.push('\n');
+            }
+            inserted = true;
+        }
+        output.push_str(line);
+        output.push('\n');
+    }
+
+    if !inserted {
+        output.push_str("* RSpice XSPICE parity instrumentation\n");
+        for directive in &prints {
+            output.push_str(directive);
+            output.push('\n');
+        }
+    }
+    Some(output)
+}
+
+fn xspice_parity_analysis_kinds(source: &str) -> BTreeSet<XspiceParityAnalysisKind> {
+    let mut analyses = BTreeSet::new();
+    let mut in_control = false;
+    for line in source.lines() {
+        let trimmed = strip_inline_comment(line).trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case(".control") {
+            in_control = true;
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case(".endc") {
+            in_control = false;
+            continue;
+        }
+        if in_control {
+            continue;
+        }
+
+        let directive = trimmed
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match directive.as_str() {
+            ".op" => {
+                analyses.insert(XspiceParityAnalysisKind::Op);
+            }
+            ".dc" => {
+                analyses.insert(XspiceParityAnalysisKind::Dc);
+            }
+            ".tran" => {
+                analyses.insert(XspiceParityAnalysisKind::Tran);
+            }
+            ".ac" => {
+                analyses.insert(XspiceParityAnalysisKind::Ac);
+            }
+            ".noise" => {
+                analyses.insert(XspiceParityAnalysisKind::Noise);
+            }
+            ".pz" => {
+                analyses.insert(XspiceParityAnalysisKind::Pz);
+            }
+            ".sens" => {
+                analyses.insert(XspiceParityAnalysisKind::Sens);
+            }
+            ".tf" => {
+                analyses.insert(XspiceParityAnalysisKind::Tf);
+            }
+            _ => {}
+        }
+    }
+    analyses
+}
+
+fn xspice_source_has_line(source: &str, target: &str) -> bool {
+    source.lines().any(|line| {
+        strip_inline_comment(line)
+            .trim()
+            .eq_ignore_ascii_case(target)
+    })
 }
 
 fn is_example_deck(path: &Path) -> bool {

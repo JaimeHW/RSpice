@@ -2,7 +2,8 @@ use rspice_core::testing::{TestResult, TestRunner, TestRunnerConfig};
 use rspice_core::xspice::CodeModelRegistry;
 use rspice_core::xspice::conformance::{
     ConformanceIssue, ConformanceSeverity, IfSpecConformancePolicy, audit_ngspice_ifspec_tree,
-    audit_ngspice_xspice_examples, materialize_ngspice_xspice_smoke_suite,
+    audit_ngspice_xspice_examples, materialize_ngspice_xspice_parity_suite,
+    materialize_ngspice_xspice_smoke_suite,
 };
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -92,6 +93,45 @@ fn run() -> Result<(), String> {
         }
     }
 
+    if args.run_example_parity {
+        let suite_root = args
+            .parity_suite_root
+            .clone()
+            .unwrap_or_else(unique_example_parity_suite_root);
+        let parity_suite =
+            materialize_ngspice_xspice_parity_suite(&args.ngspice_source_root, &suite_root)
+                .map_err(|err| err.to_string())?;
+        let run_count = args
+            .example_limit
+            .unwrap_or(parity_suite.parity_decks.len())
+            .min(parity_suite.parity_decks.len());
+        let runner = TestRunner::new(&parity_suite.root, example_parity_runner_config(&args)?);
+        let mut results = Vec::new();
+        for (relative, deck) in parity_suite
+            .parity_relative_decks
+            .iter()
+            .zip(parity_suite.parity_decks.iter())
+            .take(run_count)
+        {
+            results.push((relative.clone(), runner.run_test(deck)));
+        }
+        print_example_parity_report(
+            &results,
+            parity_suite.parity_decks.len(),
+            parity_suite.skipped_relative_decks.len(),
+        );
+        failed |= results.iter().any(|(_, result)| !result.passed);
+
+        if !args.keep_example_suite && args.parity_suite_root.is_none() {
+            let _ = std::fs::remove_dir_all(&parity_suite.root);
+        } else {
+            println!(
+                "materialized parity example suite: {}",
+                parity_suite.root.display()
+            );
+        }
+    }
+
     if failed {
         Err("XSPICE conformance audit failed".to_string())
     } else {
@@ -108,6 +148,9 @@ struct Args {
     example_limit: Option<usize>,
     example_max_time_ms: u128,
     example_suite_root: Option<PathBuf>,
+    parity_suite_root: Option<PathBuf>,
+    run_example_parity: bool,
+    ngspice_exe: Option<PathBuf>,
     keep_example_suite: bool,
 }
 
@@ -123,6 +166,9 @@ impl Args {
         let mut example_limit = None;
         let mut example_max_time_ms = TestRunnerConfig::default().max_time_per_test_ms;
         let mut example_suite_root = None;
+        let mut parity_suite_root = None;
+        let mut run_example_parity = false;
+        let mut ngspice_exe = None;
         let mut keep_example_suite = false;
 
         while let Some(flag) = args.next() {
@@ -139,6 +185,13 @@ impl Args {
                 "--run-examples" => {
                     run_examples = true;
                 }
+                "--run-example-parity" => {
+                    audit_examples = true;
+                    run_example_parity = true;
+                }
+                "--ngspice-exe" => {
+                    ngspice_exe = Some(next_path(&mut args, &flag)?);
+                }
                 "--example-limit" => {
                     example_limit = Some(next_parse(&mut args, &flag)?);
                 }
@@ -147,6 +200,9 @@ impl Args {
                 }
                 "--example-suite-root" => {
                     example_suite_root = Some(next_path(&mut args, &flag)?);
+                }
+                "--parity-suite-root" => {
+                    parity_suite_root = Some(next_path(&mut args, &flag)?);
                 }
                 "--keep-example-suite" => {
                     keep_example_suite = true;
@@ -171,6 +227,9 @@ impl Args {
             example_limit,
             example_max_time_ms,
             example_suite_root,
+            parity_suite_root,
+            run_example_parity,
+            ngspice_exe,
             keep_example_suite,
         })
     }
@@ -178,10 +237,11 @@ impl Args {
 
 fn print_help() {
     println!(
-        "Usage: xspice_ifspec_audit --ngspice-source-root <path> [--examples] [--run-examples] [--max-issues <n>]\n\
+        "Usage: xspice_ifspec_audit --ngspice-source-root <path> [--examples] [--run-examples] [--run-example-parity] [--max-issues <n>]\n\
          Compares RSpice builtin XSPICE metadata against ngspice src/xspice/icm/**/ifspec.ifs.\n\
          With --examples, also adjudicates ngspice examples/xspice decks without running third-party cosimulation.\n\
-         With --run-examples, materializes runnable examples into a smoke suite and executes them through RSpice."
+         With --run-examples, materializes runnable examples into a smoke suite and executes them through RSpice.\n\
+         With --run-example-parity, instruments runnable examples for .print all numeric comparison and uses --ngspice-exe or NGSPICE_EXE as the oracle."
     );
 }
 
@@ -248,14 +308,19 @@ fn format_issue(issue: &ConformanceIssue) -> String {
 }
 
 fn unique_example_suite_root() -> PathBuf {
+    unique_suite_root("rspice-xspice-examples")
+}
+
+fn unique_example_parity_suite_root() -> PathBuf {
+    unique_suite_root("rspice-xspice-parity")
+}
+
+fn unique_suite_root(prefix: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time before unix epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!(
-        "rspice-xspice-examples-{}-{nanos}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()))
 }
 
 fn example_runner_config(args: &Args) -> TestRunnerConfig {
@@ -263,6 +328,23 @@ fn example_runner_config(args: &Args) -> TestRunnerConfig {
         max_time_per_test_ms: args.example_max_time_ms.max(1),
         ..TestRunnerConfig::default()
     }
+}
+
+fn example_parity_runner_config(args: &Args) -> Result<TestRunnerConfig, String> {
+    let ngspice_exe = args
+        .ngspice_exe
+        .clone()
+        .or_else(|| std::env::var_os("NGSPICE_EXE").map(PathBuf::from))
+        .ok_or_else(|| "--run-example-parity requires --ngspice-exe or NGSPICE_EXE".to_string())?;
+
+    Ok(TestRunnerConfig {
+        max_time_per_test_ms: args.example_max_time_ms.max(1),
+        live_ngspice_source_root: Some(args.ngspice_source_root.clone()),
+        live_ngspice_exe: Some(ngspice_exe),
+        live_ngspice_timeout_ms: Some(args.example_max_time_ms.max(1)),
+        live_ngspice_direct_decks: true,
+        ..TestRunnerConfig::default()
+    })
 }
 
 fn print_example_run_report(results: &[(PathBuf, TestResult)], total_runnable: usize) {
@@ -284,5 +366,42 @@ fn print_example_run_report(results: &[(PathBuf, TestResult)], total_runnable: u
                 .as_deref()
                 .unwrap_or("failed without diagnostic")
         );
+    }
+}
+
+fn print_example_parity_report(
+    results: &[(PathBuf, TestResult)],
+    total_parity: usize,
+    skipped: usize,
+) {
+    let passed = results.iter().filter(|(_, result)| result.passed).count();
+    let failed = results.len().saturating_sub(passed);
+    println!();
+    println!("XSPICE runnable example numeric parity run");
+    println!("parity-capable decks: {total_parity}");
+    println!("skipped non-comparable runnable decks: {skipped}");
+    println!("executed: {}", results.len());
+    println!("passed: {passed}");
+    println!("failed: {failed}");
+
+    for (relative, result) in results.iter().filter(|(_, result)| !result.passed) {
+        println!(
+            "- {}: {}",
+            relative.display(),
+            result
+                .error
+                .as_deref()
+                .unwrap_or("failed without diagnostic")
+        );
+        for mismatch in result.mismatches.iter().take(3) {
+            println!(
+                "  {} at {}: expected {}, actual {}, relerr {}",
+                mismatch.node,
+                mismatch.x_value,
+                mismatch.expected,
+                mismatch.actual,
+                mismatch.relative_error
+            );
+        }
     }
 }

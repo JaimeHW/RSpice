@@ -355,6 +355,7 @@ struct LiveNgspiceReferenceConfig {
     source_root: PathBuf,
     ngspice_exe: PathBuf,
     timeout_ms: u128,
+    direct_decks: bool,
 }
 
 struct ReferenceOutput {
@@ -381,6 +382,20 @@ pub struct TestRunnerConfig {
     pub verbose: bool,
     /// Maximum time allowed per test in milliseconds (default: 5000ms = 5s)
     pub max_time_per_test_ms: u128,
+    /// Local ngspice source tree used for live reference generation.
+    ///
+    /// When this and `live_ngspice_exe` are both set, they take precedence
+    /// over the live-reference environment variables.
+    pub live_ngspice_source_root: Option<PathBuf>,
+    /// Local ngspice executable used for live reference generation.
+    pub live_ngspice_exe: Option<PathBuf>,
+    /// Timeout for each live ngspice reference run, in milliseconds.
+    pub live_ngspice_timeout_ms: Option<u128>,
+    /// Run live ngspice against the candidate deck path exactly as supplied.
+    ///
+    /// Generated parity suites should set this to compare the exact
+    /// instrumented deck that RSpice is executing.
+    pub live_ngspice_direct_decks: bool,
 }
 
 impl Default for TestRunnerConfig {
@@ -392,6 +407,10 @@ impl Default for TestRunnerConfig {
             skip_unsupported: false,
             verbose: false,
             max_time_per_test_ms: 30000, // 30 seconds max per test
+            live_ngspice_source_root: None,
+            live_ngspice_exe: None,
+            live_ngspice_timeout_ms: None,
+            live_ngspice_direct_decks: false,
         }
     }
 }
@@ -420,12 +439,13 @@ impl TestRunner {
             .unwrap_or_else(|_| test_dir.as_ref().to_path_buf());
         let (validation_manifest_root, validation_manifest) =
             Self::load_validation_manifest(&test_dir);
+        let live_reference_config = Self::live_ngspice_reference_config(&config);
         Self {
             config,
             validation_manifest_root,
             validation_manifest,
             test_dir,
-            live_reference_config: Self::live_ngspice_reference_config_from_env(),
+            live_reference_config,
             live_reference_cache: Mutex::new(HashMap::new()),
             live_raw_reference_cache: Mutex::new(HashMap::new()),
         }

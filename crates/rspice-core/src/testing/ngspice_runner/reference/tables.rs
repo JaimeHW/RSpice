@@ -283,6 +283,9 @@ impl TestRunner {
             if complex_row {
                 let value_pair_start = if complex_axis_row { 3 } else { 2 };
                 for (var_idx, var_name) in current_vars.iter().enumerate() {
+                    if is_private_ngspice_branch_table_var(var_name) {
+                        continue;
+                    }
                     let real_idx = value_pair_start + var_idx * 2;
                     let imag_idx = real_idx + 1;
                     let Some(re_str) = parts.get(real_idx) else {
@@ -312,6 +315,9 @@ impl TestRunner {
             }
 
             for (var_idx, var_name) in current_vars.iter().enumerate() {
+                if is_private_ngspice_branch_table_var(var_name) {
+                    continue;
+                }
                 let Some(val_str) = parts.get(value_col_start + var_idx) else {
                     continue;
                 };
@@ -412,6 +418,11 @@ impl TestRunner {
         }
         true
     }
+}
+
+fn is_private_ngspice_branch_table_var(var_name: &str) -> bool {
+    let normalized = TestRunner::normalize_variable_name(var_name);
+    normalized.contains("#branch_")
 }
 
 #[cfg(test)]
