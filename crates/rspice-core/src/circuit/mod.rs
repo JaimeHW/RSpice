@@ -34,7 +34,7 @@ mod nonlinear;
 /// Node identifier (0 = ground, always)
 pub type NodeId = usize;
 
-type XspiceDriverId = (String, String);
+type XspiceDriverId = (String, String, usize);
 type XspiceDigitalDrivers = HashMap<NodeId, HashMap<XspiceDriverId, DigitalValue>>;
 type XspiceRealDrivers = HashMap<NodeId, HashMap<XspiceDriverId, Value>>;
 

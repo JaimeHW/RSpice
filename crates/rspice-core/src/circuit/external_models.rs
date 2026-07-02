@@ -22,7 +22,7 @@ fn apply_xspice_events_at_or_before(
     event_queue.drain_events_at(time, |event| {
         let node_id = event.node_id;
         let event_time = event.time;
-        let driver_key = (event.instance, event.port_name);
+        let driver_key = (event.instance, event.port_name, event.driver_index);
         match event.value {
             crate::xspice::EventValue::Digital(value) => {
                 digital_drivers
@@ -1500,6 +1500,73 @@ mod tests {
         assert!(touched_real_nodes.is_empty());
         assert_eq!(touched_digital_nodes.capacity(), digital_capacity);
         assert_eq!(touched_real_nodes.capacity(), real_capacity);
+    }
+
+    #[test]
+    fn apply_xspice_events_preserves_vector_driver_elements_on_same_node() {
+        let mut digital_values = HashMap::new();
+        let mut digital_drivers = HashMap::new();
+        let mut digital_event_times = HashMap::new();
+        let mut real_values = HashMap::new();
+        let mut real_drivers = HashMap::new();
+        let mut real_event_times = HashMap::new();
+        let mut event_queue = EventQueue::new();
+        let mut touched_digital_nodes = Vec::new();
+        let mut touched_real_nodes = Vec::new();
+
+        event_queue.schedule(Event::new_with_driver_index(
+            1.0e-9,
+            1,
+            "out",
+            "vector_driver",
+            0,
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        event_queue.schedule(Event::new_with_driver_index(
+            1.0e-9,
+            1,
+            "out",
+            "vector_driver",
+            1,
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        event_queue.schedule(Event::new_with_driver_index(
+            1.0e-9,
+            2,
+            "real_out",
+            "real_vector_driver",
+            0,
+            EventValue::Real(1.0),
+        ));
+        event_queue.schedule(Event::new_with_driver_index(
+            1.0e-9,
+            2,
+            "real_out",
+            "real_vector_driver",
+            1,
+            EventValue::Real(2.0),
+        ));
+
+        assert!(apply_xspice_events_at_or_before(
+            &mut digital_values,
+            &mut digital_drivers,
+            &mut digital_event_times,
+            &mut real_values,
+            &mut real_drivers,
+            &mut real_event_times,
+            &mut event_queue,
+            &mut touched_digital_nodes,
+            &mut touched_real_nodes,
+            1.0e-9,
+        ));
+
+        assert_eq!(
+            digital_drivers.get(&1).map(|drivers| drivers.len()),
+            Some(2)
+        );
+        assert_eq!(real_drivers.get(&2).map(|drivers| drivers.len()), Some(2));
+        assert_eq!(digital_values.get(&1).copied(), Some(DigitalValue::one()));
+        assert_eq!(real_values.get(&2).copied(), Some(3.0));
     }
 
     struct OutputModel {

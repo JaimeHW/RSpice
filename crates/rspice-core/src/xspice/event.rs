@@ -32,6 +32,8 @@ pub struct Event {
     pub node_id: usize,
     /// Port name (for lookup)
     pub port_name: String,
+    /// Vector element index for distinguishing separate drivers on one port.
+    pub driver_index: usize,
     /// Instance name that scheduled the event
     pub instance: String,
     /// New event value
@@ -44,6 +46,7 @@ pub struct Event {
 struct EventDriverKey {
     node_id: usize,
     port_name: String,
+    driver_index: usize,
     instance: String,
 }
 
@@ -56,12 +59,25 @@ impl Event {
         instance: impl Into<String>,
         value: EventValue,
     ) -> Self {
+        Self::new_with_driver_index(time, node_id, port_name, instance, 0, value)
+    }
+
+    /// Create a new event for a specific vector port element.
+    pub fn new_with_driver_index(
+        time: Value,
+        node_id: usize,
+        port_name: impl Into<String>,
+        instance: impl Into<String>,
+        driver_index: usize,
+        value: EventValue,
+    ) -> Self {
         static PRIORITY_COUNTER: std::sync::atomic::AtomicU64 =
             std::sync::atomic::AtomicU64::new(0);
         Self {
             time,
             node_id,
             port_name: port_name.into(),
+            driver_index,
             instance: instance.into(),
             value,
             priority: PRIORITY_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
@@ -72,6 +88,7 @@ impl Event {
         EventDriverKey {
             node_id: self.node_id,
             port_name: self.port_name.clone(),
+            driver_index: self.driver_index,
             instance: self.instance.clone(),
         }
     }
@@ -187,14 +204,37 @@ impl EventQueue {
         instance: impl Into<String>,
         value: DigitalValue,
     ) {
+        self.schedule_delayed_with_driver_index(
+            current_time,
+            delay,
+            node_id,
+            port_name,
+            instance,
+            0,
+            value,
+        );
+    }
+
+    /// Schedule a digital event with delay from current time for one driver element.
+    pub fn schedule_delayed_with_driver_index(
+        &mut self,
+        current_time: Value,
+        delay: Value,
+        node_id: usize,
+        port_name: impl Into<String>,
+        instance: impl Into<String>,
+        driver_index: usize,
+        value: DigitalValue,
+    ) {
         if delay < 0.0 {
             return;
         }
-        let event = Event::new(
+        let event = Event::new_with_driver_index(
             current_time + delay,
             node_id,
             port_name,
             instance,
+            driver_index,
             EventValue::Digital(value),
         );
         self.schedule(event);
@@ -210,14 +250,37 @@ impl EventQueue {
         instance: impl Into<String>,
         value: Value,
     ) {
+        self.schedule_real_delayed_with_driver_index(
+            current_time,
+            delay,
+            node_id,
+            port_name,
+            instance,
+            0,
+            value,
+        );
+    }
+
+    /// Schedule a real-valued event with delay from current time for one driver element.
+    pub fn schedule_real_delayed_with_driver_index(
+        &mut self,
+        current_time: Value,
+        delay: Value,
+        node_id: usize,
+        port_name: impl Into<String>,
+        instance: impl Into<String>,
+        driver_index: usize,
+        value: Value,
+    ) {
         if delay < 0.0 {
             return;
         }
-        let event = Event::new(
+        let event = Event::new_with_driver_index(
             current_time + delay,
             node_id,
             port_name,
             instance,
+            driver_index,
             EventValue::Real(value),
         );
         self.schedule(event);
@@ -522,6 +585,46 @@ mod tests {
     }
 
     #[test]
+    fn event_queue_keeps_distinct_vector_driver_elements_on_same_node() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule(Event::new_with_driver_index(
+            3.0e-9,
+            1,
+            "out",
+            "vector_driver",
+            0,
+            EventValue::Digital(DigitalValue::zero()),
+        ));
+        queue.schedule(Event::new_with_driver_index(
+            2.0e-9,
+            1,
+            "out",
+            "vector_driver",
+            1,
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        queue.schedule(Event::new_with_driver_index(
+            1.0e-9,
+            1,
+            "out",
+            "vector_driver",
+            0,
+            EventValue::Digital(DigitalValue::unknown()),
+        ));
+
+        assert_eq!(queue.len(), 2);
+        let events = queue.pop_events_at(3.0e-9);
+        let driver_values: Vec<_> = events
+            .iter()
+            .map(|event| (event.driver_index, event.value))
+            .collect();
+        assert!(driver_values.contains(&(0, EventValue::Digital(DigitalValue::unknown()))));
+        assert!(driver_values.contains(&(1, EventValue::Digital(DigitalValue::one()))));
+        assert!(!driver_values.contains(&(0, EventValue::Digital(DigitalValue::zero()))));
+    }
+
+    #[test]
     fn event_queue_exact_pop_skips_cancelled_earlier_heap_entries() {
         let mut queue = EventQueue::new();
 
@@ -625,6 +728,7 @@ mod tests {
         let driver = EventDriverKey {
             node_id: 1,
             port_name: "out".to_string(),
+            driver_index: 0,
             instance: "a_driver".to_string(),
         };
 

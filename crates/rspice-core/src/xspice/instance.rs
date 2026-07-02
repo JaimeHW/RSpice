@@ -2123,27 +2123,32 @@ impl XspiceInstance {
                     }
                 }
                 PortConnection::DigitalVector(nodes) => {
-                    for (node, value) in nodes.iter().skip(start_index).zip(values.into_iter()) {
-                        event_queue.schedule_delayed(
+                    for (offset, (node, value)) in
+                        nodes.iter().skip(start_index).zip(values.into_iter()).enumerate()
+                    {
+                        event_queue.schedule_delayed_with_driver_index(
                             current_time,
                             delay,
                             *node,
                             &port_name,
                             &self.name,
+                            start_index + offset,
                             value,
                         );
                     }
                 }
                 PortConnection::DigitalVectorMapped(nodes) => {
-                    for (connection, value) in
+                    for (offset, (connection, value)) in
                         nodes.iter().skip(start_index).zip(values.into_iter())
+                        .enumerate()
                     {
-                        event_queue.schedule_delayed(
+                        event_queue.schedule_delayed_with_driver_index(
                             current_time,
                             delay,
                             connection.node,
                             &port_name,
                             &self.name,
+                            start_index + offset,
                             connection.output_value(value),
                         );
                     }
@@ -2180,13 +2185,16 @@ impl XspiceInstance {
                     }
                 }
                 PortConnection::RealVector(nodes) => {
-                    for (node, value) in nodes.iter().skip(start_index).zip(values.into_iter()) {
-                        event_queue.schedule_real_delayed(
+                    for (offset, (node, value)) in
+                        nodes.iter().skip(start_index).zip(values.into_iter()).enumerate()
+                    {
+                        event_queue.schedule_real_delayed_with_driver_index(
                             current_time,
                             delay,
                             *node,
                             &port_name,
                             &self.name,
+                            start_index + offset,
                             value,
                         );
                     }
@@ -3691,6 +3699,38 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].node_id, 1);
         assert_eq!(events[0].value, EventValue::Digital(DigitalValue::zero()));
+    }
+
+    #[test]
+    fn vector_output_elements_on_same_node_schedule_distinct_driver_indices() {
+        let model = model_with_ports(vec![PortSpec::vector_output("out", PortType::Digital)]);
+        let mut instance = XspiceInstance::new(
+            "Avecout",
+            Arc::new(model),
+            vec![PortConnection::DigitalVector(vec![1, 1])],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("vector output instance should construct");
+        instance.context.set_output_digital_vector_from_slice(
+            "out",
+            &[DigitalValue::zero(), DigitalValue::one()],
+            0.0,
+        );
+
+        let mut event_queue = EventQueue::new();
+        instance.schedule_events(&mut event_queue, 0.0);
+        let events = event_queue.pop_events_at(0.0);
+        let driver_values: Vec<_> = events
+            .iter()
+            .map(|event| (event.driver_index, event.value))
+            .collect();
+
+        assert_eq!(events.len(), 2);
+        assert!(driver_values.contains(&(0, EventValue::Digital(DigitalValue::zero()))));
+        assert!(driver_values.contains(&(1, EventValue::Digital(DigitalValue::one()))));
     }
 
     #[test]
