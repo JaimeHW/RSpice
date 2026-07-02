@@ -15,7 +15,6 @@ use std::sync::{
 
 const XFER_TABLE_RESOURCE: &str = "xspice.xfer.table";
 const SXFER_COEFFICIENT_RESOURCE: &str = "xspice.s_xfer.coefficients";
-const SXFER_TRANSIENT_SYSTEM_RESOURCE: &str = "xspice.s_xfer.transient_system";
 const SXFER_TRANSIENT_SCRATCH_RESOURCE: &str = "xspice.s_xfer.transient_scratch";
 const XFER_UNSET_UPPER_INDEX: usize = usize::MAX;
 const XFER_CURSOR_LINEAR_STEPS: usize = 8;
@@ -74,27 +73,6 @@ struct SXferCoefficientSignature {
 struct SXferCoefficientResource {
     signature: SXferCoefficientSignature,
     coefficients: Option<Arc<SXferCoefficients>>,
-}
-
-#[derive(Debug, Clone)]
-struct LinearFactorization {
-    lu: Vec<Vec<Value>>,
-    pivots: Vec<usize>,
-}
-
-#[derive(Debug, Clone)]
-struct SXferTransientSystem {
-    feedthrough: Value,
-    remainder: Vec<Value>,
-    factorization: LinearFactorization,
-    sensitivity: Vec<Value>,
-}
-
-#[derive(Debug, Clone)]
-struct SXferTransientSystemResource {
-    coefficients: Arc<SXferCoefficients>,
-    timestep: Value,
-    system: CmResult<Arc<SXferTransientSystem>>,
 }
 
 type SXferTransientScratchResource = Vec<Value>;
@@ -213,17 +191,6 @@ fn s_xfer_error(message: impl Into<String>) -> CmError {
         name: "s_xfer".to_string(),
         message: message.into(),
     }
-}
-
-fn reserve_s_xfer_values(context: &str, len: usize) -> CmResult<Vec<Value>> {
-    let mut values = Vec::new();
-    values.try_reserve_exact(len).map_err(|err| {
-        s_xfer_error(format!(
-            "{context}: unable to reserve {len} value(s): {err}"
-        ))
-    })?;
-    values.resize(len, 0.0);
-    Ok(values)
 }
 
 fn resize_s_xfer_values(context: &str, values: &mut Vec<Value>, len: usize) -> CmResult<()> {
@@ -964,190 +931,6 @@ fn s_xfer_feedthrough(coefficients: &SXferCoefficients) -> Value {
     }
 }
 
-fn s_xfer_feedthrough_and_remainder(coefficients: &SXferCoefficients) -> (Value, Vec<Value>) {
-    let order = coefficients.denominator.len().saturating_sub(1);
-    let feedthrough = s_xfer_feedthrough(coefficients);
-    if order == 0 {
-        return (feedthrough, Vec::new());
-    }
-
-    let remainder = (0..order)
-        .map(|index| {
-            coefficients.numerator.get(index).copied().unwrap_or(0.0)
-                - feedthrough * coefficients.denominator[index]
-        })
-        .collect();
-    (feedthrough, remainder)
-}
-
-fn factor_linear_system(mut matrix: Vec<Vec<Value>>) -> Option<LinearFactorization> {
-    let n = matrix.len();
-    let mut pivots = Vec::new();
-    pivots.try_reserve_exact(n).ok()?;
-    for pivot_col in 0..n {
-        let mut pivot_row = pivot_col;
-        let mut pivot_abs = matrix[pivot_col][pivot_col].abs();
-        for (row_index, row) in matrix.iter().enumerate().skip(pivot_col + 1) {
-            let candidate = row[pivot_col].abs();
-            if candidate > pivot_abs {
-                pivot_abs = candidate;
-                pivot_row = row_index;
-            }
-        }
-        if pivot_abs <= 1.0e-30 {
-            return None;
-        }
-        if pivot_row != pivot_col {
-            matrix.swap(pivot_row, pivot_col);
-        }
-        pivots.push(pivot_row);
-
-        let pivot = matrix[pivot_col][pivot_col];
-        let (upper_rows, lower_rows) = matrix.split_at_mut(pivot_col + 1);
-        let pivot_tail = &upper_rows[pivot_col][pivot_col + 1..];
-        for row in lower_rows {
-            let factor = row[pivot_col] / pivot;
-            row[pivot_col] = factor;
-            for (entry, pivot_value) in row[pivot_col + 1..].iter_mut().zip(pivot_tail) {
-                *entry -= factor * pivot_value;
-            }
-        }
-    }
-
-    Some(LinearFactorization { lu: matrix, pivots })
-}
-
-fn solve_factorized_system(
-    factorization: &LinearFactorization,
-    mut rhs: Vec<Value>,
-) -> Option<Vec<Value>> {
-    solve_factorized_system_in_place(factorization, &mut rhs)?;
-    Some(rhs)
-}
-
-fn solve_factorized_system_in_place(
-    factorization: &LinearFactorization,
-    rhs: &mut [Value],
-) -> Option<()> {
-    let n = rhs.len();
-    if factorization.lu.len() != n || factorization.pivots.len() != n {
-        return None;
-    }
-
-    for (pivot_col, pivot_row) in factorization.pivots.iter().copied().enumerate() {
-        if pivot_row >= n {
-            return None;
-        }
-        if pivot_row != pivot_col {
-            rhs.swap(pivot_col, pivot_row);
-        }
-    }
-
-    for row_index in 0..n {
-        if factorization.lu[row_index].len() != n {
-            return None;
-        }
-        let lower_sum: Value = factorization.lu[row_index]
-            .iter()
-            .enumerate()
-            .take(row_index)
-            .map(|(col, value)| value * rhs[col])
-            .sum();
-        rhs[row_index] -= lower_sum;
-    }
-
-    for row_index in (0..n).rev() {
-        let tail: Value = factorization.lu[row_index]
-            .iter()
-            .enumerate()
-            .skip(row_index + 1)
-            .map(|(col, value)| value * rhs[col])
-            .sum();
-        let pivot = factorization.lu[row_index][row_index];
-        if pivot.abs() <= 1.0e-30 {
-            return None;
-        }
-        rhs[row_index] = (rhs[row_index] - tail) / pivot;
-    }
-    Some(())
-}
-
-fn s_xfer_backward_euler_matrix(
-    coefficients: &SXferCoefficients,
-    dt: Value,
-) -> CmResult<Vec<Vec<Value>>> {
-    let order = coefficients.denominator.len() - 1;
-    let mut matrix = Vec::new();
-    matrix.try_reserve_exact(order).map_err(|err| {
-        s_xfer_error(format!(
-            "backward-Euler matrix: unable to reserve {order} row(s): {err}"
-        ))
-    })?;
-    for _ in 0..order {
-        matrix.push(reserve_s_xfer_values("backward-Euler matrix row", order)?);
-    }
-    for (row, values) in matrix.iter_mut().enumerate() {
-        values[row] = 1.0;
-    }
-    for row in 0..order.saturating_sub(1) {
-        matrix[row][row + 1] -= dt;
-    }
-    for col in 0..order {
-        matrix[order - 1][col] += dt * coefficients.denominator[col];
-    }
-    Ok(matrix)
-}
-
-fn build_s_xfer_transient_system(
-    coefficients: &SXferCoefficients,
-    timestep: Value,
-) -> CmResult<Arc<SXferTransientSystem>> {
-    let matrix = s_xfer_backward_euler_matrix(coefficients, timestep)?;
-    let factorization = factor_linear_system(matrix).ok_or_else(|| {
-        CmError::EvaluationError("s_xfer transient state solve is singular".to_string())
-    })?;
-
-    let order = coefficients.denominator.len() - 1;
-    let mut sensitivity_rhs = reserve_s_xfer_values("transient sensitivity RHS", order)?;
-    sensitivity_rhs[order - 1] = timestep;
-    let sensitivity =
-        solve_factorized_system(&factorization, sensitivity_rhs).ok_or_else(|| {
-            CmError::EvaluationError("s_xfer transient sensitivity solve is singular".to_string())
-        })?;
-    let (feedthrough, remainder) = s_xfer_feedthrough_and_remainder(coefficients);
-
-    Ok(Arc::new(SXferTransientSystem {
-        feedthrough,
-        remainder,
-        factorization,
-        sensitivity,
-    }))
-}
-
-fn s_xfer_transient_system_for_context(
-    ctx: &mut CmContext,
-    coefficients: &Arc<SXferCoefficients>,
-) -> CmResult<Arc<SXferTransientSystem>> {
-    if let Some(resource) =
-        ctx.resource::<SXferTransientSystemResource>(SXFER_TRANSIENT_SYSTEM_RESOURCE)
-        && resource.timestep == ctx.timestep
-        && Arc::ptr_eq(&resource.coefficients, coefficients)
-    {
-        return resource.system.clone();
-    }
-
-    let system = build_s_xfer_transient_system(coefficients.as_ref(), ctx.timestep);
-    ctx.set_resource(
-        SXFER_TRANSIENT_SYSTEM_RESOURCE,
-        Arc::new(SXferTransientSystemResource {
-            coefficients: Arc::clone(coefficients),
-            timestep: ctx.timestep,
-            system: system.clone(),
-        }),
-    );
-    system
-}
-
 fn ensure_s_xfer_transient_scratch(ctx: &mut CmContext) {
     if ctx
         .resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
@@ -1190,58 +973,20 @@ fn with_s_xfer_transient_scratch<R>(
     }
 }
 
-fn s_xfer_input_partial_from_system(
-    coefficients: &SXferCoefficients,
-    system: &SXferTransientSystem,
-) -> Value {
-    let dy_du = system
-        .remainder
-        .iter()
-        .zip(system.sensitivity.iter())
-        .map(|(coefficient, value)| coefficient * value)
-        .sum::<Value>()
-        + system.feedthrough;
-    dy_du * coefficients.gain
-}
-
-fn s_xfer_input_partial_for_coefficients(
-    ctx: &CmContext,
-    coefficients: &Arc<SXferCoefficients>,
-) -> CmResult<Value> {
-    let order = coefficients.denominator.len() - 1;
-    if order == 0 || !ctx.timestep.is_finite() || ctx.timestep <= 0.0 {
-        return Ok(s_xfer_feedthrough(coefficients) * coefficients.gain);
-    }
-
-    if let Some(resource) =
-        ctx.resource::<SXferTransientSystemResource>(SXFER_TRANSIENT_SYSTEM_RESOURCE)
-        && resource.timestep == ctx.timestep
-        && Arc::ptr_eq(&resource.coefficients, coefficients)
-    {
-        let system = resource.system.clone()?;
-        return Ok(s_xfer_input_partial_from_system(
-            coefficients.as_ref(),
-            system.as_ref(),
-        ));
-    }
-
-    let system = build_s_xfer_transient_system(coefficients.as_ref(), ctx.timestep)?;
-    Ok(s_xfer_input_partial_from_system(
-        coefficients.as_ref(),
-        system.as_ref(),
-    ))
-}
-
 fn s_xfer_input_partial_for_context(ctx: &CmContext) -> CmResult<Value> {
     let Some(coefficients) = s_xfer_coefficients_for_context(ctx)? else {
         return Ok(0.0);
     };
-    s_xfer_input_partial_for_coefficients(ctx, &coefficients)
+
+    let mut scratch = Vec::new();
+    let (_, partial) = s_xfer_ngspice_transient_eval(ctx, coefficients.as_ref(), &mut scratch)?;
+    Ok(partial)
 }
 
-fn s_xfer_transient_eval(
-    ctx: &mut CmContext,
-    coefficients: &Arc<SXferCoefficients>,
+fn s_xfer_ngspice_transient_eval(
+    ctx: &CmContext,
+    coefficients: &SXferCoefficients,
+    state: &mut Vec<Value>,
 ) -> CmResult<(Value, Value)> {
     let order = coefficients.denominator.len() - 1;
     let input = ctx.input("in") + finite_s_xfer_param(ctx, "in_offset")?;
@@ -1252,42 +997,41 @@ fn s_xfer_transient_eval(
         return Ok((feedthrough * u, feedthrough * coefficients.gain));
     }
 
-    let dt = ctx.timestep;
-    if !dt.is_finite() || dt <= 0.0 {
-        let (feedthrough, remainder) = s_xfer_feedthrough_and_remainder(coefficients.as_ref());
-        let output = remainder
-            .iter()
-            .enumerate()
-            .map(|(index, coefficient)| coefficient * ctx.state_prev(index))
-            .sum::<Value>()
-            + feedthrough * u;
-        if transfer_commits_state(ctx) {
-            for index in 0..order {
-                ctx.set_state(index, ctx.state_prev(index));
-            }
-        }
-        return Ok((output, feedthrough * coefficients.gain));
+    resize_s_xfer_values("transient state scratch", state, order + 1)?;
+
+    state[order] = u;
+    for index in 0..order {
+        state[order] -= ctx.state_prev(index) * coefficients.denominator[index];
     }
 
-    let system = s_xfer_transient_system_for_context(ctx, coefficients)?;
-    with_s_xfer_transient_scratch(ctx, |ctx, state| {
-        resize_s_xfer_values("transient state scratch", state, order)?;
+    let dt = ctx.timestep;
+    if dt.is_finite() && dt > 0.0 {
+        for index in (1..=order).rev() {
+            state[index - 1] = ctx.state_prev(index - 1) + dt * state[index];
+        }
+    } else {
         for index in 0..order {
             state[index] = ctx.state_prev(index);
         }
-        state[order - 1] += dt * u;
-        solve_factorized_system_in_place(&system.factorization, state).ok_or_else(|| {
-            CmError::EvaluationError("s_xfer transient state solve is singular".to_string())
-        })?;
+    }
 
-        let output = system
-            .remainder
-            .iter()
-            .zip(state.iter())
-            .map(|(coefficient, value)| coefficient * value)
-            .sum::<Value>()
-            + system.feedthrough * u;
-        let partial = s_xfer_input_partial_from_system(coefficients.as_ref(), system.as_ref());
+    let output = coefficients
+        .numerator
+        .iter()
+        .enumerate()
+        .map(|(index, coefficient)| coefficient * state.get(index).copied().unwrap_or(0.0))
+        .sum();
+    let partial = state.get(1).copied().unwrap_or(0.0);
+    Ok((output, partial))
+}
+
+fn s_xfer_transient_eval(
+    ctx: &mut CmContext,
+    coefficients: &Arc<SXferCoefficients>,
+) -> CmResult<(Value, Value)> {
+    with_s_xfer_transient_scratch(ctx, |ctx, state| {
+        let (output, partial) =
+            s_xfer_ngspice_transient_eval(ctx, coefficients.as_ref(), state)?;
         if transfer_commits_state(ctx) {
             for (index, value) in state.iter().copied().enumerate() {
                 ctx.set_state(index, value);
@@ -1393,7 +1137,7 @@ impl CodeModel for SXfer {
         };
 
         let order = coefficients.denominator.len().saturating_sub(1);
-        ctx.allocate_states(order);
+        ctx.allocate_states(if order == 0 { 0 } else { order + 1 });
         if order > 0 {
             ensure_s_xfer_transient_scratch(ctx);
         }
@@ -1402,6 +1146,9 @@ impl CodeModel for SXfer {
             let source_index = order - 1 - index;
             let value = int_ic.get(source_index).copied().unwrap_or(0.0);
             ctx.set_initial_state(index, value);
+        }
+        if order > 0 {
+            ctx.set_initial_state(order, 0.0);
         }
         Ok(())
     }
@@ -1875,8 +1622,9 @@ mod tests {
             .expect("s_xfer transient scratch remains installed");
         let (state_ptr, state_capacity) = {
             let state = scratch.as_ref();
-            assert_eq!(state.len(), 1);
+            assert_eq!(state.len(), 2);
             assert!(state[0].is_finite());
+            assert!(state[1].is_finite());
             (state.as_ptr(), state.capacity())
         };
         drop(scratch);
@@ -1889,8 +1637,9 @@ mod tests {
         let state = scratch.as_ref();
         assert_eq!(state.as_ptr(), state_ptr);
         assert_eq!(state.capacity(), state_capacity);
-        assert_eq!(state.len(), 1);
+        assert_eq!(state.len(), 2);
         assert!(state[0].is_finite());
+        assert!(state[1].is_finite());
     }
 
     #[test]
@@ -1928,21 +1677,21 @@ mod tests {
         assert_eq!(partials.len(), 1);
         assert_eq!(partials[0].0, "in");
         assert!(
-            (partials[0].1 - 0.2).abs() < 1.0e-12,
-            "s_xfer should compute the transient input partial from coefficients and timestep, got {partials:?}"
+            (partials[0].1 - 1.0).abs() < 1.0e-12,
+            "s_xfer should compute ngspice's pseudo-integrator partial, got {partials:?}"
         );
     }
 
     #[test]
-    fn s_xfer_partials_ignore_stale_output_partial_after_timestep_change() {
+    fn s_xfer_partials_recompute_ngspice_pseudo_integrator_without_mutating_output() {
         let mut ctx = first_order_lowpass_context();
         SXfer.init(&mut ctx).expect("s_xfer initializes");
         SXfer
             .evaluate(&mut ctx)
             .expect("s_xfer evaluates at original step");
         assert!(
-            (ctx.partial("out") - 0.2).abs() < 1.0e-12,
-            "baseline partial should match the original timestep"
+            (ctx.partial("out") - 1.0).abs() < 1.0e-12,
+            "baseline partial should match ngspice's pseudo-integrator partial"
         );
 
         ctx.timestep = 0.5;
@@ -1951,63 +1700,39 @@ mod tests {
         assert_eq!(partials.len(), 1);
         assert_eq!(partials[0].0, "in");
         assert!(
-            (partials[0].1 - (1.0 / 3.0)).abs() < 1.0e-12,
-            "s_xfer should recompute partials for the current timestep instead of reusing stale output partials, got {partials:?}"
+            (partials[0].1 - 1.0).abs() < 1.0e-12,
+            "s_xfer should recompute the pseudo-integrator partial instead of reusing stale output storage, got {partials:?}"
         );
         assert!(
-            (ctx.partial("out") - 0.2).abs() < 1.0e-12,
+            (ctx.partial("out") - 1.0).abs() < 1.0e-12,
             "partial lookup should not mutate the stored output partial"
         );
     }
 
     #[test]
-    fn s_xfer_transient_system_cache_reloads_when_timestep_or_coefficients_change() {
-        let mut ctx = first_order_lowpass_context();
-        let coefficients = Arc::new(s_xfer_coefficients(&ctx).expect("s_xfer coefficients"));
-
-        let first =
-            s_xfer_transient_system_for_context(&mut ctx, &coefficients).expect("transient system");
-        let second = s_xfer_transient_system_for_context(&mut ctx, &coefficients)
-            .expect("cached transient system");
-        assert!(Arc::ptr_eq(&first, &second));
-
+    fn s_xfer_transient_chain_matches_ngspice_controller_canonical_update() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_param("in_offset", 0.0);
+        ctx.set_param("gain", 1.0);
+        ctx.set_real_vector_param("num_coeff", vec![1.0, 0.0]);
+        ctx.set_real_vector_param("den_coeff", vec![1.0, 1.0, 1.0]);
+        ctx.set_real_vector_param("int_ic", vec![0.2, 0.4]);
+        ctx.set_param("denormalized_freq", 1.0);
+        ctx.set_input_analog("in", 1.0);
         ctx.timestep = 0.5;
-        let larger_step = s_xfer_transient_system_for_context(&mut ctx, &coefficients)
-            .expect("retimed transient system");
-        assert!(!Arc::ptr_eq(&first, &larger_step));
+        ctx.init_output("out", PortType::Voltage);
 
-        ctx.set_real_vector_param("den_coeff", vec![2.0, 1.0]);
-        let changed_coefficients =
-            Arc::new(s_xfer_coefficients(&ctx).expect("changed s_xfer coefficients"));
-        let changed = s_xfer_transient_system_for_context(&mut ctx, &changed_coefficients)
-            .expect("coefficient-specific transient system");
-        assert!(!Arc::ptr_eq(&larger_step, &changed));
-    }
+        SXfer.init(&mut ctx).expect("s_xfer initializes");
+        SXfer
+            .evaluate(&mut ctx)
+            .expect("s_xfer evaluates controller-canonical chain");
 
-    #[test]
-    fn s_xfer_factorized_solver_reuses_rhs_buffer() {
-        let factorization =
-            factor_linear_system(vec![vec![2.0, 0.0], vec![0.0, 5.0]]).expect("factorizes");
-        let rhs = vec![4.0, 10.0];
-        let first_ptr = rhs.as_ptr();
-        let first_capacity = rhs.capacity();
-
-        let solution = solve_factorized_system(&factorization, rhs).expect("solves");
-
-        assert_eq!(solution, vec![2.0, 2.0]);
-        assert_eq!(solution.as_ptr(), first_ptr);
-        assert_eq!(solution.capacity(), first_capacity);
-    }
-
-    #[test]
-    fn s_xfer_factorized_solver_applies_pivoting() {
-        let factorization =
-            factor_linear_system(vec![vec![0.0, 2.0], vec![1.0, 3.0]]).expect("factorizes");
-
-        let solution = solve_factorized_system(&factorization, vec![4.0, 7.0]).expect("solves");
-
-        assert!((solution[0] - 1.0).abs() < 1.0e-12);
-        assert!((solution[1] - 2.0).abs() < 1.0e-12);
+        assert!((ctx.state(2) - 0.4).abs() < 1.0e-12);
+        assert!((ctx.state(1) - 0.4).abs() < 1.0e-12);
+        assert!((ctx.state(0) - 0.6).abs() < 1.0e-12);
+        assert!((ctx.output("out") - 0.4).abs() < 1.0e-12);
+        assert!((ctx.partial("out") - 0.4).abs() < 1.0e-12);
     }
 
     #[test]
