@@ -317,6 +317,13 @@ impl TestRunner {
                 crate::netlist::ElementKind::VoltageSource(spec)
                 | crate::netlist::ElementKind::CurrentSource(spec) => {
                     match spec {
+                        crate::netlist::SourceSpec::RfPort { inner, .. } => {
+                            **inner = std::mem::replace(
+                                inner.as_mut(),
+                                crate::netlist::SourceSpec::Dc(0.0),
+                            )
+                            .with_dc_value(dc_value);
+                        }
                         crate::netlist::SourceSpec::Dc(v) => *v = dc_value,
                         crate::netlist::SourceSpec::DcAc { dc_value: v, .. } => *v = dc_value,
                         crate::netlist::SourceSpec::DcTransient { dc_value: v, .. } => {

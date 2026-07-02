@@ -651,6 +651,9 @@ impl Engine {
             )));
         }
         match spec {
+            SourceSpec::RfPort { inner, .. } => {
+                Self::set_pat_source_parameter(inner, param_name, value)
+            }
             SourceSpec::DcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
                 Self::set_pat_source_parameter(transient, param_name, value)
@@ -707,6 +710,7 @@ impl Engine {
         value: Value,
     ) -> Result<(), SimulationError> {
         match spec {
+            SourceSpec::RfPort { inner, .. } => Self::set_source_dc_value(inner, value),
             SourceSpec::Dc(v) => {
                 *v = value;
                 Ok(())

@@ -14,7 +14,8 @@ use super::{
     InitialCondition, JfetType, MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution,
     MosType, Netlist, NodeSet, ParamContext, ParametricValue, ParseDiagnostic, ParseError,
     PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
-    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec, StatisticalParamMode,
+    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
+    StatisticalParamMode,
     StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;

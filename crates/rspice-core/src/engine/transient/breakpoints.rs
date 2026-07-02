@@ -79,6 +79,9 @@ impl Engine {
         use crate::netlist::SourceSpec;
 
         match spec {
+            SourceSpec::RfPort { inner, .. } => {
+                Self::add_source_spec_breakpoints(breakpoints, inner, tstop, tstep_hint);
+            }
             // TRNOISE breakpoints come from its expanded PWL sample train;
             // the unexpanded spec itself schedules none.
             SourceSpec::Dc(_)

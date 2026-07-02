@@ -122,22 +122,7 @@ impl TestRunner {
             match &element.kind {
                 crate::netlist::ElementKind::VoltageSource(spec)
                 | crate::netlist::ElementKind::CurrentSource(spec) => {
-                    return Ok(match spec {
-                        crate::netlist::SourceSpec::Dc(v) => *v,
-                        crate::netlist::SourceSpec::DcAc { dc_value, .. } => *dc_value,
-                        crate::netlist::SourceSpec::DcTransient { dc_value, .. } => *dc_value,
-                        crate::netlist::SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
-                        crate::netlist::SourceSpec::Ac { .. }
-                        | crate::netlist::SourceSpec::Pulse { .. }
-                        | crate::netlist::SourceSpec::Sin { .. }
-                        | crate::netlist::SourceSpec::Pwl { .. }
-                        | crate::netlist::SourceSpec::PwlFile { .. }
-                        | crate::netlist::SourceSpec::Pat { .. }
-                        | crate::netlist::SourceSpec::Exp { .. }
-                        | crate::netlist::SourceSpec::Sffm { .. }
-                        | crate::netlist::SourceSpec::Am { .. }
-                        | crate::netlist::SourceSpec::TrNoise { .. } => 0.0,
-                    });
+                    return Ok(Self::get_source_dc_value_from_spec(spec));
                 }
                 _ => {
                     return Err(format!(
@@ -148,6 +133,28 @@ impl TestRunner {
             }
         }
         Err(format!("Transfer source '{}' not found", source_name))
+    }
+
+    fn get_source_dc_value_from_spec(spec: &crate::netlist::SourceSpec) -> Value {
+        match spec {
+            crate::netlist::SourceSpec::RfPort { inner, .. } => {
+                Self::get_source_dc_value_from_spec(inner)
+            }
+            crate::netlist::SourceSpec::Dc(v) => *v,
+            crate::netlist::SourceSpec::DcAc { dc_value, .. } => *dc_value,
+            crate::netlist::SourceSpec::DcTransient { dc_value, .. } => *dc_value,
+            crate::netlist::SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
+            crate::netlist::SourceSpec::Ac { .. }
+            | crate::netlist::SourceSpec::Pulse { .. }
+            | crate::netlist::SourceSpec::Sin { .. }
+            | crate::netlist::SourceSpec::Pwl { .. }
+            | crate::netlist::SourceSpec::PwlFile { .. }
+            | crate::netlist::SourceSpec::Pat { .. }
+            | crate::netlist::SourceSpec::Exp { .. }
+            | crate::netlist::SourceSpec::Sffm { .. }
+            | crate::netlist::SourceSpec::Am { .. }
+            | crate::netlist::SourceSpec::TrNoise { .. } => 0.0,
+        }
     }
 
     pub(in crate::testing::ngspice_runner) fn run_transfer_function_test(

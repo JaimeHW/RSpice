@@ -219,6 +219,9 @@ impl Engine {
     ) -> Option<Value> {
         match spec {
             None => Some(fallback_dc),
+            Some(SourceSpec::RfPort { inner, .. }) => {
+                Self::hb_extract_static_source_voltage(Some(inner), fallback_dc)
+            }
             Some(SourceSpec::Dc(v)) => Some(*v),
             Some(SourceSpec::DcAc {
                 dc_value,
@@ -331,6 +334,9 @@ impl Engine {
             return (ac_mag, ac_phase);
         }
         match spec {
+            Some(SourceSpec::RfPort { inner, .. }) => {
+                Self::hb_source_drive_terms(ac_mag, ac_phase, Some(inner))
+            }
             Some(SourceSpec::Sin {
                 amplitude, phase, ..
             }) => (*amplitude, *phase),

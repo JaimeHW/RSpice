@@ -5,6 +5,7 @@ use crate::netlist::SourceSpec;
 /// Extract DC value from a SourceSpec enum
 pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
     match spec {
+        SourceSpec::RfPort { inner, .. } => extract_dc_value(inner),
         SourceSpec::Dc(v) => *v,
         SourceSpec::DcAc { dc_value, .. } => *dc_value,
         SourceSpec::DcTransient { dc_value, .. } => *dc_value,
@@ -84,6 +85,7 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
 /// spec separately via hb_source_drive_terms.
 pub(crate) fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
     match spec {
+        SourceSpec::RfPort { inner, .. } => extract_ac_value(inner),
         SourceSpec::Ac { magnitude, phase } => (*magnitude, *phase),
         SourceSpec::DcAc {
             ac_magnitude,

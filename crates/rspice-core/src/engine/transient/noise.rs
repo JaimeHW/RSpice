@@ -72,6 +72,7 @@ fn element_trnoise(element: &Element) -> Option<()> {
 
 fn spec_contains_trnoise(spec: &SourceSpec) -> bool {
     match spec {
+        SourceSpec::RfPort { inner, .. } => spec_contains_trnoise(inner),
         SourceSpec::TrNoise { .. } => true,
         SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
             spec_contains_trnoise(transient)
@@ -87,6 +88,7 @@ fn replace_trnoise(
     name: &str,
 ) -> Result<(), String> {
     match spec {
+        SourceSpec::RfPort { inner, .. } => replace_trnoise(inner, tstop, seed, name),
         SourceSpec::TrNoise {
             na,
             nt,

@@ -2430,6 +2430,7 @@ fn scale_multiplicity_param(instance_params: &mut Vec<(String, Value)>, m: Value
 /// (delays, frequencies, time constants) are never touched.
 fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
     match spec {
+        SourceSpec::RfPort { inner, .. } => scale_source_amplitudes(inner, m),
         SourceSpec::Dc(v) => *v *= m,
         SourceSpec::Ac { magnitude, .. } => *magnitude *= m,
         SourceSpec::DcAc {

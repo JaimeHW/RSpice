@@ -70,6 +70,7 @@ fn validate_source_file_inputs(
     use crate::netlist::SourceSpec;
 
     match spec {
+        SourceSpec::RfPort { inner, .. } => validate_source_file_inputs(source_name, inner),
         SourceSpec::PwlFile {
             path,
             time_scale,
@@ -202,6 +203,7 @@ fn xspice_meter_element_incident(element: &Element, target: &str) -> Result<bool
 
 fn xspice_meter_zero_dc_voltage_source(spec: &SourceSpec) -> bool {
     match spec {
+        SourceSpec::RfPort { inner, .. } => xspice_meter_zero_dc_voltage_source(inner),
         SourceSpec::Dc(value) => *value == 0.0,
         SourceSpec::DcAc { dc_value, .. } => *dc_value == 0.0,
         _ => false,
@@ -3268,7 +3270,8 @@ impl Engine {
                     );
                     // Clone spec for transient analysis if it's a time-varying source
                     let transient_spec = match spec {
-                        crate::netlist::SourceSpec::Pulse { .. }
+                        crate::netlist::SourceSpec::RfPort { .. }
+                        | crate::netlist::SourceSpec::Pulse { .. }
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }
@@ -3298,7 +3301,8 @@ impl Engine {
                     let dc_value = extract_dc_value(spec);
                     let (ac_mag, ac_phase) = super::extract_ac_value(spec);
                     let transient_spec = match spec {
-                        crate::netlist::SourceSpec::Pulse { .. }
+                        crate::netlist::SourceSpec::RfPort { .. }
+                        | crate::netlist::SourceSpec::Pulse { .. }
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }

@@ -29,6 +29,7 @@ pub(super) fn parse_source_spec(
     let mut dc_value: Option<Value> = None;
     let mut ac_terms: Option<(Value, Value)> = None;
     let mut transient: Option<SourceSpec> = None;
+    let mut rf_port = SourceRfPortBuilder::default();
 
     loop {
         skip_commas(stream);
@@ -96,7 +97,7 @@ pub(super) fn parse_source_spec(
                 ac_terms = Some((ac_magnitude, ac_phase));
             }
             _ if is_source_port_annotation_keyword(&keyword) => {
-                consume_source_port_annotation(stream, line_num, params)?;
+                consume_source_port_annotation(stream, line_num, params, &mut rf_port)?;
             }
             _ if transient.is_none() => {
                 match parse_transient_source_spec_keyword(stream, line_num, params)? {
@@ -119,7 +120,7 @@ pub(super) fn parse_source_spec(
         });
     }
 
-    Ok(match (dc_value, ac_terms, transient) {
+    let source = match (dc_value, ac_terms, transient) {
         (None, None, None) => {
             // Nothing recognized: surface the same error a bad value gives.
             SourceSpec::Dc(expect_finite_source_value(
@@ -144,6 +145,15 @@ pub(super) fn parse_source_spec(
             ac_phase,
             transient: Box::new(transient),
         },
+    };
+
+    Ok(if let Some(port) = rf_port.into_port() {
+        SourceSpec::RfPort {
+            inner: Box::new(source),
+            port,
+        }
+    } else {
+        source
     })
 }
 
@@ -226,24 +236,95 @@ fn is_source_level_keyword(keyword: &str) -> bool {
             | "TRNOISE"
             | "DISTOF1"
             | "DISTOF2"
+            | "PORT"
             | "PORTNUM"
             | "Z0"
+            | "PWR"
+            | "FREQ"
+            | "PHASE"
     )
 }
 
 fn is_source_port_annotation_keyword(keyword: &str) -> bool {
-    matches!(keyword.to_ascii_uppercase().as_str(), "PORTNUM" | "Z0")
+    matches!(
+        keyword.to_ascii_uppercase().as_str(),
+        "PORT" | "PORTNUM" | "Z0" | "PWR" | "FREQ" | "PHASE"
+    )
+}
+
+#[derive(Default)]
+struct SourceRfPortBuilder {
+    portnum: Option<usize>,
+    z0: Option<Value>,
+    power: Option<Value>,
+    frequency: Option<Value>,
+    phase: Option<Value>,
+}
+
+impl SourceRfPortBuilder {
+    fn into_port(self) -> Option<SourceRfPort> {
+        Some(SourceRfPort {
+            portnum: self.portnum?,
+            z0: self.z0.unwrap_or(50.0),
+            power: self.power,
+            frequency: self.frequency,
+            phase: self.phase,
+        })
+    }
 }
 
 fn consume_source_port_annotation(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
+    rf_port: &mut SourceRfPortBuilder,
 ) -> Result<(), ParseError> {
     let keyword = expect_ident(stream, line_num)?;
     skip_commas(stream);
     stream.consume(&TokenKind::Equals);
-    expect_finite_source_value(stream, line_num, params, &keyword, "value")?;
+    let value = expect_finite_source_value(stream, line_num, params, &keyword, "value")?;
+    match keyword.to_ascii_uppercase().as_str() {
+        "PORT" | "PORTNUM" => {
+            if value < 1.0 || value.fract().abs() > 1e-12 {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("{keyword} requires a positive integer value"),
+                });
+            }
+            rf_port.portnum = Some(value as usize);
+        }
+        "Z0" => {
+            if value <= 0.0 {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Z0 requires a positive impedance".to_string(),
+                });
+            }
+            rf_port.z0 = Some(value);
+        }
+        "PWR" => {
+            if value < 0.0 {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "PWR requires a non-negative power".to_string(),
+                });
+            }
+            rf_port.power = Some(value);
+        }
+        "FREQ" => {
+            if value <= 0.0 {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "FREQ requires a positive frequency".to_string(),
+                });
+            }
+            rf_port.frequency = Some(value);
+        }
+        "PHASE" => {
+            rf_port.phase = Some(value);
+        }
+        _ => {}
+    }
     Ok(())
 }
 

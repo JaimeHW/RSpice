@@ -1101,9 +1101,33 @@ fn logarithmic_sweep_points(
 // Source Specifications
 //=============================================================================
 
+/// RF port metadata attached to a voltage source for ngspice-compatible
+/// S-parameter analysis.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceRfPort {
+    /// Port number as specified by `portnum`/`port`, 1-indexed.
+    pub portnum: usize,
+    /// Reference impedance in ohms. Ngspice defaults this to 50 ohms when
+    /// `portnum` is present and `z0` is omitted.
+    pub z0: Value,
+    /// Optional RF power annotation used by ngspice's RF source path.
+    pub power: Option<Value>,
+    /// Optional RF source frequency annotation.
+    pub frequency: Option<Value>,
+    /// Optional RF source phase annotation in degrees.
+    pub phase: Option<Value>,
+}
+
 /// Source specification (DC, AC, or transient waveforms)
 #[derive(Debug, Clone)]
 pub enum SourceSpec {
+    /// A source with ngspice RF-port annotations. The wrapped source keeps
+    /// ordinary DC/AC/transient electrical behavior.
+    RfPort {
+        inner: Box<SourceSpec>,
+        port: SourceRfPort,
+    },
+
     /// DC value
     Dc(Value),
 
@@ -1295,6 +1319,15 @@ pub enum SourceSpec {
 }
 
 impl SourceSpec {
+    /// Return RF-port metadata when this source has ngspice `portnum`
+    /// annotations.
+    pub fn rf_port(&self) -> Option<&SourceRfPort> {
+        match self {
+            SourceSpec::RfPort { port, .. } => Some(port),
+            _ => None,
+        }
+    }
+
     /// Return this specification with its AC excitation replaced by the
     /// given magnitude and phase, preserving DC and transient content.
     ///
@@ -1302,6 +1335,10 @@ impl SourceSpec {
     /// value, matching how SPICE treats `AC` annotations on such sources.
     pub fn with_ac(self, magnitude: Value, phase: Value) -> Self {
         match self {
+            SourceSpec::RfPort { inner, port } => SourceSpec::RfPort {
+                inner: Box::new(inner.with_ac(magnitude, phase)),
+                port,
+            },
             SourceSpec::Dc(dc_value) => SourceSpec::DcAc {
                 dc_value,
                 ac_magnitude: magnitude,
@@ -1340,6 +1377,10 @@ impl SourceSpec {
     /// A purely AC or transient spec gains an explicit DC component.
     pub fn with_dc_value(self, value: Value) -> SourceSpec {
         match self {
+            SourceSpec::RfPort { inner, port } => SourceSpec::RfPort {
+                inner: Box::new(inner.with_dc_value(value)),
+                port,
+            },
             SourceSpec::Dc(_) => SourceSpec::Dc(value),
             SourceSpec::Ac { magnitude, phase } => SourceSpec::DcAc {
                 dc_value: value,

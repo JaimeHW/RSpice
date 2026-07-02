@@ -694,6 +694,9 @@ impl Netlist {
 
 fn normalize_source_spec_file_paths(spec: &mut SourceSpec, source_base_dir: &Path) {
     match spec {
+        SourceSpec::RfPort { inner, .. } => {
+            normalize_source_spec_file_paths(inner, source_base_dir);
+        }
         SourceSpec::PwlFile { path, .. } => {
             let candidate = Path::new(path);
             if !candidate.is_absolute() {
@@ -5409,7 +5412,7 @@ mod tests {
     fn source_ac_terms_accept_rf_port_annotations() {
         let netlist = Netlist::parse(
             "source rf port annotations\n\
-             V1 p1 0 dc 0 ac 1 portnum 1 z0 50\n\
+             V1 p1 0 dc 0 ac 1 portnum 1 z0 75 pwr 1m freq 2.3g phase 45\n\
              R1 p1 0 50\n\
              .ac lin 1 1Meg 1Meg\n\
              .end\n",
@@ -5418,12 +5421,40 @@ mod tests {
 
         assert!(matches!(
             first_source_spec(&netlist),
-            SourceSpec::DcAc {
-                dc_value,
-                ac_magnitude,
-                ac_phase,
-            } if *dc_value == 0.0 && *ac_magnitude == 1.0 && *ac_phase == 0.0
+            SourceSpec::RfPort {
+                inner,
+                port,
+            } if matches!(
+                inner.as_ref(),
+                SourceSpec::DcAc {
+                    dc_value,
+                    ac_magnitude,
+                    ac_phase,
+                } if *dc_value == 0.0 && *ac_magnitude == 1.0 && *ac_phase == 0.0
+            ) && port.portnum == 1
+                && port.z0 == 75.0
+                && port.power == Some(1.0e-3)
+                && port.frequency == Some(2.3e9)
+                && port.phase == Some(45.0)
         ));
+    }
+
+    #[test]
+    fn source_rf_port_defaults_to_ngspice_z0() {
+        let netlist = Netlist::parse(
+            "source rf port default z0\n\
+             V1 p1 0 dc 0 ac 1 portnum 1\n\
+             R1 p1 0 50\n\
+             .ac lin 1 1Meg 1Meg\n\
+             .end\n",
+        )
+        .expect("source RF port should default z0");
+
+        let port = first_source_spec(&netlist)
+            .rf_port()
+            .expect("RF port metadata is retained");
+        assert_eq!(port.portnum, 1);
+        assert_eq!(port.z0, 50.0);
     }
 
     #[test]

@@ -531,6 +531,9 @@ impl VoltageSources {
         use std::f64::consts::PI;
 
         match spec {
+            SourceSpec::RfPort { inner, .. } => {
+                Self::evaluate_source_at_time_with_context(inner, time, context)
+            }
             SourceSpec::Dc(v) => *v,
             SourceSpec::Ac { .. } => 0.0, // AC sources are DC=0 in transient
             // TRNOISE expands into a PWL sample train before circuit
