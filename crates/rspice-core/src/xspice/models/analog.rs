@@ -1122,19 +1122,32 @@ impl CodeModel for Limiter {
         })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(
+            ctx,
+            "limit",
+            &[
+                "in_offset",
+                "gain",
+                "out_lower_limit",
+                "out_upper_limit",
+                "limit_range",
+            ],
+        )
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let transfer = cache_limit_transfer(ctx);
+        let transfer = cache_limit_transfer(ctx)?;
         ctx.set_output_with_partial("out", transfer.output, transfer.in_partial);
         Ok(())
     }
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
         if output_port.eq_ignore_ascii_case("out") {
-            vec![("in".to_string(), limit_transfer_for_context(ctx).in_partial)]
+            let Ok(transfer) = limit_transfer_for_context(ctx) else {
+                return Vec::new();
+            };
+            vec![("in".to_string(), transfer.in_partial)]
         } else {
             Vec::new()
         }
@@ -1168,16 +1181,16 @@ struct LimitTransferResource {
     transfer: LimitTransfer,
 }
 
-fn limit_transfer_signature(ctx: &CmContext) -> LimitTransferSignature {
-    LimitTransferSignature {
+fn limit_transfer_signature(ctx: &CmContext) -> CmResult<LimitTransferSignature> {
+    Ok(LimitTransferSignature {
         input: ctx.input("in"),
-        in_offset: ctx.param("in_offset"),
-        out_lower_limit: ctx.param("out_lower_limit"),
-        out_upper_limit: ctx.param("out_upper_limit"),
-        limit_range: ctx.param("limit_range"),
-        gain: ctx.param("gain"),
+        in_offset: finite_analog_scalar_param(ctx, "limit", "in_offset")?,
+        out_lower_limit: finite_analog_scalar_param(ctx, "limit", "out_lower_limit")?,
+        out_upper_limit: finite_analog_scalar_param(ctx, "limit", "out_upper_limit")?,
+        limit_range: finite_analog_scalar_param(ctx, "limit", "limit_range")?,
+        gain: finite_analog_scalar_param(ctx, "limit", "gain")?,
         fraction: ctx.param("fraction") > 0.5,
-    }
+    })
 }
 
 fn limit_transfer_from_signature(signature: LimitTransferSignature) -> LimitTransfer {
@@ -1193,28 +1206,28 @@ fn limit_transfer_from_signature(signature: LimitTransferSignature) -> LimitTran
     LimitTransfer { output, in_partial }
 }
 
-fn limit_transfer_from_context(ctx: &CmContext) -> (Value, Value) {
-    let transfer = limit_transfer_for_context(ctx);
-    (transfer.output, transfer.in_partial)
+fn limit_transfer_from_context(ctx: &CmContext) -> CmResult<(Value, Value)> {
+    let transfer = limit_transfer_for_context(ctx)?;
+    Ok((transfer.output, transfer.in_partial))
 }
 
-fn limit_transfer_for_context(ctx: &CmContext) -> LimitTransfer {
-    let signature = limit_transfer_signature(ctx);
+fn limit_transfer_for_context(ctx: &CmContext) -> CmResult<LimitTransfer> {
+    let signature = limit_transfer_signature(ctx)?;
     if let Some(resource) = ctx.resource::<LimitTransferResource>(LIMIT_TRANSFER_RESOURCE)
         && resource.signature == signature
     {
-        return resource.transfer;
+        return Ok(resource.transfer);
     }
 
-    limit_transfer_from_signature(signature)
+    Ok(limit_transfer_from_signature(signature))
 }
 
-fn cache_limit_transfer(ctx: &mut CmContext) -> LimitTransfer {
-    let signature = limit_transfer_signature(ctx);
+fn cache_limit_transfer(ctx: &mut CmContext) -> CmResult<LimitTransfer> {
+    let signature = limit_transfer_signature(ctx)?;
     if let Some(resource) = ctx.resource::<LimitTransferResource>(LIMIT_TRANSFER_RESOURCE)
         && resource.signature == signature
     {
-        return resource.transfer;
+        return Ok(resource.transfer);
     }
 
     let transfer = limit_transfer_from_signature(signature);
@@ -1225,7 +1238,7 @@ fn cache_limit_transfer(ctx: &mut CmContext) -> LimitTransfer {
             transfer,
         }),
     );
-    transfer
+    Ok(transfer)
 }
 
 fn limit_transfer(
@@ -1318,12 +1331,22 @@ impl CodeModel for ControlledLimiter {
         })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(
+            ctx,
+            "climit",
+            &[
+                "in_offset",
+                "gain",
+                "upper_delta",
+                "lower_delta",
+                "limit_range",
+            ],
+        )
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let transfer = cache_climit_transfer(ctx);
+        let transfer = cache_climit_transfer(ctx)?;
 
         ctx.set_output_with_partial("out", transfer.output, transfer.in_partial);
         Ok(())
@@ -1331,7 +1354,9 @@ impl CodeModel for ControlledLimiter {
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
         if output_port.eq_ignore_ascii_case("out") {
-            let transfer = climit_transfer_for_context(ctx);
+            let Ok(transfer) = climit_transfer_for_context(ctx) else {
+                return Vec::new();
+            };
             vec![
                 ("in".to_string(), transfer.in_partial),
                 ("cntl_lower".to_string(), transfer.lower_partial),
@@ -3804,6 +3829,73 @@ mod tests {
     }
 
     #[test]
+    fn limiter_models_reject_nonfinite_scalar_params() {
+        for (model, param, value) in [
+            (&Limiter as &dyn CodeModel, "in_offset", f64::NAN),
+            (&Limiter as &dyn CodeModel, "gain", f64::INFINITY),
+            (
+                &Limiter as &dyn CodeModel,
+                "out_lower_limit",
+                f64::NEG_INFINITY,
+            ),
+            (&Limiter as &dyn CodeModel, "out_upper_limit", f64::INFINITY),
+            (&Limiter as &dyn CodeModel, "limit_range", f64::NAN),
+            (&ControlledLimiter as &dyn CodeModel, "in_offset", f64::NAN),
+            (
+                &ControlledLimiter as &dyn CodeModel,
+                "upper_delta",
+                f64::INFINITY,
+            ),
+            (
+                &ControlledLimiter as &dyn CodeModel,
+                "lower_delta",
+                f64::NEG_INFINITY,
+            ),
+            (
+                &ControlledLimiter as &dyn CodeModel,
+                "limit_range",
+                f64::NAN,
+            ),
+            (&ControlledLimiter as &dyn CodeModel, "gain", f64::INFINITY),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_param(param, value);
+
+            let err = model
+                .init(&mut ctx)
+                .expect_err("limiter model must reject nonfinite scalar parameters");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "{} {param} produced {err:?}",
+                model.name()
+            );
+            assert!(
+                err.to_string().contains(param),
+                "{} error should name rejected parameter {param}: {err}",
+                model.name()
+            );
+        }
+
+        let mut ctx = CmContext::new();
+        Limiter
+            .init(&mut ctx)
+            .expect("default limit params are valid");
+        ctx.set_param("gain", f64::NAN);
+        Limiter
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite limit params must fail at evaluation time");
+
+        let mut ctx = CmContext::new();
+        ControlledLimiter
+            .init(&mut ctx)
+            .expect("default climit params are valid");
+        ctx.set_param("lower_delta", f64::NAN);
+        ControlledLimiter
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite climit params must fail at evaluation time");
+    }
+
+    #[test]
     fn limit_transfer_cache_reuses_evaluated_transfer_until_inputs_change() {
         let mut ctx = CmContext::new();
         ctx.set_input_analog("in", 0.5);
@@ -3814,17 +3906,20 @@ mod tests {
         ctx.set_param("gain", 1.5);
         ctx.set_param("fraction", 0.0);
 
-        let first = cache_limit_transfer(&mut ctx);
-        assert_eq!(limit_transfer_for_context(&ctx), first);
+        let first = cache_limit_transfer(&mut ctx).expect("first limit transfer caches");
+        assert_eq!(
+            limit_transfer_for_context(&ctx).expect("cached limit transfer returns"),
+            first
+        );
 
         ctx.set_param("unrelated", 42.0);
         assert_eq!(
-            limit_transfer_for_context(&ctx),
+            limit_transfer_for_context(&ctx).expect("unchanged limit transfer returns"),
             first,
             "unrelated context changes should not invalidate the limit transfer cache"
         );
 
-        let signature = limit_transfer_signature(&ctx);
+        let signature = limit_transfer_signature(&ctx).expect("valid limit signature");
         let sentinel = LimitTransfer {
             output: -123.0,
             in_partial: -456.0,
@@ -3837,25 +3932,27 @@ mod tests {
             }),
         );
         assert_eq!(
-            limit_transfer_for_context(&ctx),
+            limit_transfer_for_context(&ctx).expect("sentinel limit transfer returns"),
             sentinel,
             "matching signatures should reuse the cached limit transfer"
         );
         assert_eq!(
-            cache_limit_transfer(&mut ctx),
+            cache_limit_transfer(&mut ctx).expect("sentinel limit transfer caches"),
             sentinel,
             "matching signatures should reuse the cached limit transfer in the mutable path"
         );
 
         ctx.set_input_analog("in", 0.75);
-        let updated = cache_limit_transfer(&mut ctx);
+        let updated = cache_limit_transfer(&mut ctx).expect("updated limit transfer caches");
         assert_ne!(
             updated, sentinel,
             "changed limit inputs must invalidate the cached transfer"
         );
         assert_eq!(
             updated,
-            limit_transfer_from_signature(limit_transfer_signature(&ctx))
+            limit_transfer_from_signature(
+                limit_transfer_signature(&ctx).expect("updated limit signature")
+            )
         );
     }
 
@@ -3938,17 +4035,20 @@ mod tests {
         ctx.set_param("gain", 1.0);
         ctx.set_param("fraction", 0.0);
 
-        let first = cache_climit_transfer(&mut ctx);
-        assert_eq!(climit_transfer_for_context(&ctx), first);
+        let first = cache_climit_transfer(&mut ctx).expect("first climit transfer caches");
+        assert_eq!(
+            climit_transfer_for_context(&ctx).expect("cached climit transfer returns"),
+            first
+        );
 
         ctx.set_param("unrelated", 42.0);
         assert_eq!(
-            climit_transfer_for_context(&ctx),
+            climit_transfer_for_context(&ctx).expect("unchanged climit transfer returns"),
             first,
             "unrelated context changes should not invalidate the climit transfer cache"
         );
 
-        let signature = climit_transfer_signature(&ctx);
+        let signature = climit_transfer_signature(&ctx).expect("valid climit signature");
         let sentinel = ClimitTransfer {
             output: -123.0,
             in_partial: -456.0,
@@ -3963,25 +4063,27 @@ mod tests {
             }),
         );
         assert_eq!(
-            climit_transfer_for_context(&ctx),
+            climit_transfer_for_context(&ctx).expect("sentinel climit transfer returns"),
             sentinel,
             "matching signatures should reuse the cached climit transfer"
         );
         assert_eq!(
-            cache_climit_transfer(&mut ctx),
+            cache_climit_transfer(&mut ctx).expect("sentinel climit transfer caches"),
             sentinel,
             "matching signatures should reuse the cached climit transfer in the mutable path"
         );
 
         ctx.set_input_analog("cntl_upper", 3.0);
-        let updated = cache_climit_transfer(&mut ctx);
+        let updated = cache_climit_transfer(&mut ctx).expect("updated climit transfer caches");
         assert_ne!(
             updated, sentinel,
             "changed climit controls must invalidate the cached transfer"
         );
         assert_eq!(
             updated,
-            climit_transfer_from_signature(climit_transfer_signature(&ctx))
+            climit_transfer_from_signature(
+                climit_transfer_signature(&ctx).expect("updated climit signature")
+            )
         );
     }
 
@@ -4299,18 +4401,18 @@ struct ClimitTransferResource {
     transfer: ClimitTransfer,
 }
 
-fn climit_transfer_signature(ctx: &CmContext) -> ClimitTransferSignature {
-    ClimitTransferSignature {
+fn climit_transfer_signature(ctx: &CmContext) -> CmResult<ClimitTransferSignature> {
+    Ok(ClimitTransferSignature {
         input: ctx.input("in"),
-        in_offset: ctx.param("in_offset"),
+        in_offset: finite_analog_scalar_param(ctx, "climit", "in_offset")?,
         cntl_upper: ctx.input("cntl_upper"),
         cntl_lower: ctx.input("cntl_lower"),
-        lower_delta: ctx.param("lower_delta"),
-        upper_delta: ctx.param("upper_delta"),
-        limit_range: ctx.param("limit_range"),
-        gain: ctx.param("gain"),
+        lower_delta: finite_analog_scalar_param(ctx, "climit", "lower_delta")?,
+        upper_delta: finite_analog_scalar_param(ctx, "climit", "upper_delta")?,
+        limit_range: finite_analog_scalar_param(ctx, "climit", "limit_range")?,
+        gain: finite_analog_scalar_param(ctx, "climit", "gain")?,
         fraction: ctx.param("fraction") > 0.5,
-    }
+    })
 }
 
 fn climit_transfer_from_signature(signature: ClimitTransferSignature) -> ClimitTransfer {
@@ -4333,23 +4435,23 @@ fn climit_transfer_from_signature(signature: ClimitTransferSignature) -> ClimitT
     }
 }
 
-fn climit_transfer_for_context(ctx: &CmContext) -> ClimitTransfer {
-    let signature = climit_transfer_signature(ctx);
+fn climit_transfer_for_context(ctx: &CmContext) -> CmResult<ClimitTransfer> {
+    let signature = climit_transfer_signature(ctx)?;
     if let Some(resource) = ctx.resource::<ClimitTransferResource>(CLIMIT_TRANSFER_RESOURCE)
         && resource.signature == signature
     {
-        return resource.transfer;
+        return Ok(resource.transfer);
     }
 
-    climit_transfer_from_signature(signature)
+    Ok(climit_transfer_from_signature(signature))
 }
 
-fn cache_climit_transfer(ctx: &mut CmContext) -> ClimitTransfer {
-    let signature = climit_transfer_signature(ctx);
+fn cache_climit_transfer(ctx: &mut CmContext) -> CmResult<ClimitTransfer> {
+    let signature = climit_transfer_signature(ctx)?;
     if let Some(resource) = ctx.resource::<ClimitTransferResource>(CLIMIT_TRANSFER_RESOURCE)
         && resource.signature == signature
     {
-        return resource.transfer;
+        return Ok(resource.transfer);
     }
 
     let transfer = climit_transfer_from_signature(signature);
@@ -4360,7 +4462,7 @@ fn cache_climit_transfer(ctx: &mut CmContext) -> ClimitTransfer {
             transfer,
         }),
     );
-    transfer
+    Ok(transfer)
 }
 
 pub(super) fn smooth_corner(
