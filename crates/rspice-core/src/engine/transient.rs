@@ -3392,6 +3392,27 @@ mod tests {
         assert!(err.to_string().contains(&path));
     }
 
+    #[test]
+    fn transient_behavioral_table_source_tracks_time() {
+        let deck = "Behavioral TABLE(time) source\n\
+                    B1 1 0 V={TABLE(time, 0, 1, 1n, 2)}\n\
+                    R1 1 0 1k\n\
+                    .end\n";
+        let netlist = crate::Netlist::parse(deck).expect("deck parses");
+        let result = Engine::default()
+            .run_tran(&netlist, 1.0e-9, 1.0e-9)
+            .expect("transient runs");
+
+        let final_v = result.voltages[0]
+            .last()
+            .copied()
+            .expect("node 1 has samples");
+        assert!(
+            (final_v - 2.0).abs() <= 1.0e-9,
+            "behavioral TABLE source held {final_v:.12e} instead of tracking time"
+        );
+    }
+
     /// An explicitly configured `max_timestep` must cap the accepted step
     /// even when the caller passes a coarser per-run maximum (the CLI
     /// --max-step path resolves into the config, not the argument).

@@ -151,6 +151,25 @@ fn behavioral_preparation_treats_xyce_function_names_as_identifiers() {
 }
 
 #[test]
+fn behavioral_preparation_expands_unknown_function_arguments() {
+    let mut ctx = ParamContext::new();
+    ctx.set("V1", 1.1);
+    ctx.set("V2", 2.0);
+    ctx.set("TD", 0.5e-12);
+    ctx.set("TR", 0.3e-12);
+    ctx.set("TF", 0.4e-12);
+    ctx.set("PW", 10.0e-12);
+
+    let prepared = prepare_behavioral_expression("spice_pulse(v1,v2,td,tr,tf,pw)", &ctx)
+        .expect("behavioral expression prepares");
+
+    assert_eq!(
+        prepared,
+        "SPICE_PULSE(1.1,2,0.0000000000005,0.0000000000003,0.0000000000004,0.00000000001)"
+    );
+}
+
+#[test]
 fn behavioral_preparation_preserves_digit_leading_probe_nodes() {
     let ctx = ParamContext::new();
 

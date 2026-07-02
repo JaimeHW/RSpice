@@ -90,6 +90,7 @@ pub enum Instruction {
     Table(usize),
     Pwl(usize),
     Mod,
+    SpicePulse(usize),
 
     /// Conditional: if cond != 0, keep second, else keep third
     IfElse,
@@ -354,6 +355,14 @@ impl Vm {
                         self.stack.push(result);
                     }
                 }
+                Instruction::SpicePulse(arg_count) => {
+                    if *arg_count >= 6 && self.stack.len() >= *arg_count {
+                        let start = self.stack.len() - *arg_count;
+                        let result = spice_pulse_from_args(ctx.time, &self.stack[start..]);
+                        self.stack.truncate(start);
+                        self.stack.push(result);
+                    }
+                }
 
                 Instruction::Limit => {
                     // limit(x, lo, hi) - pop 3, push 1
@@ -445,9 +454,57 @@ fn table_interpolate_from_args(x: Value, args: &[Value]) -> Value {
 
 #[inline]
 fn interpolate_segment(x: Value, x1: Value, y1: Value, x2: Value, y2: Value, flat: Value) -> Value {
-    if (x2 - x1).abs() < 1e-12 {
+    let dx = x2 - x1;
+    if !dx.is_finite() || dx == 0.0 {
         return flat;
     }
-    let t = (x - x1) / (x2 - x1);
+    let t = (x - x1) / dx;
     y1 + t * (y2 - y1)
+}
+
+fn spice_pulse_from_args(time: Value, args: &[Value]) -> Value {
+    let v1 = args[0];
+    let v2 = args[1];
+    let delay = finite_nonnegative(args[2], 0.0);
+    let rise = finite_nonnegative(args[3], 0.0);
+    let fall = finite_nonnegative(args[4], 0.0);
+    let width = finite_nonnegative(args[5], 0.0);
+
+    if time < delay {
+        return v1;
+    }
+
+    let mut elapsed = time - delay;
+    if let Some(period) = args
+        .get(6)
+        .copied()
+        .filter(|period| period.is_finite() && *period > 0.0)
+    {
+        elapsed = elapsed.rem_euclid(period);
+    }
+    if rise > 0.0 && elapsed < rise {
+        return v1 + (v2 - v1) * elapsed / rise;
+    }
+
+    let high_start = rise;
+    let fall_start = high_start + width;
+    if elapsed < fall_start {
+        return v2;
+    }
+
+    let fall_end = fall_start + fall;
+    if fall > 0.0 && elapsed < fall_end {
+        return v2 + (v1 - v2) * (elapsed - fall_start) / fall;
+    }
+
+    v1
+}
+
+#[inline]
+fn finite_nonnegative(value: Value, default: Value) -> Value {
+    if value.is_finite() && value >= 0.0 {
+        value
+    } else {
+        default
+    }
 }

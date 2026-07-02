@@ -701,6 +701,7 @@ impl<'a> Parser<'a> {
                 "TABLE" => Some(Function::Table),
                 "PWL" => Some(Function::Pwl),
                 "MOD" | "FMOD" => Some(Function::Mod),
+                "SPICE_PULSE" => Some(Function::SpicePulse),
                 "IF" | "TERNARY_FCN" => Some(Function::If),
                 _ => None,
             };
@@ -770,6 +771,14 @@ mod tests {
         vm.execute(&program, &ctx)
     }
 
+    fn eval_tran(input: &str, time: f64) -> f64 {
+        let ast = parse_expression_strict(input)
+            .unwrap_or_else(|e| panic!("parse `{input}` failed: {e}"));
+        let program = compile(&ast);
+        let mut vm = Vm::new();
+        vm.execute(&program, &Context::transient(&[], &[], time))
+    }
+
     #[test]
     fn power_operator_matches_ngspice_b_sources() {
         // Pinned against ngspice-46 B-source oracle runs: chains fold
@@ -800,6 +809,26 @@ mod tests {
         assert!((eval_const_xyce("log(100)") - 2.0).abs() < 1.0e-15);
         assert!((eval_const_xyce("ln(100)") - 100.0_f64.ln()).abs() < 1.0e-15);
         assert!((eval_const_xyce("log10(100)") - 2.0).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn spice_pulse_expression_follows_time_axis_edges() {
+        let expr = "spice_pulse(1.1, 2.0, 0.5p, 0.3p, 0.4p, 10p)";
+        assert_eq!(eval_tran(expr, 0.0), 1.1);
+        assert_eq!(eval_tran(expr, 0.5e-12), 1.1);
+        assert!((eval_tran(expr, 0.65e-12) - 1.55).abs() < 1.0e-12);
+        assert_eq!(eval_tran(expr, 0.8e-12), 2.0);
+        assert_eq!(eval_tran(expr, 10.8e-12), 2.0);
+        assert!((eval_tran(expr, 11.0e-12) - 1.55).abs() < 1.0e-12);
+        assert_eq!(eval_tran(expr, 11.2e-12), 1.1);
+    }
+
+    #[test]
+    fn table_expression_interpolates_subpicosecond_segments() {
+        let expr = "table(time, 0, 1.1, 0.05p, 1.1, 0.08p, 2.0)";
+        assert_eq!(eval_tran(expr, 0.0), 1.1);
+        assert!((eval_tran(expr, 0.065e-12) - 1.55).abs() < 1.0e-12);
+        assert_eq!(eval_tran(expr, 0.08e-12), 2.0);
     }
 
     #[test]

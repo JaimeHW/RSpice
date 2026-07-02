@@ -124,6 +124,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 Function::Table => Instruction::Table(args.len()),
                 Function::Pwl => Instruction::Pwl(args.len()),
                 Function::Mod => Instruction::Mod,
+                Function::SpicePulse => Instruction::SpicePulse(args.len()),
                 Function::If => Instruction::IfElse,
             };
             program.instructions.push(instr);

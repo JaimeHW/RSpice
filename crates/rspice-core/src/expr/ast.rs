@@ -94,20 +94,21 @@ pub enum Function {
     Limit, // limit(x, lo, hi)
     Min,
     Max,
-    Sign,  // sign(x) = -1, 0, or 1
-    Uramp, // uramp(x) = max(0, x) - positive ramp
-    Stp,   // stp(x) = 1 if x is positive outside expression-zero tolerance else 0
-    U2,    // u2(x) = clamp(x, 0, 1)
-    Eq0,   // eq0(x) = 1 if x == 0 else 0
-    Ne0,   // ne0(x) = 1 if x != 0 else 0
-    Gt0,   // gt0(x) = 1 if x > 0 else 0
-    Lt0,   // lt0(x) = 1 if x < 0 else 0
-    Ge0,   // ge0(x) = 1 if x >= 0 else 0
-    Le0,   // le0(x) = 1 if x <= 0 else 0
-    Pow,   // pow(x, y) = x^y
-    Table, // table(x, x1,y1, x2,y2, ...)
-    Pwl,   // pwl(x, x1,y1, x2,y2, ...) alias for table
-    Mod,   // mod(x, y) = x % y - modulo
+    Sign,       // sign(x) = -1, 0, or 1
+    Uramp,      // uramp(x) = max(0, x) - positive ramp
+    Stp,        // stp(x) = 1 if x is positive outside expression-zero tolerance else 0
+    U2,         // u2(x) = clamp(x, 0, 1)
+    Eq0,        // eq0(x) = 1 if x == 0 else 0
+    Ne0,        // ne0(x) = 1 if x != 0 else 0
+    Gt0,        // gt0(x) = 1 if x > 0 else 0
+    Lt0,        // lt0(x) = 1 if x < 0 else 0
+    Ge0,        // ge0(x) = 1 if x >= 0 else 0
+    Le0,        // le0(x) = 1 if x <= 0 else 0
+    Pow,        // pow(x, y) = x^y
+    Table,      // table(x, x1,y1, x2,y2, ...)
+    Pwl,        // pwl(x, x1,y1, x2,y2, ...) alias for table
+    Mod,        // mod(x, y) = x % y - modulo
+    SpicePulse, // spice_pulse(v1, v2, td, tr, tf, pw[, per])
     // Conditional
     If, // if(cond, then, else)
 }

@@ -3759,12 +3759,7 @@ impl XyceTestRunner {
                 expression, element_name
             )
         })?;
-        if Self::behavioral_expression_depends_on_time_or_frequency(&ast) {
-            return Err(format!(
-                "native static .PRINT TRAN comparison does not yet support time-dependent behavioral expression '{}' on element '{}'",
-                expression, element_name
-            ));
-        }
+        let _validated_ast = ast;
         Ok(())
     }
 
@@ -3782,25 +3777,6 @@ impl XyceTestRunner {
             Expr::Function { args, .. } => args
                 .iter()
                 .any(Self::passive_value_expression_depends_on_runtime_quantity),
-        }
-    }
-
-    fn behavioral_expression_depends_on_time_or_frequency(expression: &Expr) -> bool {
-        match expression {
-            Expr::Const(_) | Expr::NodeVoltage(_) | Expr::BranchCurrent(_) | Expr::Temperature => {
-                false
-            }
-            Expr::Time | Expr::Frequency => true,
-            Expr::Unary { operand, .. } => {
-                Self::behavioral_expression_depends_on_time_or_frequency(operand)
-            }
-            Expr::Binary { left, right, .. } => {
-                Self::behavioral_expression_depends_on_time_or_frequency(left)
-                    || Self::behavioral_expression_depends_on_time_or_frequency(right)
-            }
-            Expr::Function { args, .. } => args
-                .iter()
-                .any(Self::behavioral_expression_depends_on_time_or_frequency),
         }
     }
 
@@ -4711,12 +4687,10 @@ impl XyceTestRunner {
         let Some((&first_time, &last_time)) = times.first().zip(times.last()) else {
             return Err("transient waveform has no samples".to_string());
         };
-        let scale = first_time
-            .abs()
-            .max(last_time.abs())
-            .max(time.abs())
-            .max(1.0);
-        let edge_tol = 1.0e-12 * scale;
+        let scale = first_time.abs().max(last_time.abs()).max(time.abs());
+        let edge_tol = (1.0e-12 * scale)
+            .max(64.0 * f64::EPSILON * scale)
+            .max(1.0e-30);
         if time < first_time - edge_tol || time > last_time + edge_tol {
             return Err(format!(
                 "requested transient sample time {time:e} is outside simulated range [{first_time:e}, {last_time:e}]"
@@ -7683,6 +7657,26 @@ End of Xyce(TM) Simulation
                 )
                 .expect("time-window comparison should evaluate"),
             "expected value falls inside the waveform interval induced by printed PRN time precision"
+        );
+    }
+
+    #[test]
+    fn transient_interpolation_preserves_subpicosecond_samples() {
+        let times = [0.0, 5.0e-13, 1.0e-12];
+        let values = [1.1, 1.5, 2.0];
+
+        let exact = XyceTestRunner::interpolate_transient_waveform_at(&times, &values, 5.0e-13)
+            .expect("exact sub-picosecond sample interpolates");
+        let midpoint = XyceTestRunner::interpolate_transient_waveform_at(&times, &values, 2.5e-13)
+            .expect("interior sub-picosecond sample interpolates");
+
+        assert!(
+            (exact - 1.5).abs() <= 1.0e-15,
+            "exact sample collapsed to {exact:.12e}"
+        );
+        assert!(
+            (midpoint - 1.3).abs() <= 1.0e-15,
+            "midpoint sample collapsed to {midpoint:.12e}"
         );
     }
 

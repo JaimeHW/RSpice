@@ -25,6 +25,8 @@ pub struct BehavioralVoltageSource {
     pub node_neg: usize,
     /// Branch ordinal for MNA (1-based, converted to matrix index at stamp time)
     pub branch_ordinal: usize,
+    /// Parsed expression used for structural analysis such as breakpoint extraction.
+    ast: Expr,
     /// Compiled expression
     pub program: CompiledExpr,
     /// VM for evaluation
@@ -69,6 +71,7 @@ impl BehavioralVoltageSource {
             node_pos,
             node_neg,
             branch_ordinal,
+            ast,
             program,
             vm: Vm::new(),
             node_bindings: Vec::new(),
@@ -160,6 +163,10 @@ impl BehavioralVoltageSource {
     #[inline]
     pub(crate) fn excludes_output_from_transient_voltage_lte(&self) -> bool {
         self.transient_voltage_lte_excluded
+    }
+
+    pub(crate) fn transient_breakpoints(&self, tstop: Value, _tstep_hint: Value) -> Vec<Value> {
+        expression_transient_breakpoints(&self.ast, tstop)
     }
 
     #[inline]
@@ -388,6 +395,152 @@ fn expression_has_discontinuous_output_for_voltage_lte(expr: &Expr) -> bool {
     }
 }
 
+fn expression_transient_breakpoints(expr: &Expr, tstop: Value) -> Vec<Value> {
+    let mut breakpoints = Vec::new();
+    collect_expression_transient_breakpoints(expr, tstop, &mut breakpoints);
+    breakpoints.retain(|time| time.is_finite() && *time >= 0.0 && *time <= tstop);
+    breakpoints.sort_by(Value::total_cmp);
+    breakpoints.dedup_by(|a, b| {
+        let scale = a.abs().max(b.abs()).max(1.0);
+        (*a - *b).abs() <= 64.0 * Value::EPSILON * scale
+    });
+    breakpoints
+}
+
+fn collect_expression_transient_breakpoints(
+    expr: &Expr,
+    tstop: Value,
+    breakpoints: &mut Vec<Value>,
+) {
+    match expr {
+        Expr::Function { func, args } => {
+            match func {
+                Function::Table | Function::Pwl => {
+                    collect_time_table_breakpoints(args, breakpoints);
+                }
+                Function::SpicePulse => {
+                    collect_spice_pulse_breakpoints(args, tstop, breakpoints);
+                }
+                _ => {}
+            }
+            for arg in args {
+                collect_expression_transient_breakpoints(arg, tstop, breakpoints);
+            }
+        }
+        Expr::Unary { operand, .. } => {
+            collect_expression_transient_breakpoints(operand, tstop, breakpoints);
+        }
+        Expr::Binary { left, right, .. } => {
+            collect_expression_transient_breakpoints(left, tstop, breakpoints);
+            collect_expression_transient_breakpoints(right, tstop, breakpoints);
+        }
+        Expr::Const(_)
+        | Expr::NodeVoltage(_)
+        | Expr::BranchCurrent(_)
+        | Expr::Time
+        | Expr::Frequency
+        | Expr::Temperature => {}
+    }
+}
+
+fn collect_time_table_breakpoints(args: &[Expr], breakpoints: &mut Vec<Value>) {
+    if !matches!(args.first(), Some(Expr::Time)) {
+        return;
+    }
+
+    for pair in args[1..].chunks(2) {
+        let Some(x_expr) = pair.first() else {
+            continue;
+        };
+        if let Some(time) = constant_expression_value(x_expr) {
+            breakpoints.push(time);
+        }
+    }
+}
+
+fn collect_spice_pulse_breakpoints(args: &[Expr], tstop: Value, breakpoints: &mut Vec<Value>) {
+    if args.len() < 6 {
+        return;
+    }
+
+    let Some(delay) = constant_expression_value(&args[2]) else {
+        return;
+    };
+    let Some(rise) = constant_expression_value(&args[3]) else {
+        return;
+    };
+    let Some(fall) = constant_expression_value(&args[4]) else {
+        return;
+    };
+    let Some(width) = constant_expression_value(&args[5]) else {
+        return;
+    };
+
+    let delay = finite_nonnegative(delay, 0.0);
+    let rise = finite_nonnegative(rise, 0.0);
+    let fall = finite_nonnegative(fall, 0.0);
+    let width = finite_nonnegative(width, 0.0);
+    let period = args
+        .get(6)
+        .and_then(constant_expression_value)
+        .filter(|period| period.is_finite() && *period > 0.0);
+
+    let cycle_count = period
+        .map(|period| {
+            (((tstop - delay).max(0.0) / period).ceil() as usize)
+                .saturating_add(1)
+                .min(1_000_000)
+        })
+        .unwrap_or(1);
+
+    for cycle in 0..cycle_count {
+        let cycle_start = delay + period.unwrap_or(0.0) * cycle as Value;
+        if cycle_start > tstop {
+            break;
+        }
+        breakpoints.push(cycle_start);
+        breakpoints.push(cycle_start + rise);
+        breakpoints.push(cycle_start + rise + width);
+        breakpoints.push(cycle_start + rise + width + fall);
+    }
+}
+
+fn constant_expression_value(expr: &Expr) -> Option<Value> {
+    if expression_depends_on_runtime_quantity(expr) {
+        return None;
+    }
+    let program = compile(expr);
+    let mut vm = Vm::new();
+    let value = vm.execute(&program, &Context::dc(&[], &[]));
+    value.is_finite().then_some(value)
+}
+
+fn expression_depends_on_runtime_quantity(expr: &Expr) -> bool {
+    match expr {
+        Expr::Const(_) => false,
+        Expr::NodeVoltage(_)
+        | Expr::BranchCurrent(_)
+        | Expr::Time
+        | Expr::Frequency
+        | Expr::Temperature => true,
+        Expr::Unary { operand, .. } => expression_depends_on_runtime_quantity(operand),
+        Expr::Binary { left, right, .. } => {
+            expression_depends_on_runtime_quantity(left)
+                || expression_depends_on_runtime_quantity(right)
+        }
+        Expr::Function { args, .. } => args.iter().any(expression_depends_on_runtime_quantity),
+    }
+}
+
+#[inline]
+fn finite_nonnegative(value: Value, default: Value) -> Value {
+    if value.is_finite() && value >= 0.0 {
+        value
+    } else {
+        default
+    }
+}
+
 /// Compiled behavioral current source
 #[derive(Debug, Clone)]
 pub struct BehavioralCurrentSource {
@@ -397,6 +550,8 @@ pub struct BehavioralCurrentSource {
     pub node_pos: usize,
     /// Negative node (current flows out of)
     pub node_neg: usize,
+    /// Parsed expression used for structural analysis such as breakpoint extraction.
+    ast: Expr,
     /// Compiled expression
     pub program: CompiledExpr,
     /// VM for evaluation
@@ -435,6 +590,7 @@ impl BehavioralCurrentSource {
             name,
             node_pos,
             node_neg,
+            ast,
             program,
             vm: Vm::new(),
             node_bindings: Vec::new(),
@@ -520,6 +676,10 @@ impl BehavioralCurrentSource {
             .iter()
             .chain(self.branch_bindings.iter())
             .filter_map(|binding| *binding)
+    }
+
+    pub(crate) fn transient_breakpoints(&self, tstop: Value, _tstep_hint: Value) -> Vec<Value> {
+        expression_transient_breakpoints(&self.ast, tstop)
     }
 
     #[inline]
@@ -745,6 +905,22 @@ impl BehavioralSources {
 
     pub fn is_empty(&self) -> bool {
         self.voltage_sources.is_empty() && self.current_sources.is_empty()
+    }
+
+    pub(crate) fn transient_breakpoints(&self, tstop: Value, tstep_hint: Value) -> Vec<Value> {
+        let mut breakpoints = Vec::new();
+        for source in &self.voltage_sources {
+            breakpoints.extend(source.transient_breakpoints(tstop, tstep_hint));
+        }
+        for source in &self.current_sources {
+            breakpoints.extend(source.transient_breakpoints(tstop, tstep_hint));
+        }
+        breakpoints.sort_by(Value::total_cmp);
+        breakpoints.dedup_by(|a, b| {
+            let scale = a.abs().max(b.abs()).max(1.0);
+            (*a - *b).abs() <= 64.0 * Value::EPSILON * scale
+        });
+        breakpoints
     }
 
     /// Stamp all behavioral sources
