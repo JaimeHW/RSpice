@@ -491,6 +491,7 @@ struct ScalarGraphBuilder<'a> {
     assignment_history_reference_stack: Vec<(VariableId, usize)>,
     assignment_history_previous_value_stack: Vec<(VariableId, ValueId)>,
     history_reconstruction_steps: usize,
+    potential_equation_state_operator_depth: usize,
     guard_alias_lowering_depth: usize,
     branch_current_values: HashMap<String, ValueId>,
     branch_flow_context: Option<BranchUnknownId>,
@@ -733,6 +734,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             assignment_history_reference_stack: Vec::new(),
             assignment_history_previous_value_stack: Vec::new(),
             history_reconstruction_steps: 0,
+            potential_equation_state_operator_depth: 0,
             guard_alias_lowering_depth: 0,
             branch_current_values: HashMap::new(),
             branch_flow_context: None,
@@ -1987,6 +1989,15 @@ impl<'a> ScalarGraphBuilder<'a> {
                 op: HirAnalogOperator::Ddt { expr, abstol: None },
             } => self.lower_ddt_expression(*expr, expr_id),
             HirExprKind::AnalogOperator {
+                op:
+                    HirAnalogOperator::Idt {
+                        expr,
+                        assert: None,
+                        abstol: None,
+                        ..
+                    },
+            } if self.in_potential_equation_state_operator_context() => self.lower_expression(*expr),
+            HirExprKind::AnalogOperator {
                 op: HirAnalogOperator::Ddx { expr, probe },
             } => self.lower_ddx_expression(*expr, *probe),
             HirExprKind::AnalogOperator {
@@ -1999,8 +2010,13 @@ impl<'a> ScalarGraphBuilder<'a> {
     fn lower_equation_expression(&mut self, equation: &MirEquation) -> Option<ValueId> {
         self.expression_values.clear();
         let previous_context = self.branch_flow_context;
+        let previous_state_operator_depth = self.potential_equation_state_operator_depth;
         self.branch_flow_context = self.equation_branch_unknown(equation);
+        if equation.kind == MirEquationKind::Potential {
+            self.potential_equation_state_operator_depth += 1;
+        }
         let lowered = self.lower_equation_expression_inner(equation.expression.id);
+        self.potential_equation_state_operator_depth = previous_state_operator_depth;
         self.branch_flow_context = previous_context;
         self.expression_values.clear();
         lowered
@@ -4635,6 +4651,12 @@ impl<'a> ScalarGraphBuilder<'a> {
             };
             return self.lower_ddt_expression(*expr, operator);
         }
+        if self.in_potential_equation_state_operator_context()
+            && name.eq_ignore_ascii_case("idt")
+            && (1..=2).contains(&args.len())
+        {
+            return self.lower_expression(args[0]);
+        }
         if name.eq_ignore_ascii_case("analysis") {
             return self.lower_analysis_call(args);
         }
@@ -4732,6 +4754,10 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn zero_real(&mut self) -> ValueId {
         self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0))
+    }
+
+    fn in_potential_equation_state_operator_context(&self) -> bool {
+        self.potential_equation_state_operator_depth > 0
     }
 
     fn ddt_scale(&mut self) -> ValueId {

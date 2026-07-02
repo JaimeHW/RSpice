@@ -440,6 +440,40 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_lowers_nested_idt_potential_equation() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module nested_idt_potential(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real scale = 2.0 from (0:inf);
+    analog begin
+        V(p, n) <+ scale * idt(-V(p, n), 0.0);
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("nested idt potential contribution should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_guarded_series_resistance_state() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
