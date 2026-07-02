@@ -885,7 +885,7 @@ fn microstrip_propagation_uncached(
     let h = positive_param(ctx, "h", 1.0e-3)?;
     let t = nonnegative_param(ctx, "t", 35.0e-6)?;
     let er = dielectric_param(ctx, "er", 9.8)?;
-    let tan_delta = finite_param(ctx, "tand", 2.0e-4)?;
+    let tan_delta = nonnegative_param(ctx, "tand", 2.0e-4)?;
     let rho = nonnegative_param(ctx, "rho", 0.022e-6)?;
     let roughness = finite_param(ctx, "d", 0.15e-6)?;
     let (substrate_model, dispersion_model) = microstrip_selector_params(ctx)?;
@@ -1237,7 +1237,7 @@ fn coupled_microstrip_propagation_uncached(
     let h = positive_param(ctx, "h", 1.0e-3)?;
     let t = nonnegative_param(ctx, "t", 35.0e-6)?;
     let er = dielectric_param(ctx, "er", 9.8)?;
-    let tan_delta = finite_param(ctx, "tand", 2.0e-4)?;
+    let tan_delta = nonnegative_param(ctx, "tand", 2.0e-4)?;
     let rho = nonnegative_param(ctx, "rho", 0.022e-6)?;
     let roughness = finite_param(ctx, "d", 0.15e-6)?;
     let (substrate_model, dispersion_model) = coupled_microstrip_selector_params(ctx)?;
@@ -2995,6 +2995,20 @@ mod tests {
         let mut msopen = microstrip_cache_context();
         msopen.set_param("er", 0.5);
         assert_invalid_param(MicrostripOpenEnd.init(&mut msopen), "er");
+    }
+
+    #[test]
+    fn microstrip_models_reject_negative_loss_tangent() {
+        let mut mline = microstrip_cache_context();
+        mline.set_param("tand", -1.0e-3);
+        assert_invalid_param(microstrip_propagation_uncached(&mline, 1.0e9), "tand");
+
+        let mut cpmlin = coupled_microstrip_cache_context();
+        cpmlin.set_param("tand", -1.0e-3);
+        assert_invalid_param(
+            coupled_microstrip_propagation_uncached(&cpmlin, 1.0e9),
+            "tand",
+        );
     }
 
     #[test]
