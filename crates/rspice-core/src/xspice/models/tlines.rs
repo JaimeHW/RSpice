@@ -318,6 +318,18 @@ fn finite_integer_param(ctx: &CmContext, name: &str, default: i64) -> CmResult<i
     }
 }
 
+#[inline]
+fn finite_complex(value: Complex64) -> bool {
+    value.re.is_finite() && value.im.is_finite()
+}
+
+fn finite_ac_partials<const N: usize>(items: [(&str, Complex64); N]) -> Vec<(String, Complex64)> {
+    items
+        .into_iter()
+        .filter_map(|(port, partial)| finite_complex(partial).then(|| (port.to_string(), partial)))
+        .collect()
+}
+
 fn microstrip_selector_params(ctx: &CmContext) -> CmResult<(i64, i64)> {
     Ok((
         finite_integer_param(ctx, "model", HAMMERSTAD)?,
@@ -2215,8 +2227,8 @@ impl CodeModel for GenericTransmissionLine {
             return Vec::new();
         };
         match output_port_key(output_port) {
-            OutputPortKey::In => vec![("in".to_string(), z11), ("out".to_string(), z21)],
-            OutputPortKey::Out => vec![("out".to_string(), z11), ("in".to_string(), z21)],
+            OutputPortKey::In => finite_ac_partials([("in", z11), ("out", z21)]),
+            OutputPortKey::Out => finite_ac_partials([("out", z11), ("in", z21)]),
             _ => Vec::new(),
         }
     }
@@ -2324,8 +2336,8 @@ impl CodeModel for MicrostripLine {
             return Vec::new();
         };
         match output_port_key(output_port) {
-            OutputPortKey::Port1 => vec![("port1".to_string(), z11), ("port2".to_string(), z21)],
-            OutputPortKey::Port2 => vec![("port2".to_string(), z11), ("port1".to_string(), z21)],
+            OutputPortKey::Port1 => finite_ac_partials([("port1", z11), ("port2", z21)]),
+            OutputPortKey::Port2 => finite_ac_partials([("port2", z11), ("port1", z21)]),
             _ => Vec::new(),
         }
     }
@@ -2460,30 +2472,18 @@ impl CodeModel for CoupledTransmissionLine {
             return Vec::new();
         };
         match output_port_key(output_port) {
-            OutputPortKey::P1 => vec![
-                ("p1".to_string(), z11),
-                ("p2".to_string(), z12),
-                ("p3".to_string(), z13),
-                ("p4".to_string(), z14),
-            ],
-            OutputPortKey::P2 => vec![
-                ("p1".to_string(), z12),
-                ("p2".to_string(), z11),
-                ("p3".to_string(), z14),
-                ("p4".to_string(), z13),
-            ],
-            OutputPortKey::P3 => vec![
-                ("p1".to_string(), z13),
-                ("p2".to_string(), z14),
-                ("p3".to_string(), z11),
-                ("p4".to_string(), z12),
-            ],
-            OutputPortKey::P4 => vec![
-                ("p1".to_string(), z14),
-                ("p2".to_string(), z13),
-                ("p3".to_string(), z12),
-                ("p4".to_string(), z11),
-            ],
+            OutputPortKey::P1 => {
+                finite_ac_partials([("p1", z11), ("p2", z12), ("p3", z13), ("p4", z14)])
+            }
+            OutputPortKey::P2 => {
+                finite_ac_partials([("p1", z12), ("p2", z11), ("p3", z14), ("p4", z13)])
+            }
+            OutputPortKey::P3 => {
+                finite_ac_partials([("p1", z13), ("p2", z14), ("p3", z11), ("p4", z12)])
+            }
+            OutputPortKey::P4 => {
+                finite_ac_partials([("p1", z14), ("p2", z13), ("p3", z12), ("p4", z11)])
+            }
             _ => Vec::new(),
         }
     }
@@ -2619,30 +2619,18 @@ impl CodeModel for CoupledMicrostripLine {
             return Vec::new();
         };
         match output_port_key(output_port) {
-            OutputPortKey::P1 => vec![
-                ("p1".to_string(), z11),
-                ("p2".to_string(), z12),
-                ("p3".to_string(), z13),
-                ("p4".to_string(), z14),
-            ],
-            OutputPortKey::P2 => vec![
-                ("p1".to_string(), z12),
-                ("p2".to_string(), z11),
-                ("p3".to_string(), z14),
-                ("p4".to_string(), z13),
-            ],
-            OutputPortKey::P3 => vec![
-                ("p1".to_string(), z13),
-                ("p2".to_string(), z14),
-                ("p3".to_string(), z11),
-                ("p4".to_string(), z12),
-            ],
-            OutputPortKey::P4 => vec![
-                ("p1".to_string(), z14),
-                ("p2".to_string(), z13),
-                ("p3".to_string(), z12),
-                ("p4".to_string(), z11),
-            ],
+            OutputPortKey::P1 => {
+                finite_ac_partials([("p1", z11), ("p2", z12), ("p3", z13), ("p4", z14)])
+            }
+            OutputPortKey::P2 => {
+                finite_ac_partials([("p1", z12), ("p2", z11), ("p3", z14), ("p4", z13)])
+            }
+            OutputPortKey::P3 => {
+                finite_ac_partials([("p1", z13), ("p2", z14), ("p3", z11), ("p4", z12)])
+            }
+            OutputPortKey::P4 => {
+                finite_ac_partials([("p1", z14), ("p2", z13), ("p3", z12), ("p4", z11)])
+            }
             _ => Vec::new(),
         }
     }
@@ -2687,8 +2675,9 @@ impl CodeModel for MicrostripOpenEnd {
             return Vec::new();
         }
         match msopen_admittance(ctx, frequency) {
-            Ok(admittance) => vec![("p1".to_string(), admittance)],
+            Ok(admittance) if finite_complex(admittance) => vec![("p1".to_string(), admittance)],
             Err(_) => Vec::new(),
+            Ok(_) => Vec::new(),
         }
     }
 }
@@ -2869,6 +2858,41 @@ mod tests {
         let mut cpmlin = coupled_microstrip_cache_context();
         cpmlin.set_param("l", -1.0);
         assert_invalid_param(CoupledMicrostripLine.init(&mut cpmlin), "l");
+    }
+
+    #[test]
+    fn transmission_lines_suppress_nonfinite_ac_partials() {
+        let tline = CmContext::new();
+        assert!(
+            GenericTransmissionLine
+                .output_input_ac_partials(&tline, "in", 0.0)
+                .is_empty(),
+            "lossless tline is singular at zero-frequency AC"
+        );
+
+        let mline = microstrip_cache_context();
+        assert!(
+            MicrostripLine
+                .output_input_ac_partials(&mline, "port1", 0.0)
+                .is_empty(),
+            "lossless mlin is singular at zero-frequency AC"
+        );
+
+        let cpline = CmContext::new();
+        assert!(
+            CoupledTransmissionLine
+                .output_input_ac_partials(&cpline, "p1", 0.0)
+                .is_empty(),
+            "lossless cpline is singular at zero-frequency AC"
+        );
+
+        let cpmlin = coupled_microstrip_cache_context();
+        assert!(
+            CoupledMicrostripLine
+                .output_input_ac_partials(&cpmlin, "p1", 0.0)
+                .is_empty(),
+            "lossless cpmlin is singular at zero-frequency AC"
+        );
     }
 
     #[test]
