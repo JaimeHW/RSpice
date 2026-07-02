@@ -686,14 +686,6 @@ fn descending_to_denormalized_ascending(
         .collect()
 }
 
-fn s_xfer_improper_order(ctx: &CmContext) -> bool {
-    let numerator_desc = ctx.real_vector_param("num_coeff").unwrap_or(&[]);
-    let denominator_desc = ctx.real_vector_param("den_coeff").unwrap_or(&[]);
-    !numerator_desc.is_empty()
-        && !denominator_desc.is_empty()
-        && numerator_desc.len() > denominator_desc.len()
-}
-
 fn s_xfer_coefficients(ctx: &CmContext) -> CmResult<SXferCoefficients> {
     let numerator_desc = ctx.real_vector_param("num_coeff").unwrap_or(&[]);
     let denominator_desc = ctx.real_vector_param("den_coeff").unwrap_or(&[]);
@@ -781,11 +773,7 @@ fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCo
         return Ok(resource.coefficients.clone());
     }
 
-    let coefficients = if s_xfer_improper_order(ctx) {
-        None
-    } else {
-        Some(Arc::new(s_xfer_coefficients(ctx)?))
-    };
+    let coefficients = Some(Arc::new(s_xfer_coefficients(ctx)?));
     ctx.set_resource(
         SXFER_COEFFICIENT_RESOURCE,
         Arc::new(SXferCoefficientResource {
@@ -801,9 +789,6 @@ fn s_xfer_coefficients_for_context(ctx: &CmContext) -> CmResult<Option<Arc<SXfer
         if s_xfer_coefficient_signature_matches(ctx, &resource.signature) {
             return Ok(resource.coefficients.clone());
         }
-    }
-    if s_xfer_improper_order(ctx) {
-        return Ok(None);
     }
     s_xfer_coefficients(ctx).map(Arc::new).map(Some)
 }
@@ -1641,6 +1626,26 @@ mod tests {
         ctx.timestep = 0.25;
         ctx.init_output("out", PortType::Voltage);
         ctx
+    }
+
+    #[test]
+    fn s_xfer_rejects_improper_transfer_order() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_real_vector_param("num_coeff", vec![1.0, 0.0]);
+        ctx.set_real_vector_param("den_coeff", vec![1.0]);
+
+        let err = SXfer
+            .init(&mut ctx)
+            .expect_err("s_xfer must reject numerator order above denominator order");
+        let message = err.to_string();
+
+        assert!(
+            message.contains(
+                "Numerator coefficient array size greater than denominator coefficient array size"
+            ),
+            "s_xfer error should explain improper transfer order, got {message}"
+        );
     }
 
     #[test]
