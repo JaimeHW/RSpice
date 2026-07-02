@@ -573,7 +573,10 @@ impl Engine {
     ) {
         let (conductance, _) = instance.analog_vector_contribution_at(port_idx, output_index);
         match port.default_type {
-            crate::xspice::PortType::Voltage | crate::xspice::PortType::DifferentialVoltage => {
+            crate::xspice::PortType::Voltage
+            | crate::xspice::PortType::DifferentialVoltage
+            | crate::xspice::PortType::Hybrid
+            | crate::xspice::PortType::DifferentialHybrid => {
                 let Some(branch_ordinal) =
                     instance.branch_vector_output_ordinal(port_idx, output_index)
                 else {
@@ -794,7 +797,9 @@ impl Engine {
 
                 match port.default_type {
                     crate::xspice::PortType::Voltage
-                    | crate::xspice::PortType::DifferentialVoltage => {
+                    | crate::xspice::PortType::DifferentialVoltage
+                    | crate::xspice::PortType::Hybrid
+                    | crate::xspice::PortType::DifferentialHybrid => {
                         let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) else {
                             continue;
                         };
@@ -817,6 +822,15 @@ impl Engine {
                                     ac_matrix.add_real(br_idx, *neg - 1, -1.0);
                                     ac_matrix.add_real(*neg - 1, br_idx, -1.0);
                                 }
+                            }
+                            crate::xspice::PortConnection::Hybrid { pos, neg, .. } => {
+                                Self::stamp_xspice_ac_voltage_branch_topology(
+                                    circuit,
+                                    ac_matrix,
+                                    branch_ordinal,
+                                    *pos,
+                                    *neg,
+                                );
                             }
                             _ => continue,
                         }
