@@ -721,8 +721,7 @@ fn explicit_digital_bridge_kind_for_port(
 
     if model_name.eq_ignore_ascii_case("adc_bridge") && port.direction == PortDirection::Out {
         Some(XspiceAutoBridgeKind::Adc)
-    } else if model_name.eq_ignore_ascii_case("dac_bridge") && port.direction == PortDirection::In
-    {
+    } else if model_name.eq_ignore_ascii_case("dac_bridge") && port.direction == PortDirection::In {
         Some(XspiceAutoBridgeKind::Dac)
     } else if model_name.eq_ignore_ascii_case("bidi_bridge")
         && port.direction == PortDirection::InOut
