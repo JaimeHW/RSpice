@@ -166,17 +166,24 @@ fn table_uncached(ctx: &CmContext) -> CmResult<TableData> {
     let y = ctx
         .real_vector_param("y")
         .ok_or_else(|| CmError::MissingParameter("y".to_string()))?;
-    let effective_len = x.len().min(y.len());
-    if effective_len < 2 {
+    if x.len() != y.len() {
         return Err(invalid_param(
             "x/y",
-            format!("x and y require at least 2 common points, got {effective_len}"),
+            format!(
+                "x and y vectors must have the same length, got x={} y={}",
+                x.len(),
+                y.len()
+            ),
         ));
     }
-    let x = &x[..effective_len];
-    let y = &y[..effective_len];
+    if x.len() < 2 {
+        return Err(invalid_param(
+            "x/y",
+            format!("x and y require at least 2 common points, got {}", x.len()),
+        ));
+    }
 
-    let mut points = Vec::with_capacity(effective_len);
+    let mut points = Vec::with_capacity(x.len());
     for (idx, (&x_value, &y_value)) in x.iter().zip(y).enumerate() {
         if !x_value.is_finite() {
             return Err(invalid_param(
@@ -763,6 +770,20 @@ mod tests {
             "changed multi_input_pwl table parameters must refresh the parsed table"
         );
         assert_eq!(updated.points[2].y, 30.0);
+    }
+
+    #[test]
+    fn multi_input_rejects_mismatched_table_lengths() {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x", vec![0.0, 1.0, 2.0]);
+        ctx.set_real_vector_param("y", vec![0.0, 10.0]);
+
+        let err = table_uncached(&ctx).expect_err("mismatched tables must be rejected");
+        let message = err.to_string();
+        assert!(
+            message.contains("same length"),
+            "mismatched table error should explain the length problem, got {message}"
+        );
     }
 
     #[test]
