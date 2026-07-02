@@ -568,11 +568,36 @@ impl Engine {
         output_index: usize,
         pos: usize,
         neg: usize,
+        force_current_output: bool,
         frequency_hz: Value,
         num_nodes: usize,
     ) {
         let (conductance, _) =
             instance.analog_vector_small_signal_contribution_at(port_idx, output_index);
+        let stamp_as_current_output = force_current_output
+            || matches!(
+                port.default_type,
+                crate::xspice::PortType::Current
+                    | crate::xspice::PortType::DifferentialCurrent
+                    | crate::xspice::PortType::Conductance
+                    | crate::xspice::PortType::DifferentialConductance
+            );
+        if stamp_as_current_output {
+            let self_conductance =
+                Self::xspice_ac_current_output_self_conductance(port, conductance);
+            Self::stamp_xspice_ac_current_self_conductance(ac_matrix, pos, neg, self_conductance);
+            Self::stamp_xspice_ac_vector_current_controls(
+                ac_matrix,
+                instance,
+                &port.name,
+                output_index,
+                pos,
+                neg,
+                frequency_hz,
+                num_nodes,
+            );
+            return;
+        }
         match port.default_type {
             crate::xspice::PortType::Voltage
             | crate::xspice::PortType::DifferentialVoltage
@@ -597,29 +622,6 @@ impl Engine {
                     &port.name,
                     output_index,
                     branch - 1,
-                    frequency_hz,
-                    num_nodes,
-                );
-            }
-            crate::xspice::PortType::Current
-            | crate::xspice::PortType::DifferentialCurrent
-            | crate::xspice::PortType::Conductance
-            | crate::xspice::PortType::DifferentialConductance => {
-                let self_conductance =
-                    Self::xspice_ac_current_output_self_conductance(port, conductance);
-                Self::stamp_xspice_ac_current_self_conductance(
-                    ac_matrix,
-                    pos,
-                    neg,
-                    self_conductance,
-                );
-                Self::stamp_xspice_ac_vector_current_controls(
-                    ac_matrix,
-                    instance,
-                    &port.name,
-                    output_index,
-                    pos,
-                    neg,
                     frequency_hz,
                     num_nodes,
                 );
@@ -663,6 +665,7 @@ impl Engine {
                                     output_index,
                                     node,
                                     0,
+                                    false,
                                     frequency_hz,
                                     num_nodes,
                                 );
@@ -681,6 +684,7 @@ impl Engine {
                                             output_index,
                                             *node,
                                             0,
+                                            false,
                                             frequency_hz,
                                             num_nodes,
                                         );
@@ -689,10 +693,6 @@ impl Engine {
                                         pos,
                                         neg,
                                     )
-                                    | crate::xspice::AnalogInputConnection::CurrentOutput {
-                                        pos,
-                                        neg,
-                                    }
                                     | crate::xspice::AnalogInputConnection::Hybrid {
                                         pos,
                                         neg,
@@ -707,6 +707,25 @@ impl Engine {
                                             output_index,
                                             *pos,
                                             *neg,
+                                            false,
+                                            frequency_hz,
+                                            num_nodes,
+                                        );
+                                    }
+                                    crate::xspice::AnalogInputConnection::CurrentOutput {
+                                        pos,
+                                        neg,
+                                    } => {
+                                        Self::stamp_xspice_ac_vector_output_element(
+                                            circuit,
+                                            ac_matrix,
+                                            instance,
+                                            port,
+                                            port_idx,
+                                            output_index,
+                                            *pos,
+                                            *neg,
+                                            true,
                                             frequency_hz,
                                             num_nodes,
                                         );
