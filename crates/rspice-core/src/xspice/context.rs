@@ -1000,6 +1000,14 @@ impl CmContext {
             .unwrap_or_default()
     }
 
+    /// Borrow digital vector output values without cloning.
+    pub fn output_digital_vector_values(&self, name: &str) -> Option<&[DigitalValue]> {
+        match self.outputs.get(name) {
+            Some(OutputValue::DigitalVector(values)) => Some(values),
+            _ => None,
+        }
+    }
+
     /// Get one digital vector output element without cloning the full vector.
     pub fn output_digital_vector_value(&self, name: &str, index: usize) -> Option<DigitalValue> {
         match self.outputs.get(name) {

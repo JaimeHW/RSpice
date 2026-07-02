@@ -206,14 +206,19 @@ fn schedule_normalized_runtime_outputs(
     width: usize,
     delay: Value,
 ) {
+    let mut changes = Vec::new();
+    let previous_values = ctx.output_digital_vector_values(port_name);
     for index in 0..width {
-        let previous = ctx
-            .output_digital_vector_value(port_name, index)
+        let previous = previous_values
+            .and_then(|values| values.get(index).copied())
             .unwrap_or_else(DigitalValue::zero);
         let value = runtime_values.get(index).copied().unwrap_or(previous);
         if previous != value {
-            ctx.set_output_digital_vector_element(port_name, index, value, delay);
+            changes.push((index, value));
         }
+    }
+    for (index, value) in changes {
+        ctx.set_output_digital_vector_element(port_name, index, value, delay);
     }
 }
 
