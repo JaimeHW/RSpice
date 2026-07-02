@@ -1299,6 +1299,53 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_coerces_bool_runtime_loop_assignment_to_real() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module bool_to_real_runtime_loop_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    integer i;
+    real acc, enabled, term;
+    analog begin
+        acc = 0.0;
+        enabled = 0.0;
+        for (i = 0; i < nf; i = i + 1) begin
+            enabled = (i == 0);
+            term = enabled * V(p, n);
+            acc = acc + term;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("bool-to-real runtime loop assignment should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("let mut r0_"), "{stamp}");
+        assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
+        assert!(stamp.contains("{1.0}else{0.0}"), "{stamp}");
+        assert!(!stamp.contains("{true}else{false}"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_parameter_bounded_inclusive_runtime_for_loop() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
