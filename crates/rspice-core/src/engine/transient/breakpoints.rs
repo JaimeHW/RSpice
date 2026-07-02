@@ -412,7 +412,7 @@ impl Engine {
                     .string_param("input_file")
                     .filter(|path| !path.trim().is_empty())
                     .unwrap_or("source.txt");
-                match std::fs::read_to_string(input_file) {
+                match crate::xspice::read_data_file_to_string(input_file) {
                     Ok(contents) => {
                         for (line_idx, line) in contents.lines().enumerate() {
                             let trimmed = line.trim();
@@ -422,19 +422,16 @@ impl Engine {
                             let Some(time_token) = trimmed.split_whitespace().next() else {
                                 continue;
                             };
-                            match crate::netlist::lexer::parse_spice_value(time_token) {
-                                Ok(time) => {
-                                    Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
-                                }
-                                Err(err) => {
-                                    log::warn!(
-                                        "Failed to parse d_source breakpoint time '{}' in '{}' line {}: {:?}",
-                                        time_token,
-                                        input_file,
-                                        line_idx + 1,
-                                        err
-                                    );
-                                }
+                            let time = crate::xspice::parse_data_file_spice_value(time_token);
+                            if time.is_finite() {
+                                Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+                            } else {
+                                log::warn!(
+                                    "Failed to parse d_source breakpoint time '{}' in '{}' line {}",
+                                    time_token,
+                                    input_file,
+                                    line_idx + 1
+                                );
                             }
                         }
                     }

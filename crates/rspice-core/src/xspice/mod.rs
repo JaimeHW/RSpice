@@ -58,6 +58,10 @@ pub mod models;
 // Re-export primary types
 pub use context::{AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase};
 pub use data_file::{clear_registered_data_files, register_data_file, unregister_data_file};
+pub(crate) use data_file::{
+    parse_ngspice_spice_value as parse_data_file_spice_value,
+    read_to_string as read_data_file_to_string,
+};
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
 pub use event::{Event, EventQueue, EventValue};
 pub use external::{
