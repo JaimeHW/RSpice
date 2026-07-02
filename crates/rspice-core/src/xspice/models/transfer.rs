@@ -191,6 +191,16 @@ fn xfer_error(message: impl Into<String>) -> CmError {
     }
 }
 
+fn reserve_xfer_points(source: &str, row_count: usize) -> CmResult<Vec<XferPoint>> {
+    let mut points = Vec::new();
+    points.try_reserve_exact(row_count).map_err(|err| {
+        xfer_error(format!(
+            "{source} has {row_count} row(s), unable to reserve transfer points: {err}"
+        ))
+    })?;
+    Ok(points)
+}
+
 fn xfer_param_error(name: &str, message: impl Into<String>) -> CmError {
     CmError::InvalidParameter {
         name: name.to_string(),
@@ -294,7 +304,7 @@ fn xfer_table_from_model(ctx: &CmContext) -> CmResult<Vec<XferPoint>> {
     let db = xfer_bool_param(ctx, "db")?;
     let rad = xfer_bool_param(ctx, "rad")?;
     let row_count = table.len() / span;
-    let mut points = Vec::with_capacity(row_count);
+    let mut points = reserve_xfer_points("table parameter", row_count)?;
     let mut last_frequency = None;
     for row in table.chunks_exact(span) {
         let frequency = row[0];
@@ -468,7 +478,10 @@ fn xfer_table_from_touchstone(
         };
     }
     let rows = parse_touchstone_rows(&contents, span, offset);
-    let mut points = Vec::with_capacity(rows.len());
+    let mut points = match reserve_xfer_points(file, rows.len()) {
+        Ok(points) => points,
+        Err(err) => return (file_virtual_stamp, Err(err)),
+    };
     for [frequency, a, b] in rows {
         // ngspice parses the Touchstone frequency unit token for xfer files
         // but stores the raw frequency value without applying the multiplier.
