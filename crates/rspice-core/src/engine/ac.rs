@@ -571,7 +571,8 @@ impl Engine {
         frequency_hz: Value,
         num_nodes: usize,
     ) {
-        let (conductance, _) = instance.analog_vector_contribution_at(port_idx, output_index);
+        let (conductance, _) =
+            instance.analog_vector_small_signal_contribution_at(port_idx, output_index);
         match port.default_type {
             crate::xspice::PortType::Voltage
             | crate::xspice::PortType::DifferentialVoltage
@@ -649,7 +650,7 @@ impl Engine {
                     continue;
                 }
 
-                if instance.has_analog_vector_contributions(port_idx) {
+                if instance.has_analog_vector_small_signal_contributions(port_idx) {
                     match connection {
                         crate::xspice::PortConnection::AnalogVector(nodes) => {
                             for (output_index, node) in nodes.iter().copied().enumerate() {

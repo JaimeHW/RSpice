@@ -2106,6 +2106,22 @@ impl XspiceInstance {
         })
     }
 
+    /// Whether a port has analog vector small-signal output data available.
+    ///
+    /// DC stamping intentionally limits `has_analog_vector_contributions` to
+    /// output ports because inout conductance models may already queue
+    /// explicit matrix stamps. AC matrix assembly uses this broader predicate
+    /// to read the converged linearization without re-evaluating the model.
+    pub fn has_analog_vector_small_signal_contributions(&self, port_idx: usize) -> bool {
+        self.ports.get(port_idx).is_some_and(|port| {
+            matches!(
+                port.direction,
+                super::PortDirection::Out | super::PortDirection::InOut
+            ) && port.is_vector
+                && port.default_type.is_analog()
+        })
+    }
+
     /// Get one analog vector contribution without allocating the full vector.
     pub fn analog_vector_contribution_at(
         &self,
@@ -2116,6 +2132,25 @@ impl XspiceInstance {
             return (0.0, 0.0);
         };
         if !self.has_analog_vector_contributions(port_idx) {
+            return (0.0, 0.0);
+        }
+
+        (
+            self.context.partial_vector_value(&port.name, output_index),
+            self.context.output_vector_value(&port.name, output_index),
+        )
+    }
+
+    /// Get one analog vector small-signal contribution for AC assembly.
+    pub fn analog_vector_small_signal_contribution_at(
+        &self,
+        port_idx: usize,
+        output_index: usize,
+    ) -> (Value, Value) {
+        let Some(port) = self.ports.get(port_idx) else {
+            return (0.0, 0.0);
+        };
+        if !self.has_analog_vector_small_signal_contributions(port_idx) {
             return (0.0, 0.0);
         }
 
