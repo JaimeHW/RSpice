@@ -17,6 +17,21 @@ fn official_bridge_timing(value: Value) -> Value {
     value.max(OFFICIAL_BRIDGE_TIMING_MIN)
 }
 
+fn finite_bridge_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("{model_name} parameter must be finite, got {value}"),
+        });
+    }
+    Ok(value)
+}
+
+fn bridge_timing_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResult<Value> {
+    finite_bridge_param(ctx, model_name, name).map(official_bridge_timing)
+}
+
 fn official_bridge_resistance(value: Value) -> Value {
     value.max(OFFICIAL_BRIDGE_RESISTANCE_MIN)
 }
@@ -107,10 +122,10 @@ impl CodeModel for AdcBridge {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let width = bridge_vector_width(ctx, "adc_bridge")?;
-        let in_low = ctx.param("in_low");
-        let in_high = ctx.param("in_high");
-        let rise_delay = official_bridge_timing(ctx.param("rise_delay"));
-        let fall_delay = official_bridge_timing(ctx.param("fall_delay"));
+        let in_low = finite_bridge_param(ctx, "adc_bridge", "in_low")?;
+        let in_high = finite_bridge_param(ctx, "adc_bridge", "in_high")?;
+        let rise_delay = bridge_timing_param(ctx, "adc_bridge", "rise_delay")?;
+        let fall_delay = bridge_timing_param(ctx, "adc_bridge", "fall_delay")?;
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
         for index in 0..width {
@@ -936,14 +951,14 @@ fn dac_bridge_state_base(index: usize) -> usize {
     index * 4
 }
 
-fn dac_bridge_out_undef(ctx: &CmContext, out_low: Value, out_high: Value) -> Value {
+fn dac_bridge_out_undef(ctx: &CmContext, out_low: Value, out_high: Value) -> CmResult<Value> {
     if ctx.param_was_provided("out_low")
         && ctx.param_was_provided("out_high")
         && !ctx.param_was_provided("out_undef")
     {
-        out_low + (out_high - out_low) / 2.0
+        Ok(out_low + (out_high - out_low) / 2.0)
     } else {
-        ctx.param("out_undef")
+        finite_bridge_param(ctx, "dac_bridge", "out_undef")
     }
 }
 
@@ -1003,9 +1018,9 @@ impl CodeModel for DacBridge {
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let width = bridge_vector_width(ctx, "dac_bridge")?;
         ctx.allocate_states(4 * width);
-        let out_low = ctx.param("out_low");
-        let out_high = ctx.param("out_high");
-        let undef = dac_bridge_out_undef(ctx, out_low, out_high);
+        let out_low = finite_bridge_param(ctx, "dac_bridge", "out_low")?;
+        let out_high = finite_bridge_param(ctx, "dac_bridge", "out_high")?;
+        let undef = dac_bridge_out_undef(ctx, out_low, out_high)?;
         for index in 0..width {
             let base = dac_bridge_state_base(index);
             ctx.set_initial_state(base, undef);
@@ -1018,11 +1033,11 @@ impl CodeModel for DacBridge {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let width = bridge_vector_width(ctx, "dac_bridge")?;
-        let out_low = ctx.param("out_low");
-        let out_high = ctx.param("out_high");
-        let out_undef = dac_bridge_out_undef(ctx, out_low, out_high);
-        let t_rise = official_bridge_timing(ctx.param("t_rise"));
-        let t_fall = official_bridge_timing(ctx.param("t_fall"));
+        let out_low = finite_bridge_param(ctx, "dac_bridge", "out_low")?;
+        let out_high = finite_bridge_param(ctx, "dac_bridge", "out_high")?;
+        let out_undef = dac_bridge_out_undef(ctx, out_low, out_high)?;
+        let t_rise = bridge_timing_param(ctx, "dac_bridge", "t_rise")?;
+        let t_fall = bridge_timing_param(ctx, "dac_bridge", "t_fall")?;
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
         for index in 0..width {
@@ -1544,6 +1559,30 @@ mod tests {
     }
 
     #[test]
+    fn adc_bridge_rejects_nonfinite_thresholds() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 1);
+        ctx.set_port_width("out", 1);
+        ctx.set_param("in_low", f64::NAN);
+        ctx.set_param("in_high", 0.9);
+        ctx.set_param("rise_delay", 1.0e-9);
+        ctx.set_param("fall_delay", 1.0e-9);
+        ctx.init_output_vector("out", PortType::Digital, 1);
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(0.5)]));
+
+        AdcBridge.init(&mut ctx).expect("adc_bridge initializes");
+        let err = AdcBridge
+            .evaluate(&mut ctx)
+            .expect_err("adc_bridge must reject nonfinite thresholds");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("adc_bridge parameter must be finite"),
+            "adc_bridge error should explain nonfinite threshold, got {message}"
+        );
+    }
+
+    #[test]
     fn dac_bridge_rollbackable_probe_does_not_commit_ramp_state_or_breakpoints() {
         let mut ctx = CmContext::new();
         ctx.set_port_width("in", 1);
@@ -1610,6 +1649,26 @@ mod tests {
         assert_eq!(ctx.state(base + 2), 0.0);
         assert_eq!(ctx.state(base + 3), 0.0);
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
+    }
+
+    #[test]
+    fn dac_bridge_rejects_nonfinite_output_levels() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 1);
+        ctx.set_port_width("out", 1);
+        ctx.set_param("out_low", 0.0);
+        ctx.set_param("out_high", 1.0);
+        ctx.set_param("out_undef", f64::NAN);
+
+        let err = DacBridge
+            .init(&mut ctx)
+            .expect_err("dac_bridge must reject nonfinite output levels");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("dac_bridge parameter must be finite"),
+            "dac_bridge error should explain nonfinite output level, got {message}"
+        );
     }
 
     #[test]
