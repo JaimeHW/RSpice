@@ -275,12 +275,9 @@ fn prune_transient_history(
         return;
     }
     let oldest_kept = time - retention_window;
-    let prune_count = history
-        .iter()
-        .take_while(|sample| {
-            sample.time < oldest_kept && !same_transient_time(sample.time, oldest_kept)
-        })
-        .count();
+    let prune_count = history.partition_point(|sample| {
+        sample.time < oldest_kept && !same_transient_time(sample.time, oldest_kept)
+    });
     if prune_count > 0 {
         history.drain(0..prune_count);
     }
