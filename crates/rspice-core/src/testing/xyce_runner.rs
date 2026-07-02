@@ -3647,21 +3647,76 @@ impl XyceTestRunner {
         for probe in &print.probes {
             Self::validate_tran_probe(probe, netlist)?;
         }
-        Self::validate_native_transient_contract(netlist)?;
+        Self::validate_native_transient_contract(&netlist.elements, &netlist.params)?;
 
         Ok(())
     }
 
-    fn validate_native_transient_contract(netlist: &Netlist) -> Result<(), String> {
-        for element in &netlist.elements {
+    fn validate_native_transient_contract(
+        elements: &[crate::netlist::Element],
+        params: &crate::netlist::ParamContext,
+    ) -> Result<(), String> {
+        for element in elements {
             match &element.kind {
                 ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_) => {}
+                ElementKind::Vcvs { gain, .. } => {
+                    Self::validate_finite_controlled_source_gain(
+                        "VCVS",
+                        &element.name,
+                        "gain",
+                        *gain,
+                    )?;
+                }
+                ElementKind::Vccs {
+                    transconductance, ..
+                } => {
+                    Self::validate_finite_controlled_source_gain(
+                        "VCCS",
+                        &element.name,
+                        "transconductance",
+                        *transconductance,
+                    )?;
+                }
+                ElementKind::Cccs {
+                    gain,
+                    control_element,
+                } => {
+                    Self::validate_finite_controlled_source_gain(
+                        "CCCS",
+                        &element.name,
+                        "gain",
+                        *gain,
+                    )?;
+                    Self::validate_current_controlled_source_probe(
+                        elements,
+                        "CCCS",
+                        &element.name,
+                        control_element,
+                    )?;
+                }
+                ElementKind::Ccvs {
+                    transresistance,
+                    control_element,
+                } => {
+                    Self::validate_finite_controlled_source_gain(
+                        "CCVS",
+                        &element.name,
+                        "transresistance",
+                        *transresistance,
+                    )?;
+                    Self::validate_current_controlled_source_probe(
+                        elements,
+                        "CCVS",
+                        &element.name,
+                        control_element,
+                    )?;
+                }
                 ElementKind::BehavioralVoltage { expression, .. }
                 | ElementKind::BehavioralCurrent { expression, .. } => {
                     Self::validate_transient_behavioral_expression(
                         &element.name,
                         expression,
-                        &netlist.params,
+                        params,
                     )?;
                 }
                 ElementKind::Resistor { value_expr, .. } => {
@@ -3689,7 +3744,7 @@ impl XyceTestRunner {
                         value_expr.as_deref(),
                         model.as_deref(),
                         instance_params,
-                        &netlist.params,
+                        params,
                     )?;
                 }
                 ElementKind::Inductor {
@@ -3706,7 +3761,7 @@ impl XyceTestRunner {
                         value_expr.as_deref(),
                         model.as_deref(),
                         instance_params,
-                        &netlist.params,
+                        params,
                     )?;
                 }
                 _ => {
@@ -3718,6 +3773,36 @@ impl XyceTestRunner {
             }
         }
         Ok(())
+    }
+
+    fn validate_finite_controlled_source_gain(
+        source_kind: &str,
+        element_name: &str,
+        value_name: &str,
+        value: Value,
+    ) -> Result<(), String> {
+        if value.is_finite() {
+            Ok(())
+        } else {
+            Err(format!(
+                "native static .PRINT TRAN comparison does not support {source_kind} element '{element_name}' with non-finite {value_name} {value}"
+            ))
+        }
+    }
+
+    fn validate_current_controlled_source_probe(
+        elements: &[crate::netlist::Element],
+        source_kind: &str,
+        element_name: &str,
+        control_element: &str,
+    ) -> Result<(), String> {
+        if Self::elements_have_recorded_branch_current(elements, control_element) {
+            Ok(())
+        } else {
+            Err(format!(
+                "native static .PRINT TRAN comparison does not support {source_kind} element '{element_name}' because controlling element '{control_element}' has no recorded branch current"
+            ))
+        }
     }
 
     fn validate_static_transient_passive_value(
