@@ -2609,12 +2609,22 @@ impl XyceTestRunner {
         let reference_step = Self::reference_min_positive_time_step(reference)?;
         let source_step = Self::source_frequency_transient_max_step(netlist, tran);
         let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
-        let max_step = [requested, reference_step, source_step, Some(fallback)]
-            .into_iter()
-            .flatten()
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .reduce(Value::min)
-            .unwrap_or(fallback);
+        let reference_limited_step = if Self::netlist_has_capacitor(netlist) {
+            None
+        } else {
+            reference_step
+        };
+        let max_step = [
+            requested,
+            reference_limited_step,
+            source_step,
+            Some(fallback),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .reduce(Value::min)
+        .unwrap_or(fallback);
         if !max_step.is_finite() || max_step <= 0.0 {
             return Err(format!(
                 "resolved transient maximum step must be finite and positive, got {max_step}"
@@ -2749,6 +2759,13 @@ impl XyceTestRunner {
             .get(time_column)
             .is_some_and(|column| Self::normalize_probe(column) == "time")
             .then_some(time_column)
+    }
+
+    fn netlist_has_capacitor(netlist: &Netlist) -> bool {
+        netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Capacitor { .. }))
     }
 
     fn compare_step_res_reference(
@@ -3370,13 +3387,80 @@ impl XyceTestRunner {
                         ));
                     }
                 }
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    ..
+                } => {
+                    Self::validate_static_transient_passive_value(
+                        "capacitor",
+                        &element.name,
+                        *value,
+                        value_expr.as_deref(),
+                        model.as_deref(),
+                        instance_params,
+                        &netlist.params,
+                    )?;
+                }
                 _ => {
                     return Err(format!(
-                        "native static .PRINT TRAN comparison currently supports independent, behavioral, and static-resistor transient decks; element '{}' requires a broader transient oracle contract",
+                        "native static .PRINT TRAN comparison currently supports independent, behavioral, and static R/C transient decks; element '{}' requires a broader transient oracle contract",
                         element.name
                     ));
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn validate_static_transient_passive_value(
+        device_kind: &str,
+        element_name: &str,
+        value: Value,
+        value_expr: Option<&str>,
+        model: Option<&str>,
+        instance_params: &[(String, Value)],
+        params: &crate::netlist::ParamContext,
+    ) -> Result<(), String> {
+        if model.is_some() {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not yet support model-based {device_kind} value resolution on element '{element_name}'"
+            ));
+        }
+        if !instance_params.is_empty() {
+            let names = instance_params
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not yet support {device_kind} instance parameter(s) {names} on element '{element_name}'"
+            ));
+        }
+        if value.is_finite() {
+            return Ok(());
+        }
+        let Some(expression) = value_expr else {
+            return Err(format!(
+                "native static .PRINT TRAN comparison could not resolve {device_kind} value for element '{element_name}'"
+            ));
+        };
+        let prepared = prepare_behavioral_expression(expression, params).map_err(|err| {
+            format!(
+                "native static .PRINT TRAN comparison could not prepare {device_kind} value expression '{expression}' on element '{element_name}': {err}"
+            )
+        })?;
+        let ast = parse_expression_strict(&prepared).map_err(|err| {
+            format!(
+                "native static .PRINT TRAN comparison does not yet support {device_kind} value expression '{expression}' on element '{element_name}': {err}"
+            )
+        })?;
+        if Self::passive_value_expression_depends_on_runtime_quantity(&ast) {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not yet support runtime-dependent {device_kind} value expression '{expression}' on element '{element_name}'"
+            ));
         }
         Ok(())
     }
@@ -3405,6 +3489,23 @@ impl XyceTestRunner {
             ));
         }
         Ok(())
+    }
+
+    fn passive_value_expression_depends_on_runtime_quantity(expression: &Expr) -> bool {
+        match expression {
+            Expr::Const(_) | Expr::Temperature => false,
+            Expr::NodeVoltage(_) | Expr::BranchCurrent(_) | Expr::Time | Expr::Frequency => true,
+            Expr::Unary { operand, .. } => {
+                Self::passive_value_expression_depends_on_runtime_quantity(operand)
+            }
+            Expr::Binary { left, right, .. } => {
+                Self::passive_value_expression_depends_on_runtime_quantity(left)
+                    || Self::passive_value_expression_depends_on_runtime_quantity(right)
+            }
+            Expr::Function { args, .. } => args
+                .iter()
+                .any(Self::passive_value_expression_depends_on_runtime_quantity),
+        }
     }
 
     fn behavioral_expression_depends_on_time_or_frequency(expression: &Expr) -> bool {
