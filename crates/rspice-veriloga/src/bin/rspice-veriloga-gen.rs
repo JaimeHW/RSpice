@@ -2,8 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 use rspice_veriloga::rust_backend::{
-    BuiltinBackendFallbackReason, generate_generated_builtin_subset_with_progress,
-    regenerate_generated_builtins_with_progress, validate_generated_builtins,
+    BuiltinBackendFallbackReason, generate_generated_builtin_subset_with_progress_and_jobs,
+    regenerate_generated_builtins_with_progress_and_jobs, validate_generated_builtins,
 };
 
 type CommandResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -22,6 +22,7 @@ struct Options {
     generated_root: PathBuf,
     generator_root: PathBuf,
     filter: Option<String>,
+    jobs: Option<usize>,
 }
 
 fn main() {
@@ -44,11 +45,12 @@ fn run() -> CommandResult<()> {
                         .into(),
                 );
             }
-            let report = regenerate_generated_builtins_with_progress(
+            let report = regenerate_generated_builtins_with_progress_and_jobs(
                 &options.model_root,
                 &options.generated_root,
                 &options.generator_root,
                 true,
+                options.jobs,
             )?;
             println!(
                 "regenerated {} Verilog-A built-ins at {}",
@@ -71,11 +73,12 @@ fn run() -> CommandResult<()> {
             let Some(filter) = options.filter.as_deref() else {
                 return Err("generate-builtins-subset requires --filter FILTER".into());
             };
-            let report = generate_generated_builtin_subset_with_progress(
+            let report = generate_generated_builtin_subset_with_progress_and_jobs(
                 &options.model_root,
                 &options.generated_root,
                 filter,
                 true,
+                options.jobs,
             )?;
             println!(
                 "generated {} filtered Verilog-A built-ins at {}",
@@ -94,6 +97,9 @@ fn run() -> CommandResult<()> {
         Command::CheckBuiltins => {
             if options.filter.is_some() {
                 return Err("--filter is not supported by check-builtins".into());
+            }
+            if options.jobs.is_some() {
+                return Err("--jobs is not supported by check-builtins".into());
             }
             let manifest = validate_generated_builtins(
                 &options.model_root,
@@ -151,6 +157,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Op
     };
     let mut generator_root = workspace_root.join("crates/rspice-veriloga");
     let mut filter = None;
+    let mut jobs = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -166,6 +173,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Op
             "--filter" => {
                 filter = Some(string_arg("--filter", args.next())?);
             }
+            "--jobs" => {
+                jobs = Some(usize_arg("--jobs", args.next())?);
+            }
             "-h" | "--help" => {
                 return Ok(None);
             }
@@ -179,6 +189,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Op
         generated_root,
         generator_root,
         filter,
+        jobs,
     }))
 }
 
@@ -192,6 +203,13 @@ fn string_arg(flag: &str, value: Option<String>) -> CommandResult<String> {
     value.ok_or_else(|| format!("{flag} requires an argument").into())
 }
 
+fn usize_arg(flag: &str, value: Option<String>) -> CommandResult<usize> {
+    let value = string_arg(flag, value)?;
+    value
+        .parse::<usize>()
+        .map_err(|error| format!("{flag} requires a positive integer: {error}").into())
+}
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -203,8 +221,8 @@ fn workspace_root() -> PathBuf {
 fn usage() -> String {
     [
         "usage:",
-        "  cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins [--models PATH] [--out PATH]",
-        "  cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- generate-builtins-subset --filter FILTER [--models PATH] [--out PATH]",
+        "  cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins [--models PATH] [--out PATH] [--jobs N]",
+        "  cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- generate-builtins-subset --filter FILTER [--models PATH] [--out PATH] [--jobs N]",
         "  cargo run -p rspice-veriloga --bin rspice-veriloga-gen -- check-builtins [--models PATH] [--out PATH]",
     ]
     .join("\n")

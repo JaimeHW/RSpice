@@ -1,7 +1,10 @@
+use std::collections::VecDeque;
+use std::env;
 use std::fmt::Write;
 use std::fs;
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::canonical_ir::StableDigest;
@@ -95,12 +98,28 @@ pub fn regenerate_generated_builtins_with_progress(
     generator_root: &Path,
     progress: bool,
 ) -> BuiltinResult<BuiltinGenerationReport> {
+    regenerate_generated_builtins_with_progress_and_jobs(
+        model_root,
+        generated_root,
+        generator_root,
+        progress,
+        None,
+    )
+}
+
+pub fn regenerate_generated_builtins_with_progress_and_jobs(
+    model_root: &Path,
+    generated_root: &Path,
+    generator_root: &Path,
+    progress: bool,
+    jobs: Option<usize>,
+) -> BuiltinResult<BuiltinGenerationReport> {
     validate_model_root(model_root)?;
 
     let source_tree_digest = tree_digest(model_root, false)?;
     let generator_digest = generator_digest(generator_root, false)?;
     let (devices, backend_counts, fallback_reasons) =
-        generate_devices_with_stack(model_root.to_path_buf(), None, progress)?;
+        generate_devices_with_stack(model_root.to_path_buf(), None, progress, jobs)?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any discovered modules",
@@ -134,10 +153,30 @@ pub fn generate_generated_builtin_subset_with_progress(
     filter: &str,
     progress: bool,
 ) -> BuiltinResult<BuiltinSubsetGenerationReport> {
+    generate_generated_builtin_subset_with_progress_and_jobs(
+        model_root,
+        generated_root,
+        filter,
+        progress,
+        None,
+    )
+}
+
+pub fn generate_generated_builtin_subset_with_progress_and_jobs(
+    model_root: &Path,
+    generated_root: &Path,
+    filter: &str,
+    progress: bool,
+    jobs: Option<usize>,
+) -> BuiltinResult<BuiltinSubsetGenerationReport> {
     validate_model_root(model_root)?;
 
-    let (devices, backend_counts, fallback_reasons) =
-        generate_devices_with_stack(model_root.to_path_buf(), Some(filter.to_string()), progress)?;
+    let (devices, backend_counts, fallback_reasons) = generate_devices_with_stack(
+        model_root.to_path_buf(),
+        Some(filter.to_string()),
+        progress,
+        jobs,
+    )?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any modules matching filter '{filter}'",
@@ -422,6 +461,7 @@ fn generate_devices(
     model_root: &Path,
     filter: Option<&str>,
     progress: bool,
+    requested_jobs: Option<usize>,
 ) -> BuiltinResult<(
     Vec<GeneratedRustDevice>,
     BuiltinBackendSelectionCounts,
@@ -435,89 +475,30 @@ fn generate_devices(
     let filter = filter.map(BuiltinSourceFilter::new).transpose()?;
     let work_items = builtin_module_work_items(model_root, &candidates, filter.as_ref());
     let total_modules = work_items.len();
-    let mut options = CompilerOptions::default();
-    options.include_paths.push(model_root.to_path_buf());
-    let compiler = VerilogACompiler::new(options);
-    let transpiler = RustTranspiler::new_auto(Default::default());
-    let mut devices = Vec::new();
+    let jobs = builtin_generator_jobs(requested_jobs, total_modules)?;
+    if progress && total_modules > 0 {
+        eprintln!(
+            "generating {total_modules} Verilog-A built-ins with {jobs} generator job{}",
+            if jobs == 1 { "" } else { "s" }
+        );
+        let _ = std::io::stderr().flush();
+    }
+
+    let generated = if jobs <= 1 {
+        generate_devices_sequential(model_root, work_items, progress)?
+    } else {
+        generate_devices_parallel(model_root, work_items, progress, jobs)?
+    };
+
+    let mut devices = Vec::with_capacity(generated.len());
     let mut backend_counts = BuiltinBackendSelectionCounts::default();
     let mut fallback_reasons = Vec::new();
-    let mut module_index = 0usize;
-
-    for item in work_items {
-        module_index += 1;
-        if progress {
-            eprintln!(
-                "generating Verilog-A built-in {module_index}/{total_modules}: {} :: {}",
-                item.path
-                    .strip_prefix(model_root)
-                    .unwrap_or(&item.path)
-                    .display(),
-                item.module
-            );
-            let _ = std::io::stderr().flush();
+    for generated in generated {
+        backend_counts.record(generated.backend);
+        if let Some(reason) = generated.fallback_reason {
+            fallback_reasons.push(reason);
         }
-        let started = Instant::now();
-        let compiled =
-            compiler.compile_file_canonical_ir_with_metadata(&item.path, Some(&item.module))?;
-        if progress {
-            eprintln!(
-                "compiled Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:.2?})",
-                item.path
-                    .strip_prefix(model_root)
-                    .unwrap_or(&item.path)
-                    .display(),
-                item.module,
-                started.elapsed()
-            );
-            let _ = std::io::stderr().flush();
-        }
-        let transpile_started = Instant::now();
-        if progress {
-            eprintln!(
-                "transpiling Verilog-A built-in {module_index}/{total_modules}: {} :: {}",
-                item.path
-                    .strip_prefix(model_root)
-                    .unwrap_or(&item.path)
-                    .display(),
-                item.module
-            );
-            let _ = std::io::stderr().flush();
-        }
-        let report = transpiler.transpile_with_report(&compiled.artifact)?;
-        backend_counts.record(report.backend);
-        if let Some(reason) = &report.fallback_reason {
-            fallback_reasons.push(BuiltinBackendFallbackReason {
-                source: item
-                    .path
-                    .strip_prefix(model_root)
-                    .unwrap_or(&item.path)
-                    .to_path_buf(),
-                module: item.module.clone(),
-                backend: report.backend,
-                reason: reason.clone(),
-            });
-        }
-        if progress {
-            let fallback = report
-                .fallback_reason
-                .as_ref()
-                .map(|reason| format!(", fallback: {reason}"))
-                .unwrap_or_default();
-            eprintln!(
-                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:?}{fallback}, transpile {:.2?}, total {:.2?})",
-                item.path
-                    .strip_prefix(model_root)
-                    .unwrap_or(&item.path)
-                    .display(),
-                item.module,
-                report.backend,
-                transpile_started.elapsed(),
-                started.elapsed()
-            );
-            let _ = std::io::stderr().flush();
-        }
-        devices.push(report.device);
+        devices.push(generated.device);
     }
 
     devices.sort_by(|left, right| {
@@ -526,6 +507,275 @@ fn generate_devices(
             .then_with(|| left.folder_name.cmp(&right.folder_name))
     });
     Ok((devices, backend_counts, fallback_reasons))
+}
+
+fn generate_devices_sequential(
+    model_root: &Path,
+    work_items: Vec<BuiltinModuleWorkItem>,
+    progress: bool,
+) -> BuiltinResult<Vec<GeneratedBuiltinModule>> {
+    let total_modules = work_items.len();
+    let mut options = CompilerOptions::default();
+    options.include_paths.push(model_root.to_path_buf());
+    let compiler = VerilogACompiler::new(options);
+    let transpiler = RustTranspiler::new_auto(Default::default());
+    let mut generated = Vec::with_capacity(total_modules);
+    for (index, item) in work_items.into_iter().enumerate() {
+        generated.push(generate_device_work_item(
+            model_root,
+            &compiler,
+            &transpiler,
+            item,
+            index,
+            total_modules,
+            progress,
+            None,
+        )?);
+    }
+    Ok(generated)
+}
+
+fn generate_devices_parallel(
+    model_root: &Path,
+    work_items: Vec<BuiltinModuleWorkItem>,
+    progress: bool,
+    jobs: usize,
+) -> BuiltinResult<Vec<GeneratedBuiltinModule>> {
+    let total_modules = work_items.len();
+    let queue: VecDeque<_> = work_items.into_iter().enumerate().collect();
+    let queue = Arc::new(Mutex::new(queue));
+    let generated = Arc::new(Mutex::new(Vec::with_capacity(total_modules)));
+    let progress_lock = Arc::new(Mutex::new(()));
+    let first_error = Arc::new(Mutex::new(None::<String>));
+    let mut handles = Vec::with_capacity(jobs);
+
+    for worker in 0..jobs {
+        let model_root = model_root.to_path_buf();
+        let queue = Arc::clone(&queue);
+        let generated = Arc::clone(&generated);
+        let progress_lock = Arc::clone(&progress_lock);
+        let first_error = Arc::clone(&first_error);
+        let handle = std::thread::Builder::new()
+            .name(format!("rspice-veriloga-builtin-generator-{worker}"))
+            .stack_size(256 * 1024 * 1024)
+            .spawn(move || -> Result<(), String> {
+                let mut options = CompilerOptions::default();
+                options.include_paths.push(model_root.clone());
+                let compiler = VerilogACompiler::new(options);
+                let transpiler = RustTranspiler::new_auto(Default::default());
+
+                loop {
+                    if first_error
+                        .lock()
+                        .expect("generator error lock poisoned")
+                        .is_some()
+                    {
+                        return Ok(());
+                    }
+                    let Some((index, item)) = queue
+                        .lock()
+                        .expect("generator work queue lock poisoned")
+                        .pop_front()
+                    else {
+                        return Ok(());
+                    };
+                    let result = generate_device_work_item(
+                        &model_root,
+                        &compiler,
+                        &transpiler,
+                        item,
+                        index,
+                        total_modules,
+                        progress,
+                        Some(&progress_lock),
+                    )
+                    .map_err(|error| error.to_string());
+                    match result {
+                        Ok(module) => generated
+                            .lock()
+                            .expect("generator result lock poisoned")
+                            .push(module),
+                        Err(error) => {
+                            *first_error.lock().expect("generator error lock poisoned") =
+                                Some(error.clone());
+                            return Err(error);
+                        }
+                    }
+                }
+            })?;
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        match handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(error.into()),
+            Err(_) => return Err("Verilog-A built-in generator worker panicked".into()),
+        }
+    }
+
+    if let Some(error) = first_error
+        .lock()
+        .expect("generator error lock poisoned")
+        .clone()
+    {
+        return Err(error.into());
+    }
+
+    let mut generated = Arc::try_unwrap(generated)
+        .map_err(|_| "Verilog-A generated module results still have references")?
+        .into_inner()
+        .map_err(|_| "Verilog-A generated module result lock is poisoned")?;
+    generated.sort_by_key(|module| module.index);
+    Ok(generated)
+}
+
+fn generate_device_work_item(
+    model_root: &Path,
+    compiler: &VerilogACompiler,
+    transpiler: &RustTranspiler,
+    item: BuiltinModuleWorkItem,
+    index: usize,
+    total_modules: usize,
+    progress: bool,
+    progress_lock: Option<&Mutex<()>>,
+) -> BuiltinResult<GeneratedBuiltinModule> {
+    let module_index = index + 1;
+    let relative_source = item
+        .path
+        .strip_prefix(model_root)
+        .unwrap_or(&item.path)
+        .to_path_buf();
+    if progress {
+        log_generation_progress(
+            progress_lock,
+            format!(
+                "generating Verilog-A built-in {module_index}/{total_modules}: {} :: {}",
+                relative_source.display(),
+                item.module
+            ),
+        );
+    }
+    let started = Instant::now();
+    let compiled =
+        compiler.compile_file_canonical_ir_with_metadata(&item.path, Some(&item.module))?;
+    if progress {
+        log_generation_progress(
+            progress_lock,
+            format!(
+                "compiled Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:.2?})",
+                relative_source.display(),
+                item.module,
+                started.elapsed()
+            ),
+        );
+    }
+    let transpile_started = Instant::now();
+    if progress {
+        log_generation_progress(
+            progress_lock,
+            format!(
+                "transpiling Verilog-A built-in {module_index}/{total_modules}: {} :: {}",
+                relative_source.display(),
+                item.module
+            ),
+        );
+    }
+    let report = transpiler.transpile_with_report(&compiled.artifact)?;
+    let fallback_reason =
+        report
+            .fallback_reason
+            .as_ref()
+            .map(|reason| BuiltinBackendFallbackReason {
+                source: relative_source.clone(),
+                module: item.module.clone(),
+                backend: report.backend,
+                reason: reason.clone(),
+            });
+    if progress {
+        let fallback = report
+            .fallback_reason
+            .as_ref()
+            .map(|reason| format!(", fallback: {reason}"))
+            .unwrap_or_default();
+        log_generation_progress(
+            progress_lock,
+            format!(
+                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:?}{fallback}, transpile {:.2?}, total {:.2?})",
+                relative_source.display(),
+                item.module,
+                report.backend,
+                transpile_started.elapsed(),
+                started.elapsed()
+            ),
+        );
+    }
+
+    Ok(GeneratedBuiltinModule {
+        index,
+        device: report.device,
+        backend: report.backend,
+        fallback_reason,
+    })
+}
+
+fn log_generation_progress(progress_lock: Option<&Mutex<()>>, message: String) {
+    if let Some(progress_lock) = progress_lock {
+        let _guard = progress_lock
+            .lock()
+            .expect("generator progress lock poisoned");
+        eprintln!("{message}");
+        let _ = std::io::stderr().flush();
+    } else {
+        eprintln!("{message}");
+        let _ = std::io::stderr().flush();
+    }
+}
+
+fn builtin_generator_jobs(requested: Option<usize>, total_modules: usize) -> BuiltinResult<usize> {
+    if total_modules <= 1 {
+        validate_requested_generator_jobs(requested)?;
+        return Ok(1);
+    }
+
+    let requested = match requested {
+        Some(jobs) => Some(jobs),
+        None => env::var("RSPICE_VERILOGA_GENERATOR_JOBS")
+            .ok()
+            .map(|value| {
+                value.parse::<usize>().map_err(|error| {
+                    format!("RSPICE_VERILOGA_GENERATOR_JOBS must be a positive integer: {error}")
+                })
+            })
+            .transpose()?,
+    };
+    let jobs = if let Some(jobs) = requested {
+        if jobs == 0 {
+            return Err("Verilog-A generator --jobs must be at least 1".into());
+        }
+        jobs
+    } else {
+        std::thread::available_parallelism()
+            .map(|available| available.get())
+            .unwrap_or(1)
+            .min(4)
+    };
+    Ok(jobs.clamp(1, total_modules))
+}
+
+fn validate_requested_generator_jobs(requested: Option<usize>) -> BuiltinResult<()> {
+    if requested == Some(0) {
+        return Err("Verilog-A generator --jobs must be at least 1".into());
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct GeneratedBuiltinModule {
+    index: usize,
+    device: GeneratedRustDevice,
+    backend: RustBackendSelection,
+    fallback_reason: Option<BuiltinBackendFallbackReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -589,6 +839,7 @@ fn generate_devices_with_stack(
     model_root: PathBuf,
     filter: Option<String>,
     progress: bool,
+    jobs: Option<usize>,
 ) -> Result<
     (
         Vec<GeneratedRustDevice>,
@@ -601,7 +852,7 @@ fn generate_devices_with_stack(
         .name("rspice-veriloga-builtin-generator".to_string())
         .stack_size(256 * 1024 * 1024)
         .spawn(move || {
-            generate_devices(&model_root, filter.as_deref(), progress)
+            generate_devices(&model_root, filter.as_deref(), progress, jobs)
                 .map_err(|error| error.to_string())
         })?
         .join()
@@ -647,6 +898,17 @@ mod tests {
         assert_eq!(work_items.len(), 2);
         assert_eq!(work_items[0].module, "hicuml2");
         assert_eq!(work_items[1].module, "hicuml0");
+    }
+
+    #[test]
+    fn builtin_generator_jobs_clamps_requested_jobs_to_work_items() {
+        assert_eq!(builtin_generator_jobs(Some(99), 3).expect("jobs"), 3);
+    }
+
+    #[test]
+    fn builtin_generator_jobs_rejects_zero_jobs() {
+        let error = builtin_generator_jobs(Some(0), 3).expect_err("zero jobs must fail");
+        assert!(error.to_string().contains("must be at least 1"));
     }
 }
 

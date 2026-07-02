@@ -14,8 +14,9 @@ pub use builtins::{
     BuiltinBackendFallbackReason, BuiltinBackendSelectionCounts, BuiltinGenerationReport,
     BuiltinSubsetGenerationReport, GENERATED_BUILTIN_MANIFEST_FILE_NAME,
     REGENERATE_BUILTINS_COMMAND, generate_generated_builtin_subset_with_progress,
-    regenerate_generated_builtins, regenerate_generated_builtins_with_progress,
-    validate_generated_builtins,
+    generate_generated_builtin_subset_with_progress_and_jobs, regenerate_generated_builtins,
+    regenerate_generated_builtins_with_progress,
+    regenerate_generated_builtins_with_progress_and_jobs, validate_generated_builtins,
 };
 pub use device::render_runtime_support_module;
 pub use discover::{
