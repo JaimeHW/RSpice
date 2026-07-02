@@ -695,7 +695,7 @@ fn bidi_current_target(
             (
                 target,
                 partial,
-                params.out_high / params.r_high + params.out_low / params.r_low,
+                bidi_resistive_unknown_range(params.out_low, g_low, params.out_high, g_high),
             )
         }
         DigitalStrength::HighZ => (0.0, 0.0, params.drive_high.max(params.drive_low)),
@@ -736,6 +736,15 @@ fn bidi_resistive_unknown_target(
         let partial = lower_conductance + upper_conductance;
         ((voltage - voc) * partial, partial)
     }
+}
+
+fn bidi_resistive_unknown_range(
+    out_low: Value,
+    low_conductance: Value,
+    out_high: Value,
+    high_conductance: Value,
+) -> Value {
+    out_low.abs() * low_conductance + out_high.abs() * high_conductance
 }
 
 fn bidi_advance_current(
@@ -1810,6 +1819,27 @@ mod tests {
         let (above_current, above_partial, _) = bidi_current_target(6.0, drive, 0.5, params);
         assert!((above_current - 0.0003).abs() <= 1.0e-15);
         assert!((above_partial - 0.00005).abs() <= 1.0e-15);
+    }
+
+    #[test]
+    fn bidi_bridge_resistive_unknown_range_handles_bipolar_rails() {
+        let mut ctx = CmContext::new();
+        set_bidi_default_params(&mut ctx, 0.0);
+        ctx.set_param("out_low", -5.0);
+        ctx.set_param("out_high", 5.0);
+        ctx.set_param("r_low", 10_000.0);
+        ctx.set_param("r_high", 10_000.0);
+        let params = bidi_params(&ctx);
+        let drive = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Resistive);
+
+        let (_, _, range) = bidi_current_target(0.0, drive, 0.5, params);
+        assert!((range - 0.001).abs() <= 1.0e-15);
+
+        let current = bidi_advance_current(0.0, 0.001, 0.5e-9, range, params);
+        assert!(
+            (current - 0.0005).abs() <= 1.0e-15,
+            "bipolar rails should not cancel the bidi_bridge current transition range"
+        );
     }
 
     fn set_bidi_default_params(ctx: &mut CmContext, smooth: Value) {
