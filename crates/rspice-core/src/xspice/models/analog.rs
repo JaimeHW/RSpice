@@ -1882,35 +1882,44 @@ fn interpolate_delay_history(ctx: &CmContext, buffer_size: usize, target_time: V
     prev_value + alpha * (current_value - prev_value)
 }
 
-fn effective_delay(ctx: &CmContext) -> Value {
+fn effective_delay(ctx: &CmContext) -> CmResult<Value> {
     let delay = if ctx.param("has_delay_cnt") > 0.5 {
         let raw_delmax_provided = ctx.param_was_provided("delmax");
         let raw_delmax = if raw_delmax_provided {
-            ctx.param("delmax")
+            finite_analog_scalar_param(ctx, "delay", "delmax")?
         } else {
             ctx.transient_stop_time()
                 .unwrap_or_else(|| ctx.param("delmax"))
         };
+        if !raw_delmax.is_finite() {
+            return Err(CmError::InvalidParameter {
+                name: "delmax".to_string(),
+                message: format!("delay parameter must be finite, got {raw_delmax}"),
+            });
+        }
+        let raw_delmin = finite_analog_scalar_param(ctx, "delay", "delmin")?;
         let delmin = if raw_delmax_provided && raw_delmax < 0.0 {
             // ngspice's cm_delay negative-delmax branch resets tdelmin before
             // reconciling max < min, so both bounds collapse to zero.
             0.0
         } else {
-            controlled_delay_bound(ctx, ctx.param("delmin"))
+            controlled_delay_bound(ctx, raw_delmin)
         };
         let delmax = controlled_delay_bound(ctx, raw_delmax).max(delmin);
         let control = ctx.input("cntrl").clamp(0.0, 1.0);
         delmin + (delmax - delmin) * control
     } else {
-        ctx.param("delay").max(0.0)
+        finite_analog_scalar_param(ctx, "delay", "delay")?.max(0.0)
     };
 
     let cutoff_step = ctx.transient_step_hint().unwrap_or(ctx.timestep);
-    if cutoff_step.is_finite() && cutoff_step > 0.0 && delay < cutoff_step {
-        0.0
-    } else {
-        delay
-    }
+    Ok(
+        if cutoff_step.is_finite() && cutoff_step > 0.0 && delay < cutoff_step {
+            0.0
+        } else {
+            delay
+        },
+    )
 }
 
 impl CodeModel for AnalogDelayLine {
@@ -1983,6 +1992,7 @@ impl CodeModel for AnalogDelayLine {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(ctx, "delay", &["delay", "delmin", "delmax"])?;
         let buffer_size = delay_buffer_size(ctx)?;
         ctx.allocate_states(delay_state_count(buffer_size)?);
         ctx.allocate_int_states(3);
@@ -2005,7 +2015,7 @@ impl CodeModel for AnalogDelayLine {
             append_delay_sample(ctx, buffer_size, input);
         }
 
-        let delay = effective_delay(ctx);
+        let delay = effective_delay(ctx)?;
         let output = if delay <= DELAY_TIME_EPSILON {
             input
         } else {
@@ -4099,12 +4109,46 @@ mod tests {
         ctx.mark_param_provided("delmax");
         ctx.set_input_analog("cntrl", 0.5);
 
-        let delay = effective_delay(&ctx);
+        let delay = effective_delay(&ctx).expect("finite negative delmax remains accepted");
 
         assert_eq!(
             delay, 0.0,
             "ngspice cm_delay resets tdelmin when a provided delmax is negative"
         );
+    }
+
+    #[test]
+    fn delay_rejects_nonfinite_scalar_params() {
+        for (param, value) in [
+            ("delay", f64::NAN),
+            ("delmin", f64::INFINITY),
+            ("delmax", f64::NEG_INFINITY),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_param(param, value);
+
+            let err = AnalogDelayLine
+                .init(&mut ctx)
+                .expect_err("delay must reject nonfinite scalar parameters");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "delay {param} produced {err:?}"
+            );
+            assert!(
+                err.to_string().contains(param),
+                "delay error should name rejected parameter {param}: {err}"
+            );
+        }
+
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        AnalogDelayLine
+            .init(&mut ctx)
+            .expect("default delay params are valid");
+        ctx.set_param("delay", f64::NAN);
+        AnalogDelayLine
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite delay params must fail at evaluation time");
     }
 
     #[test]
