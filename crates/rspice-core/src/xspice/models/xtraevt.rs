@@ -25,10 +25,10 @@ fn digital_to_real_value(ctx: &CmContext) -> Value {
         0.0
     } else if input.state.is_low() {
         zero
-    } else if input.state.is_unknown() {
-        midpoint
-    } else {
+    } else if input.state.is_high() {
         one
+    } else {
+        midpoint
     }
 }
 
@@ -517,6 +517,20 @@ mod tests {
             Some(0.0),
             "ngspice only enables d_to_real when enable is exactly ONE"
         );
+    }
+
+    #[test]
+    fn d_to_real_high_z_input_maps_to_unknown_midpoint_like_ngspice() {
+        let mut ctx = CmContext::new();
+        ctx.set_param("zero", -2.0);
+        ctx.set_param("one", 4.0);
+        ctx.set_input_digital("in", DigitalValue::high_z());
+
+        DigitalToReal
+            .evaluate(&mut ctx)
+            .expect("d_to_real evaluates");
+
+        assert_eq!(ctx.output_real("out"), Some(1.0));
     }
 
     #[test]
