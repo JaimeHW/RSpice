@@ -51,6 +51,13 @@ struct DMemoryShapeResource {
     shape: DMemoryShape,
 }
 
+#[derive(Debug)]
+struct DMemoryInputCodes {
+    address: Vec<i64>,
+    data: Vec<i64>,
+    select: Vec<i64>,
+}
+
 fn d_ram_data_start(address_width: usize) -> usize {
     D_RAM_ADDRESS_START + address_width
 }
@@ -173,14 +180,30 @@ fn d_ram_value_from_code(code: i64, strength: DigitalStrength) -> DigitalValue {
     DigitalValue::new(state, strength)
 }
 
-fn d_ram_input_state_code(ctx: &CmContext, name: &str, index: usize) -> i64 {
-    ctx.input_digital_vector_values(name)
-        .and_then(|values| values.get(index).copied())
-        .map(d_ram_state_code)
-        .unwrap_or_else(|| d_ram_state_code(DigitalValue::default()))
+fn d_ram_vector_state_codes(ctx: &CmContext, name: &str, width: usize) -> Vec<i64> {
+    let values = ctx.input_digital_vector_values(name).unwrap_or(&[]);
+    let mut codes = Vec::with_capacity(width);
+    for index in 0..width {
+        codes.push(
+            values
+                .get(index)
+                .copied()
+                .map(d_ram_state_code)
+                .unwrap_or_else(|| d_ram_state_code(DigitalValue::default())),
+        );
+    }
+    codes
 }
 
-fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape) -> i64 {
+fn d_ram_input_codes(ctx: &CmContext, shape: DMemoryShape) -> DMemoryInputCodes {
+    DMemoryInputCodes {
+        address: d_ram_vector_state_codes(ctx, "address", shape.address_width),
+        data: d_ram_vector_state_codes(ctx, "data_in", shape.word_width),
+        select: d_ram_vector_state_codes(ctx, "select", shape.select_width),
+    }
+}
+
+fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape, select_codes: &[i64]) -> i64 {
     let select_value = d_ram_integer_param(
         ctx,
         "select_value",
@@ -191,7 +214,7 @@ fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape) -> i64 {
 
     for bit_idx in 0..shape.select_width {
         let expected = (select_value >> bit_idx) & 1;
-        if d_ram_input_state_code(ctx, "select", bit_idx) != expected {
+        if select_codes[bit_idx] != expected {
             return 0;
         }
     }
@@ -211,10 +234,8 @@ fn d_ram_address_index_from_codes(address: impl Iterator<Item = i64>) -> Option<
     Some(index)
 }
 
-fn d_ram_address_index(ctx: &CmContext, shape: DMemoryShape) -> Option<usize> {
-    d_ram_address_index_from_codes(
-        (0..shape.address_width).map(|index| d_ram_input_state_code(ctx, "address", index)),
-    )
+fn d_ram_address_index(address_codes: &[i64]) -> Option<usize> {
+    d_ram_address_index_from_codes(address_codes.iter().copied())
 }
 
 fn d_ram_memory_index(shape: DMemoryShape, address_index: usize, bit: usize) -> usize {
@@ -322,6 +343,7 @@ fn d_ram_write_word(
     scratch_state: &mut Option<&mut [i64]>,
     shape: DMemoryShape,
     address_index: Option<usize>,
+    data_codes: &[i64],
 ) {
     let Some(address_index) = address_index else {
         d_ram_fill_memory_state(ctx, scratch_state, shape, 2);
@@ -329,7 +351,7 @@ fn d_ram_write_word(
     };
 
     for bit in 0..shape.word_width {
-        let code = d_ram_input_state_code(ctx, "data_in", bit);
+        let code = data_codes[bit];
         d_ram_set_memory_state(ctx, scratch_state, shape, address_index, bit, code);
     }
 }
@@ -342,19 +364,17 @@ fn d_ram_set_outputs(
     strength: DigitalStrength,
     delay: Value,
 ) {
-    ctx.set_output_digital_vector_from_context_fn(
-        "data_out",
-        shape.word_width,
-        delay,
-        |source_ctx, bit| {
+    let values: Vec<_> = (0..shape.word_width)
+        .map(|bit| {
             let code = address_index
                 .map(|address_index| {
-                    d_ram_memory_state(source_ctx, scratch_state, shape, address_index, bit)
+                    d_ram_memory_state(ctx, scratch_state, shape, address_index, bit)
                 })
                 .unwrap_or(2);
             d_ram_value_from_code(code, strength)
-        },
-    );
+        })
+        .collect();
+    ctx.set_output_digital_vector_from_slice("data_out", &values, delay);
 }
 
 fn d_ram_set_uniform_outputs(
@@ -365,31 +385,29 @@ fn d_ram_set_uniform_outputs(
     delay: Value,
 ) {
     let value = d_ram_value_from_code(code, strength);
-    ctx.set_output_digital_vector_from_context_fn("data_out", shape.word_width, delay, |_, _| {
-        value
-    });
+    let values = vec![value; shape.word_width];
+    ctx.set_output_digital_vector_from_slice("data_out", &values, delay);
 }
 
 fn d_ram_set_input_data_outputs(
     ctx: &mut CmContext,
     shape: DMemoryShape,
     address_index: Option<usize>,
+    data_codes: &[i64],
     strength: DigitalStrength,
     delay: Value,
 ) {
-    ctx.set_output_digital_vector_from_context_fn(
-        "data_out",
-        shape.word_width,
-        delay,
-        |source_ctx, bit| {
+    let values: Vec<_> = (0..shape.word_width)
+        .map(|bit| {
             let code = if address_index.is_some() {
-                d_ram_input_state_code(source_ctx, "data_in", bit)
+                data_codes[bit]
             } else {
                 2
             };
             d_ram_value_from_code(code, strength)
-        },
-    );
+        })
+        .collect();
+    ctx.set_output_digital_vector_from_slice("data_out", &values, delay);
 }
 
 fn d_ram_store_previous(
@@ -398,16 +416,15 @@ fn d_ram_store_previous(
     shape: DMemoryShape,
     write_en: i64,
     select: i64,
+    inputs: &DMemoryInputCodes,
 ) {
     d_ram_set_state(ctx, scratch_state, D_RAM_PREV_WRITE_EN, write_en);
     d_ram_set_state(ctx, scratch_state, D_RAM_PREV_SELECT, select);
-    for idx in 0..shape.address_width {
-        let code = d_ram_input_state_code(ctx, "address", idx);
+    for (idx, code) in inputs.address.iter().copied().enumerate() {
         d_ram_set_state(ctx, scratch_state, D_RAM_ADDRESS_START + idx, code);
     }
     let data_start = d_ram_data_start(shape.address_width);
-    for idx in 0..shape.word_width {
-        let code = d_ram_input_state_code(ctx, "data_in", idx);
+    for (idx, code) in inputs.data.iter().copied().enumerate() {
         d_ram_set_state(ctx, scratch_state, data_start + idx, code);
     }
 }
@@ -416,23 +433,21 @@ fn d_ram_previous_address_changed(
     ctx: &CmContext,
     scratch_state: Option<&[i64]>,
     shape: DMemoryShape,
+    address_codes: &[i64],
 ) -> bool {
-    (0..shape.address_width).any(|idx| {
-        d_ram_state(ctx, scratch_state, D_RAM_ADDRESS_START + idx)
-            != d_ram_input_state_code(ctx, "address", idx)
-    })
+    (0..shape.address_width)
+        .any(|idx| d_ram_state(ctx, scratch_state, D_RAM_ADDRESS_START + idx) != address_codes[idx])
 }
 
 fn d_ram_previous_data_changed(
     ctx: &CmContext,
     scratch_state: Option<&[i64]>,
     shape: DMemoryShape,
+    data_codes: &[i64],
 ) -> bool {
     let data_start = d_ram_data_start(shape.address_width);
-    (0..shape.word_width).any(|idx| {
-        d_ram_state(ctx, scratch_state, data_start + idx)
-            != d_ram_input_state_code(ctx, "data_in", idx)
-    })
+    (0..shape.word_width)
+        .any(|idx| d_ram_state(ctx, scratch_state, data_start + idx) != data_codes[idx])
 }
 
 fn d_ram_evaluate_with_state(
@@ -441,6 +456,7 @@ fn d_ram_evaluate_with_state(
     write_en: i64,
     select: i64,
     address_index: Option<usize>,
+    inputs: &DMemoryInputCodes,
     ic: i64,
     read_delay: Value,
     mut scratch_state: Option<&mut [i64]>,
@@ -455,7 +471,7 @@ fn d_ram_evaluate_with_state(
         }
 
         d_ram_set_state(ctx, &mut scratch_state, D_RAM_INITIALIZED, 1);
-        d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select);
+        d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select, inputs);
         return Ok(());
     }
 
@@ -474,11 +490,12 @@ fn d_ram_evaluate_with_state(
                     read_delay,
                 );
             } else {
-                d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
+                d_ram_write_word(ctx, &mut scratch_state, shape, address_index, &inputs.data);
                 d_ram_set_input_data_outputs(
                     ctx,
                     shape,
                     address_index,
+                    &inputs.data,
                     DigitalStrength::HighZ,
                     read_delay,
                 );
@@ -487,16 +504,17 @@ fn d_ram_evaluate_with_state(
             d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, read_delay);
         }
     } else if write_changed
-        || d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape)
-        || d_ram_previous_data_changed(ctx, scratch_state.as_deref(), shape)
+        || d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape, &inputs.address)
+        || d_ram_previous_data_changed(ctx, scratch_state.as_deref(), shape, &inputs.data)
     {
         if write_en == 1 {
             if select == 1 {
-                d_ram_write_word(ctx, &mut scratch_state, shape, address_index);
+                d_ram_write_word(ctx, &mut scratch_state, shape, address_index, &inputs.data);
                 d_ram_set_input_data_outputs(
                     ctx,
                     shape,
                     address_index,
+                    &inputs.data,
                     DigitalStrength::HighZ,
                     read_delay,
                 );
@@ -513,7 +531,7 @@ fn d_ram_evaluate_with_state(
         }
     }
 
-    d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select);
+    d_ram_store_previous(ctx, &mut scratch_state, shape, write_en, select, inputs);
     Ok(())
 }
 
@@ -570,9 +588,10 @@ impl CodeModel for DigitalRam {
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let shape = d_ram_cached_shape(ctx)?;
+        let inputs = d_ram_input_codes(ctx, shape);
         let write_en = d_ram_state_code(ctx.input_digital("write_en").unwrap_or_default());
-        let select = d_ram_select_code(ctx, shape);
-        let address_index = d_ram_address_index(ctx, shape);
+        let select = d_ram_select_code(ctx, shape, &inputs.select);
+        let address_index = d_ram_address_index(&inputs.address);
         let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX);
         let read_delay = d_ram_read_delay(ctx);
 
@@ -590,6 +609,7 @@ impl CodeModel for DigitalRam {
                 write_en,
                 select,
                 address_index,
+                &inputs,
                 ic,
                 read_delay,
                 Some(scratch.as_mut_slice()),
@@ -602,6 +622,7 @@ impl CodeModel for DigitalRam {
             write_en,
             select,
             address_index,
+            &inputs,
             ic,
             read_delay,
             None,
