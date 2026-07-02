@@ -460,36 +460,12 @@ fn transient_phase(
     Ok(phase)
 }
 
-fn phase_fraction(phase: Value) -> Value {
-    phase - phase.floor()
-}
-
 fn c_truncated_fraction(phase: Value) -> Value {
     phase - phase.trunc()
 }
 
 fn request_absolute_breakpoint(ctx: &mut CmContext, time: Value) {
     if waveform_commits_state(ctx) && time.is_finite() && time >= ctx.time {
-        ctx.request_breakpoint(time);
-    }
-}
-
-fn request_next_phase_breakpoint(
-    ctx: &mut CmContext,
-    phase: Value,
-    frequency: Value,
-    target: Value,
-) {
-    if !frequency.is_finite() || frequency <= 0.0 || !target.is_finite() || target < 0.0 {
-        return;
-    }
-
-    let mut target_phase = phase.floor() + target;
-    while target_phase <= phase + 1.0e-15 {
-        target_phase += 1.0;
-    }
-    let time = ctx.time + (target_phase - phase) / frequency;
-    if waveform_commits_state(ctx) {
         ctx.request_breakpoint(time);
     }
 }
@@ -773,17 +749,8 @@ impl CodeModel for TriangleOscillator {
         let duty = duty_cycle(ctx)?;
         let amplitude = high - low;
 
-        let output = if !frequency.is_finite() {
+        let output = if !frequency.is_finite() || frequency == 0.0 {
             low
-        } else if frequency >= 0.0 {
-            let frac = phase_fraction(phase);
-            request_next_phase_breakpoint(ctx, phase, frequency, duty);
-            request_next_phase_breakpoint(ctx, phase, frequency, 1.0);
-            if frac <= duty {
-                low + (frac / duty) * amplitude
-            } else {
-                high + ((frac - duty) / (1.0 - duty)) * (low - high)
-            }
         } else {
             let mut time1 = ctx.state_prev(TRIANGLE_TIME1_STATE);
             let mut time2 = ctx.state_prev(TRIANGLE_TIME2_STATE);
