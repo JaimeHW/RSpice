@@ -215,6 +215,72 @@ r0 out 0 1k
 }
 
 #[test]
+fn filesource_prefers_ngspice_input_dir_over_current_directory_like_ngspice() {
+    let unique = format!(
+        "rspice-xspice-filesource-env-precedence-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos()
+    );
+    let relative_path = PathBuf::from("target").join(&unique).join("stim.txt");
+    let relative_spice_path = relative_path.to_string_lossy().replace('\\', "/");
+
+    let current_fixture_root = std::env::current_dir()
+        .expect("current directory is available")
+        .join("target")
+        .join(&unique);
+    fs::create_dir_all(&current_fixture_root).expect("create current-dir fixture");
+    fs::write(
+        current_fixture_root.join("stim.txt"),
+        "\
+0 10
+1e-9 10
+",
+    )
+    .expect("write current-dir filesource fixture");
+    let _current_fixture = TempDir {
+        dir: current_fixture_root,
+    };
+
+    let env_dir = TempDir::new("rspice-xspice-filesource-env-precedence");
+    let env_fixture = env_dir.dir.join(&relative_path);
+    fs::create_dir_all(env_fixture.parent().expect("env fixture has parent"))
+        .expect("create NGSPICE_INPUT_DIR fixture");
+    fs::write(
+        env_fixture,
+        "\
+0 0
+1e-9 1
+",
+    )
+    .expect("write NGSPICE_INPUT_DIR filesource fixture");
+    let _env_guard = NgspiceInputDirGuard::set(&env_dir.dir);
+
+    let netlist = Netlist::parse(&format!(
+        "\
+* XSPICE filesource NGSPICE_INPUT_DIR precedence
+a_src out fs
+.model fs filesource (file=\"{relative_spice_path}\" amploffset=[0] amplscale=[1])
+r0 out 0 1k
+.end
+"
+    ))
+    .expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 1.0e-9, 0.25e-9)
+        .expect("transient solves");
+    let out = transient_node_series(&result, "out");
+
+    let mid = value_at_time(&result.time, out, 0.5e-9);
+    assert!(
+        (mid - 0.5).abs() < 1.0e-3,
+        "filesource should prefer NGSPICE_INPUT_DIR over current directory, got {mid}"
+    );
+}
+
+#[test]
 fn filesource_reads_registered_virtual_data_file() {
     let _guard = DataFileRegistryGuard::new();
     register_data_file(

@@ -210,14 +210,16 @@ fn ngspice_input_dir_path(path: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(input_dir).join(path))
 }
 
-fn fallback_error(
-    primary: &std::io::Error,
+fn native_path_error(
+    preferred: &Path,
+    preferred_err: &std::io::Error,
     fallback: &Path,
-    fallback_err: std::io::Error,
+    fallback_err: &std::io::Error,
 ) -> String {
     format!(
-        "{}; NGSPICE_INPUT_DIR fallback '{}' failed: {}",
-        primary,
+        "'{}' failed: {}; fallback '{}' failed: {}",
+        preferred.display(),
+        preferred_err,
         fallback.display(),
         fallback_err
     )
@@ -232,16 +234,24 @@ fn read_native_to_string_with_stamp(path: &str) -> Result<(Arc<str>, DataFileSta
     }
 
     let path_ref = Path::new(path);
-    match read_path(path_ref) {
-        Ok(file) => Ok(file),
-        Err(primary) => {
-            if let Some(fallback) = ngspice_input_dir_path(path_ref) {
-                return read_path(&fallback)
-                    .map_err(|fallback_err| fallback_error(&primary, &fallback, fallback_err));
-            }
-            Err(primary.to_string())
+    if let Some(preferred) = ngspice_input_dir_path(path_ref) {
+        match read_path(&preferred) {
+            Ok(file) => return Ok(file),
+            Err(preferred_err) => match read_path(path_ref) {
+                Ok(file) => return Ok(file),
+                Err(fallback_err) => {
+                    return Err(native_path_error(
+                        &preferred,
+                        &preferred_err,
+                        path_ref,
+                        &fallback_err,
+                    ));
+                }
+            },
         }
     }
+
+    read_path(path_ref).map_err(|err| err.to_string())
 }
 
 fn native_stamp(path: &str) -> Result<DataFileStamp, String> {
