@@ -262,7 +262,7 @@ impl EventQueue {
                 if let Some(e) = self.events.pop() {
                     if self.remove_active_event(&e) {
                         self.events_processed += 1;
-                        self.last_event_time = time;
+                        self.last_event_time = e.time;
                         sink(e);
                     }
                 }
@@ -276,23 +276,22 @@ impl EventQueue {
     pub fn pop_events_exactly_at(&mut self, time: Value) -> Vec<Event> {
         const EPSILON: Value = 1e-18;
         let mut events = Vec::new();
-        while let Some(event) = self.events.peek() {
-            if event.time < time - EPSILON
-                && !self.active_event_priorities.contains(&event.priority)
-            {
-                self.events.pop();
-            } else if (event.time - time).abs() < EPSILON {
-                if let Some(e) = self.events.pop() {
-                    if self.remove_active_event(&e) {
-                        events.push(e);
-                        self.events_processed += 1;
-                        self.last_event_time = time;
-                    }
+        let mut retained = BinaryHeap::with_capacity(self.events.len());
+        while let Some(event) = self.events.pop() {
+            if !self.active_event_priorities.contains(&event.priority) {
+                continue;
+            }
+            if (event.time - time).abs() < EPSILON {
+                if self.remove_active_event(&event) {
+                    self.events_processed += 1;
+                    self.last_event_time = event.time;
+                    events.push(event);
                 }
             } else {
-                break;
+                retained.push(event);
             }
         }
+        self.events = retained;
         events
     }
 
@@ -562,6 +561,62 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].node_id, 2);
         assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn event_queue_exact_pop_is_not_blocked_by_earlier_active_events() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule(Event::new(
+            1.0e-9,
+            1,
+            "out",
+            "early_driver",
+            EventValue::Digital(DigitalValue::zero()),
+        ));
+        queue.schedule(Event::new(
+            2.0e-9,
+            2,
+            "out",
+            "target_driver",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        queue.schedule(Event::new(
+            3.0e-9,
+            3,
+            "out",
+            "late_driver",
+            EventValue::Digital(DigitalValue::unknown()),
+        ));
+
+        let events = queue.pop_events_exactly_at(2.0e-9);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].node_id, 2);
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.next_event_time(), Some(1.0e-9));
+
+        let remaining = queue.pop_events_at(3.0e-9);
+        let remaining_nodes: Vec<_> = remaining.iter().map(|event| event.node_id).collect();
+        assert_eq!(remaining_nodes, vec![1, 3]);
+    }
+
+    #[test]
+    fn event_queue_stats_record_actual_processed_event_time() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule(Event::new(
+            1.0e-9,
+            1,
+            "out",
+            "driver",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+
+        let events = queue.pop_events_at(2.0e-9);
+        assert_eq!(events.len(), 1);
+        let stats = queue.stats();
+        assert_eq!(stats.processed, 1);
+        assert_eq!(stats.last_event_time, 1.0e-9);
     }
 
     #[test]
