@@ -259,8 +259,13 @@ endmodule
         assert!(
             error
                 .message
-                .contains("model cannot be lowered by scalar Rust backends"),
+                .contains("model cannot be lowered by generated Rust backends"),
             "{error}"
+        );
+        assert!(
+            error
+                .message
+                .contains("legacy path: indirect contributions")
         );
     }
 
@@ -1345,19 +1350,21 @@ module self_alias_operand_history_snapshot(p, n);
     inout p, n;
     electrical p, n;
     parameter integer mode = 1 from [0:1];
-    real a, b, c, d, total;
+    real a, b, c, d, e, total;
     analog begin
         a = V(p, n);
         b = 2.0 * V(p, n);
         c = 3.0 * V(p, n);
         d = 4.0 * V(p, n);
+        e = 5.0 * V(p, n);
         total = 1.0;
-        total = total + a + b + c + d;
+        total = total + a + b + c + d + e;
 
         a = $simparam("unused_later_a");
         b = $simparam("unused_later_b");
         c = $simparam("unused_later_c");
         d = $simparam("unused_later_d");
+        e = $simparam("unused_later_e");
 
         if (mode == 0) begin
             total = $simparam("inactive_total");
@@ -1375,6 +1382,87 @@ endmodule
         let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
             .transpile_with_report(&artifact)
             .expect("self alias history should replay from assignment-time operand snapshots");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_replays_selective_mid_size_self_update_history() {
+        let mut source = String::from(
+            r#"
+module selective_mid_size_history(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real pad, state;
+    analog begin
+        state = $simparam("unsupported_initial_state");
+        state = (mode == 1) ? V(p, n) : state;
+"#,
+        );
+        for _ in 0..3500 {
+            source.push_str("        pad = (((pad + 1.0) + (2.0 * 3.0)) + (4.0 / 5.0));\n");
+        }
+        source.push_str(
+            r#"
+        I(p, n) <+ ((mode == 1) ? state : 0.0);
+    end
+endmodule
+"#,
+        );
+
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .expect("canonical IR");
+        assert!(
+            artifact.hir.expressions.len() > 20_000,
+            "fixture must exceed complete expanded-history threshold"
+        );
+        assert!(
+            artifact.hir.statements.len() <= 5_000,
+            "fixture must stay within selective history statement gate"
+        );
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("selective current-path history should lower to scalar OptIR");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+    }
+
+    #[test]
+    fn scalar_backend_coerces_boolean_assignment_history_to_real() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module boolean_real_assignment_history(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real state;
+    analog begin
+        state = $simparam("unsupported_initial_state");
+        state = (mode == 1) ? (V(p, n) > 0.0) : state;
+        I(p, n) <+ ((mode == 1) ? state : 0.0);
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("boolean history assigned to a real variable should be scalar-coerced");
 
         let stamp = report
             .device
@@ -1921,7 +2009,7 @@ endmodule
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
         assert!(stamp.contains("let mut r0_"), "{stamp}");
         assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
-        assert!(stamp.contains("{1.0}else{0.0}"), "{stamp}");
+        assert!(stamp.contains("}else{v0}"), "{stamp}");
         assert!(!stamp.contains("{true}else{false}"), "{stamp}");
         assert!(!stamp.contains("AdValue"), "{stamp}");
     }
