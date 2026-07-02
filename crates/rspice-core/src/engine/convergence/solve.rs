@@ -672,7 +672,37 @@ impl Engine {
             let zero_solution = vec![0.0; size];
             circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, time);
         }
-        matrix.solve(&rhs).map_err(SimulationError::Solver)
+        match matrix.solve(&rhs) {
+            Ok(solution) if solution.iter().all(|value| value.is_finite()) => Ok(solution),
+            Ok(_) | Err(_) if !circuit.inductors.is_empty() => {
+                matrix.clear_values();
+                rhs.fill(0.0);
+                Self::stamp_transient_current_seed_linear(
+                    circuit,
+                    matrix,
+                    &mut rhs,
+                    time,
+                    self.dc_nodal_gmin_floor(circuit),
+                );
+                if !circuit.behavioral_sources.is_empty()
+                    && !circuit.behavioral_sources.has_solution_dependent_sources()
+                {
+                    let zero_solution = vec![0.0; size];
+                    circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, time);
+                }
+                match matrix.solve(&rhs) {
+                    Ok(solution) if solution.iter().all(|value| value.is_finite()) => Ok(solution),
+                    Ok(_) => Err(SimulationError::Solver(
+                        crate::solver::SolverError::SingularMatrix,
+                    )),
+                    Err(err) => Err(SimulationError::Solver(err)),
+                }
+            }
+            Ok(_) => Err(SimulationError::Solver(
+                crate::solver::SolverError::SingularMatrix,
+            )),
+            Err(err) => Err(SimulationError::Solver(err)),
+        }
     }
 
     pub(crate) fn solve_nonlinear_transient_op_with_node_hints_and_abort(

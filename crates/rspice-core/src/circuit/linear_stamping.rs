@@ -543,6 +543,28 @@ impl CircuitData {
         self.stamp_coupled_tlines_dc_direct(matrix);
     }
 
+    /// Stamp a deterministic transient-start seed when the ordinary t=0
+    /// inductor-short operating point is singular.
+    ///
+    /// Inductors are fixed to `IC=` or zero branch current. Other linear
+    /// devices, controlled sources, source values at t=0, and transmission-line
+    /// DC fallbacks keep the same semantics as the ordinary transient operating
+    /// point. This path is intentionally not used when the ordinary DC-short
+    /// solve succeeds, because resistor-fed inductors must retain their solved
+    /// operating-point current.
+    pub fn stamp_transient_current_seed_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+    ) {
+        self.stamp_transient_linear_direct(matrix, rhs);
+        self.inductors
+            .stamp_transient_current_seed_direct(matrix, rhs, self.num_nodes);
+        self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
+        self.stamp_tlines_dc_direct(matrix);
+        self.stamp_coupled_tlines_dc_direct(matrix);
+    }
+
     /// Stamp all devices with scaled source values (for source stepping)
     pub fn stamp_dc_direct_scaled(
         &self,

@@ -113,6 +113,15 @@ pub(crate) fn klu_backend_enabled() -> bool {
     })
 }
 
+#[inline]
+fn finite_solution_or_singular(solution: Vec<Value>) -> Result<Vec<Value>, SolverError> {
+    if solution.iter().all(|value| value.is_finite()) {
+        Ok(solution)
+    } else {
+        Err(SolverError::SingularMatrix)
+    }
+}
+
 impl StaticMatrix {
     /// Create a zero-valued matrix with the same sparsity structure.
     ///
@@ -548,7 +557,7 @@ impl StaticMatrix {
         if klu_backend_enabled()
             && let Some(result) = self.try_solve_klu(rhs)
         {
-            return Ok(result);
+            return finite_solution_or_singular(result);
         }
 
         self.ensure_lu_workspace()?;
@@ -580,7 +589,7 @@ impl StaticMatrix {
             MemStack::new(&mut ws.solve_mem),
         );
 
-        Ok(ws.rhs.col_as_slice(0).to_vec())
+        finite_solution_or_singular(ws.rhs.col_as_slice(0).to_vec())
     }
 
     /// Default KLU-class real solve: values-only
@@ -1075,7 +1084,7 @@ impl SparseLuSolver {
         lu.solve_in_place(b.as_mut());
 
         // Extract solution
-        Ok((0..n).map(|i| b[(i, 0)]).collect())
+        finite_solution_or_singular((0..n).map(|i| b[(i, 0)]).collect())
     }
 
     /// Clear cached symbolic factorization (call when matrix structure changes)
@@ -1148,7 +1157,7 @@ pub fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Valu
         x[i] = sum / a[i][i];
     }
 
-    Ok(x)
+    finite_solution_or_singular(x)
 }
 
 #[cfg(test)]
@@ -1169,6 +1178,25 @@ mod tests {
                 && message.contains("(0, 1)"),
             "unexpected error: {message}"
         );
+    }
+
+    #[test]
+    fn static_matrix_singular_solve_rejects_non_finite_solution() {
+        let mut matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 0.0), (1, 1, 0.0)],
+        )
+        .unwrap();
+
+        matrix.add(0, 0, 1.0);
+        matrix.add(0, 1, 1.0);
+        matrix.add(1, 0, 2.0);
+        matrix.add(1, 1, 2.0);
+
+        let err = matrix.solve(&[1.0, 2.0]).unwrap_err();
+
+        assert!(matches!(err, SolverError::SingularMatrix));
     }
 
     #[test]

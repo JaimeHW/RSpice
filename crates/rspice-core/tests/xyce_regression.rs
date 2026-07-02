@@ -983,25 +983,30 @@ fn test_xyce_linear_coupled_inductor_transient_cases_run() {
 }
 
 #[test]
-fn test_xyce_coupled_inductor_unvalidated_variants_stay_named_unsupported() {
+fn test_xyce_zero_step_coupled_inductor_parameter_print_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    let relative = "Netlists/MINDUCTORS/mutIndPrint1.cir";
-    let reason = "positive .TRAN print step";
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && result.expected_unsupported,
-        "{relative} should stay named unsupported until the coupled-inductor variant is production-validated, got {result:?}"
-    );
-    assert!(
-        result
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains(reason)),
-        "unsupported reason for {relative} should name '{reason}', got {result:?}"
-    );
+    for (relative, contract) in [
+        ("Netlists/MINDUCTORS/mutIndPrint1.cir", "static_prn_tran"),
+        ("Netlists/MINDUCTORS/mutIndStep.cir", "static_prn_step_tran"),
+    ] {
+        let result = runner.run_test(root.join(relative));
+
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce zero-step coupled-inductor parameter-print comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, contract,
+            "{relative} should report the expected transient .prn contract"
+        );
+    }
 }
 
 #[test]

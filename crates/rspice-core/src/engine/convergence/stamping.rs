@@ -264,4 +264,26 @@ impl Engine {
         circuit.current_sources.update_transient_rhs(rhs, time);
         circuit.stamp_generic_switches(matrix, rhs, time);
     }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn stamp_transient_current_seed_linear(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+        gmin: Value,
+    ) {
+        let node_count = circuit.num_nodes().min(rhs.len());
+        for i in 0..node_count {
+            matrix.add(i, i, gmin);
+        }
+
+        circuit.stamp_transient_current_seed_direct(matrix, rhs);
+        let num_nodes = circuit.num_nodes();
+        circuit
+            .voltage_sources
+            .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
+        circuit.current_sources.update_transient_rhs(rhs, time);
+        circuit.stamp_generic_switches(matrix, rhs, time);
+    }
 }

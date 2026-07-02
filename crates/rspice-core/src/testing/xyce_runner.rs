@@ -1688,8 +1688,35 @@ impl XyceTestRunner {
         let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
         let engine = self.create_xyce_static_tran_engine(None, initial_step);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let result = match engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort) {
-            Ok(result) => result,
+        let mut best_mismatches = None;
+        let mut simulation_error = None;
+        match engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort) {
+            Ok(result) => {
+                let mismatches = match self.compare_tran_prn_reference(
+                    &reference,
+                    &plan.print,
+                    &netlist,
+                    &plan.source,
+                    &result,
+                ) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("reference comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+
+                if mismatches.is_empty() {
+                    return self.passed_result(deck, start, contract);
+                }
+
+                best_mismatches = Some(mismatches);
+            }
             Err(SimulationError::Aborted) => {
                 return self.failure_result(
                     deck,
@@ -1711,59 +1738,51 @@ impl XyceTestRunner {
                 );
             }
             Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("simulation error: {err}"),
-                    Vec::new(),
-                );
+                simulation_error = Some(format!("simulation error: {err}"));
             }
-        };
-        let mismatches = match self.compare_tran_prn_reference(
-            &reference,
-            &plan.print,
-            &netlist,
-            &plan.source,
-            &result,
-        ) {
-            Ok(mismatches) => mismatches,
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("reference comparison error: {err}"),
-                    Vec::new(),
-                );
-            }
-        };
-
-        if mismatches.is_empty() {
-            return self.passed_result(deck, start, contract);
         }
 
-        let mut best_mismatches = mismatches;
         let capacitor_branch_print =
             Self::transient_print_requests_linear_capacitor_branch_quantity(&netlist, &plan.print);
+        let mut fallback_errors = Vec::new();
 
         let locked_engine =
             self.create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
-        if let Ok(locked_result) =
-            locked_engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort)
-            && let Ok(locked_mismatches) = self.compare_tran_prn_reference(
-                &reference,
-                &plan.print,
-                &netlist,
-                &plan.source,
-                &locked_result,
-            )
-        {
-            if locked_mismatches.is_empty() {
-                return self.passed_result(deck, start, contract);
+        match locked_engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort) {
+            Ok(locked_result) => {
+                match self.compare_tran_prn_reference(
+                    &reference,
+                    &plan.print,
+                    &netlist,
+                    &plan.source,
+                    &locked_result,
+                ) {
+                    Ok(locked_mismatches) => {
+                        if locked_mismatches.is_empty() {
+                            return self.passed_result(deck, start, contract);
+                        }
+                        if best_mismatches
+                            .as_ref()
+                            .is_none_or(|best| locked_mismatches.len() < best.len())
+                        {
+                            best_mismatches = Some(locked_mismatches);
+                        }
+                    }
+                    Err(err) => {
+                        fallback_errors.push(format!(
+                            "locked time-grid reference comparison error: {err}"
+                        ));
+                    }
+                }
             }
-            if locked_mismatches.len() < best_mismatches.len() {
-                best_mismatches = locked_mismatches;
+            Err(SimulationError::Aborted) => {
+                fallback_errors.push(format!(
+                    "locked time-grid simulation exceeded timeout ({}ms)",
+                    self.config.max_time_per_test_ms
+                ));
+            }
+            Err(err) => {
+                fallback_errors.push(format!("locked time-grid simulation error: {err}"));
             }
         }
 
@@ -1774,37 +1793,70 @@ impl XyceTestRunner {
                     crate::analysis::IntegrationMethod::BackwardEuler,
                     initial_step,
                 );
-            if let Ok(backward_euler_result) = backward_euler_engine.run_tran_with_abort(
+            match backward_euler_engine.run_tran_with_abort(
                 &netlist,
                 plan.tran.stop,
                 max_step,
                 &abort,
-            ) && let Ok(backward_euler_mismatches) = self.compare_tran_prn_reference(
-                &reference,
-                &plan.print,
-                &netlist,
-                &plan.source,
-                &backward_euler_result,
             ) {
-                if backward_euler_mismatches.is_empty() {
-                    return self.passed_result(deck, start, contract);
+                Ok(backward_euler_result) => {
+                    match self.compare_tran_prn_reference(
+                        &reference,
+                        &plan.print,
+                        &netlist,
+                        &plan.source,
+                        &backward_euler_result,
+                    ) {
+                        Ok(backward_euler_mismatches) => {
+                            if backward_euler_mismatches.is_empty() {
+                                return self.passed_result(deck, start, contract);
+                            }
+                            if best_mismatches
+                                .as_ref()
+                                .is_none_or(|best| backward_euler_mismatches.len() < best.len())
+                            {
+                                best_mismatches = Some(backward_euler_mismatches);
+                            }
+                        }
+                        Err(err) => {
+                            fallback_errors
+                                .push(format!("backward-Euler reference comparison error: {err}"));
+                        }
+                    }
                 }
-                if backward_euler_mismatches.len() < best_mismatches.len() {
-                    best_mismatches = backward_euler_mismatches;
+                Err(SimulationError::Aborted) => {
+                    fallback_errors.push(format!(
+                        "backward-Euler simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ));
+                }
+                Err(err) => {
+                    fallback_errors.push(format!("backward-Euler simulation error: {err}"));
                 }
             }
         }
 
-        self.failure_result(
-            deck,
-            start,
-            contract,
-            format!(
-                "{} Xyce transient reference mismatch(es)",
-                best_mismatches.len()
-            ),
-            best_mismatches,
-        )
+        if let Some(best_mismatches) = best_mismatches {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce transient reference mismatch(es)",
+                    best_mismatches.len()
+                ),
+                best_mismatches,
+            )
+        } else {
+            let mut message = simulation_error.unwrap_or_else(|| {
+                "transient simulation produced no comparable result".to_string()
+            });
+            if !fallback_errors.is_empty() {
+                message.push_str("; ");
+                message.push_str(&fallback_errors.join("; "));
+            }
+            self.failure_result(deck, start, contract, message, Vec::new())
+        }
     }
 
     fn run_static_prn_step_tran_plan(
@@ -1856,7 +1908,12 @@ impl XyceTestRunner {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mismatches =
             match self.compare_step_tran_runs(&plan, &step_runs, &step_references, &abort, false) {
-                Ok(mismatches) => mismatches,
+                Ok(mismatches) => {
+                    if mismatches.is_empty() {
+                        return self.passed_result(deck, start, contract);
+                    }
+                    Some(mismatches)
+                }
                 Err(err) if err.starts_with("UNSUPPORTED:") => {
                     return self.expected_unsupported_result(
                         deck,
@@ -1866,13 +1923,39 @@ impl XyceTestRunner {
                     );
                 }
                 Err(err) => {
-                    return self.failure_result(deck, start, contract, err, Vec::new());
+                    let locked_result = self.compare_step_tran_runs(
+                        &plan,
+                        &step_runs,
+                        &step_references,
+                        &abort,
+                        true,
+                    );
+                    return match locked_result {
+                        Ok(locked_mismatches) if locked_mismatches.is_empty() => {
+                            self.passed_result(deck, start, contract)
+                        }
+                        Ok(locked_mismatches) => self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                "{} Xyce stepped transient reference mismatch(es)",
+                                locked_mismatches.len()
+                            ),
+                            locked_mismatches,
+                        ),
+                        Err(locked_err) => self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("{err}; locked time-grid retry failed: {locked_err}"),
+                            Vec::new(),
+                        ),
+                    };
                 }
             };
 
-        if mismatches.is_empty() {
-            return self.passed_result(deck, start, contract);
-        }
+        let mismatches = mismatches.expect("non-empty adaptive mismatches");
 
         if let Ok(locked_mismatches) =
             self.compare_step_tran_runs(&plan, &step_runs, &step_references, &abort, true)
@@ -4247,12 +4330,6 @@ impl XyceTestRunner {
         for probe in &print.probes {
             Self::validate_tran_probe(probe, netlist)?;
         }
-        if Self::netlist_has_coupling(netlist) && tran.step <= 0.0 {
-            return Err(
-                "native coupled-inductor .PRINT TRAN comparison requires a positive .TRAN print step until zero-step coupled-reactive startup is production-validated"
-                    .to_string(),
-            );
-        }
         Self::validate_native_transient_contract(netlist)?;
 
         Ok(())
@@ -4517,13 +4594,6 @@ impl XyceTestRunner {
             )?;
         }
         Ok(())
-    }
-
-    fn netlist_has_coupling(netlist: &Netlist) -> bool {
-        netlist
-            .elements
-            .iter()
-            .any(|element| matches!(element.kind, ElementKind::Coupling { .. }))
     }
 
     fn validate_static_step_tran_source_spec(

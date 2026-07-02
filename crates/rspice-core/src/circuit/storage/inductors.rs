@@ -159,6 +159,40 @@ impl Inductors {
         }
     }
 
+    /// Stamp inductors as fixed branch-current seeds for transient startup.
+    ///
+    /// This is only for the fallback transient initial condition solve. The
+    /// ordinary operating point still treats inductors without `IC=` as DC
+    /// shorts so resistor-fed inductors get their correct bias current. When
+    /// that system is singular because an ideal inductor is in a redundant
+    /// ideal-source loop, the DC equations do not determine branch current;
+    /// seed it from `IC=` or zero so transient companion histories start from
+    /// a finite, deterministic state.
+    #[inline]
+    pub fn stamp_transient_current_seed_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+    ) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br_ordinal = self.branch_indices[i];
+            let br = num_nodes + br_ordinal;
+            let current = self.ic[i].unwrap_or(0.0);
+
+            if np > 0 {
+                rhs[np - 1] -= current;
+            }
+            if nn > 0 {
+                rhs[nn - 1] += current;
+            }
+            matrix.add(br - 1, br - 1, 1.0);
+            rhs[br - 1] = current;
+        }
+    }
+
     /// Stamp inductors for DC operating point (triplet path).
     #[inline]
     pub fn stamp_dc_short(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], num_nodes: usize) {
