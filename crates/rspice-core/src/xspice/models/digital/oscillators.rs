@@ -492,6 +492,17 @@ fn scalar_finite_param(ctx: &CmContext, model: &str, name: &str) -> CmResult<Val
     Ok(value)
 }
 
+fn initial_phase_fraction(ctx: &CmContext, model: &str) -> CmResult<Value> {
+    let phase = ctx.param("init_phase");
+    if !phase.is_finite() {
+        return Err(oscillator_error(
+            model,
+            format!("init_phase must be finite, got {phase}"),
+        ));
+    }
+    Ok(phase.clamp(-180.0, 360.0) / 360.0)
+}
+
 fn oscillator_set_state(ctx: &mut CmContext, index: usize, value: Value) {
     if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
         ctx.set_state(index, value);
@@ -504,8 +515,13 @@ fn oscillator_set_int_state(ctx: &mut CmContext, index: usize, value: i64) {
     }
 }
 
-fn initialize_timing_state(ctx: &mut CmContext, period: Value, duty_cycle: Value) -> (Value, i64) {
-    let mut phase = ctx.param("init_phase").clamp(-180.0, 360.0) / 360.0;
+fn initialize_timing_state(
+    ctx: &mut CmContext,
+    model: &str,
+    period: Value,
+    duty_cycle: Value,
+) -> CmResult<(Value, i64)> {
+    let mut phase = initial_phase_fraction(ctx, model)?;
     if phase < 0.0 {
         phase += 1.0;
     }
@@ -519,7 +535,7 @@ fn initialize_timing_state(ctx: &mut CmContext, period: Value, duty_cycle: Value
     oscillator_set_state(ctx, OSC_LAST_TIME, last_time);
     oscillator_set_int_state(ctx, OSC_LAST_STATE, last_state);
     oscillator_set_int_state(ctx, OSC_INITIALIZED, 1);
-    (last_time, last_state)
+    Ok((last_time, last_state))
 }
 
 fn state_to_value(state: i64) -> DigitalValue {
@@ -588,6 +604,7 @@ fn nco_set_state(ctx: &mut CmContext, next_time: Value, output_state: i64) {
 
 fn evaluate_digital_oscillator(
     ctx: &mut CmContext,
+    model: &str,
     period: Value,
     duty_cycle: Value,
 ) -> CmResult<()> {
@@ -596,7 +613,7 @@ fn evaluate_digital_oscillator(
     }
 
     let initialized = if ctx.time == 0.0 || ctx.int_state(OSC_INITIALIZED) == 0 {
-        let timing_state = initialize_timing_state(ctx, period, duty_cycle);
+        let timing_state = initialize_timing_state(ctx, model, period, duty_cycle)?;
         ctx.set_output_digital("out", state_to_value(timing_state.1), 0.0);
         Some(timing_state)
     } else {
@@ -768,7 +785,7 @@ impl CodeModel for DigitalOscillator {
         };
         let period = d_osc_period_from_table(&table, ctx.input("cntl_in"));
         let duty_cycle = d_osc_duty_cycle(ctx)?;
-        evaluate_digital_oscillator(ctx, period, duty_cycle)
+        evaluate_digital_oscillator(ctx, "d_osc", period, duty_cycle)
     }
 }
 
@@ -825,7 +842,7 @@ impl CodeModel for DigitalPwmOscillator {
         };
         let frequency = d_pwm_frequency(ctx)?;
         let duty_cycle = d_pwm_duty_cycle_from_table(&table, ctx.input("cntl_in"));
-        evaluate_digital_oscillator(ctx, 1.0 / frequency, duty_cycle)
+        evaluate_digital_oscillator(ctx, "d_pwm", 1.0 / frequency, duty_cycle)
     }
 }
 
@@ -1253,7 +1270,7 @@ mod tests {
         ctx.allocate_states(1);
         ctx.allocate_int_states(2);
 
-        evaluate_digital_oscillator(&mut ctx, -1.0e-9, 0.25)
+        evaluate_digital_oscillator(&mut ctx, "d_osc", -1.0e-9, 0.25)
             .expect("ngspice digital oscillator event path does not reject negative intervals");
     }
 
@@ -1264,10 +1281,28 @@ mod tests {
         ctx.allocate_states(1);
         ctx.allocate_int_states(2);
 
-        initialize_timing_state(&mut ctx, 1.0e-9, 0.25);
+        initialize_timing_state(&mut ctx, "d_osc", 1.0e-9, 0.25).expect("finite initial phase");
 
         assert_eq!(ctx.int_state(OSC_LAST_STATE), 0);
         assert!((ctx.state(OSC_LAST_TIME) + 0.25e-9).abs() < 1.0e-18);
+    }
+
+    #[test]
+    fn digital_oscillator_rejects_nonfinite_runtime_initial_phase() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_param("init_phase", f64::NAN);
+        ctx.allocate_states(1);
+        ctx.allocate_int_states(2);
+
+        let err = evaluate_digital_oscillator(&mut ctx, "d_osc", 1.0e-6, 0.5)
+            .expect_err("runtime oscillator init should reject nonfinite init_phase");
+
+        assert!(
+            format!("{err:?}").contains("init_phase must be finite"),
+            "unexpected error: {err:?}"
+        );
+        assert_eq!(ctx.int_state(OSC_INITIALIZED), 0);
     }
 
     #[test]
@@ -1278,7 +1313,8 @@ mod tests {
         ctx.allocate_states(1);
         ctx.allocate_int_states(2);
 
-        evaluate_digital_oscillator(&mut ctx, 1.0e-6, 0.5).expect("initial oscillator evaluation");
+        evaluate_digital_oscillator(&mut ctx, "d_osc", 1.0e-6, 0.5)
+            .expect("initial oscillator evaluation");
         let _ = ctx.take_pending_events();
         let _ = ctx.take_requested_breakpoints();
         assert_eq!(ctx.int_state(OSC_LAST_STATE), 0);
@@ -1286,7 +1322,8 @@ mod tests {
 
         ctx.time = 0.5e-6;
         ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
-        evaluate_digital_oscillator(&mut ctx, 1.0e-6, 0.5).expect("rollback oscillator transition");
+        evaluate_digital_oscillator(&mut ctx, "d_osc", 1.0e-6, 0.5)
+            .expect("rollback oscillator transition");
         let events = ctx.take_pending_events();
         assert!(
             events
@@ -1310,7 +1347,7 @@ mod tests {
         );
 
         ctx.set_evaluation_phase(EvaluationPhase::DirectEvaluation);
-        evaluate_digital_oscillator(&mut ctx, 1.0e-6, 0.5)
+        evaluate_digital_oscillator(&mut ctx, "d_osc", 1.0e-6, 0.5)
             .expect("direct oscillator transition after probe");
         assert_eq!(ctx.int_state(OSC_LAST_STATE), 1);
         assert!((ctx.state(OSC_LAST_TIME) - 0.5e-6).abs() < 1.0e-18);
