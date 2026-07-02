@@ -1,7 +1,7 @@
 //! External host interfaces used by XSPICE code models.
 
-use crate::Value;
 use crate::xspice::{CmError, CmResult, DigitalValue};
+use crate::Value;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 /// Startup configuration for the official XSPICE `d_process` code model.
@@ -280,8 +280,8 @@ impl DigitalProcessRuntimeFactory for WasmDigitalProcessFactory {
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::{
-        CmError, CmResult, DigitalProcessRuntime, DigitalProcessRuntimeFactory, DigitalProcessSpec,
-        Value, validate_digital_process_spec,
+        validate_digital_process_spec, CmError, CmResult, DigitalProcessRuntime,
+        DigitalProcessRuntimeFactory, DigitalProcessSpec, Value,
     };
     use std::io::{Read, Write};
     use std::process::{Child, Command, Stdio};
@@ -484,7 +484,8 @@ mod native_cosim {
     };
     use crate::xspice::{DigitalState, DigitalStrength};
     use libloading::Library;
-    use std::ffi::{CStr, CString, c_char, c_uint, c_void};
+    use std::ffi::{c_char, c_uint, c_void, CStr, CString};
+    use std::path::{Path, PathBuf};
 
     #[cfg(unix)]
     type PlatformLibrary = libloading::os::unix::Library;
@@ -580,6 +581,38 @@ mod native_cosim {
         candidates
     }
 
+    fn configured_cosim_library_dirs() -> Vec<PathBuf> {
+        std::env::var_os("NGSPICELIBDIR")
+            .map(|paths| std::env::split_paths(&paths).collect())
+            .unwrap_or_default()
+    }
+
+    fn cosim_library_search_candidates_with_dirs<'a>(
+        filename: &str,
+        dirs: impl IntoIterator<Item = &'a Path>,
+    ) -> Vec<String> {
+        let direct_candidates = cosim_library_candidates(filename);
+        let mut candidates = direct_candidates.clone();
+        for dir in dirs {
+            for candidate in &direct_candidates {
+                let candidate_path = Path::new(candidate);
+                if candidate_path.is_absolute() {
+                    continue;
+                }
+                let candidate = dir.join(candidate_path).to_string_lossy().into_owned();
+                if !candidates.iter().any(|existing| existing == &candidate) {
+                    candidates.push(candidate);
+                }
+            }
+        }
+        candidates
+    }
+
+    fn cosim_library_search_candidates(filename: &str) -> Vec<String> {
+        let dirs = configured_cosim_library_dirs();
+        cosim_library_search_candidates_with_dirs(filename, dirs.iter().map(PathBuf::as_path))
+    }
+
     #[cfg(unix)]
     unsafe fn open_platform_cosim_library(
         filename: &str,
@@ -601,7 +634,7 @@ mod native_cosim {
 
     fn open_cosim_platform_library(filename: &str) -> Result<PlatformLibrary, libloading::Error> {
         let mut last_error = None;
-        for candidate in cosim_library_candidates(filename) {
+        for candidate in cosim_library_search_candidates(filename) {
             match unsafe { open_platform_cosim_library(&candidate) } {
                 Ok(library) => return Ok(library),
                 Err(error) => last_error = Some(error),
@@ -1107,6 +1140,23 @@ mod native_cosim {
                     .any(|candidate| candidate == "cosim_model.so.so"),
                 "ngspice does not append a matching shared-library extension twice"
             );
+        }
+
+        #[test]
+        fn cosim_library_search_candidates_try_configured_library_dirs() {
+            let direct = cosim_library_candidates("cosim_model");
+            let lib_dir = std::path::Path::new("ngspice-lib");
+            let candidates =
+                cosim_library_search_candidates_with_dirs("cosim_model", [lib_dir].into_iter());
+
+            assert_eq!(&candidates[..direct.len()], direct.as_slice());
+            for candidate in direct {
+                let configured = lib_dir.join(candidate).to_string_lossy().into_owned();
+                assert!(
+                    candidates.iter().any(|existing| existing == &configured),
+                    "configured library directory candidate {configured} should be searched"
+                );
+            }
         }
 
         #[test]
