@@ -200,6 +200,17 @@ fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
+fn reserve_lookup_points(point_count: usize) -> CmResult<Vec<LookupPoint>> {
+    let mut points = Vec::new();
+    points.try_reserve_exact(point_count).map_err(|err| {
+        invalid_param(
+            "x_array/y_array",
+            format!("unable to reserve {point_count} lookup point(s): {err}"),
+        )
+    })?;
+    Ok(points)
+}
+
 fn validate_lookup_table(x_values: &[Value], y_values: &[Value]) -> CmResult<LookupTable> {
     if x_values.len() != y_values.len() {
         return Err(invalid_param(
@@ -221,7 +232,7 @@ fn validate_lookup_table(x_values: &[Value], y_values: &[Value]) -> CmResult<Loo
         ));
     }
 
-    let mut points: Vec<LookupPoint> = Vec::with_capacity(x_values.len());
+    let mut points = reserve_lookup_points(x_values.len())?;
     for (idx, (&x, &y)) in x_values.iter().zip(y_values).enumerate() {
         if !x.is_finite() {
             return Err(invalid_param(
