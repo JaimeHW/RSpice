@@ -953,6 +953,64 @@ fn test_xyce_capacitor_multiplicity_step_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_linear_single_coupled_inductor_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MINDUCTORS/MINDUCTORS.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce linear coupled-inductor transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
+fn test_xyce_coupled_inductor_unvalidated_variants_stay_named_unsupported() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, reason) in [
+        (
+            "Netlists/MINDUCTORS/InductorICBug.cir",
+            "initial condition on referenced inductor",
+        ),
+        (
+            "Netlists/MINDUCTORS/cpldLMIs.cir",
+            "exactly one linear coupling",
+        ),
+        (
+            "Netlists/MINDUCTORS/mutIndPrint1.cir",
+            "positive .TRAN print step",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && result.expected_unsupported,
+            "{relative} should stay named unsupported until the coupled-inductor variant is production-validated, got {result:?}"
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains(reason)),
+            "unsupported reason for {relative} should name '{reason}', got {result:?}"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_semiconductor_capacitor_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

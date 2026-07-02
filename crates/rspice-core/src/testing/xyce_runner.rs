@@ -4240,6 +4240,12 @@ impl XyceTestRunner {
         for probe in &print.probes {
             Self::validate_tran_probe(probe, netlist)?;
         }
+        if Self::netlist_has_coupling(netlist) && tran.step <= 0.0 {
+            return Err(
+                "native coupled-inductor .PRINT TRAN comparison requires a positive .TRAN print step until zero-step coupled-reactive startup is production-validated"
+                    .to_string(),
+            );
+        }
         Self::validate_native_transient_contract(netlist)?;
 
         Ok(())
@@ -4260,11 +4266,16 @@ impl XyceTestRunner {
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
                 }
-                ElementKind::Coupling { .. } => {
-                    return Err(format!(
-                        "native .STEP .PRINT TRAN comparison does not yet support coupled-inductor transient decks; element '{}' requires production transient coupling validation",
-                        element.name
-                    ));
+                ElementKind::Coupling {
+                    inductors,
+                    coefficient,
+                } => {
+                    Self::validate_static_step_coupling_contract(
+                        netlist,
+                        &element.name,
+                        inductors,
+                        *coefficient,
+                    )?;
                 }
                 _ => {
                     return Err(format!(
@@ -4469,6 +4480,74 @@ impl XyceTestRunner {
         }
     }
 
+    fn validate_static_step_coupling_contract(
+        netlist: &Netlist,
+        element_name: &str,
+        inductors: &[String],
+        coefficient: Value,
+    ) -> Result<(), String> {
+        if inductors.len() < 2 {
+            return Err(format!(
+                "native .PRINT TRAN comparison does not support coupling '{}' with fewer than two inductors",
+                element_name
+            ));
+        }
+        let coupling_count = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Coupling { .. }))
+            .count();
+        if coupling_count != 1 {
+            return Err(format!(
+                "native .PRINT TRAN comparison currently supports exactly one linear coupling per deck; coupling '{}' is in a deck with {} coupling elements",
+                element_name, coupling_count
+            ));
+        }
+        if !coefficient.is_finite() || !(0.0..=1.0).contains(&coefficient) {
+            return Err(format!(
+                "native .PRINT TRAN comparison does not support coupling '{}' with invalid coefficient {}",
+                element_name, coefficient
+            ));
+        }
+
+        for inductor_name in inductors {
+            if Self::inductor_has_initial_condition(netlist, inductor_name) {
+                return Err(format!(
+                    "native .PRINT TRAN comparison does not yet support coupling '{}' with initial condition on referenced inductor '{}'",
+                    element_name, inductor_name
+                ));
+            }
+            Self::validate_static_step_inductor_contract(netlist, inductor_name).map_err(
+                |err| {
+                    format!(
+                        "native .PRINT TRAN comparison does not support coupling '{}' because referenced inductor '{}' is not a supported linear inductor: {}",
+                        element_name, inductor_name, err
+                    )
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    fn netlist_has_coupling(netlist: &Netlist) -> bool {
+        netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Coupling { .. }))
+    }
+
+    fn inductor_has_initial_condition(netlist: &Netlist, inductor_name: &str) -> bool {
+        Self::find_inductor_element(netlist, inductor_name).is_some_and(|element| {
+            matches!(
+                element.kind,
+                ElementKind::Inductor {
+                    initial_current: Some(_),
+                    ..
+                }
+            )
+        })
+    }
+
     fn validate_static_step_tran_source_spec(
         source_name: &str,
         spec: &crate::netlist::SourceSpec,
@@ -4573,11 +4652,16 @@ impl XyceTestRunner {
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
                 }
-                ElementKind::Coupling { .. } => {
-                    return Err(format!(
-                        "native static .PRINT TRAN comparison does not yet support coupled-inductor transient decks; element '{}' requires production transient coupling validation",
-                        element.name
-                    ));
+                ElementKind::Coupling {
+                    inductors,
+                    coefficient,
+                } => {
+                    Self::validate_static_step_coupling_contract(
+                        netlist,
+                        &element.name,
+                        inductors,
+                        *coefficient,
+                    )?;
                 }
                 _ => {
                     return Err(format!(
