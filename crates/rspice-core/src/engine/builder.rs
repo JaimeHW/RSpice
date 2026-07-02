@@ -227,6 +227,7 @@ fn xspice_meter_resolved_capacitance(
     netlist: &Netlist,
     element: &Element,
     temperature: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<Option<f64>, SimulationError> {
     match &element.kind {
         ElementKind::Capacitor {
@@ -241,6 +242,7 @@ fn xspice_meter_resolved_capacitance(
             model.as_deref(),
             instance_params,
             temperature,
+            spice_dialect,
         )?)),
         ElementKind::Xspice {
             model,
@@ -340,11 +342,13 @@ fn xspice_meter_equivalent_capacitance(
     flat_elements: &[Element],
     input_node: &str,
     temperature: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<f64, SimulationError> {
     let mut capacitance = 0.0;
 
     for element in flat_elements {
-        if let Some(value) = xspice_meter_resolved_capacitance(netlist, element, temperature)?
+        if let Some(value) =
+            xspice_meter_resolved_capacitance(netlist, element, temperature, spice_dialect)?
             && xspice_meter_element_incident(element, input_node)?
         {
             capacitance += value;
@@ -356,7 +360,8 @@ fn xspice_meter_equivalent_capacitance(
         .filter_map(|element| xspice_meter_zero_source_other_node(element, input_node))
     {
         for element in flat_elements {
-            if let Some(value) = xspice_meter_resolved_capacitance(netlist, element, temperature)?
+            if let Some(value) =
+                xspice_meter_resolved_capacitance(netlist, element, temperature, spice_dialect)?
                 && xspice_meter_element_incident(element, zero_source_node)?
             {
                 capacitance += value;
@@ -407,12 +412,17 @@ fn xspice_meter_measured_value(
     ports: &[XspicePort],
     kind: XspiceMeterKind,
     temperature: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<f64, SimulationError> {
     let input_node = xspice_meter_input_node(element_name, model_name, ports)?;
     match kind {
-        XspiceMeterKind::Capacitance => {
-            xspice_meter_equivalent_capacitance(netlist, flat_elements, input_node, temperature)
-        }
+        XspiceMeterKind::Capacitance => xspice_meter_equivalent_capacitance(
+            netlist,
+            flat_elements,
+            input_node,
+            temperature,
+            spice_dialect,
+        ),
         XspiceMeterKind::Inductance => {
             xspice_meter_equivalent_inductance(netlist, flat_elements, input_node, temperature)
         }
@@ -1064,6 +1074,53 @@ impl Engine {
         .map(Some)
     }
 
+    pub(crate) fn resolved_capacitor_value(
+        &self,
+        netlist: &Netlist,
+        capacitor_name: &str,
+    ) -> Result<Option<f64>, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        let flattened = flatten_netlist_with_models(netlist)
+            .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
+        let mut effective_netlist;
+        let netlist = if flattened.scoped_models.is_empty() {
+            netlist
+        } else {
+            effective_netlist = netlist.clone();
+            effective_netlist.models.extend(flattened.scoped_models);
+            &effective_netlist
+        };
+
+        let Some(element) = flattened
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(capacitor_name))
+        else {
+            return Ok(None);
+        };
+
+        let ElementKind::Capacitor {
+            value,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Ok(None);
+        };
+
+        resolve_capacitor_instance_value(
+            netlist,
+            &element.name,
+            *value,
+            model.as_deref(),
+            instance_params,
+            engine.config.temperature,
+            engine.config.spice_dialect,
+        )
+        .map(Some)
+    }
+
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
         let mut circuit = CircuitData::new();
@@ -1291,6 +1348,7 @@ impl Engine {
                         model.as_deref(),
                         instance_params,
                         self.config.temperature,
+                        self.config.spice_dialect,
                     )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -3521,6 +3579,7 @@ impl Engine {
                             ports,
                             kind,
                             self.config.temperature,
+                            self.config.spice_dialect,
                         )?;
                         numeric_params.push((
                             crate::xspice::models::XTRADEV_METER_MEASURED_VALUE_PARAM.to_string(),

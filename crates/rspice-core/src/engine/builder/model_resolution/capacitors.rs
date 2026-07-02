@@ -18,6 +18,7 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<f64, SimulationError> {
     let model_def = if let Some(model_name) = model_name {
         let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
@@ -46,62 +47,104 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
         capacitance = Some(value);
     }
 
+    let mut xyce_model_multiplier = 1.0;
     if let Some(model_def) = model_def {
-        if capacitance.is_none() {
-            capacitance =
-                resolve_model_param(model_def, &["C", "CAP", "VALUE", "CAPACITANCE"], &eval_ctx)?;
-        }
+        if spice_dialect == SpiceDialect::Xyce {
+            xyce_model_multiplier =
+                resolve_model_param(model_def, &["C"], &eval_ctx)?.unwrap_or(1.0);
+            if capacitance.is_none() {
+                let cj = resolve_model_param(model_def, &["CJ"], &eval_ctx)?.unwrap_or(0.0);
+                let cjsw = resolve_model_param(model_def, &["CJSW"], &eval_ctx)?.unwrap_or(0.0);
 
-        if capacitance.is_none() {
-            let cj =
-                resolve_model_param(model_def, &["CJ", "CJA"], &eval_ctx)?.ok_or_else(|| {
+                let length = instance_param(instance_params, &["L"]).ok_or_else(|| {
                     SimulationError::Circuit(format!(
-                        "Capacitor '{}' model '{}' requires C/CAP or CJ with geometry",
+                        "Capacitor '{}' model '{}' requires L when using Xyce semiconductor capacitor geometry",
                         element_name,
                         model_name.unwrap_or_default()
                     ))
                 })?;
-            let cjsw = resolve_model_param(model_def, &["CJSW", "CJP"], &eval_ctx)?.unwrap_or(0.0);
+                let width = instance_param(instance_params, &["W"])
+                    .or_else(|| {
+                        resolve_model_param(model_def, &["DEFW"], &eval_ctx)
+                            .ok()
+                            .flatten()
+                    })
+                    .unwrap_or(1.0e-6);
+                let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
 
-            let width = instance_param(instance_params, &["W", "WIDTH"])
-                .or_else(|| {
-                    resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], &eval_ctx)
-                        .ok()
-                        .flatten()
-                })
-                .ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "Capacitor '{}' model '{}' requires W/WIDTH (or DEFW) when using CJ",
-                        element_name,
-                        model_name.unwrap_or_default()
-                    ))
-                })?;
-            let length = instance_param(instance_params, &["L", "LENGTH"])
-                .or_else(|| {
-                    resolve_model_param(model_def, &["L", "LENGTH", "DEFL"], &eval_ctx)
-                        .ok()
-                        .flatten()
-                })
-                .ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        "Capacitor '{}' model '{}' requires L/LENGTH (or DEFL) when using CJ",
-                        element_name,
-                        model_name.unwrap_or_default()
-                    ))
-                })?;
-            let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
-            let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
+                let w_eff = width - narrow;
+                let l_eff = length - narrow;
+                if !w_eff.is_finite() || !l_eff.is_finite() || w_eff <= 0.0 || l_eff <= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "Capacitor '{}' has invalid Xyce effective geometry (W={}, L={}, NARROW={})",
+                        element_name, width, length, narrow
+                    )));
+                }
 
-            let w_eff = width - narrow;
-            let l_eff = length - short;
-            if !w_eff.is_finite() || !l_eff.is_finite() || w_eff <= 0.0 || l_eff <= 0.0 {
-                return Err(SimulationError::Circuit(format!(
-                    "Capacitor '{}' has invalid effective geometry (W={}, L={}, NARROW={}, SHORT={})",
-                    element_name, width, length, narrow, short
-                )));
+                capacitance = Some(cj * l_eff * w_eff + 2.0 * cjsw * (l_eff + w_eff));
+            }
+        } else {
+            if capacitance.is_none() {
+                capacitance = resolve_model_param(
+                    model_def,
+                    &["C", "CAP", "VALUE", "CAPACITANCE"],
+                    &eval_ctx,
+                )?;
             }
 
-            capacitance = Some(cj * w_eff * l_eff + 2.0 * cjsw * (w_eff + l_eff));
+            if capacitance.is_none() {
+                let cj = resolve_model_param(model_def, &["CJ", "CJA"], &eval_ctx)?.ok_or_else(
+                    || {
+                        SimulationError::Circuit(format!(
+                            "Capacitor '{}' model '{}' requires C/CAP or CJ with geometry",
+                            element_name,
+                            model_name.unwrap_or_default()
+                        ))
+                    },
+                )?;
+                let cjsw =
+                    resolve_model_param(model_def, &["CJSW", "CJP"], &eval_ctx)?.unwrap_or(0.0);
+
+                let width = instance_param(instance_params, &["W", "WIDTH"])
+                    .or_else(|| {
+                        resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], &eval_ctx)
+                            .ok()
+                            .flatten()
+                    })
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Capacitor '{}' model '{}' requires W/WIDTH (or DEFW) when using CJ",
+                            element_name,
+                            model_name.unwrap_or_default()
+                        ))
+                    })?;
+                let length = instance_param(instance_params, &["L", "LENGTH"])
+                    .or_else(|| {
+                        resolve_model_param(model_def, &["L", "LENGTH", "DEFL"], &eval_ctx)
+                            .ok()
+                            .flatten()
+                    })
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Capacitor '{}' model '{}' requires L/LENGTH (or DEFL) when using CJ",
+                            element_name,
+                            model_name.unwrap_or_default()
+                        ))
+                    })?;
+                let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
+                let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
+
+                let w_eff = width - narrow;
+                let l_eff = length - short;
+                if !w_eff.is_finite() || !l_eff.is_finite() || w_eff <= 0.0 || l_eff <= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "Capacitor '{}' has invalid effective geometry (W={}, L={}, NARROW={}, SHORT={})",
+                        element_name, width, length, narrow, short
+                    )));
+                }
+
+                capacitance = Some(cj * w_eff * l_eff + 2.0 * cjsw * (w_eff + l_eff));
+            }
         }
     }
 
@@ -118,6 +161,8 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
             ))
         }
     })?;
+
+    resolved *= xyce_model_multiplier;
 
     let tc1 = instance_param(instance_params, &["TC1"])
         .or_else(|| {
@@ -206,6 +251,7 @@ mod tests {
             model.as_deref(),
             instance_params,
             crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Ngspice,
         )
         .expect("capacitor resolves")
     }
@@ -251,5 +297,40 @@ mod tests {
             ((c - expected) / expected).abs() < 1e-12,
             "resolved {c}, expected {expected}"
         );
+    }
+
+    #[test]
+    fn xyce_semiconductor_geometry_uses_model_c_as_multiplier() {
+        let netlist = crate::netlist::Netlist::parse(
+            "xyce geom cap\nC1 a 0 cmod L=20u W=1u\n.model cmod C CJ=1 C=2\n.end\n",
+        )
+        .expect("test netlist parses");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("C1"))
+            .expect("test capacitor exists");
+        let crate::netlist::ElementKind::Capacitor {
+            value,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            panic!("test element is not a capacitor");
+        };
+
+        let c = resolve_capacitor_instance_value(
+            &netlist,
+            &element.name,
+            *value,
+            model.as_deref(),
+            instance_params,
+            crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Xyce,
+        )
+        .expect("capacitor resolves");
+        let expected = 1.0 * 20.0e-6 * 1.0e-6 * 2.0;
+        assert!((c - expected).abs() < 1e-18, "resolved {c}");
     }
 }
