@@ -765,34 +765,41 @@ fn dac_bridge_ramp_value(
     t_fall: Value,
 ) -> Value {
     let elapsed = (time - start_time).max(0.0);
-    if (target - start_value).abs() < 1e-12 {
+    let span = (out_high - out_low).abs();
+    if (target - start_value).abs() < 1e-12 || span <= 1e-12 {
         target
-    } else if (out_high - out_low).abs() <= 1e-12 {
-        target
-    } else if (target - out_low).abs() <= 1e-12 {
-        let fall_slope = (out_high - out_low) / t_fall;
-        if start_value > out_low && fall_slope.is_finite() {
-            let output = start_value - fall_slope * elapsed;
-            if out_low > output { out_low } else { output }
-        } else {
-            out_low
-        }
-    } else if (target - out_high).abs() <= 1e-12 {
-        let rise_slope = (out_high - out_low) / t_rise;
-        if start_value < out_high && rise_slope.is_finite() {
-            let output = start_value + rise_slope * elapsed;
-            if out_high < output { out_high } else { output }
-        } else {
-            out_high
-        }
-    } else if start_value < target {
-        let rise_slope = (out_high - out_low) / t_rise;
-        let output = start_value + rise_slope * elapsed;
-        if target < output { target } else { output }
     } else {
-        let fall_slope = (out_high - out_low) / t_fall;
-        let output = start_value - fall_slope * elapsed;
-        if target > output { target } else { output }
+        let duration =
+            dac_bridge_transition_duration(start_value, target, out_low, out_high, t_rise, t_fall);
+        let slope = span / duration;
+        if !slope.is_finite() || slope <= 0.0 {
+            return target;
+        }
+        let delta = slope * elapsed;
+        if target > start_value {
+            (start_value + delta).min(target)
+        } else {
+            (start_value - delta).max(target)
+        }
+    }
+}
+
+fn dac_bridge_transition_duration(
+    start_value: Value,
+    target: Value,
+    out_low: Value,
+    out_high: Value,
+    t_rise: Value,
+    t_fall: Value,
+) -> Value {
+    if (target - out_high).abs() <= 1e-12 {
+        t_rise
+    } else if (target - out_low).abs() <= 1e-12 {
+        t_fall
+    } else if target > start_value {
+        t_rise
+    } else {
+        t_fall
     }
 }
 
@@ -805,27 +812,15 @@ fn dac_bridge_completion_time(
     t_rise: Value,
     t_fall: Value,
 ) -> Option<Value> {
-    if (target - start_value).abs() <= 1e-12 || (out_high - out_low).abs() <= 1e-12 {
+    let span = (out_high - out_low).abs();
+    if (target - start_value).abs() <= 1e-12 || span <= 1e-12 {
         return None;
     }
 
-    if (target - out_low).abs() <= 1e-12 {
-        let fall_slope = (out_high - out_low) / t_fall;
-        (start_value > out_low && fall_slope > 0.0 && fall_slope.is_finite())
-            .then_some(start_time + (start_value - out_low) / fall_slope)
-    } else if (target - out_high).abs() <= 1e-12 {
-        let rise_slope = (out_high - out_low) / t_rise;
-        (start_value < out_high && rise_slope > 0.0 && rise_slope.is_finite())
-            .then_some(start_time + (out_high - start_value) / rise_slope)
-    } else if start_value < target {
-        let rise_slope = (out_high - out_low) / t_rise;
-        (rise_slope > 0.0 && rise_slope.is_finite())
-            .then_some(start_time + (target - start_value) / rise_slope)
-    } else {
-        let fall_slope = (out_high - out_low) / t_fall;
-        (fall_slope > 0.0 && fall_slope.is_finite())
-            .then_some(start_time + (start_value - target) / fall_slope)
-    }
+    let duration =
+        dac_bridge_transition_duration(start_value, target, out_low, out_high, t_rise, t_fall);
+    let slope = span / duration;
+    (slope > 0.0 && slope.is_finite()).then_some(start_time + (target - start_value).abs() / slope)
 }
 
 fn bridge_vector_width(ctx: &CmContext, model_name: &str) -> CmResult<usize> {
@@ -1494,6 +1489,46 @@ mod tests {
         assert_eq!(ctx.state(base + 1), 1.0);
         assert_eq!(ctx.state(base + 2), 0.0);
         assert_eq!(ctx.state(base + 3), 0.0);
+        assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
+    }
+
+    #[test]
+    fn dac_bridge_ramps_inverted_output_levels() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 1);
+        ctx.set_port_width("out", 1);
+        ctx.set_param("out_low", 5.0);
+        ctx.set_param("out_high", 0.0);
+        ctx.set_param("out_undef", 2.5);
+        ctx.set_param("input_load", 1.0e-12);
+        ctx.set_param("t_rise", 1.0e-9);
+        ctx.set_param("t_fall", 2.0e-9);
+        ctx.init_output_vector("out", PortType::Voltage, 1);
+        ctx.analysis = AnalysisType::Transient;
+        ctx.call_type = CallType::TransientAnalysis;
+        ctx.timestep = 1.0e-9;
+
+        DacBridge.init(&mut ctx).expect("dac_bridge initializes");
+
+        ctx.time = 0.0;
+        ctx.set_input("in", InputValue::DigitalVector(vec![DigitalValue::zero()]));
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+        DacBridge
+            .evaluate(&mut ctx)
+            .expect("records initial active-low zero level");
+        ctx.advance_state();
+
+        ctx.time = 0.25e-9;
+        ctx.set_input("in", InputValue::DigitalVector(vec![DigitalValue::one()]));
+        ctx.set_input_digital_vector_event_times("in", vec![Some(0.0)]);
+        DacBridge
+            .evaluate(&mut ctx)
+            .expect("ramps toward inverted one level");
+
+        assert!(
+            (ctx.output_vector("out")[0] - 3.75).abs() <= 1.0e-15,
+            "inverted dac_bridge levels should ramp instead of snapping"
+        );
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
     }
 
