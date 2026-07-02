@@ -44,10 +44,14 @@ fn apply_xspice_events_at_or_before(
             }
         }
     });
-    touched_digital_nodes.sort_unstable();
-    touched_digital_nodes.dedup();
-    touched_real_nodes.sort_unstable();
-    touched_real_nodes.dedup();
+    if touched_digital_nodes.len() > 1 {
+        touched_digital_nodes.sort_unstable();
+        touched_digital_nodes.dedup();
+    }
+    if touched_real_nodes.len() > 1 {
+        touched_real_nodes.sort_unstable();
+        touched_real_nodes.dedup();
+    }
     for &node_id in touched_digital_nodes.iter() {
         let resolved = digital_drivers
             .get(&node_id)
