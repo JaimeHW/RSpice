@@ -540,6 +540,18 @@ struct RelativeCondition {
     truth: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CurrentPathAssignmentEffect {
+    Assign(ValueId),
+    KeepPrevious,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CurrentPathAssignmentScan {
+    value: Option<ValueId>,
+    crossed_unknown_guard: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct AssignmentHistoryPrefixCacheKey {
     variable: VariableId,
@@ -3787,14 +3799,25 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
         let history = self.variable_assignment_history.get(&variable)?.clone();
         self.consume_history_reconstruction_step()?;
-        let direct = history
-            .iter()
-            .rev()
-            .take(MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES)
-            .find_map(|entry| self.lower_assignment_expr_for_current_path(variable, entry));
-        let lowered = direct.or_else(|| {
+        let known = self.lower_known_assignment_history_for_current_path(variable, &history);
+        let lowered = if known.crossed_unknown_guard {
             self.lower_complementary_assignment_history_pair_for_current_path(variable, &history)
-        });
+                .or_else(|| {
+                    self.lower_recent_assignment_history_for_current_path(variable, &history)
+                })
+                .or(known.value)
+        } else {
+            known
+                .value
+                .or_else(|| {
+                    self.lower_complementary_assignment_history_pair_for_current_path(
+                        variable, &history,
+                    )
+                })
+                .or_else(|| {
+                    self.lower_recent_assignment_history_for_current_path(variable, &history)
+                })
+        };
         if let Some(value) = lowered {
             self.current_path_history_cache.insert(cache_key, value);
         }
@@ -3865,14 +3888,45 @@ impl<'a> ScalarGraphBuilder<'a> {
         self.condition_truth_in_current_path(assignment.condition)
             .is_some_and(|truth| truth)
             .then_some(())?;
-        self.lower_assignment_expr_for_current_path(variable, &assignment.value)
+        match self.lower_assignment_expr_for_current_path(variable, &assignment.value)? {
+            CurrentPathAssignmentEffect::Assign(value) => Some(value),
+            CurrentPathAssignmentEffect::KeepPrevious => None,
+        }
+    }
+
+    fn lower_known_assignment_history_for_current_path(
+        &mut self,
+        variable: VariableId,
+        history: &[AssignmentHistoryEntry],
+    ) -> CurrentPathAssignmentScan {
+        let mut crossed_unknown_guard = false;
+        for entry in history
+            .iter()
+            .rev()
+            .take(MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES)
+        {
+            match self.lower_assignment_expr_for_current_path(variable, entry) {
+                Some(CurrentPathAssignmentEffect::Assign(value)) => {
+                    return CurrentPathAssignmentScan {
+                        value: Some(value),
+                        crossed_unknown_guard,
+                    };
+                }
+                Some(CurrentPathAssignmentEffect::KeepPrevious) => continue,
+                None => crossed_unknown_guard = true,
+            }
+        }
+        CurrentPathAssignmentScan {
+            value: None,
+            crossed_unknown_guard,
+        }
     }
 
     fn lower_assignment_expr_for_current_path(
         &mut self,
         variable: VariableId,
         entry: &AssignmentHistoryEntry,
-    ) -> Option<ValueId> {
+    ) -> Option<CurrentPathAssignmentEffect> {
         let expression = self.mir.expressions.get(usize::from(entry.expr))?;
         let HirExprKind::Conditional {
             condition,
@@ -3883,7 +3937,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             if self.expr_references_variable(entry.expr, variable) {
                 return None;
             }
-            return self.lower_expression_with_assignment_snapshot(entry, entry.expr);
+            return self
+                .lower_expression_with_assignment_snapshot(entry, entry.expr)
+                .map(CurrentPathAssignmentEffect::Assign);
         };
         let condition_truth = self.condition_truth_in_current_path(*condition)?;
         let selected = if condition_truth {
@@ -3892,9 +3948,115 @@ impl<'a> ScalarGraphBuilder<'a> {
             *else_expr
         };
         if self.variable_identifier(selected) == Some(variable) {
+            return Some(CurrentPathAssignmentEffect::KeepPrevious);
+        }
+        self.lower_expression_with_assignment_snapshot_and_path(
+            entry,
+            *condition,
+            condition_truth,
+            selected,
+        )
+        .map(CurrentPathAssignmentEffect::Assign)
+    }
+
+    fn lower_expression_with_assignment_snapshot_and_path(
+        &mut self,
+        entry: &AssignmentHistoryEntry,
+        condition: ExprId,
+        truth: bool,
+        expr: ExprId,
+    ) -> Option<ValueId> {
+        self.conditional_path_stack
+            .push(ConditionalPathPredicate { condition, truth });
+        let lowered = self.lower_expression_with_assignment_snapshot(entry, expr);
+        self.conditional_path_stack.pop();
+        lowered
+    }
+
+    fn lower_recent_assignment_history_for_current_path(
+        &mut self,
+        variable: VariableId,
+        history: &[AssignmentHistoryEntry],
+    ) -> Option<ValueId> {
+        if self.conditional_path_stack.is_empty() {
             return None;
         }
-        self.lower_expression_with_assignment_snapshot(entry, selected)
+        self.consume_history_reconstruction_step()?;
+        let scan_start = history
+            .len()
+            .saturating_sub(MAX_SCALAR_RECENT_HISTORY_RECONSTRUCTION_ENTRIES);
+        for base_index in (scan_start..history.len()).rev() {
+            let base_entry = &history[base_index];
+            if self.expr_references_variable(base_entry.expr, variable) {
+                continue;
+            }
+            let Some(mut value) =
+                self.lower_expression_with_assignment_snapshot(base_entry, base_entry.expr)
+            else {
+                continue;
+            };
+            let mut complete = true;
+            for entry in history.iter().skip(base_index + 1) {
+                let Some(next) = self.lower_assignment_history_expr_from_previous_for_current_path(
+                    variable, entry, value,
+                ) else {
+                    complete = false;
+                    break;
+                };
+                value = next;
+            }
+            if complete {
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    fn lower_assignment_history_expr_from_previous_for_current_path(
+        &mut self,
+        variable: VariableId,
+        entry: &AssignmentHistoryEntry,
+        previous_value: ValueId,
+    ) -> Option<ValueId> {
+        self.consume_history_reconstruction_step()?;
+        let expression = self.mir.expressions.get(usize::from(entry.expr))?;
+        let HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } = &expression.kind
+        else {
+            return self.lower_expression_with_assignment_previous_value_and_snapshot(
+                variable,
+                previous_value,
+                entry,
+                entry.expr,
+            );
+        };
+
+        let Some(condition_truth) = self.condition_truth_in_current_path(*condition) else {
+            return self.lower_assignment_history_expr_from_previous(
+                variable,
+                entry,
+                previous_value,
+            );
+        };
+        let selected = if condition_truth {
+            *then_expr
+        } else {
+            *else_expr
+        };
+        if self.variable_identifier(selected) == Some(variable) {
+            return Some(previous_value);
+        }
+        self.lower_expression_with_assignment_previous_value_snapshot_and_path(
+            variable,
+            previous_value,
+            entry,
+            *condition,
+            condition_truth,
+            selected,
+        )
     }
 
     fn lower_complementary_assignment_history_pair_for_current_path(

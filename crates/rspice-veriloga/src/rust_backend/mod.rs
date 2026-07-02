@@ -956,6 +956,59 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_replays_unknown_current_path_history_before_stale_base() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module unknown_current_path_history_before_stale_base(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    real state;
+    analog begin
+        state = 0.0;
+
+        if (enable == 1) begin
+            state = V(p, n);
+        end
+
+        if (V(p, n) > 0.0) begin
+            state = 7.0 * V(p, n);
+        end
+
+        if (enable == 0) begin
+            state = $simparam("inactive_scalar_probe");
+        end
+
+        if (enable == 1) begin
+            I(p, n) <+ state;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("current-path history should replay through unknown guarded assignments");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("7.0"), "{stamp}");
+        assert!(!stamp.contains("inactive_scalar_probe"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_replays_guarded_loop_self_update_on_current_path() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
