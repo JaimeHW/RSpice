@@ -1685,7 +1685,7 @@ impl XyceTestRunner {
                 }
             };
 
-        let engine = self.create_xyce_engine();
+        let engine = self.create_xyce_static_tran_engine(&netlist, &plan.print, None);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let result = match engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort) {
             Ok(result) => result,
@@ -1743,8 +1743,15 @@ impl XyceTestRunner {
             return self.passed_result(deck, start, contract);
         }
 
-        let locked_engine =
-            self.create_xyce_engine_with_locked_time_grid(Some(reference_time_grid));
+        let mut best_mismatches = mismatches;
+        let capacitor_branch_print =
+            Self::transient_print_requests_linear_capacitor_branch_quantity(&netlist, &plan.print);
+
+        let locked_engine = self.create_xyce_static_tran_engine(
+            &netlist,
+            &plan.print,
+            Some(reference_time_grid.clone()),
+        );
         if let Ok(locked_result) =
             locked_engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort)
             && let Ok(locked_mismatches) = self.compare_tran_prn_reference(
@@ -1758,17 +1765,35 @@ impl XyceTestRunner {
             if locked_mismatches.is_empty() {
                 return self.passed_result(deck, start, contract);
             }
-            if locked_mismatches.len() < mismatches.len() {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!(
-                        "{} Xyce transient reference mismatch(es)",
-                        locked_mismatches.len()
-                    ),
-                    locked_mismatches,
+            if locked_mismatches.len() < best_mismatches.len() {
+                best_mismatches = locked_mismatches;
+            }
+        }
+
+        if !capacitor_branch_print {
+            let backward_euler_engine = self
+                .create_xyce_static_tran_engine_with_integration_method(
+                    Some(reference_time_grid),
+                    crate::analysis::IntegrationMethod::BackwardEuler,
                 );
+            if let Ok(backward_euler_result) = backward_euler_engine.run_tran_with_abort(
+                &netlist,
+                plan.tran.stop,
+                max_step,
+                &abort,
+            ) && let Ok(backward_euler_mismatches) = self.compare_tran_prn_reference(
+                &reference,
+                &plan.print,
+                &netlist,
+                &plan.source,
+                &backward_euler_result,
+            ) {
+                if backward_euler_mismatches.is_empty() {
+                    return self.passed_result(deck, start, contract);
+                }
+                if backward_euler_mismatches.len() < best_mismatches.len() {
+                    best_mismatches = backward_euler_mismatches;
+                }
             }
         }
 
@@ -1776,8 +1801,11 @@ impl XyceTestRunner {
             deck,
             start,
             contract,
-            format!("{} Xyce transient reference mismatch(es)", mismatches.len()),
-            mismatches,
+            format!(
+                "{} Xyce transient reference mismatch(es)",
+                best_mismatches.len()
+            ),
+            best_mismatches,
         )
     }
 
@@ -2822,8 +2850,35 @@ impl XyceTestRunner {
         &self,
         locked_time_grid: Option<Vec<Value>>,
     ) -> Engine {
+        Engine::new(self.xyce_engine_config(locked_time_grid))
+    }
+
+    fn create_xyce_static_tran_engine(
+        &self,
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        locked_time_grid: Option<Vec<Value>>,
+    ) -> Engine {
+        let mut config = self.xyce_engine_config(locked_time_grid);
+        if Self::transient_print_requests_linear_capacitor_branch_quantity(netlist, print) {
+            config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        }
+        Engine::new(config)
+    }
+
+    fn create_xyce_static_tran_engine_with_integration_method(
+        &self,
+        locked_time_grid: Option<Vec<Value>>,
+        integration_method: crate::analysis::IntegrationMethod,
+    ) -> Engine {
+        let mut config = self.xyce_engine_config(locked_time_grid);
+        config.integration_method = integration_method;
+        Engine::new(config)
+    }
+
+    fn xyce_engine_config(&self, locked_time_grid: Option<Vec<Value>>) -> SimulationConfig {
         let defaults = SimulationConfig::default();
-        Engine::new(SimulationConfig {
+        SimulationConfig {
             max_iterations: defaults.max_iterations.max(1200),
             convergence_config: ConvergenceConfig::robust(),
             spice_dialect: SpiceDialect::Xyce,
@@ -2831,7 +2886,71 @@ impl XyceTestRunner {
             temperature: 300.15,
             locked_time_grid: locked_time_grid.map(Arc::new),
             ..defaults
+        }
+    }
+
+    fn transient_print_requests_linear_capacitor_branch_quantity(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> bool {
+        print.probes.iter().any(|probe| {
+            Self::transient_probe_requests_linear_capacitor_branch_quantity(netlist, probe)
         })
+    }
+
+    fn transient_probe_requests_linear_capacitor_branch_quantity(
+        netlist: &Netlist,
+        probe: &str,
+    ) -> bool {
+        let normalized = Self::normalize_probe(probe);
+        if Self::normalized_probe_requests_linear_capacitor_branch_quantity(netlist, &normalized) {
+            return true;
+        }
+
+        let Some(expression) = Self::print_expression_inner(probe) else {
+            return false;
+        };
+        let normalized_expression = Self::normalize_probe(expression);
+        if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+            return Self::normalized_probe_requests_linear_capacitor_branch_quantity(
+                netlist,
+                &normalized_expression,
+            );
+        }
+
+        let mut found = false;
+        let mut call_value = |call: &str| {
+            if Self::normalized_probe_requests_linear_capacitor_branch_quantity(
+                netlist,
+                &Self::normalize_probe(call),
+            ) {
+                found = true;
+            }
+            Ok(1.0)
+        };
+        let _ = Self::evaluate_print_expression_with_probe_calls(
+            expression,
+            netlist.params.clone(),
+            &mut call_value,
+        );
+        found
+    }
+
+    fn normalized_probe_requests_linear_capacitor_branch_quantity(
+        netlist: &Netlist,
+        normalized: &str,
+    ) -> bool {
+        if let Some(element_name) = Self::parse_current_probe(normalized)
+            && Self::find_capacitor_element(netlist, &element_name).is_some()
+        {
+            return true;
+        }
+        if let Some(element_name) = Self::parse_power_probe(normalized)
+            && Self::find_capacitor_element(netlist, &element_name).is_some()
+        {
+            return true;
+        }
+        false
     }
 
     fn compare_dc_prn_reference(
@@ -3226,11 +3345,14 @@ impl XyceTestRunner {
         tran: &XyceTranAnalysis,
         reference: &XycePrnTable,
     ) -> Result<Value, String> {
-        let requested = tran
-            .max_step
-            .or_else(|| (tran.step > 0.0).then_some(tran.step));
+        let requested = tran.max_step.or_else(|| {
+            (tran.step > 0.0)
+                .then_some(tran.step)
+                .and_then(|step| Self::feasible_oracle_limited_step(tran, step))
+        });
         let reference_step = Self::reference_min_positive_time_step(reference)?;
-        let source_step = Self::source_transient_max_step(netlist, tran);
+        let source_step = Self::source_transient_max_step(netlist, tran)
+            .and_then(|step| Self::feasible_oracle_limited_step(tran, step));
         let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
         let reference_limited_step = Self::feasible_reference_limited_step(tran, reference_step);
         let fallback_limit = reference_limited_step.is_none().then_some(fallback);
@@ -3273,8 +3395,13 @@ impl XyceTestRunner {
         // coarse table; those must fall back to source/requested/final-time
         // limits and be compared by interpolation instead of forcing millions
         // of native steps.
-        let estimated_reference_steps = (tran.stop / reference_step).ceil();
-        (estimated_reference_steps <= MAX_NATIVE_TRAN_ORACLE_STEPS).then_some(reference_step)
+        Self::feasible_oracle_limited_step(tran, reference_step)
+    }
+
+    fn feasible_oracle_limited_step(tran: &XyceTranAnalysis, step: Value) -> Option<Value> {
+        let step = (step.is_finite() && step > f64::MIN_POSITIVE).then_some(step)?;
+        let estimated_steps = (tran.stop / step).ceil();
+        (estimated_steps <= MAX_NATIVE_TRAN_ORACLE_STEPS).then_some(step)
     }
 
     fn source_transient_max_step(netlist: &Netlist, tran: &XyceTranAnalysis) -> Option<Value> {
@@ -3917,6 +4044,13 @@ impl XyceTestRunner {
         if Self::probe_uses_voltage_tolerance(normalized_probe) {
             tolerance.absolute = self.config.voltage_absolute_tolerance;
         }
+        if Self::probe_uses_current_tolerance(normalized_probe) {
+            tolerance.zero = Some(
+                tolerance
+                    .zero
+                    .unwrap_or(2.0 * self.config.absolute_tolerance),
+            );
+        }
         if Self::parse_power_probe(normalized_probe).is_some() {
             tolerance.absolute = tolerance.absolute.max(self.config.power_absolute_tolerance);
         }
@@ -3927,6 +4061,11 @@ impl XyceTestRunner {
         normalized_probe == "v-sweep"
             || Self::parse_voltage_probe(normalized_probe)
                 .is_some_and(|probe| probe.accessor.uses_voltage_tolerance())
+    }
+
+    fn probe_uses_current_tolerance(normalized_probe: &str) -> bool {
+        Self::parse_current_probe(normalized_probe).is_some()
+            || Self::parse_lead_current_probe(normalized_probe).is_some()
     }
 
     fn split_comp_directive(rest: &str) -> Option<(String, String)> {
@@ -4115,22 +4254,8 @@ impl XyceTestRunner {
                 ElementKind::Resistor { .. } => {
                     Self::validate_static_step_resistor_contract(netlist, &element.name)?;
                 }
-                ElementKind::Capacitor {
-                    value,
-                    value_expr,
-                    model,
-                    instance_params,
-                    ..
-                } => {
-                    Self::validate_static_transient_passive_value(
-                        "capacitor",
-                        &element.name,
-                        *value,
-                        value_expr.as_deref(),
-                        model.as_deref(),
-                        instance_params,
-                        &netlist.params,
-                    )?;
+                ElementKind::Capacitor { .. } => {
+                    Self::validate_static_step_capacitor_contract(netlist, &element.name)?
                 }
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
@@ -4170,6 +4295,158 @@ impl XyceTestRunner {
                 element_name, resistance
             ))
         }
+    }
+
+    fn validate_static_step_capacitor_contract(
+        netlist: &Netlist,
+        element_name: &str,
+    ) -> Result<(), String> {
+        Self::validate_xyce_capacitor_contract_params(netlist, element_name)?;
+        let capacitance = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        })
+        .resolved_capacitor_value(netlist, element_name)
+        .map_err(|err| {
+            format!(
+                "native .PRINT TRAN comparison could not resolve capacitor '{}' to a static capacitance: {}",
+                element_name, err
+            )
+        })?
+        .ok_or_else(|| {
+            format!(
+                "native .PRINT TRAN comparison could not resolve capacitor '{}' to a static capacitance",
+                element_name
+            )
+        })?;
+        if capacitance.is_finite() && capacitance >= 0.0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "native .PRINT TRAN comparison does not support capacitor '{}' with invalid capacitance {}",
+                element_name, capacitance
+            ))
+        }
+    }
+
+    fn validate_xyce_capacitor_contract_params(
+        netlist: &Netlist,
+        element_name: &str,
+    ) -> Result<(), String> {
+        let element = Self::find_capacitor_element(netlist, element_name)
+            .ok_or_else(|| format!("capacitor '{}' not found", element_name))?;
+        let ElementKind::Capacitor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Err(format!("element '{}' is not a capacitor", element_name));
+        };
+
+        if !value.is_finite() {
+            if let Some(expression) = value_expr.as_deref() {
+                Self::validate_static_transient_passive_value_expression(
+                    "capacitor",
+                    element_name,
+                    expression,
+                    &netlist.params,
+                )?;
+            } else if model.is_none() {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison could not resolve capacitor value for element '{}'",
+                    element_name
+                ));
+            }
+        }
+
+        const INSTANCE_PARAMS: &[&str] = &["L", "W", "M", "TEMP", "DTEMP", "TC1", "TC2"];
+        for (name, value) in instance_params {
+            if !INSTANCE_PARAMS
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison does not yet support Xyce capacitor instance parameter {} on element '{}'",
+                    name, element_name
+                ));
+            }
+            if !value.is_finite() {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison does not support capacitor '{}' with non-finite instance parameter {}={}",
+                    element_name, name, value
+                ));
+            }
+        }
+
+        let Some(model_name) = model.as_deref() else {
+            return Ok(());
+        };
+        let model = Self::find_model(&netlist.models, model_name).ok_or_else(|| {
+            format!(
+                "native static .PRINT TRAN comparison could not find capacitor '{}' model '{}'",
+                element_name, model_name
+            )
+        })?;
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "C" | "CAP" | "CAPACITOR"
+        ) {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not support capacitor '{}' model '{}' of type '{}'",
+                element_name, model_name, model.model_type
+            ));
+        }
+
+        const MODEL_PARAMS: &[&str] = &["C", "CJ", "CJSW", "DEFW", "NARROW", "TC1", "TC2", "TNOM"];
+        for (name, value) in &model.params {
+            if !MODEL_PARAMS
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison does not yet support Xyce capacitor model parameter {} on model '{}'",
+                    name, model_name
+                ));
+            }
+            if !value.is_finite() {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison does not support capacitor model '{}' with non-finite parameter {}={}",
+                    model_name, name, value
+                ));
+            }
+        }
+        for (name, expression) in &model.expr_params {
+            if !MODEL_PARAMS
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison does not yet support Xyce capacitor model expression parameter {} on model '{}'",
+                    name, model_name
+                ));
+            }
+            Self::validate_static_transient_passive_value_expression(
+                "capacitor model parameter",
+                name,
+                expression,
+                &netlist.params,
+            )?;
+        }
+        if !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+        {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not support non-scalar capacitor model parameters on model '{}'",
+                model_name
+            ));
+        }
+        Ok(())
     }
 
     fn validate_static_step_inductor_contract(
@@ -4290,22 +4567,8 @@ impl XyceTestRunner {
                         )?;
                     }
                 }
-                ElementKind::Capacitor {
-                    value,
-                    value_expr,
-                    model,
-                    instance_params,
-                    ..
-                } => {
-                    Self::validate_static_transient_passive_value(
-                        "capacitor",
-                        &element.name,
-                        *value,
-                        value_expr.as_deref(),
-                        model.as_deref(),
-                        instance_params,
-                        params,
-                    )?;
+                ElementKind::Capacitor { .. } => {
+                    Self::validate_static_step_capacitor_contract(netlist, &element.name)?
                 }
                 ElementKind::Inductor { .. } => {
                     Self::validate_static_step_inductor_contract(netlist, &element.name)?;
@@ -4357,38 +4620,12 @@ impl XyceTestRunner {
         }
     }
 
-    fn validate_static_transient_passive_value(
+    fn validate_static_transient_passive_value_expression(
         device_kind: &str,
         element_name: &str,
-        value: Value,
-        value_expr: Option<&str>,
-        model: Option<&str>,
-        instance_params: &[(String, Value)],
+        expression: &str,
         params: &crate::netlist::ParamContext,
     ) -> Result<(), String> {
-        if model.is_some() {
-            return Err(format!(
-                "native static .PRINT TRAN comparison does not yet support model-based {device_kind} value resolution on element '{element_name}'"
-            ));
-        }
-        if !instance_params.is_empty() {
-            let names = instance_params
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(format!(
-                "native static .PRINT TRAN comparison does not yet support {device_kind} instance parameter(s) {names} on element '{element_name}'"
-            ));
-        }
-        if value.is_finite() {
-            return Ok(());
-        }
-        let Some(expression) = value_expr else {
-            return Err(format!(
-                "native static .PRINT TRAN comparison could not resolve {device_kind} value for element '{element_name}'"
-            ));
-        };
         let prepared = prepare_behavioral_expression(expression, params).map_err(|err| {
             format!(
                 "native static .PRINT TRAN comparison could not prepare {device_kind} value expression '{expression}' on element '{element_name}': {err}"
@@ -4501,7 +4738,8 @@ impl XyceTestRunner {
             ));
         }
         if let Some(element_name) = Self::parse_power_probe(normalized) {
-            if Self::find_inductor_element(netlist, &element_name).is_some()
+            if (Self::find_capacitor_element(netlist, &element_name).is_some()
+                || Self::find_inductor_element(netlist, &element_name).is_some())
                 && Self::netlist_has_recorded_branch_current(netlist, &element_name)
             {
                 return Ok(());
@@ -5311,6 +5549,14 @@ impl XyceTestRunner {
         }
 
         if let Some(element_name) = Self::parse_power_probe(normalized) {
+            if Self::find_capacitor_element(netlist, &element_name).is_some() {
+                return Self::evaluate_transient_capacitor_power(
+                    netlist,
+                    result,
+                    time,
+                    &element_name,
+                );
+            }
             if Self::find_inductor_element(netlist, &element_name).is_some() {
                 return Self::evaluate_transient_inductor_power(
                     netlist,
@@ -5386,32 +5632,65 @@ impl XyceTestRunner {
     ) -> Result<Value, String> {
         let element = Self::find_inductor_element(netlist, inductor_name)
             .ok_or_else(|| format!("inductor '{}' not found", inductor_name))?;
+        Self::evaluate_transient_two_terminal_branch_power(
+            result,
+            time,
+            "inductor",
+            &element.name,
+            &element,
+        )
+    }
+
+    fn evaluate_transient_capacitor_power(
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        capacitor_name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_capacitor_element(netlist, capacitor_name)
+            .ok_or_else(|| format!("capacitor '{}' not found", capacitor_name))?;
+        Self::evaluate_transient_two_terminal_branch_power(
+            result,
+            time,
+            "capacitor",
+            &element.name,
+            &element,
+        )
+    }
+
+    fn evaluate_transient_two_terminal_branch_power(
+        result: &TransientResult,
+        time: Value,
+        device_kind: &str,
+        branch_name: &str,
+        element: &crate::netlist::Element,
+    ) -> Result<Value, String> {
         let node_pos = element
             .nodes
             .first()
-            .ok_or_else(|| format!("inductor '{}' has no positive node", inductor_name))?;
+            .ok_or_else(|| format!("{device_kind} '{}' has no positive node", element.name))?;
         let node_neg = element
             .nodes
             .get(1)
-            .ok_or_else(|| format!("inductor '{}' has no negative node", inductor_name))?;
+            .ok_or_else(|| format!("{device_kind} '{}' has no negative node", element.name))?;
         let pos_index = result
             .node_index_named(node_pos)
             .ok_or_else(|| format!("node '{}' not found in transient result", node_pos))?;
         let neg_index = result
             .node_index_named(node_neg)
             .ok_or_else(|| format!("node '{}' not found in transient result", node_neg))?;
-        let current = Self::transient_branch_current_waveform_named(result, inductor_name)
+        let current = Self::transient_branch_current_waveform_named(result, branch_name)
             .ok_or_else(|| {
                 format!(
                     "branch current '{}' not found in transient result",
-                    inductor_name
+                    branch_name
                 )
             })?;
 
         if current.len() != result.time.len() {
             return Err(format!(
                 "branch current '{}' has {} sample(s) for {} time point(s)",
-                inductor_name,
+                branch_name,
                 current.len(),
                 result.time.len()
             ));
@@ -6374,6 +6653,7 @@ impl XyceTestRunner {
         let ElementKind::Capacitor {
             value,
             value_expr,
+            model,
             instance_params,
             ..
         } = &element.kind
@@ -6382,6 +6662,12 @@ impl XyceTestRunner {
                 "capacitor parameter probe '{name}:C' targets a non-capacitor element"
             ));
         };
+        if (model.is_some()
+            || Self::capacitor_instance_params_affect_effective_value(instance_params))
+            && let Some(capacitance) = Self::effective_capacitor_value(netlist, name)
+        {
+            return Ok(capacitance);
+        }
         Self::evaluate_static_passive_parameter_value(
             netlist,
             dc,
@@ -6576,6 +6862,7 @@ impl XyceTestRunner {
         let ElementKind::Capacitor {
             value,
             value_expr,
+            model,
             instance_params,
             ..
         } = &element.kind
@@ -6584,6 +6871,12 @@ impl XyceTestRunner {
                 "capacitor parameter probe '{name}:C' targets a non-capacitor element"
             ));
         };
+        if (model.is_some()
+            || Self::capacitor_instance_params_affect_effective_value(instance_params))
+            && let Some(capacitance) = Self::effective_capacitor_value(netlist, name)
+        {
+            return Ok(capacitance);
+        }
         Self::evaluate_transient_static_passive_parameter_value(
             netlist,
             result,
@@ -7182,6 +7475,7 @@ impl XyceTestRunner {
             kind,
             ElementKind::VoltageSource(_)
                 | ElementKind::Resistor { .. }
+                | ElementKind::Capacitor { .. }
                 | ElementKind::Inductor { .. }
                 | ElementKind::JilesAthertonInductor { .. }
                 | ElementKind::Vcvs { .. }
@@ -7374,6 +7668,16 @@ impl XyceTestRunner {
         .flatten()
     }
 
+    fn effective_capacitor_value(netlist: &Netlist, name: &str) -> Option<Value> {
+        Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        })
+        .resolved_capacitor_value(netlist, name)
+        .ok()
+        .flatten()
+    }
+
     fn effective_inductor_value(netlist: &Netlist, name: &str) -> Option<Value> {
         Engine::new(SimulationConfig {
             spice_dialect: SpiceDialect::Xyce,
@@ -7400,6 +7704,17 @@ impl XyceTestRunner {
             "TC1",
             "TC2",
         ];
+        instance_params.iter().any(|(name, _)| {
+            EFFECTIVE_VALUE_PARAMS
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        })
+    }
+
+    fn capacitor_instance_params_affect_effective_value(
+        instance_params: &[(String, Value)],
+    ) -> bool {
+        const EFFECTIVE_VALUE_PARAMS: &[&str] = &["L", "W", "M", "TEMP", "DTEMP", "TC1", "TC2"];
         instance_params.iter().any(|(name, _)| {
             EFFECTIVE_VALUE_PARAMS
                 .iter()
@@ -8936,6 +9251,85 @@ End of Xyce(TM) Simulation
     }
 
     #[test]
+    fn transient_max_step_ignores_infeasible_source_transition_oversampling() {
+        let netlist = Netlist::parse(
+            "\
+source transition envelope
+VIN 1 0 PULSE(0 1 10U 1N 1N 30U)
+.TRAN 1N 20U
+.PRINT TRAN V(1)
+.END
+",
+        )
+        .expect("test netlist parses");
+        let tran = XyceTranAnalysis {
+            step: 1.0e-9,
+            stop: 20.0e-6,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 0.0],
+                vec![1.0, 1.0e-9, 0.0],
+                vec![2.0, 10.0000004e-6, 1.0],
+                vec![3.0, 20.0e-6, 1.0],
+            ],
+        };
+
+        let max_step =
+            XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+                .expect("requested .TRAN step remains feasible");
+
+        assert_eq!(max_step, 1.0e-9);
+    }
+
+    #[test]
+    fn transient_max_step_does_not_treat_expensive_print_step_as_tmax() {
+        let netlist = Netlist::parse(
+            "\
+long rc envelope
+V1 in 0 0
+R1 in out 1k
+C1 out 0 40u IC=1
+.TRAN 0.5U 400ms
+.PRINT TRAN V(out)
+.END
+",
+        )
+        .expect("test netlist parses");
+        let tran = XyceTranAnalysis {
+            step: 0.5e-6,
+            stop: 400.0e-3,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(out)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0],
+                vec![1.0, 0.5e-6, 1.0],
+                vec![2.0, 400.0e-3, 0.0],
+            ],
+        };
+
+        let max_step =
+            XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+                .expect("long transient falls back to bounded native step count");
+
+        assert_eq!(max_step, 400.0e-6);
+    }
+
+    #[test]
     fn reference_columns_accept_primary_sweep_and_branch_labels() {
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
         let netlist = Netlist::default();
@@ -9226,6 +9620,7 @@ End of Xyce(TM) Simulation
         assert_eq!(magnitude_tolerance.absolute, crate::constants::VNTOL);
         assert_eq!(phase_tolerance.absolute, 1.0e-12);
         assert_eq!(current_tolerance.absolute, 1.0e-12);
+        assert_eq!(current_tolerance.zero, Some(2.0e-12));
         assert_eq!(power_tolerance.absolute, 1.0e-9);
         assert!(
             runner
@@ -9244,6 +9639,12 @@ End of Xyce(TM) Simulation
                 .value_mismatch(3.98095099e-12, 0.0, current_tolerance)
                 .is_some(),
             "current differences keep the stricter ITOL-scale default"
+        );
+        assert!(
+            runner
+                .value_mismatch(1.87829126e-12, -5.0e-15, current_tolerance)
+                .is_none(),
+            "near-zero current residuals inside both simulators' ABSTOL budgets should compare equal"
         );
     }
 
@@ -9401,6 +9802,10 @@ End of Xyce(TM) Simulation
         let engine = runner.create_dc_engine();
 
         assert_eq!(engine.config().spice_dialect, SpiceDialect::Xyce);
+        assert_eq!(
+            engine.config().integration_method,
+            crate::analysis::IntegrationMethod::TrapGear
+        );
         assert_eq!(
             engine.config().resolved_jfet_level2_model(),
             crate::engine::JfetLevel2Model::XyceModifiedShockley

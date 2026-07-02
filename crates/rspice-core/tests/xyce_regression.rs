@@ -901,6 +901,78 @@ fn test_xyce_transient_resistor_branch_current_cases_run() {
 }
 
 #[test]
+fn test_xyce_transient_capacitor_branch_current_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_524_SON/cmod_capmod.cir",
+        "Netlists/MULTIPLICITY_FACTOR/capacitor_ic.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce transient capacitor branch-current comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_semiconductor_capacitor_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/SEMIC_CAPACITOR/semicap.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce semiconductor capacitor transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
+fn test_xyce_polyg_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/POLYG/polyg.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce POLY G-source transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_behavioral_source_transient_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
