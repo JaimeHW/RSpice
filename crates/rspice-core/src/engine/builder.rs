@@ -1068,13 +1068,337 @@ enum XspiceAutoBridgeFormatArg<'a> {
     Float(crate::Value),
 }
 
+#[derive(Default)]
+struct XspiceAutoBridgePrintfFlags {
+    left_justify: bool,
+    sign_plus: bool,
+    sign_space: bool,
+    alternate: bool,
+    zero_pad: bool,
+}
+
+struct XspiceAutoBridgePrintfSpec {
+    placeholder: String,
+    flags: XspiceAutoBridgePrintfFlags,
+    width: Option<usize>,
+    precision: Option<usize>,
+    specifier: char,
+}
+
+fn parse_xspice_auto_bridge_printf_spec(
+    template_key: &str,
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> Result<XspiceAutoBridgePrintfSpec, SimulationError> {
+    let mut placeholder = String::from("%");
+    let mut flags = XspiceAutoBridgePrintfFlags::default();
+
+    loop {
+        let Some(&ch) = chars.peek() else {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE auto-bridge template '{template_key}' has a trailing '%' in format card"
+            )));
+        };
+        match ch {
+            '-' => flags.left_justify = true,
+            '+' => flags.sign_plus = true,
+            ' ' => flags.sign_space = true,
+            '#' => flags.alternate = true,
+            '0' => flags.zero_pad = true,
+            _ => break,
+        }
+        placeholder.push(ch);
+        chars.next();
+    }
+
+    let width = parse_xspice_auto_bridge_printf_digits(chars, &mut placeholder);
+
+    let precision = if chars.peek() == Some(&'.') {
+        placeholder.push('.');
+        chars.next();
+        Some(parse_xspice_auto_bridge_printf_digits(chars, &mut placeholder).unwrap_or(0))
+    } else {
+        None
+    };
+
+    if chars.peek() == Some(&'*') {
+        placeholder.push('*');
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE auto-bridge template '{template_key}' uses unsupported dynamic-width format placeholder {placeholder}"
+        )));
+    }
+
+    match chars.peek().copied() {
+        Some('h' | 'l') => {
+            let length = chars.next().expect("peeked length modifier");
+            placeholder.push(length);
+            if chars.peek() == Some(&length) {
+                placeholder.push(length);
+                chars.next();
+            }
+        }
+        Some('L' | 'j' | 'z' | 't') => {
+            let length = chars.next().expect("peeked length modifier");
+            placeholder.push(length);
+        }
+        _ => {}
+    }
+
+    let Some(specifier) = chars.next() else {
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE auto-bridge template '{template_key}' has a trailing '%' in format card"
+        )));
+    };
+    placeholder.push(specifier);
+
+    Ok(XspiceAutoBridgePrintfSpec {
+        placeholder,
+        flags,
+        width,
+        precision,
+        specifier,
+    })
+}
+
+fn parse_xspice_auto_bridge_printf_digits(
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    placeholder: &mut String,
+) -> Option<usize> {
+    let mut value = 0usize;
+    let mut saw_digit = false;
+    while let Some(ch) = chars.peek().copied() {
+        let Some(digit) = ch.to_digit(10) else {
+            break;
+        };
+        saw_digit = true;
+        placeholder.push(ch);
+        chars.next();
+        value = value.saturating_mul(10).saturating_add(digit as usize);
+    }
+    saw_digit.then_some(value)
+}
+
+fn xspice_auto_bridge_format_len(value: &str) -> usize {
+    value.chars().count()
+}
+
+fn apply_xspice_auto_bridge_string_width(
+    mut value: String,
+    spec: &XspiceAutoBridgePrintfSpec,
+) -> String {
+    let Some(width) = spec.width else {
+        return value;
+    };
+    let len = xspice_auto_bridge_format_len(&value);
+    if len >= width {
+        return value;
+    }
+
+    let padding = " ".repeat(width - len);
+    if spec.flags.left_justify {
+        value.push_str(&padding);
+        value
+    } else {
+        format!("{padding}{value}")
+    }
+}
+
+fn xspice_auto_bridge_numeric_prefix_len(value: &str) -> usize {
+    let mut prefix_len = match value.as_bytes().first().copied() {
+        Some(b'+' | b'-' | b' ') => 1,
+        _ => 0,
+    };
+    let rest = &value[prefix_len..];
+    if rest.starts_with("0x") || rest.starts_with("0X") {
+        prefix_len += 2;
+    }
+    prefix_len
+}
+
+fn apply_xspice_auto_bridge_numeric_width(
+    value: String,
+    spec: &XspiceAutoBridgePrintfSpec,
+    zero_pad_allowed: bool,
+) -> String {
+    let Some(width) = spec.width else {
+        return value;
+    };
+    let len = xspice_auto_bridge_format_len(&value);
+    if len >= width {
+        return value;
+    }
+
+    let pad_len = width - len;
+    if spec.flags.left_justify {
+        let mut padded = value;
+        padded.push_str(&" ".repeat(pad_len));
+        return padded;
+    }
+
+    if spec.flags.zero_pad && zero_pad_allowed {
+        let prefix_len = xspice_auto_bridge_numeric_prefix_len(&value);
+        let (prefix, body) = value.split_at(prefix_len);
+        format!("{prefix}{}{body}", "0".repeat(pad_len))
+    } else {
+        format!("{}{value}", " ".repeat(pad_len))
+    }
+}
+
+fn format_xspice_auto_bridge_int(value: usize, spec: &XspiceAutoBridgePrintfSpec) -> String {
+    let mut digits = match spec.specifier {
+        'o' => format!("{value:o}"),
+        'x' => format!("{value:x}"),
+        'X' => format!("{value:X}"),
+        _ => value.to_string(),
+    };
+
+    if spec.precision == Some(0) && value == 0 {
+        digits.clear();
+    } else if let Some(precision) = spec.precision {
+        let len = xspice_auto_bridge_format_len(&digits);
+        if len < precision {
+            digits = format!("{}{digits}", "0".repeat(precision - len));
+        }
+    }
+
+    let mut formatted = String::new();
+    match spec.specifier {
+        'd' | 'i' => {
+            if spec.flags.sign_plus {
+                formatted.push('+');
+            } else if spec.flags.sign_space {
+                formatted.push(' ');
+            }
+        }
+        'o' if spec.flags.alternate && !digits.starts_with('0') => formatted.push('0'),
+        'x' if spec.flags.alternate && value != 0 => formatted.push_str("0x"),
+        'X' if spec.flags.alternate && value != 0 => formatted.push_str("0X"),
+        _ => {}
+    }
+    formatted.push_str(&digits);
+    apply_xspice_auto_bridge_numeric_width(formatted, spec, spec.precision.is_none())
+}
+
+fn trim_xspice_auto_bridge_float_zeros(value: &mut String) {
+    let exponent = value.find('e').or_else(|| value.find('E'));
+    let suffix = exponent.map(|index| value.split_off(index));
+
+    if let Some(dot) = value.find('.') {
+        while value.ends_with('0') {
+            value.pop();
+        }
+        if value.len() > dot && value.ends_with('.') {
+            value.pop();
+        }
+    }
+
+    if let Some(suffix) = suffix {
+        value.push_str(&suffix);
+    }
+}
+
+fn format_xspice_auto_bridge_general_float(
+    value: crate::Value,
+    precision: Option<usize>,
+    uppercase: bool,
+    alternate: bool,
+) -> String {
+    let precision = precision.unwrap_or(6).max(1);
+    if !value.is_finite() {
+        let formatted = value.to_string();
+        return if uppercase {
+            formatted.to_ascii_uppercase()
+        } else {
+            formatted
+        };
+    }
+
+    let abs = value.abs();
+    let exponent = if abs == 0.0 {
+        0
+    } else {
+        abs.log10().floor() as i32
+    };
+
+    let mut formatted = if exponent < -4 || exponent >= precision as i32 {
+        let digits_after_decimal = precision.saturating_sub(1);
+        if uppercase {
+            format!("{:.*E}", digits_after_decimal, value)
+        } else {
+            format!("{:.*e}", digits_after_decimal, value)
+        }
+    } else {
+        let digits_after_decimal = (precision as i32 - exponent - 1).max(0) as usize;
+        format!("{:.*}", digits_after_decimal, value)
+    };
+
+    if !alternate {
+        trim_xspice_auto_bridge_float_zeros(&mut formatted);
+    }
+    if uppercase {
+        formatted = formatted.to_ascii_uppercase();
+    }
+    formatted
+}
+
+fn format_xspice_auto_bridge_float(
+    value: crate::Value,
+    spec: &XspiceAutoBridgePrintfSpec,
+) -> String {
+    let mut formatted = match spec.specifier {
+        'e' => format!("{:.*e}", spec.precision.unwrap_or(6), value),
+        'E' => format!("{:.*E}", spec.precision.unwrap_or(6), value),
+        'f' | 'F' => {
+            let mut fixed = format!("{:.*}", spec.precision.unwrap_or(6), value);
+            if spec.specifier == 'F' {
+                fixed = fixed.to_ascii_uppercase();
+            }
+            if spec.flags.alternate && spec.precision == Some(0) && !fixed.contains('.') {
+                fixed.push('.');
+            }
+            fixed
+        }
+        'g' => format_xspice_auto_bridge_general_float(
+            value,
+            spec.precision,
+            false,
+            spec.flags.alternate,
+        ),
+        'G' => format_xspice_auto_bridge_general_float(
+            value,
+            spec.precision,
+            true,
+            spec.flags.alternate,
+        ),
+        _ => value.to_string(),
+    };
+
+    if !formatted.starts_with('-') {
+        if spec.flags.sign_plus {
+            formatted.insert(0, '+');
+        } else if spec.flags.sign_space {
+            formatted.insert(0, ' ');
+        }
+    }
+
+    apply_xspice_auto_bridge_numeric_width(formatted, spec, true)
+}
+
+fn format_xspice_auto_bridge_str(value: &str, spec: &XspiceAutoBridgePrintfSpec) -> String {
+    let formatted = if let Some(precision) = spec.precision {
+        value.chars().take(precision).collect()
+    } else {
+        value.to_string()
+    };
+    apply_xspice_auto_bridge_string_width(formatted, spec)
+}
+
 fn format_xspice_auto_bridge_template_card(
     template_key: &str,
     card: &str,
     args: &[XspiceAutoBridgeFormatArg<'_>],
 ) -> Result<String, SimulationError> {
     let mut output = String::with_capacity(card.len() + 32);
-    let mut chars = card.chars();
+    let mut chars = card.chars().peekable();
     let mut arg_index = 0usize;
 
     while let Some(ch) = chars.next() {
@@ -1083,39 +1407,47 @@ fn format_xspice_auto_bridge_template_card(
             continue;
         }
 
-        let Some(specifier) = chars.next() else {
+        let Some(next) = chars.peek().copied() else {
             return Err(SimulationError::Circuit(format!(
                 "XSPICE auto-bridge template '{template_key}' has a trailing '%' in format card"
             )));
         };
-        if specifier == '%' {
+        if next == '%' {
+            chars.next();
             output.push('%');
             continue;
         }
 
+        let spec = parse_xspice_auto_bridge_printf_spec(template_key, &mut chars)?;
+
         let Some(arg) = args.get(arg_index) else {
             return Err(SimulationError::Circuit(format!(
-                "XSPICE auto-bridge template '{template_key}' has too many %{specifier} placeholders"
+                "XSPICE auto-bridge template '{template_key}' has too many {} placeholders",
+                spec.placeholder
             )));
         };
         arg_index += 1;
 
-        match (specifier, arg) {
-            ('d', XspiceAutoBridgeFormatArg::Int(value)) => {
-                output.push_str(&value.to_string());
+        match (spec.specifier, arg) {
+            ('d' | 'i' | 'u' | 'o' | 'x' | 'X', XspiceAutoBridgeFormatArg::Int(value)) => {
+                output.push_str(&format_xspice_auto_bridge_int(*value, &spec));
             }
-            ('s', XspiceAutoBridgeFormatArg::Str(value)) => output.push_str(value),
-            ('g', XspiceAutoBridgeFormatArg::Float(value)) => {
-                output.push_str(&value.to_string());
+            ('s', XspiceAutoBridgeFormatArg::Str(value)) => {
+                output.push_str(&format_xspice_auto_bridge_str(value, &spec));
             }
-            ('d' | 's' | 'g', _) => {
+            ('e' | 'E' | 'f' | 'F' | 'g' | 'G', XspiceAutoBridgeFormatArg::Float(value)) => {
+                output.push_str(&format_xspice_auto_bridge_float(*value, &spec));
+            }
+            ('d' | 'i' | 'u' | 'o' | 'x' | 'X' | 's' | 'e' | 'E' | 'f' | 'F' | 'g' | 'G', _) => {
                 return Err(SimulationError::Circuit(format!(
-                    "XSPICE auto-bridge template '{template_key}' placeholder %{specifier} has the wrong argument type"
+                    "XSPICE auto-bridge template '{template_key}' placeholder {} has the wrong argument type",
+                    spec.placeholder
                 )));
             }
             _ => {
                 return Err(SimulationError::Circuit(format!(
-                    "XSPICE auto-bridge template '{template_key}' uses unsupported format placeholder %{specifier}"
+                    "XSPICE auto-bridge template '{template_key}' uses unsupported format placeholder {}",
+                    spec.placeholder
                 )));
             }
         }
@@ -1827,6 +2159,35 @@ set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_
         assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -1.0);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
+    }
+
+    #[test]
+    fn auto_bridge_template_accepts_printf_width_and_precision() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge template accepts printf modifiers
+.param vcc=4.567
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.control
+set auto_bridge_d_out = ( \".model fmt_dac dac_bridge(out_low = 0 out_high = %.2f)\" \"afmt%03d [ %12s ] [ %12s ] fmt_dac\" 1 )
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        let dac = single_xspice_instance(&circuit, "dac_bridge");
+        assert_eq!(dac.name, "AFMT001");
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_high"),
+            4.57
+        );
     }
 
     #[test]
