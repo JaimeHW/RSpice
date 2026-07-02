@@ -1273,9 +1273,13 @@ impl CodeModel for SXfer {
         if order > 0 {
             ensure_s_xfer_transient_scratch(ctx);
         }
-        let int_ic = ctx.real_vector_param("int_ic").unwrap_or(&[]).to_vec();
         for index in 0..order {
-            let value = int_ic.get(order - 1 - index).copied().unwrap_or(0.0);
+            let source_index = order - 1 - index;
+            let value = ctx
+                .real_vector_param("int_ic")
+                .and_then(|int_ic| int_ic.get(source_index))
+                .copied()
+                .unwrap_or(0.0);
             ctx.set_initial_state(index, value);
         }
         Ok(())
