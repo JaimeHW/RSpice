@@ -736,18 +736,21 @@ mod tests {
     fn d_cosim_input_events_use_unified_indices_for_runtime_batch() {
         let mut ctx = CmContext::new();
         ctx.time = 2.0e-9;
-        ctx.allocate_states(3);
-        ctx.allocate_int_states(STATE_PREV_INPUT_START + 3);
-        for index in 0..3 {
-            ctx.set_int_state(STATE_PREV_INPUT_START + index, -1);
+
+        let inputs = [DigitalValue::one(), DigitalValue::zero()];
+        let inouts = [DigitalValue::unknown()];
+        let input_layout =
+            digital_cosim_input_layout(inputs.len(), inouts.len()).expect("valid input layout");
+        ctx.allocate_states(input_layout.connected_input_count);
+        ctx.allocate_int_states(input_layout.int_state_count);
+        for index in 0..input_layout.connected_input_count {
+            ctx.set_int_state(input_layout.previous_input_start + index, -1);
         }
         ctx.set_input_digital_vector_event_times("d_in", vec![Some(1.5e-9), Some(1.0e-9)]);
         ctx.set_input_digital_vector_event_times("d_inout", vec![Some(1.0e-9)]);
 
-        let inputs = [DigitalValue::one(), DigitalValue::zero()];
-        let inouts = [DigitalValue::unknown()];
         let mut events = Vec::new();
-        collect_input_events(&ctx, &inputs, &inouts, None, &mut events);
+        collect_input_events(&ctx, &inputs, &inouts, None, input_layout, &mut events);
 
         assert_eq!(events.len(), 3);
         assert_eq!(
@@ -765,7 +768,7 @@ mod tests {
         let first_ptr = events.as_ptr();
         let first_capacity = events.capacity();
 
-        collect_input_events(&ctx, &inputs, &inouts, Some(2), &mut events);
+        collect_input_events(&ctx, &inputs, &inouts, Some(2), input_layout, &mut events);
         assert_eq!(events.as_ptr(), first_ptr);
         assert_eq!(events.capacity(), first_capacity);
         assert_eq!(
