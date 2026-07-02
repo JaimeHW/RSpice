@@ -1111,6 +1111,11 @@ fn parse_scalar_param_token_value(
                 .unwrap_or_else(|| xspice_string_value_from_param_preference(param_name, value));
             Ok(parsed)
         }
+        TokenKind::Other('<') => {
+            let value =
+                parse_xspice_complex_literal_string(stream, line_num, param_name, netlist_params)?;
+            Ok(XspiceParamValue::String(value))
+        }
         TokenKind::LBracket => parse_vector_param_value(
             stream,
             line_num,
@@ -1339,7 +1344,8 @@ fn parse_vector_param_value(
         netlist_params,
         defer_simple_param_refs,
     ) {
-        parse_string_vector_param(stream, line_num).map(XspiceParamValue::StringVector)
+        parse_string_vector_param(stream, line_num, param_name, netlist_params)
+            .map(XspiceParamValue::StringVector)
     } else {
         parse_real_vector_param(stream, line_num, netlist_params, defer_simple_param_refs)
     }
@@ -1362,6 +1368,7 @@ fn vector_param_should_parse_as_string(
     skip_vector_commas(&mut probe);
 
     match &probe.peek().kind {
+        TokenKind::Other('<') => true,
         TokenKind::StringLit(_) => true,
         TokenKind::Ident(_) if defer_simple_param_refs => false,
         TokenKind::Ident(value) => {
@@ -1410,7 +1417,8 @@ pub(crate) fn parse_xspice_string_vector_literal(
         message: format!("Invalid XSPICE string-vector parameter literal: {err}"),
     })?;
     let mut stream = TokenStream::new(tokens);
-    let values = parse_string_vector_param(&mut stream, line_num)?;
+    let values =
+        parse_string_vector_param(&mut stream, line_num, param_name, &ParamContext::new())?;
     while stream.consume(&TokenKind::Newline) {}
     if !stream.is_eof() {
         return Err(ParseError::Syntax {
@@ -1536,6 +1544,8 @@ fn parse_real_vector_entry(
 fn parse_string_vector_param(
     stream: &mut TokenStream,
     line_num: usize,
+    param_name: &str,
+    netlist_params: &ParamContext,
 ) -> Result<Vec<String>, ParseError> {
     if !stream.consume(&TokenKind::LBracket) {
         return Err(ParseError::Syntax {
@@ -1557,6 +1567,21 @@ fn parse_string_vector_param(
                 let value = value.clone();
                 stream.advance();
                 values.push(value);
+            }
+            TokenKind::Other('<') => {
+                let mut probe = stream.clone();
+                match parse_xspice_complex_literal_string(
+                    &mut probe,
+                    line_num,
+                    param_name,
+                    netlist_params,
+                ) {
+                    Ok(value) => {
+                        *stream = probe;
+                        values.push(value);
+                    }
+                    Err(_) => values.push(parse_string_vector_bare_value(stream, line_num)?),
+                }
             }
             TokenKind::Newline | TokenKind::Eof => {
                 return Err(ParseError::Syntax {
@@ -1608,6 +1633,124 @@ fn parse_string_vector_bare_value(
         });
     }
     Ok(value)
+}
+
+fn parse_xspice_complex_literal_string(
+    stream: &mut TokenStream,
+    line_num: usize,
+    param_name: &str,
+    netlist_params: &ParamContext,
+) -> Result<String, ParseError> {
+    if !stream.consume(&TokenKind::Other('<')) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected complex XSPICE parameter value for '{}', found '{}'",
+                param_name,
+                stream.peek().kind
+            ),
+        });
+    }
+
+    let real =
+        parse_xspice_complex_component(stream, line_num, param_name, netlist_params, "real")?;
+    let imag =
+        parse_xspice_complex_component(stream, line_num, param_name, netlist_params, "imaginary")?;
+
+    skip_vector_commas(stream);
+    if !stream.consume(&TokenKind::Other('>')) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected '>' after complex XSPICE parameter '{}', found '{}'",
+                param_name,
+                stream.peek().kind
+            ),
+        });
+    }
+
+    Ok(format!(
+        "<{} {}>",
+        format_xspice_complex_component(real),
+        format_xspice_complex_component(imag)
+    ))
+}
+
+fn parse_xspice_complex_component(
+    stream: &mut TokenStream,
+    line_num: usize,
+    param_name: &str,
+    netlist_params: &ParamContext,
+    component: &str,
+) -> Result<Value, ParseError> {
+    skip_vector_commas(stream);
+
+    let sign = match &stream.peek().kind {
+        TokenKind::Plus => {
+            stream.advance();
+            1.0
+        }
+        TokenKind::Minus => {
+            stream.advance();
+            -1.0
+        }
+        _ => 1.0,
+    };
+
+    let token = stream.peek().clone();
+    let value = match token.kind {
+        TokenKind::Number(value) => {
+            stream.advance();
+            value
+        }
+        TokenKind::Expression(expr_text) => {
+            stream.advance();
+            expr::eval_expression(&expr_text, netlist_params).map_err(|err| ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Could not resolve {component} part of complex XSPICE parameter '{}': {}",
+                    param_name, err
+                ),
+            })?
+        }
+        TokenKind::Ident(raw) => {
+            stream.advance();
+            if let Some(value) = netlist_params.get(&raw) {
+                value
+            } else if let Some(value) = parse_boolean_literal(&raw) {
+                value
+            } else if let Ok(value) = parse_spice_value(&raw) {
+                value
+            } else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Expected {component} part of complex XSPICE parameter '{}', found '{}'",
+                        param_name, raw
+                    ),
+                });
+            }
+        }
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Expected {component} part of complex XSPICE parameter '{}', found '{}'",
+                    param_name, token.kind
+                ),
+            });
+        }
+    };
+
+    Ok(sign * value)
+}
+
+fn format_xspice_complex_component(value: Value) -> String {
+    let formatted = value.to_string();
+    formatted
+        .strip_suffix(".0")
+        .unwrap_or(formatted.as_str())
+        .to_string()
 }
 
 fn string_vector_piece_from_token(token: &Token) -> Option<String> {

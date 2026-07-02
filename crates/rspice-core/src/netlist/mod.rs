@@ -2467,6 +2467,45 @@ mod tests {
     }
 
     #[test]
+    fn xspice_instance_params_accept_ngspice_complex_literals() {
+        let netlist = Netlist::parse(
+            "xspice instance complex params\n\
+             A1 in out print_param_types complex=<4.0 5.0> complex_array=[<11.0t 12.0g> <13.0m 14.0>]\n\
+             .end\n",
+        )
+        .expect("XSPICE instance params accept ngspice complex literals");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                string_params,
+                string_vector_params,
+                ..
+            } => {
+                assert_eq!(
+                    string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("complex"))
+                        .map(|(_, value)| value.as_str()),
+                    Some("<4 5>")
+                );
+                assert_eq!(
+                    string_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("complex_array"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(
+                        &[
+                            "<11000000000000 12000000000>".to_string(),
+                            "<0.013 14>".to_string()
+                        ][..]
+                    )
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn xspice_instance_string_vector_scalar_params_preserve_unquoted_argv_tokens() {
         let netlist = Netlist::parse(
             "xspice instance scalar string-vector params\n\
