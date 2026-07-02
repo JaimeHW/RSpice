@@ -81,6 +81,21 @@ fn real_to_v_output(
     }
 }
 
+fn real_to_v_completion_time(
+    start_time: Value,
+    start_value: Value,
+    target: Value,
+    transition_time: Value,
+) -> Option<Value> {
+    if (target - start_value).abs() <= 1.0e-12
+        || !(start_time.is_finite() && transition_time.is_finite() && transition_time > 0.0)
+    {
+        return None;
+    }
+
+    Some(start_time + transition_time)
+}
+
 fn set_real_output_when_changed(ctx: &mut CmContext, name: &str, value: Value, delay: Value) {
     if !commit_event_outputs(ctx) {
         return;
@@ -424,6 +439,15 @@ impl CodeModel for RealToVoltage {
         };
 
         if commit_event_outputs(ctx) {
+            if let Some(completion_time) = real_to_v_completion_time(
+                next_start_time,
+                next_start_value,
+                next_target,
+                transition_time,
+            ) && completion_time > ctx.time + 1.0e-18
+            {
+                ctx.request_breakpoint(completion_time);
+            }
             ctx.set_state(0, output);
             ctx.set_state(1, next_target);
             ctx.set_state(2, next_start_time);
@@ -690,6 +714,10 @@ mod tests {
             0.0,
             "rollbackable probes must not commit a new real_to_v transition start time"
         );
+        assert!(
+            ctx.take_requested_breakpoints().is_empty(),
+            "rollbackable probes must not schedule real_to_v completion breakpoints"
+        );
 
         ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
         RealToVoltage
@@ -698,5 +726,6 @@ mod tests {
 
         assert_eq!(ctx.state(1), 4.0);
         assert_eq!(ctx.state(2), 1.0e-9);
+        assert_eq!(ctx.take_requested_breakpoints(), vec![2.0e-9]);
     }
 }
