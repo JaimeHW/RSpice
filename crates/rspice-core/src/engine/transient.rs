@@ -1617,6 +1617,7 @@ impl Engine {
                             &bounded_force_candidate,
                             expected_source_delta,
                             num_nodes,
+                            &circuit.inductors.branch_indices,
                         );
                     let stagnant_force_candidate = use_static_source_recovery_guards
                         && Self::is_stagnant_force_candidate(
@@ -2427,6 +2428,7 @@ impl Engine {
                             &bounded_force_candidate,
                             expected_source_delta,
                             num_nodes,
+                            &circuit.inductors.branch_indices,
                         );
                     let stagnant_force_candidate = use_static_source_recovery_guards
                         && Self::is_stagnant_force_candidate(
@@ -2819,7 +2821,13 @@ impl Engine {
 
             if locked_grid.is_none()
                 && !circuit.has_xspice_event_driven_devices()
-                && Self::is_stale_step(&solution, &new_solution, expected_source_delta, num_nodes)
+                && Self::is_stale_step(
+                    &solution,
+                    &new_solution,
+                    expected_source_delta,
+                    num_nodes,
+                    &circuit.inductors.branch_indices,
+                )
             {
                 stale_accept_count += 1;
                 let boosted = (dt * 2.0).min(max_step);
@@ -3244,6 +3252,27 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_step_guard_counts_inductor_branch_current_motion() {
+        let previous = [1.0, 2.0, 0.0];
+        let node_stale_branch_active = [1.0, 2.0, 0.1];
+
+        assert!(!Engine::is_stale_step(
+            &previous,
+            &node_stale_branch_active,
+            SOURCE_ACTIVE_DELTA * 10.0,
+            2,
+            &[1],
+        ));
+        assert!(Engine::is_stale_step(
+            &previous,
+            &node_stale_branch_active,
+            SOURCE_ACTIVE_DELTA * 10.0,
+            2,
+            &[],
+        ));
+    }
 
     fn missing_pwl_path(name: &str) -> String {
         let unique = std::time::SystemTime::now()

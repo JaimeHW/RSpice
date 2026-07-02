@@ -29,6 +29,7 @@ const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
 const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 50_000.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
+const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
 
 /// Configuration for the Xyce corpus runner.
 #[derive(Debug, Clone)]
@@ -2607,18 +2608,16 @@ impl XyceTestRunner {
             .max_step
             .or_else(|| (tran.step > 0.0).then_some(tran.step));
         let reference_step = Self::reference_min_positive_time_step(reference)?;
-        let source_step = Self::source_frequency_transient_max_step(netlist, tran);
+        let source_step = Self::source_transient_max_step(netlist, tran);
         let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
-        let reference_limited_step = if Self::netlist_has_capacitor(netlist) {
-            None
-        } else {
-            reference_step
-        };
+        let reference_limited_step =
+            Self::feasible_reference_limited_step(netlist, tran, reference_step);
+        let fallback_limit = reference_limited_step.is_none().then_some(fallback);
         let max_step = [
             requested,
             reference_limited_step,
             source_step,
-            Some(fallback),
+            fallback_limit,
         ]
         .into_iter()
         .flatten()
@@ -2640,60 +2639,155 @@ impl XyceTestRunner {
         Ok(max_step)
     }
 
-    fn source_frequency_transient_max_step(
+    fn feasible_reference_limited_step(
         netlist: &Netlist,
         tran: &XyceTranAnalysis,
+        reference_step: Option<Value>,
     ) -> Option<Value> {
+        let reference_step =
+            reference_step.filter(|step| step.is_finite() && *step > f64::MIN_POSITIVE)?;
+        if !Self::netlist_has_passive_energy_storage(netlist) {
+            return Some(reference_step);
+        }
+
+        // For passive-storage decks the Xyce accepted cadence is part of the
+        // oracle: changing dt changes the numerical trajectory even for a
+        // linear L/R or R/C network. Use the reference minimum spacing when
+        // it is affordable, but fall back to source/final-time limits for long
+        // pulse decks whose dense Xyce rows would require millions of native
+        // steps.
+        let estimated_reference_steps = (tran.stop / reference_step).ceil();
+        (estimated_reference_steps <= MAX_NATIVE_TRAN_ORACLE_STEPS).then_some(reference_step)
+    }
+
+    fn source_transient_max_step(netlist: &Netlist, tran: &XyceTranAnalysis) -> Option<Value> {
         netlist
             .elements
             .iter()
             .filter_map(|element| match &element.kind {
                 ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-                    Self::source_spec_max_frequency(spec, tran.stop)
+                    Self::source_spec_transient_max_step(spec, tran)
                 }
                 _ => None,
             })
-            .filter(|frequency| frequency.is_finite() && *frequency > 0.0)
-            .map(|frequency| 1.0 / (frequency * TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD))
+            .filter(|step| step.is_finite() && *step > 0.0)
             .reduce(Value::min)
     }
 
-    fn source_spec_max_frequency(spec: &crate::netlist::SourceSpec, tstop: Value) -> Option<Value> {
+    fn source_spec_transient_max_step(
+        spec: &crate::netlist::SourceSpec,
+        tran: &XyceTranAnalysis,
+    ) -> Option<Value> {
         match spec {
             crate::netlist::SourceSpec::Dc(_)
             | crate::netlist::SourceSpec::Ac { .. }
             | crate::netlist::SourceSpec::DcAc { .. }
-            | crate::netlist::SourceSpec::Pwl { .. }
             | crate::netlist::SourceSpec::PwlFile { .. }
-            | crate::netlist::SourceSpec::Pulse { .. }
-            | crate::netlist::SourceSpec::Exp { .. }
             | crate::netlist::SourceSpec::TrNoise { .. } => None,
             crate::netlist::SourceSpec::DcTransient { transient, .. }
             | crate::netlist::SourceSpec::DcAcTransient { transient, .. } => {
-                Self::source_spec_max_frequency(transient, tstop)
+                Self::source_spec_transient_max_step(transient, tran)
             }
+            crate::netlist::SourceSpec::Pulse {
+                rise,
+                fall,
+                width,
+                period,
+                width_defaults_to_zero,
+                ..
+            } => {
+                let tstep_hint = if tran.step.is_finite() && tran.step > 0.0 {
+                    tran.step
+                } else {
+                    (tran.stop / 1000.0).max(f64::MIN_POSITIVE)
+                };
+                let (_delay, resolved_rise, resolved_fall, resolved_width, resolved_period) =
+                    crate::circuit::VoltageSources::resolve_pulse_timing_with_defaults(
+                        0.0,
+                        *rise,
+                        *fall,
+                        *width,
+                        *period,
+                        *width_defaults_to_zero,
+                        tstep_hint,
+                        tran.stop.max(f64::MIN_POSITIVE),
+                    );
+                [
+                    Self::positive_duration_step(
+                        resolved_rise,
+                        TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION,
+                    ),
+                    Self::positive_duration_step(
+                        resolved_fall,
+                        TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION,
+                    ),
+                    Self::positive_duration_step(
+                        resolved_width,
+                        TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD,
+                    ),
+                    Self::positive_duration_step(
+                        resolved_period,
+                        TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD,
+                    ),
+                ]
+                .into_iter()
+                .flatten()
+                .reduce(Value::min)
+            }
+            crate::netlist::SourceSpec::Pwl { points } => points
+                .windows(2)
+                .filter_map(|window| {
+                    let (t0, _v0) = window[0];
+                    let (t1, _v1) = window[1];
+                    Self::positive_duration_step(t1 - t0, TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION)
+                })
+                .reduce(Value::min),
+            crate::netlist::SourceSpec::Exp {
+                tau1,
+                tau2,
+                td1,
+                td2,
+                ..
+            } => [
+                Self::positive_duration_step(*tau1, TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION),
+                Self::positive_duration_step(*tau2, TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION),
+                Self::positive_duration_step(*td2 - *td1, TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD),
+            ]
+            .into_iter()
+            .flatten()
+            .reduce(Value::min),
             crate::netlist::SourceSpec::Sin { frequency, .. } => {
-                Some(Self::resolved_sin_frequency(*frequency, tstop))
+                Self::positive_frequency_step(Self::resolved_sin_frequency(*frequency, tran.stop))
             }
             crate::netlist::SourceSpec::Sffm {
                 carrier_freq,
                 signal_freq,
                 ..
-            } => Some(
-                Self::resolved_modulated_frequency(*carrier_freq, 5.0, tstop).max(
-                    Self::resolved_modulated_frequency(*signal_freq, 500.0, tstop),
+            } => Self::positive_frequency_step(
+                Self::resolved_modulated_frequency(*carrier_freq, 5.0, tran.stop).max(
+                    Self::resolved_modulated_frequency(*signal_freq, 500.0, tran.stop),
                 ),
             ),
             crate::netlist::SourceSpec::Am {
                 modulating_freq,
                 carrier_freq,
                 ..
-            } => Some(
-                Self::resolved_modulated_frequency(*carrier_freq, 500.0, tstop).max(
-                    Self::resolved_modulated_frequency(*modulating_freq, 5.0, tstop),
+            } => Self::positive_frequency_step(
+                Self::resolved_modulated_frequency(*carrier_freq, 500.0, tran.stop).max(
+                    Self::resolved_modulated_frequency(*modulating_freq, 5.0, tran.stop),
                 ),
             ),
         }
+    }
+
+    fn positive_duration_step(duration: Value, points_per_duration: Value) -> Option<Value> {
+        (duration.is_finite() && duration > 0.0 && points_per_duration > 0.0)
+            .then_some(duration / points_per_duration)
+    }
+
+    fn positive_frequency_step(frequency: Value) -> Option<Value> {
+        (frequency.is_finite() && frequency > 0.0)
+            .then_some(1.0 / (frequency * TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD))
     }
 
     fn resolved_sin_frequency(frequency: Value, tstop: Value) -> Value {
@@ -2761,11 +2855,13 @@ impl XyceTestRunner {
             .then_some(time_column)
     }
 
-    fn netlist_has_capacitor(netlist: &Netlist) -> bool {
-        netlist
-            .elements
-            .iter()
-            .any(|element| matches!(element.kind, ElementKind::Capacitor { .. }))
+    fn netlist_has_passive_energy_storage(netlist: &Netlist) -> bool {
+        netlist.elements.iter().any(|element| {
+            matches!(
+                element.kind,
+                ElementKind::Capacitor { .. } | ElementKind::Inductor { .. }
+            )
+        })
     }
 
     fn compare_step_res_reference(
@@ -3404,9 +3500,26 @@ impl XyceTestRunner {
                         &netlist.params,
                     )?;
                 }
+                ElementKind::Inductor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    ..
+                } => {
+                    Self::validate_static_transient_passive_value(
+                        "inductor",
+                        &element.name,
+                        *value,
+                        value_expr.as_deref(),
+                        model.as_deref(),
+                        instance_params,
+                        &netlist.params,
+                    )?;
+                }
                 _ => {
                     return Err(format!(
-                        "native static .PRINT TRAN comparison currently supports independent, behavioral, and static R/C transient decks; element '{}' requires a broader transient oracle contract",
+                        "native static .PRINT TRAN comparison currently supports independent, behavioral, and static R/L/C transient decks; element '{}' requires a broader transient oracle contract",
                         element.name
                     ));
                 }
@@ -3932,6 +4045,23 @@ impl XyceTestRunner {
                 .to_ascii_lowercase();
             if trimmed.is_empty() {
                 continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix(".options") {
+                let option_tokens = rest
+                    .split(|ch: char| ch.is_ascii_whitespace() || ch == ',')
+                    .filter(|token| !token.is_empty())
+                    .collect::<Vec<_>>();
+                if option_tokens.iter().any(|token| *token == "loca")
+                    || (option_tokens.iter().any(|token| *token == "nonlin")
+                        && option_tokens
+                            .iter()
+                            .any(|token| token.starts_with("continuation")))
+                {
+                    return Err(
+                        "deck requires Xyce LOCA continuation options; the native Xyce adapter does not yet implement continuation analysis semantics"
+                            .to_string(),
+                    );
+                }
             }
         }
         Ok(())
@@ -7363,6 +7493,19 @@ End of Xyce(TM) Simulation
                 .value_mismatch(3.98095099e-12, 0.0, current_tolerance)
                 .is_some(),
             "current differences keep the stricter ITOL-scale default"
+        );
+    }
+
+    #[test]
+    fn source_directive_rejection_fails_closed_on_loca_continuation_options() {
+        let source = ".options nonlin continuation=1\n.options loca stepper=natural\n";
+
+        let err = XyceTestRunner::reject_unsupported_source_directives(source)
+            .expect_err("LOCA continuation options are outside the native contract");
+
+        assert!(
+            err.contains("LOCA continuation"),
+            "unexpected rejection message: {err}"
         );
     }
 

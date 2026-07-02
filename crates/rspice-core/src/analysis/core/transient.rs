@@ -4,6 +4,7 @@
 use crate::Value;
 
 type ChargeLteInputs<'a> = (&'a [Value], &'a [Value], &'a [Value], &'a [Value]);
+const TRAPGEAR_SIGN_CHANGE_FLOOR: Value = crate::constants::VNTOL;
 
 /// Numerical integration methods for transient analysis
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,10 +136,18 @@ const DEFAULT_BREAKPOINT_TOLERANCE: Value = 1e-15;
 /// Ngspice `dctran.c` factor for equalizing the last two pre-breakpoint steps.
 const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
 
+/// Xyce-compatible scale for the first step after a source breakpoint.
+///
+/// Xyce 7.10 exposes this as `.OPTIONS TIMEINT RESTARTSTEPSCALE` and defaults
+/// it to `0.005`. Keeping the restart tied to the saved attempted step prevents
+/// interpolation across source derivative corners from hiding the true
+/// post-breakpoint state of ideal energy-storage devices.
+const BREAKPOINT_RESTART_STEP_SCALE: Value = 0.005;
+
 /// Breakpoint manager for handling discontinuities
 ///
 /// Ensures solver lands exactly on breakpoints and restarts from the same
-/// one-tenth saved-delta rule used by ngspice's `dctran.c`.
+/// saved-delta scale used by Xyce's time-integration restart path.
 #[derive(Debug)]
 pub struct BreakpointManager {
     /// Sorted list of breakpoint times
@@ -332,7 +341,7 @@ impl BreakpointManager {
     }
 
     /// Mark that we just solved at a breakpoint (call after solving at BP)
-    /// Returns the ngspice-style restart timestep.
+    /// Returns the Xyce-style restart timestep.
     pub fn mark_breakpoint_solved(&mut self, time: Value) -> Value {
         // Advance current_index past this breakpoint
         while self.current_index < self.breakpoints.len()
@@ -354,7 +363,7 @@ impl BreakpointManager {
             .filter(|delta| delta.is_finite() && *delta > 0.0);
 
         saved_delta
-            .map(|delta| 0.1 * delta.min(next_gap))
+            .map(|delta| BREAKPOINT_RESTART_STEP_SCALE * delta.min(next_gap))
             .filter(|restart| restart.is_finite() && *restart > 0.0)
             .unwrap_or(MIN_STEP_AFTER_BREAKPOINT)
     }
@@ -406,6 +415,21 @@ mod breakpoint_manager_tests {
         assert_eq!(dt, 6.0);
         assert!(lands_on_breakpoint);
         assert!(!breakpoints.should_use_minimal_step());
+    }
+
+    #[test]
+    fn breakpoint_restart_scales_saved_attempted_step() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+        assert_eq!(dt, 6.0);
+        assert!(lands_on_breakpoint);
+
+        let restart = breakpoints.mark_breakpoint_solved(10.0);
+
+        assert_eq!(restart, BREAKPOINT_RESTART_STEP_SCALE * 6.0);
+        assert!(breakpoints.should_use_minimal_step());
     }
 
     #[test]
@@ -1093,7 +1117,8 @@ impl CompanionCoefficients {
 /// - Track solution derivative sign changes for each node
 /// - When 3+ consecutive sign changes detected (oscillation), switch to Gear-2
 /// - After 2-3 smooth steps without oscillation, switch back to Trapezoidal
-/// - At breakpoints (source discontinuities), preemptively use Gear-2
+/// - At breakpoints (source discontinuities), restart with first-order
+///   trapezoidal history; switch to Gear-2 only for detected oscillation.
 #[derive(Debug)]
 pub struct TrapGearController {
     /// Current effective method being used
@@ -1139,8 +1164,10 @@ impl TrapGearController {
     pub fn set_at_breakpoint(&mut self, at_bp: bool) {
         self.at_breakpoint = at_bp;
         if at_bp {
-            // Preemptively switch to Gear-2 at breakpoints
-            self.current_method = IntegrationMethod::Gear2;
+            // The engine restarts trapezoidal history with a backward-Euler
+            // companion on breakpoint steps. Forcing Gear-2 here would apply
+            // equal-step BDF2 history across a source corner, producing
+            // spurious voltage impulses for ideal L/C state.
             self.smooth_steps = 0;
         }
     }
@@ -1166,7 +1193,7 @@ impl TrapGearController {
             let curr_sign = derivative >= 0.0;
 
             // Check for sign change in derivative
-            if curr_sign != self.prev_signs[i] && derivative.abs() > 1e-12 {
+            if curr_sign != self.prev_signs[i] && derivative.abs() > TRAPGEAR_SIGN_CHANGE_FLOOR {
                 self.sign_change_count[i] += 1;
                 any_sign_change = true;
             } else {
@@ -1233,6 +1260,36 @@ impl TrapGearController {
 impl Default for TrapGearController {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod trapgear_controller_tests {
+    use super::*;
+
+    #[test]
+    fn ignores_voltage_tolerance_scale_sign_noise() {
+        let mut controller = TrapGearController::new();
+        assert!(!controller.update(&[-50.0], 1.0e-6));
+
+        for sample in [
+            -50.0 - 0.1 * TRAPGEAR_SIGN_CHANGE_FLOOR,
+            -50.0 + 0.1 * TRAPGEAR_SIGN_CHANGE_FLOOR,
+            -50.0 - 0.2 * TRAPGEAR_SIGN_CHANGE_FLOOR,
+            -50.0 + 0.2 * TRAPGEAR_SIGN_CHANGE_FLOOR,
+        ] {
+            assert!(!controller.update(&[sample], 1.0e-6));
+            assert_eq!(controller.current_method(), IntegrationMethod::Trapezoidal);
+        }
+    }
+
+    #[test]
+    fn breakpoint_restart_does_not_force_gear2() {
+        let mut controller = TrapGearController::new();
+
+        controller.set_at_breakpoint(true);
+
+        assert_eq!(controller.current_method(), IntegrationMethod::Trapezoidal);
     }
 }
 

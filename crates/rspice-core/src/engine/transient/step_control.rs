@@ -114,6 +114,7 @@ impl Engine {
         candidate_solution: &[Value],
         expected_source_delta: Value,
         num_nodes: usize,
+        dynamic_branch_ordinals: &[crate::NodeId],
     ) -> bool {
         // Only police stale accepts when sources are strongly active on this step.
         // Weak source movement can legitimately yield tiny accepted deltas in
@@ -124,8 +125,15 @@ impl Engine {
 
         // If the entire solution moves orders of magnitude less than the source
         // should have moved, the solver likely accepted a stale state.
-        let observed_delta =
+        let node_delta =
             Self::max_abs_delta_prefix(previous_solution, candidate_solution, num_nodes);
+        let dynamic_current_delta = Self::max_abs_delta_branch_ordinals(
+            previous_solution,
+            candidate_solution,
+            num_nodes,
+            dynamic_branch_ordinals,
+        );
+        let observed_delta = node_delta.max(dynamic_current_delta);
         observed_delta <= expected_source_delta * 1e-3
     }
 
