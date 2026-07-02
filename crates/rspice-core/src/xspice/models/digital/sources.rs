@@ -655,22 +655,44 @@ fn d_state_packed_entries_len(input_width: usize) -> Option<usize> {
     }
 }
 
+fn d_state_full_input_mask(input_width: usize) -> u64 {
+    if input_width == 64 {
+        u64::MAX
+    } else if input_width == 0 {
+        0
+    } else {
+        (1_u64 << input_width) - 1
+    }
+}
+
 fn d_state_fill_packed_entries(
     entries: &mut [Option<usize>],
     input_width: usize,
     row_index: usize,
     row: &DStateTransition,
 ) {
-    let Some(limit) = d_state_packed_entries_len(input_width) else {
+    if d_state_packed_entries_len(input_width).is_none() {
         return;
     };
-    for bits in 0..limit {
-        if entries[bits].is_none() {
-            let bits = bits as u64;
-            if (bits & row.input_mask) == row.input_bits {
-                entries[bits as usize] = Some(row_index);
-            }
+
+    let full_mask = d_state_full_input_mask(input_width);
+    let known_mask = row.input_mask & full_mask;
+    let base_bits = row.input_bits & known_mask;
+    let free_mask = full_mask & !known_mask;
+    let mut free_bits = free_mask;
+
+    loop {
+        let bits = (base_bits | free_bits) as usize;
+        if let Some(entry) = entries.get_mut(bits)
+            && entry.is_none()
+        {
+            *entry = Some(row_index);
         }
+
+        if free_bits == 0 {
+            break;
+        }
+        free_bits = (free_bits - 1) & free_mask;
     }
 }
 
