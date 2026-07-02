@@ -717,10 +717,11 @@ fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData, ste
     };
     let lower_values = data.row_values(lower);
     let upper_values = data.row_values(lower + 1);
-    let width = lower_values.len().min(upper_values.len());
-    ctx.set_output_vector_from_fn("out", width, |index| {
-        let lower = lower_values.get(index).copied().unwrap_or(0.0);
-        let upper = upper_values.get(index).copied().unwrap_or(0.0);
+    debug_assert_eq!(lower_values.len(), data.width);
+    debug_assert_eq!(upper_values.len(), data.width);
+    ctx.set_output_vector_from_fn("out", data.width, |index| {
+        let lower = lower_values[index];
+        let upper = upper_values[index];
         lower + alpha * (upper - lower)
     });
 }
