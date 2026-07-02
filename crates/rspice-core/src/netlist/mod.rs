@@ -400,6 +400,9 @@ impl Netlist {
             if let Some(command) = Self::promote_control_set_command(line) {
                 promoted.push(command);
             }
+            if let Some(command) = Self::promote_control_auto_bridge_set_command(line) {
+                promoted.push(command);
+            }
         }
 
         promoted
@@ -441,6 +444,31 @@ impl Netlist {
 
         let value = control_set_value(parts.next().unwrap_or(""), "digital_delay_type")?;
         Some(format!(".options digital_delay_type={value}"))
+    }
+
+    fn promote_control_auto_bridge_set_command(line: &str) -> Option<String> {
+        let body = strip_control_inline_comment(line).trim();
+        if body.is_empty() || body.starts_with('*') {
+            return None;
+        }
+
+        let body = body.strip_prefix('.').unwrap_or(body);
+        let mut parts = body.splitn(2, char::is_whitespace);
+        let command = parts.next()?;
+        if !command.eq_ignore_ascii_case("set") {
+            return None;
+        }
+
+        let (key, setup_card, device_card, max_nodes) =
+            control_auto_bridge_template_assignment(parts.next().unwrap_or(""))?;
+        let max_nodes = max_nodes.unwrap_or(0);
+        Some(format!(
+            ".RSPICE_AUTO_BRIDGE_TEMPLATE {} {} {} {}",
+            control_hex_encode(&key),
+            control_hex_encode(&setup_card),
+            control_hex_encode(&device_card),
+            max_nodes
+        ))
     }
 
     fn strip_control_blocks_with_diagnostics(
@@ -633,6 +661,162 @@ fn control_set_value(assignments: &str, name: &str) -> Option<String> {
         index += 1;
     }
     None
+}
+
+fn control_auto_bridge_template_assignment(
+    assignments: &str,
+) -> Option<(String, String, String, Option<usize>)> {
+    let bytes = assignments.as_bytes();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        skip_control_ws(bytes, &mut index);
+        let key_start = index;
+        while bytes
+            .get(index)
+            .is_some_and(|byte| control_variable_name_byte(*byte))
+        {
+            index += 1;
+        }
+        if key_start == index {
+            index += 1;
+            continue;
+        }
+
+        let key = assignments[key_start..index].to_string();
+        skip_control_ws(bytes, &mut index);
+        if bytes.get(index) != Some(&b'=') {
+            continue;
+        }
+        index += 1;
+        skip_control_ws(bytes, &mut index);
+
+        if !control_auto_bridge_template_key(&key) {
+            index = skip_control_assignment_value(assignments, index);
+            continue;
+        }
+
+        let values = parse_control_bridge_template_list(assignments, &mut index)?;
+        if values.len() < 2 {
+            return None;
+        }
+        let max_nodes = values
+            .get(2)
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .filter(|value| *value > 0);
+        return Some((key, values[0].clone(), values[1].clone(), max_nodes));
+    }
+
+    None
+}
+
+fn control_auto_bridge_template_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.starts_with("auto_bridge_") && !lower.starts_with("auto_bridge_parm_")
+}
+
+fn control_variable_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
+}
+
+fn skip_control_ws(bytes: &[u8], index: &mut usize) {
+    while bytes
+        .get(*index)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        *index += 1;
+    }
+}
+
+fn skip_control_assignment_value(input: &str, mut index: usize) -> usize {
+    let bytes = input.as_bytes();
+    let mut quote = false;
+    let mut depth = 0usize;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => quote = !quote,
+            b'(' if !quote => depth += 1,
+            b')' if !quote => depth = depth.saturating_sub(1),
+            byte if !quote && depth == 0 && byte.is_ascii_whitespace() => break,
+            _ => {}
+        }
+        index += 1;
+    }
+    index
+}
+
+fn parse_control_bridge_template_list(input: &str, index: &mut usize) -> Option<Vec<String>> {
+    let bytes = input.as_bytes();
+    if bytes.get(*index) != Some(&b'(') {
+        return None;
+    }
+    *index += 1;
+
+    let mut values = Vec::new();
+    loop {
+        skip_control_ws(bytes, index);
+        match bytes.get(*index) {
+            Some(b')') => {
+                *index += 1;
+                return Some(values);
+            }
+            Some(b'+') => {
+                *index += 1;
+                continue;
+            }
+            Some(b'"') => values.push(parse_control_quoted_string(input, index)?),
+            Some(_) => values.push(parse_control_unquoted_list_value(input, index)?),
+            None => return None,
+        }
+    }
+}
+
+fn parse_control_quoted_string(input: &str, index: &mut usize) -> Option<String> {
+    let bytes = input.as_bytes();
+    if bytes.get(*index) != Some(&b'"') {
+        return None;
+    }
+    *index += 1;
+    let mut value = String::new();
+    while *index < bytes.len() {
+        let byte = bytes[*index];
+        *index += 1;
+        if byte == b'"' {
+            return Some(value);
+        }
+        if byte == b'\\'
+            && let Some(next) = bytes.get(*index)
+        {
+            value.push(*next as char);
+            *index += 1;
+            continue;
+        }
+        value.push(byte as char);
+    }
+    None
+}
+
+fn parse_control_unquoted_list_value(input: &str, index: &mut usize) -> Option<String> {
+    let bytes = input.as_bytes();
+    let start = *index;
+    while bytes
+        .get(*index)
+        .is_some_and(|byte| !byte.is_ascii_whitespace() && *byte != b')' && *byte != b'+')
+    {
+        *index += 1;
+    }
+    (*index > start).then(|| input[start..*index].to_string())
+}
+
+fn control_hex_encode(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(4 + value.len() * 2);
+    encoded.push_str("HEX_");
+    for byte in value.bytes() {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
 }
 
 fn normalize_control_analysis_token(token: &str) -> String {
@@ -961,6 +1145,34 @@ mod tests {
             err.to_string().contains("DIGITAL_DELAY_TYPE"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn control_block_auto_bridge_template_set_promotes_option() {
+        let netlist = Netlist::parse(
+            "control xspice auto bridge template\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             set auto_bridge_d_out = ( \".model auto_dac dac_bridge(out_low = 0 out_high = %g)\" \"auto_dac%d [ %s ] [ %s ] auto_dac\" 1 )\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control set auto_bridge_d_out promotes to a structured template");
+
+        let template = netlist
+            .options
+            .auto_bridge_templates
+            .iter()
+            .find(|template| template.key.eq_ignore_ascii_case("auto_bridge_d_out"))
+            .expect("promoted auto_bridge_d_out template exists");
+
+        assert_eq!(
+            template.setup_card,
+            ".model auto_dac dac_bridge(out_low = 0 out_high = %g)"
+        );
+        assert_eq!(template.device_card, "auto_dac%d [ %s ] [ %s ] auto_dac");
+        assert_eq!(template.max_nodes, Some(1));
     }
 
     #[test]

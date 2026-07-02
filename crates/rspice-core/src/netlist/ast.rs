@@ -1703,6 +1703,15 @@ pub struct NodeSet {
 // Simulation Options
 //=============================================================================
 
+/// Ngspice-style XSPICE auto-bridge template from `set auto_bridge_* = (...)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XspiceAutoBridgeTemplate {
+    pub key: String,
+    pub setup_card: String,
+    pub device_card: String,
+    pub max_nodes: Option<usize>,
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -1763,6 +1772,9 @@ pub struct SimulationOptions {
     pub auto_bridge: Option<bool>,
     /// Ngspice-compatible `.options auto_bridge=2` generated bridge diagnostics.
     pub auto_bridge_show_generated: Option<bool>,
+    /// Ngspice-compatible XSPICE custom automatic bridge templates promoted
+    /// from `.control` `set auto_bridge_* = (...)` variables.
+    pub auto_bridge_templates: Vec<XspiceAutoBridgeTemplate>,
     /// Xyce `.options topology supernode=...`: collapse nodes connected by
     /// explicit zero/near-zero resistors before device construction.
     pub topology_supernode: Option<bool>,
@@ -1849,6 +1861,9 @@ impl SimulationOptions {
         if other.auto_bridge_show_generated.is_some() {
             self.auto_bridge_show_generated = other.auto_bridge_show_generated;
         }
+        for template in &other.auto_bridge_templates {
+            self.set_auto_bridge_template(template.clone());
+        }
         if other.topology_supernode.is_some() {
             self.topology_supernode = other.topology_supernode;
         }
@@ -1858,6 +1873,12 @@ impl SimulationOptions {
         if other.b3soi_gmin_scaling.is_some() {
             self.b3soi_gmin_scaling = other.b3soi_gmin_scaling;
         }
+    }
+
+    pub fn set_auto_bridge_template(&mut self, template: XspiceAutoBridgeTemplate) {
+        self.auto_bridge_templates
+            .retain(|existing| !existing.key.eq_ignore_ascii_case(&template.key));
+        self.auto_bridge_templates.push(template);
     }
 }
 

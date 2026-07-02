@@ -1,5 +1,7 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
+use crate::netlist::XspiceAutoBridgeTemplate;
+
 use super::*;
 
 pub(super) fn parse_command(
@@ -141,6 +143,9 @@ pub(super) fn parse_command(
         ".MODEL" => {
             let model = parse_model_definition(stream, line_num, params, models, false)?;
             models.push(model);
+        }
+        ".RSPICE_AUTO_BRIDGE_TEMPLATE" => {
+            parse_rspice_auto_bridge_template_command(stream, line_num, params, options)?;
         }
         ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
             parse_param_statement(stream, line_num, params, deferred_body_params)?;
@@ -289,6 +294,68 @@ fn reject_unconsumed_command_tokens(
             stream.peek().kind
         ),
     })
+}
+
+fn parse_rspice_auto_bridge_template_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    options: &mut SimulationOptions,
+) -> Result<(), ParseError> {
+    let key = expect_auto_bridge_template_field(stream, line_num, "key")?;
+    let setup_card = expect_auto_bridge_template_field(stream, line_num, "setup card")?;
+    let device_card = expect_auto_bridge_template_field(stream, line_num, "device card")?;
+    let max_value = expect_value(stream, line_num, params)?;
+    if !max_value.is_finite() || max_value < 0.0 || max_value.fract() != 0.0 {
+        return Err(ParseError::InvalidValue(format!(
+            "line {line_num}: RSpice auto-bridge template max_nodes must be a non-negative integer"
+        )));
+    }
+
+    options.set_auto_bridge_template(XspiceAutoBridgeTemplate {
+        key,
+        setup_card,
+        device_card,
+        max_nodes: (max_value as usize > 0).then_some(max_value as usize),
+    });
+    Ok(())
+}
+
+fn expect_auto_bridge_template_field(
+    stream: &mut TokenStream,
+    line_num: usize,
+    label: &str,
+) -> Result<String, ParseError> {
+    let raw = match &stream.peek().kind {
+        TokenKind::Ident(value) | TokenKind::StringLit(value) => value.clone(),
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("RSpice auto-bridge template requires encoded {label}"),
+            });
+        }
+    };
+    stream.advance();
+    decode_auto_bridge_template_field(&raw).ok_or_else(|| {
+        ParseError::InvalidValue(format!(
+            "line {line_num}: RSpice auto-bridge template {label} is not valid HEX_ data"
+        ))
+    })
+}
+
+fn decode_auto_bridge_template_field(raw: &str) -> Option<String> {
+    let hex = raw.strip_prefix("HEX_")?;
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(hex.len() / 2);
+    let mut index = 0usize;
+    while index < hex.len() {
+        let byte = u8::from_str_radix(&hex[index..index + 2], 16).ok()?;
+        bytes.push(byte);
+        index += 2;
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// Parse a `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` probe list into the netlist's
