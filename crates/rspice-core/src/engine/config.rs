@@ -55,6 +55,13 @@ pub struct SimulationConfig {
     pub min_timestep: Value,
     /// Maximum timestep for transient analysis
     pub max_timestep: Value,
+    /// Optional explicit first transient timestep.
+    ///
+    /// When unset, the engine chooses its startup step from its normal
+    /// compatibility policy. Xyce oracle runs set this from the `.TRAN`
+    /// starting step because Xyce's time integrator uses that value directly
+    /// for the first accepted transient point.
+    pub transient_initial_timestep: Option<Value>,
     /// Temperature in Kelvin
     pub temperature: Value,
     /// Transient source/code-model ramping time in seconds. A value <= 0 disables it.
@@ -310,6 +317,7 @@ impl Default for SimulationConfig {
             transient_max_iterations: crate::constants::MAX_TRANSIENT_NR_ITERATIONS,
             min_timestep: crate::constants::MIN_TIMESTEP,
             max_timestep: crate::constants::MAX_TIMESTEP,
+            transient_initial_timestep: None,
             temperature: crate::constants::TEMP_REFERENCE,
             ramptime: 0.0,
             digital_delay_type: None,

@@ -3797,7 +3797,7 @@ impl Engine {
             for a in 0..indices.len() {
                 for b in (a + 1)..indices.len() {
                     let (i, j) = (indices[a], indices[b]);
-                    let device = crate::device::CoupledInductorPair::new(
+                    let mut device = crate::device::CoupledInductorPair::new(
                         coupling.name.clone(),
                         circuit.inductors.node_pos[i],
                         circuit.inductors.node_neg[i],
@@ -3806,6 +3806,10 @@ impl Engine {
                         circuit.inductors.node_neg[j],
                         circuit.inductors.inductances[j],
                         coupling.coefficient,
+                    );
+                    device.set_initial_currents(
+                        circuit.inductors.ic[i].unwrap_or(0.0),
+                        circuit.inductors.ic[j].unwrap_or(0.0),
                     );
                     circuit.add_coupled_inductor_pair(
                         circuit.inductors.branch_indices[i],

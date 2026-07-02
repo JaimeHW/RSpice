@@ -959,8 +959,11 @@ fn test_xyce_linear_coupled_inductor_transient_cases_run() {
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
     for relative in [
+        "Netlists/MINDUCTORS/InductorICBug.cir",
         "Netlists/MINDUCTORS/MINDUCTORS.cir",
+        "Netlists/MINDUCTORS/MINDUCTORS_IC.cir",
         "Netlists/MINDUCTORS/cpldLMIs.cir",
+        "Netlists/MINDUCTORS/cpldLMIs_ic.cir",
     ] {
         let result = runner.run_test(root.join(relative));
 
@@ -985,29 +988,20 @@ fn test_xyce_coupled_inductor_unvalidated_variants_stay_named_unsupported() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for (relative, reason) in [
-        (
-            "Netlists/MINDUCTORS/InductorICBug.cir",
-            "initial condition on referenced inductor",
-        ),
-        (
-            "Netlists/MINDUCTORS/mutIndPrint1.cir",
-            "positive .TRAN print step",
-        ),
-    ] {
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && result.expected_unsupported,
-            "{relative} should stay named unsupported until the coupled-inductor variant is production-validated, got {result:?}"
-        );
-        assert!(
-            result
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains(reason)),
-            "unsupported reason for {relative} should name '{reason}', got {result:?}"
-        );
-    }
+    let relative = "Netlists/MINDUCTORS/mutIndPrint1.cir";
+    let reason = "positive .TRAN print step";
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && result.expected_unsupported,
+        "{relative} should stay named unsupported until the coupled-inductor variant is production-validated, got {result:?}"
+    );
+    assert!(
+        result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains(reason)),
+        "unsupported reason for {relative} should name '{reason}', got {result:?}"
+    );
 }
 
 #[test]

@@ -121,6 +121,15 @@ impl TimestepController {
         self.current_dt = dt.clamp(self.hard_min_dt, self.max_dt);
     }
 
+    /// Update the maximum allowed timestep.
+    pub fn set_max_dt(&mut self, max_dt: Value) {
+        let max_dt = max_dt.max(self.hard_min_dt);
+        self.max_dt = max_dt;
+        self.preferred_min_dt = self.preferred_min_dt.clamp(self.hard_min_dt, self.max_dt);
+        self.current_dt = self.current_dt.clamp(self.hard_min_dt, self.max_dt);
+        self.prev_dt = self.prev_dt.clamp(self.hard_min_dt, self.max_dt);
+    }
+
     /// Check if timestep was rejected (too small)
     pub fn is_at_minimum(&self) -> bool {
         self.current_dt <= self.hard_min_dt * 1.001

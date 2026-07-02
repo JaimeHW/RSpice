@@ -744,10 +744,18 @@ impl Engine {
             .iter()
             .filter(|&&time| time > resume_time)
             .count();
-        let initial_step = Self::ngspice_t0_breakpoint_limited_initial_timestep(
-            Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
-            breakpoints.next_after(resume_time),
-        );
+        let configured_initial_step = self
+            .config
+            .transient_initial_timestep
+            .filter(|step| step.is_finite() && *step > 0.0);
+        let initial_step = configured_initial_step
+            .map(|step| step.max(1e-30))
+            .unwrap_or_else(|| {
+                Self::ngspice_t0_breakpoint_limited_initial_timestep(
+                    Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
+                    breakpoints.next_after(resume_time),
+                )
+            });
         let practical_min = Self::startup_practical_min_timestep(
             has_bjts,
             hinted_max_step,
@@ -756,11 +764,14 @@ impl Engine {
         );
         let preferred_min_dt = practical_min.max(self.config.min_timestep.max(1e-15));
         let hard_min_dt = Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt);
+        let startup_max_dt = configured_initial_step
+            .map(|step| hinted_max_step.max(step))
+            .unwrap_or(hinted_max_step);
         let mut timestep = TimestepController::new_with_preferred_min(
             initial_step,
             hard_min_dt,
             preferred_min_dt,
-            hinted_max_step,
+            startup_max_dt,
         );
         let mut dynamic_tline_breakpoints_added = 0_usize;
         let mut warned_dynamic_tline_breakpoint_cap = false;
@@ -3364,6 +3375,7 @@ impl Engine {
             circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
             result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
             if first_accepted_transient_step {
+                timestep.set_max_dt(hinted_max_step);
                 timestep.force_step(dt);
             } else {
                 Self::recover_timestep_after_accepted_step(

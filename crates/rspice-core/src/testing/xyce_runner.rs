@@ -1685,7 +1685,8 @@ impl XyceTestRunner {
                 }
             };
 
-        let engine = self.create_xyce_static_tran_engine(&netlist, &plan.print, None);
+        let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
+        let engine = self.create_xyce_static_tran_engine(None, initial_step);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let result = match engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort) {
             Ok(result) => result,
@@ -1719,7 +1720,6 @@ impl XyceTestRunner {
                 );
             }
         };
-
         let mismatches = match self.compare_tran_prn_reference(
             &reference,
             &plan.print,
@@ -1747,11 +1747,8 @@ impl XyceTestRunner {
         let capacitor_branch_print =
             Self::transient_print_requests_linear_capacitor_branch_quantity(&netlist, &plan.print);
 
-        let locked_engine = self.create_xyce_static_tran_engine(
-            &netlist,
-            &plan.print,
-            Some(reference_time_grid.clone()),
-        );
+        let locked_engine =
+            self.create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
         if let Ok(locked_result) =
             locked_engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort)
             && let Ok(locked_mismatches) = self.compare_tran_prn_reference(
@@ -1775,6 +1772,7 @@ impl XyceTestRunner {
                 .create_xyce_static_tran_engine_with_integration_method(
                     Some(reference_time_grid),
                     crate::analysis::IntegrationMethod::BackwardEuler,
+                    initial_step,
                 );
             if let Ok(backward_euler_result) = backward_euler_engine.run_tran_with_abort(
                 &netlist,
@@ -2855,14 +2853,12 @@ impl XyceTestRunner {
 
     fn create_xyce_static_tran_engine(
         &self,
-        netlist: &Netlist,
-        print: &XycePrintRequest,
         locked_time_grid: Option<Vec<Value>>,
+        initial_timestep: Option<Value>,
     ) -> Engine {
         let mut config = self.xyce_engine_config(locked_time_grid);
-        if Self::transient_print_requests_linear_capacitor_branch_quantity(netlist, print) {
-            config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
-        }
+        config.transient_initial_timestep = initial_timestep;
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
         Engine::new(config)
     }
 
@@ -2870,8 +2866,10 @@ impl XyceTestRunner {
         &self,
         locked_time_grid: Option<Vec<Value>>,
         integration_method: crate::analysis::IntegrationMethod,
+        initial_timestep: Option<Value>,
     ) -> Engine {
         let mut config = self.xyce_engine_config(locked_time_grid);
+        config.transient_initial_timestep = initial_timestep;
         config.integration_method = integration_method;
         Engine::new(config)
     }
@@ -3380,6 +3378,15 @@ impl XyceTestRunner {
             ));
         }
         Ok(max_step)
+    }
+
+    fn xyce_initial_timestep_for_tran(tran: &XyceTranAnalysis) -> Option<Value> {
+        let step = if tran.step.is_finite() && tran.step > 0.0 {
+            tran.step
+        } else {
+            1.0e-10
+        };
+        Some(step.max(1.0e-30))
     }
 
     fn feasible_reference_limited_step(
@@ -4500,12 +4507,6 @@ impl XyceTestRunner {
         }
 
         for inductor_name in inductors {
-            if Self::inductor_has_initial_condition(netlist, inductor_name) {
-                return Err(format!(
-                    "native .PRINT TRAN comparison does not yet support coupling '{}' with initial condition on referenced inductor '{}'",
-                    element_name, inductor_name
-                ));
-            }
             Self::validate_static_step_inductor_contract(netlist, inductor_name).map_err(
                 |err| {
                     format!(
@@ -4523,18 +4524,6 @@ impl XyceTestRunner {
             .elements
             .iter()
             .any(|element| matches!(element.kind, ElementKind::Coupling { .. }))
-    }
-
-    fn inductor_has_initial_condition(netlist: &Netlist, inductor_name: &str) -> bool {
-        Self::find_inductor_element(netlist, inductor_name).is_some_and(|element| {
-            matches!(
-                element.kind,
-                ElementKind::Inductor {
-                    initial_current: Some(_),
-                    ..
-                }
-            )
-        })
     }
 
     fn validate_static_step_tran_source_spec(
