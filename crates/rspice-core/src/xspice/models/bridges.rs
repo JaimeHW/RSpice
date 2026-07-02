@@ -185,6 +185,16 @@ const BIDI_OFF_LOW: Value = 0.7;
 const BIDI_OFF_HIGH: Value = 0.3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BidiStateLayout {
+    current_base: usize,
+    drive_state_base: usize,
+    drive_strength_base: usize,
+    state_count: usize,
+    strength_base: usize,
+    int_state_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BidiDirection {
     Dac,
     Adc,
@@ -468,18 +478,54 @@ fn bidi_params(ctx: &CmContext) -> CmResult<BidiParams> {
     })
 }
 
+fn bidi_state_layout_error(width: usize) -> CmError {
+    CmError::InvalidPortConnection(format!("bidi_bridge vector width {width} is too large"))
+}
+
+fn bidi_state_layout(width: usize) -> CmResult<BidiStateLayout> {
+    let current_base = width
+        .checked_mul(BIDI_STATE_CURRENT_BASE_OFFSET)
+        .ok_or_else(|| bidi_state_layout_error(width))?;
+    let drive_state_base = width
+        .checked_mul(BIDI_STATE_DRIVE_STATE_BASE_OFFSET)
+        .ok_or_else(|| bidi_state_layout_error(width))?;
+    let drive_strength_base = width
+        .checked_mul(BIDI_STATE_DRIVE_STRENGTH_BASE_OFFSET)
+        .ok_or_else(|| bidi_state_layout_error(width))?;
+    let state_count = width
+        .checked_mul(BIDI_STATE_DRIVE_STRENGTH_BASE_OFFSET + 1)
+        .ok_or_else(|| bidi_state_layout_error(width))?;
+    let strength_base = width;
+    let int_state_count = width
+        .checked_mul(BIDI_INT_OUTPUT_STRENGTH_BASE_OFFSET + 1)
+        .ok_or_else(|| bidi_state_layout_error(width))?;
+
+    Ok(BidiStateLayout {
+        current_base,
+        drive_state_base,
+        drive_strength_base,
+        state_count,
+        strength_base,
+        int_state_count,
+    })
+}
+
+#[cfg(test)]
 fn bidi_state_base(width: usize) -> usize {
     BIDI_STATE_CURRENT_BASE_OFFSET * width
 }
 
+#[cfg(test)]
 fn bidi_drive_state_base(width: usize) -> usize {
     BIDI_STATE_DRIVE_STATE_BASE_OFFSET * width
 }
 
+#[cfg(test)]
 fn bidi_drive_strength_base(width: usize) -> usize {
     BIDI_STATE_DRIVE_STRENGTH_BASE_OFFSET * width
 }
 
+#[cfg(test)]
 fn bidi_int_strength_base(width: usize) -> usize {
     BIDI_INT_OUTPUT_STRENGTH_BASE_OFFSET * width
 }
@@ -593,11 +639,12 @@ fn bidi_advance_svoc(prev: Value, drive: DigitalValue, dt: Value, params: BidiPa
     }
 }
 
-fn bidi_previous_drive(ctx: &CmContext, index: usize, width: usize) -> DigitalValue {
-    let state_base = bidi_drive_state_base(width);
-    let strength_base = bidi_drive_strength_base(width);
-    let state = digital_state_from_code(ctx.state_prev(state_base + index).round() as i64);
-    let strength = digital_strength_from_code(ctx.state_prev(strength_base + index).round() as i64);
+fn bidi_previous_drive(ctx: &CmContext, index: usize, layout: BidiStateLayout) -> DigitalValue {
+    let state =
+        digital_state_from_code(ctx.state_prev(layout.drive_state_base + index).round() as i64);
+    let strength = digital_strength_from_code(
+        ctx.state_prev(layout.drive_strength_base + index).round() as i64,
+    );
     DigitalValue::new(state, strength)
 }
 
@@ -615,7 +662,7 @@ fn bidi_analog_segments(
     ctx: &CmContext,
     index: usize,
     drive: DigitalValue,
-    width: usize,
+    layout: BidiStateLayout,
 ) -> BidiAnalogSegments {
     let step = bidi_analog_step(ctx);
     let Some(event_time) = ctx.input_digital_vector_event_time("d", index) else {
@@ -624,7 +671,7 @@ fn bidi_analog_segments(
             interval: step,
         });
     };
-    let previous_drive = bidi_previous_drive(ctx, index, width);
+    let previous_drive = bidi_previous_drive(ctx, index, layout);
     let step_start = ctx.time_prev;
     let step_end = ctx.time;
     let iota = step.abs() * 1.0e-6;
@@ -841,7 +888,7 @@ fn bidi_drive_current(
     voltage: Value,
     drive: DigitalValue,
     params: BidiParams,
-    width: usize,
+    layout: BidiStateLayout,
 ) -> BidiAnalogDrive {
     if !ctx.is_transient() {
         let svoc = bidi_target_svoc(drive, params);
@@ -855,14 +902,14 @@ fn bidi_drive_current(
     }
 
     let mut svoc = ctx.state_prev(BIDI_STATE_SVOC_BASE + index).clamp(0.0, 1.0);
-    let mut current = ctx.state_prev(bidi_state_base(width) + index);
+    let mut current = ctx.state_prev(layout.current_base + index);
     if !current.is_finite() {
         current = 0.0;
     }
     let mut partial = 0.0;
     let mut last_target = current;
     let mut last_range = 0.0;
-    let segments = bidi_analog_segments(ctx, index, drive, width);
+    let segments = bidi_analog_segments(ctx, index, drive, layout);
     for segment in segments.iter() {
         svoc = bidi_advance_svoc(svoc, segment.drive, segment.interval, params);
         let (target, segment_partial, range) =
@@ -1207,21 +1254,18 @@ impl CodeModel for BidiBridge {
         let params = bidi_params(ctx)?;
         let _input_load = params.input_load;
 
-        ctx.allocate_states(width * 4);
-        ctx.allocate_int_states(width * 2);
-        let current_base = bidi_state_base(width);
-        let drive_state_base = bidi_drive_state_base(width);
-        let drive_strength_base = bidi_drive_strength_base(width);
-        let strength_base = bidi_int_strength_base(width);
+        let layout = bidi_state_layout(width)?;
+        ctx.allocate_states(layout.state_count);
+        ctx.allocate_int_states(layout.int_state_count);
         for index in 0..width {
             ctx.set_initial_state(BIDI_STATE_SVOC_BASE + index, 0.5);
-            ctx.set_initial_state(current_base + index, 0.0);
+            ctx.set_initial_state(layout.current_base + index, 0.0);
             ctx.set_initial_state(
-                drive_state_base + index,
+                layout.drive_state_base + index,
                 digital_state_code(DigitalState::Unknown) as Value,
             );
             ctx.set_initial_state(
-                drive_strength_base + index,
+                layout.drive_strength_base + index,
                 digital_strength_code(DigitalStrength::HighZ) as Value,
             );
             ctx.set_int_state(
@@ -1229,7 +1273,7 @@ impl CodeModel for BidiBridge {
                 BIDI_UNINITIALIZED_STATE_CODE,
             );
             ctx.set_int_state(
-                strength_base + index,
+                layout.strength_base + index,
                 digital_strength_code(DigitalStrength::HighZ),
             );
         }
@@ -1248,10 +1292,7 @@ impl CodeModel for BidiBridge {
 
         let params = bidi_params(ctx)?;
         let output_strength = digital_strength_from_param(params.strength);
-        let current_base = bidi_state_base(width);
-        let drive_state_base = bidi_drive_state_base(width);
-        let drive_strength_base = bidi_drive_strength_base(width);
-        let strength_base = bidi_int_strength_base(width);
+        let layout = bidi_state_layout(width)?;
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
 
         for index in 0..width {
@@ -1267,7 +1308,8 @@ impl CodeModel for BidiBridge {
             } else {
                 digital_state_from_code(old_state_code)
             };
-            let old_strength = digital_strength_from_code(ctx.int_state(strength_base + index));
+            let old_strength =
+                digital_strength_from_code(ctx.int_state(layout.strength_base + index));
             let digital_input = digital_vector_input_value(ctx, "d", index);
             let direction = if direction_request == BidiDirection::Bidirectional {
                 bidi_default_effective_direction(digital_input, old_state, old_strength)
@@ -1288,7 +1330,7 @@ impl CodeModel for BidiBridge {
                         digital_state_code(DigitalState::HighZ),
                     );
                     ctx.set_int_state(
-                        strength_base + index,
+                        layout.strength_base + index,
                         digital_strength_code(DigitalStrength::HighZ),
                     );
                 }
@@ -1306,7 +1348,7 @@ impl CodeModel for BidiBridge {
                         digital_state_code(new_state),
                     );
                     ctx.set_int_state(
-                        strength_base + index,
+                        layout.strength_base + index,
                         digital_strength_code(output_strength),
                     );
                 }
@@ -1316,7 +1358,7 @@ impl CodeModel for BidiBridge {
                 BidiDirection::Adc => DigitalValue::high_z(),
                 BidiDirection::Dac | BidiDirection::Bidirectional => digital_input,
             };
-            let analog_drive = bidi_drive_current(ctx, index, voltage, drive, params, width);
+            let analog_drive = bidi_drive_current(ctx, index, voltage, drive, params, layout);
             if let Some(completion_time) = analog_drive.completion_time
                 && commit_outputs
                 && completion_time > ctx.time + 1.0e-18
@@ -1332,13 +1374,13 @@ impl CodeModel for BidiBridge {
 
             if commit_outputs {
                 ctx.set_state(BIDI_STATE_SVOC_BASE + index, analog_drive.svoc);
-                ctx.set_state(current_base + index, analog_drive.current);
+                ctx.set_state(layout.current_base + index, analog_drive.current);
                 ctx.set_state(
-                    drive_state_base + index,
+                    layout.drive_state_base + index,
                     digital_state_code(drive.state) as Value,
                 );
                 ctx.set_state(
-                    drive_strength_base + index,
+                    layout.drive_strength_base + index,
                     digital_strength_code(drive.strength) as Value,
                 );
             }
