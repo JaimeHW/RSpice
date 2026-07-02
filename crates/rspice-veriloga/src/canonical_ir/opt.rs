@@ -1515,6 +1515,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             return false;
         };
         let mut accumulator_targets = HashSet::new();
+        let mut product_targets = HashSet::new();
         let mut saw_counter_increment = false;
 
         for statement in &loop_statement.body {
@@ -1530,6 +1531,10 @@ impl<'a> ScalarGraphBuilder<'a> {
                 accumulator_targets.insert(assignment.target);
                 continue;
             }
+            if let Some(_factor) = self.product_update_factor(assignment, counter, expr) {
+                product_targets.insert(assignment.target);
+                continue;
+            }
             if assignment.index.is_some() || !supported_assignment_value_type(assignment.expr_type)
             {
                 return false;
@@ -1539,7 +1544,8 @@ impl<'a> ScalarGraphBuilder<'a> {
             }
         }
 
-        if !saw_counter_increment || accumulator_targets.is_empty() {
+        if !saw_counter_increment || (accumulator_targets.is_empty() && product_targets.is_empty())
+        {
             return false;
         }
 
@@ -1555,6 +1561,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             };
             if self.is_counter_increment_assignment(assignment, counter)
                 || accumulator_targets.contains(&assignment.target)
+                || product_targets.contains(&assignment.target)
             {
                 continue;
             }
@@ -1572,8 +1579,15 @@ impl<'a> ScalarGraphBuilder<'a> {
             .copied()
             .filter(|variable| *variable != counter)
             .filter(|variable| !accumulator_targets.contains(variable))
+            .filter(|variable| !product_targets.contains(variable))
             .filter(|variable| !safe_loop_local_targets.contains(variable))
             .collect();
+        let mut forbidden_product_factor_targets: HashSet<_> = assigned_variables
+            .iter()
+            .copied()
+            .filter(|variable| *variable != counter)
+            .collect();
+        forbidden_product_factor_targets.insert(counter);
 
         let original_variable_values = self.variable_values.clone();
         let Some(loop_id) = self.allocate_loop_id() else {
@@ -1584,6 +1598,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         self.expression_values.clear();
 
         let mut accumulator_sums = Vec::new();
+        let mut accumulator_products = Vec::new();
         for statement in &loop_statement.body {
             let HirStatement::Assignment(assignment) = statement else {
                 return false;
@@ -1611,6 +1626,23 @@ impl<'a> ScalarGraphBuilder<'a> {
                     return false;
                 };
                 accumulator_sums.push((assignment.target, previous, term));
+                continue;
+            }
+            if let Some(factor_expr) = self.product_update_factor(assignment, counter, expr) {
+                if self.expr_references_any_variable(factor_expr, &forbidden_product_factor_targets)
+                {
+                    return false;
+                }
+                let Some(initial) =
+                    self.variable_value_from_snapshot(assignment.target, &original_variable_values)
+                else {
+                    return false;
+                };
+                self.expression_values.clear();
+                let Some(factor) = self.lower_expression(factor_expr) else {
+                    return false;
+                };
+                accumulator_products.push((assignment.target, initial, factor));
                 continue;
             }
 
@@ -1643,6 +1675,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                 },
             );
             self.variable_values.insert(target, Some(sum));
+        }
+        for (target, initial, factor) in accumulator_products {
+            let power = self.push_binary_value(OptBinaryOp::Pow, factor, bound);
+            let product = self.push_binary_value(OptBinaryOp::Mul, initial, power);
+            self.variable_values.insert(target, Some(product));
         }
         self.variable_values.insert(counter, Some(bound));
         true
@@ -1781,6 +1818,28 @@ impl<'a> ScalarGraphBuilder<'a> {
         None
     }
 
+    fn product_update_factor(
+        &self,
+        assignment: &HirAssignment,
+        counter: VariableId,
+        expr: ExprId,
+    ) -> Option<ExprId> {
+        if assignment.target == counter
+            || assignment.index.is_some()
+            || !supported_assignment_value_type(assignment.expr_type)
+        {
+            return None;
+        }
+        let (left, right) = self.mul_operands(expr)?;
+        if self.variable_identifier(left) == Some(assignment.target) {
+            return Some(right);
+        }
+        if self.variable_identifier(right) == Some(assignment.target) {
+            return Some(left);
+        }
+        None
+    }
+
     fn counted_loop_assignment_expr(&self, assignment: &HirAssignment) -> ExprId {
         let Some(expression) = self.mir.expressions.get(usize::from(assignment.expr.id)) else {
             return assignment.expr.id;
@@ -1823,6 +1882,14 @@ impl<'a> ScalarGraphBuilder<'a> {
             return None;
         };
         (op.as_str() == "Add").then_some((*left, *right))
+    }
+
+    fn mul_operands(&self, expr: ExprId) -> Option<(ExprId, ExprId)> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Binary { op, left, right } = &expression.kind else {
+            return None;
+        };
+        (op.as_str() == "Mul").then_some((*left, *right))
     }
 
     fn current_variable_value(&mut self, variable: VariableId) -> Option<ValueId> {
