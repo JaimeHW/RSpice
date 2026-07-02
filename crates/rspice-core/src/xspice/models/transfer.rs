@@ -205,6 +205,13 @@ fn s_xfer_error(message: impl Into<String>) -> CmError {
     }
 }
 
+fn s_xfer_param_error(name: &str, message: impl Into<String>) -> CmError {
+    CmError::InvalidParameter {
+        name: name.to_string(),
+        message: message.into(),
+    }
+}
+
 fn xfer_complex_value(a: Value, b: Value, ri: bool, db: bool, rad: bool) -> CmResult<Complex64> {
     if !a.is_finite() || !b.is_finite() {
         return Err(xfer_error("table values must be finite"));
@@ -723,6 +730,30 @@ fn finite_coefficients(name: &str, values: &[Value]) -> CmResult<()> {
     Ok(())
 }
 
+fn finite_s_xfer_param(ctx: &CmContext, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(s_xfer_param_error(
+            name,
+            format!("value must be finite, got {value}"),
+        ));
+    }
+    Ok(value)
+}
+
+fn finite_s_xfer_vector_param(ctx: &CmContext, name: &str) -> CmResult<Vec<Value>> {
+    let values = ctx.real_vector_param(name).unwrap_or(&[]);
+    for (index, value) in values.iter().copied().enumerate() {
+        if !value.is_finite() {
+            return Err(s_xfer_param_error(
+                name,
+                format!("element {index} must be finite, got {value}"),
+            ));
+        }
+    }
+    Ok(values.to_vec())
+}
+
 fn descending_to_denormalized_ascending(
     coefficients: &[Value],
     denormalized_freq: Value,
@@ -1154,7 +1185,7 @@ fn s_xfer_transient_eval(
     coefficients: &Arc<SXferCoefficients>,
 ) -> CmResult<(Value, Value)> {
     let order = coefficients.denominator.len() - 1;
-    let input = ctx.input("in") + ctx.param("in_offset");
+    let input = ctx.input("in") + finite_s_xfer_param(ctx, "in_offset")?;
     let u = coefficients.gain * input;
 
     if order == 0 {
@@ -1307,13 +1338,10 @@ impl CodeModel for SXfer {
         if order > 0 {
             ensure_s_xfer_transient_scratch(ctx);
         }
+        let int_ic = finite_s_xfer_vector_param(ctx, "int_ic")?;
         for index in 0..order {
             let source_index = order - 1 - index;
-            let value = ctx
-                .real_vector_param("int_ic")
-                .and_then(|int_ic| int_ic.get(source_index))
-                .copied()
-                .unwrap_or(0.0);
+            let value = int_ic.get(source_index).copied().unwrap_or(0.0);
             ctx.set_initial_state(index, value);
         }
         Ok(())
@@ -1708,6 +1736,38 @@ mod tests {
                 "Numerator coefficient array size greater than denominator coefficient array size"
             ),
             "s_xfer error should explain improper transfer order, got {message}"
+        );
+    }
+
+    #[test]
+    fn s_xfer_rejects_nonfinite_transient_params() {
+        let mut ctx = first_order_lowpass_context();
+        ctx.set_real_vector_param("int_ic", vec![f64::NAN]);
+        let err = SXfer
+            .init(&mut ctx)
+            .expect_err("s_xfer must reject nonfinite initial conditions");
+        assert!(
+            matches!(&err, CmError::InvalidParameter { .. }),
+            "s_xfer int_ic produced {err:?}"
+        );
+        assert!(
+            err.to_string().contains("int_ic"),
+            "s_xfer error should name rejected int_ic: {err}"
+        );
+
+        let mut ctx = first_order_lowpass_context();
+        SXfer.init(&mut ctx).expect("s_xfer initializes");
+        ctx.set_param("in_offset", f64::INFINITY);
+        let err = SXfer
+            .evaluate(&mut ctx)
+            .expect_err("s_xfer must reject nonfinite input offsets");
+        assert!(
+            matches!(&err, CmError::InvalidParameter { .. }),
+            "s_xfer in_offset produced {err:?}"
+        );
+        assert!(
+            err.to_string().contains("in_offset"),
+            "s_xfer error should name rejected in_offset: {err}"
         );
     }
 
