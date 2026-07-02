@@ -373,365 +373,8 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) scalar_v4: f64,
-    pub(crate) scalar_v6: f64,
-    pub(crate) scalar_v8: bool,
-    pub(crate) scalar_v12: f64,
-    pub(crate) scalar_v14: f64,
-    pub(crate) scalar_v16: bool,
-    pub(crate) scalar_v19: f64,
-    pub(crate) scalar_v22: f64,
-    pub(crate) scalar_v23: bool,
-    pub(crate) scalar_v28: f64,
-    pub(crate) scalar_v29: bool,
-    pub(crate) scalar_v32: f64,
-    pub(crate) scalar_v34: bool,
-    pub(crate) scalar_v37: f64,
-    pub(crate) scalar_v38: f64,
-    pub(crate) scalar_v40: f64,
-    pub(crate) scalar_v41: bool,
-    pub(crate) scalar_v42: f64,
-    pub(crate) scalar_v43: f64,
-    pub(crate) scalar_v45: f64,
-    pub(crate) scalar_v46: bool,
-    pub(crate) scalar_v47: f64,
-    pub(crate) scalar_v48: f64,
-    pub(crate) scalar_v50: f64,
-    pub(crate) scalar_v51: bool,
-    pub(crate) scalar_v52: f64,
-    pub(crate) scalar_v53: f64,
-    pub(crate) scalar_v55: f64,
-    pub(crate) scalar_v56: bool,
-    pub(crate) scalar_v57: f64,
-    pub(crate) scalar_v58: f64,
-    pub(crate) scalar_v60: f64,
-    pub(crate) scalar_v61: bool,
-    pub(crate) scalar_v62: f64,
-    pub(crate) scalar_v63: f64,
-    pub(crate) scalar_v65: f64,
-    pub(crate) scalar_v68: f64,
-    pub(crate) scalar_v69: f64,
-    pub(crate) scalar_v72: f64,
-    pub(crate) scalar_v75: f64,
-    pub(crate) scalar_v76: f64,
-    pub(crate) scalar_v83: f64,
-    pub(crate) scalar_v84: f64,
-    pub(crate) scalar_v99: f64,
-    pub(crate) scalar_v100: f64,
-    pub(crate) scalar_v101: bool,
-    pub(crate) scalar_v102: f64,
-    pub(crate) scalar_v104: f64,
-    pub(crate) scalar_v105: f64,
-    pub(crate) scalar_v113: bool,
-    pub(crate) scalar_v115: f64,
-    pub(crate) scalar_v116: f64,
-    pub(crate) scalar_v117: f64,
-    pub(crate) scalar_v120: f64,
-    pub(crate) scalar_v121: f64,
-    pub(crate) scalar_v129: f64,
-    pub(crate) scalar_v130: bool,
-    pub(crate) scalar_v137: f64,
-    pub(crate) scalar_v138: f64,
-    pub(crate) scalar_v139: f64,
-    pub(crate) scalar_v141: f64,
-    pub(crate) scalar_v142: f64,
-    pub(crate) scalar_v158: f64,
-    pub(crate) scalar_v159: f64,
-    pub(crate) scalar_v160: f64,
-    pub(crate) scalar_v161: f64,
-    pub(crate) scalar_v164: f64,
-    pub(crate) scalar_v165: f64,
-    pub(crate) scalar_v176: f64,
-    pub(crate) scalar_v177: f64,
-    pub(crate) scalar_v195: f64,
-    pub(crate) scalar_v196: f64,
-    pub(crate) scalar_v197: f64,
-    pub(crate) scalar_v200: f64,
-    pub(crate) scalar_v201: f64,
-    pub(crate) scalar_v227: f64,
-    pub(crate) scalar_v228: f64,
-    pub(crate) scalar_v229: f64,
-    pub(crate) scalar_v230: f64,
-    pub(crate) scalar_v233: f64,
-    pub(crate) scalar_v234: f64,
-    pub(crate) scalar_v248: f64,
-    pub(crate) scalar_v249: f64,
-    pub(crate) scalar_v250: f64,
-    pub(crate) scalar_v251: f64,
-    pub(crate) scalar_v254: f64,
-    pub(crate) scalar_v255: f64,
-    pub(crate) scalar_v269: f64,
-    pub(crate) scalar_v270: f64,
-    pub(crate) scalar_v271: f64,
-    pub(crate) scalar_v274: f64,
-    pub(crate) scalar_v275: f64,
-    pub(crate) scalar_v289: f64,
-    pub(crate) scalar_v290: f64,
-    pub(crate) scalar_v291: f64,
-    pub(crate) scalar_v294: f64,
-    pub(crate) scalar_v295: f64,
-    pub(crate) scalar_v309: f64,
-    pub(crate) scalar_v320: f64,
-    pub(crate) scalar_v331: f64,
-    pub(crate) scalar_v332: f64,
-    pub(crate) scalar_v333: f64,
-    pub(crate) scalar_v336: f64,
-    pub(crate) scalar_v337: f64,
-    pub(crate) scalar_v351: f64,
-    pub(crate) scalar_v352: f64,
-    pub(crate) scalar_v353: f64,
-    pub(crate) scalar_v356: f64,
-    pub(crate) scalar_v357: f64,
-    pub(crate) scalar_v393: f64,
-    pub(crate) scalar_v396: f64,
-    pub(crate) scalar_v397: f64,
-    pub(crate) scalar_v398: f64,
-    pub(crate) scalar_v402: bool,
-    pub(crate) scalar_v403: f64,
-    pub(crate) scalar_v407: f64,
-    pub(crate) scalar_v408: f64,
-    pub(crate) scalar_v409: f64,
-    pub(crate) scalar_v413: bool,
-    pub(crate) scalar_v416: f64,
-    pub(crate) scalar_v417: f64,
-    pub(crate) scalar_v418: f64,
-    pub(crate) scalar_v422: bool,
-    pub(crate) scalar_v423: f64,
-    pub(crate) scalar_v427: f64,
-    pub(crate) scalar_v428: f64,
-    pub(crate) scalar_v429: f64,
-    pub(crate) scalar_v433: bool,
-    pub(crate) scalar_v436: f64,
-    pub(crate) scalar_v437: f64,
-    pub(crate) scalar_v440: f64,
-    pub(crate) scalar_v441: f64,
-    pub(crate) scalar_v444: f64,
-    pub(crate) scalar_v445: f64,
-    pub(crate) scalar_v446: f64,
-    pub(crate) scalar_v450: bool,
-    pub(crate) scalar_v453: f64,
-    pub(crate) scalar_v454: f64,
-    pub(crate) scalar_v526: f64,
-    pub(crate) scalar_v531: f64,
-    pub(crate) scalar_v532: f64,
-    pub(crate) scalar_v536: f64,
-    pub(crate) scalar_v537: f64,
-    pub(crate) scalar_v541: f64,
-    pub(crate) scalar_v542: f64,
-    pub(crate) scalar_v548: f64,
-    pub(crate) scalar_v555: f64,
-    pub(crate) scalar_v556: f64,
-    pub(crate) scalar_v561: f64,
-    pub(crate) scalar_v589: f64,
-    pub(crate) scalar_v590: f64,
-    pub(crate) scalar_v594: f64,
-    pub(crate) scalar_v616: f64,
-    pub(crate) scalar_v617: f64,
-    pub(crate) scalar_v621: f64,
-    pub(crate) scalar_v643: f64,
-    pub(crate) scalar_v645: f64,
-    pub(crate) scalar_v648: f64,
-    pub(crate) scalar_v650: f64,
-    pub(crate) scalar_v653: f64,
-    pub(crate) scalar_v655: f64,
-    pub(crate) scalar_v657: f64,
-    pub(crate) scalar_v660: f64,
-    pub(crate) scalar_v666: f64,
-    pub(crate) scalar_v667: f64,
-    pub(crate) scalar_v674: f64,
-    pub(crate) scalar_v675: f64,
-    pub(crate) scalar_v679: f64,
-    pub(crate) scalar_v680: f64,
-    pub(crate) scalar_v764: f64,
-    pub(crate) scalar_v766: f64,
-    pub(crate) scalar_v767: bool,
-    pub(crate) scalar_v772: f64,
-    pub(crate) scalar_v773: f64,
-    pub(crate) scalar_v774: f64,
-    pub(crate) scalar_v779: f64,
-    pub(crate) scalar_v782: f64,
-    pub(crate) scalar_v802: bool,
-    pub(crate) scalar_v804: f64,
-    pub(crate) scalar_v805: f64,
-    pub(crate) scalar_v845: f64,
-    pub(crate) scalar_v846: bool,
-    pub(crate) scalar_v851: f64,
-    pub(crate) scalar_v852: f64,
-    pub(crate) scalar_v858: f64,
-    pub(crate) scalar_v861: f64,
-    pub(crate) scalar_v868: f64,
-    pub(crate) scalar_v869: bool,
-    pub(crate) scalar_v870: f64,
-    pub(crate) scalar_v901: f64,
-    pub(crate) scalar_v902: bool,
-    pub(crate) scalar_v903: bool,
-    pub(crate) scalar_v904: bool,
-    pub(crate) scalar_v905: bool,
-    pub(crate) scalar_v913: f64,
-    pub(crate) scalar_v914: f64,
-    pub(crate) scalar_v919: f64,
-    pub(crate) scalar_v920: f64,
-    pub(crate) scalar_v970: f64,
-    pub(crate) scalar_v989: bool,
-    pub(crate) scalar_v990: bool,
-    pub(crate) scalar_v1019: f64,
-    pub(crate) scalar_v1075: f64,
-    pub(crate) scalar_v1076: bool,
-    pub(crate) scalar_v1077: f64,
-    pub(crate) scalar_v1090: f64,
-    pub(crate) scalar_v1094: bool,
-    pub(crate) scalar_v1106: f64,
-    pub(crate) scalar_v1111: bool,
-    pub(crate) scalar_v1140: f64,
-    pub(crate) scalar_v1142: f64,
-    pub(crate) scalar_v1181: bool,
-    pub(crate) scalar_v1185: f64,
-    pub(crate) scalar_v1186: bool,
-    pub(crate) scalar_v1219: f64,
-    pub(crate) scalar_v1220: bool,
-    pub(crate) scalar_v1221: bool,
-    pub(crate) scalar_v1232: bool,
-    pub(crate) scalar_v1233: bool,
-    pub(crate) scalar_v1237: bool,
-    pub(crate) scalar_v1238: bool,
-    pub(crate) scalar_v1261: bool,
-    pub(crate) scalar_v1262: bool,
-    pub(crate) scalar_v1263: bool,
-    pub(crate) scalar_v1301: bool,
-    pub(crate) scalar_v1322: bool,
-    pub(crate) scalar_v1323: bool,
-    pub(crate) scalar_v1348: bool,
-    pub(crate) scalar_v1356: bool,
-    pub(crate) scalar_v1361: bool,
-    pub(crate) scalar_v1378: f64,
-    pub(crate) scalar_v1407: f64,
-    pub(crate) scalar_v1431: f64,
-    pub(crate) scalar_v1467: bool,
-    pub(crate) scalar_v1468: bool,
-    pub(crate) scalar_v1469: bool,
-    pub(crate) scalar_v1506: bool,
-    pub(crate) scalar_v1564: f64,
-    pub(crate) scalar_v1565: bool,
-    pub(crate) scalar_v1570: f64,
-    pub(crate) scalar_v1571: f64,
-    pub(crate) scalar_v1584: f64,
-    pub(crate) scalar_v1606: bool,
-    pub(crate) scalar_v1608: f64,
-    pub(crate) scalar_v1609: bool,
-    pub(crate) scalar_v1612: f64,
-    pub(crate) scalar_v1613: f64,
-    pub(crate) scalar_v1614: f64,
-    pub(crate) scalar_v1627: f64,
-    pub(crate) scalar_v1648: bool,
-    pub(crate) scalar_v1650: f64,
-    pub(crate) scalar_v1651: bool,
-    pub(crate) scalar_v1652: f64,
-    pub(crate) scalar_v1653: bool,
-    pub(crate) scalar_v1654: bool,
-    pub(crate) scalar_v1655: f64,
-    pub(crate) scalar_v1656: bool,
-    pub(crate) scalar_v1657: bool,
-    pub(crate) scalar_v1672: bool,
-    pub(crate) scalar_v1673: bool,
-    pub(crate) scalar_v1677: f64,
-    pub(crate) scalar_v1681: bool,
-    pub(crate) scalar_v1685: bool,
-    pub(crate) scalar_v1686: bool,
-    pub(crate) scalar_v1687: bool,
-    pub(crate) scalar_v1726: bool,
-    pub(crate) scalar_v1755: f64,
-    pub(crate) scalar_v1756: f64,
-    pub(crate) scalar_v1783: bool,
-    pub(crate) scalar_v1787: f64,
-    pub(crate) scalar_v1788: bool,
-    pub(crate) scalar_v1789: bool,
-    pub(crate) scalar_v1794: f64,
-    pub(crate) scalar_v1795: f64,
-    pub(crate) scalar_v1800: f64,
-    pub(crate) scalar_v1803: f64,
-    pub(crate) scalar_v1823: bool,
-    pub(crate) scalar_v1824: bool,
-    pub(crate) scalar_v1826: f64,
-    pub(crate) scalar_v1827: f64,
-    pub(crate) scalar_v1865: bool,
-    pub(crate) scalar_v2045: f64,
-    pub(crate) scalar_v2046: f64,
-    pub(crate) scalar_v2050: f64,
-    pub(crate) scalar_v2066: f64,
-    pub(crate) scalar_v2069: f64,
-    pub(crate) scalar_v2077: f64,
-    pub(crate) scalar_v2080: f64,
-    pub(crate) scalar_v2082: f64,
-    pub(crate) scalar_v2084: f64,
-    pub(crate) scalar_v2086: f64,
-    pub(crate) scalar_v2105: f64,
-    pub(crate) scalar_v2110: f64,
-    pub(crate) scalar_v2116: f64,
-    pub(crate) scalar_v2122: f64,
-    pub(crate) scalar_v2130: f64,
-    pub(crate) scalar_v2136: f64,
-    pub(crate) scalar_v2142: f64,
-    pub(crate) scalar_v2150: f64,
-    pub(crate) scalar_v2155: f64,
-    pub(crate) scalar_v2160: f64,
-    pub(crate) scalar_v2170: f64,
-    pub(crate) scalar_v2187: f64,
-    pub(crate) scalar_v2203: f64,
-    pub(crate) scalar_v2219: f64,
-    pub(crate) scalar_v2235: f64,
-    pub(crate) scalar_v2251: f64,
-    pub(crate) scalar_v2267: f64,
-    pub(crate) scalar_v2291: f64,
-    pub(crate) scalar_v2307: f64,
-    pub(crate) scalar_v2468: f64,
-    pub(crate) scalar_v2486: f64,
-    pub(crate) scalar_v2491: f64,
-    pub(crate) scalar_v2504: f64,
-    pub(crate) scalar_v2614: f64,
-    pub(crate) scalar_v2782: f64,
-    pub(crate) scalar_v2993: f64,
-    pub(crate) scalar_v3247: f64,
-    pub(crate) scalar_v3266: f64,
-    pub(crate) scalar_v4595: f64,
-    pub(crate) scalar_v4622: f64,
-    pub(crate) scalar_v4704: f64,
-    pub(crate) scalar_v4731: f64,
-    pub(crate) scalar_v4833: f64,
-    pub(crate) scalar_v5291: f64,
-    pub(crate) scalar_v6021: f64,
-    pub(crate) scalar_v6022: f64,
-    pub(crate) scalar_v6023: f64,
-    pub(crate) scalar_v73: f64,
-    pub(crate) scalar_v74: f64,
-    pub(crate) scalar_v77: bool,
-    pub(crate) scalar_v78: f64,
-    pub(crate) scalar_v79: f64,
-    pub(crate) scalar_v80: f64,
-    pub(crate) scalar_v81: f64,
-    pub(crate) scalar_v82: f64,
-    pub(crate) scalar_v85: bool,
-    pub(crate) scalar_v86: bool,
-    pub(crate) scalar_v87: bool,
-    pub(crate) scalar_v88: f64,
-    pub(crate) scalar_v89: f64,
-    pub(crate) scalar_v90: f64,
-    pub(crate) scalar_v91: f64,
-    pub(crate) scalar_v92: f64,
-    pub(crate) scalar_v93: f64,
-    pub(crate) scalar_v95: f64,
-    pub(crate) scalar_v97: f64,
-    pub(crate) scalar_v103: f64,
-    pub(crate) scalar_v106: f64,
-    pub(crate) scalar_v107: f64,
-    pub(crate) scalar_v124: f64,
-    pub(crate) scalar_v167: f64,
-    pub(crate) scalar_v203: f64,
-    pub(crate) scalar_v236: f64,
-    pub(crate) scalar_v257: f64,
-    pub(crate) scalar_v277: f64,
-    pub(crate) scalar_v297: f64,
-    pub(crate) scalar_v339: f64,
-    pub(crate) scalar_v359: f64,
+    pub(crate) scalar_static_f64: Box<[f64; 281]>,
+    pub(crate) scalar_static_bool: Box<[bool; 78]>,
     pub(crate) scalar_temperature_static_valid: bool,
     pub(crate) scalar_temperature_static_temperature: f64,
     pub(crate) scalar_temperature_static_thermal_voltage: f64,
@@ -758,365 +401,8 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
-            scalar_v4: self.scalar_v4,
-            scalar_v6: self.scalar_v6,
-            scalar_v8: self.scalar_v8,
-            scalar_v12: self.scalar_v12,
-            scalar_v14: self.scalar_v14,
-            scalar_v16: self.scalar_v16,
-            scalar_v19: self.scalar_v19,
-            scalar_v22: self.scalar_v22,
-            scalar_v23: self.scalar_v23,
-            scalar_v28: self.scalar_v28,
-            scalar_v29: self.scalar_v29,
-            scalar_v32: self.scalar_v32,
-            scalar_v34: self.scalar_v34,
-            scalar_v37: self.scalar_v37,
-            scalar_v38: self.scalar_v38,
-            scalar_v40: self.scalar_v40,
-            scalar_v41: self.scalar_v41,
-            scalar_v42: self.scalar_v42,
-            scalar_v43: self.scalar_v43,
-            scalar_v45: self.scalar_v45,
-            scalar_v46: self.scalar_v46,
-            scalar_v47: self.scalar_v47,
-            scalar_v48: self.scalar_v48,
-            scalar_v50: self.scalar_v50,
-            scalar_v51: self.scalar_v51,
-            scalar_v52: self.scalar_v52,
-            scalar_v53: self.scalar_v53,
-            scalar_v55: self.scalar_v55,
-            scalar_v56: self.scalar_v56,
-            scalar_v57: self.scalar_v57,
-            scalar_v58: self.scalar_v58,
-            scalar_v60: self.scalar_v60,
-            scalar_v61: self.scalar_v61,
-            scalar_v62: self.scalar_v62,
-            scalar_v63: self.scalar_v63,
-            scalar_v65: self.scalar_v65,
-            scalar_v68: self.scalar_v68,
-            scalar_v69: self.scalar_v69,
-            scalar_v72: self.scalar_v72,
-            scalar_v75: self.scalar_v75,
-            scalar_v76: self.scalar_v76,
-            scalar_v83: self.scalar_v83,
-            scalar_v84: self.scalar_v84,
-            scalar_v99: self.scalar_v99,
-            scalar_v100: self.scalar_v100,
-            scalar_v101: self.scalar_v101,
-            scalar_v102: self.scalar_v102,
-            scalar_v104: self.scalar_v104,
-            scalar_v105: self.scalar_v105,
-            scalar_v113: self.scalar_v113,
-            scalar_v115: self.scalar_v115,
-            scalar_v116: self.scalar_v116,
-            scalar_v117: self.scalar_v117,
-            scalar_v120: self.scalar_v120,
-            scalar_v121: self.scalar_v121,
-            scalar_v129: self.scalar_v129,
-            scalar_v130: self.scalar_v130,
-            scalar_v137: self.scalar_v137,
-            scalar_v138: self.scalar_v138,
-            scalar_v139: self.scalar_v139,
-            scalar_v141: self.scalar_v141,
-            scalar_v142: self.scalar_v142,
-            scalar_v158: self.scalar_v158,
-            scalar_v159: self.scalar_v159,
-            scalar_v160: self.scalar_v160,
-            scalar_v161: self.scalar_v161,
-            scalar_v164: self.scalar_v164,
-            scalar_v165: self.scalar_v165,
-            scalar_v176: self.scalar_v176,
-            scalar_v177: self.scalar_v177,
-            scalar_v195: self.scalar_v195,
-            scalar_v196: self.scalar_v196,
-            scalar_v197: self.scalar_v197,
-            scalar_v200: self.scalar_v200,
-            scalar_v201: self.scalar_v201,
-            scalar_v227: self.scalar_v227,
-            scalar_v228: self.scalar_v228,
-            scalar_v229: self.scalar_v229,
-            scalar_v230: self.scalar_v230,
-            scalar_v233: self.scalar_v233,
-            scalar_v234: self.scalar_v234,
-            scalar_v248: self.scalar_v248,
-            scalar_v249: self.scalar_v249,
-            scalar_v250: self.scalar_v250,
-            scalar_v251: self.scalar_v251,
-            scalar_v254: self.scalar_v254,
-            scalar_v255: self.scalar_v255,
-            scalar_v269: self.scalar_v269,
-            scalar_v270: self.scalar_v270,
-            scalar_v271: self.scalar_v271,
-            scalar_v274: self.scalar_v274,
-            scalar_v275: self.scalar_v275,
-            scalar_v289: self.scalar_v289,
-            scalar_v290: self.scalar_v290,
-            scalar_v291: self.scalar_v291,
-            scalar_v294: self.scalar_v294,
-            scalar_v295: self.scalar_v295,
-            scalar_v309: self.scalar_v309,
-            scalar_v320: self.scalar_v320,
-            scalar_v331: self.scalar_v331,
-            scalar_v332: self.scalar_v332,
-            scalar_v333: self.scalar_v333,
-            scalar_v336: self.scalar_v336,
-            scalar_v337: self.scalar_v337,
-            scalar_v351: self.scalar_v351,
-            scalar_v352: self.scalar_v352,
-            scalar_v353: self.scalar_v353,
-            scalar_v356: self.scalar_v356,
-            scalar_v357: self.scalar_v357,
-            scalar_v393: self.scalar_v393,
-            scalar_v396: self.scalar_v396,
-            scalar_v397: self.scalar_v397,
-            scalar_v398: self.scalar_v398,
-            scalar_v402: self.scalar_v402,
-            scalar_v403: self.scalar_v403,
-            scalar_v407: self.scalar_v407,
-            scalar_v408: self.scalar_v408,
-            scalar_v409: self.scalar_v409,
-            scalar_v413: self.scalar_v413,
-            scalar_v416: self.scalar_v416,
-            scalar_v417: self.scalar_v417,
-            scalar_v418: self.scalar_v418,
-            scalar_v422: self.scalar_v422,
-            scalar_v423: self.scalar_v423,
-            scalar_v427: self.scalar_v427,
-            scalar_v428: self.scalar_v428,
-            scalar_v429: self.scalar_v429,
-            scalar_v433: self.scalar_v433,
-            scalar_v436: self.scalar_v436,
-            scalar_v437: self.scalar_v437,
-            scalar_v440: self.scalar_v440,
-            scalar_v441: self.scalar_v441,
-            scalar_v444: self.scalar_v444,
-            scalar_v445: self.scalar_v445,
-            scalar_v446: self.scalar_v446,
-            scalar_v450: self.scalar_v450,
-            scalar_v453: self.scalar_v453,
-            scalar_v454: self.scalar_v454,
-            scalar_v526: self.scalar_v526,
-            scalar_v531: self.scalar_v531,
-            scalar_v532: self.scalar_v532,
-            scalar_v536: self.scalar_v536,
-            scalar_v537: self.scalar_v537,
-            scalar_v541: self.scalar_v541,
-            scalar_v542: self.scalar_v542,
-            scalar_v548: self.scalar_v548,
-            scalar_v555: self.scalar_v555,
-            scalar_v556: self.scalar_v556,
-            scalar_v561: self.scalar_v561,
-            scalar_v589: self.scalar_v589,
-            scalar_v590: self.scalar_v590,
-            scalar_v594: self.scalar_v594,
-            scalar_v616: self.scalar_v616,
-            scalar_v617: self.scalar_v617,
-            scalar_v621: self.scalar_v621,
-            scalar_v643: self.scalar_v643,
-            scalar_v645: self.scalar_v645,
-            scalar_v648: self.scalar_v648,
-            scalar_v650: self.scalar_v650,
-            scalar_v653: self.scalar_v653,
-            scalar_v655: self.scalar_v655,
-            scalar_v657: self.scalar_v657,
-            scalar_v660: self.scalar_v660,
-            scalar_v666: self.scalar_v666,
-            scalar_v667: self.scalar_v667,
-            scalar_v674: self.scalar_v674,
-            scalar_v675: self.scalar_v675,
-            scalar_v679: self.scalar_v679,
-            scalar_v680: self.scalar_v680,
-            scalar_v764: self.scalar_v764,
-            scalar_v766: self.scalar_v766,
-            scalar_v767: self.scalar_v767,
-            scalar_v772: self.scalar_v772,
-            scalar_v773: self.scalar_v773,
-            scalar_v774: self.scalar_v774,
-            scalar_v779: self.scalar_v779,
-            scalar_v782: self.scalar_v782,
-            scalar_v802: self.scalar_v802,
-            scalar_v804: self.scalar_v804,
-            scalar_v805: self.scalar_v805,
-            scalar_v845: self.scalar_v845,
-            scalar_v846: self.scalar_v846,
-            scalar_v851: self.scalar_v851,
-            scalar_v852: self.scalar_v852,
-            scalar_v858: self.scalar_v858,
-            scalar_v861: self.scalar_v861,
-            scalar_v868: self.scalar_v868,
-            scalar_v869: self.scalar_v869,
-            scalar_v870: self.scalar_v870,
-            scalar_v901: self.scalar_v901,
-            scalar_v902: self.scalar_v902,
-            scalar_v903: self.scalar_v903,
-            scalar_v904: self.scalar_v904,
-            scalar_v905: self.scalar_v905,
-            scalar_v913: self.scalar_v913,
-            scalar_v914: self.scalar_v914,
-            scalar_v919: self.scalar_v919,
-            scalar_v920: self.scalar_v920,
-            scalar_v970: self.scalar_v970,
-            scalar_v989: self.scalar_v989,
-            scalar_v990: self.scalar_v990,
-            scalar_v1019: self.scalar_v1019,
-            scalar_v1075: self.scalar_v1075,
-            scalar_v1076: self.scalar_v1076,
-            scalar_v1077: self.scalar_v1077,
-            scalar_v1090: self.scalar_v1090,
-            scalar_v1094: self.scalar_v1094,
-            scalar_v1106: self.scalar_v1106,
-            scalar_v1111: self.scalar_v1111,
-            scalar_v1140: self.scalar_v1140,
-            scalar_v1142: self.scalar_v1142,
-            scalar_v1181: self.scalar_v1181,
-            scalar_v1185: self.scalar_v1185,
-            scalar_v1186: self.scalar_v1186,
-            scalar_v1219: self.scalar_v1219,
-            scalar_v1220: self.scalar_v1220,
-            scalar_v1221: self.scalar_v1221,
-            scalar_v1232: self.scalar_v1232,
-            scalar_v1233: self.scalar_v1233,
-            scalar_v1237: self.scalar_v1237,
-            scalar_v1238: self.scalar_v1238,
-            scalar_v1261: self.scalar_v1261,
-            scalar_v1262: self.scalar_v1262,
-            scalar_v1263: self.scalar_v1263,
-            scalar_v1301: self.scalar_v1301,
-            scalar_v1322: self.scalar_v1322,
-            scalar_v1323: self.scalar_v1323,
-            scalar_v1348: self.scalar_v1348,
-            scalar_v1356: self.scalar_v1356,
-            scalar_v1361: self.scalar_v1361,
-            scalar_v1378: self.scalar_v1378,
-            scalar_v1407: self.scalar_v1407,
-            scalar_v1431: self.scalar_v1431,
-            scalar_v1467: self.scalar_v1467,
-            scalar_v1468: self.scalar_v1468,
-            scalar_v1469: self.scalar_v1469,
-            scalar_v1506: self.scalar_v1506,
-            scalar_v1564: self.scalar_v1564,
-            scalar_v1565: self.scalar_v1565,
-            scalar_v1570: self.scalar_v1570,
-            scalar_v1571: self.scalar_v1571,
-            scalar_v1584: self.scalar_v1584,
-            scalar_v1606: self.scalar_v1606,
-            scalar_v1608: self.scalar_v1608,
-            scalar_v1609: self.scalar_v1609,
-            scalar_v1612: self.scalar_v1612,
-            scalar_v1613: self.scalar_v1613,
-            scalar_v1614: self.scalar_v1614,
-            scalar_v1627: self.scalar_v1627,
-            scalar_v1648: self.scalar_v1648,
-            scalar_v1650: self.scalar_v1650,
-            scalar_v1651: self.scalar_v1651,
-            scalar_v1652: self.scalar_v1652,
-            scalar_v1653: self.scalar_v1653,
-            scalar_v1654: self.scalar_v1654,
-            scalar_v1655: self.scalar_v1655,
-            scalar_v1656: self.scalar_v1656,
-            scalar_v1657: self.scalar_v1657,
-            scalar_v1672: self.scalar_v1672,
-            scalar_v1673: self.scalar_v1673,
-            scalar_v1677: self.scalar_v1677,
-            scalar_v1681: self.scalar_v1681,
-            scalar_v1685: self.scalar_v1685,
-            scalar_v1686: self.scalar_v1686,
-            scalar_v1687: self.scalar_v1687,
-            scalar_v1726: self.scalar_v1726,
-            scalar_v1755: self.scalar_v1755,
-            scalar_v1756: self.scalar_v1756,
-            scalar_v1783: self.scalar_v1783,
-            scalar_v1787: self.scalar_v1787,
-            scalar_v1788: self.scalar_v1788,
-            scalar_v1789: self.scalar_v1789,
-            scalar_v1794: self.scalar_v1794,
-            scalar_v1795: self.scalar_v1795,
-            scalar_v1800: self.scalar_v1800,
-            scalar_v1803: self.scalar_v1803,
-            scalar_v1823: self.scalar_v1823,
-            scalar_v1824: self.scalar_v1824,
-            scalar_v1826: self.scalar_v1826,
-            scalar_v1827: self.scalar_v1827,
-            scalar_v1865: self.scalar_v1865,
-            scalar_v2045: self.scalar_v2045,
-            scalar_v2046: self.scalar_v2046,
-            scalar_v2050: self.scalar_v2050,
-            scalar_v2066: self.scalar_v2066,
-            scalar_v2069: self.scalar_v2069,
-            scalar_v2077: self.scalar_v2077,
-            scalar_v2080: self.scalar_v2080,
-            scalar_v2082: self.scalar_v2082,
-            scalar_v2084: self.scalar_v2084,
-            scalar_v2086: self.scalar_v2086,
-            scalar_v2105: self.scalar_v2105,
-            scalar_v2110: self.scalar_v2110,
-            scalar_v2116: self.scalar_v2116,
-            scalar_v2122: self.scalar_v2122,
-            scalar_v2130: self.scalar_v2130,
-            scalar_v2136: self.scalar_v2136,
-            scalar_v2142: self.scalar_v2142,
-            scalar_v2150: self.scalar_v2150,
-            scalar_v2155: self.scalar_v2155,
-            scalar_v2160: self.scalar_v2160,
-            scalar_v2170: self.scalar_v2170,
-            scalar_v2187: self.scalar_v2187,
-            scalar_v2203: self.scalar_v2203,
-            scalar_v2219: self.scalar_v2219,
-            scalar_v2235: self.scalar_v2235,
-            scalar_v2251: self.scalar_v2251,
-            scalar_v2267: self.scalar_v2267,
-            scalar_v2291: self.scalar_v2291,
-            scalar_v2307: self.scalar_v2307,
-            scalar_v2468: self.scalar_v2468,
-            scalar_v2486: self.scalar_v2486,
-            scalar_v2491: self.scalar_v2491,
-            scalar_v2504: self.scalar_v2504,
-            scalar_v2614: self.scalar_v2614,
-            scalar_v2782: self.scalar_v2782,
-            scalar_v2993: self.scalar_v2993,
-            scalar_v3247: self.scalar_v3247,
-            scalar_v3266: self.scalar_v3266,
-            scalar_v4595: self.scalar_v4595,
-            scalar_v4622: self.scalar_v4622,
-            scalar_v4704: self.scalar_v4704,
-            scalar_v4731: self.scalar_v4731,
-            scalar_v4833: self.scalar_v4833,
-            scalar_v5291: self.scalar_v5291,
-            scalar_v6021: self.scalar_v6021,
-            scalar_v6022: self.scalar_v6022,
-            scalar_v6023: self.scalar_v6023,
-            scalar_v73: self.scalar_v73,
-            scalar_v74: self.scalar_v74,
-            scalar_v77: self.scalar_v77,
-            scalar_v78: self.scalar_v78,
-            scalar_v79: self.scalar_v79,
-            scalar_v80: self.scalar_v80,
-            scalar_v81: self.scalar_v81,
-            scalar_v82: self.scalar_v82,
-            scalar_v85: self.scalar_v85,
-            scalar_v86: self.scalar_v86,
-            scalar_v87: self.scalar_v87,
-            scalar_v88: self.scalar_v88,
-            scalar_v89: self.scalar_v89,
-            scalar_v90: self.scalar_v90,
-            scalar_v91: self.scalar_v91,
-            scalar_v92: self.scalar_v92,
-            scalar_v93: self.scalar_v93,
-            scalar_v95: self.scalar_v95,
-            scalar_v97: self.scalar_v97,
-            scalar_v103: self.scalar_v103,
-            scalar_v106: self.scalar_v106,
-            scalar_v107: self.scalar_v107,
-            scalar_v124: self.scalar_v124,
-            scalar_v167: self.scalar_v167,
-            scalar_v203: self.scalar_v203,
-            scalar_v236: self.scalar_v236,
-            scalar_v257: self.scalar_v257,
-            scalar_v277: self.scalar_v277,
-            scalar_v297: self.scalar_v297,
-            scalar_v339: self.scalar_v339,
-            scalar_v359: self.scalar_v359,
+            scalar_static_f64: self.scalar_static_f64.clone(),
+            scalar_static_bool: self.scalar_static_bool.clone(),
             scalar_temperature_static_valid: self.scalar_temperature_static_valid,
             scalar_temperature_static_temperature: self.scalar_temperature_static_temperature,
             scalar_temperature_static_thermal_voltage: self.scalar_temperature_static_thermal_voltage,
@@ -1160,365 +446,8 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            scalar_v4: 0.0,
-            scalar_v6: 0.0,
-            scalar_v8: false,
-            scalar_v12: 0.0,
-            scalar_v14: 0.0,
-            scalar_v16: false,
-            scalar_v19: 0.0,
-            scalar_v22: 0.0,
-            scalar_v23: false,
-            scalar_v28: 0.0,
-            scalar_v29: false,
-            scalar_v32: 0.0,
-            scalar_v34: false,
-            scalar_v37: 0.0,
-            scalar_v38: 0.0,
-            scalar_v40: 0.0,
-            scalar_v41: false,
-            scalar_v42: 0.0,
-            scalar_v43: 0.0,
-            scalar_v45: 0.0,
-            scalar_v46: false,
-            scalar_v47: 0.0,
-            scalar_v48: 0.0,
-            scalar_v50: 0.0,
-            scalar_v51: false,
-            scalar_v52: 0.0,
-            scalar_v53: 0.0,
-            scalar_v55: 0.0,
-            scalar_v56: false,
-            scalar_v57: 0.0,
-            scalar_v58: 0.0,
-            scalar_v60: 0.0,
-            scalar_v61: false,
-            scalar_v62: 0.0,
-            scalar_v63: 0.0,
-            scalar_v65: 0.0,
-            scalar_v68: 0.0,
-            scalar_v69: 0.0,
-            scalar_v72: 0.0,
-            scalar_v75: 0.0,
-            scalar_v76: 0.0,
-            scalar_v83: 0.0,
-            scalar_v84: 0.0,
-            scalar_v99: 0.0,
-            scalar_v100: 0.0,
-            scalar_v101: false,
-            scalar_v102: 0.0,
-            scalar_v104: 0.0,
-            scalar_v105: 0.0,
-            scalar_v113: false,
-            scalar_v115: 0.0,
-            scalar_v116: 0.0,
-            scalar_v117: 0.0,
-            scalar_v120: 0.0,
-            scalar_v121: 0.0,
-            scalar_v129: 0.0,
-            scalar_v130: false,
-            scalar_v137: 0.0,
-            scalar_v138: 0.0,
-            scalar_v139: 0.0,
-            scalar_v141: 0.0,
-            scalar_v142: 0.0,
-            scalar_v158: 0.0,
-            scalar_v159: 0.0,
-            scalar_v160: 0.0,
-            scalar_v161: 0.0,
-            scalar_v164: 0.0,
-            scalar_v165: 0.0,
-            scalar_v176: 0.0,
-            scalar_v177: 0.0,
-            scalar_v195: 0.0,
-            scalar_v196: 0.0,
-            scalar_v197: 0.0,
-            scalar_v200: 0.0,
-            scalar_v201: 0.0,
-            scalar_v227: 0.0,
-            scalar_v228: 0.0,
-            scalar_v229: 0.0,
-            scalar_v230: 0.0,
-            scalar_v233: 0.0,
-            scalar_v234: 0.0,
-            scalar_v248: 0.0,
-            scalar_v249: 0.0,
-            scalar_v250: 0.0,
-            scalar_v251: 0.0,
-            scalar_v254: 0.0,
-            scalar_v255: 0.0,
-            scalar_v269: 0.0,
-            scalar_v270: 0.0,
-            scalar_v271: 0.0,
-            scalar_v274: 0.0,
-            scalar_v275: 0.0,
-            scalar_v289: 0.0,
-            scalar_v290: 0.0,
-            scalar_v291: 0.0,
-            scalar_v294: 0.0,
-            scalar_v295: 0.0,
-            scalar_v309: 0.0,
-            scalar_v320: 0.0,
-            scalar_v331: 0.0,
-            scalar_v332: 0.0,
-            scalar_v333: 0.0,
-            scalar_v336: 0.0,
-            scalar_v337: 0.0,
-            scalar_v351: 0.0,
-            scalar_v352: 0.0,
-            scalar_v353: 0.0,
-            scalar_v356: 0.0,
-            scalar_v357: 0.0,
-            scalar_v393: 0.0,
-            scalar_v396: 0.0,
-            scalar_v397: 0.0,
-            scalar_v398: 0.0,
-            scalar_v402: false,
-            scalar_v403: 0.0,
-            scalar_v407: 0.0,
-            scalar_v408: 0.0,
-            scalar_v409: 0.0,
-            scalar_v413: false,
-            scalar_v416: 0.0,
-            scalar_v417: 0.0,
-            scalar_v418: 0.0,
-            scalar_v422: false,
-            scalar_v423: 0.0,
-            scalar_v427: 0.0,
-            scalar_v428: 0.0,
-            scalar_v429: 0.0,
-            scalar_v433: false,
-            scalar_v436: 0.0,
-            scalar_v437: 0.0,
-            scalar_v440: 0.0,
-            scalar_v441: 0.0,
-            scalar_v444: 0.0,
-            scalar_v445: 0.0,
-            scalar_v446: 0.0,
-            scalar_v450: false,
-            scalar_v453: 0.0,
-            scalar_v454: 0.0,
-            scalar_v526: 0.0,
-            scalar_v531: 0.0,
-            scalar_v532: 0.0,
-            scalar_v536: 0.0,
-            scalar_v537: 0.0,
-            scalar_v541: 0.0,
-            scalar_v542: 0.0,
-            scalar_v548: 0.0,
-            scalar_v555: 0.0,
-            scalar_v556: 0.0,
-            scalar_v561: 0.0,
-            scalar_v589: 0.0,
-            scalar_v590: 0.0,
-            scalar_v594: 0.0,
-            scalar_v616: 0.0,
-            scalar_v617: 0.0,
-            scalar_v621: 0.0,
-            scalar_v643: 0.0,
-            scalar_v645: 0.0,
-            scalar_v648: 0.0,
-            scalar_v650: 0.0,
-            scalar_v653: 0.0,
-            scalar_v655: 0.0,
-            scalar_v657: 0.0,
-            scalar_v660: 0.0,
-            scalar_v666: 0.0,
-            scalar_v667: 0.0,
-            scalar_v674: 0.0,
-            scalar_v675: 0.0,
-            scalar_v679: 0.0,
-            scalar_v680: 0.0,
-            scalar_v764: 0.0,
-            scalar_v766: 0.0,
-            scalar_v767: false,
-            scalar_v772: 0.0,
-            scalar_v773: 0.0,
-            scalar_v774: 0.0,
-            scalar_v779: 0.0,
-            scalar_v782: 0.0,
-            scalar_v802: false,
-            scalar_v804: 0.0,
-            scalar_v805: 0.0,
-            scalar_v845: 0.0,
-            scalar_v846: false,
-            scalar_v851: 0.0,
-            scalar_v852: 0.0,
-            scalar_v858: 0.0,
-            scalar_v861: 0.0,
-            scalar_v868: 0.0,
-            scalar_v869: false,
-            scalar_v870: 0.0,
-            scalar_v901: 0.0,
-            scalar_v902: false,
-            scalar_v903: false,
-            scalar_v904: false,
-            scalar_v905: false,
-            scalar_v913: 0.0,
-            scalar_v914: 0.0,
-            scalar_v919: 0.0,
-            scalar_v920: 0.0,
-            scalar_v970: 0.0,
-            scalar_v989: false,
-            scalar_v990: false,
-            scalar_v1019: 0.0,
-            scalar_v1075: 0.0,
-            scalar_v1076: false,
-            scalar_v1077: 0.0,
-            scalar_v1090: 0.0,
-            scalar_v1094: false,
-            scalar_v1106: 0.0,
-            scalar_v1111: false,
-            scalar_v1140: 0.0,
-            scalar_v1142: 0.0,
-            scalar_v1181: false,
-            scalar_v1185: 0.0,
-            scalar_v1186: false,
-            scalar_v1219: 0.0,
-            scalar_v1220: false,
-            scalar_v1221: false,
-            scalar_v1232: false,
-            scalar_v1233: false,
-            scalar_v1237: false,
-            scalar_v1238: false,
-            scalar_v1261: false,
-            scalar_v1262: false,
-            scalar_v1263: false,
-            scalar_v1301: false,
-            scalar_v1322: false,
-            scalar_v1323: false,
-            scalar_v1348: false,
-            scalar_v1356: false,
-            scalar_v1361: false,
-            scalar_v1378: 0.0,
-            scalar_v1407: 0.0,
-            scalar_v1431: 0.0,
-            scalar_v1467: false,
-            scalar_v1468: false,
-            scalar_v1469: false,
-            scalar_v1506: false,
-            scalar_v1564: 0.0,
-            scalar_v1565: false,
-            scalar_v1570: 0.0,
-            scalar_v1571: 0.0,
-            scalar_v1584: 0.0,
-            scalar_v1606: false,
-            scalar_v1608: 0.0,
-            scalar_v1609: false,
-            scalar_v1612: 0.0,
-            scalar_v1613: 0.0,
-            scalar_v1614: 0.0,
-            scalar_v1627: 0.0,
-            scalar_v1648: false,
-            scalar_v1650: 0.0,
-            scalar_v1651: false,
-            scalar_v1652: 0.0,
-            scalar_v1653: false,
-            scalar_v1654: false,
-            scalar_v1655: 0.0,
-            scalar_v1656: false,
-            scalar_v1657: false,
-            scalar_v1672: false,
-            scalar_v1673: false,
-            scalar_v1677: 0.0,
-            scalar_v1681: false,
-            scalar_v1685: false,
-            scalar_v1686: false,
-            scalar_v1687: false,
-            scalar_v1726: false,
-            scalar_v1755: 0.0,
-            scalar_v1756: 0.0,
-            scalar_v1783: false,
-            scalar_v1787: 0.0,
-            scalar_v1788: false,
-            scalar_v1789: false,
-            scalar_v1794: 0.0,
-            scalar_v1795: 0.0,
-            scalar_v1800: 0.0,
-            scalar_v1803: 0.0,
-            scalar_v1823: false,
-            scalar_v1824: false,
-            scalar_v1826: 0.0,
-            scalar_v1827: 0.0,
-            scalar_v1865: false,
-            scalar_v2045: 0.0,
-            scalar_v2046: 0.0,
-            scalar_v2050: 0.0,
-            scalar_v2066: 0.0,
-            scalar_v2069: 0.0,
-            scalar_v2077: 0.0,
-            scalar_v2080: 0.0,
-            scalar_v2082: 0.0,
-            scalar_v2084: 0.0,
-            scalar_v2086: 0.0,
-            scalar_v2105: 0.0,
-            scalar_v2110: 0.0,
-            scalar_v2116: 0.0,
-            scalar_v2122: 0.0,
-            scalar_v2130: 0.0,
-            scalar_v2136: 0.0,
-            scalar_v2142: 0.0,
-            scalar_v2150: 0.0,
-            scalar_v2155: 0.0,
-            scalar_v2160: 0.0,
-            scalar_v2170: 0.0,
-            scalar_v2187: 0.0,
-            scalar_v2203: 0.0,
-            scalar_v2219: 0.0,
-            scalar_v2235: 0.0,
-            scalar_v2251: 0.0,
-            scalar_v2267: 0.0,
-            scalar_v2291: 0.0,
-            scalar_v2307: 0.0,
-            scalar_v2468: 0.0,
-            scalar_v2486: 0.0,
-            scalar_v2491: 0.0,
-            scalar_v2504: 0.0,
-            scalar_v2614: 0.0,
-            scalar_v2782: 0.0,
-            scalar_v2993: 0.0,
-            scalar_v3247: 0.0,
-            scalar_v3266: 0.0,
-            scalar_v4595: 0.0,
-            scalar_v4622: 0.0,
-            scalar_v4704: 0.0,
-            scalar_v4731: 0.0,
-            scalar_v4833: 0.0,
-            scalar_v5291: 0.0,
-            scalar_v6021: 0.0,
-            scalar_v6022: 0.0,
-            scalar_v6023: 0.0,
-            scalar_v73: 0.0,
-            scalar_v74: 0.0,
-            scalar_v77: false,
-            scalar_v78: 0.0,
-            scalar_v79: 0.0,
-            scalar_v80: 0.0,
-            scalar_v81: 0.0,
-            scalar_v82: 0.0,
-            scalar_v85: false,
-            scalar_v86: false,
-            scalar_v87: false,
-            scalar_v88: 0.0,
-            scalar_v89: 0.0,
-            scalar_v90: 0.0,
-            scalar_v91: 0.0,
-            scalar_v92: 0.0,
-            scalar_v93: 0.0,
-            scalar_v95: 0.0,
-            scalar_v97: 0.0,
-            scalar_v103: 0.0,
-            scalar_v106: 0.0,
-            scalar_v107: 0.0,
-            scalar_v124: 0.0,
-            scalar_v167: 0.0,
-            scalar_v203: 0.0,
-            scalar_v236: 0.0,
-            scalar_v257: 0.0,
-            scalar_v277: 0.0,
-            scalar_v297: 0.0,
-            scalar_v339: 0.0,
-            scalar_v359: 0.0,
+            scalar_static_f64: boxed_zero_f64_array::<281>(),
+            scalar_static_bool: boxed_zero_bool_array::<78>(),
             scalar_temperature_static_valid: false,
             scalar_temperature_static_temperature: 0.0,
             scalar_temperature_static_thermal_voltage: 0.0,
@@ -1547,365 +476,8 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
-            scalar_v4,
-            scalar_v6,
-            scalar_v8,
-            scalar_v12,
-            scalar_v14,
-            scalar_v16,
-            scalar_v19,
-            scalar_v22,
-            scalar_v23,
-            scalar_v28,
-            scalar_v29,
-            scalar_v32,
-            scalar_v34,
-            scalar_v37,
-            scalar_v38,
-            scalar_v40,
-            scalar_v41,
-            scalar_v42,
-            scalar_v43,
-            scalar_v45,
-            scalar_v46,
-            scalar_v47,
-            scalar_v48,
-            scalar_v50,
-            scalar_v51,
-            scalar_v52,
-            scalar_v53,
-            scalar_v55,
-            scalar_v56,
-            scalar_v57,
-            scalar_v58,
-            scalar_v60,
-            scalar_v61,
-            scalar_v62,
-            scalar_v63,
-            scalar_v65,
-            scalar_v68,
-            scalar_v69,
-            scalar_v72,
-            scalar_v75,
-            scalar_v76,
-            scalar_v83,
-            scalar_v84,
-            scalar_v99,
-            scalar_v100,
-            scalar_v101,
-            scalar_v102,
-            scalar_v104,
-            scalar_v105,
-            scalar_v113,
-            scalar_v115,
-            scalar_v116,
-            scalar_v117,
-            scalar_v120,
-            scalar_v121,
-            scalar_v129,
-            scalar_v130,
-            scalar_v137,
-            scalar_v138,
-            scalar_v139,
-            scalar_v141,
-            scalar_v142,
-            scalar_v158,
-            scalar_v159,
-            scalar_v160,
-            scalar_v161,
-            scalar_v164,
-            scalar_v165,
-            scalar_v176,
-            scalar_v177,
-            scalar_v195,
-            scalar_v196,
-            scalar_v197,
-            scalar_v200,
-            scalar_v201,
-            scalar_v227,
-            scalar_v228,
-            scalar_v229,
-            scalar_v230,
-            scalar_v233,
-            scalar_v234,
-            scalar_v248,
-            scalar_v249,
-            scalar_v250,
-            scalar_v251,
-            scalar_v254,
-            scalar_v255,
-            scalar_v269,
-            scalar_v270,
-            scalar_v271,
-            scalar_v274,
-            scalar_v275,
-            scalar_v289,
-            scalar_v290,
-            scalar_v291,
-            scalar_v294,
-            scalar_v295,
-            scalar_v309,
-            scalar_v320,
-            scalar_v331,
-            scalar_v332,
-            scalar_v333,
-            scalar_v336,
-            scalar_v337,
-            scalar_v351,
-            scalar_v352,
-            scalar_v353,
-            scalar_v356,
-            scalar_v357,
-            scalar_v393,
-            scalar_v396,
-            scalar_v397,
-            scalar_v398,
-            scalar_v402,
-            scalar_v403,
-            scalar_v407,
-            scalar_v408,
-            scalar_v409,
-            scalar_v413,
-            scalar_v416,
-            scalar_v417,
-            scalar_v418,
-            scalar_v422,
-            scalar_v423,
-            scalar_v427,
-            scalar_v428,
-            scalar_v429,
-            scalar_v433,
-            scalar_v436,
-            scalar_v437,
-            scalar_v440,
-            scalar_v441,
-            scalar_v444,
-            scalar_v445,
-            scalar_v446,
-            scalar_v450,
-            scalar_v453,
-            scalar_v454,
-            scalar_v526,
-            scalar_v531,
-            scalar_v532,
-            scalar_v536,
-            scalar_v537,
-            scalar_v541,
-            scalar_v542,
-            scalar_v548,
-            scalar_v555,
-            scalar_v556,
-            scalar_v561,
-            scalar_v589,
-            scalar_v590,
-            scalar_v594,
-            scalar_v616,
-            scalar_v617,
-            scalar_v621,
-            scalar_v643,
-            scalar_v645,
-            scalar_v648,
-            scalar_v650,
-            scalar_v653,
-            scalar_v655,
-            scalar_v657,
-            scalar_v660,
-            scalar_v666,
-            scalar_v667,
-            scalar_v674,
-            scalar_v675,
-            scalar_v679,
-            scalar_v680,
-            scalar_v764,
-            scalar_v766,
-            scalar_v767,
-            scalar_v772,
-            scalar_v773,
-            scalar_v774,
-            scalar_v779,
-            scalar_v782,
-            scalar_v802,
-            scalar_v804,
-            scalar_v805,
-            scalar_v845,
-            scalar_v846,
-            scalar_v851,
-            scalar_v852,
-            scalar_v858,
-            scalar_v861,
-            scalar_v868,
-            scalar_v869,
-            scalar_v870,
-            scalar_v901,
-            scalar_v902,
-            scalar_v903,
-            scalar_v904,
-            scalar_v905,
-            scalar_v913,
-            scalar_v914,
-            scalar_v919,
-            scalar_v920,
-            scalar_v970,
-            scalar_v989,
-            scalar_v990,
-            scalar_v1019,
-            scalar_v1075,
-            scalar_v1076,
-            scalar_v1077,
-            scalar_v1090,
-            scalar_v1094,
-            scalar_v1106,
-            scalar_v1111,
-            scalar_v1140,
-            scalar_v1142,
-            scalar_v1181,
-            scalar_v1185,
-            scalar_v1186,
-            scalar_v1219,
-            scalar_v1220,
-            scalar_v1221,
-            scalar_v1232,
-            scalar_v1233,
-            scalar_v1237,
-            scalar_v1238,
-            scalar_v1261,
-            scalar_v1262,
-            scalar_v1263,
-            scalar_v1301,
-            scalar_v1322,
-            scalar_v1323,
-            scalar_v1348,
-            scalar_v1356,
-            scalar_v1361,
-            scalar_v1378,
-            scalar_v1407,
-            scalar_v1431,
-            scalar_v1467,
-            scalar_v1468,
-            scalar_v1469,
-            scalar_v1506,
-            scalar_v1564,
-            scalar_v1565,
-            scalar_v1570,
-            scalar_v1571,
-            scalar_v1584,
-            scalar_v1606,
-            scalar_v1608,
-            scalar_v1609,
-            scalar_v1612,
-            scalar_v1613,
-            scalar_v1614,
-            scalar_v1627,
-            scalar_v1648,
-            scalar_v1650,
-            scalar_v1651,
-            scalar_v1652,
-            scalar_v1653,
-            scalar_v1654,
-            scalar_v1655,
-            scalar_v1656,
-            scalar_v1657,
-            scalar_v1672,
-            scalar_v1673,
-            scalar_v1677,
-            scalar_v1681,
-            scalar_v1685,
-            scalar_v1686,
-            scalar_v1687,
-            scalar_v1726,
-            scalar_v1755,
-            scalar_v1756,
-            scalar_v1783,
-            scalar_v1787,
-            scalar_v1788,
-            scalar_v1789,
-            scalar_v1794,
-            scalar_v1795,
-            scalar_v1800,
-            scalar_v1803,
-            scalar_v1823,
-            scalar_v1824,
-            scalar_v1826,
-            scalar_v1827,
-            scalar_v1865,
-            scalar_v2045,
-            scalar_v2046,
-            scalar_v2050,
-            scalar_v2066,
-            scalar_v2069,
-            scalar_v2077,
-            scalar_v2080,
-            scalar_v2082,
-            scalar_v2084,
-            scalar_v2086,
-            scalar_v2105,
-            scalar_v2110,
-            scalar_v2116,
-            scalar_v2122,
-            scalar_v2130,
-            scalar_v2136,
-            scalar_v2142,
-            scalar_v2150,
-            scalar_v2155,
-            scalar_v2160,
-            scalar_v2170,
-            scalar_v2187,
-            scalar_v2203,
-            scalar_v2219,
-            scalar_v2235,
-            scalar_v2251,
-            scalar_v2267,
-            scalar_v2291,
-            scalar_v2307,
-            scalar_v2468,
-            scalar_v2486,
-            scalar_v2491,
-            scalar_v2504,
-            scalar_v2614,
-            scalar_v2782,
-            scalar_v2993,
-            scalar_v3247,
-            scalar_v3266,
-            scalar_v4595,
-            scalar_v4622,
-            scalar_v4704,
-            scalar_v4731,
-            scalar_v4833,
-            scalar_v5291,
-            scalar_v6021,
-            scalar_v6022,
-            scalar_v6023,
-            scalar_v73,
-            scalar_v74,
-            scalar_v77,
-            scalar_v78,
-            scalar_v79,
-            scalar_v80,
-            scalar_v81,
-            scalar_v82,
-            scalar_v85,
-            scalar_v86,
-            scalar_v87,
-            scalar_v88,
-            scalar_v89,
-            scalar_v90,
-            scalar_v91,
-            scalar_v92,
-            scalar_v93,
-            scalar_v95,
-            scalar_v97,
-            scalar_v103,
-            scalar_v106,
-            scalar_v107,
-            scalar_v124,
-            scalar_v167,
-            scalar_v203,
-            scalar_v236,
-            scalar_v257,
-            scalar_v277,
-            scalar_v297,
-            scalar_v339,
-            scalar_v359,
+            scalar_static_f64,
+            scalar_static_bool,
             scalar_temperature_static_valid,
             scalar_temperature_static_temperature,
             scalar_temperature_static_thermal_voltage,
@@ -1928,365 +500,8 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
-            scalar_v4,
-            scalar_v6,
-            scalar_v8,
-            scalar_v12,
-            scalar_v14,
-            scalar_v16,
-            scalar_v19,
-            scalar_v22,
-            scalar_v23,
-            scalar_v28,
-            scalar_v29,
-            scalar_v32,
-            scalar_v34,
-            scalar_v37,
-            scalar_v38,
-            scalar_v40,
-            scalar_v41,
-            scalar_v42,
-            scalar_v43,
-            scalar_v45,
-            scalar_v46,
-            scalar_v47,
-            scalar_v48,
-            scalar_v50,
-            scalar_v51,
-            scalar_v52,
-            scalar_v53,
-            scalar_v55,
-            scalar_v56,
-            scalar_v57,
-            scalar_v58,
-            scalar_v60,
-            scalar_v61,
-            scalar_v62,
-            scalar_v63,
-            scalar_v65,
-            scalar_v68,
-            scalar_v69,
-            scalar_v72,
-            scalar_v75,
-            scalar_v76,
-            scalar_v83,
-            scalar_v84,
-            scalar_v99,
-            scalar_v100,
-            scalar_v101,
-            scalar_v102,
-            scalar_v104,
-            scalar_v105,
-            scalar_v113,
-            scalar_v115,
-            scalar_v116,
-            scalar_v117,
-            scalar_v120,
-            scalar_v121,
-            scalar_v129,
-            scalar_v130,
-            scalar_v137,
-            scalar_v138,
-            scalar_v139,
-            scalar_v141,
-            scalar_v142,
-            scalar_v158,
-            scalar_v159,
-            scalar_v160,
-            scalar_v161,
-            scalar_v164,
-            scalar_v165,
-            scalar_v176,
-            scalar_v177,
-            scalar_v195,
-            scalar_v196,
-            scalar_v197,
-            scalar_v200,
-            scalar_v201,
-            scalar_v227,
-            scalar_v228,
-            scalar_v229,
-            scalar_v230,
-            scalar_v233,
-            scalar_v234,
-            scalar_v248,
-            scalar_v249,
-            scalar_v250,
-            scalar_v251,
-            scalar_v254,
-            scalar_v255,
-            scalar_v269,
-            scalar_v270,
-            scalar_v271,
-            scalar_v274,
-            scalar_v275,
-            scalar_v289,
-            scalar_v290,
-            scalar_v291,
-            scalar_v294,
-            scalar_v295,
-            scalar_v309,
-            scalar_v320,
-            scalar_v331,
-            scalar_v332,
-            scalar_v333,
-            scalar_v336,
-            scalar_v337,
-            scalar_v351,
-            scalar_v352,
-            scalar_v353,
-            scalar_v356,
-            scalar_v357,
-            scalar_v393,
-            scalar_v396,
-            scalar_v397,
-            scalar_v398,
-            scalar_v402,
-            scalar_v403,
-            scalar_v407,
-            scalar_v408,
-            scalar_v409,
-            scalar_v413,
-            scalar_v416,
-            scalar_v417,
-            scalar_v418,
-            scalar_v422,
-            scalar_v423,
-            scalar_v427,
-            scalar_v428,
-            scalar_v429,
-            scalar_v433,
-            scalar_v436,
-            scalar_v437,
-            scalar_v440,
-            scalar_v441,
-            scalar_v444,
-            scalar_v445,
-            scalar_v446,
-            scalar_v450,
-            scalar_v453,
-            scalar_v454,
-            scalar_v526,
-            scalar_v531,
-            scalar_v532,
-            scalar_v536,
-            scalar_v537,
-            scalar_v541,
-            scalar_v542,
-            scalar_v548,
-            scalar_v555,
-            scalar_v556,
-            scalar_v561,
-            scalar_v589,
-            scalar_v590,
-            scalar_v594,
-            scalar_v616,
-            scalar_v617,
-            scalar_v621,
-            scalar_v643,
-            scalar_v645,
-            scalar_v648,
-            scalar_v650,
-            scalar_v653,
-            scalar_v655,
-            scalar_v657,
-            scalar_v660,
-            scalar_v666,
-            scalar_v667,
-            scalar_v674,
-            scalar_v675,
-            scalar_v679,
-            scalar_v680,
-            scalar_v764,
-            scalar_v766,
-            scalar_v767,
-            scalar_v772,
-            scalar_v773,
-            scalar_v774,
-            scalar_v779,
-            scalar_v782,
-            scalar_v802,
-            scalar_v804,
-            scalar_v805,
-            scalar_v845,
-            scalar_v846,
-            scalar_v851,
-            scalar_v852,
-            scalar_v858,
-            scalar_v861,
-            scalar_v868,
-            scalar_v869,
-            scalar_v870,
-            scalar_v901,
-            scalar_v902,
-            scalar_v903,
-            scalar_v904,
-            scalar_v905,
-            scalar_v913,
-            scalar_v914,
-            scalar_v919,
-            scalar_v920,
-            scalar_v970,
-            scalar_v989,
-            scalar_v990,
-            scalar_v1019,
-            scalar_v1075,
-            scalar_v1076,
-            scalar_v1077,
-            scalar_v1090,
-            scalar_v1094,
-            scalar_v1106,
-            scalar_v1111,
-            scalar_v1140,
-            scalar_v1142,
-            scalar_v1181,
-            scalar_v1185,
-            scalar_v1186,
-            scalar_v1219,
-            scalar_v1220,
-            scalar_v1221,
-            scalar_v1232,
-            scalar_v1233,
-            scalar_v1237,
-            scalar_v1238,
-            scalar_v1261,
-            scalar_v1262,
-            scalar_v1263,
-            scalar_v1301,
-            scalar_v1322,
-            scalar_v1323,
-            scalar_v1348,
-            scalar_v1356,
-            scalar_v1361,
-            scalar_v1378,
-            scalar_v1407,
-            scalar_v1431,
-            scalar_v1467,
-            scalar_v1468,
-            scalar_v1469,
-            scalar_v1506,
-            scalar_v1564,
-            scalar_v1565,
-            scalar_v1570,
-            scalar_v1571,
-            scalar_v1584,
-            scalar_v1606,
-            scalar_v1608,
-            scalar_v1609,
-            scalar_v1612,
-            scalar_v1613,
-            scalar_v1614,
-            scalar_v1627,
-            scalar_v1648,
-            scalar_v1650,
-            scalar_v1651,
-            scalar_v1652,
-            scalar_v1653,
-            scalar_v1654,
-            scalar_v1655,
-            scalar_v1656,
-            scalar_v1657,
-            scalar_v1672,
-            scalar_v1673,
-            scalar_v1677,
-            scalar_v1681,
-            scalar_v1685,
-            scalar_v1686,
-            scalar_v1687,
-            scalar_v1726,
-            scalar_v1755,
-            scalar_v1756,
-            scalar_v1783,
-            scalar_v1787,
-            scalar_v1788,
-            scalar_v1789,
-            scalar_v1794,
-            scalar_v1795,
-            scalar_v1800,
-            scalar_v1803,
-            scalar_v1823,
-            scalar_v1824,
-            scalar_v1826,
-            scalar_v1827,
-            scalar_v1865,
-            scalar_v2045,
-            scalar_v2046,
-            scalar_v2050,
-            scalar_v2066,
-            scalar_v2069,
-            scalar_v2077,
-            scalar_v2080,
-            scalar_v2082,
-            scalar_v2084,
-            scalar_v2086,
-            scalar_v2105,
-            scalar_v2110,
-            scalar_v2116,
-            scalar_v2122,
-            scalar_v2130,
-            scalar_v2136,
-            scalar_v2142,
-            scalar_v2150,
-            scalar_v2155,
-            scalar_v2160,
-            scalar_v2170,
-            scalar_v2187,
-            scalar_v2203,
-            scalar_v2219,
-            scalar_v2235,
-            scalar_v2251,
-            scalar_v2267,
-            scalar_v2291,
-            scalar_v2307,
-            scalar_v2468,
-            scalar_v2486,
-            scalar_v2491,
-            scalar_v2504,
-            scalar_v2614,
-            scalar_v2782,
-            scalar_v2993,
-            scalar_v3247,
-            scalar_v3266,
-            scalar_v4595,
-            scalar_v4622,
-            scalar_v4704,
-            scalar_v4731,
-            scalar_v4833,
-            scalar_v5291,
-            scalar_v6021,
-            scalar_v6022,
-            scalar_v6023,
-            scalar_v73,
-            scalar_v74,
-            scalar_v77,
-            scalar_v78,
-            scalar_v79,
-            scalar_v80,
-            scalar_v81,
-            scalar_v82,
-            scalar_v85,
-            scalar_v86,
-            scalar_v87,
-            scalar_v88,
-            scalar_v89,
-            scalar_v90,
-            scalar_v91,
-            scalar_v92,
-            scalar_v93,
-            scalar_v95,
-            scalar_v97,
-            scalar_v103,
-            scalar_v106,
-            scalar_v107,
-            scalar_v124,
-            scalar_v167,
-            scalar_v203,
-            scalar_v236,
-            scalar_v257,
-            scalar_v277,
-            scalar_v297,
-            scalar_v339,
-            scalar_v359,
+            scalar_static_f64,
+            scalar_static_bool,
             scalar_temperature_static_valid,
             scalar_temperature_static_temperature,
             scalar_temperature_static_thermal_voltage,
@@ -2524,662 +739,334 @@ impl Instance {
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
         let param_given = self.param_given.as_ref();
-        let v4: f64 = if param_given[10] { 1.0 } else { 0.0 };
-        self.scalar_v4 = v4;
-        let v6: f64 = p.p10;
-        self.scalar_v6 = v6;
-        let v8: bool = (!(if param_given[10] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v8 = v8;
-        let v12: f64 = if param_given[11] { 1.0 } else { 0.0 };
-        self.scalar_v12 = v12;
-        let v14: f64 = p.p11;
-        self.scalar_v14 = v14;
-        let v16: bool = (!(if param_given[11] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v16 = v16;
-        let v19: f64 = if param_given[3] { 1.0 } else { 0.0 };
-        self.scalar_v19 = v19;
-        let v22: f64 = if param_given[4] { 1.0 } else { 0.0 };
-        self.scalar_v22 = v22;
-        let v23: bool = (!(if param_given[3] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v23 = v23;
-        let v28: f64 = if param_given[5] { 1.0 } else { 0.0 };
-        self.scalar_v28 = v28;
-        let v29: bool = (!(if param_given[4] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v29 = v29;
-        let v32: f64 = p.p5;
-        self.scalar_v32 = v32;
-        let v34: bool = (!(if param_given[5] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v34 = v34;
-        let v37: f64 = p.p12;
-        self.scalar_v37 = v37;
-        let v38: f64 = ((p.p12) as f64).ln();
-        self.scalar_v38 = v38;
-        let v40: f64 = p.p74;
-        self.scalar_v40 = v40;
-        let v41: bool = (p.p74 > 0.0);
-        self.scalar_v41 = v41;
-        let v42: f64 = (1.0 / p.p74);
-        self.scalar_v42 = v42;
-        let v43: f64 = (if v41 { v42 } else { 0.0 });
-        self.scalar_v43 = v43;
-        let v45: f64 = p.p75;
-        self.scalar_v45 = v45;
-        let v46: bool = (p.p75 > 0.0);
-        self.scalar_v46 = v46;
-        let v47: f64 = (1.0 / p.p75);
-        self.scalar_v47 = v47;
-        let v48: f64 = (if v46 { v47 } else { 0.0 });
-        self.scalar_v48 = v48;
-        let v50: f64 = p.p20;
-        self.scalar_v50 = v50;
-        let v51: bool = (p.p20 > 0.0);
-        self.scalar_v51 = v51;
-        let v52: f64 = (1.0 / p.p20);
-        self.scalar_v52 = v52;
-        let v53: f64 = (if v51 { v52 } else { 0.0 });
-        self.scalar_v53 = v53;
-        let v55: f64 = p.p79;
-        self.scalar_v55 = v55;
-        let v56: bool = (p.p79 > 0.0);
-        self.scalar_v56 = v56;
-        let v57: f64 = (1.0 / p.p79);
-        self.scalar_v57 = v57;
-        let v58: f64 = (if v56 { v57 } else { 0.0 });
-        self.scalar_v58 = v58;
-        let v60: f64 = p.p80;
-        self.scalar_v60 = v60;
-        let v61: bool = (p.p80 > 0.0);
-        self.scalar_v61 = v61;
-        let v62: f64 = (1.0 / p.p80);
-        self.scalar_v62 = v62;
-        let v63: f64 = (if v61 { v62 } else { 0.0 });
-        self.scalar_v63 = v63;
-        let v65: f64 = (if v61 { 0.0 } else { 1.0 });
-        self.scalar_v65 = v65;
-        let v68: f64 = p.p13;
-        self.scalar_v68 = v68;
-        let v69: f64 = (273.15 + p.p13);
-        self.scalar_v69 = v69;
-        let v72: f64 = p.p0;
-        self.scalar_v72 = v72;
-        let v75: f64 = p.p14;
-        self.scalar_v75 = v75;
-        let v76: f64 = (1.0 + p.p14);
-        self.scalar_v76 = v76;
-        let v83: f64 = p.p15;
-        self.scalar_v83 = v83;
-        let v84: f64 = (p.p15 - 1.0);
-        self.scalar_v84 = v84;
-        let v99: f64 = p.p26;
-        self.scalar_v99 = v99;
-        let v100: f64 = p.p90;
-        self.scalar_v100 = v100;
-        let v101: bool = (p.p90 > 0.0);
-        self.scalar_v101 = v101;
-        let v102: f64 = p.p89;
-        self.scalar_v102 = v102;
-        let v104: f64 = p.p88;
-        self.scalar_v104 = v104;
-        let v105: f64 = (-p.p88);
-        self.scalar_v105 = v105;
-        let v113: bool = (!v101);
-        self.scalar_v113 = v113;
-        let v115: f64 = p.p122;
-        self.scalar_v115 = v115;
-        let v116: f64 = p.p28;
-        self.scalar_v116 = v116;
-        let v117: f64 = (p.p122 / p.p28);
-        self.scalar_v117 = v117;
-        let v120: f64 = p.p113;
-        self.scalar_v120 = v120;
-        let v121: f64 = (-p.p113);
-        self.scalar_v121 = v121;
-        let v129: f64 = p.p72;
-        self.scalar_v129 = v129;
-        let v130: bool = (p.p72 > 0.0);
-        self.scalar_v130 = v130;
-        let v137: f64 = (4.0 / p.p72);
-        self.scalar_v137 = v137;
-        let v138: f64 = p.p73;
-        self.scalar_v138 = v138;
-        let v139: f64 = f64::powf(v137, p.p73);
-        self.scalar_v139 = v139;
-        let v141: f64 = (1.0 - p.p73);
-        self.scalar_v141 = v141;
-        let v142: f64 = (1.0 / v141);
-        self.scalar_v142 = v142;
-        let v158: f64 = p.p27;
-        self.scalar_v158 = v158;
-        let v159: f64 = p.p125;
-        self.scalar_v159 = v159;
-        let v160: f64 = p.p29;
-        self.scalar_v160 = v160;
-        let v161: f64 = (p.p125 / p.p29);
-        self.scalar_v161 = v161;
-        let v164: f64 = p.p121;
-        self.scalar_v164 = v164;
-        let v165: f64 = (-p.p121);
-        self.scalar_v165 = v165;
-        let v176: f64 = (4.0 / p.p74);
-        self.scalar_v176 = v176;
-        let v177: f64 = f64::powf(v176, p.p73);
-        self.scalar_v177 = v177;
-        let v195: f64 = p.p31;
-        self.scalar_v195 = v195;
-        let v196: f64 = p.p33;
-        self.scalar_v196 = v196;
-        let v197: f64 = (p.p122 / p.p33);
-        self.scalar_v197 = v197;
-        let v200: f64 = p.p120;
-        self.scalar_v200 = v200;
-        let v201: f64 = (-p.p120);
-        self.scalar_v201 = v201;
-        let v227: f64 = p.p54;
-        self.scalar_v227 = v227;
-        let v228: f64 = p.p123;
-        self.scalar_v228 = v228;
-        let v229: f64 = p.p56;
-        self.scalar_v229 = v229;
-        let v230: f64 = (p.p123 / p.p56);
-        self.scalar_v230 = v230;
-        let v233: f64 = p.p114;
-        self.scalar_v233 = v233;
-        let v234: f64 = (-p.p114);
-        self.scalar_v234 = v234;
-        let v248: f64 = p.p58;
-        self.scalar_v248 = v248;
-        let v249: f64 = p.p124;
-        self.scalar_v249 = v249;
-        let v250: f64 = p.p59;
-        self.scalar_v250 = v250;
-        let v251: f64 = (p.p124 / p.p59);
-        self.scalar_v251 = v251;
-        let v254: f64 = p.p117;
-        self.scalar_v254 = v254;
-        let v255: f64 = (-p.p117);
-        self.scalar_v255 = v255;
-        let v269: f64 = p.p60;
-        self.scalar_v269 = v269;
-        let v270: f64 = p.p61;
-        self.scalar_v270 = v270;
-        let v271: f64 = (p.p123 / p.p61);
-        self.scalar_v271 = v271;
-        let v274: f64 = p.p115;
-        self.scalar_v274 = v274;
-        let v275: f64 = (-p.p115);
-        self.scalar_v275 = v275;
-        let v289: f64 = p.p62;
-        self.scalar_v289 = v289;
-        let v290: f64 = p.p63;
-        self.scalar_v290 = v290;
-        let v291: f64 = (p.p124 / p.p63);
-        self.scalar_v291 = v291;
-        let v294: f64 = p.p118;
-        self.scalar_v294 = v294;
-        let v295: f64 = (-p.p118);
-        self.scalar_v295 = v295;
-        let v309: f64 = p.p64;
-        self.scalar_v309 = v309;
-        let v320: f64 = p.p65;
-        self.scalar_v320 = v320;
-        let v331: f64 = p.p66;
-        self.scalar_v331 = v331;
-        let v332: f64 = p.p67;
-        self.scalar_v332 = v332;
-        let v333: f64 = (p.p123 / p.p67);
-        self.scalar_v333 = v333;
-        let v336: f64 = p.p116;
-        self.scalar_v336 = v336;
-        let v337: f64 = (-p.p116);
-        self.scalar_v337 = v337;
-        let v351: f64 = p.p68;
-        self.scalar_v351 = v351;
-        let v352: f64 = p.p69;
-        self.scalar_v352 = v352;
-        let v353: f64 = (p.p124 / p.p69);
-        self.scalar_v353 = v353;
-        let v356: f64 = p.p119;
-        self.scalar_v356 = v356;
-        let v357: f64 = (-p.p119);
-        self.scalar_v357 = v357;
-        let v393: f64 = p.p126;
-        self.scalar_v393 = v393;
-        let v396: f64 = if param_given[109] { 1.0 } else { 0.0 };
-        self.scalar_v396 = v396;
-        let v397: f64 = p.p16;
-        self.scalar_v397 = v397;
-        let v398: f64 = p.p109;
-        self.scalar_v398 = v398;
-        let v402: bool = (!(if param_given[109] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v402 = v402;
-        let v403: f64 = p.p107;
-        self.scalar_v403 = v403;
-        let v407: f64 = if param_given[108] { 1.0 } else { 0.0 };
-        self.scalar_v407 = v407;
-        let v408: f64 = p.p17;
-        self.scalar_v408 = v408;
-        let v409: f64 = p.p108;
-        self.scalar_v409 = v409;
-        let v413: bool = (!(if param_given[108] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v413 = v413;
-        let v416: f64 = if param_given[106] { 1.0 } else { 0.0 };
-        self.scalar_v416 = v416;
-        let v417: f64 = p.p21;
-        self.scalar_v417 = v417;
-        let v418: f64 = p.p106;
-        self.scalar_v418 = v418;
-        let v422: bool = (!(if param_given[106] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v422 = v422;
-        let v423: f64 = p.p104;
-        self.scalar_v423 = v423;
-        let v427: f64 = if param_given[105] { 1.0 } else { 0.0 };
-        self.scalar_v427 = v427;
-        let v428: f64 = p.p22;
-        self.scalar_v428 = v428;
-        let v429: f64 = p.p105;
-        self.scalar_v429 = v429;
-        let v433: bool = (!(if param_given[105] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v433 = v433;
-        let v436: f64 = p.p23;
-        self.scalar_v436 = v436;
-        let v437: f64 = p.p103;
-        self.scalar_v437 = v437;
-        let v440: f64 = p.p24;
-        self.scalar_v440 = v440;
-        let v441: f64 = p.p111;
-        self.scalar_v441 = v441;
-        let v444: f64 = if param_given[110] { 1.0 } else { 0.0 };
-        self.scalar_v444 = v444;
-        let v445: f64 = p.p25;
-        self.scalar_v445 = v445;
-        let v446: f64 = p.p110;
-        self.scalar_v446 = v446;
-        let v450: bool = (!(if param_given[110] { 1.0 } else { 0.0 } != 0.0));
-        self.scalar_v450 = v450;
-        let v453: f64 = p.p101;
-        self.scalar_v453 = v453;
-        let v454: f64 = p.p132;
-        self.scalar_v454 = v454;
-        let v526: f64 = p.p129;
-        self.scalar_v526 = v526;
-        let v531: f64 = p.p84;
-        self.scalar_v531 = v531;
-        let v532: f64 = p.p127;
-        self.scalar_v532 = v532;
-        let v536: f64 = p.p86;
-        self.scalar_v536 = v536;
-        let v537: f64 = p.p128;
-        self.scalar_v537 = v537;
-        let v541: f64 = p.p91;
-        self.scalar_v541 = v541;
-        let v542: f64 = p.p92;
-        self.scalar_v542 = v542;
-        let v548: f64 = p.p93;
-        self.scalar_v548 = v548;
-        let v555: f64 = p.p37;
-        self.scalar_v555 = v555;
-        let v556: f64 = (0.5 * p.p37);
-        self.scalar_v556 = v556;
-        let v561: f64 = (p.p37 * -0.5);
-        self.scalar_v561 = v561;
-        let v589: f64 = p.p42;
-        self.scalar_v589 = v589;
-        let v590: f64 = (0.5 * p.p42);
-        self.scalar_v590 = v590;
-        let v594: f64 = (-0.5 * p.p42);
-        self.scalar_v594 = v594;
-        let v616: f64 = p.p50;
-        self.scalar_v616 = v616;
-        let v617: f64 = (0.5 * p.p50);
-        self.scalar_v617 = v617;
-        let v621: f64 = (-0.5 * p.p50);
-        self.scalar_v621 = v621;
-        let v643: f64 = p.p36;
-        self.scalar_v643 = v643;
-        let v645: f64 = p.p38;
-        self.scalar_v645 = v645;
-        let v648: f64 = p.p41;
-        self.scalar_v648 = v648;
-        let v650: f64 = p.p43;
-        self.scalar_v650 = v650;
-        let v653: f64 = p.p48;
-        self.scalar_v653 = v653;
-        let v655: f64 = p.p49;
-        self.scalar_v655 = v655;
-        let v657: f64 = p.p51;
-        self.scalar_v657 = v657;
-        let v660: f64 = p.p19;
-        self.scalar_v660 = v660;
-        let v666: f64 = p.p18;
-        self.scalar_v666 = v666;
-        let v667: f64 = p.p112;
-        self.scalar_v667 = v667;
-        let v674: f64 = p.p70;
-        self.scalar_v674 = v674;
-        let v675: f64 = p.p130;
-        self.scalar_v675 = v675;
-        let v679: f64 = p.p71;
-        self.scalar_v679 = v679;
-        let v680: f64 = p.p131;
-        self.scalar_v680 = v680;
-        let v764: f64 = p.p34;
-        self.scalar_v764 = v764;
-        let v766: f64 = p.p39;
-        self.scalar_v766 = v766;
-        let v767: bool = (p.p39 <= 0.0);
-        self.scalar_v767 = v767;
-        let v772: f64 = (1.0 - p.p34);
-        self.scalar_v772 = v772;
-        let v773: f64 = (-p.p38);
-        self.scalar_v773 = v773;
-        let v774: f64 = f64::powf(v772, v773);
-        self.scalar_v774 = v774;
-        let v779: f64 = (1.0 - p.p38);
-        self.scalar_v779 = v779;
-        let v782: f64 = (0.5 * p.p38);
-        self.scalar_v782 = v782;
-        let v802: bool = (!v767);
-        self.scalar_v802 = v802;
-        let v804: f64 = (4.0 * p.p39);
-        self.scalar_v804 = v804;
-        let v805: f64 = (p.p39 * v804);
-        self.scalar_v805 = v805;
-        let v845: f64 = p.p44;
-        self.scalar_v845 = v845;
-        let v846: bool = (p.p44 <= 0.0);
-        self.scalar_v846 = v846;
-        let v851: f64 = (-1.0 - p.p43);
-        self.scalar_v851 = v851;
-        let v852: f64 = f64::powf(v772, v851);
-        self.scalar_v852 = v852;
-        let v858: f64 = (1.0 - p.p43);
-        self.scalar_v858 = v858;
-        let v861: f64 = (0.5 * p.p43);
-        self.scalar_v861 = v861;
-        let v868: f64 = p.p45;
-        self.scalar_v868 = v868;
-        let v869: bool = (p.p45 > 0.0);
-        self.scalar_v869 = v869;
-        let v870: f64 = (-p.p45);
-        self.scalar_v870 = v870;
-        let v901: f64 = p.p46;
-        self.scalar_v901 = v901;
-        let v902: bool = (p.p46 > 0.0);
-        self.scalar_v902 = v902;
-        let v903: bool = (v869 && v902);
-        self.scalar_v903 = v903;
-        let v904: bool = (!v846);
-        self.scalar_v904 = v904;
-        let v905: bool = (v903 && v904);
-        self.scalar_v905 = v905;
-        let v913: f64 = (4.0 * p.p44);
-        self.scalar_v913 = v913;
-        let v914: f64 = (p.p44 * v913);
-        self.scalar_v914 = v914;
-        let v919: f64 = (4.0 * p.p46);
-        self.scalar_v919 = v919;
-        let v920: f64 = (p.p46 * v919);
-        self.scalar_v920 = v920;
-        let v970: f64 = (-p.p43);
-        self.scalar_v970 = v970;
-        let v989: bool = (!v903);
-        self.scalar_v989 = v989;
-        let v990: bool = (v904 && v989);
-        self.scalar_v990 = v990;
-        let v1019: f64 = f64::powf(v772, v970);
-        self.scalar_v1019 = v1019;
-        let v1075: f64 = p.p30;
-        self.scalar_v1075 = v1075;
-        let v1076: bool = (p.p30 < 0.5);
-        self.scalar_v1076 = v1076;
-        let v1077: f64 = (1.0 / p.p73);
-        self.scalar_v1077 = v1077;
-        let v1090: f64 = f64::powf(1e-8, p.p73);
-        self.scalar_v1090 = v1090;
-        let v1094: bool = (!v1076);
-        self.scalar_v1094 = v1094;
-        let v1106: f64 = (1.0 + v1090);
-        self.scalar_v1106 = v1106;
-        let v1111: bool = (p.p31 > 0.0);
-        self.scalar_v1111 = v1111;
-        let v1140: f64 = p.p32;
-        self.scalar_v1140 = v1140;
-        let v1142: f64 = (1.0 - p.p32);
-        self.scalar_v1142 = v1142;
-        let v1181: bool = (!v1111);
-        self.scalar_v1181 = v1181;
-        let v1185: f64 = p.p55;
-        self.scalar_v1185 = v1185;
-        let v1186: bool = (1.0 == p.p55);
-        self.scalar_v1186 = v1186;
-        let v1219: f64 = p.p57;
-        self.scalar_v1219 = v1219;
-        let v1220: bool = (p.p57 > 0.0);
-        self.scalar_v1220 = v1220;
-        let v1221: bool = (v1186 && v1220);
-        self.scalar_v1221 = v1221;
-        let v1232: bool = (!v1220);
-        self.scalar_v1232 = v1232;
-        let v1233: bool = (v1186 && v1232);
-        self.scalar_v1233 = v1233;
-        let v1237: bool = (p.p88 > 0.0);
-        self.scalar_v1237 = v1237;
-        let v1238: bool = (v1186 && v1237);
-        self.scalar_v1238 = v1238;
-        let v1261: bool = (0.0 == p.p55);
-        self.scalar_v1261 = v1261;
-        let v1262: bool = (!v1186);
-        self.scalar_v1262 = v1262;
-        let v1263: bool = (v1261 && v1262);
-        self.scalar_v1263 = v1263;
-        let v1301: bool = (v1237 && v1263);
-        self.scalar_v1301 = v1301;
-        let v1322: bool = (!v1261);
-        self.scalar_v1322 = v1322;
-        let v1323: bool = (v1262 && v1322);
-        self.scalar_v1323 = v1323;
-        let v1348: bool = (v1220 && v1323);
-        self.scalar_v1348 = v1348;
-        let v1356: bool = (v1232 && v1323);
-        self.scalar_v1356 = v1356;
-        let v1361: bool = (v1237 && v1323);
-        self.scalar_v1361 = v1361;
-        let v1378: f64 = (p.p90 * p.p55);
-        self.scalar_v1378 = v1378;
-        let v1407: f64 = (1.0 - p.p55);
-        self.scalar_v1407 = v1407;
-        let v1431: f64 = (p.p90 * v1407);
-        self.scalar_v1431 = v1431;
-        let v1467: bool = (p.p64 > 0.0);
-        self.scalar_v1467 = v1467;
-        let v1468: bool = (p.p65 > 0.0);
-        self.scalar_v1468 = v1468;
-        let v1469: bool = (v1467 || v1468);
-        self.scalar_v1469 = v1469;
-        let v1506: bool = (!v1469);
-        self.scalar_v1506 = v1506;
-        let v1564: f64 = p.p83;
-        self.scalar_v1564 = v1564;
-        let v1565: bool = (p.p83 > 0.0);
-        self.scalar_v1565 = v1565;
-        let v1570: f64 = (1.01 - p.p43);
-        self.scalar_v1570 = v1570;
-        let v1571: f64 = (1.0 / v1570);
-        self.scalar_v1571 = v1571;
-        let v1584: f64 = (p.p43 - 1.0);
-        self.scalar_v1584 = v1584;
-        let v1606: bool = (!v1565);
-        self.scalar_v1606 = v1606;
-        let v1608: f64 = p.p85;
-        self.scalar_v1608 = v1608;
-        let v1609: bool = (p.p85 > 0.0);
-        self.scalar_v1609 = v1609;
-        let v1612: f64 = p.p87;
-        self.scalar_v1612 = v1612;
-        let v1613: f64 = (1.01 - p.p87);
-        self.scalar_v1613 = v1613;
-        let v1614: f64 = (1.0 / v1613);
-        self.scalar_v1614 = v1614;
-        let v1627: f64 = (p.p87 - 1.0);
-        self.scalar_v1627 = v1627;
-        let v1648: bool = (!v1609);
-        self.scalar_v1648 = v1648;
-        let v1650: f64 = p.p97;
-        self.scalar_v1650 = v1650;
-        let v1651: bool = (p.p97 > 0.0);
-        self.scalar_v1651 = v1651;
-        let v1652: f64 = p.p95;
-        self.scalar_v1652 = v1652;
-        let v1653: bool = (p.p95 > 0.0);
-        self.scalar_v1653 = v1653;
-        let v1654: bool = (v1651 && v1653);
-        self.scalar_v1654 = v1654;
-        let v1655: f64 = p.p94;
-        self.scalar_v1655 = v1655;
-        let v1656: bool = (p.p94 > 0.0);
-        self.scalar_v1656 = v1656;
-        let v1657: bool = (v1654 && v1656);
-        self.scalar_v1657 = v1657;
-        let v1672: bool = (!v1656);
-        self.scalar_v1672 = v1672;
-        let v1673: bool = (v1654 && v1672);
-        self.scalar_v1673 = v1673;
-        let v1677: f64 = p.p96;
-        self.scalar_v1677 = v1677;
-        let v1681: bool = (!v1654);
-        self.scalar_v1681 = v1681;
-        let v1685: bool = (p.p66 > 0.0);
-        self.scalar_v1685 = v1685;
-        let v1686: bool = (p.p68 > 0.0);
-        self.scalar_v1686 = v1686;
-        let v1687: bool = (v1685 || v1686);
-        self.scalar_v1687 = v1687;
-        let v1726: bool = (!v1687);
-        self.scalar_v1726 = v1726;
-        let v1755: f64 = p.p2;
-        self.scalar_v1755 = v1755;
-        let v1756: f64 = (-p.p2);
-        self.scalar_v1756 = v1756;
-        let v1783: bool = (p.p49 > 0.0);
-        self.scalar_v1783 = v1783;
-        let v1787: f64 = p.p52;
-        self.scalar_v1787 = v1787;
-        let v1788: bool = (p.p52 <= 0.0);
-        self.scalar_v1788 = v1788;
-        let v1789: bool = (v1783 && v1788);
-        self.scalar_v1789 = v1789;
-        let v1794: f64 = (-p.p51);
-        self.scalar_v1794 = v1794;
-        let v1795: f64 = f64::powf(v772, v1794);
-        self.scalar_v1795 = v1795;
-        let v1800: f64 = (1.0 - p.p51);
-        self.scalar_v1800 = v1800;
-        let v1803: f64 = (0.5 * p.p51);
-        self.scalar_v1803 = v1803;
-        let v1823: bool = (!v1788);
-        self.scalar_v1823 = v1823;
-        let v1824: bool = (v1783 && v1823);
-        self.scalar_v1824 = v1824;
-        let v1826: f64 = (4.0 * p.p52);
-        self.scalar_v1826 = v1826;
-        let v1827: f64 = (p.p52 * v1826);
-        self.scalar_v1827 = v1827;
-        let v1865: bool = (!v1783);
-        self.scalar_v1865 = v1865;
-        let v2045: f64 = p.p76;
-        self.scalar_v2045 = v2045;
-        let v2046: f64 = p.p77;
-        self.scalar_v2046 = v2046;
-        let v2050: f64 = p.p78;
-        self.scalar_v2050 = v2050;
-        let v2066: f64 = p.p81;
-        self.scalar_v2066 = v2066;
-        let v2069: f64 = p.p47;
-        self.scalar_v2069 = v2069;
-        let v2077: f64 = p.p53;
-        self.scalar_v2077 = v2077;
-        let v2080: f64 = p.p35;
-        self.scalar_v2080 = v2080;
-        let v2082: f64 = p.p40;
-        self.scalar_v2082 = v2082;
-        let v2084: f64 = p.p102;
-        self.scalar_v2084 = v2084;
-        let v2086: f64 = p.p82;
-        self.scalar_v2086 = v2086;
-        let v2105: f64 = (p.p126 - 1.0);
-        self.scalar_v2105 = v2105;
-        let v2110: f64 = (p.p109 - 1.0);
-        self.scalar_v2110 = v2110;
-        let v2116: f64 = (p.p107 - 1.0);
-        self.scalar_v2116 = v2116;
-        let v2122: f64 = (p.p108 - 1.0);
-        self.scalar_v2122 = v2122;
-        let v2130: f64 = (p.p106 - 1.0);
-        self.scalar_v2130 = v2130;
-        let v2136: f64 = (p.p104 - 1.0);
-        self.scalar_v2136 = v2136;
-        let v2142: f64 = (p.p105 - 1.0);
-        self.scalar_v2142 = v2142;
-        let v2150: f64 = (p.p103 - 1.0);
-        self.scalar_v2150 = v2150;
-        let v2155: f64 = (p.p111 - 1.0);
-        self.scalar_v2155 = v2155;
-        let v2160: f64 = (p.p110 - 1.0);
-        self.scalar_v2160 = v2160;
-        let v2170: f64 = (v117 - 1.0);
-        self.scalar_v2170 = v2170;
-        let v2187: f64 = (v161 - 1.0);
-        self.scalar_v2187 = v2187;
-        let v2203: f64 = (v197 - 1.0);
-        self.scalar_v2203 = v2203;
-        let v2219: f64 = (v230 - 1.0);
-        self.scalar_v2219 = v2219;
-        let v2235: f64 = (v251 - 1.0);
-        self.scalar_v2235 = v2235;
-        let v2251: f64 = (v271 - 1.0);
-        self.scalar_v2251 = v2251;
-        let v2267: f64 = (v291 - 1.0);
-        self.scalar_v2267 = v2267;
-        let v2291: f64 = (v333 - 1.0);
-        self.scalar_v2291 = v2291;
-        let v2307: f64 = (v353 - 1.0);
-        self.scalar_v2307 = v2307;
-        let v2468: f64 = (p.p38 - 1.0);
-        self.scalar_v2468 = v2468;
-        let v2486: f64 = (p.p51 - 1.0);
-        self.scalar_v2486 = v2486;
-        let v2491: f64 = (p.p122 - 1.0);
-        self.scalar_v2491 = v2491;
-        let v2504: f64 = (p.p112 - 1.0);
-        self.scalar_v2504 = v2504;
-        let v2614: f64 = (v779 - 1.0);
-        self.scalar_v2614 = v2614;
-        let v2782: f64 = (v858 - 1.0);
-        self.scalar_v2782 = v2782;
-        let v2993: f64 = (v970 - 1.0);
-        self.scalar_v2993 = v2993;
-        let v3247: f64 = (v1077 - 1.0);
-        self.scalar_v3247 = v3247;
-        let v3266: f64 = (p.p73 - 1.0);
-        self.scalar_v3266 = v3266;
-        let v4595: f64 = (v1571 - 1.0);
-        self.scalar_v4595 = v4595;
-        let v4622: f64 = (v1584 - 1.0);
-        self.scalar_v4622 = v4622;
-        let v4704: f64 = (v1614 - 1.0);
-        self.scalar_v4704 = v4704;
-        let v4731: f64 = (v1627 - 1.0);
-        self.scalar_v4731 = v4731;
-        let v4833: f64 = (p.p96 - 1.0);
-        self.scalar_v4833 = v4833;
-        let v5291: f64 = (v1800 - 1.0);
-        self.scalar_v5291 = v5291;
-        let v6021: f64 = (-p.p35);
-        self.scalar_v6021 = v6021;
-        let v6022: f64 = (-p.p40);
-        self.scalar_v6022 = v6022;
-        let v6023: f64 = (p.p82 * 0.3333333333333333);
-        self.scalar_v6023 = v6023;
+        self.scalar_static_f64[0]=if param_given[10] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[1]=p.p10;
+        self.scalar_static_bool[0]=(!(self.scalar_static_f64[0]!=0.0));
+        self.scalar_static_f64[2]=if param_given[11] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[3]=p.p11;
+        self.scalar_static_bool[1]=(!(self.scalar_static_f64[2]!=0.0));
+        self.scalar_static_f64[4]=if param_given[3] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[5]=if param_given[4] { 1.0 } else { 0.0 };
+        self.scalar_static_bool[2]=(!(self.scalar_static_f64[4]!=0.0));
+        self.scalar_static_f64[6]=if param_given[5] { 1.0 } else { 0.0 };
+        self.scalar_static_bool[3]=(!(self.scalar_static_f64[5]!=0.0));
+        self.scalar_static_f64[7]=p.p5;
+        self.scalar_static_bool[4]=(!(self.scalar_static_f64[6]!=0.0));
+        self.scalar_static_f64[8]=p.p12;
+        self.scalar_static_f64[9]=(self.scalar_static_f64[8]).ln();
+        self.scalar_static_f64[10]=p.p74;
+        self.scalar_static_bool[5]=(self.scalar_static_f64[10]>0.0);
+        self.scalar_static_f64[11]=(1.0/self.scalar_static_f64[10]);
+        self.scalar_static_f64[12]=(if self.scalar_static_bool[5]{self.scalar_static_f64[11]}else{0.0});
+        self.scalar_static_f64[13]=p.p75;
+        self.scalar_static_bool[6]=(self.scalar_static_f64[13]>0.0);
+        self.scalar_static_f64[14]=(1.0/self.scalar_static_f64[13]);
+        self.scalar_static_f64[15]=(if self.scalar_static_bool[6]{self.scalar_static_f64[14]}else{0.0});
+        self.scalar_static_f64[16]=p.p20;
+        self.scalar_static_bool[7]=(self.scalar_static_f64[16]>0.0);
+        self.scalar_static_f64[17]=(1.0/self.scalar_static_f64[16]);
+        self.scalar_static_f64[18]=(if self.scalar_static_bool[7]{self.scalar_static_f64[17]}else{0.0});
+        self.scalar_static_f64[19]=p.p79;
+        self.scalar_static_bool[8]=(self.scalar_static_f64[19]>0.0);
+        self.scalar_static_f64[20]=(1.0/self.scalar_static_f64[19]);
+        self.scalar_static_f64[21]=(if self.scalar_static_bool[8]{self.scalar_static_f64[20]}else{0.0});
+        self.scalar_static_f64[22]=p.p80;
+        self.scalar_static_bool[9]=(self.scalar_static_f64[22]>0.0);
+        self.scalar_static_f64[23]=(1.0/self.scalar_static_f64[22]);
+        self.scalar_static_f64[24]=(if self.scalar_static_bool[9]{self.scalar_static_f64[23]}else{0.0});
+        self.scalar_static_f64[25]=(if self.scalar_static_bool[9]{0.0}else{1.0});
+        self.scalar_static_f64[26]=p.p13;
+        self.scalar_static_f64[27]=(273.15+self.scalar_static_f64[26]);
+        self.scalar_static_f64[28]=p.p0;
+        self.scalar_static_f64[29]=p.p14;
+        self.scalar_static_f64[30]=(1.0+self.scalar_static_f64[29]);
+        self.scalar_static_f64[31]=p.p15;
+        self.scalar_static_f64[32]=(self.scalar_static_f64[31]-1.0);
+        self.scalar_static_f64[33]=p.p26;
+        self.scalar_static_f64[34]=p.p90;
+        self.scalar_static_bool[10]=(self.scalar_static_f64[34]>0.0);
+        self.scalar_static_f64[35]=p.p89;
+        self.scalar_static_f64[36]=p.p88;
+        self.scalar_static_f64[37]=(-self.scalar_static_f64[36]);
+        self.scalar_static_bool[11]=(!self.scalar_static_bool[10]);
+        self.scalar_static_f64[38]=p.p122;
+        self.scalar_static_f64[39]=p.p28;
+        self.scalar_static_f64[40]=(self.scalar_static_f64[38]/self.scalar_static_f64[39]);
+        self.scalar_static_f64[41]=p.p113;
+        self.scalar_static_f64[42]=(-self.scalar_static_f64[41]);
+        self.scalar_static_f64[43]=p.p72;
+        self.scalar_static_bool[12]=(self.scalar_static_f64[43]>0.0);
+        self.scalar_static_f64[44]=(4.0/self.scalar_static_f64[43]);
+        self.scalar_static_f64[45]=p.p73;
+        self.scalar_static_f64[46]=f64::powf(self.scalar_static_f64[44],self.scalar_static_f64[45]);
+        self.scalar_static_f64[47]=(1.0-self.scalar_static_f64[45]);
+        self.scalar_static_f64[48]=(1.0/self.scalar_static_f64[47]);
+        self.scalar_static_f64[49]=p.p27;
+        self.scalar_static_f64[50]=p.p125;
+        self.scalar_static_f64[51]=p.p29;
+        self.scalar_static_f64[52]=(self.scalar_static_f64[50]/self.scalar_static_f64[51]);
+        self.scalar_static_f64[53]=p.p121;
+        self.scalar_static_f64[54]=(-self.scalar_static_f64[53]);
+        self.scalar_static_f64[55]=(4.0/self.scalar_static_f64[10]);
+        self.scalar_static_f64[56]=f64::powf(self.scalar_static_f64[55],self.scalar_static_f64[45]);
+        self.scalar_static_f64[57]=p.p31;
+        self.scalar_static_f64[58]=p.p33;
+        self.scalar_static_f64[59]=(self.scalar_static_f64[38]/self.scalar_static_f64[58]);
+        self.scalar_static_f64[60]=p.p120;
+        self.scalar_static_f64[61]=(-self.scalar_static_f64[60]);
+        self.scalar_static_f64[62]=p.p54;
+        self.scalar_static_f64[63]=p.p123;
+        self.scalar_static_f64[64]=p.p56;
+        self.scalar_static_f64[65]=(self.scalar_static_f64[63]/self.scalar_static_f64[64]);
+        self.scalar_static_f64[66]=p.p114;
+        self.scalar_static_f64[67]=(-self.scalar_static_f64[66]);
+        self.scalar_static_f64[68]=p.p58;
+        self.scalar_static_f64[69]=p.p124;
+        self.scalar_static_f64[70]=p.p59;
+        self.scalar_static_f64[71]=(self.scalar_static_f64[69]/self.scalar_static_f64[70]);
+        self.scalar_static_f64[72]=p.p117;
+        self.scalar_static_f64[73]=(-self.scalar_static_f64[72]);
+        self.scalar_static_f64[74]=p.p60;
+        self.scalar_static_f64[75]=p.p61;
+        self.scalar_static_f64[76]=(self.scalar_static_f64[63]/self.scalar_static_f64[75]);
+        self.scalar_static_f64[77]=p.p115;
+        self.scalar_static_f64[78]=(-self.scalar_static_f64[77]);
+        self.scalar_static_f64[79]=p.p62;
+        self.scalar_static_f64[80]=p.p63;
+        self.scalar_static_f64[81]=(self.scalar_static_f64[69]/self.scalar_static_f64[80]);
+        self.scalar_static_f64[82]=p.p118;
+        self.scalar_static_f64[83]=(-self.scalar_static_f64[82]);
+        self.scalar_static_f64[84]=p.p64;
+        self.scalar_static_f64[85]=p.p65;
+        self.scalar_static_f64[86]=p.p66;
+        self.scalar_static_f64[87]=p.p67;
+        self.scalar_static_f64[88]=(self.scalar_static_f64[63]/self.scalar_static_f64[87]);
+        self.scalar_static_f64[89]=p.p116;
+        self.scalar_static_f64[90]=(-self.scalar_static_f64[89]);
+        self.scalar_static_f64[91]=p.p68;
+        self.scalar_static_f64[92]=p.p69;
+        self.scalar_static_f64[93]=(self.scalar_static_f64[69]/self.scalar_static_f64[92]);
+        self.scalar_static_f64[94]=p.p119;
+        self.scalar_static_f64[95]=(-self.scalar_static_f64[94]);
+        self.scalar_static_f64[96]=p.p126;
+        self.scalar_static_f64[97]=if param_given[109] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[98]=p.p16;
+        self.scalar_static_f64[99]=p.p109;
+        self.scalar_static_bool[13]=(!(self.scalar_static_f64[97]!=0.0));
+        self.scalar_static_f64[100]=p.p107;
+        self.scalar_static_f64[101]=if param_given[108] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[102]=p.p17;
+        self.scalar_static_f64[103]=p.p108;
+        self.scalar_static_bool[14]=(!(self.scalar_static_f64[101]!=0.0));
+        self.scalar_static_f64[104]=if param_given[106] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[105]=p.p21;
+        self.scalar_static_f64[106]=p.p106;
+        self.scalar_static_bool[15]=(!(self.scalar_static_f64[104]!=0.0));
+        self.scalar_static_f64[107]=p.p104;
+        self.scalar_static_f64[108]=if param_given[105] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[109]=p.p22;
+        self.scalar_static_f64[110]=p.p105;
+        self.scalar_static_bool[16]=(!(self.scalar_static_f64[108]!=0.0));
+        self.scalar_static_f64[111]=p.p23;
+        self.scalar_static_f64[112]=p.p103;
+        self.scalar_static_f64[113]=p.p24;
+        self.scalar_static_f64[114]=p.p111;
+        self.scalar_static_f64[115]=if param_given[110] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[116]=p.p25;
+        self.scalar_static_f64[117]=p.p110;
+        self.scalar_static_bool[17]=(!(self.scalar_static_f64[115]!=0.0));
+        self.scalar_static_f64[118]=p.p101;
+        self.scalar_static_f64[119]=p.p132;
+        self.scalar_static_f64[120]=p.p129;
+        self.scalar_static_f64[121]=p.p84;
+        self.scalar_static_f64[122]=p.p127;
+        self.scalar_static_f64[123]=p.p86;
+        self.scalar_static_f64[124]=p.p128;
+        self.scalar_static_f64[125]=p.p91;
+        self.scalar_static_f64[126]=p.p92;
+        self.scalar_static_f64[127]=p.p93;
+        self.scalar_static_f64[128]=p.p37;
+        self.scalar_static_f64[129]=(0.5*self.scalar_static_f64[128]);
+        self.scalar_static_f64[130]=(self.scalar_static_f64[128]* -0.5);
+        self.scalar_static_f64[131]=p.p42;
+        self.scalar_static_f64[132]=(0.5*self.scalar_static_f64[131]);
+        self.scalar_static_f64[133]=(-0.5*self.scalar_static_f64[131]);
+        self.scalar_static_f64[134]=p.p50;
+        self.scalar_static_f64[135]=(0.5*self.scalar_static_f64[134]);
+        self.scalar_static_f64[136]=(-0.5*self.scalar_static_f64[134]);
+        self.scalar_static_f64[137]=p.p36;
+        self.scalar_static_f64[138]=p.p38;
+        self.scalar_static_f64[139]=p.p41;
+        self.scalar_static_f64[140]=p.p43;
+        self.scalar_static_f64[141]=p.p48;
+        self.scalar_static_f64[142]=p.p49;
+        self.scalar_static_f64[143]=p.p51;
+        self.scalar_static_f64[144]=p.p19;
+        self.scalar_static_f64[145]=p.p18;
+        self.scalar_static_f64[146]=p.p112;
+        self.scalar_static_f64[147]=p.p70;
+        self.scalar_static_f64[148]=p.p130;
+        self.scalar_static_f64[149]=p.p71;
+        self.scalar_static_f64[150]=p.p131;
+        self.scalar_static_f64[151]=p.p34;
+        self.scalar_static_f64[152]=p.p39;
+        self.scalar_static_bool[18]=(self.scalar_static_f64[152]<=0.0);
+        self.scalar_static_f64[153]=(1.0-self.scalar_static_f64[151]);
+        self.scalar_static_f64[154]=(-self.scalar_static_f64[138]);
+        self.scalar_static_f64[155]=f64::powf(self.scalar_static_f64[153],self.scalar_static_f64[154]);
+        self.scalar_static_f64[156]=(1.0-self.scalar_static_f64[138]);
+        self.scalar_static_f64[157]=(0.5*self.scalar_static_f64[138]);
+        self.scalar_static_bool[19]=(!self.scalar_static_bool[18]);
+        self.scalar_static_f64[158]=(4.0*self.scalar_static_f64[152]);
+        self.scalar_static_f64[159]=(self.scalar_static_f64[152]*self.scalar_static_f64[158]);
+        self.scalar_static_f64[160]=p.p44;
+        self.scalar_static_bool[20]=(self.scalar_static_f64[160]<=0.0);
+        self.scalar_static_f64[161]=(-1.0-self.scalar_static_f64[140]);
+        self.scalar_static_f64[162]=f64::powf(self.scalar_static_f64[153],self.scalar_static_f64[161]);
+        self.scalar_static_f64[163]=(1.0-self.scalar_static_f64[140]);
+        self.scalar_static_f64[164]=(0.5*self.scalar_static_f64[140]);
+        self.scalar_static_f64[165]=p.p45;
+        self.scalar_static_bool[21]=(self.scalar_static_f64[165]>0.0);
+        self.scalar_static_f64[166]=(-self.scalar_static_f64[165]);
+        self.scalar_static_f64[167]=p.p46;
+        self.scalar_static_bool[22]=(self.scalar_static_f64[167]>0.0);
+        self.scalar_static_bool[23]=(self.scalar_static_bool[21]&&self.scalar_static_bool[22]);
+        self.scalar_static_bool[24]=(!self.scalar_static_bool[20]);
+        self.scalar_static_bool[25]=(self.scalar_static_bool[23]&&self.scalar_static_bool[24]);
+        self.scalar_static_f64[168]=(4.0*self.scalar_static_f64[160]);
+        self.scalar_static_f64[169]=(self.scalar_static_f64[160]*self.scalar_static_f64[168]);
+        self.scalar_static_f64[170]=(4.0*self.scalar_static_f64[167]);
+        self.scalar_static_f64[171]=(self.scalar_static_f64[167]*self.scalar_static_f64[170]);
+        self.scalar_static_f64[172]=(-self.scalar_static_f64[140]);
+        self.scalar_static_bool[26]=(!self.scalar_static_bool[23]);
+        self.scalar_static_bool[27]=(self.scalar_static_bool[24]&&self.scalar_static_bool[26]);
+        self.scalar_static_f64[173]=f64::powf(self.scalar_static_f64[153],self.scalar_static_f64[172]);
+        self.scalar_static_f64[174]=p.p30;
+        self.scalar_static_bool[28]=(self.scalar_static_f64[174]<0.5);
+        self.scalar_static_f64[175]=(1.0/self.scalar_static_f64[45]);
+        self.scalar_static_f64[176]=f64::powf(1e-8,self.scalar_static_f64[45]);
+        self.scalar_static_bool[29]=(!self.scalar_static_bool[28]);
+        self.scalar_static_f64[177]=(1.0+self.scalar_static_f64[176]);
+        self.scalar_static_bool[30]=(self.scalar_static_f64[57]>0.0);
+        self.scalar_static_f64[178]=p.p32;
+        self.scalar_static_f64[179]=(1.0-self.scalar_static_f64[178]);
+        self.scalar_static_bool[31]=(!self.scalar_static_bool[30]);
+        self.scalar_static_f64[180]=p.p55;
+        self.scalar_static_bool[32]=(1.0==self.scalar_static_f64[180]);
+        self.scalar_static_f64[181]=p.p57;
+        self.scalar_static_bool[33]=(self.scalar_static_f64[181]>0.0);
+        self.scalar_static_bool[34]=(self.scalar_static_bool[32]&&self.scalar_static_bool[33]);
+        self.scalar_static_bool[35]=(!self.scalar_static_bool[33]);
+        self.scalar_static_bool[36]=(self.scalar_static_bool[32]&&self.scalar_static_bool[35]);
+        self.scalar_static_bool[37]=(self.scalar_static_f64[36]>0.0);
+        self.scalar_static_bool[38]=(self.scalar_static_bool[32]&&self.scalar_static_bool[37]);
+        self.scalar_static_bool[39]=(0.0==self.scalar_static_f64[180]);
+        self.scalar_static_bool[40]=(!self.scalar_static_bool[32]);
+        self.scalar_static_bool[41]=(self.scalar_static_bool[39]&&self.scalar_static_bool[40]);
+        self.scalar_static_bool[42]=(self.scalar_static_bool[37]&&self.scalar_static_bool[41]);
+        self.scalar_static_bool[43]=(!self.scalar_static_bool[39]);
+        self.scalar_static_bool[44]=(self.scalar_static_bool[40]&&self.scalar_static_bool[43]);
+        self.scalar_static_bool[45]=(self.scalar_static_bool[33]&&self.scalar_static_bool[44]);
+        self.scalar_static_bool[46]=(self.scalar_static_bool[35]&&self.scalar_static_bool[44]);
+        self.scalar_static_bool[47]=(self.scalar_static_bool[37]&&self.scalar_static_bool[44]);
+        self.scalar_static_f64[182]=(self.scalar_static_f64[34]*self.scalar_static_f64[180]);
+        self.scalar_static_f64[183]=(1.0-self.scalar_static_f64[180]);
+        self.scalar_static_f64[184]=(self.scalar_static_f64[34]*self.scalar_static_f64[183]);
+        self.scalar_static_bool[48]=(self.scalar_static_f64[84]>0.0);
+        self.scalar_static_bool[49]=(self.scalar_static_f64[85]>0.0);
+        self.scalar_static_bool[50]=(self.scalar_static_bool[48]||self.scalar_static_bool[49]);
+        self.scalar_static_bool[51]=(!self.scalar_static_bool[50]);
+        self.scalar_static_f64[185]=p.p83;
+        self.scalar_static_bool[52]=(self.scalar_static_f64[185]>0.0);
+        self.scalar_static_f64[186]=(1.01-self.scalar_static_f64[140]);
+        self.scalar_static_f64[187]=(1.0/self.scalar_static_f64[186]);
+        self.scalar_static_f64[188]=(self.scalar_static_f64[140]-1.0);
+        self.scalar_static_bool[53]=(!self.scalar_static_bool[52]);
+        self.scalar_static_f64[189]=p.p85;
+        self.scalar_static_bool[54]=(self.scalar_static_f64[189]>0.0);
+        self.scalar_static_f64[190]=p.p87;
+        self.scalar_static_f64[191]=(1.01-self.scalar_static_f64[190]);
+        self.scalar_static_f64[192]=(1.0/self.scalar_static_f64[191]);
+        self.scalar_static_f64[193]=(self.scalar_static_f64[190]-1.0);
+        self.scalar_static_bool[55]=(!self.scalar_static_bool[54]);
+        self.scalar_static_f64[194]=p.p97;
+        self.scalar_static_bool[56]=(self.scalar_static_f64[194]>0.0);
+        self.scalar_static_f64[195]=p.p95;
+        self.scalar_static_bool[57]=(self.scalar_static_f64[195]>0.0);
+        self.scalar_static_bool[58]=(self.scalar_static_bool[56]&&self.scalar_static_bool[57]);
+        self.scalar_static_f64[196]=p.p94;
+        self.scalar_static_bool[59]=(self.scalar_static_f64[196]>0.0);
+        self.scalar_static_bool[60]=(self.scalar_static_bool[58]&&self.scalar_static_bool[59]);
+        self.scalar_static_bool[61]=(!self.scalar_static_bool[59]);
+        self.scalar_static_bool[62]=(self.scalar_static_bool[58]&&self.scalar_static_bool[61]);
+        self.scalar_static_f64[197]=p.p96;
+        self.scalar_static_bool[63]=(!self.scalar_static_bool[58]);
+        self.scalar_static_bool[64]=(self.scalar_static_f64[86]>0.0);
+        self.scalar_static_bool[65]=(self.scalar_static_f64[91]>0.0);
+        self.scalar_static_bool[66]=(self.scalar_static_bool[64]||self.scalar_static_bool[65]);
+        self.scalar_static_bool[67]=(!self.scalar_static_bool[66]);
+        self.scalar_static_f64[198]=p.p2;
+        self.scalar_static_f64[199]=(-self.scalar_static_f64[198]);
+        self.scalar_static_bool[68]=(self.scalar_static_f64[142]>0.0);
+        self.scalar_static_f64[200]=p.p52;
+        self.scalar_static_bool[69]=(self.scalar_static_f64[200]<=0.0);
+        self.scalar_static_bool[70]=(self.scalar_static_bool[68]&&self.scalar_static_bool[69]);
+        self.scalar_static_f64[201]=(-self.scalar_static_f64[143]);
+        self.scalar_static_f64[202]=f64::powf(self.scalar_static_f64[153],self.scalar_static_f64[201]);
+        self.scalar_static_f64[203]=(1.0-self.scalar_static_f64[143]);
+        self.scalar_static_f64[204]=(0.5*self.scalar_static_f64[143]);
+        self.scalar_static_bool[71]=(!self.scalar_static_bool[69]);
+        self.scalar_static_bool[72]=(self.scalar_static_bool[68]&&self.scalar_static_bool[71]);
+        self.scalar_static_f64[205]=(4.0*self.scalar_static_f64[200]);
+        self.scalar_static_f64[206]=(self.scalar_static_f64[200]*self.scalar_static_f64[205]);
+        self.scalar_static_bool[73]=(!self.scalar_static_bool[68]);
+        self.scalar_static_f64[207]=p.p76;
+        self.scalar_static_f64[208]=p.p77;
+        self.scalar_static_f64[209]=p.p78;
+        self.scalar_static_f64[210]=p.p81;
+        self.scalar_static_f64[211]=p.p47;
+        self.scalar_static_f64[212]=p.p53;
+        self.scalar_static_f64[213]=p.p35;
+        self.scalar_static_f64[214]=p.p40;
+        self.scalar_static_f64[215]=p.p102;
+        self.scalar_static_f64[216]=p.p82;
+        self.scalar_static_f64[217]=(self.scalar_static_f64[96]-1.0);
+        self.scalar_static_f64[218]=(self.scalar_static_f64[99]-1.0);
+        self.scalar_static_f64[219]=(self.scalar_static_f64[100]-1.0);
+        self.scalar_static_f64[220]=(self.scalar_static_f64[103]-1.0);
+        self.scalar_static_f64[221]=(self.scalar_static_f64[106]-1.0);
+        self.scalar_static_f64[222]=(self.scalar_static_f64[107]-1.0);
+        self.scalar_static_f64[223]=(self.scalar_static_f64[110]-1.0);
+        self.scalar_static_f64[224]=(self.scalar_static_f64[112]-1.0);
+        self.scalar_static_f64[225]=(self.scalar_static_f64[114]-1.0);
+        self.scalar_static_f64[226]=(self.scalar_static_f64[117]-1.0);
+        self.scalar_static_f64[227]=(self.scalar_static_f64[40]-1.0);
+        self.scalar_static_f64[228]=(self.scalar_static_f64[52]-1.0);
+        self.scalar_static_f64[229]=(self.scalar_static_f64[59]-1.0);
+        self.scalar_static_f64[230]=(self.scalar_static_f64[65]-1.0);
+        self.scalar_static_f64[231]=(self.scalar_static_f64[71]-1.0);
+        self.scalar_static_f64[232]=(self.scalar_static_f64[76]-1.0);
+        self.scalar_static_f64[233]=(self.scalar_static_f64[81]-1.0);
+        self.scalar_static_f64[234]=(self.scalar_static_f64[88]-1.0);
+        self.scalar_static_f64[235]=(self.scalar_static_f64[93]-1.0);
+        self.scalar_static_f64[236]=(self.scalar_static_f64[138]-1.0);
+        self.scalar_static_f64[237]=(self.scalar_static_f64[143]-1.0);
+        self.scalar_static_f64[238]=(self.scalar_static_f64[38]-1.0);
+        self.scalar_static_f64[239]=(self.scalar_static_f64[146]-1.0);
+        self.scalar_static_f64[240]=(self.scalar_static_f64[156]-1.0);
+        self.scalar_static_f64[241]=(self.scalar_static_f64[163]-1.0);
+        self.scalar_static_f64[242]=(self.scalar_static_f64[172]-1.0);
+        self.scalar_static_f64[243]=(self.scalar_static_f64[175]-1.0);
+        self.scalar_static_f64[244]=(self.scalar_static_f64[45]-1.0);
+        self.scalar_static_f64[245]=(self.scalar_static_f64[187]-1.0);
+        self.scalar_static_f64[246]=(self.scalar_static_f64[188]-1.0);
+        self.scalar_static_f64[247]=(self.scalar_static_f64[192]-1.0);
+        self.scalar_static_f64[248]=(self.scalar_static_f64[193]-1.0);
+        self.scalar_static_f64[249]=(self.scalar_static_f64[197]-1.0);
+        self.scalar_static_f64[250]=(self.scalar_static_f64[203]-1.0);
+        self.scalar_static_f64[251]=(-self.scalar_static_f64[213]);
+        self.scalar_static_f64[252]=(-self.scalar_static_f64[214]);
+        self.scalar_static_f64[253]=(self.scalar_static_f64[216]*0.3333333333333333);
     }
 
     #[inline]
@@ -3200,68 +1087,37 @@ impl Instance {
     #[inline]
     fn recompute_temperature_static(&mut self, temperature: f64, thermal_voltage: f64) {
         let p = &(*self.params);
-        let v73: f64 = (temperature + self.scalar_v72);
-        self.scalar_v73 = v73;
-        let v74: f64 = (self.scalar_v73 - 273.15);
-        self.scalar_v74 = v74;
-        let v77: bool = (self.scalar_v74 < self.scalar_v76);
-        self.scalar_v77 = v77;
-        let v78: f64 = (self.scalar_v74 - self.scalar_v75);
-        self.scalar_v78 = v78;
-        let v79: f64 = (self.scalar_v78 - 1.0);
-        self.scalar_v79 = v79;
-        let v80: f64 = ((self.scalar_v79) as f64).exp();
-        self.scalar_v80 = v80;
-        let v81: f64 = (self.scalar_v75 + self.scalar_v80);
-        self.scalar_v81 = v81;
-        let v82: f64 = (if self.scalar_v77 { self.scalar_v81 } else { self.scalar_v74 });
-        self.scalar_v82 = v82;
-        let v85: bool = (self.scalar_v82 > self.scalar_v84);
-        self.scalar_v85 = v85;
-        let v86: bool = (!self.scalar_v77);
-        self.scalar_v86 = v86;
-        let v87: bool = (self.scalar_v85 && self.scalar_v86);
-        self.scalar_v87 = v87;
-        let v88: f64 = (self.scalar_v83 - self.scalar_v82);
-        self.scalar_v88 = v88;
-        let v89: f64 = (self.scalar_v88 - 1.0);
-        self.scalar_v89 = v89;
-        let v90: f64 = ((self.scalar_v89) as f64).exp();
-        self.scalar_v90 = v90;
-        let v91: f64 = (self.scalar_v83 - self.scalar_v90);
-        self.scalar_v91 = v91;
-        let v92: f64 = (if self.scalar_v87 { self.scalar_v91 } else { self.scalar_v82 });
-        self.scalar_v92 = v92;
-        let v93: f64 = (273.15 + self.scalar_v92);
-        self.scalar_v93 = v93;
-        let v95: f64 = (self.scalar_v93 * 1.380662e-23);
-        self.scalar_v95 = v95;
-        let v97: f64 = (self.scalar_v95 / 1.602189e-19);
-        self.scalar_v97 = v97;
-        let v103: f64 = (self.scalar_v97 * self.scalar_v102);
-        self.scalar_v103 = v103;
-        let v106: f64 = (self.scalar_v105 / self.scalar_v103);
-        self.scalar_v106 = v106;
-        let v107: f64 = ((self.scalar_v106) as f64).exp();
-        self.scalar_v107 = v107;
-        let v124: f64 = (self.scalar_v97 * self.scalar_v116);
-        self.scalar_v124 = v124;
-        let v167: f64 = (self.scalar_v97 * self.scalar_v160);
-        self.scalar_v167 = v167;
-        let v203: f64 = (self.scalar_v97 * self.scalar_v196);
-        self.scalar_v203 = v203;
-        let v236: f64 = (self.scalar_v97 * self.scalar_v229);
-        self.scalar_v236 = v236;
-        let v257: f64 = (self.scalar_v97 * self.scalar_v250);
-        self.scalar_v257 = v257;
-        let v277: f64 = (self.scalar_v97 * self.scalar_v270);
-        self.scalar_v277 = v277;
-        let v297: f64 = (self.scalar_v97 * self.scalar_v290);
-        self.scalar_v297 = v297;
-        let v339: f64 = (self.scalar_v97 * self.scalar_v332);
-        self.scalar_v339 = v339;
-        let v359: f64 = (self.scalar_v97 * self.scalar_v352);
-        self.scalar_v359 = v359;
+        self.scalar_static_f64[254]=(temperature+self.scalar_static_f64[28]);
+        self.scalar_static_f64[255]=(self.scalar_static_f64[254]-273.15);
+        self.scalar_static_bool[74]=(self.scalar_static_f64[255]<self.scalar_static_f64[30]);
+        self.scalar_static_f64[256]=(self.scalar_static_f64[255]-self.scalar_static_f64[29]);
+        self.scalar_static_f64[257]=(self.scalar_static_f64[256]-1.0);
+        self.scalar_static_f64[258]=(self.scalar_static_f64[257]).exp();
+        self.scalar_static_f64[259]=(self.scalar_static_f64[29]+self.scalar_static_f64[258]);
+        self.scalar_static_f64[260]=(if self.scalar_static_bool[74]{self.scalar_static_f64[259]}else{self.scalar_static_f64[255]});
+        self.scalar_static_bool[75]=(self.scalar_static_f64[260]>self.scalar_static_f64[32]);
+        self.scalar_static_bool[76]=(!self.scalar_static_bool[74]);
+        self.scalar_static_bool[77]=(self.scalar_static_bool[75]&&self.scalar_static_bool[76]);
+        self.scalar_static_f64[261]=(self.scalar_static_f64[31]-self.scalar_static_f64[260]);
+        self.scalar_static_f64[262]=(self.scalar_static_f64[261]-1.0);
+        self.scalar_static_f64[263]=(self.scalar_static_f64[262]).exp();
+        self.scalar_static_f64[264]=(self.scalar_static_f64[31]-self.scalar_static_f64[263]);
+        self.scalar_static_f64[265]=(if self.scalar_static_bool[77]{self.scalar_static_f64[264]}else{self.scalar_static_f64[260]});
+        self.scalar_static_f64[266]=(273.15+self.scalar_static_f64[265]);
+        self.scalar_static_f64[267]=(self.scalar_static_f64[266]*1.380662e-23);
+        self.scalar_static_f64[268]=(self.scalar_static_f64[267]/1.602189e-19);
+        self.scalar_static_f64[269]=(self.scalar_static_f64[268]*self.scalar_static_f64[35]);
+        self.scalar_static_f64[270]=(self.scalar_static_f64[37]/self.scalar_static_f64[269]);
+        self.scalar_static_f64[271]=(self.scalar_static_f64[270]).exp();
+        self.scalar_static_f64[272]=(self.scalar_static_f64[268]*self.scalar_static_f64[39]);
+        self.scalar_static_f64[273]=(self.scalar_static_f64[268]*self.scalar_static_f64[51]);
+        self.scalar_static_f64[274]=(self.scalar_static_f64[268]*self.scalar_static_f64[58]);
+        self.scalar_static_f64[275]=(self.scalar_static_f64[268]*self.scalar_static_f64[64]);
+        self.scalar_static_f64[276]=(self.scalar_static_f64[268]*self.scalar_static_f64[70]);
+        self.scalar_static_f64[277]=(self.scalar_static_f64[268]*self.scalar_static_f64[75]);
+        self.scalar_static_f64[278]=(self.scalar_static_f64[268]*self.scalar_static_f64[80]);
+        self.scalar_static_f64[279]=(self.scalar_static_f64[268]*self.scalar_static_f64[87]);
+        self.scalar_static_f64[280]=(self.scalar_static_f64[268]*self.scalar_static_f64[92]);
         self.scalar_temperature_static_temperature = temperature;
         self.scalar_temperature_static_thermal_voltage = thermal_voltage;
         self.scalar_temperature_static_valid = true;
