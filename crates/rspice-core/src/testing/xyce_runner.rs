@@ -187,6 +187,25 @@ struct XyceStaticTranPlan {
     source: String,
     print: XycePrintRequest,
     tran: XyceTranAnalysis,
+    steps: Vec<StepCommand>,
+    contract: XyceStaticTranContract,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStaticTranContract {
+    PlainStatic,
+    WrapperStatic,
+}
+
+impl XyceStaticTranContract {
+    fn result_contract(self, has_step: bool) -> &'static str {
+        match (self, has_step) {
+            (Self::PlainStatic, false) => "static_prn_tran",
+            (Self::PlainStatic, true) => "static_prn_step_tran",
+            (Self::WrapperStatic, false) => "wrapper_static_prn_tran",
+            (Self::WrapperStatic, true) => "wrapper_static_prn_step_tran",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -855,10 +874,7 @@ impl XyceTestRunner {
     }
 
     fn static_tran_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticTranPlan, String> {
-        if self.requires_upstream_wrapper(&deck.relative_path) {
-            return Err(Self::upstream_wrapper_required_reason().to_string());
-        }
-
+        let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
         let reference_path = self
             .static_prn_reference_path(&deck.path)
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
@@ -884,11 +900,14 @@ impl XyceTestRunner {
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let tran = Self::single_tran_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
+        if steps.is_empty() && requires_wrapper {
+            return Err(Self::upstream_wrapper_required_reason().to_string());
+        }
         if !steps.is_empty() {
-            return Err(
-                ".STEP .PRINT TRAN comparison is not implemented in the native Xyce adapter yet"
-                    .to_string(),
-            );
+            Self::validate_static_step_tran_contract(&netlist)?;
+        }
+        if requires_wrapper {
+            Self::validate_native_static_prn_tran_wrapper_contract(&source)?;
         }
         Self::validate_static_tran_contract(&netlist, &tran, &print)?;
 
@@ -898,6 +917,12 @@ impl XyceTestRunner {
             source,
             print,
             tran,
+            steps,
+            contract: if requires_wrapper {
+                XyceStaticTranContract::WrapperStatic
+            } else {
+                XyceStaticTranContract::PlainStatic
+            },
         })
     }
 
@@ -1229,10 +1254,86 @@ impl XyceTestRunner {
         Ok(has_file_output)
     }
 
+    fn validate_native_static_prn_tran_wrapper_contract(source: &str) -> Result<(), String> {
+        let mut primary_tran_print_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") {
+                let tokens = Self::split_print_fields(&trimmed)?;
+                let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+                let Some(analysis) = token_refs.get(1).copied() else {
+                    return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
+                };
+                if !analysis.eq_ignore_ascii_case("TRAN") {
+                    return Err(format!(
+                        "wrapper-origin transient .prn contract does not cover .PRINT {analysis}"
+                    ));
+                }
+                let mut has_file_output = false;
+                let mut index = 2usize;
+                while index < token_refs.len() {
+                    if let Some((raw_key, _raw_value, consumed)) =
+                        Self::print_option_assignment(&token_refs, index)
+                    {
+                        if raw_key.trim().eq_ignore_ascii_case("file") {
+                            has_file_output = true;
+                        }
+                        index += consumed;
+                        continue;
+                    }
+                    index += 1;
+                }
+                if !has_file_output {
+                    primary_tran_print_count += 1;
+                }
+                continue;
+            }
+            if Self::is_extra_wrapper_tran_output_analysis_command(command) {
+                return Err(format!(
+                    "wrapper-origin transient .prn contract does not cover {command} directives"
+                ));
+            }
+        }
+
+        match primary_tran_print_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin transient .prn contract requires one primary .PRINT TRAN statement"
+                    .to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin transient .prn contract requires one primary .PRINT TRAN statement, found {primary_tran_print_count}"
+            )),
+        }
+    }
+
     fn dc_print_format_is_prn_compatible(format: &str) -> bool {
         matches!(
             format.to_ascii_lowercase().as_str(),
             "std" | "tecplot" | "touchstone" | "touchstone2" | "noindex" | "gnuplot" | "splot"
+        )
+    }
+
+    fn is_extra_wrapper_tran_output_analysis_command(command: &str) -> bool {
+        matches!(
+            command.to_ascii_lowercase().as_str(),
+            ".ac"
+                | ".dc"
+                | ".four"
+                | ".fft"
+                | ".hb"
+                | ".measure"
+                | ".meas"
+                | ".noise"
+                | ".probe"
+                | ".save"
+                | ".sens"
         )
     }
 
@@ -1483,7 +1584,7 @@ impl XyceTestRunner {
         plan: XyceStaticTranPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = "static_prn_tran";
+        let contract = plan.contract.result_contract(!plan.steps.is_empty());
         let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
             Ok(netlist) => netlist,
             Err(err) => {
@@ -1509,6 +1610,9 @@ impl XyceTestRunner {
                 );
             }
         };
+        if !plan.steps.is_empty() {
+            return self.run_static_prn_step_tran_plan(deck, plan, netlist, reference, start);
+        }
         let reference_time_grid = match Self::reference_time_grid(&reference) {
             Ok(grid) => grid,
             Err(err) => {
@@ -1638,6 +1742,232 @@ impl XyceTestRunner {
             format!("{} Xyce transient reference mismatch(es)", mismatches.len()),
             mismatches,
         )
+    }
+
+    fn run_static_prn_step_tran_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticTranPlan,
+        netlist: Netlist,
+        reference: XycePrnTable,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.contract.result_contract(true);
+        let expansion_engine = self.create_xyce_engine();
+        let step_runs =
+            match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
+                Ok(runs) => runs,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this .STEP TRAN deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(".STEP expansion error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+
+        let step_references =
+            match Self::split_transient_step_reference(&reference, step_runs.len()) {
+                Ok(references) => references,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("stepped transient oracle error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let mismatches =
+            match self.compare_step_tran_runs(&plan, &step_runs, &step_references, &abort, false) {
+                Ok(mismatches) => mismatches,
+                Err(err) if err.starts_with("UNSUPPORTED:") => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        err.trim_start_matches("UNSUPPORTED:").trim(),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(deck, start, contract, err, Vec::new());
+                }
+            };
+
+        if mismatches.is_empty() {
+            return self.passed_result(deck, start, contract);
+        }
+
+        if let Ok(locked_mismatches) =
+            self.compare_step_tran_runs(&plan, &step_runs, &step_references, &abort, true)
+        {
+            if locked_mismatches.is_empty() {
+                return self.passed_result(deck, start, contract);
+            }
+            if locked_mismatches.len() < mismatches.len() {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce stepped transient reference mismatch(es)",
+                        locked_mismatches.len()
+                    ),
+                    locked_mismatches,
+                );
+            }
+        }
+
+        self.failure_result(
+            deck,
+            start,
+            contract,
+            format!(
+                "{} Xyce stepped transient reference mismatch(es)",
+                mismatches.len()
+            ),
+            mismatches,
+        )
+    }
+
+    fn compare_step_tran_runs(
+        &self,
+        plan: &XyceStaticTranPlan,
+        step_runs: &[XyceStepRun],
+        step_references: &[XycePrnTable],
+        abort: &dyn AbortSignal,
+        locked_time_grid: bool,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (step_index, (run, reference)) in
+            step_runs.iter().zip(step_references.iter()).enumerate()
+        {
+            let max_step =
+                Self::transient_max_step_for_reference(&run.netlist, &plan.tran, reference)
+                    .map_err(|err| {
+                        if err.contains("transient harness execution envelope") {
+                            format!("UNSUPPORTED: {err}")
+                        } else {
+                            format!("reference time-grid error: step {}: {err}", step_index + 1)
+                        }
+                    })?;
+            let engine = if locked_time_grid {
+                self.create_xyce_engine_with_locked_time_grid(Some(Self::reference_time_grid(
+                    reference,
+                )?))
+            } else {
+                self.create_xyce_engine()
+            };
+            let result = match engine.run_tran_with_abort(
+                &run.netlist,
+                plan.tran.stop,
+                max_step,
+                abort,
+            ) {
+                Ok(result) => result,
+                Err(SimulationError::Aborted) => {
+                    return Err(format!(
+                        "simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ));
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return Err(format!(
+                        "UNSUPPORTED: RSpice runtime does not yet support this .STEP TRAN deck: {err}"
+                    ));
+                }
+                Err(err) => {
+                    return Err(format!("simulation error: step {}: {err}", step_index + 1));
+                }
+            };
+
+            let mut step_mismatches = self
+                .compare_tran_prn_reference(
+                    reference,
+                    &plan.print,
+                    &run.netlist,
+                    &plan.source,
+                    &result,
+                )
+                .map_err(|err| {
+                    format!("reference comparison error: step {}: {err}", step_index + 1)
+                })?;
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+            }
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                return Ok(mismatches);
+            }
+            row_offset += reference.rows.len();
+        }
+        Ok(mismatches)
+    }
+
+    fn split_transient_step_reference(
+        reference: &XycePrnTable,
+        expected_steps: usize,
+    ) -> Result<Vec<XycePrnTable>, String> {
+        if expected_steps == 0 {
+            return Err(".STEP expansion produced no runs".to_string());
+        }
+        if expected_steps == 1 {
+            return Ok(vec![reference.clone()]);
+        }
+        let time_column = Self::reference_time_column_index(reference)
+            .ok_or_else(|| "stepped transient reference table has no TIME column".to_string())?;
+        let mut starts = vec![0usize];
+        let mut previous_time = None;
+        for (row_index, row) in reference.rows.iter().enumerate() {
+            let time = *row.get(time_column).ok_or_else(|| {
+                format!("row {row_index} has no TIME column at index {time_column}")
+            })?;
+            if !time.is_finite() {
+                return Err(format!("row {row_index} has non-finite TIME value {time}"));
+            }
+            if let Some(previous) = previous_time
+                && time < previous
+            {
+                starts.push(row_index);
+            }
+            previous_time = Some(time);
+        }
+        starts.push(reference.rows.len());
+        let actual_steps = starts.len().saturating_sub(1);
+        if actual_steps != expected_steps {
+            return Err(format!(
+                "reference contains {actual_steps} transient step table(s), but .STEP expansion produced {expected_steps} run(s)"
+            ));
+        }
+
+        let mut references = Vec::with_capacity(expected_steps);
+        for range in starts.windows(2) {
+            let start = range[0];
+            let end = range[1];
+            if start == end {
+                return Err("stepped transient reference contains an empty step table".to_string());
+            }
+            references.push(XycePrnTable {
+                columns: reference.columns.clone(),
+                rows: reference.rows[start..end].to_vec(),
+            });
+        }
+        Ok(references)
     }
 
     fn compare_gnuplot_splot_side_output_batches(
@@ -3643,6 +3973,54 @@ impl XyceTestRunner {
         Self::validate_native_transient_contract(&netlist.elements, &netlist.params)?;
 
         Ok(())
+    }
+
+    fn validate_static_step_tran_contract(netlist: &Netlist) -> Result<(), String> {
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Self::validate_static_step_tran_source_spec(&element.name, spec)?;
+                }
+                ElementKind::Resistor { value_expr, .. } => {
+                    if value_expr
+                        .as_deref()
+                        .is_some_and(Self::expression_references_time_symbol)
+                    {
+                        return Err(format!(
+                            "native .STEP .PRINT TRAN comparison does not yet support time-dependent resistor value expressions; element '{}' references TIME",
+                            element.name
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "native .STEP .PRINT TRAN comparison currently supports static resistors and independent DC/PWL sources; element '{}' requires a broader stepped transient oracle contract",
+                        element.name
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_static_step_tran_source_spec(
+        source_name: &str,
+        spec: &crate::netlist::SourceSpec,
+    ) -> Result<(), String> {
+        match spec {
+            crate::netlist::SourceSpec::Dc(_)
+            | crate::netlist::SourceSpec::Ac { .. }
+            | crate::netlist::SourceSpec::DcAc { .. }
+            | crate::netlist::SourceSpec::Pwl { .. }
+            | crate::netlist::SourceSpec::PwlFile { .. } => Ok(()),
+            crate::netlist::SourceSpec::DcTransient { transient, .. }
+            | crate::netlist::SourceSpec::DcAcTransient { transient, .. } => {
+                Self::validate_static_step_tran_source_spec(source_name, transient)
+            }
+            other => Err(format!(
+                "native .STEP .PRINT TRAN comparison currently supports independent DC/PWL sources; source '{source_name}' uses {other:?}"
+            )),
+        }
     }
 
     fn validate_native_transient_contract(

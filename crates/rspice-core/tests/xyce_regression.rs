@@ -410,10 +410,7 @@ fn test_xyce_vpwl_delay_repeat_cases_run() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in [
-        "Netlists/VPWL/vpwl.cir",
-        "Netlists/VPWL/vpwl_filebased.cir",
-    ] {
+    for relative in ["Netlists/VPWL/vpwl.cir", "Netlists/VPWL/vpwl_filebased.cir"] {
         let result = runner.run_test(root.join(relative));
         assert!(
             result.passed && !result.expected_unsupported,
@@ -424,6 +421,33 @@ fn test_xyce_vpwl_delay_repeat_cases_run() {
             "{relative} should match the checked-in Xyce .prn oracle"
         );
     }
+}
+
+#[test]
+fn test_xyce_vpwl_step_delay_repeat_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/VPWL/vpwl_repeat_step.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain its removed upstream .STEP TRAN wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce stepped PWL transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_static_prn_step_tran",
+        "{relative} should report the native wrapper-origin stepped transient .prn contract"
+    );
 }
 
 #[test]
