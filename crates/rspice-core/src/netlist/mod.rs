@@ -3401,6 +3401,67 @@ mod tests {
     }
 
     #[test]
+    fn multi_input_vcvs_gate_lowers_to_xspice_pwl() {
+        let netlist = Netlist::parse(
+            "multi-input VCVS gate\n\
+             E1 out 0 nand(2) in1 0 in2 0 ({vcc / 3}, 0) ({2 * vcc / 3}, {vcc})\n\
+             .end\n",
+        )
+        .expect("ngspice multi-input VCVS gate syntax should parse");
+
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name == "E1__MULTI_INPUT")
+            .expect("lowered XSPICE element exists");
+
+        match &element.kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                string_params,
+                real_vector_expr_params,
+                ..
+            } => {
+                assert_eq!(model, "multi_input_pwl");
+                assert_eq!(
+                    string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("model"))
+                        .map(|(_, value)| value.as_str()),
+                    Some("nand")
+                );
+                assert_eq!(ports.len(), 3);
+                assert!(matches!(
+                    &ports[0],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos.eq_ignore_ascii_case("in1") && neg == "0"
+                ));
+                assert!(matches!(
+                    &ports[2],
+                    XspicePort::DifferentialVoltage { pos, neg }
+                        if pos.eq_ignore_ascii_case("out") && neg == "0"
+                ));
+                assert_eq!(
+                    real_vector_expr_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("x"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(&["vcc / 3".to_string(), "2 * vcc / 3".to_string()][..])
+                );
+                assert_eq!(
+                    real_vector_expr_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("y"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(&["0".to_string(), "vcc".to_string()][..])
+                );
+            }
+            other => panic!("expected lowered XSPICE multi_input_pwl, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn linear_controlled_sources_reject_unconsumed_trailing_tokens() {
         for line in [
             "E1 out 0 in 0 2 garbage",

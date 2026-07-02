@@ -4851,6 +4851,15 @@ fn parse_voltage_controlled_source(
             return Err(unsupported_form_error(line_num, element_label, "FREQ"));
         }
         None => {
+            if is_voltage_output
+                && let Some(element) = try_parse_multi_input_vcvs(
+                    stream, line_num, &name, &node_pos, &node_neg, params,
+                )?
+            {
+                elements.push(element);
+                return Ok(());
+            }
+
             let ctrl_pos = expect_node(stream, line_num)?;
             let ctrl_neg = expect_node(stream, line_num)?;
             let gain = expect_value(stream, line_num, params)?;
@@ -4875,6 +4884,122 @@ fn parse_voltage_controlled_source(
     }
 
     Ok(())
+}
+
+fn try_parse_multi_input_vcvs(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+    node_pos: &str,
+    node_neg: &str,
+    params: &ParamContext,
+) -> Result<Option<Element>, ParseError> {
+    let mut probe = stream.clone();
+    let Some((gate, input_count)) = parse_multi_input_gate_head(&mut probe, line_num, params)?
+    else {
+        return Ok(None);
+    };
+
+    let mut ports = Vec::with_capacity(input_count + 1);
+    for _ in 0..input_count {
+        let pos = expect_node(&mut probe, line_num)?;
+        let neg = expect_node(&mut probe, line_num)?;
+        ports.push(XspicePort::DifferentialVoltage { pos, neg });
+    }
+    ports.push(XspicePort::DifferentialVoltage {
+        pos: node_pos.to_string(),
+        neg: node_neg.to_string(),
+    });
+
+    let (x0, y0) = parse_multi_input_pwl_pair(&mut probe, line_num)?;
+    let (x1, y1) = parse_multi_input_pwl_pair(&mut probe, line_num)?;
+    reject_unexpected_controlled_source_tail(&mut probe, line_num, "E (VCVS)")?;
+    *stream = probe;
+
+    Ok(Some(Element {
+        name: format!("{name}__MULTI_INPUT"),
+        kind: ElementKind::Xspice {
+            model: "multi_input_pwl".to_string(),
+            pspice_u_timing: None,
+            ports,
+            params: Vec::new(),
+            expr_params: Vec::new(),
+            string_params: vec![("model".to_string(), gate)],
+            string_expr_params: Vec::new(),
+            string_vector_params: Vec::new(),
+            string_vector_expr_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            real_vector_expr_params: vec![
+                ("x".to_string(), vec![x0, x1]),
+                ("y".to_string(), vec![y0, y1]),
+            ],
+        },
+        nodes: Vec::new(),
+    }))
+}
+
+fn parse_multi_input_gate_head(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<Option<(String, usize)>, ParseError> {
+    let TokenKind::Ident(raw_gate) = &stream.peek().kind else {
+        return Ok(None);
+    };
+    let gate = raw_gate.to_ascii_lowercase();
+    if !matches!(gate.as_str(), "and" | "or" | "nand" | "nor")
+        || !matches!(stream.peek_n(1).kind, TokenKind::LParen)
+    {
+        return Ok(None);
+    }
+
+    stream.advance();
+    stream.consume(&TokenKind::LParen);
+    let input_count = expect_value(stream, line_num, params)?;
+    if input_count < 1.0 || input_count.fract().abs() > f64::EPSILON {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "multi-input VCVS gate requires an integer input count, got {input_count}"
+            ),
+        });
+    }
+    if !stream.consume(&TokenKind::RParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "multi-input VCVS gate requires ')' after input count".to_string(),
+        });
+    }
+
+    Ok(Some((gate, input_count as usize)))
+}
+
+fn parse_multi_input_pwl_pair(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<(String, String), ParseError> {
+    skip_commas(stream);
+    if !stream.consume(&TokenKind::LParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "multi-input VCVS gate requires a parenthesized (x,y) pair".to_string(),
+        });
+    }
+    let x = collect_expression_argument(stream, line_num, Some(&TokenKind::Comma))?;
+    if !stream.consume(&TokenKind::Comma) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "multi-input VCVS gate requires ',' between x and y values".to_string(),
+        });
+    }
+    let y = collect_expression_argument(stream, line_num, Some(&TokenKind::RParen))?;
+    if !stream.consume(&TokenKind::RParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "multi-input VCVS gate requires ')' after x,y pair".to_string(),
+        });
+    }
+    Ok((x, y))
 }
 
 /// Shared implementation for F (CCCS) and H (CCVS) parsing, covering the
