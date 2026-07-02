@@ -1877,7 +1877,7 @@ mod tests {
     }
 
     #[test]
-    fn bidi_bridge_strong_unknown_drive_prefers_stronger_limit() {
+    fn bidi_bridge_strong_unknown_drive_matches_ngspice_midrail_fallthrough() {
         let mut ctx = CmContext::new();
         set_bidi_default_params(&mut ctx, 0.0);
         let drive = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Strong);
@@ -1893,7 +1893,7 @@ mod tests {
         ctx.set_param("drive_low", 0.04);
         assert_eq!(
             bidi_target_svoc(drive, bidi_params(&ctx).expect("bidi params")),
-            0.0
+            0.5
         );
 
         ctx.set_param("drive_high", 0.03);
