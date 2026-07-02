@@ -929,7 +929,7 @@ fn load_d_state_table(
 
     let table = match parse_d_state_contents(state_file, input_width, output_width, &contents) {
         Ok(table) => Arc::new(table),
-        Err(_) => return (virtual_stamp, Ok(None)),
+        Err(err) => return (virtual_stamp, Err(err)),
     };
     let mut guard = lock_d_state_cache();
     guard.sync_virtual_epoch();
@@ -1902,7 +1902,7 @@ mod tests {
     }
 
     #[test]
-    fn d_state_malformed_file_returns_without_fatal_error_like_ngspice() {
+    fn d_state_malformed_file_fails_closed() {
         let _guard = data_file_test_guard();
         let state_file = "virtual://d_state/malformed";
         unregister_test_data_file(state_file);
@@ -1916,13 +1916,14 @@ mod tests {
         ctx.set_string_param("state_file", state_file);
         model.init(&mut ctx).expect("d_state init");
 
-        model
+        let err = model
             .evaluate(&mut ctx)
-            .expect("ngspice logs malformed d_state files but does not fail evaluation");
+            .expect_err("malformed d_state files must fail evaluation");
+        let message = err.to_string();
 
         assert!(
-            ctx.take_pending_events().is_empty(),
-            "malformed d_state files should return before scheduling output events"
+            message.contains("invalid d_state output token 'bogus'"),
+            "malformed d_state error should explain the parser failure, got {message}"
         );
 
         unregister_test_data_file(state_file);
