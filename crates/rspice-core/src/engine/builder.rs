@@ -742,6 +742,15 @@ fn xspice_auto_bridge_node_label(node_names: Option<&[String]>, node: usize) -> 
         .unwrap_or_else(|| node.to_string())
 }
 
+fn xspice_auto_bridge_kind_label(kind: XspiceAutoBridgeKind) -> &'static str {
+    match kind {
+        XspiceAutoBridgeKind::Adc => "analog-to-digital",
+        XspiceAutoBridgeKind::Dac => "digital-to-analog",
+        XspiceAutoBridgeKind::Bidi => "bidirectional digital/analog",
+        XspiceAutoBridgeKind::RealToV => "real-to-voltage",
+    }
+}
+
 fn xspice_auto_bridge_generated_card(
     bridge: PlannedXspiceAutoBridge,
     instance_name: &str,
@@ -763,6 +772,22 @@ fn xspice_auto_bridge_generated_card(
             format!("{instance_name} {node_label} null {node_label} r_to_v")
         }
     }
+}
+
+fn reject_disabled_xspice_auto_bridge(
+    circuit: &CircuitData,
+    bridges: &[PlannedXspiceAutoBridge],
+) -> Result<(), SimulationError> {
+    if let Some(bridge) = bridges.first().copied() {
+        let node_names = circuit.node_names_sorted();
+        let node_label = xspice_auto_bridge_node_label(Some(&node_names), bridge.node);
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE auto-bridge insertion is disabled, but node '{}' is mixed-type and needs a {} bridge",
+            node_label,
+            xspice_auto_bridge_kind_label(bridge.kind)
+        )));
+    }
+    Ok(())
 }
 
 fn add_planned_xspice_auto_bridges(
@@ -3584,9 +3609,9 @@ impl Engine {
             }
         }
 
-        if netlist.options.auto_bridge.unwrap_or(true) {
-            let auto_bridges = plan_xspice_auto_bridges(&circuit, &flat_elements);
-            if !auto_bridges.is_empty() {
+        let auto_bridges = plan_xspice_auto_bridges(&circuit, &flat_elements);
+        if !auto_bridges.is_empty() {
+            if netlist.options.auto_bridge.unwrap_or(true) {
                 add_planned_xspice_auto_bridges(
                     &mut circuit,
                     &auto_bridges,
@@ -3595,6 +3620,8 @@ impl Engine {
                     self.config.ramptime,
                     netlist.options.auto_bridge_show_generated.unwrap_or(false),
                 )?;
+            } else {
+                reject_disabled_xspice_auto_bridge(&circuit, &auto_bridges)?;
             }
         }
 
