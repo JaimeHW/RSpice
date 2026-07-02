@@ -30,6 +30,8 @@ const MSOPEN_ALEXOPOULOS: i64 = 2;
 
 const TRAN_DC: i64 = 0;
 const TRAN_FULL: i64 = 1;
+const DB_TO_LOG_AMPLITUDE: Value = std::f64::consts::LN_10 / 20.0;
+const COMPLEX_HYPERBOLIC_REAL_LIMIT: Value = 350.0;
 const MICROSTRIP_PROPAGATION_RESOURCE: &str = "xspice.tlines.microstrip_propagation";
 const COUPLED_MICROSTRIP_PROPAGATION_RESOURCE: &str =
     "xspice.tlines.coupled_microstrip_propagation";
@@ -321,6 +323,36 @@ fn finite_integer_param(ctx: &CmContext, name: &str, default: i64) -> CmResult<i
 #[inline]
 fn finite_complex(value: Complex64) -> bool {
     value.re.is_finite() && value.im.is_finite()
+}
+
+fn db_to_log_amplitude(name: &str, db: Value) -> CmResult<Value> {
+    let value = db * DB_TO_LOG_AMPLITUDE;
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("attenuation conversion must be finite, got {value}"),
+        })
+    }
+}
+
+fn complex_coth(value: Complex64) -> Complex64 {
+    if value.re > COMPLEX_HYPERBOLIC_REAL_LIMIT {
+        Complex64::new(1.0, 0.0)
+    } else if value.re < -COMPLEX_HYPERBOLIC_REAL_LIMIT {
+        Complex64::new(-1.0, 0.0)
+    } else {
+        Complex64::new(1.0, 0.0) / value.tanh()
+    }
+}
+
+fn complex_csch(value: Complex64) -> Complex64 {
+    if value.re.abs() > COMPLEX_HYPERBOLIC_REAL_LIMIT {
+        Complex64::new(0.0, 0.0)
+    } else {
+        Complex64::new(1.0, 0.0) / value.sinh()
+    }
 }
 
 fn finite_ac_partials<const N: usize>(items: [(&str, Complex64); N]) -> Vec<(String, Complex64)> {
@@ -1422,12 +1454,11 @@ fn tline_ac_impedances_uncached(
 ) -> CmResult<TwoPortAcImpedances> {
     let length = tline_length(ctx)?;
     let impedance = tline_impedance(ctx)?;
-    let attenuation_db = tline_attenuation(ctx)?;
-    let alpha = (10.0_f64.powf(0.05 * attenuation_db)).ln() / 2.0;
+    let alpha = db_to_log_amplitude("a", tline_attenuation(ctx)?)? / 2.0;
     let beta = std::f64::consts::TAU * frequency / C0;
     let gamma_l = Complex64::new(alpha, beta) * length;
     let z = Complex64::new(impedance, 0.0);
-    Ok((z / gamma_l.tanh(), z / gamma_l.sinh()))
+    Ok((z * complex_coth(gamma_l), z * complex_csch(gamma_l)))
 }
 
 fn tline_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
@@ -1594,7 +1625,7 @@ fn mlin_ac_impedances_uncached(ctx: &CmContext, frequency: Value) -> CmResult<Tw
     let propagation = microstrip_propagation(ctx, frequency)?;
     let gamma_l = Complex64::new(propagation.alpha, propagation.beta) * length;
     let z = Complex64::new(propagation.zl, 0.0);
-    Ok((z / gamma_l.tanh(), z / gamma_l.sinh()))
+    Ok((z * complex_coth(gamma_l), z * complex_csch(gamma_l)))
 }
 
 fn mlin_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
@@ -1822,18 +1853,22 @@ fn cpline_ac_impedances_uncached(
     let zo = cpline_odd_impedance(ctx)?;
     let ere = cpline_even_permittivity(ctx)?;
     let ero = cpline_odd_permittivity(ctx)?;
-    let ae = 10.0_f64.powf(0.05 * cpline_even_attenuation(ctx)?);
-    let ao = 10.0_f64.powf(0.05 * cpline_odd_attenuation(ctx)?);
+    let ae_log = db_to_log_amplitude("ae", cpline_even_attenuation(ctx)?)?;
+    let ao_log = db_to_log_amplitude("ao", cpline_odd_attenuation(ctx)?)?;
     let omega = std::f64::consts::TAU * frequency;
-    let arg_e = Complex64::new((ae.ln()) * length / 2.0, omega * length / C0 * ere.sqrt());
-    let arg_o = Complex64::new((ao.ln()) * length / 2.0, omega * length / C0 * ero.sqrt());
+    let arg_e = Complex64::new(ae_log * length / 2.0, omega * length / C0 * ere.sqrt());
+    let arg_o = Complex64::new(ao_log * length / 2.0, omega * length / C0 * ero.sqrt());
     let ze_c = Complex64::new(ze, 0.0);
     let zo_c = Complex64::new(zo, 0.0);
+    let coth_e = complex_coth(arg_e);
+    let coth_o = complex_coth(arg_o);
+    let csch_e = complex_csch(arg_e);
+    let csch_o = complex_csch(arg_o);
 
-    let z11 = zo_c / (arg_o.tanh() * 2.0) + ze_c / (arg_e.tanh() * 2.0);
-    let z12 = zo_c / (arg_o.sinh() * 2.0) + ze_c / (arg_e.sinh() * 2.0);
-    let z13 = ze_c / (arg_e.sinh() * 2.0) - zo_c / (arg_o.sinh() * 2.0);
-    let z14 = ze_c / (arg_e.tanh() * 2.0) - zo_c / (arg_o.tanh() * 2.0);
+    let z11 = zo_c * coth_o / 2.0 + ze_c * coth_e / 2.0;
+    let z12 = zo_c * csch_o / 2.0 + ze_c * csch_e / 2.0;
+    let z13 = ze_c * csch_e / 2.0 - zo_c * csch_o / 2.0;
+    let z14 = ze_c * coth_e / 2.0 - zo_c * coth_o / 2.0;
     Ok((z11, z12, z13, z14))
 }
 
@@ -1992,11 +2027,17 @@ fn cpmlin_ac_impedances_uncached(
     let go = Complex64::new(propagation.alpha_odd, propagation.beta_odd);
     let ze = Complex64::new(propagation.ze, 0.0);
     let zo = Complex64::new(propagation.zo, 0.0);
+    let ge_l = ge * length;
+    let go_l = go * length;
+    let coth_e = complex_coth(ge_l);
+    let coth_o = complex_coth(go_l);
+    let csch_e = complex_csch(ge_l);
+    let csch_o = complex_csch(go_l);
 
-    let z11 = zo / ((go * length).tanh() * 2.0) + ze / ((ge * length).tanh() * 2.0);
-    let z12 = zo / ((go * length).sinh() * 2.0) + ze / ((ge * length).sinh() * 2.0);
-    let z13 = ze / ((ge * length).sinh() * 2.0) - zo / ((go * length).sinh() * 2.0);
-    let z14 = ze / ((ge * length).tanh() * 2.0) - zo / ((go * length).tanh() * 2.0);
+    let z11 = zo * coth_o / 2.0 + ze * coth_e / 2.0;
+    let z12 = zo * csch_o / 2.0 + ze * csch_e / 2.0;
+    let z13 = ze * csch_e / 2.0 - zo * csch_o / 2.0;
+    let z14 = ze * coth_e / 2.0 - zo * coth_o / 2.0;
     Ok((z11, z12, z13, z14))
 }
 
@@ -2896,6 +2937,27 @@ mod tests {
     }
 
     #[test]
+    fn tline_attenuation_conversion_stays_finite_for_large_db() {
+        let frequency = 1.0e9;
+
+        let mut tline = CmContext::new();
+        tline.set_param("a", 1.0e6);
+        let (z11, z21) =
+            tline_ac_impedances_uncached(&tline, frequency).expect("large finite tline loss");
+        assert_complex_finite(z11);
+        assert_complex_finite(z21);
+
+        let mut cpline = CmContext::new();
+        cpline.set_param("ae", 1.0e6);
+        cpline.set_param("ao", 1.0e6);
+        let (z11, z12, z13, z14) =
+            cpline_ac_impedances_uncached(&cpline, frequency).expect("large finite cpline loss");
+        for partial in [z11, z12, z13, z14] {
+            assert_complex_finite(partial);
+        }
+    }
+
+    #[test]
     fn two_port_ac_impedance_caches_reuse_matching_entries_and_invalidate() {
         let frequency = 1.0e9;
 
@@ -3020,5 +3082,12 @@ mod tests {
             Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected),
             other => panic!("expected InvalidParameter for {expected}, got {other:?}"),
         }
+    }
+
+    fn assert_complex_finite(value: Complex64) {
+        assert!(
+            finite_complex(value),
+            "expected finite complex value, got {value:?}"
+        );
     }
 }
