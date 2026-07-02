@@ -364,17 +364,19 @@ fn d_ram_set_outputs(
     strength: DigitalStrength,
     delay: Value,
 ) {
-    let values: Vec<_> = (0..shape.word_width)
-        .map(|bit| {
+    ctx.set_output_digital_vector_from_context_fn(
+        "data_out",
+        shape.word_width,
+        delay,
+        |ctx, bit| {
             let code = address_index
                 .map(|address_index| {
                     d_ram_memory_state(ctx, scratch_state, shape, address_index, bit)
                 })
                 .unwrap_or(2);
             d_ram_value_from_code(code, strength)
-        })
-        .collect();
-    ctx.set_output_digital_vector_from_slice("data_out", &values, delay);
+        },
+    );
 }
 
 fn d_ram_set_uniform_outputs(
@@ -385,8 +387,9 @@ fn d_ram_set_uniform_outputs(
     delay: Value,
 ) {
     let value = d_ram_value_from_code(code, strength);
-    let values = vec![value; shape.word_width];
-    ctx.set_output_digital_vector_from_slice("data_out", &values, delay);
+    ctx.set_output_digital_vector_from_context_fn("data_out", shape.word_width, delay, |_, _| {
+        value
+    });
 }
 
 fn d_ram_set_input_data_outputs(
@@ -397,17 +400,14 @@ fn d_ram_set_input_data_outputs(
     strength: DigitalStrength,
     delay: Value,
 ) {
-    let values: Vec<_> = (0..shape.word_width)
-        .map(|bit| {
-            let code = if address_index.is_some() {
-                data_codes[bit]
-            } else {
-                2
-            };
-            d_ram_value_from_code(code, strength)
-        })
-        .collect();
-    ctx.set_output_digital_vector_from_slice("data_out", &values, delay);
+    ctx.set_output_digital_vector_from_context_fn("data_out", shape.word_width, delay, |_, bit| {
+        let code = if address_index.is_some() {
+            data_codes[bit]
+        } else {
+            2
+        };
+        d_ram_value_from_code(code, strength)
+    });
 }
 
 fn d_ram_store_previous(
