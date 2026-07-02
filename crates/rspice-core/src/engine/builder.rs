@@ -1199,13 +1199,17 @@ fn assign_xspice_output_branches(
 
 fn add_template_xspice_auto_bridge(
     circuit: &mut CircuitData,
-    bridge: &PlannedXspiceAutoBridge,
+    bridges: &[&PlannedXspiceAutoBridge],
     template: &XspiceAutoBridgeTemplate,
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
     node_names: Option<&[String]>,
 ) -> Result<(), SimulationError> {
+    let Some(first_bridge) = bridges.first().copied() else {
+        return Ok(());
+    };
+
     let owned_node_names;
     let all_node_names: &[String] = match node_names {
         Some(node_names) => node_names,
@@ -1214,27 +1218,31 @@ fn add_template_xspice_auto_bridge(
             &owned_node_names
         }
     };
-    let node_label = xspice_auto_bridge_node_label(Some(all_node_names), bridge.node);
+    let node_labels: Vec<String> = bridges
+        .iter()
+        .map(|bridge| xspice_auto_bridge_node_label(Some(all_node_names), bridge.node))
+        .collect();
+    let node_list = node_labels.join(" ");
 
     let setup_card = format_xspice_auto_bridge_template_card(
         &template.key,
         &template.setup_card,
         &[
-            XspiceAutoBridgeFormatArg::Float(bridge.vcc),
-            XspiceAutoBridgeFormatArg::Float(bridge.vcc),
-            XspiceAutoBridgeFormatArg::Float(bridge.vcc),
-            XspiceAutoBridgeFormatArg::Float(bridge.vcc),
-            XspiceAutoBridgeFormatArg::Float(bridge.vcc),
+            XspiceAutoBridgeFormatArg::Float(first_bridge.vcc),
+            XspiceAutoBridgeFormatArg::Float(first_bridge.vcc),
+            XspiceAutoBridgeFormatArg::Float(first_bridge.vcc),
+            XspiceAutoBridgeFormatArg::Float(first_bridge.vcc),
+            XspiceAutoBridgeFormatArg::Float(first_bridge.vcc),
         ],
     )?;
     let device_card = format_xspice_auto_bridge_template_card(
         &template.key,
         &template.device_card,
         &[
-            XspiceAutoBridgeFormatArg::Int(bridge.node),
-            XspiceAutoBridgeFormatArg::Str(&node_label),
-            XspiceAutoBridgeFormatArg::Str(&node_label),
-            XspiceAutoBridgeFormatArg::Float(bridge.vcc),
+            XspiceAutoBridgeFormatArg::Int(first_bridge.node),
+            XspiceAutoBridgeFormatArg::Str(&node_list),
+            XspiceAutoBridgeFormatArg::Str(&node_list),
+            XspiceAutoBridgeFormatArg::Float(first_bridge.vcc),
         ],
     )?;
 
@@ -1374,9 +1382,9 @@ fn add_template_xspice_auto_bridge(
     })?;
 
     log::debug!(
-        "Generated XSPICE auto-bridge {} on node {} from template {}",
+        "Generated XSPICE auto-bridge {} on nodes {} from template {}",
         element.name,
-        bridge.node,
+        node_list,
         template.key
     );
     if node_names.is_some() {
@@ -1396,11 +1404,52 @@ fn add_planned_xspice_auto_bridges(
     show_generated: bool,
 ) -> Result<(), SimulationError> {
     let node_names = show_generated.then(|| circuit.node_names_sorted());
-    for bridge in bridges {
-        add_planned_xspice_auto_bridge(
+    let mut consumed = vec![false; bridges.len()];
+
+    for index in 0..bridges.len() {
+        if consumed[index] {
+            continue;
+        }
+
+        let bridge = &bridges[index];
+        let Some(template) = find_xspice_auto_bridge_template(templates, bridge) else {
+            consumed[index] = true;
+            add_planned_xspice_auto_bridge(
+                circuit,
+                bridge,
+                &[],
+                temperature,
+                ramptime,
+                digital_delay_type,
+                node_names.as_deref(),
+            )?;
+            continue;
+        };
+
+        let max_nodes = template.max_nodes.unwrap_or(bridges.len()).max(1);
+        let mut group = Vec::with_capacity(max_nodes.min(bridges.len() - index));
+        consumed[index] = true;
+        group.push(bridge);
+
+        for candidate_index in index + 1..bridges.len() {
+            if group.len() >= max_nodes {
+                break;
+            }
+            if consumed[candidate_index] {
+                continue;
+            }
+            let candidate = &bridges[candidate_index];
+            if xspice_auto_bridge_template_group_compatible(templates, template, bridge, candidate)
+            {
+                consumed[candidate_index] = true;
+                group.push(candidate);
+            }
+        }
+
+        add_template_xspice_auto_bridge(
             circuit,
-            bridge,
-            templates,
+            &group,
+            template,
             temperature,
             ramptime,
             digital_delay_type,
@@ -1408,6 +1457,21 @@ fn add_planned_xspice_auto_bridges(
         )?;
     }
     Ok(())
+}
+
+fn xspice_auto_bridge_template_group_compatible(
+    templates: &[XspiceAutoBridgeTemplate],
+    template: &XspiceAutoBridgeTemplate,
+    first: &PlannedXspiceAutoBridge,
+    candidate: &PlannedXspiceAutoBridge,
+) -> bool {
+    if first.kind != candidate.kind || first.vcc != candidate.vcc {
+        return false;
+    }
+
+    find_xspice_auto_bridge_template(templates, candidate).is_some_and(|candidate_template| {
+        candidate_template.key.eq_ignore_ascii_case(&template.key)
+    })
 }
 
 fn add_planned_xspice_auto_bridge(
@@ -1422,9 +1486,10 @@ fn add_planned_xspice_auto_bridge(
     use crate::xspice::PortConnection;
 
     if let Some(template) = find_xspice_auto_bridge_template(templates, bridge) {
+        let bridges = [bridge];
         return add_template_xspice_auto_bridge(
             circuit,
-            bridge,
+            &bridges,
             template,
             temperature,
             ramptime,
@@ -1600,6 +1665,24 @@ mod tests {
         instance.param(param)
     }
 
+    fn single_xspice_instance<'a>(
+        circuit: &'a CircuitData,
+        model_name: &str,
+    ) -> &'a crate::xspice::XspiceInstance {
+        let mut matches = circuit
+            .xspice_instances
+            .iter()
+            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name));
+        let instance = matches
+            .next()
+            .unwrap_or_else(|| panic!("expected one {model_name} instance"));
+        assert!(
+            matches.next().is_none(),
+            "expected exactly one {model_name} instance"
+        );
+        instance
+    }
+
     #[test]
     fn explicit_adc_does_not_suppress_needed_auto_dac_on_same_node() {
         let netlist = Netlist::parse(
@@ -1685,6 +1768,54 @@ set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_
         assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -2.0);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
+    }
+
+    #[test]
+    fn auto_bridge_template_groups_nodes_up_to_max() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge template max groups nodes into one vector bridge
+.param vcc=4
+rload0 mix0 0 1k
+rload1 mix1 0 1k
+.model pull d_pullup
+apull0 [mix0] pull
+apull1 [mix1] pull
+.control
+set auto_bridge_d_out = ( \".model grouped_dac dac_bridge(out_low = -0.25 out_high = %g)\" \"agroup%d [ %s ] [ %s ] grouped_dac\" 2 )
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 2);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_low"),
+            -0.25
+        );
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.0);
+
+        let dac = single_xspice_instance(&circuit, "dac_bridge");
+        assert!(
+            matches!(
+                dac.connection("in"),
+                Some(crate::xspice::PortConnection::DigitalVector(nodes)) if nodes.len() == 2
+            ),
+            "grouped template should generate a two-bit digital input vector"
+        );
+        assert!(
+            matches!(
+                dac.connection("out"),
+                Some(crate::xspice::PortConnection::AnalogVector(nodes)) if nodes.len() == 2
+            ),
+            "grouped template should generate a two-node analog output vector"
+        );
     }
 
     #[test]
