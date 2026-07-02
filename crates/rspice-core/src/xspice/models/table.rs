@@ -152,12 +152,12 @@ impl<'a> TokenCursor<'a> {
     fn next_data_line_optional(&mut self) -> Option<&TableLine<'a>> {
         loop {
             let index = self.next;
-            let data_comment = self.lines.get(index)?.data_comment;
+            let line = self.lines.get(index)?;
             self.next += 1;
-            if data_comment {
+            if line.header_ignored || line.data_comment {
                 continue;
             }
-            return Some(&self.lines[index]);
+            return Some(line);
         }
     }
 
@@ -402,6 +402,21 @@ fn table_cache_key(file: &str, stamp: data_file::DataFileStamp) -> TableCacheKey
     }
 }
 
+fn table_line_data(line: &str) -> (&str, bool) {
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() {
+        return ("", false);
+    }
+    if matches!(trimmed.as_bytes()[0], b'*' | b'#' | b';' | b'$') {
+        return ("", true);
+    }
+    let end = trimmed
+        .char_indices()
+        .find_map(|(index, ch)| matches!(ch, '#' | ';' | '$').then_some(index))
+        .unwrap_or(trimmed.len());
+    (trimmed[..end].trim_end(), false)
+}
+
 fn tokenize_table_contents<'a>(
     model: &str,
     file: &str,
@@ -411,12 +426,12 @@ fn tokenize_table_contents<'a>(
 
     for (line_idx, line) in contents.lines().enumerate() {
         let line_no = line_idx + 1;
-        let header_ignored = line.is_empty() || line.starts_with('*');
-        let data_comment = line.starts_with('*');
+        let (data, data_comment) = table_line_data(line);
+        let header_ignored = data.is_empty() || data_comment;
         let mut tokens = Vec::new();
         if !header_ignored {
             for token in
-                line.split(|ch: char| ch.is_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
+                data.split(|ch: char| ch.is_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
             {
                 if token.is_empty() {
                     continue;
@@ -1893,6 +1908,27 @@ mod tests {
         let row = cursor.next_data_line_optional().unwrap();
 
         assert_eq!(row.tokens.as_ptr(), data_tokens);
+    }
+
+    #[test]
+    fn table2d_parser_accepts_indented_and_inline_comments() {
+        let table = parse_table2d_contents(
+            "inline-table2d",
+            "\
+  * header comment
+2 # x size
+2 ; y size
+0 1 ; x axis
+0 1 # y axis
+3 4
+
+  * gap comment
+5 6 $ final row
+",
+        )
+        .expect("table2d should parse commented table data");
+
+        assert_eq!(table.values, vec![3.0, 4.0, 5.0, 6.0]);
     }
 
     #[test]
