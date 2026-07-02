@@ -272,6 +272,17 @@ fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
+fn reserve_core_points(point_count: usize) -> CmResult<Vec<CorePoint>> {
+    let mut points = Vec::new();
+    points.try_reserve_exact(point_count).map_err(|err| {
+        invalid_param(
+            "h_array/b_array",
+            format!("unable to reserve {point_count} core table point(s): {err}"),
+        )
+    })?;
+    Ok(points)
+}
+
 fn inout_conductance_port(name: &str, description: &str) -> PortSpec {
     PortSpec {
         name: name.to_string(),
@@ -1460,7 +1471,7 @@ fn core_table_uncached(ctx: &CmContext) -> CmResult<CoreTable> {
         ));
     }
 
-    let mut points: Vec<CorePoint> = Vec::with_capacity(h_values.len());
+    let mut points = reserve_core_points(h_values.len())?;
     for (index, (&h, &b)) in h_values.iter().zip(b_values).enumerate() {
         if !h.is_finite() {
             return Err(invalid_param(
