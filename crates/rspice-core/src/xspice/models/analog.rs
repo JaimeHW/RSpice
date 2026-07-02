@@ -3897,7 +3897,8 @@ mod tests {
         let mut ctx = CmContext::new();
         ctx.set_input_analog_vector_from_fn("in", 3, |index| {
             AnalogValue::new([1.0, 2.0, 3.0][index])
-        });
+        })
+        .expect("set mult inputs");
         ctx.set_real_vector_param("in_gain", vec![2.0, 3.0, 4.0]);
         ctx.set_real_vector_param("in_offset", vec![0.5, -1.0, 0.0]);
         ctx.set_param("out_gain", 2.0);
@@ -3922,7 +3923,8 @@ mod tests {
         let mut ctx = CmContext::new();
         ctx.set_input_analog_vector_from_fn("in", 3, |index| {
             AnalogValue::new([1.0, 2.0, 3.0][index])
-        });
+        })
+        .expect("set mult inputs");
         ctx.set_real_vector_param("in_gain", vec![2.0, 3.0, 4.0]);
         ctx.set_real_vector_param("in_offset", vec![0.5, -1.0, 0.0]);
         ctx.set_param("out_gain", 2.0);
@@ -3948,7 +3950,8 @@ mod tests {
 
         ctx.set_input_analog_vector_from_fn("in", 3, |index| {
             AnalogValue::new([1.0, 4.0, 3.0][index])
-        });
+        })
+        .expect("update mult inputs");
         let changed_inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
         assert!(
             !mult_transfer_resource_matches(&resource, base, changed_inputs),
@@ -3961,7 +3964,8 @@ mod tests {
         let mut ctx = CmContext::new();
         ctx.set_input_analog_vector_from_fn("in", 3, |index| {
             AnalogValue::new([1.0, 2.0, 3.0][index])
-        });
+        })
+        .expect("set mult inputs");
         ctx.set_real_vector_param("in_gain", vec![2.0, 3.0, 4.0]);
         ctx.set_real_vector_param("in_offset", vec![0.5, -1.0, 0.0]);
         ctx.set_param("out_gain", 2.0);
@@ -4012,7 +4016,8 @@ mod tests {
 
         ctx.set_input_analog_vector_from_fn("in", 3, |index| {
             AnalogValue::new([1.0, 4.0, 3.0][index])
-        });
+        })
+        .expect("update mult inputs");
         let updated = cache_mult_transfer(&mut ctx).expect("changed input recomputes transfer");
         assert_ne!(
             updated.as_ref(),

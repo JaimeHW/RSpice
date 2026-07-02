@@ -3,7 +3,7 @@
 //! Provides the runtime context passed to code models during evaluation.
 //! Handles port value access, parameter lookup, and state management.
 
-use super::{DigitalValue, PortType};
+use super::{CmError, CmResult, DigitalValue, PortType};
 use crate::{Complex64, Value};
 use std::any::Any;
 use std::borrow::Cow;
@@ -283,7 +283,22 @@ fn prune_transient_history(
     }
 }
 
-fn refill_vec_from_fn<T, F>(values: &mut Vec<T>, value_count: usize, mut value_at: F)
+fn context_allocation_error(
+    context: &str,
+    len: usize,
+    err: std::collections::TryReserveError,
+) -> CmError {
+    CmError::EvaluationError(format!(
+        "{context}: unable to reserve {len} value(s): {err}"
+    ))
+}
+
+fn refill_vec_from_fn<T, F>(
+    context: &str,
+    values: &mut Vec<T>,
+    value_count: usize,
+    mut value_at: F,
+) -> CmResult<()>
 where
     F: FnMut(usize) -> T,
 {
@@ -297,11 +312,31 @@ where
     }
 
     if existing_len < value_count {
-        values.reserve(value_count - existing_len);
+        if values.capacity() < value_count {
+            let additional = value_count - values.capacity();
+            values
+                .try_reserve_exact(additional)
+                .map_err(|err| context_allocation_error(context, value_count, err))?;
+        }
         for index in existing_len..value_count {
             values.push(value_at(index));
         }
     }
+    Ok(())
+}
+
+fn vec_from_fn<T, F>(context: &str, value_count: usize, mut value_at: F) -> CmResult<Vec<T>>
+where
+    F: FnMut(usize) -> T,
+{
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(value_count)
+        .map_err(|err| context_allocation_error(context, value_count, err))?;
+    for index in 0..value_count {
+        values.push(value_at(index));
+    }
+    Ok(values)
 }
 
 impl OutputValue {
@@ -811,22 +846,21 @@ impl CmContext {
         name: &str,
         value_count: usize,
         mut value_at: F,
-    ) where
+    ) -> CmResult<()>
+    where
         F: FnMut(usize) -> Value,
     {
         match self.port_vector_total_loads.get_mut(name) {
             Some(values) => {
-                refill_vec_from_fn(values, value_count, value_at);
+                refill_vec_from_fn("port vector total loads", values, value_count, value_at)?;
             }
             None => {
-                let mut values = Vec::with_capacity(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                let values = vec_from_fn("port vector total loads", value_count, value_at)?;
                 self.port_vector_total_loads
                     .insert(name.to_string(), values);
             }
         }
+        Ok(())
     }
 
     /// Set analog vector input values while reusing an existing vector buffer.
@@ -835,29 +869,25 @@ impl CmContext {
         name: &str,
         value_count: usize,
         mut value_at: F,
-    ) where
+    ) -> CmResult<()>
+    where
         F: FnMut(usize) -> AnalogValue,
     {
         match self.inputs.get_mut(name) {
             Some(InputValue::AnalogVector(values)) => {
-                refill_vec_from_fn(values, value_count, value_at);
+                refill_vec_from_fn("analog vector input", values, value_count, value_at)?;
             }
             Some(value) => {
-                let mut values = Vec::with_capacity(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                let values = vec_from_fn("analog vector input", value_count, value_at)?;
                 *value = InputValue::AnalogVector(values);
             }
             None => {
-                let mut values = Vec::with_capacity(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                let values = vec_from_fn("analog vector input", value_count, value_at)?;
                 self.inputs
                     .insert(name.to_string(), InputValue::AnalogVector(values));
             }
         }
+        Ok(())
     }
 
     /// Set digital vector input values while reusing an existing vector buffer.
@@ -866,29 +896,25 @@ impl CmContext {
         name: &str,
         value_count: usize,
         mut value_at: F,
-    ) where
+    ) -> CmResult<()>
+    where
         F: FnMut(usize) -> DigitalValue,
     {
         match self.inputs.get_mut(name) {
             Some(InputValue::DigitalVector(values)) => {
-                refill_vec_from_fn(values, value_count, value_at);
+                refill_vec_from_fn("digital vector input", values, value_count, value_at)?;
             }
             Some(value) => {
-                let mut values = Vec::with_capacity(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                let values = vec_from_fn("digital vector input", value_count, value_at)?;
                 *value = InputValue::DigitalVector(values);
             }
             None => {
-                let mut values = Vec::with_capacity(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                let values = vec_from_fn("digital vector input", value_count, value_at)?;
                 self.inputs
                     .insert(name.to_string(), InputValue::DigitalVector(values));
             }
         }
+        Ok(())
     }
 
     /// Set real vector input values while reusing an existing vector buffer.
@@ -897,29 +923,25 @@ impl CmContext {
         name: &str,
         value_count: usize,
         mut value_at: F,
-    ) where
+    ) -> CmResult<()>
+    where
         F: FnMut(usize) -> Value,
     {
         match self.inputs.get_mut(name) {
             Some(InputValue::RealVector(values)) => {
-                refill_vec_from_fn(values, value_count, value_at);
+                refill_vec_from_fn("real vector input", values, value_count, value_at)?;
             }
             Some(value) => {
-                let mut values = Vec::with_capacity(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                let values = vec_from_fn("real vector input", value_count, value_at)?;
                 *value = InputValue::RealVector(values);
             }
             None => {
-                let mut values = Vec::with_capacity(value_count);
-                for index in 0..value_count {
-                    values.push(value_at(index));
-                }
+                let values = vec_from_fn("real vector input", value_count, value_at)?;
                 self.inputs
                     .insert(name.to_string(), InputValue::RealVector(values));
             }
         }
+        Ok(())
     }
 
     /// Set last event time for a scalar digital input.
@@ -952,22 +974,21 @@ impl CmContext {
         name: &str,
         value_count: usize,
         mut time_at: F,
-    ) where
+    ) -> CmResult<()>
+    where
         F: FnMut(usize) -> Option<Value>,
     {
         match self.input_vector_event_times.get_mut(name) {
             Some(times) => {
-                refill_vec_from_fn(times, value_count, time_at);
+                refill_vec_from_fn("digital vector event times", times, value_count, time_at)?;
             }
             None => {
-                let mut times = Vec::with_capacity(value_count);
-                for index in 0..value_count {
-                    times.push(time_at(index));
-                }
+                let times = vec_from_fn("digital vector event times", value_count, time_at)?;
                 self.input_vector_event_times
                     .insert(name.to_string(), times);
             }
         }
+        Ok(())
     }
 
     /// Set last event time for a scalar real input.
@@ -2367,12 +2388,14 @@ mod tests {
             } else {
                 DigitalValue::one()
             }
-        });
+        })
+        .expect("set digital vector input");
         let digital_ptr = match ctx.inputs.get("din") {
             Some(InputValue::DigitalVector(values)) => values.as_ptr(),
             other => panic!("expected digital vector input, got {other:?}"),
         };
-        ctx.set_input_digital_vector_from_fn("din", 2, |_| DigitalValue::unknown());
+        ctx.set_input_digital_vector_from_fn("din", 2, |_| DigitalValue::unknown())
+            .expect("reuse digital vector input");
         assert_eq!(
             ctx.input_digital_vector_values("din").unwrap(),
             &[DigitalValue::unknown(), DigitalValue::unknown()]
@@ -2389,7 +2412,8 @@ mod tests {
         let times_ptr = ctx.input_vector_event_times["din"].as_ptr();
         ctx.set_input_digital_vector_event_times_from_fn("din", 2, |index| {
             (index == 1).then_some(3.0e-9)
-        });
+        })
+        .expect("reuse digital vector event times");
         assert_eq!(ctx.input_digital_vector_event_time("din", 0), None);
         assert_eq!(ctx.input_digital_vector_event_time("din", 1), Some(3.0e-9));
         assert_eq!(ctx.input_vector_event_times["din"].as_ptr(), times_ptr);
@@ -2397,14 +2421,16 @@ mod tests {
         assert_eq!(ctx.input_digital_vector_event_time("din", 0), Some(5.0e-9));
         assert_eq!(ctx.input_vector_event_times["din"].as_ptr(), times_ptr);
 
-        ctx.set_input_analog_vector_from_fn("ain", 3, |index| AnalogValue::new(index as Value));
+        ctx.set_input_analog_vector_from_fn("ain", 3, |index| AnalogValue::new(index as Value))
+            .expect("set analog vector input");
         let analog_ptr = match ctx.inputs.get("ain") {
             Some(InputValue::AnalogVector(values)) => values.as_ptr(),
             other => panic!("expected analog vector input, got {other:?}"),
         };
         ctx.set_input_analog_vector_from_fn("ain", 2, |index| {
             AnalogValue::new(10.0 + index as Value)
-        });
+        })
+        .expect("reuse analog vector input");
         assert_eq!(
             ctx.input_analog_vector_values("ain")
                 .unwrap()
@@ -2418,12 +2444,14 @@ mod tests {
             other => panic!("expected reused analog vector input, got {other:?}"),
         }
 
-        ctx.set_input_real_vector_from_fn("rin", 3, |index| index as Value);
+        ctx.set_input_real_vector_from_fn("rin", 3, |index| index as Value)
+            .expect("set real vector input");
         let real_ptr = match ctx.inputs.get("rin") {
             Some(InputValue::RealVector(values)) => values.as_ptr(),
             other => panic!("expected real vector input, got {other:?}"),
         };
-        ctx.set_input_real_vector_from_fn("rin", 2, |index| 20.0 + index as Value);
+        ctx.set_input_real_vector_from_fn("rin", 2, |index| 20.0 + index as Value)
+            .expect("reuse real vector input");
         assert_eq!(ctx.input_real_vector_values("rin").unwrap(), &[20.0, 21.0]);
         match ctx.inputs.get("rin") {
             Some(InputValue::RealVector(values)) => assert_eq!(values.as_ptr(), real_ptr),

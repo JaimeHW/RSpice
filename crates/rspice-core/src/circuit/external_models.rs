@@ -295,7 +295,7 @@ impl CircuitData {
             );
 
             for instance in &mut self.xspice_instances {
-                instance.update_inputs(
+                if let Err(e) = instance.update_inputs(
                     solution,
                     num_nodes,
                     digital_values,
@@ -304,7 +304,13 @@ impl CircuitData {
                     real_values,
                     real_event_times,
                     &current_source_values,
-                );
+                ) {
+                    let message = format!("{}: {}", instance.name, e);
+                    if self.xspice_evaluation_error.is_none() {
+                        self.xspice_evaluation_error = Some(message.clone());
+                    }
+                    return Err(crate::xspice::CmError::EvaluationError(message));
+                }
 
                 if let Err(e) = instance.evaluate(time, timestep, analysis, phase) {
                     let message = format!("{}: {}", instance.name, e);

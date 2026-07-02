@@ -580,7 +580,8 @@ mod tests {
     fn set_inputs(ctx: &mut CmContext, values: &[Value]) {
         ctx.set_input_analog_vector_from_fn("in", values.len(), |index| {
             AnalogValue::new(values[index])
-        });
+        })
+        .expect("set spice2poly inputs");
     }
 
     #[test]

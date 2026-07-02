@@ -332,7 +332,7 @@ fn set_context_event_total_load(
     port_name: &str,
     connection: &PortConnection,
     event_total_loads: &HashMap<usize, Value>,
-) {
+) -> CmResult<()> {
     match connection {
         PortConnection::Digital(node)
         | PortConnection::DigitalInverted(node)
@@ -345,7 +345,7 @@ fn set_context_event_total_load(
         PortConnection::DigitalVector(nodes) | PortConnection::RealVector(nodes) => {
             context.set_port_vector_total_loads_from_fn(port_name, nodes.len(), |index| {
                 event_total_loads.get(&nodes[index]).copied().unwrap_or(0.0)
-            });
+            })?;
         }
         PortConnection::DigitalVectorMapped(nodes) => {
             context.set_port_vector_total_loads_from_fn(port_name, nodes.len(), |index| {
@@ -353,10 +353,11 @@ fn set_context_event_total_load(
                     .get(&nodes[index].node)
                     .copied()
                     .unwrap_or(0.0)
-            });
+            })?;
         }
         _ => {}
     }
+    Ok(())
 }
 
 fn validate_branch_ordinal(
@@ -1311,7 +1312,7 @@ impl XspiceInstance {
         real_values: &HashMap<usize, Value>,
         real_event_times: &HashMap<usize, Value>,
         current_source_values: &[Value],
-    ) {
+    ) -> CmResult<()> {
         if self.solution_num_nodes != num_nodes {
             self.port_context_solution_num_nodes = None;
             self.solution_num_nodes = num_nodes;
@@ -1341,7 +1342,7 @@ impl XspiceInstance {
                 &port.name,
                 &self.connections[i],
                 event_total_loads,
-            );
+            )?;
 
             if port.direction != super::PortDirection::In
                 && port.direction != super::PortDirection::InOut
@@ -1428,7 +1429,7 @@ impl XspiceInstance {
                         &port.name,
                         nodes.len(),
                         |index| AnalogValue::new(node_voltage(solution, nodes[index])),
-                    );
+                    )?;
                 }
                 PortConnection::TypedAnalogVector(elements) => {
                     self.context.set_input_analog_vector_from_fn(
@@ -1441,7 +1442,7 @@ impl XspiceInstance {
                                 current_source_values,
                             ))
                         },
-                    );
+                    )?;
                 }
                 PortConnection::DigitalVector(nodes) => {
                     self.context.set_input_digital_vector_from_fn(
@@ -1453,34 +1454,36 @@ impl XspiceInstance {
                                 .copied()
                                 .unwrap_or_default()
                         },
-                    );
+                    )?;
                     self.context.set_input_digital_vector_event_times_from_fn(
                         &port.name,
                         nodes.len(),
                         |index| digital_event_times.get(&nodes[index]).copied(),
-                    );
+                    )?;
                 }
                 PortConnection::DigitalVectorMapped(nodes) => {
                     self.context.set_input_digital_vector_from_fn(
                         &port.name,
                         nodes.len(),
                         |index| nodes[index].input_value(digital_values),
-                    );
+                    )?;
                     self.context.set_input_digital_vector_event_times_from_fn(
                         &port.name,
                         nodes.len(),
                         |index| digital_event_times.get(&nodes[index].node).copied(),
-                    );
+                    )?;
                 }
                 PortConnection::RealVector(nodes) => {
-                    self.context
-                        .set_input_real_vector_from_fn(&port.name, nodes.len(), |index| {
-                            real_values.get(&nodes[index]).copied().unwrap_or(0.0)
-                        });
+                    self.context.set_input_real_vector_from_fn(
+                        &port.name,
+                        nodes.len(),
+                        |index| real_values.get(&nodes[index]).copied().unwrap_or(0.0),
+                    )?;
                 }
                 PortConnection::Null => {}
             }
         }
+        Ok(())
     }
 
     /// Evaluate the code model
@@ -2952,16 +2955,18 @@ mod tests {
         assert_eq!(event_total_loads.get(&2).copied(), Some(2.0e-12));
         assert_eq!(event_total_loads.get(&3).copied(), Some(8.0e-12));
 
-        instance.update_inputs(
-            &[],
-            0,
-            &HashMap::new(),
-            &HashMap::new(),
-            &event_total_loads,
-            &HashMap::new(),
-            &HashMap::new(),
-            &[],
-        );
+        instance
+            .update_inputs(
+                &[],
+                0,
+                &HashMap::new(),
+                &HashMap::new(),
+                &event_total_loads,
+                &HashMap::new(),
+                &HashMap::new(),
+                &[],
+            )
+            .expect("update inputs");
 
         assert_eq!(instance.context.port_vector_total_load("in", 0), 6.0e-12);
         assert_eq!(instance.context.port_vector_total_load("in", 1), 2.0e-12);
@@ -3412,16 +3417,18 @@ mod tests {
         instance
             .set_output_branch(0, 3)
             .expect("voltage output branch assignment");
-        instance.update_inputs(
-            &[0.0, 0.0, 0.0, 0.0],
-            4,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &[],
-        );
+        instance
+            .update_inputs(
+                &[0.0, 0.0, 0.0, 0.0],
+                4,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &[],
+            )
+            .expect("update inputs");
         instance.context.set_output("out", 7.0);
 
         let mut stamps = Vec::new();
@@ -3511,16 +3518,18 @@ mod tests {
         let mut digital_values = HashMap::new();
         digital_values.insert(1, DigitalValue::zero());
 
-        instance.update_inputs(
-            &[],
-            0,
-            &digital_values,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &[],
-        );
+        instance
+            .update_inputs(
+                &[],
+                0,
+                &digital_values,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &[],
+            )
+            .expect("update inputs");
 
         assert_eq!(
             instance.context.input_digital("in"),
@@ -3559,16 +3568,18 @@ mod tests {
         real_values.insert(5, 10.0);
         real_values.insert(6, 11.0);
 
-        instance.update_inputs(
-            &[1.0, 2.0],
-            2,
-            &digital_values,
-            &digital_event_times,
-            &HashMap::new(),
-            &real_values,
-            &HashMap::new(),
-            &[],
-        );
+        instance
+            .update_inputs(
+                &[1.0, 2.0],
+                2,
+                &digital_values,
+                &digital_event_times,
+                &HashMap::new(),
+                &real_values,
+                &HashMap::new(),
+                &[],
+            )
+            .expect("update inputs");
 
         let analog_ptr = instance
             .context
@@ -3593,16 +3604,18 @@ mod tests {
         real_values.insert(5, 20.0);
         real_values.insert(6, 21.0);
 
-        instance.update_inputs(
-            &[3.0, 4.0],
-            2,
-            &digital_values,
-            &digital_event_times,
-            &HashMap::new(),
-            &real_values,
-            &HashMap::new(),
-            &[],
-        );
+        instance
+            .update_inputs(
+                &[3.0, 4.0],
+                2,
+                &digital_values,
+                &digital_event_times,
+                &HashMap::new(),
+                &real_values,
+                &HashMap::new(),
+                &[],
+            )
+            .expect("update inputs");
 
         let analog = instance.context.input_analog_vector_values("ain").unwrap();
         assert_eq!(analog.as_ptr(), analog_ptr);
@@ -3698,16 +3711,18 @@ mod tests {
         )
         .expect("current-probe instance should construct");
 
-        instance.update_inputs(
-            &[0.0; 8],
-            5,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &[],
-        );
+        instance
+            .update_inputs(
+                &[0.0; 8],
+                5,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &[],
+            )
+            .expect("update inputs");
         instance
             .evaluate(
                 0.0,
@@ -3724,16 +3739,18 @@ mod tests {
                 EvaluationPhase::DirectEvaluation,
             )
             .expect("cached-port evaluation should succeed");
-        instance.update_inputs(
-            &[0.0; 10],
-            7,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &[],
-        );
+        instance
+            .update_inputs(
+                &[0.0; 10],
+                7,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &[],
+            )
+            .expect("update inputs");
         instance
             .evaluate(
                 2e-9,
@@ -3769,16 +3786,18 @@ mod tests {
         )
         .expect("current-probe instance should construct");
 
-        instance.update_inputs(
-            &[0.0; 8],
-            5,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-            &[],
-        );
+        instance
+            .update_inputs(
+                &[0.0; 8],
+                5,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+                &[],
+            )
+            .expect("update inputs");
         let err = instance
             .evaluate(
                 0.0,
@@ -3893,16 +3912,18 @@ mod tests {
             "the instance must not observe model port mutations after construction"
         );
         let result = catch_unwind(AssertUnwindSafe(|| {
-            instance.update_inputs(
-                &[0.0],
-                1,
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &HashMap::new(),
-                &[],
-            );
+            instance
+                .update_inputs(
+                    &[0.0],
+                    1,
+                    &HashMap::new(),
+                    &HashMap::new(),
+                    &HashMap::new(),
+                    &HashMap::new(),
+                    &HashMap::new(),
+                    &[],
+                )
+                .expect("update inputs");
             instance
                 .evaluate(
                     0.0,
