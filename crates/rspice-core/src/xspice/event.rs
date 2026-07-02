@@ -7,7 +7,7 @@
 use super::digital::DigitalValue;
 use crate::Value;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 
 //=============================================================================
 // Event Types
@@ -67,18 +67,35 @@ impl Event {
         }
     }
 
-    fn same_output_driver(&self, other: &Self) -> bool {
-        self.node_id == other.node_id
-            && self.instance == other.instance
-            && self.port_name == other.port_name
-    }
-
     fn driver_key(&self) -> EventDriverKey {
         EventDriverKey {
             node_id: self.node_id,
             port_name: self.port_name.clone(),
             instance: self.instance.clone(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EventTimeKey(Value);
+
+impl PartialEq for EventTimeKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.total_cmp(&other.0) == Ordering::Equal
+    }
+}
+
+impl Eq for EventTimeKey {}
+
+impl PartialOrd for EventTimeKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for EventTimeKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
     }
 }
 
@@ -120,8 +137,12 @@ impl Ord for Event {
 pub struct EventQueue {
     /// Pending events (min-heap by time)
     events: BinaryHeap<Event>,
-    /// Latest pending event time for each output driver.
-    latest_driver_event_times: HashMap<EventDriverKey, Value>,
+    /// Active pending event priorities for lazy cancellation.
+    active_event_priorities: HashSet<u64>,
+    /// Active pending event counts by time.
+    active_times: BTreeMap<EventTimeKey, usize>,
+    /// Active pending event priorities by output driver and time.
+    driver_event_priorities: HashMap<EventDriverKey, BTreeMap<EventTimeKey, Vec<u64>>>,
     /// Number of events processed
     events_processed: u64,
     /// Last event time processed
@@ -140,18 +161,19 @@ impl EventQueue {
             return;
         }
         let driver_key = event.driver_key();
-        if self
-            .latest_driver_event_times
-            .get(&driver_key)
-            .is_some_and(|latest_time| *latest_time >= event.time)
-        {
-            self.events.retain(|pending| {
-                !(pending.same_output_driver(&event) && pending.time >= event.time)
-            });
+        let event_time = EventTimeKey(event.time);
+        if let Some(cancelled) = self.cancel_driver_events_at_or_after(&driver_key, event_time) {
+            for (time, priorities) in cancelled {
+                for priority in priorities {
+                    if self.active_event_priorities.remove(&priority) {
+                        self.decrement_active_time(time);
+                    }
+                }
+            }
         }
-        self.latest_driver_event_times
-            .insert(driver_key, event.time);
+        self.insert_active_event(&driver_key, event_time, event.priority);
         self.events.push(event);
+        self.compact_stale_events_if_needed();
     }
 
     /// Schedule an event with delay from current time.
@@ -202,22 +224,24 @@ impl EventQueue {
 
     /// Check if there are any pending events
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        self.active_event_priorities.is_empty()
     }
 
     /// Get the number of pending events
     pub fn len(&self) -> usize {
-        self.events.len()
+        self.active_event_priorities.len()
     }
 
     /// Get the time of the next pending event
     pub fn next_event_time(&self) -> Option<Value> {
-        self.events.peek().map(|e| e.time)
+        self.active_times.first_key_value().map(|(time, _)| time.0)
     }
 
     /// Check if there's an event at or before the given time
     pub fn has_event_at_or_before(&self, time: Value) -> bool {
-        self.events.peek().is_some_and(|e| e.time <= time)
+        self.active_times
+            .first_key_value()
+            .is_some_and(|(event_time, _)| event_time.0 <= time)
     }
 
     /// Pop all events at or before the given time
@@ -235,10 +259,11 @@ impl EventQueue {
         while let Some(event) = self.events.peek() {
             if event.time <= time {
                 if let Some(e) = self.events.pop() {
-                    self.forget_drained_event(&e);
-                    self.events_processed += 1;
-                    self.last_event_time = time;
-                    sink(e);
+                    if self.remove_active_event(&e) {
+                        self.events_processed += 1;
+                        self.last_event_time = time;
+                        sink(e);
+                    }
                 }
             } else {
                 break;
@@ -251,12 +276,17 @@ impl EventQueue {
         const EPSILON: Value = 1e-18;
         let mut events = Vec::new();
         while let Some(event) = self.events.peek() {
-            if (event.time - time).abs() < EPSILON {
+            if event.time < time - EPSILON
+                && !self.active_event_priorities.contains(&event.priority)
+            {
+                self.events.pop();
+            } else if (event.time - time).abs() < EPSILON {
                 if let Some(e) = self.events.pop() {
-                    self.forget_drained_event(&e);
-                    events.push(e);
-                    self.events_processed += 1;
-                    self.last_event_time = time;
+                    if self.remove_active_event(&e) {
+                        events.push(e);
+                        self.events_processed += 1;
+                        self.last_event_time = time;
+                    }
                 }
             } else {
                 break;
@@ -267,53 +297,121 @@ impl EventQueue {
 
     /// Cancel all events for a specific node
     pub fn cancel_node_events(&mut self, node_id: usize) {
-        self.events.retain(|event| event.node_id != node_id);
-        self.rebuild_driver_index();
+        let active_event_priorities = &self.active_event_priorities;
+        self.events.retain(|event| {
+            active_event_priorities.contains(&event.priority) && event.node_id != node_id
+        });
+        self.rebuild_indexes();
     }
 
     /// Cancel all events for a specific instance
     pub fn cancel_instance_events(&mut self, instance: &str) {
-        self.events.retain(|event| event.instance != instance);
-        self.rebuild_driver_index();
+        let active_event_priorities = &self.active_event_priorities;
+        self.events.retain(|event| {
+            active_event_priorities.contains(&event.priority) && event.instance != instance
+        });
+        self.rebuild_indexes();
     }
 
     /// Clear all pending events
     pub fn clear(&mut self) {
         self.events.clear();
-        self.latest_driver_event_times.clear();
+        self.active_event_priorities.clear();
+        self.active_times.clear();
+        self.driver_event_priorities.clear();
     }
 
     /// Get statistics
     pub fn stats(&self) -> EventQueueStats {
         EventQueueStats {
-            pending: self.events.len(),
+            pending: self.active_event_priorities.len(),
             processed: self.events_processed,
             last_event_time: self.last_event_time,
         }
     }
 
-    fn forget_drained_event(&mut self, event: &Event) {
+    fn cancel_driver_events_at_or_after(
+        &mut self,
+        driver_key: &EventDriverKey,
+        time: EventTimeKey,
+    ) -> Option<BTreeMap<EventTimeKey, Vec<u64>>> {
+        let driver_events = self.driver_event_priorities.get_mut(driver_key)?;
+        let has_later_event = driver_events
+            .last_key_value()
+            .is_some_and(|(latest_time, _)| *latest_time >= time);
+        has_later_event.then(|| driver_events.split_off(&time))
+    }
+
+    fn insert_active_event(
+        &mut self,
+        driver_key: &EventDriverKey,
+        time: EventTimeKey,
+        priority: u64,
+    ) {
+        self.active_event_priorities.insert(priority);
+        *self.active_times.entry(time).or_insert(0) += 1;
+        self.driver_event_priorities
+            .entry(driver_key.clone())
+            .or_default()
+            .entry(time)
+            .or_default()
+            .push(priority);
+    }
+
+    fn remove_active_event(&mut self, event: &Event) -> bool {
+        if !self.active_event_priorities.remove(&event.priority) {
+            return false;
+        }
+        let time = EventTimeKey(event.time);
+        self.decrement_active_time(time);
         let driver_key = event.driver_key();
-        if self
-            .latest_driver_event_times
-            .get(&driver_key)
-            .is_some_and(|latest_time| *latest_time == event.time)
-        {
-            self.latest_driver_event_times.remove(&driver_key);
+        let mut remove_driver = false;
+        if let Some(driver_events) = self.driver_event_priorities.get_mut(&driver_key) {
+            let mut remove_time = false;
+            if let Some(priorities) = driver_events.get_mut(&time) {
+                priorities.retain(|priority| *priority != event.priority);
+                remove_time = priorities.is_empty();
+            }
+            if remove_time {
+                driver_events.remove(&time);
+            }
+            remove_driver = driver_events.is_empty();
+        }
+        if remove_driver {
+            self.driver_event_priorities.remove(&driver_key);
+        }
+        true
+    }
+
+    fn decrement_active_time(&mut self, time: EventTimeKey) {
+        let mut remove_time = false;
+        if let Some(count) = self.active_times.get_mut(&time) {
+            *count = count.saturating_sub(1);
+            remove_time = *count == 0;
+        }
+        if remove_time {
+            self.active_times.remove(&time);
         }
     }
 
-    fn rebuild_driver_index(&mut self) {
-        self.latest_driver_event_times.clear();
-        for event in &self.events {
-            self.latest_driver_event_times
-                .entry(event.driver_key())
-                .and_modify(|latest_time| {
-                    if event.time > *latest_time {
-                        *latest_time = event.time;
-                    }
-                })
-                .or_insert(event.time);
+    fn compact_stale_events_if_needed(&mut self) {
+        let active_events = self.active_event_priorities.len();
+        if self.events.len() <= active_events.saturating_mul(2).saturating_add(1024) {
+            return;
+        }
+        let active_event_priorities = &self.active_event_priorities;
+        self.events
+            .retain(|event| active_event_priorities.contains(&event.priority));
+    }
+
+    fn rebuild_indexes(&mut self) {
+        self.active_event_priorities.clear();
+        self.active_times.clear();
+        self.driver_event_priorities.clear();
+        let events: Vec<_> = self.events.iter().cloned().collect();
+        for event in events {
+            let driver_key = event.driver_key();
+            self.insert_active_event(&driver_key, EventTimeKey(event.time), event.priority);
         }
     }
 }
@@ -395,7 +493,49 @@ mod tests {
     }
 
     #[test]
-    fn event_queue_driver_index_tracks_schedule_drain_cancel_and_clear() {
+    fn event_queue_exact_pop_skips_cancelled_earlier_heap_entries() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule(Event::new(
+            1.0e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::zero()),
+        ));
+        queue.schedule(Event::new(
+            3.0e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+        queue.schedule(Event::new(
+            0.5e-9,
+            1,
+            "out",
+            "a_driver",
+            EventValue::Digital(DigitalValue::unknown()),
+        ));
+
+        assert_eq!(queue.pop_events_exactly_at(0.5e-9).len(), 1);
+
+        queue.schedule(Event::new(
+            2.0e-9,
+            2,
+            "out",
+            "another_driver",
+            EventValue::Digital(DigitalValue::one()),
+        ));
+
+        let events = queue.pop_events_exactly_at(2.0e-9);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].node_id, 2);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn event_queue_active_indexes_track_schedule_drain_cancel_and_clear() {
         let mut queue = EventQueue::new();
         let driver = EventDriverKey {
             node_id: 1,
@@ -417,10 +557,12 @@ mod tests {
             "a_driver",
             EventValue::Digital(DigitalValue::one()),
         ));
-        assert_eq!(
-            queue.latest_driver_event_times.get(&driver).copied(),
-            Some(3.0e-9)
-        );
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.next_event_time(), Some(1.0e-9));
+        assert!(queue
+            .driver_event_priorities
+            .get(&driver)
+            .is_some_and(|events| events.contains_key(&EventTimeKey(3.0e-9))));
 
         queue.schedule(Event::new(
             2.0e-9,
@@ -430,20 +572,24 @@ mod tests {
             EventValue::Digital(DigitalValue::unknown()),
         ));
         assert_eq!(queue.len(), 2);
-        assert_eq!(
-            queue.latest_driver_event_times.get(&driver).copied(),
-            Some(2.0e-9)
-        );
+        assert!(queue
+            .driver_event_priorities
+            .get(&driver)
+            .is_some_and(|events| !events.contains_key(&EventTimeKey(3.0e-9))
+                && events.contains_key(&EventTimeKey(2.0e-9))));
 
         let drained = queue.pop_events_at(1.0e-9);
         assert_eq!(drained.len(), 1);
-        assert_eq!(
-            queue.latest_driver_event_times.get(&driver).copied(),
-            Some(2.0e-9)
-        );
+        assert_eq!(queue.len(), 1);
+        assert!(queue
+            .driver_event_priorities
+            .get(&driver)
+            .is_some_and(|events| events.contains_key(&EventTimeKey(2.0e-9))));
 
         queue.cancel_node_events(1);
-        assert!(queue.latest_driver_event_times.is_empty());
+        assert!(queue.active_event_priorities.is_empty());
+        assert!(queue.active_times.is_empty());
+        assert!(queue.driver_event_priorities.is_empty());
 
         queue.schedule(Event::new(
             4.0e-9,
@@ -453,7 +599,9 @@ mod tests {
             EventValue::Digital(DigitalValue::one()),
         ));
         queue.clear();
-        assert!(queue.latest_driver_event_times.is_empty());
+        assert!(queue.active_event_priorities.is_empty());
+        assert!(queue.active_times.is_empty());
+        assert!(queue.driver_event_priorities.is_empty());
     }
 
     #[test]
