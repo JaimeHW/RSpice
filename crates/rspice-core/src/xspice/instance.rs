@@ -268,6 +268,43 @@ fn port_declares_event_type(port: &PortSpec) -> bool {
     }
 }
 
+fn param_name_matches_port_load(param_name: &str, port_name: &str) -> bool {
+    const LOAD_SUFFIX: &str = "_load";
+    if param_name.len() != port_name.len() + LOAD_SUFFIX.len() {
+        return false;
+    }
+
+    let Some(prefix) = param_name.get(..port_name.len()) else {
+        return false;
+    };
+    let Some(suffix) = param_name.get(port_name.len()..) else {
+        return false;
+    };
+
+    prefix.eq_ignore_ascii_case(port_name) && suffix.eq_ignore_ascii_case(LOAD_SUFFIX)
+}
+
+fn event_load_alias_for_port(port_name: &str) -> Option<&'static str> {
+    if port_name.eq_ignore_ascii_case("in")
+        || port_name.eq_ignore_ascii_case("d")
+        || port_name.eq_ignore_ascii_case("dir")
+    {
+        Some("input_load")
+    } else if port_name.eq_ignore_ascii_case("data") || port_name.eq_ignore_ascii_case("data_in") {
+        Some("data_load")
+    } else if port_name.eq_ignore_ascii_case("j") || port_name.eq_ignore_ascii_case("k") {
+        Some("jk_load")
+    } else if port_name.eq_ignore_ascii_case("s") || port_name.eq_ignore_ascii_case("r") {
+        Some("sr_load")
+    } else if port_name.eq_ignore_ascii_case("write_en") {
+        Some("enable_load")
+    } else if port_name.eq_ignore_ascii_case("out") {
+        Some("load")
+    } else {
+        None
+    }
+}
+
 fn for_each_event_connection_node(
     connection: &PortConnection,
     mut visit: impl FnMut(usize, usize),
@@ -1170,8 +1207,7 @@ impl XspiceInstance {
             .find(|spec| spec.name.eq_ignore_ascii_case(name))
     }
 
-    fn event_load_from_param(&self, name: &str, element_index: usize) -> Option<Value> {
-        let spec = self.declared_param_spec(name)?;
+    fn event_load_from_spec(&self, spec: &ParamSpec, element_index: usize) -> Option<Value> {
         match spec.param_type {
             ParamType::Real => Some(self.context.param(&spec.name)),
             ParamType::RealVector => {
@@ -1187,22 +1223,29 @@ impl XspiceInstance {
         .filter(|value| value.is_finite())
     }
 
-    fn event_load_for_port(&self, port_name: &str, element_index: usize) -> Option<Value> {
-        let name = port_name.to_ascii_lowercase();
-        let mut candidates = vec![format!("{name}_load")];
-        match name.as_str() {
-            "in" | "d" | "dir" => candidates.push("input_load".to_string()),
-            "data" | "data_in" => candidates.push("data_load".to_string()),
-            "j" | "k" => candidates.push("jk_load".to_string()),
-            "s" | "r" => candidates.push("sr_load".to_string()),
-            "write_en" => candidates.push("enable_load".to_string()),
-            "out" => candidates.push("load".to_string()),
-            _ => {}
-        }
+    fn event_load_from_param(&self, name: &str, element_index: usize) -> Option<Value> {
+        self.declared_param_spec(name)
+            .and_then(|spec| self.event_load_from_spec(spec, element_index))
+    }
 
-        candidates
-            .into_iter()
-            .find_map(|candidate| self.event_load_from_param(&candidate, element_index))
+    fn event_load_from_port_named_param(
+        &self,
+        port_name: &str,
+        element_index: usize,
+    ) -> Option<Value> {
+        self.model
+            .parameters()
+            .iter()
+            .find(|spec| param_name_matches_port_load(&spec.name, port_name))
+            .and_then(|spec| self.event_load_from_spec(spec, element_index))
+    }
+
+    fn event_load_for_port(&self, port_name: &str, element_index: usize) -> Option<Value> {
+        self.event_load_from_port_named_param(port_name, element_index)
+            .or_else(|| {
+                event_load_alias_for_port(port_name)
+                    .and_then(|name| self.event_load_from_param(name, element_index))
+            })
     }
 
     /// Visit event-node load contributions declared by ngspice-style LOAD(port)
