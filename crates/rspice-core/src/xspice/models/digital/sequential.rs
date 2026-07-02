@@ -290,6 +290,10 @@ impl CodeModel for DFlipFlop {
         Ok(())
     }
 
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         evaluate_edge_model(ctx, dff_next_on_rising_clock)
     }
@@ -331,6 +335,10 @@ impl CodeModel for JkFlipFlop {
         Ok(())
     }
 
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         evaluate_edge_model(ctx, jkff_next_on_rising_clock)
     }
@@ -369,6 +377,10 @@ impl CodeModel for TFlipFlop {
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_int_states(EDGE_STATE_COUNT);
         Ok(())
+    }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -905,6 +917,11 @@ impl CodeModel for SrFlipFlop {
         ctx.allocate_int_states(EDGE_STATE_COUNT);
         Ok(())
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         evaluate_edge_model(ctx, srff_next_on_rising_clock)
     }
@@ -1009,6 +1026,11 @@ impl CodeModel for DLatch {
         ctx.allocate_int_states(DLATCH_STATE_COUNT);
         Ok(())
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let data = input_code(ctx.input_digital("data"));
         let enable = input_code(ctx.input_digital("enable"));
@@ -1175,6 +1197,11 @@ impl CodeModel for SrLatch {
         ctx.allocate_int_states(SRLATCH_STATE_COUNT);
         Ok(())
     }
+
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let s = input_code(ctx.input_digital("s"));
         let r = input_code(ctx.input_digital("r"));
