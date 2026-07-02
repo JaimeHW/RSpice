@@ -3317,7 +3317,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                         .is_none()
             })
             .count();
-        (history_backed_unresolved == 1).then_some(variables)
+        (history_backed_unresolved <= 1).then_some(variables)
     }
 
     fn simple_assignment_alias_variables(&self, expr: ExprId) -> Option<BTreeSet<VariableId>> {
