@@ -3377,7 +3377,19 @@ impl CodeModel for SeeGenerator {
             1
         };
 
-        let mut breakpoints = Vec::with_capacity(pulse_count * 3);
+        let breakpoint_capacity = pulse_count.checked_mul(3).ok_or_else(|| {
+            CmError::EvaluationError(format!(
+                "seegen breakpoint count for {pulse_count} pulses exceeds addressable memory"
+            ))
+        })?;
+        let mut breakpoints = Vec::new();
+        breakpoints
+            .try_reserve_exact(breakpoint_capacity)
+            .map_err(|err| {
+                CmError::EvaluationError(format!(
+                    "seegen unable to reserve storage for {breakpoint_capacity} breakpoints: {err}"
+                ))
+            })?;
         for index in 0..pulse_count {
             let start = params.tdelay + params.tperiod.max(0.0) * index as Value;
             seegen_push_pulse_breakpoints(&mut breakpoints, start, params);
