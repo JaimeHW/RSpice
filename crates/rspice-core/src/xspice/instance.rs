@@ -1026,7 +1026,16 @@ impl XspiceInstance {
                     }
                     ParamType::ComplexVector => {
                         validate_vector_param_len(spec, values.len())?;
-                        let mut complex_values = Vec::with_capacity(values.len());
+                        let mut complex_values = Vec::new();
+                        complex_values
+                            .try_reserve_exact(values.len())
+                            .map_err(|err| CmError::InvalidParameter {
+                                name: spec.name.clone(),
+                                message: format!(
+                                    "unable to reserve {} complex vector value(s): {err}",
+                                    values.len()
+                                ),
+                            })?;
                         for value in values {
                             complex_values.push(parse_complex_param(spec, value)?);
                         }
@@ -1049,7 +1058,16 @@ impl XspiceInstance {
                     }
                     ParamType::IntegerVector => {
                         validate_vector_param_len(spec, values.len())?;
-                        let mut integer_values = Vec::with_capacity(values.len());
+                        let mut integer_values = Vec::new();
+                        integer_values
+                            .try_reserve_exact(values.len())
+                            .map_err(|err| CmError::InvalidParameter {
+                                name: spec.name.clone(),
+                                message: format!(
+                                    "unable to reserve {} integer vector value(s): {err}",
+                                    values.len()
+                                ),
+                            })?;
                         for value in values {
                             validate_numeric_param(spec, *value)?;
                             integer_values.push(value.round() as i64);
