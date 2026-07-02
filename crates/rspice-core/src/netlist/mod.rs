@@ -403,6 +403,9 @@ impl Netlist {
             if let Some(command) = Self::promote_control_set_command(line) {
                 promoted.push(command);
             }
+            if let Some(command) = Self::promote_control_option_command(line) {
+                promoted.push(command);
+            }
             if let Some(command) = Self::promote_control_auto_bridge_set_command(line) {
                 promoted.push(command);
             }
@@ -500,8 +503,31 @@ impl Netlist {
             return None;
         }
 
-        let value = control_set_value(parts.next().unwrap_or(""), "digital_delay_type")?;
-        Some(format!(".options digital_delay_type={value}"))
+        let assignments = parts.next().unwrap_or("");
+        if let Some(value) = control_set_value(assignments, "digital_delay_type") {
+            return Some(format!(".options digital_delay_type={value}"));
+        }
+        if let Some(value) = control_set_value(assignments, "xtrtol") {
+            return Some(format!(".options trtol={value}"));
+        }
+        None
+    }
+
+    fn promote_control_option_command(line: &str) -> Option<String> {
+        let body = strip_control_inline_comment(line).trim();
+        if body.is_empty() || body.starts_with('*') {
+            return None;
+        }
+
+        let body = body.strip_prefix('.').unwrap_or(body);
+        let mut parts = body.splitn(2, char::is_whitespace);
+        let command = parts.next()?;
+        if !matches!(command.to_ascii_lowercase().as_str(), "option" | "options") {
+            return None;
+        }
+
+        let value = control_set_value(parts.next().unwrap_or(""), "trtol")?;
+        Some(format!(".options trtol={value}"))
     }
 
     fn promote_control_auto_bridge_set_command(line: &str) -> Option<String> {
@@ -1406,6 +1432,33 @@ mod tests {
             err.to_string().contains("DIGITAL_DELAY_TYPE"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn control_block_xtrtol_promotes_transient_tolerance_option() {
+        let set_netlist = Netlist::parse(
+            "control xspice trtol set\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             set xtrtol=2\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control set xtrtol promotes to .options trtol");
+        assert_eq!(set_netlist.options.trtol, Some(2.0));
+
+        let option_netlist = Netlist::parse(
+            "control option trtol\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             option trtol=1\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control option trtol promotes to .options trtol");
+        assert_eq!(option_netlist.options.trtol, Some(1.0));
     }
 
     #[test]
