@@ -1604,6 +1604,69 @@ impl XspiceInstance {
         M: FnMut(usize, usize, Value),
         R: FnMut(usize, Value),
     {
+        fn current_output_self_conductance(port: &PortSpec, conductance: Value) -> Value {
+            match port.default_type {
+                PortType::Current
+                | PortType::DifferentialCurrent
+                | PortType::Conductance
+                | PortType::DifferentialConductance => conductance,
+                _ => 0.0,
+            }
+        }
+
+        fn stamp_current_output<M, R>(
+            matrix_add: &mut M,
+            rhs_add: &mut R,
+            pos: usize,
+            neg: usize,
+            conductance: Value,
+            current: Value,
+        ) where
+            M: FnMut(usize, usize, Value),
+            R: FnMut(usize, Value),
+        {
+            if pos > 0 {
+                let pos_row = pos - 1;
+                matrix_add(pos_row, pos_row, conductance);
+                if neg > 0 {
+                    matrix_add(pos_row, neg - 1, -conductance);
+                }
+                rhs_add(pos_row, -current);
+            }
+            if neg > 0 {
+                let neg_row = neg - 1;
+                if pos > 0 {
+                    matrix_add(neg_row, pos - 1, -conductance);
+                }
+                matrix_add(neg_row, neg_row, conductance);
+                rhs_add(neg_row, current);
+            }
+        }
+
+        fn stamp_voltage_output<M, R>(
+            matrix_add: &mut M,
+            rhs_add: &mut R,
+            branch_row: usize,
+            pos: usize,
+            neg: usize,
+            value: Value,
+        ) where
+            M: FnMut(usize, usize, Value),
+            R: FnMut(usize, Value),
+        {
+            if pos > 0 {
+                let pos_row = pos - 1;
+                matrix_add(branch_row, pos_row, 1.0);
+                matrix_add(pos_row, branch_row, 1.0);
+            }
+            if neg > 0 {
+                let neg_row = neg - 1;
+                matrix_add(branch_row, neg_row, -1.0);
+                matrix_add(neg_row, branch_row, -1.0);
+            }
+            rhs_add(branch_row, value);
+        }
+
         let ports = &self.ports;
 
         for (i, port) in ports.iter().enumerate() {
@@ -1613,27 +1676,80 @@ impl XspiceInstance {
                 continue;
             }
 
-            // Get output value and partial derivative
-            let output_value = self.context.output(&port.name);
+            let Some((conductance, value)) = self.get_analog_contribution(i) else {
+                continue;
+            };
 
-            match port.default_type {
-                PortType::Voltage => {
-                    // Voltage source output - stamps like a dependent voltage source
-                    if let PortConnection::Analog(node) = &self.connections[i]
-                        && *node > 0
+            match (port.default_type, &self.connections[i]) {
+                (
+                    PortType::Voltage | PortType::DifferentialVoltage,
+                    PortConnection::Analog(node),
+                ) => {
+                    if let Some(branch_ordinal) = self.branch_ordinal_at(i)
+                        && self.solution_num_nodes > 0
                     {
-                        // Would need branch equation - for now, treat as current source
-                        rhs_add(*node - 1, output_value);
+                        let branch_row = self.solution_num_nodes + branch_ordinal - 1;
+                        stamp_voltage_output(
+                            &mut matrix_add,
+                            &mut rhs_add,
+                            branch_row,
+                            *node,
+                            0,
+                            value,
+                        );
                     }
                 }
-                PortType::Current | PortType::DifferentialCurrent => {
-                    // Current source output
-                    if let PortConnection::Analog(node) = &self.connections[i]
-                        && *node > 0
+                (
+                    PortType::Voltage | PortType::DifferentialVoltage,
+                    PortConnection::Differential(pos, neg),
+                )
+                | (
+                    PortType::Voltage | PortType::DifferentialVoltage,
+                    PortConnection::Hybrid { pos, neg, .. },
+                ) => {
+                    if let Some(branch_ordinal) = self.branch_ordinal_at(i)
+                        && self.solution_num_nodes > 0
                     {
-                        rhs_add(*node - 1, output_value);
+                        let branch_row = self.solution_num_nodes + branch_ordinal - 1;
+                        stamp_voltage_output(
+                            &mut matrix_add,
+                            &mut rhs_add,
+                            branch_row,
+                            *pos,
+                            *neg,
+                            value,
+                        );
                     }
                 }
+                (
+                    PortType::Current
+                    | PortType::DifferentialCurrent
+                    | PortType::Conductance
+                    | PortType::DifferentialConductance,
+                    PortConnection::Analog(node),
+                ) => stamp_current_output(
+                    &mut matrix_add,
+                    &mut rhs_add,
+                    *node,
+                    0,
+                    current_output_self_conductance(port, conductance),
+                    value,
+                ),
+                (
+                    PortType::Current
+                    | PortType::DifferentialCurrent
+                    | PortType::Conductance
+                    | PortType::DifferentialConductance,
+                    PortConnection::Differential(pos, neg)
+                    | PortConnection::CurrentOutput { pos, neg },
+                ) => stamp_current_output(
+                    &mut matrix_add,
+                    &mut rhs_add,
+                    *pos,
+                    *neg,
+                    current_output_self_conductance(port, conductance),
+                    value,
+                ),
                 _ => {}
             }
         }
@@ -2878,6 +2994,70 @@ mod tests {
                 .expect("vector contributions should still be available"),
             vec![(0.25, 1.5), (0.5, 2.5)]
         );
+    }
+
+    #[test]
+    fn standalone_stamp_uses_current_output_sign_convention() {
+        let model = model_with_ports(vec![PortSpec::output("out", PortType::Current)]);
+        let mut instance = XspiceInstance::new(
+            "Acurrent",
+            Arc::new(model),
+            vec![PortConnection::Analog(2)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("current output should construct");
+        instance.context.set_output_with_partial("out", 5.0, 0.25);
+
+        let mut stamps = Vec::new();
+        let mut rhs = Vec::new();
+        instance.stamp(
+            |row, col, value| stamps.push((row, col, value)),
+            |row, value| rhs.push((row, value)),
+        );
+
+        assert_eq!(stamps, vec![(1, 1, 0.25)]);
+        assert_eq!(rhs, vec![(1, -5.0)]);
+    }
+
+    #[test]
+    fn standalone_stamp_uses_assigned_voltage_output_branch() {
+        let model = model_with_ports(vec![PortSpec::output("out", PortType::Voltage)]);
+        let mut instance = XspiceInstance::new(
+            "Avoltage",
+            Arc::new(model),
+            vec![PortConnection::Analog(2)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("voltage output should construct");
+        instance
+            .set_output_branch(0, 3)
+            .expect("voltage output branch assignment");
+        instance.update_inputs(
+            &[0.0, 0.0, 0.0, 0.0],
+            4,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &[],
+        );
+        instance.context.set_output("out", 7.0);
+
+        let mut stamps = Vec::new();
+        let mut rhs = Vec::new();
+        instance.stamp(
+            |row, col, value| stamps.push((row, col, value)),
+            |row, value| rhs.push((row, value)),
+        );
+
+        assert_eq!(stamps, vec![(6, 1, 1.0), (1, 6, 1.0)]);
+        assert_eq!(rhs, vec![(6, 7.0)]);
     }
 
     #[test]
