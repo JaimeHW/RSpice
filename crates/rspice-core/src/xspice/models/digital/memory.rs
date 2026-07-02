@@ -1,7 +1,7 @@
 use super::*;
 use crate::Value;
 use crate::xspice::{CmError, EvaluationPhase};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 //=============================================================================
 // Memory
@@ -25,7 +25,7 @@ const D_RAM_CODE_MASK: u64 = 0b11;
 const D_RAM_SCRATCH_STATE_RESOURCE: &str = "d_ram.scratch_state";
 const D_RAM_SHAPE_RESOURCE: &str = "d_ram.shape";
 
-type DRamScratchStateResource = Mutex<Vec<i64>>;
+type DRamScratchStateResource = Vec<i64>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DMemoryShapeSignature {
@@ -580,10 +580,7 @@ impl CodeModel for DigitalRam {
         let shape = d_ram_cached_shape(ctx)?;
         ctx.allocate_int_states(d_ram_state_len(shape));
         ctx.set_int_state(D_RAM_INITIALIZED, 0);
-        ctx.set_resource(
-            D_RAM_SCRATCH_STATE_RESOURCE,
-            Arc::new(Mutex::new(Vec::<i64>::new())),
-        );
+        ctx.set_resource(D_RAM_SCRATCH_STATE_RESOURCE, Arc::new(Vec::<i64>::new()));
         Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -596,14 +593,14 @@ impl CodeModel for DigitalRam {
         let read_delay = d_ram_read_delay(ctx);
 
         if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
-            let scratch = ctx
-                .resource::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
-                .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
-            let mut scratch = scratch
-                .lock()
-                .map_err(|_| d_ram_error("scratch state lock is poisoned"))?;
+            let mut scratch = {
+                let scratch = ctx
+                    .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+                    .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
+                std::mem::take(scratch)
+            };
             d_ram_fill_state_snapshot(ctx, shape, &mut scratch);
-            return d_ram_evaluate_with_state(
+            let result = d_ram_evaluate_with_state(
                 ctx,
                 shape,
                 write_en,
@@ -614,6 +611,11 @@ impl CodeModel for DigitalRam {
                 read_delay,
                 Some(scratch.as_mut_slice()),
             );
+            let scratch_slot = ctx
+                .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+                .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
+            *scratch_slot = scratch;
+            return result;
         }
 
         d_ram_evaluate_with_state(
@@ -1045,16 +1047,17 @@ mod tests {
         let scratch = ctx
             .resource::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
             .expect("d_ram scratch state is installed");
-        let guard = scratch.lock().expect("d_ram scratch state locks");
-        assert_eq!(guard.len(), d_ram_state_len(shape));
-        let first_ptr = guard.as_ptr();
-        let first_capacity = guard.capacity();
-        drop(guard);
+        assert_eq!(scratch.len(), d_ram_state_len(shape));
+        let first_ptr = scratch.as_ptr();
+        let first_capacity = scratch.capacity();
+        drop(scratch);
 
         evaluate_ram_with_phase(&mut ctx, 2.0e-9, EvaluationPhase::RollbackableProbe);
-        let guard = scratch.lock().expect("d_ram scratch state locks again");
-        assert_eq!(guard.as_ptr(), first_ptr);
-        assert_eq!(guard.capacity(), first_capacity);
+        let scratch = ctx
+            .resource::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+            .expect("d_ram scratch state remains installed");
+        assert_eq!(scratch.as_ptr(), first_ptr);
+        assert_eq!(scratch.capacity(), first_capacity);
         assert_eq!(
             d_ram_memory_state(&ctx, None, shape, 0, 0),
             1,
