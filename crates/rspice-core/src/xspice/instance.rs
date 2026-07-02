@@ -79,7 +79,7 @@ fn validate_vector_param_len(spec: &ParamSpec, len: usize) -> CmResult<()> {
 }
 
 fn validate_vector_default_len(spec: &ParamSpec, len: usize) -> CmResult<()> {
-    if len == 0 && !spec.required {
+    if !spec.required {
         return Ok(());
     }
     validate_vector_param_len(spec, len)

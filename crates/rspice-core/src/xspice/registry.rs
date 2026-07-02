@@ -302,6 +302,19 @@ impl CodeModelRegistry {
 
         // Memory
         self.register(Arc::new(super::models::DigitalRam));
+
+        self.apply_builtin_metadata_overlays();
+    }
+
+    fn apply_builtin_metadata_overlays(&mut self) {
+        let names: Vec<String> = self.models.keys().cloned().collect();
+        for name in names {
+            let Some(model) = self.models.remove(&name) else {
+                continue;
+            };
+            let model = super::metadata::with_builtin_metadata(model);
+            self.models.insert(canonical_model_key(model.name()), model);
+        }
     }
 
     /// Get models by category
