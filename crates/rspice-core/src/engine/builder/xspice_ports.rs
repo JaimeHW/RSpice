@@ -241,6 +241,10 @@ pub(in crate::engine::builder) fn coerce_xspice_connections(
 
     for (spec_idx, port_spec) in port_specs.iter().enumerate() {
         if cursor >= parsed_ports.len() {
+            if port_spec.null_allowed {
+                connections.push(crate::xspice::PortConnection::Null);
+                continue;
+            }
             return Err(SimulationError::Circuit(format!(
                 "XSPICE element '{}' provides too few connections ({}) for model '{}' ports ({})",
                 element_name,
@@ -259,15 +263,18 @@ pub(in crate::engine::builder) fn coerce_xspice_connections(
         }
 
         if port_spec.is_vector && !parsed_ports[cursor].is_vector_connection() {
-            let remaining_specs = port_specs.len() - spec_idx - 1;
+            let remaining_required_specs = port_specs[spec_idx + 1..]
+                .iter()
+                .filter(|spec| !spec.null_allowed)
+                .count();
             let remaining_ports = parsed_ports.len() - cursor;
-            if remaining_ports <= remaining_specs {
+            if remaining_ports <= remaining_required_specs {
                 return Err(SimulationError::Circuit(format!(
                     "XSPICE element '{}' vector port '{}' has no connections",
                     element_name, port_spec.name
                 )));
             }
-            let take = remaining_ports - remaining_specs;
+            let take = remaining_ports - remaining_required_specs;
             connections.push(coerce_xspice_vector_connection(
                 circuit,
                 port_spec,
@@ -769,6 +776,63 @@ mod tests {
 
         assert_eq!(connections.len(), 1);
         assert!(matches!(connections[0], PortConnection::Null));
+    }
+
+    #[test]
+    fn trailing_nullable_vector_ports_may_be_omitted() {
+        let ports = vec![
+            PortSpec::vector_input("d_in", PortType::Digital)
+                .with_vector_min_len(0)
+                .nullable(),
+            PortSpec::vector_output("d_out", PortType::Digital)
+                .with_vector_min_len(0)
+                .nullable(),
+            PortSpec::vector_input("d_inout", PortType::Digital)
+                .with_vector_min_len(0)
+                .nullable(),
+        ];
+
+        let mut vector_circuit = CircuitData::new();
+        let vector_connections = coerce_xspice_connections(
+            &mut vector_circuit,
+            &ports,
+            &[
+                XspicePort::DigitalVector(vec!["A".to_string(), "B".to_string()]),
+                XspicePort::DigitalVector(vec!["Y".to_string(), "QB".to_string()]),
+            ],
+            "A1",
+            "d_cosim",
+        )
+        .expect("omitted trailing nullable vector should default to null");
+
+        assert_eq!(vector_connections.len(), 3);
+        assert!(matches!(
+            vector_connections[0],
+            PortConnection::DigitalVector(_)
+        ));
+        assert!(matches!(
+            vector_connections[1],
+            PortConnection::DigitalVector(_)
+        ));
+        assert!(matches!(vector_connections[2], PortConnection::Null));
+
+        let mut scalar_circuit = CircuitData::new();
+        let scalar_connections = coerce_xspice_connections(
+            &mut scalar_circuit,
+            &ports,
+            &[XspicePort::Null, XspicePort::Digital("OUT".to_string())],
+            "A2",
+            "d_cosim",
+        )
+        .expect("scalar output vector should not reserve a token for omitted nullable inout");
+
+        assert_eq!(scalar_connections.len(), 3);
+        assert!(matches!(scalar_connections[0], PortConnection::Null));
+        assert!(matches!(
+            scalar_connections[1],
+            PortConnection::DigitalVector(_)
+        ));
+        assert!(matches!(scalar_connections[2], PortConnection::Null));
     }
 
     #[test]

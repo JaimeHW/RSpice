@@ -3,6 +3,7 @@
 use crate::cli::{CheckArgs, CliError};
 use rspice_core::{Engine, Netlist};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Validation result
 #[derive(Debug, Default)]
@@ -107,6 +108,7 @@ fn check_xspice_build(netlist: &Netlist, result: &mut ValidationResult) {
         return;
     }
 
+    let _external_guard = XspiceCheckExternalRuntimeGuard::install();
     if let Err(error) = Engine::default().build_circuit(netlist) {
         result.errors.push(ValidationIssue {
             message: format!("XSPICE build validation failed: {error}"),
@@ -132,6 +134,110 @@ fn netlist_contains_xspice(netlist: &Netlist) -> bool {
             .subcircuits
             .iter()
             .any(|subckt| elements_contain_xspice(&subckt.elements))
+}
+
+struct XspiceCheckExternalRuntimeGuard {
+    previous_process: Option<Arc<dyn rspice_core::xspice::DigitalProcessRuntimeFactory>>,
+    previous_cosim: Option<Arc<dyn rspice_core::xspice::DigitalCosimRuntimeFactory>>,
+}
+
+impl XspiceCheckExternalRuntimeGuard {
+    fn install() -> Self {
+        let previous_process = rspice_core::xspice::set_digital_process_runtime_factory(Some(
+            Arc::new(CheckDigitalProcessFactory),
+        ));
+        let previous_cosim = rspice_core::xspice::set_digital_cosim_runtime_factory(Some(
+            Arc::new(CheckDigitalCosimFactory),
+        ));
+        Self {
+            previous_process,
+            previous_cosim,
+        }
+    }
+}
+
+impl Drop for XspiceCheckExternalRuntimeGuard {
+    fn drop(&mut self) {
+        let previous_process = self.previous_process.take();
+        let previous_cosim = self.previous_cosim.take();
+        let _ = rspice_core::xspice::set_digital_process_runtime_factory(previous_process);
+        let _ = rspice_core::xspice::set_digital_cosim_runtime_factory(previous_cosim);
+    }
+}
+
+struct CheckDigitalProcessFactory;
+
+impl rspice_core::xspice::DigitalProcessRuntimeFactory for CheckDigitalProcessFactory {
+    fn start(
+        &self,
+        _spec: &rspice_core::xspice::DigitalProcessSpec,
+    ) -> rspice_core::xspice::CmResult<Box<dyn rspice_core::xspice::DigitalProcessRuntime>> {
+        Ok(Box::new(CheckDigitalProcessRuntime))
+    }
+}
+
+struct CheckDigitalProcessRuntime;
+
+impl rspice_core::xspice::DigitalProcessRuntime for CheckDigitalProcessRuntime {
+    fn exchange(
+        &mut self,
+        _signed_time: rspice_core::Value,
+        _input_bytes: &[u8],
+        output_bytes: &mut [u8],
+    ) -> rspice_core::xspice::CmResult<()> {
+        output_bytes.fill(0);
+        Ok(())
+    }
+}
+
+struct CheckDigitalCosimFactory;
+
+impl rspice_core::xspice::DigitalCosimRuntimeFactory for CheckDigitalCosimFactory {
+    fn start(
+        &self,
+        spec: &rspice_core::xspice::DigitalCosimSpec,
+    ) -> rspice_core::xspice::CmResult<Box<dyn rspice_core::xspice::DigitalCosimRuntime>> {
+        Ok(Box::new(CheckDigitalCosimRuntime {
+            output_count: spec.output_count,
+            inout_count: spec.inout_count,
+        }))
+    }
+}
+
+struct CheckDigitalCosimRuntime {
+    output_count: usize,
+    inout_count: usize,
+}
+
+impl CheckDigitalCosimRuntime {
+    fn step_result(&self, time: rspice_core::Value) -> rspice_core::xspice::DigitalCosimStep {
+        rspice_core::xspice::DigitalCosimStep {
+            vtime: time,
+            outputs: vec![rspice_core::xspice::DigitalValue::default(); self.output_count],
+            inouts: vec![rspice_core::xspice::DigitalValue::default(); self.inout_count],
+        }
+    }
+}
+
+impl rspice_core::xspice::DigitalCosimRuntime for CheckDigitalCosimRuntime {
+    fn initialize(
+        &mut self,
+        time: rspice_core::Value,
+        _inputs: &[rspice_core::xspice::DigitalValue],
+        _inouts: &[rspice_core::xspice::DigitalValue],
+    ) -> rspice_core::xspice::CmResult<rspice_core::xspice::DigitalCosimStep> {
+        Ok(self.step_result(time))
+    }
+
+    fn step(
+        &mut self,
+        time: rspice_core::Value,
+        _inputs: &[rspice_core::xspice::DigitalValue],
+        _inouts: &[rspice_core::xspice::DigitalValue],
+        _events: &[rspice_core::xspice::DigitalCosimInputEvent],
+    ) -> rspice_core::xspice::CmResult<rspice_core::xspice::DigitalCosimStep> {
+        Ok(self.step_result(time))
+    }
 }
 
 /// Detect circuit topologies that make the MNA matrix singular:

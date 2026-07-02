@@ -281,6 +281,31 @@ fn check_rejects_xspice_port_type_mismatch() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn check_validates_xspice_without_launching_external_runtimes() {
+    let dir = test_dir("xspice_external_check");
+    let deck = dir.join("xspice_external_check.sp");
+    std::fs::write(
+        &deck,
+        "* d_cosim static check\n\
+         A1 [din] [dout] co\n\
+         .model co d_cosim simulation=\"./missing_cosim_runtime\"\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice(&["--quiet", "check", deck.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "static check must not launch d_cosim runtime; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A config value explicitly set to the built-in default must still
 /// override a lower layer (the old merge compared against defaults and
 /// could not).
