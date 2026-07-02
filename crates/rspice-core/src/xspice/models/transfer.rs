@@ -9,7 +9,7 @@ use crate::{
 };
 use std::f64::consts::PI;
 use std::sync::{
-    Arc, Mutex, OnceLock,
+    Arc, OnceLock,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -97,7 +97,7 @@ struct SXferTransientSystemResource {
     system: CmResult<Arc<SXferTransientSystem>>,
 }
 
-type SXferTransientScratchResource = Mutex<Vec<Value>>;
+type SXferTransientScratchResource = Vec<Value>;
 
 fn transfer_ports() -> &'static [PortSpec] {
     static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
@@ -1031,15 +1031,39 @@ fn ensure_s_xfer_transient_scratch(ctx: &mut CmContext) {
     {
         ctx.set_resource(
             SXFER_TRANSIENT_SCRATCH_RESOURCE,
-            Arc::new(Mutex::new(Vec::<Value>::new())),
+            Arc::new(Vec::<Value>::new()),
         );
     }
 }
 
-fn s_xfer_transient_scratch(ctx: &mut CmContext) -> Arc<SXferTransientScratchResource> {
+fn with_s_xfer_transient_scratch<R>(
+    ctx: &mut CmContext,
+    f: impl FnOnce(&mut CmContext, &mut Vec<Value>) -> CmResult<R>,
+) -> CmResult<R> {
     ensure_s_xfer_transient_scratch(ctx);
-    ctx.resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
-        .expect("s_xfer transient scratch resource was just installed")
+    let mut scratch = {
+        let scratch = ctx
+            .resource_mut::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+            .ok_or_else(|| {
+                s_xfer_error("transient scratch is not initialized or is not uniquely owned")
+            })?;
+        std::mem::take(scratch)
+    };
+    let result = f(ctx, &mut scratch);
+    let restore = ctx
+        .resource_mut::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+        .ok_or_else(|| {
+            s_xfer_error("transient scratch is not initialized or is not uniquely owned")
+        })
+        .map(|slot| {
+            *slot = scratch;
+        });
+
+    match (result, restore) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(err), Ok(())) => Err(err),
+        (_, Err(err)) => Err(err),
+    }
 }
 
 fn s_xfer_input_partial_from_system(
@@ -1122,33 +1146,31 @@ fn s_xfer_transient_eval(
     }
 
     let system = s_xfer_transient_system_for_context(ctx, coefficients)?;
-    let scratch = s_xfer_transient_scratch(ctx);
-    let mut state = scratch
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    state.resize(order, 0.0);
-    for index in 0..order {
-        state[index] = ctx.state_prev(index);
-    }
-    state[order - 1] += dt * u;
-    solve_factorized_system_in_place(&system.factorization, &mut state).ok_or_else(|| {
-        CmError::EvaluationError("s_xfer transient state solve is singular".to_string())
-    })?;
-
-    let output = system
-        .remainder
-        .iter()
-        .zip(state.iter())
-        .map(|(coefficient, value)| coefficient * value)
-        .sum::<Value>()
-        + system.feedthrough * u;
-    let partial = s_xfer_input_partial_from_system(coefficients.as_ref(), system.as_ref());
-    if transfer_commits_state(ctx) {
-        for (index, value) in state.iter().copied().enumerate() {
-            ctx.set_state(index, value);
+    with_s_xfer_transient_scratch(ctx, |ctx, state| {
+        state.resize(order, 0.0);
+        for index in 0..order {
+            state[index] = ctx.state_prev(index);
         }
-    }
-    Ok((output, partial))
+        state[order - 1] += dt * u;
+        solve_factorized_system_in_place(&system.factorization, state).ok_or_else(|| {
+            CmError::EvaluationError("s_xfer transient state solve is singular".to_string())
+        })?;
+
+        let output = system
+            .remainder
+            .iter()
+            .zip(state.iter())
+            .map(|(coefficient, value)| coefficient * value)
+            .sum::<Value>()
+            + system.feedthrough * u;
+        let partial = s_xfer_input_partial_from_system(coefficients.as_ref(), system.as_ref());
+        if transfer_commits_state(ctx) {
+            for (index, value) in state.iter().copied().enumerate() {
+                ctx.set_state(index, value);
+            }
+        }
+        Ok((output, partial))
+    })
 }
 
 fn transfer_commits_state(ctx: &CmContext) -> bool {
@@ -1646,13 +1668,10 @@ mod tests {
     fn s_xfer_transient_state_scratch_overwrites_and_reuses_buffer() {
         let mut ctx = first_order_lowpass_context();
         SXfer.init(&mut ctx).expect("s_xfer initializes");
-        let scratch = ctx
-            .resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
-            .expect("s_xfer installs transient scratch for dynamic systems");
         {
-            let mut state = scratch
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let state = ctx
+                .resource_mut::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+                .expect("s_xfer installs transient scratch for dynamic systems");
             state.resize(16, Value::NAN);
         }
 
@@ -1660,20 +1679,23 @@ mod tests {
         assert!(ctx.output("out").is_finite());
         assert!(ctx.state(0).is_finite());
 
+        let scratch = ctx
+            .resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+            .expect("s_xfer transient scratch remains installed");
         let (state_ptr, state_capacity) = {
-            let state = scratch
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let state = scratch.as_ref();
             assert_eq!(state.len(), 1);
             assert!(state[0].is_finite());
             (state.as_ptr(), state.capacity())
         };
+        drop(scratch);
 
         ctx.set_input_analog("in", 0.5);
         SXfer.evaluate(&mut ctx).expect("s_xfer reuses scratch");
-        let state = scratch
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let scratch = ctx
+            .resource::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+            .expect("s_xfer transient scratch remains installed");
+        let state = scratch.as_ref();
         assert_eq!(state.as_ptr(), state_ptr);
         assert_eq!(state.capacity(), state_capacity);
         assert_eq!(state.len(), 1);
