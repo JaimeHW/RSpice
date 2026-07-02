@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 pub struct DigitalCosim;
 
 type DigitalCosimRuntimeResource = Mutex<Box<dyn DigitalCosimRuntime>>;
-type DigitalCosimInputScratchResource = Mutex<DigitalCosimInputScratch>;
+type DigitalCosimInputScratchResource = DigitalCosimInputScratch;
 
 const RESOURCE_RUNTIME: &str = "d_cosim.runtime";
 const RESOURCE_INPUT_SCRATCH: &str = "d_cosim.input_scratch";
@@ -37,6 +37,33 @@ struct DigitalCosimInputScratch {
     inouts: Vec<DigitalValue>,
     input_events: Vec<DigitalCosimInputEvent>,
     results: Vec<DigitalCosimStep>,
+}
+
+fn with_input_scratch<R>(
+    ctx: &mut CmContext,
+    f: impl FnOnce(&mut CmContext, &mut DigitalCosimInputScratch) -> CmResult<R>,
+) -> CmResult<R> {
+    let mut scratch = {
+        let scratch = ctx
+            .resource_mut::<DigitalCosimInputScratchResource>(RESOURCE_INPUT_SCRATCH)
+            .ok_or_else(|| {
+                d_cosim_error("input scratch is not initialized or is not uniquely owned")
+            })?;
+        std::mem::take(scratch)
+    };
+    let result = f(ctx, &mut scratch);
+    let restore = ctx
+        .resource_mut::<DigitalCosimInputScratchResource>(RESOURCE_INPUT_SCRATCH)
+        .ok_or_else(|| d_cosim_error("input scratch is not initialized or is not uniquely owned"))
+        .map(|slot| {
+            *slot = scratch;
+        });
+
+    match (result, restore) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(err), Ok(())) => Err(err),
+        (_, Err(err)) => Err(err),
+    }
 }
 
 fn official_cosim_delay(ctx: &CmContext) -> Value {
@@ -344,7 +371,7 @@ impl CodeModel for DigitalCosim {
         ctx.set_resource(RESOURCE_RUNTIME, runtime);
         ctx.set_resource(
             RESOURCE_INPUT_SCRATCH,
-            Arc::new(Mutex::new(DigitalCosimInputScratch::default())),
+            Arc::new(DigitalCosimInputScratch::default()),
         );
         set_initial_outputs(ctx, official_cosim_delay(ctx));
         Ok(())
@@ -357,72 +384,68 @@ impl CodeModel for DigitalCosim {
 
         let input_width = ctx.port_width("d_in");
         let inout_width = ctx.port_width("d_inout");
-        let input_scratch = ctx
-            .resource::<DigitalCosimInputScratchResource>(RESOURCE_INPUT_SCRATCH)
-            .ok_or_else(|| d_cosim_error("input scratch is not initialized"))?;
-        let mut input_scratch = input_scratch
-            .lock()
-            .map_err(|_| d_cosim_error("input scratch lock is poisoned"))?;
-        let DigitalCosimInputScratch {
-            inputs,
-            inouts,
-            input_events,
-            results,
-        } = &mut *input_scratch;
-        fill_sized_digital_vector(ctx, "d_in", input_width, inputs);
-        fill_sized_digital_vector(ctx, "d_inout", inout_width, inouts);
+        with_input_scratch(ctx, |ctx, input_scratch| {
+            let DigitalCosimInputScratch {
+                inputs,
+                inouts,
+                input_events,
+                results,
+            } = input_scratch;
+            fill_sized_digital_vector(ctx, "d_in", input_width, inputs);
+            fill_sized_digital_vector(ctx, "d_inout", inout_width, inouts);
 
-        let runtime = ctx
-            .resource::<DigitalCosimRuntimeResource>(RESOURCE_RUNTIME)
-            .ok_or_else(|| d_cosim_error("runtime is not initialized"))?;
-        let input_event_limit = {
-            let runtime = runtime
+            let runtime = ctx
+                .resource::<DigitalCosimRuntimeResource>(RESOURCE_RUNTIME)
+                .ok_or_else(|| d_cosim_error("runtime is not initialized"))?;
+            let input_event_limit = {
+                let runtime = runtime
+                    .lock()
+                    .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
+                runtime.input_event_limit()
+            };
+            collect_input_events(ctx, inputs, inouts, input_event_limit, input_events);
+
+            let mut runtime = runtime
                 .lock()
                 .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
-            runtime.input_event_limit()
-        };
-        collect_input_events(ctx, inputs, inouts, input_event_limit, input_events);
 
-        let mut runtime = runtime
-            .lock()
-            .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
-
-        results.clear();
-        if ctx.time == 0.0 {
-            if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) != COSIM_NOT_INITIALIZED {
-                return Ok(());
+            results.clear();
+            if ctx.time == 0.0 {
+                if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) != COSIM_NOT_INITIALIZED {
+                    return Ok(());
+                }
+                ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_INPUTS_INITIALIZED);
+                for index in 0..(input_width + inout_width) {
+                    ctx.set_state(index, 0.0);
+                }
+                for (index, value) in inputs.iter().copied().enumerate() {
+                    ctx.set_int_state(STATE_PREV_INPUT_START + index, digital_value_code(value));
+                }
+                for (index, value) in inouts.iter().copied().enumerate() {
+                    ctx.set_int_state(
+                        STATE_PREV_INPUT_START + input_width + index,
+                        digital_value_code(value),
+                    );
+                }
+                results.push(runtime.initialize(ctx.time, inputs, inouts)?);
+            } else {
+                if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) == COSIM_INPUTS_INITIALIZED {
+                    results.push(runtime.startup_step(0.0)?);
+                    ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_STARTUP_STEP_DONE);
+                }
+                results.push(runtime.step(ctx.time, inputs, inouts, input_events)?);
             }
-            ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_INPUTS_INITIALIZED);
-            for index in 0..(input_width + inout_width) {
-                ctx.set_state(index, 0.0);
-            }
-            for (index, value) in inputs.iter().copied().enumerate() {
-                ctx.set_int_state(STATE_PREV_INPUT_START + index, digital_value_code(value));
-            }
-            for (index, value) in inouts.iter().copied().enumerate() {
+            drop(runtime);
+            for event in input_events.iter() {
+                ctx.set_state(event.index, event.time);
                 ctx.set_int_state(
-                    STATE_PREV_INPUT_START + input_width + index,
-                    digital_value_code(value),
+                    STATE_PREV_INPUT_START + event.index,
+                    digital_value_code(event.value),
                 );
             }
-            results.push(runtime.initialize(ctx.time, inputs, inouts)?);
-        } else {
-            if ctx.int_state(STATE_TIME_ZERO_INITIALIZED) == COSIM_INPUTS_INITIALIZED {
-                results.push(runtime.startup_step(0.0)?);
-                ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_STARTUP_STEP_DONE);
-            }
-            results.push(runtime.step(ctx.time, inputs, inouts, input_events)?);
-        }
-        drop(runtime);
-        for event in input_events.iter() {
-            ctx.set_state(event.index, event.time);
-            ctx.set_int_state(
-                STATE_PREV_INPUT_START + event.index,
-                digital_value_code(event.value),
-            );
-        }
-        apply_cosim_steps(ctx, results)?;
-        Ok(())
+            apply_cosim_steps(ctx, results)?;
+            Ok(())
+        })
     }
 }
 

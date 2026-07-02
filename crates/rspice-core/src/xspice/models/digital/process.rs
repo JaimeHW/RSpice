@@ -1,5 +1,5 @@
 use crate::xspice::external::{
-    start_digital_process_runtime, DigitalProcessRuntime, DigitalProcessSpec,
+    DigitalProcessRuntime, DigitalProcessSpec, start_digital_process_runtime,
 };
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, DigitalState, DigitalStrength, DigitalValue,
@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 pub struct DigitalProcess;
 
 type DigitalProcessRuntimeResource = Mutex<Box<dyn DigitalProcessRuntime>>;
-type DigitalProcessIoScratchResource = Mutex<DigitalProcessIoScratch>;
+type DigitalProcessIoScratchResource = DigitalProcessIoScratch;
 
 const RESOURCE_RUNTIME: &str = "d_process.runtime";
 const RESOURCE_IO_SCRATCH: &str = "d_process.io_scratch";
@@ -34,6 +34,33 @@ fn d_process_error(message: impl Into<String>) -> CmError {
 struct DigitalProcessIoScratch {
     input_bytes: Vec<u8>,
     output_bytes: Vec<u8>,
+}
+
+fn with_io_scratch<R>(
+    ctx: &mut CmContext,
+    f: impl FnOnce(&mut CmContext, &mut DigitalProcessIoScratch) -> CmResult<R>,
+) -> CmResult<R> {
+    let mut scratch = {
+        let scratch = ctx
+            .resource_mut::<DigitalProcessIoScratchResource>(RESOURCE_IO_SCRATCH)
+            .ok_or_else(|| {
+                d_process_error("I/O scratch is not initialized or is not uniquely owned")
+            })?;
+        std::mem::take(scratch)
+    };
+    let result = f(ctx, &mut scratch);
+    let restore = ctx
+        .resource_mut::<DigitalProcessIoScratchResource>(RESOURCE_IO_SCRATCH)
+        .ok_or_else(|| d_process_error("I/O scratch is not initialized or is not uniquely owned"))
+        .map(|slot| {
+            *slot = scratch;
+        });
+
+    match (result, restore) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(err), Ok(())) => Err(err),
+        (_, Err(err)) => Err(err),
+    }
 }
 
 fn packed_byte_len(bit_count: usize) -> usize {
@@ -223,7 +250,7 @@ impl CodeModel for DigitalProcess {
         ctx.set_resource(RESOURCE_RUNTIME, runtime);
         ctx.set_resource(
             RESOURCE_IO_SCRATCH,
-            Arc::new(Mutex::new(DigitalProcessIoScratch::default())),
+            Arc::new(DigitalProcessIoScratch::default()),
         );
         set_unknown_outputs(ctx, output_width);
         Ok(())
@@ -257,61 +284,55 @@ impl CodeModel for DigitalProcess {
         let prev_clk_code = ctx.int_state(STATE_PREV_CLK);
 
         if prev_clk_code != STATE_ONE && clk_code == STATE_ONE {
-            let scratch = ctx
-                .resource::<DigitalProcessIoScratchResource>(RESOURCE_IO_SCRATCH)
-                .ok_or_else(|| d_process_error("I/O scratch is not initialized"))?;
-            let mut scratch = scratch
-                .lock()
-                .map_err(|_| d_process_error("I/O scratch lock is poisoned"))?;
-            pack_input_bits(ctx, input_width, &mut scratch.input_bytes);
-            resize_zeroed(&mut scratch.output_bytes, packed_byte_len(output_width));
-            let signed_time = if reset_code == STATE_ONE {
-                -ctx.time
-            } else {
-                ctx.time
-            };
+            with_io_scratch(ctx, |ctx, scratch| {
+                pack_input_bits(ctx, input_width, &mut scratch.input_bytes);
+                resize_zeroed(&mut scratch.output_bytes, packed_byte_len(output_width));
+                let signed_time = if reset_code == STATE_ONE {
+                    -ctx.time
+                } else {
+                    ctx.time
+                };
 
-            let exchange_ok = {
-                let runtime = ctx
-                    .resource::<DigitalProcessRuntimeResource>(RESOURCE_RUNTIME)
-                    .ok_or_else(|| d_process_error("runtime is not initialized"))?;
-                let mut runtime = runtime
-                    .lock()
-                    .map_err(|_| d_process_error("runtime lock is poisoned"))?;
-                let DigitalProcessIoScratch {
-                    input_bytes,
-                    output_bytes,
-                } = &mut *scratch;
-                match runtime.exchange(signed_time, input_bytes, output_bytes) {
-                    Ok(()) => true,
-                    Err(err) => {
-                        log::warn!(
-                            "d_process external exchange failed at {signed_time:.16e}; preserving current outputs like ngspice: {err}"
-                        );
-                        false
+                let exchange_ok = {
+                    let runtime = ctx
+                        .resource::<DigitalProcessRuntimeResource>(RESOURCE_RUNTIME)
+                        .ok_or_else(|| d_process_error("runtime is not initialized"))?;
+                    let mut runtime = runtime
+                        .lock()
+                        .map_err(|_| d_process_error("runtime lock is poisoned"))?;
+                    let DigitalProcessIoScratch {
+                        input_bytes,
+                        output_bytes,
+                    } = scratch;
+                    match runtime.exchange(signed_time, input_bytes, output_bytes) {
+                        Ok(()) => true,
+                        Err(err) => {
+                            log::warn!(
+                                "d_process external exchange failed at {signed_time:.16e}; preserving current outputs like ngspice: {err}"
+                            );
+                            false
+                        }
+                    }
+                };
+
+                if exchange_ok {
+                    let clk_delay = ctx.param_or("clk_delay", 1.0e-9);
+                    for index in 0..output_width {
+                        let new_code = output_code(&scratch.output_bytes, index);
+                        if new_code != ctx.int_state(STATE_DOUT_START + index) {
+                            ctx.set_output_digital_vector_element(
+                                "out",
+                                index,
+                                output_value_from_code(new_code),
+                                clk_delay,
+                            );
+                            ctx.set_int_state(STATE_DOUT_START + index, new_code);
+                        }
                     }
                 }
-            };
 
-            if !exchange_ok {
-                ctx.set_int_state(STATE_PREV_CLK, clk_code);
-                ctx.set_int_state(STATE_PREV_RESET, reset_code);
-                return Ok(());
-            }
-
-            let clk_delay = ctx.param_or("clk_delay", 1.0e-9);
-            for index in 0..output_width {
-                let new_code = output_code(&scratch.output_bytes, index);
-                if new_code != ctx.int_state(STATE_DOUT_START + index) {
-                    ctx.set_output_digital_vector_element(
-                        "out",
-                        index,
-                        output_value_from_code(new_code),
-                        clk_delay,
-                    );
-                    ctx.set_int_state(STATE_DOUT_START + index, new_code);
-                }
-            }
+                Ok(())
+            })?;
         }
 
         ctx.set_int_state(STATE_PREV_CLK, clk_code);
@@ -323,8 +344,8 @@ impl CodeModel for DigitalProcess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::xspice::context::InputValue;
     use crate::xspice::AnalysisType;
+    use crate::xspice::context::InputValue;
     use crate::xspice::{ParamType, PortDirection};
 
     #[test]
