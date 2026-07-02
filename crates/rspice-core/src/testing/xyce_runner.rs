@@ -1276,13 +1276,19 @@ impl XyceTestRunner {
                     ));
                 }
                 let mut has_file_output = false;
+                let mut primary_format: Option<String> = None;
                 let mut index = 2usize;
                 while index < token_refs.len() {
-                    if let Some((raw_key, _raw_value, consumed)) =
+                    if let Some((raw_key, raw_value, consumed)) =
                         Self::print_option_assignment(&token_refs, index)
                     {
-                        if raw_key.trim().eq_ignore_ascii_case("file") {
-                            has_file_output = true;
+                        match raw_key.trim().to_ascii_lowercase().as_str() {
+                            "file" => has_file_output = true,
+                            "format" => {
+                                primary_format =
+                                    Some(raw_value.trim().trim_matches(['"', '\'']).to_string())
+                            }
+                            _ => {}
                         }
                         index += consumed;
                         continue;
@@ -1290,9 +1296,28 @@ impl XyceTestRunner {
                     index += 1;
                 }
                 if !has_file_output {
+                    if primary_format.as_deref().is_some_and(|format| {
+                        matches!(
+                            format.to_ascii_lowercase().as_str(),
+                            "gnuplot" | "splot"
+                        )
+                    }) {
+                        return Err(format!(
+                            "wrapper-origin transient .prn contract does not cover primary .PRINT TRAN FORMAT={}",
+                            primary_format.unwrap()
+                        ));
+                    }
                     primary_tran_print_count += 1;
                 }
                 continue;
+            }
+            if command.eq_ignore_ascii_case(".options")
+                && trimmed.to_ascii_lowercase().contains("add_stepnum_col")
+            {
+                return Err(
+                    "wrapper-origin transient .prn contract does not cover .OPTIONS OUTPUT ADD_STEPNUM_COL"
+                        .to_string(),
+                );
             }
             if Self::is_extra_wrapper_tran_output_analysis_command(command) {
                 return Err(format!(
@@ -4004,7 +4029,7 @@ impl XyceTestRunner {
                 }
                 _ => {
                     return Err(format!(
-                        "native .STEP .PRINT TRAN comparison currently supports static resistors and independent DC/PWL/PAT sources; element '{}' requires a broader stepped transient oracle contract",
+                        "native .STEP .PRINT TRAN comparison currently supports static resistors and independent DC/PULSE/SIN/PWL/PAT sources; element '{}' requires a broader stepped transient oracle contract",
                         element.name
                     ));
                 }
@@ -4021,6 +4046,8 @@ impl XyceTestRunner {
             crate::netlist::SourceSpec::Dc(_)
             | crate::netlist::SourceSpec::Ac { .. }
             | crate::netlist::SourceSpec::DcAc { .. }
+            | crate::netlist::SourceSpec::Pulse { .. }
+            | crate::netlist::SourceSpec::Sin { .. }
             | crate::netlist::SourceSpec::Pwl { .. }
             | crate::netlist::SourceSpec::PwlFile { .. }
             | crate::netlist::SourceSpec::Pat { .. } => Ok(()),
@@ -4029,7 +4056,7 @@ impl XyceTestRunner {
                 Self::validate_static_step_tran_source_spec(source_name, transient)
             }
             other => Err(format!(
-                "native .STEP .PRINT TRAN comparison currently supports independent DC/PWL/PAT sources; source '{source_name}' uses {other:?}"
+                "native .STEP .PRINT TRAN comparison currently supports independent DC/PULSE/SIN/PWL/PAT sources; source '{source_name}' uses {other:?}"
             )),
         }
     }
@@ -4349,6 +4376,27 @@ impl XyceTestRunner {
             }
             return Err(format!(
                 "transient branch-current probe '{}' targets an element without a recorded transient branch current",
+                original
+            ));
+        }
+        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
+            match parameter.as_str() {
+                "r" if Self::find_resistor_element(netlist, &element_name).is_some() => {
+                    return Ok(());
+                }
+                "c" if Self::find_capacitor_element(netlist, &element_name).is_some() => {
+                    return Ok(());
+                }
+                "l" if Self::find_inductor_element(netlist, &element_name).is_some() => {
+                    return Ok(());
+                }
+                "temp" if Self::resistor_temperature_value(netlist, &element_name).is_some() => {
+                    return Ok(());
+                }
+                _ => {}
+            }
+            return Err(format!(
+                "device parameter probe '{}' targets an unsupported transient parameter",
                 original
             ));
         }
@@ -5127,6 +5175,16 @@ impl XyceTestRunner {
                 "branch current '{}' not found in transient result",
                 element_name
             ));
+        }
+
+        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
+            return Self::evaluate_transient_device_parameter_probe(
+                netlist,
+                result,
+                time,
+                &element_name,
+                &parameter,
+            );
         }
 
         Err(format!("unsupported TRAN probe '{}'", normalized))
@@ -6030,6 +6088,201 @@ impl XyceTestRunner {
             netlist,
             dc,
             sweep_point,
+            "inductor",
+            name,
+            "L",
+            *value,
+            value_expr.as_deref(),
+            instance_params,
+        )
+    }
+
+    fn evaluate_transient_device_parameter_probe(
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        element_name: &str,
+        parameter: &str,
+    ) -> Result<f64, String> {
+        match parameter {
+            "r" => Self::evaluate_transient_resistor_parameter_r_value(
+                netlist,
+                result,
+                time,
+                element_name,
+            ),
+            "c" => Self::evaluate_transient_capacitor_parameter_c_value(
+                netlist,
+                result,
+                time,
+                element_name,
+            ),
+            "l" => Self::evaluate_transient_inductor_parameter_l_value(
+                netlist,
+                result,
+                time,
+                element_name,
+            ),
+            "temp" => Self::resistor_temperature_value(netlist, element_name).ok_or_else(|| {
+                format!(
+                    "resistor parameter probe '{}:TEMP' targets an unknown resistor",
+                    element_name
+                )
+            }),
+            _ => Err(format!(
+                "device parameter probe '{}:{}' is not supported in transient output",
+                element_name, parameter
+            )),
+        }
+    }
+
+    fn evaluate_transient_static_passive_parameter_value(
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        device_kind: &str,
+        element_name: &str,
+        parameter_name: &str,
+        value: Value,
+        value_expr: Option<&str>,
+        instance_params: &[(String, Value)],
+    ) -> Result<Value, String> {
+        if let Some(instance_value) =
+            Self::instance_param(instance_params, &[parameter_name, "VALUE"])
+        {
+            return Ok(instance_value);
+        }
+        if value.is_finite() {
+            return Ok(value);
+        }
+        if let Some(expression) = value_expr {
+            let context = Self::print_tran_eval_context(netlist, time);
+            let mut call_value = |call: &str| {
+                let normalized = Self::normalize_probe(call);
+                Self::evaluate_atomic_tran_probe(&normalized, netlist, result, time)
+            };
+            return Self::evaluate_print_expression_with_probe_calls(
+                expression,
+                context,
+                &mut call_value,
+            )
+            .map_err(|err| {
+                format!(
+                    "failed to evaluate transient {device_kind} parameter probe '{element_name}:{parameter_name}': {err}"
+                )
+            });
+        }
+        Err(format!(
+            "{device_kind} parameter probe '{element_name}:{parameter_name}' could not resolve a value"
+        ))
+    }
+
+    fn evaluate_transient_resistor_parameter_r_value(
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_resistor_element(netlist, name).ok_or_else(|| {
+            format!("resistor parameter probe '{name}:R' targets an unknown resistor")
+        })?;
+        let ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Err(format!(
+                "resistor parameter probe '{name}:R' targets a non-resistor element"
+            ));
+        };
+
+        if Self::resistor_uses_xyce_default_marker(instance_params)
+            && let Some(resistance) = Self::effective_resistor_value(netlist, name)
+        {
+            return Ok(resistance);
+        }
+        let value = Self::evaluate_transient_static_passive_parameter_value(
+            netlist,
+            result,
+            time,
+            "resistor",
+            name,
+            "R",
+            *value,
+            value_expr.as_deref(),
+            instance_params,
+        );
+        if value.is_ok() {
+            return value;
+        }
+        if model.is_some()
+            && let Some(resistance) = Self::resistor_parameter_r_value(netlist, name)
+        {
+            return Ok(resistance);
+        }
+        value
+    }
+
+    fn evaluate_transient_capacitor_parameter_c_value(
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_capacitor_element(netlist, name).ok_or_else(|| {
+            format!("capacitor parameter probe '{name}:C' targets an unknown capacitor")
+        })?;
+        let ElementKind::Capacitor {
+            value,
+            value_expr,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Err(format!(
+                "capacitor parameter probe '{name}:C' targets a non-capacitor element"
+            ));
+        };
+        Self::evaluate_transient_static_passive_parameter_value(
+            netlist,
+            result,
+            time,
+            "capacitor",
+            name,
+            "C",
+            *value,
+            value_expr.as_deref(),
+            instance_params,
+        )
+    }
+
+    fn evaluate_transient_inductor_parameter_l_value(
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_inductor_element(netlist, name).ok_or_else(|| {
+            format!("inductor parameter probe '{name}:L' targets an unknown inductor")
+        })?;
+        let ElementKind::Inductor {
+            value,
+            value_expr,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Err(format!(
+                "inductor parameter probe '{name}:L' targets a non-inductor element"
+            ));
+        };
+        Self::evaluate_transient_static_passive_parameter_value(
+            netlist,
+            result,
+            time,
             "inductor",
             name,
             "L",
