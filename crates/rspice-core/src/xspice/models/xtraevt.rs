@@ -88,7 +88,11 @@ fn real_to_v_completion_time(
     transition_time: Value,
 ) -> Option<Value> {
     if (target - start_value).abs() <= 1.0e-12
-        || !(start_time.is_finite() && transition_time.is_finite() && transition_time > 0.0)
+        || !(start_time.is_finite()
+            && start_value.is_finite()
+            && target.is_finite()
+            && transition_time.is_finite()
+            && transition_time > 0.0)
     {
         return None;
     }
