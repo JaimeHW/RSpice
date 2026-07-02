@@ -82,13 +82,21 @@ fn d_ram_read_delay(ctx: &CmContext) -> CmResult<Value> {
     Ok(value.max(D_RAM_READ_DELAY_MIN))
 }
 
-fn d_ram_integer_param(ctx: &CmContext, name: &str, default: Value, min: i64, max: i64) -> i64 {
+fn d_ram_integer_param(
+    ctx: &CmContext,
+    name: &str,
+    default: Value,
+    min: i64,
+    max: i64,
+) -> CmResult<i64> {
     let value = ctx.param_or(name, default).round();
-    if value.is_finite() {
-        (value as i64).clamp(min, max)
-    } else {
-        (default.round() as i64).clamp(min, max)
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("integer parameter must be finite, got {value}"),
+        });
     }
+    Ok((value as i64).clamp(min, max))
 }
 
 fn d_ram_shape_signature(ctx: &CmContext) -> DMemoryShapeSignature {
@@ -225,23 +233,23 @@ fn d_ram_restore_input_codes(ctx: &mut CmContext, codes: DMemoryInputCodes) {
     }
 }
 
-fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape, select_codes: &[i64]) -> i64 {
+fn d_ram_select_code(ctx: &CmContext, shape: DMemoryShape, select_codes: &[i64]) -> CmResult<i64> {
     let select_value = d_ram_integer_param(
         ctx,
         "select_value",
         1.0,
         D_RAM_SELECT_VALUE_MIN,
         D_RAM_SELECT_VALUE_MAX,
-    );
+    )?;
 
     for bit_idx in 0..shape.select_width {
         let expected = (select_value >> bit_idx) & 1;
         if select_codes[bit_idx] != expected {
-            return 0;
+            return Ok(0);
         }
     }
 
-    1
+    Ok(1)
 }
 
 fn d_ram_address_index_from_codes(address: impl Iterator<Item = i64>) -> Option<usize> {
@@ -603,6 +611,14 @@ impl CodeModel for DigitalRam {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        d_ram_integer_param(
+            ctx,
+            "select_value",
+            1.0,
+            D_RAM_SELECT_VALUE_MIN,
+            D_RAM_SELECT_VALUE_MAX,
+        )?;
+        d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX)?;
         let shape = d_ram_cached_shape(ctx)?;
         ctx.allocate_int_states(d_ram_state_len(shape));
         ctx.set_int_state(D_RAM_INITIALIZED, 0);
@@ -618,9 +634,9 @@ impl CodeModel for DigitalRam {
         let mut inputs = d_ram_take_input_codes(ctx);
         d_ram_fill_input_codes(ctx, shape, &mut inputs);
         let write_en = d_ram_state_code(ctx.input_digital("write_en").unwrap_or_default());
-        let select = d_ram_select_code(ctx, shape, &inputs.select);
+        let select = d_ram_select_code(ctx, shape, &inputs.select)?;
         let address_index = d_ram_address_index(&inputs.address);
-        let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX);
+        let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX)?;
         let read_delay = d_ram_read_delay(ctx)?;
 
         let result = if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
@@ -812,6 +828,31 @@ mod tests {
         DigitalRam.init(&mut ctx).expect("d_ram initializes");
 
         assert_invalid_param(DigitalRam.evaluate(&mut ctx), "read_delay");
+    }
+
+    #[test]
+    fn d_ram_rejects_nonfinite_integer_params_before_casting() {
+        let mut select_ctx = ram_context();
+        select_ctx.set_param("select_value", f64::NAN);
+        assert_invalid_param(DigitalRam.init(&mut select_ctx), "select_value");
+
+        let mut ic_ctx = ram_context();
+        ic_ctx.set_param("ic", f64::INFINITY);
+        assert_invalid_param(DigitalRam.init(&mut ic_ctx), "ic");
+
+        let mut mutated_select_ctx = ram_context();
+        DigitalRam
+            .init(&mut mutated_select_ctx)
+            .expect("d_ram initializes with finite integer params");
+        mutated_select_ctx.set_param("select_value", f64::NEG_INFINITY);
+        assert_invalid_param(DigitalRam.evaluate(&mut mutated_select_ctx), "select_value");
+
+        let mut mutated_ic_ctx = ram_context();
+        DigitalRam
+            .init(&mut mutated_ic_ctx)
+            .expect("d_ram initializes with finite integer params");
+        mutated_ic_ctx.set_param("ic", f64::NAN);
+        assert_invalid_param(DigitalRam.evaluate(&mut mutated_ic_ctx), "ic");
     }
 
     #[test]
