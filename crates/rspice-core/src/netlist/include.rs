@@ -28,6 +28,8 @@ use super::{ParseError, read_file_with_encoding};
 pub struct IncludeProcessor {
     /// Base directory for resolving relative paths
     base_dir: PathBuf,
+    /// Execution directory used as Xyce's final relative include fallback
+    execution_dir: PathBuf,
     /// Currently active include/lib stack entries used for recursion detection
     active_includes: HashSet<IncludeKey>,
     /// Additional library search paths
@@ -66,14 +68,29 @@ impl IncludeProcessor {
     /// # Arguments
     /// * `base_path` - Path to the main netlist file (or its directory)
     pub fn new(base_path: &Path) -> Self {
+        Self::new_with_execution_dir(base_path, None)
+    }
+
+    /// Create a new include processor with an explicit execution directory.
+    ///
+    /// Xyce resolves nested includes relative to the including file first, then
+    /// the top-level netlist directory, then the process execution directory.
+    /// Most callers use the top-level directory as the execution directory, but
+    /// upstream wrapper tests can intentionally run a deck from another
+    /// directory.
+    pub fn new_with_execution_dir(base_path: &Path, execution_dir: Option<&Path>) -> Self {
         let base_dir = if base_path.is_file() {
             base_path.parent().unwrap_or(Path::new(".")).to_path_buf()
         } else {
             base_path.to_path_buf()
         };
+        let execution_dir = execution_dir
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| base_dir.clone());
 
         Self {
             base_dir,
+            execution_dir,
             active_includes: HashSet::new(),
             lib_paths: Vec::new(),
             max_depth: 64, // Foundry PDK trees nest .include/.lib deeply
@@ -177,6 +194,11 @@ impl IncludeProcessor {
         let top_level_relative = self.base_dir.join(&relative_path);
         if top_level_relative.exists() {
             return Ok(top_level_relative);
+        }
+
+        let execution_relative = self.execution_dir.join(&relative_path);
+        if execution_relative.exists() {
+            return Ok(execution_relative);
         }
 
         // Try library search paths
@@ -649,6 +671,48 @@ mod tests {
         assert!(expanded.contains("RWIN 1 0 5"), "{expanded}");
         assert!(!expanded.contains("RLOSE"), "{expanded}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn include_processor_uses_xyce_execution_dir_fallback_after_top_level_path() {
+        let exec_dir = unique_include_temp_dir("execution-fallback");
+        let top_dir = exec_dir.join("top");
+        let include_dir = top_dir.join("sub1");
+        std::fs::create_dir_all(&include_dir).expect("create nested include fixture");
+        let deck_path = top_dir.join("deck.cir");
+        std::fs::write(
+            include_dir.join("include1"),
+            ".INC local\n.INC top\n.INC execution\n.INC precedence/wins_top\n",
+        )
+        .expect("write include1");
+        std::fs::write(include_dir.join("local"), "RLOCAL 1 0 3\n").expect("write local include");
+        std::fs::write(top_dir.join("top"), "RTOP 1 0 4\n").expect("write top include");
+        std::fs::write(exec_dir.join("execution"), "REXEC 1 0 5\n")
+            .expect("write execution include");
+        std::fs::create_dir_all(top_dir.join("precedence")).expect("create top precedence dir");
+        std::fs::create_dir_all(exec_dir.join("precedence"))
+            .expect("create execution precedence dir");
+        std::fs::write(top_dir.join("precedence").join("wins_top"), "RWIN 1 0 6\n")
+            .expect("write top precedence include");
+        std::fs::write(
+            exec_dir.join("precedence").join("wins_top"),
+            "RLOSE 1 0 7\n",
+        )
+        .expect("write execution precedence include");
+
+        let deck = ".INC sub1/include1\n";
+        std::fs::write(&deck_path, deck).expect("write deck");
+        let mut processor = IncludeProcessor::new_with_execution_dir(&deck_path, Some(&exec_dir));
+        let expanded = processor
+            .expand_content(deck, &deck_path)
+            .expect("execution fallback expands");
+
+        assert!(expanded.contains("RLOCAL 1 0 3"), "{expanded}");
+        assert!(expanded.contains("RTOP 1 0 4"), "{expanded}");
+        assert!(expanded.contains("REXEC 1 0 5"), "{expanded}");
+        assert!(expanded.contains("RWIN 1 0 6"), "{expanded}");
+        assert!(!expanded.contains("RLOSE"), "{expanded}");
+        let _ = std::fs::remove_dir_all(exec_dir);
     }
 
     #[test]

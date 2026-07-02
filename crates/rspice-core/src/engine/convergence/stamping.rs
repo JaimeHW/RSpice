@@ -250,6 +250,7 @@ impl Engine {
         rhs: &mut [Value],
         time: Value,
         gmin: Value,
+        stamp_generic_switches: bool,
     ) {
         let node_count = circuit.num_nodes().min(rhs.len());
         for i in 0..node_count {
@@ -262,7 +263,9 @@ impl Engine {
             .voltage_sources
             .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
         circuit.current_sources.update_transient_rhs(rhs, time);
-        circuit.stamp_generic_switches(matrix, rhs, time);
+        if stamp_generic_switches {
+            circuit.stamp_generic_switches(matrix, rhs, time);
+        }
     }
 
     #[inline]

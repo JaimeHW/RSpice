@@ -207,7 +207,38 @@ impl Netlist {
         file_path: &std::path::Path,
         options: NetlistParseOptions,
     ) -> Result<Self, ParseError> {
-        let processed = Self::preprocess_includes(input, file_path)?;
+        Self::parse_with_path_execution_dir_and_options(input, file_path, None, options)
+    }
+
+    /// Parse a netlist from source text with include resolution and an explicit
+    /// execution directory.
+    ///
+    /// Xyce falls back to the execution directory after checking the including
+    /// file and top-level netlist directories for nested includes. This entry
+    /// point preserves the ordinary top-level path while allowing wrappers that
+    /// execute a deck from another directory to model that search rule.
+    pub fn parse_with_path_and_execution_dir(
+        input: &str,
+        file_path: &std::path::Path,
+        execution_dir: &std::path::Path,
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
+        Self::parse_with_path_execution_dir_and_options(
+            input,
+            file_path,
+            Some(execution_dir),
+            options,
+        )
+    }
+
+    fn parse_with_path_execution_dir_and_options(
+        input: &str,
+        file_path: &std::path::Path,
+        execution_dir: Option<&std::path::Path>,
+        options: NetlistParseOptions,
+    ) -> Result<Self, ParseError> {
+        let processed =
+            Self::preprocess_includes_with_execution_dir(input, file_path, execution_dir)?;
         let mut netlist = Self::parse_with_options(&processed, options)?;
         Self::normalize_model_string_paths(&mut netlist, file_path);
         Self::normalize_source_file_paths(&mut netlist, file_path);
@@ -313,7 +344,15 @@ impl Netlist {
         content: &str,
         file_path: &std::path::Path,
     ) -> Result<String, ParseError> {
-        let mut processor = IncludeProcessor::new(file_path);
+        Self::preprocess_includes_with_execution_dir(content, file_path, None)
+    }
+
+    fn preprocess_includes_with_execution_dir(
+        content: &str,
+        file_path: &std::path::Path,
+        execution_dir: Option<&std::path::Path>,
+    ) -> Result<String, ParseError> {
+        let mut processor = IncludeProcessor::new_with_execution_dir(file_path, execution_dir);
         processor.expand_content(content, file_path)
     }
 

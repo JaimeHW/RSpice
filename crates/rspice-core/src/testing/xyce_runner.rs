@@ -166,6 +166,7 @@ pub struct XyceTestRunner {
 #[derive(Debug, Clone)]
 struct XyceExecutionPlan {
     deck_path: PathBuf,
+    execution_dir: Option<PathBuf>,
     reference_path: PathBuf,
     source: String,
     expression_dialect: ExpressionDialect,
@@ -178,6 +179,7 @@ struct XyceExecutionPlan {
 #[derive(Debug, Clone)]
 struct XyceStaticDcPlan {
     deck_path: PathBuf,
+    execution_dir: Option<PathBuf>,
     source: String,
     expression_dialect: ExpressionDialect,
     print: XycePrintRequest,
@@ -270,6 +272,7 @@ enum XyceStaticDcContract {
     WrapperHspiceMath,
     WrapperRaw,
     WrapperResistorDefault,
+    WrapperTopLevelExecutionDir,
     WrapperVoltageAccessor,
 }
 
@@ -288,6 +291,10 @@ impl XyceStaticDcContract {
             (Self::WrapperRaw, true) => "wrapper_raw_step_dc",
             (Self::WrapperResistorDefault, false) => "wrapper_resistor_default_prn_dc",
             (Self::WrapperResistorDefault, true) => "wrapper_resistor_default_prn_step_dc",
+            (Self::WrapperTopLevelExecutionDir, false) => "wrapper_top_level_execution_dir_prn_dc",
+            (Self::WrapperTopLevelExecutionDir, true) => {
+                "wrapper_top_level_execution_dir_prn_step_dc"
+            }
             (Self::WrapperVoltageAccessor, false) => "wrapper_voltage_accessor_prn_dc",
             (Self::WrapperVoltageAccessor, true) => "wrapper_voltage_accessor_prn_step_dc",
         }
@@ -603,14 +610,34 @@ impl XyceTestRunner {
         deck_path: &Path,
         expression_dialect: ExpressionDialect,
     ) -> Result<Netlist, crate::netlist::ParseError> {
-        Netlist::parse_with_path_and_options(
+        Self::parse_netlist_with_expression_dialect_and_execution_dir(
             source,
             deck_path,
-            NetlistParseOptions {
-                statistical_mode: StatisticalParamMode::Nominal,
-                expression_dialect,
-            },
+            expression_dialect,
+            None,
         )
+    }
+
+    fn parse_netlist_with_expression_dialect_and_execution_dir(
+        source: &str,
+        deck_path: &Path,
+        expression_dialect: ExpressionDialect,
+        execution_dir: Option<&Path>,
+    ) -> Result<Netlist, crate::netlist::ParseError> {
+        let options = NetlistParseOptions {
+            statistical_mode: StatisticalParamMode::Nominal,
+            expression_dialect,
+        };
+        if let Some(execution_dir) = execution_dir {
+            return Netlist::parse_with_path_and_execution_dir(
+                source,
+                deck_path,
+                execution_dir,
+                options,
+            );
+        }
+
+        Netlist::parse_with_path_and_options(source, deck_path, options)
     }
 
     /// RSpice never executes upstream `.sh`/`.pl` harness files in this runner.
@@ -890,6 +917,22 @@ impl XyceTestRunner {
         } else {
             None
         };
+        let (execution_deck_path, execution_dir) = if matches!(
+            wrapper_contract,
+            Some(XyceStaticDcContract::WrapperTopLevelExecutionDir)
+        ) {
+            (
+                Self::top_level_execution_deck_path(&deck.path)?,
+                Some(
+                    deck.path
+                        .parent()
+                        .ok_or_else(|| "wrapper deck has no parent directory".to_string())?
+                        .to_path_buf(),
+                ),
+            )
+        } else {
+            (deck.path.clone(), None)
+        };
         let reference_path = match wrapper_contract {
             Some(XyceStaticDcContract::WrapperRaw) => self
                 .static_raw_reference_path(&deck.path)
@@ -918,7 +961,11 @@ impl XyceTestRunner {
         } else {
             ExpressionDialect::Xyce
         };
-        let static_plan = self.static_dc_plan_for_path(&deck.path, expression_dialect)?;
+        let static_plan = self.static_dc_plan_for_path_with_execution_dir(
+            &execution_deck_path,
+            expression_dialect,
+            execution_dir.as_deref(),
+        )?;
         let contract = if let Some(contract) = wrapper_contract {
             self.validate_native_static_prn_wrapper_contract(
                 contract,
@@ -931,7 +978,8 @@ impl XyceTestRunner {
         };
 
         Ok(XyceExecutionPlan {
-            deck_path: deck.path.clone(),
+            deck_path: static_plan.deck_path,
+            execution_dir: static_plan.execution_dir,
             reference_path,
             source: static_plan.source,
             expression_dialect,
@@ -1006,6 +1054,15 @@ impl XyceTestRunner {
         deck_path: &Path,
         expression_dialect: ExpressionDialect,
     ) -> Result<XyceStaticDcPlan, String> {
+        self.static_dc_plan_for_path_with_execution_dir(deck_path, expression_dialect, None)
+    }
+
+    fn static_dc_plan_for_path_with_execution_dir(
+        &self,
+        deck_path: &Path,
+        expression_dialect: ExpressionDialect,
+        execution_dir: Option<&Path>,
+    ) -> Result<XyceStaticDcPlan, String> {
         let source =
             fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
         if Self::contains_control_block(&source) {
@@ -1017,11 +1074,13 @@ impl XyceTestRunner {
         Self::reject_unsupported_source_directives(&source)?;
 
         let print = Self::single_dc_print_request(&source)?;
-        let netlist =
-            Self::parse_netlist_with_expression_dialect(&source, deck_path, expression_dialect)
-                .map_err(|err| {
-                    format!("netlist parser does not yet accept this Xyce deck: {err}")
-                })?;
+        let netlist = Self::parse_netlist_with_expression_dialect_and_execution_dir(
+            &source,
+            deck_path,
+            expression_dialect,
+            execution_dir,
+        )
+        .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let diagnostics = netlist.diagnostics.clone();
         let dc = Self::single_dc_sweep(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
@@ -1029,6 +1088,7 @@ impl XyceTestRunner {
 
         Ok(XyceStaticDcPlan {
             deck_path: deck_path.to_path_buf(),
+            execution_dir: execution_dir.map(Path::to_path_buf),
             source,
             expression_dialect,
             print,
@@ -1119,6 +1179,10 @@ impl XyceTestRunner {
         if Self::is_native_semiconductor_resistor_step_wrapper_candidate(relative_path, source) {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperDefault);
+        }
+
+        if Self::is_native_top_level_execution_dir_wrapper_candidate(deck_path, source) {
+            return Ok(XyceStaticDcContract::WrapperTopLevelExecutionDir);
         }
 
         if Self::is_native_step_data_wrapper_candidate(source) {
@@ -1245,6 +1309,23 @@ impl XyceTestRunner {
         }
 
         has_resistor_geometry_step && has_resistor_default_step && has_resistor_model
+    }
+
+    fn is_native_top_level_execution_dir_wrapper_candidate(deck_path: &Path, source: &str) -> bool {
+        Self::logical_netlist_lines(source)
+            .iter()
+            .all(|line| Self::strip_netlist_comment(line).trim().is_empty())
+            && Self::top_level_execution_deck_path(deck_path).is_ok_and(|path| path.is_file())
+    }
+
+    fn top_level_execution_deck_path(deck_path: &Path) -> Result<PathBuf, String> {
+        let file_name = deck_path
+            .file_name()
+            .ok_or_else(|| "wrapper deck has no filename".to_string())?;
+        let parent = deck_path
+            .parent()
+            .ok_or_else(|| "wrapper deck has no parent directory".to_string())?;
+        Ok(parent.join("top_level").join(file_name))
     }
 
     fn is_native_step_data_wrapper_candidate(source: &str) -> bool {
@@ -1818,10 +1899,11 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract(false);
-        let netlist = match Self::parse_netlist_with_expression_dialect(
+        let netlist = match Self::parse_netlist_with_expression_dialect_and_execution_dir(
             &plan.source,
             &plan.deck_path,
             plan.expression_dialect,
+            plan.execution_dir.as_deref(),
         ) {
             Ok(netlist) => netlist,
             Err(err) => {

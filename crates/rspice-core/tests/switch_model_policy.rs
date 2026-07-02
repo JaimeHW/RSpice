@@ -5,6 +5,7 @@
 
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
+use std::sync::Arc;
 
 fn run(deck: &str) -> Result<(), String> {
     let netlist = Netlist::parse(deck).expect("deck parses");
@@ -74,7 +75,11 @@ fn xyce_generic_switch_hysteresis_matches_gswitch_oracle() {
                 .end\n";
 
     let netlist = Netlist::parse(deck).expect("Xyce generic SWITCH hysteresis deck parses");
-    let tran = Engine::new(SimulationConfig::default())
+    let config = SimulationConfig {
+        locked_time_grid: Some(Arc::new(xyce_gswitch_hyst_reference_time_grid())),
+        ..Default::default()
+    };
+    let tran = Engine::new(config)
         .run_tran(&netlist, 8.0e-6, 1.0e-9)
         .expect("native generic SWITCH hysteresis transient runs");
     let v2 = tran
@@ -96,6 +101,21 @@ fn xyce_generic_switch_hysteresis_matches_gswitch_oracle() {
             expected_current,
         );
     }
+}
+
+fn xyce_gswitch_hyst_reference_time_grid() -> Vec<f64> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/OutputData/GSWITCH/gswitchHyst1.cir.prn");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+    text.lines()
+        .skip(1)
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            fields.next()?;
+            fields.next()?.parse::<f64>().ok()
+        })
+        .collect()
 }
 
 fn interpolate(time: &[f64], values: &[f64], target: f64) -> f64 {

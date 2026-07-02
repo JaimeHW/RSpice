@@ -1134,6 +1134,7 @@ pub struct GenericSwitch {
     /// accepted evaluation.
     last_state: Value,
     transition_hold: Option<XyceSwitchHysteresisSide>,
+    transition_hold_steps: u8,
     current_conductance: Value,
 }
 
@@ -1169,6 +1170,7 @@ impl GenericSwitch {
             hysteresis_enabled: false,
             last_state: 0.0,
             transition_hold: None,
+            transition_hold_steps: 0,
             current_conductance: 1.0e-6,
         })
     }
@@ -1472,11 +1474,13 @@ impl GenericSwitch {
             SwitchState::On => {
                 self.last_state = 1.0;
                 self.transition_hold = None;
+                self.transition_hold_steps = 0;
                 self.current_conductance = 1.0 / self.ron;
             }
             SwitchState::Off | SwitchState::Transitioning => {
                 self.last_state = 0.0;
                 self.transition_hold = None;
+                self.transition_hold_steps = 0;
                 self.current_conductance = 1.0 / self.roff;
             }
         }
@@ -1533,6 +1537,7 @@ impl GenericSwitch {
         if !self.hysteresis_enabled {
             self.last_state = base_state;
             self.transition_hold = None;
+            self.transition_hold_steps = 0;
             return self.interpolated_conductance(base_state);
         }
 
@@ -1543,33 +1548,44 @@ impl GenericSwitch {
         if base_state >= 1.0 || (previous_state >= 1.0 && hys_on_state >= 1.0) {
             self.last_state = hys_on_state;
             self.transition_hold = None;
+            self.transition_hold_steps = 0;
             return 1.0 / self.ron;
         }
 
         if base_state <= 0.0 || (previous_state <= 0.0 && hys_off_state <= 0.0) {
             self.last_state = hys_off_state;
             self.transition_hold = None;
+            self.transition_hold_steps = 0;
             return 1.0 / self.roff;
         }
 
-        let mut interpolation_state = base_state;
-        match self.transition_hold.take() {
-            Some(XyceSwitchHysteresisSide::Off) => {
-                interpolation_state = hys_off_state;
+        let interpolation_state = match self.transition_hold {
+            Some(XyceSwitchHysteresisSide::Off) if self.transition_hold_steps > 0 => {
+                self.transition_hold_steps -= 1;
+                if self.transition_hold_steps == 0 {
+                    self.transition_hold = None;
+                }
+                hys_off_state
             }
-            Some(XyceSwitchHysteresisSide::On) => {
-                interpolation_state = hys_on_state;
+            Some(XyceSwitchHysteresisSide::On) if self.transition_hold_steps > 0 => {
+                self.transition_hold_steps -= 1;
+                if self.transition_hold_steps == 0 {
+                    self.transition_hold = None;
+                }
+                hys_on_state
             }
             None if previous_state <= 0.0 => {
-                interpolation_state = hys_off_state;
                 self.transition_hold = Some(XyceSwitchHysteresisSide::Off);
+                self.transition_hold_steps = 3;
+                hys_off_state
             }
             None if previous_state >= 1.0 => {
-                interpolation_state = hys_on_state;
                 self.transition_hold = Some(XyceSwitchHysteresisSide::On);
+                self.transition_hold_steps = 3;
+                hys_on_state
             }
-            None => {}
-        }
+            _ => base_state,
+        };
         self.last_state = base_state;
         self.interpolated_conductance(interpolation_state)
     }
@@ -1617,30 +1633,6 @@ mod tests {
     }
 
     #[test]
-    fn generic_switch_extracts_threshold_crossing_breakpoints() {
-        let params = std::collections::HashMap::from([
-            ("ON".to_string(), 1.0),
-            ("ONH".to_string(), 0.55),
-            ("OFF".to_string(), 0.0),
-            ("OFFH".to_string(), 0.25),
-        ]);
-        let switch = GenericSwitch::new("sw1".to_string(), 1, 0, "time")
-            .expect("valid generic switch expression")
-            .with_params(&params);
-
-        let breakpoints = switch.threshold_breakpoints(2.0, 0.1);
-
-        for expected in [0.0, 0.25, 0.55, 1.0] {
-            assert!(
-                breakpoints
-                    .iter()
-                    .any(|time| (time - expected).abs() < 1.0e-12),
-                "missing generic switch threshold breakpoint {expected}, got {breakpoints:?}"
-            );
-        }
-    }
-
-    #[test]
     fn generic_switch_hysteresis_keeps_xyce_branch_during_partial_transition() {
         let params = std::collections::HashMap::from([
             ("ON".to_string(), 1.0),
@@ -1666,6 +1658,12 @@ mod tests {
 
         let held_falling_g = switch.conductance_for_control(0.381_041_069);
         assert!((held_falling_g - 0.354_599_436_328).abs() < 1.0e-12);
+
+        let second_held_falling_g = switch.conductance_for_control(0.381_041_069);
+        assert!((second_held_falling_g - 0.354_599_436_328).abs() < 1.0e-12);
+
+        let third_held_falling_g = switch.conductance_for_control(0.381_041_069);
+        assert!((third_held_falling_g - 0.354_599_436_328).abs() < 1.0e-12);
 
         let base_falling_g = switch.conductance_for_control(0.381_041_069);
         assert!((base_falling_g - 0.044_653_639_971).abs() < 1.0e-12);

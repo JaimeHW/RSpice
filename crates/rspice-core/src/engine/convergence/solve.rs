@@ -665,6 +665,7 @@ impl Engine {
             &mut rhs,
             time,
             self.dc_nodal_gmin_floor(circuit),
+            true,
         );
         if !circuit.behavioral_sources.is_empty()
             && !circuit.behavioral_sources.has_solution_dependent_sources()
@@ -718,7 +719,9 @@ impl Engine {
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let mut solution = self
             .linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {
-                Self::stamp_transient_operating_point_linear(circuit, matrix, rhs, time, 0.0);
+                Self::stamp_transient_operating_point_linear(
+                    circuit, matrix, rhs, time, 0.0, false,
+                );
             })
             .unwrap_or_else(|| vec![0.0; size]);
 
@@ -762,7 +765,7 @@ impl Engine {
 
             circuit.refresh_jiles_atherton_inductances(&solution);
             Self::stamp_transient_operating_point_linear(
-                circuit, matrix, &mut rhs, time, gmin_floor,
+                circuit, matrix, &mut rhs, time, gmin_floor, false,
             );
             self.try_stamp_nonlinear_devices_for_operating_point(
                 circuit,
@@ -786,7 +789,7 @@ impl Engine {
                         |circuit, matrix, rhs| {
                             circuit.refresh_jiles_atherton_inductances(trial);
                             Self::stamp_transient_operating_point_linear(
-                                circuit, matrix, rhs, time, gmin_floor,
+                                circuit, matrix, rhs, time, gmin_floor, false,
                             );
                         },
                     )
@@ -818,7 +821,7 @@ impl Engine {
                     |circuit, matrix, rhs| {
                         circuit.refresh_jiles_atherton_inductances(&new_solution);
                         Self::stamp_transient_operating_point_linear(
-                            circuit, matrix, rhs, time, gmin_floor,
+                            circuit, matrix, rhs, time, gmin_floor, false,
                         );
                     },
                 );
