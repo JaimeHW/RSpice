@@ -861,6 +861,11 @@ fn positive_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value
     Ok(value)
 }
 
+fn boolean_param(ctx: &CmContext, name: &str, default: bool) -> CmResult<bool> {
+    let default = if default { 1.0 } else { 0.0 };
+    Ok(finite_param(ctx, name, default)? > 0.5)
+}
+
 fn guarded_position(ctx: &CmContext) -> CmResult<Value> {
     let mut position = finite_param(ctx, "position", 0.5)?;
     if position <= 0.0 {
@@ -875,7 +880,7 @@ fn potentiometer_split(ctx: &CmContext) -> CmResult<PotentiometerSplit> {
     let position = guarded_position(ctx)?;
     let resistance = finite_param(ctx, "r", 1.0e5)?;
 
-    let log = ctx.param_or("log", 0.0) > 0.5;
+    let log = boolean_param(ctx, "log", false)?;
     let r_lower = if log {
         let log_multiplier = finite_param(ctx, "log_multiplier", 1.0)?;
         let divisor = 10.0_f64.powf(position * log_multiplier);
@@ -913,8 +918,8 @@ fn potentiometer_split(ctx: &CmContext) -> CmResult<PotentiometerSplit> {
 fn aswitch_eval(ctx: &CmContext) -> CmResult<AswitchEval> {
     let cntl_on = finite_param(ctx, "cntl_on", 1.0)?;
     let cntl_off = finite_param(ctx, "cntl_off", 0.0)?;
-    let limit = ctx.param_or("limit", 0.0) > 0.5;
-    let log_mode = ctx.param_or("log", 1.0) > 0.5;
+    let limit = boolean_param(ctx, "limit", false)?;
+    let log_mode = boolean_param(ctx, "log", true)?;
     let r_off = if log_mode || limit {
         positive_param(ctx, "r_off", 1.0e12)?
     } else {
@@ -984,7 +989,7 @@ fn pswitch_eval(ctx: &CmContext) -> CmResult<PswitchEval> {
     let mut r_on = finite_param(ctx, "r_on", 1.0)?;
     let mut r_off = finite_param(ctx, "r_off", 1.0e12)?;
     let r_cntl_in = finite_param(ctx, "r_cntl_in", 1.0e12)?;
-    let log_mode = ctx.param_or("log", 1.0) > 0.5;
+    let log_mode = boolean_param(ctx, "log", true)?;
     if log_mode && r_off <= 0.0 {
         return Err(invalid_param(
             "r_off",
@@ -1182,10 +1187,10 @@ fn sidiode_eval(ctx: &CmContext) -> CmResult<SidiodeEval> {
     })
 }
 
-fn zener_limited_voltage(ctx: &mut CmContext) -> Value {
+fn zener_limited_voltage(ctx: &mut CmContext) -> CmResult<Value> {
     let mut voltage = ctx.input("z");
-    if ctx.param_or("limit_switch", 0.0) <= 0.5 || ctx.is_ac() {
-        return voltage;
+    if !boolean_param(ctx, "limit_switch", false)? || ctx.is_ac() {
+        return Ok(voltage);
     }
 
     let previous = ctx.state(0);
@@ -1201,7 +1206,7 @@ fn zener_limited_voltage(ctx: &mut CmContext) -> Value {
         voltage = limited;
     }
     xtradev_set_state(ctx, 0, voltage);
-    voltage
+    Ok(voltage)
 }
 
 fn zener_eval_for_voltage(ctx: &CmContext, voltage: Value) -> CmResult<ZenerEval> {
@@ -1631,7 +1636,7 @@ fn core_pwl_flux_density(
 
 fn core_pwl_eval_from_table(ctx: &CmContext, table: &CoreTable) -> CmResult<CoreEval> {
     let input_domain = core_input_domain(ctx)?;
-    let fraction = ctx.param_or("fraction", 1.0) > 0.5;
+    let fraction = boolean_param(ctx, "fraction", true)?;
     if !core_pwl_smoothing_allowed(table, input_domain, fraction) {
         return Ok(CoreEval {
             current: 0.0,
@@ -1686,7 +1691,7 @@ fn core_hysteresis_params(ctx: &CmContext) -> CmResult<CoreHysteresisParams> {
     }
 
     let input_domain = core_input_domain(ctx)?;
-    let fraction = ctx.param_or("fraction", 1.0) > 0.5;
+    let fraction = boolean_param(ctx, "fraction", true)?;
     Ok(CoreHysteresisParams {
         in_low,
         in_high,
@@ -2095,7 +2100,7 @@ fn seegen_params(ctx: &CmContext) -> CmResult<SeeGeneratorParams> {
     let cdepth = finite_param(ctx, "cdepth", 1.0)?;
     let angle = finite_param(ctx, "angle", 0.0)?.clamp(0.0, 1.57079);
     let ctrlthres = finite_param(ctx, "ctrlthres", 0.5)?;
-    let perlim = ctx.param_or("perlim", 1.0) > 0.5;
+    let perlim = boolean_param(ctx, "perlim", true)?;
 
     Ok(SeeGeneratorParams {
         tfall,
@@ -2837,7 +2842,7 @@ impl CodeModel for Zener {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let voltage = zener_limited_voltage(ctx);
+        let voltage = zener_limited_voltage(ctx)?;
         let eval = zener_eval_for_voltage(ctx, voltage)?;
         let pair = ctx.port_node_pair("z").unwrap_or((0, 0));
 
@@ -3929,6 +3934,37 @@ mod tests {
             LcCouple.init(&mut coupling_ctx),
             Err(CmError::InvalidParameter { .. })
         ));
+    }
+
+    #[test]
+    fn xtradev_boolean_params_reject_nonfinite_values() {
+        for (name, default) in [
+            ("log", false),
+            ("limit", false),
+            ("limit_switch", false),
+            ("fraction", true),
+            ("perlim", true),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_param(name, f64::NAN);
+            assert_invalid_param_name(boolean_param(&ctx, name, default), name);
+        }
+
+        let mut potentiometer_ctx = CmContext::new();
+        potentiometer_ctx.set_param("log", f64::NAN);
+        assert_invalid_param_name(Potentiometer.init(&mut potentiometer_ctx), "log");
+
+        let mut zener_ctx = CmContext::new();
+        zener_ctx.set_input_analog("z", 1.0);
+        zener_ctx.set_param("limit_switch", f64::NAN);
+        assert_invalid_param_name(Zener.evaluate(&mut zener_ctx), "limit_switch");
+    }
+
+    fn assert_invalid_param_name<T: std::fmt::Debug>(result: CmResult<T>, expected_name: &str) {
+        match result {
+            Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected_name),
+            other => panic!("expected InvalidParameter for {expected_name}, got {other:?}"),
+        }
     }
 
     #[test]
