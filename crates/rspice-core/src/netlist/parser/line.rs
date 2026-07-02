@@ -325,6 +325,7 @@ pub(super) fn process_line(
                     options,
                     diagnostics,
                     spef_includes,
+                    deferred_body_params: Some(&mut frame.def.body_expr_params),
                 },
             )?;
             capture_subckt_body_scope(line, &mut frame.def, &frame.local_params);
@@ -357,6 +358,7 @@ pub(super) fn process_line(
             options: &mut state.options,
             diagnostics: &mut state.diagnostics,
             spef_includes: &mut state.spef_includes,
+            deferred_body_params: None,
         },
     )
 }
@@ -381,6 +383,7 @@ pub(super) fn parse_line(
         options,
         diagnostics,
         spef_includes,
+        deferred_body_params,
     } = context;
 
     // Tokenize the line
@@ -423,6 +426,8 @@ pub(super) fn parse_line(
                 options,
                 diagnostics,
                 spef_includes,
+                defer_scoped_values: defer_simple_param_refs,
+                deferred_body_params,
             },
         ),
         'R' => parse_resistor(

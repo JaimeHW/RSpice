@@ -1623,6 +1623,8 @@ pub struct InitialCondition {
     pub node: String,
     /// Initial voltage
     pub voltage: Value,
+    /// Deferred voltage expression for subcircuit-scoped startup directives.
+    pub voltage_expr: Option<String>,
 }
 
 /// Nodeset hint for operating point
@@ -1632,6 +1634,8 @@ pub struct NodeSet {
     pub node: String,
     /// Suggested voltage
     pub voltage: Value,
+    /// Deferred voltage expression for subcircuit-scoped startup directives.
+    pub voltage_expr: Option<String>,
 }
 
 //=============================================================================
@@ -1813,10 +1817,14 @@ pub struct SubcircuitDef {
     pub node_sets: Vec<NodeSet>,
     /// Default parameter values (can be overridden at instance)
     pub params: Vec<(String, Value)>,
+    /// Default numeric parameter expressions resolved when the subcircuit is instantiated.
+    pub expr_params: Vec<(String, String)>,
     /// Default string parameter values (can be overridden at instance)
     pub string_params: Vec<(String, String)>,
     /// Parameter definitions declared inside the subcircuit body with `.PARAM`.
     pub body_params: Vec<(String, Value)>,
+    /// Deferred numeric `.PARAM` expressions declared inside the subcircuit body.
+    pub body_expr_params: Vec<(String, String)>,
     /// String parameter definitions declared inside the subcircuit body.
     pub body_string_params: Vec<(String, String)>,
     /// User-defined functions declared inside the subcircuit body with `.FUNC`.

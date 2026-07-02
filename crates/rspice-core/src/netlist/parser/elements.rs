@@ -5212,7 +5212,8 @@ pub(super) fn parse_subckt_def(
         }
     }
 
-    let (params, string_params) = resolve_subckt_default_params(assignments, params_ctx, line_num)?;
+    let (params, expr_params, string_params) =
+        resolve_subckt_default_params(assignments, params_ctx, line_num)?;
 
     Ok(SubcircuitDef {
         name,
@@ -5221,8 +5222,10 @@ pub(super) fn parse_subckt_def(
         initial_conditions: Vec::new(),
         node_sets: Vec::new(),
         params,
+        expr_params,
         string_params,
         body_params: Vec::new(),
+        body_expr_params: Vec::new(),
         body_string_params: Vec::new(),
         body_functions: Vec::new(),
         local_options: std::collections::HashMap::new(),
@@ -5258,9 +5261,17 @@ fn resolve_subckt_default_params(
     assignments: Vec<(String, String)>,
     params_ctx: &ParamContext,
     line_num: usize,
-) -> Result<(Vec<(String, Value)>, Vec<(String, String)>), ParseError> {
+) -> Result<
+    (
+        Vec<(String, Value)>,
+        Vec<(String, String)>,
+        Vec<(String, String)>,
+    ),
+    ParseError,
+> {
     let mut eval_ctx = params_ctx.clone();
     let mut params = Vec::new();
+    let mut expr_params = Vec::new();
     let mut string_params = Vec::new();
     let mut pending = assignments;
 
@@ -5268,6 +5279,7 @@ fn resolve_subckt_default_params(
         let mut progress = false;
         let mut unresolved = Vec::new();
         let mut first_error = None;
+        let mut deferrable = true;
 
         for (param_name, raw_value) in pending {
             if let Some(value) = parse_string_field_value(&raw_value, &eval_ctx) {
@@ -5284,6 +5296,9 @@ fn resolve_subckt_default_params(
                     progress = true;
                 }
                 Err(err) => {
+                    if !parameter_error_can_defer(&err) {
+                        deferrable = false;
+                    }
                     first_error.get_or_insert(err);
                     unresolved.push((param_name, raw_value));
                 }
@@ -5291,6 +5306,13 @@ fn resolve_subckt_default_params(
         }
 
         if !progress {
+            if deferrable {
+                for (param_name, raw_value) in unresolved {
+                    let expr = strip_wrapping_expression_delimiters(&raw_value).to_string();
+                    upsert_param_expression(&mut expr_params, param_name, expr);
+                }
+                break;
+            }
             return Err(first_error.unwrap_or_else(|| ParseError::Syntax {
                 line: line_num,
                 message: "subcircuit default parameters could not be resolved".to_string(),
@@ -5299,7 +5321,26 @@ fn resolve_subckt_default_params(
         pending = unresolved;
     }
 
-    Ok((params, string_params))
+    Ok((params, expr_params, string_params))
+}
+
+pub(super) fn parameter_error_can_defer(err: &ParseError) -> bool {
+    matches!(err, ParseError::InvalidValue(message) if message.contains("Undefined parameter"))
+}
+
+pub(super) fn upsert_param_expression(
+    items: &mut Vec<(String, String)>,
+    name: String,
+    expr: String,
+) {
+    if let Some((_, existing_expr)) = items
+        .iter_mut()
+        .find(|(existing, _)| existing.eq_ignore_ascii_case(&name))
+    {
+        *existing_expr = expr;
+    } else {
+        items.push((name, expr));
+    }
 }
 
 fn parse_string_field_value(raw_value: &str, params_ctx: &ParamContext) -> Option<String> {

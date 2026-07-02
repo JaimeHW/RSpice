@@ -675,6 +675,7 @@ pub(super) fn parse_nodeset_command(
     line_num: usize,
     params: &ParamContext,
     node_sets: &mut Vec<NodeSet>,
+    defer_values: bool,
 ) -> Result<(), ParseError> {
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -687,8 +688,13 @@ pub(super) fn parse_nodeset_command(
         };
 
         stream.consume(&TokenKind::Equals);
-        let voltage = expect_value(stream, line_num, params)?;
-        node_sets.push(NodeSet { node, voltage });
+        let (voltage, voltage_expr) =
+            parse_voltage_hint_value(stream, line_num, params, defer_values)?;
+        node_sets.push(NodeSet {
+            node,
+            voltage,
+            voltage_expr,
+        });
     }
 
     Ok(())
@@ -703,6 +709,7 @@ pub(super) fn parse_ic_command(
     line_num: usize,
     params: &ParamContext,
     initial_conditions: &mut Vec<InitialCondition>,
+    defer_values: bool,
 ) -> Result<(), ParseError> {
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -715,11 +722,108 @@ pub(super) fn parse_ic_command(
         };
 
         stream.consume(&TokenKind::Equals);
-        let voltage = expect_value(stream, line_num, params)?;
-        initial_conditions.push(InitialCondition { node, voltage });
+        let (voltage, voltage_expr) =
+            parse_voltage_hint_value(stream, line_num, params, defer_values)?;
+        initial_conditions.push(InitialCondition {
+            node,
+            voltage,
+            voltage_expr,
+        });
     }
 
     Ok(())
+}
+
+fn parse_voltage_hint_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_values: bool,
+) -> Result<(Value, Option<String>), ParseError> {
+    let mut value_stream = stream.clone();
+    match expect_value(&mut value_stream, line_num, params) {
+        Ok(value) => {
+            *stream = value_stream;
+            Ok((value, None))
+        }
+        Err(err) if defer_values && parameter_error_can_defer(&err) => {
+            let expr = collect_voltage_hint_expression(stream, line_num)?;
+            Ok((Value::NAN, Some(expr)))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn collect_voltage_hint_expression(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    let mut expression = String::new();
+    let mut saw_token = false;
+
+    loop {
+        if matches!(
+            stream.peek().kind,
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Comma
+        ) {
+            break;
+        }
+        if saw_token && looks_like_voltage_hint_target(stream) {
+            break;
+        }
+
+        let token = stream.peek().clone();
+        let fragment = match &token.kind {
+            TokenKind::Expression(expr) => expr.clone(),
+            TokenKind::Ident(_)
+            | TokenKind::Number(_)
+            | TokenKind::Equals
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::LParen
+            | TokenKind::RParen
+            | TokenKind::AtSign
+            | TokenKind::Tilde
+            | TokenKind::Other(_) => token.lexeme.clone(),
+            other => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Expected voltage expression, found {}", other),
+                });
+            }
+        };
+        if !expression.is_empty()
+            && expression
+                .chars()
+                .last()
+                .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            && fragment
+                .chars()
+                .next()
+                .is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            expression.push(' ');
+        }
+        expression.push_str(&fragment);
+        saw_token = true;
+        stream.advance();
+    }
+
+    if expression.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Expected voltage expression".to_string(),
+        });
+    }
+
+    Ok(expression)
+}
+
+fn looks_like_voltage_hint_target(stream: &TokenStream) -> bool {
+    matches!(&stream.peek().kind, TokenKind::Ident(ident) if ident.eq_ignore_ascii_case("V"))
+        && matches!(stream.peek_n(1).kind, TokenKind::LParen)
 }
 
 fn parse_voltage_hint_target(

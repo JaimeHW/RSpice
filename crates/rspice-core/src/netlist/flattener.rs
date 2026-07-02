@@ -479,7 +479,7 @@ impl<'a> Flattener<'a> {
             )?;
         }
         self.expansion_stack.pop();
-        self.collect_scoped_startup_directives(subckt, &new_prefix, &node_map);
+        self.collect_scoped_startup_directives(subckt, &new_prefix, &node_map, &param_scope)?;
 
         Ok(())
     }
@@ -489,20 +489,60 @@ impl<'a> Flattener<'a> {
         subckt: &SubcircuitDef,
         prefix: &str,
         node_map: &HashMap<String, String>,
-    ) {
+        scope: &ParamContext,
+    ) -> Result<(), ParseError> {
         for ic in &subckt.initial_conditions {
             self.scoped_initial_conditions.push(InitialCondition {
                 node: self.remap_node(&ic.node, prefix, node_map),
-                voltage: ic.voltage,
+                voltage: self.resolve_startup_voltage(
+                    ic.voltage,
+                    ic.voltage_expr.as_deref(),
+                    scope,
+                    ".IC",
+                    &ic.node,
+                )?,
+                voltage_expr: None,
             });
         }
 
         for nodeset in &subckt.node_sets {
             self.scoped_node_sets.push(NodeSet {
                 node: self.remap_node(&nodeset.node, prefix, node_map),
-                voltage: nodeset.voltage,
+                voltage: self.resolve_startup_voltage(
+                    nodeset.voltage,
+                    nodeset.voltage_expr.as_deref(),
+                    scope,
+                    ".NODESET",
+                    &nodeset.node,
+                )?,
+                voltage_expr: None,
             });
         }
+
+        Ok(())
+    }
+
+    fn resolve_startup_voltage(
+        &self,
+        voltage: Value,
+        voltage_expr: Option<&str>,
+        scope: &ParamContext,
+        directive: &str,
+        node: &str,
+    ) -> Result<Value, ParseError> {
+        let Some(expr) = voltage_expr else {
+            return Ok(voltage);
+        };
+        resolve_parametric_value(
+            &ParametricValue::Expression(expr.to_string()),
+            scope,
+            &self.random,
+        )
+        .map_err(|err| {
+            ParseError::InvalidValue(format!(
+                "{directive} for node '{node}' could not resolve expression '{expr}': {err}"
+            ))
+        })
     }
 
     /// Remap an element's nodes using the current prefix and node map
@@ -1640,15 +1680,13 @@ fn build_subcircuit_param_scope(
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
 ) -> Result<ParamContext, ParseError> {
-    let (instance_numeric, instance_strings) =
-        resolve_subcircuit_instance_params(subckt, caller_scope, instance_params, random)?;
-
     let mut scope = caller_scope.clone();
     scope.adopt_random(random);
 
     for (name, value) in &subckt.params {
         scope.set(name, *value);
     }
+    resolve_deferred_param_expressions(&subckt.expr_params, &mut scope, random, &[])?;
     for (name, value) in &subckt.string_params {
         scope.set_string(name, value.clone());
     }
@@ -1662,14 +1700,78 @@ fn build_subcircuit_param_scope(
         scope.import_function(function.clone());
     }
 
+    let (instance_numeric, instance_strings) =
+        resolve_subcircuit_instance_params(subckt, &scope, instance_params, random)?;
+    let instance_names = instance_params
+        .iter()
+        .map(|(name, _)| name.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+
     for (name, value) in instance_strings {
         scope.set_string(&name, value);
     }
     for (name, value) in instance_numeric {
         scope.set(&name, value);
     }
+    resolve_deferred_param_expressions(
+        &subckt.body_expr_params,
+        &mut scope,
+        random,
+        &instance_names,
+    )?;
 
     Ok(scope)
+}
+
+fn resolve_deferred_param_expressions(
+    expr_params: &[(String, String)],
+    scope: &mut ParamContext,
+    random: &RandomState,
+    skip_names: &[String],
+) -> Result<(), ParseError> {
+    let mut pending = expr_params
+        .iter()
+        .filter(|(name, _)| {
+            !skip_names
+                .iter()
+                .any(|skip| skip.eq_ignore_ascii_case(name))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    while !pending.is_empty() {
+        let mut progress = false;
+        let mut unresolved = Vec::new();
+        let mut first_error = None;
+
+        for (name, expr) in pending {
+            match resolve_parametric_value(
+                &ParametricValue::Expression(expr.clone()),
+                scope,
+                random,
+            ) {
+                Ok(value) => {
+                    scope.set(&name, value);
+                    progress = true;
+                }
+                Err(err) => {
+                    first_error.get_or_insert(err);
+                    unresolved.push((name, expr));
+                }
+            }
+        }
+
+        if !progress {
+            return Err(first_error.unwrap_or_else(|| {
+                ParseError::InvalidValue(
+                    "subcircuit deferred parameters could not be resolved".to_string(),
+                )
+            }));
+        }
+        pending = unresolved;
+    }
+
+    Ok(())
 }
 
 fn resolve_subcircuit_instance_params(

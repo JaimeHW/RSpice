@@ -111,6 +111,7 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) spef_includes: &'a mut Vec<String>,
+    pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,
 }
 
 pub(super) struct ParseCommandContext<'a> {
@@ -126,4 +127,6 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) options: &'a mut super::SimulationOptions,
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) spef_includes: &'a mut Vec<String>,
+    pub(super) defer_scoped_values: bool,
+    pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,
 }

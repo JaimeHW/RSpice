@@ -20,6 +20,8 @@ pub(super) fn parse_command(
         options,
         diagnostics,
         spef_includes,
+        defer_scoped_values,
+        deferred_body_params,
     } = context;
 
     let cmd = expect_ident(stream, line_num)?;
@@ -141,7 +143,7 @@ pub(super) fn parse_command(
             models.push(model);
         }
         ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
-            parse_param_statement(stream, line_num, params)?;
+            parse_param_statement(stream, line_num, params, deferred_body_params)?;
         }
         ".STEP" => {
             let step_cmd = parse_step_command(stream, line_num, params)?;
@@ -176,10 +178,16 @@ pub(super) fn parse_command(
             analyses.push(pz);
         }
         ".IC" => {
-            parse_ic_command(stream, line_num, params, initial_conditions)?;
+            parse_ic_command(
+                stream,
+                line_num,
+                params,
+                initial_conditions,
+                defer_scoped_values,
+            )?;
         }
         ".NODESET" => {
-            parse_nodeset_command(stream, line_num, params, node_sets)?;
+            parse_nodeset_command(stream, line_num, params, node_sets, defer_scoped_values)?;
         }
         ".INCLUDE" | ".INC" => {
             // Include directives are handled in a preprocessing pass
@@ -1367,6 +1375,7 @@ pub(super) fn parse_param_statement(
     stream: &mut TokenStream,
     line_num: usize,
     params: &mut ParamContext,
+    mut deferred_params: Option<&mut Vec<(String, String)>>,
 ) -> Result<(), ParseError> {
     // Parse one or more NAME=VALUE pairs
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline) {
@@ -1411,9 +1420,18 @@ pub(super) fn parse_param_statement(
             }
             _ if param_rhs_continues(stream) => {
                 let expr = collect_param_rhs_expression(stream, line_num, &name)?;
-                let value = eval_expression_complex(&expr, params)
-                    .map_err(|e| ParseError::InvalidValue(format!("line {}: {}", line_num, e)))?;
-                params.set_complex(&name, value);
+                match eval_expression_complex(&expr, params) {
+                    Ok(value) => params.set_complex(&name, value),
+                    Err(err) => {
+                        let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
+                        defer_param_expression_or_error(
+                            deferred_params.as_deref_mut(),
+                            name,
+                            expr,
+                            err,
+                        )?;
+                    }
+                }
             }
             TokenKind::Expression(expr) if params.get_string(expr).is_some() => {
                 let value = params
@@ -1426,9 +1444,18 @@ pub(super) fn parse_param_statement(
             TokenKind::Expression(expr) => {
                 let expr = expr.clone();
                 stream.advance();
-                let value = eval_expression_complex(&expr, params)
-                    .map_err(|e| ParseError::InvalidValue(format!("line {}: {}", line_num, e)))?;
-                params.set_complex(&name, value);
+                match eval_expression_complex(&expr, params) {
+                    Ok(value) => params.set_complex(&name, value),
+                    Err(err) => {
+                        let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
+                        defer_param_expression_or_error(
+                            deferred_params.as_deref_mut(),
+                            name,
+                            expr,
+                            err,
+                        )?;
+                    }
+                }
             }
             TokenKind::Ident(param_name) if params.get_complex(param_name).is_some() => {
                 let value = params
@@ -1438,13 +1465,42 @@ pub(super) fn parse_param_statement(
                 params.set_complex(&name, value);
             }
             _ => {
-                let value = expect_value(stream, line_num, params)?;
-                params.set(&name, value);
+                let mut value_stream = stream.clone();
+                match expect_value(&mut value_stream, line_num, params) {
+                    Ok(value) => {
+                        *stream = value_stream;
+                        params.set(&name, value);
+                    }
+                    Err(err) => {
+                        let expr = collect_param_rhs_expression(stream, line_num, &name)?;
+                        defer_param_expression_or_error(
+                            deferred_params.as_deref_mut(),
+                            name,
+                            expr,
+                            err,
+                        )?;
+                    }
+                }
             }
         }
     }
 
     Ok(())
+}
+
+fn defer_param_expression_or_error(
+    deferred_params: Option<&mut Vec<(String, String)>>,
+    name: String,
+    expr: String,
+    err: ParseError,
+) -> Result<(), ParseError> {
+    if let Some(deferred_params) = deferred_params
+        && parameter_error_can_defer(&err)
+    {
+        upsert_param_expression(deferred_params, name, expr);
+        return Ok(());
+    }
+    Err(err)
 }
 
 fn parse_param_function_definition(

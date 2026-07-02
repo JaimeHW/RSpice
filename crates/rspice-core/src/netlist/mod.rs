@@ -2553,8 +2553,10 @@ mod tests {
             initial_conditions: Vec::new(),
             node_sets: Vec::new(),
             params: vec![("g".to_string(), 2.0)],
+            expr_params: Vec::new(),
             string_params: Vec::new(),
             body_params: Vec::new(),
+            body_expr_params: Vec::new(),
             body_string_params: Vec::new(),
             body_functions: Vec::new(),
             local_options: std::collections::HashMap::new(),
@@ -6246,6 +6248,78 @@ mod tests {
             .expect("flattened resistor exists");
 
         assert_eq!(resistance, 10_000.0);
+    }
+
+    #[test]
+    fn unused_subckt_default_with_unresolved_param_parses() {
+        Netlist::parse(
+            "unused deferred subckt default\n\
+             .subckt MaybeUsed a b speed1={speed}\n\
+             R1 a b 1k\n\
+             .ends\n\
+             V1 1 0 1\n\
+             Rtop 1 0 1k\n\
+             .end\n",
+        )
+        .expect("unused reusable subckt defaults may depend on caller params");
+    }
+
+    #[test]
+    fn deferred_subckt_default_feeds_body_param_at_flattening() {
+        let netlist = Netlist::parse(
+            "deferred subckt default and body param\n\
+             X1 1 0 Gate\n\
+             .subckt Gate a b vcc1={vcc}\n\
+             .param Rout={60/(vcc1)}\n\
+             R1 a b {Rout}\n\
+             .ends\n\
+             .param vcc=3\n\
+             .end\n",
+        )
+        .expect("subckt defaults may reference later caller params");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("deferred subckt defaults resolve while flattening");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. }
+                    if element.name.eq_ignore_ascii_case("X1.R1") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("flattened resistor exists");
+
+        assert!((resistance - 20.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn deferred_subckt_initial_condition_resolves_at_flattening() {
+        let netlist = Netlist::parse(
+            "deferred subckt startup directive\n\
+             X1 n Cell\n\
+             .subckt Cell out bias={vcc}\n\
+             .ic v(out)='bias/2'\n\
+             R1 out 0 1k\n\
+             .ends\n\
+             .param vcc=5\n\
+             .end\n",
+        )
+        .expect("subckt .IC may reference caller params");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("subckt .IC expression resolves while flattening");
+        let ic = flattened
+            .scoped_initial_conditions
+            .iter()
+            .find(|ic| ic.node.eq_ignore_ascii_case("n"))
+            .expect("scoped initial condition exists");
+
+        assert!((ic.voltage - 2.5).abs() < 1.0e-12);
+        assert!(ic.voltage_expr.is_none());
     }
 
     #[test]
