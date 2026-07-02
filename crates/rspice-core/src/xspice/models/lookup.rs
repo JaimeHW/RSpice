@@ -410,10 +410,27 @@ fn lookup_center_index_with_cursor(table: &LookupTable, x: Value) -> usize {
     center_index
 }
 
-fn lookup_breakpoint_times(table: &LookupTable, input_domain: Value, fraction: bool) -> Vec<Value> {
+fn lookup_breakpoint_times(
+    table: &LookupTable,
+    input_domain: Value,
+    fraction: bool,
+) -> CmResult<Vec<Value>> {
     let points = table.points.as_slice();
     let expanded_len = points.len() + 2;
-    let mut breakpoints = Vec::with_capacity(points.len() * 3);
+    let breakpoint_capacity = points.len().checked_mul(3).ok_or_else(|| {
+        CmError::EvaluationError(format!(
+            "pwlts breakpoint count for {} points exceeds addressable memory",
+            points.len()
+        ))
+    })?;
+    let mut breakpoints = Vec::new();
+    breakpoints
+        .try_reserve_exact(breakpoint_capacity)
+        .map_err(|err| {
+            CmError::EvaluationError(format!(
+                "pwlts unable to reserve storage for {breakpoint_capacity} breakpoints: {err}"
+            ))
+        })?;
     for index in 1..expanded_len - 1 {
         let lower = expanded_lookup_point(points, index - 1, false);
         let center = expanded_lookup_point(points, index, false);
@@ -425,7 +442,7 @@ fn lookup_breakpoint_times(table: &LookupTable, input_domain: Value, fraction: b
             breakpoints.push(center.x + domain);
         }
     }
-    breakpoints
+    Ok(breakpoints)
 }
 
 fn linear_value(point: LookupPoint, slope: Value, x: Value) -> LookupResult {
@@ -655,7 +672,7 @@ impl CodeModel for PiecewiseLinearTimeSeries {
         let input_domain = effective_input_domain(ctx.param("input_domain"))?;
         let fraction = lookup_bool_param(ctx, "fraction")?;
         validate_smoothing_domain(&points, input_domain, fraction)?;
-        Ok(lookup_breakpoint_times(&points, input_domain, fraction))
+        lookup_breakpoint_times(&points, input_domain, fraction)
     }
 }
 
@@ -1169,7 +1186,7 @@ mod tests {
         let table = validate_lookup_table(&[0.0, 1.0e-9, 2.0e-9], &[0.0, 10.0, 30.0])
             .expect("strictly increasing lookup table");
 
-        let breakpoints = lookup_breakpoint_times(&table, 0.01, true);
+        let breakpoints = lookup_breakpoint_times(&table, 0.01, true).expect("breakpoints");
         let expected = [0.99e-9, 1.0e-9, 1.01e-9, 1.99e-9, 2.0e-9, 2.01e-9];
         assert_eq!(breakpoints.len(), expected.len());
         for (actual, expected) in breakpoints.into_iter().zip(expected) {
