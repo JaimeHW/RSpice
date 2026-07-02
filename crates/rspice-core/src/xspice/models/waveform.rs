@@ -200,7 +200,14 @@ fn controlled_frequency_table_optional_uncached(
         ));
     }
     if controls.len() != frequencies.len() {
-        return Ok(None);
+        return Err(invalid_param(
+            "cntl_array/freq_array",
+            format!(
+                "cntl_array length must match freq_array length, got {}/{}",
+                controls.len(),
+                frequencies.len()
+            ),
+        ));
     }
 
     let mut table: Vec<ControlPoint> = Vec::with_capacity(controls.len());
@@ -1009,33 +1016,36 @@ mod tests {
     }
 
     #[test]
-    fn waveform_oscillators_ignore_mismatched_frequency_tables_like_ngspice() {
+    fn waveform_oscillators_reject_mismatched_frequency_tables() {
         let mut sine = mismatched_table_context();
-        SineOscillator
+        let sine_err = SineOscillator
             .init(&mut sine)
-            .expect("ngspice sine reports mismatched tables but does not fail initialization");
-        SineOscillator
-            .evaluate(&mut sine)
-            .expect("ngspice sine returns without fatal error on mismatched tables");
-        assert_eq!(sine.output("out"), 0.0);
+            .expect_err("sine must reject mismatched frequency tables");
+        let sine_message = sine_err.to_string();
+        assert!(
+            sine_message.contains("cntl_array length must match freq_array length"),
+            "sine error should explain mismatched frequency table lengths, got {sine_message}"
+        );
 
         let mut square = mismatched_table_context();
-        SquareOscillator
+        let square_err = SquareOscillator
             .init(&mut square)
-            .expect("ngspice square reports mismatched tables but does not fail initialization");
-        SquareOscillator
-            .evaluate(&mut square)
-            .expect("ngspice square returns without fatal error on mismatched tables");
-        assert_eq!(square.output("out"), 0.0);
+            .expect_err("square must reject mismatched frequency tables");
+        let square_message = square_err.to_string();
+        assert!(
+            square_message.contains("cntl_array length must match freq_array length"),
+            "square error should explain mismatched frequency table lengths, got {square_message}"
+        );
 
         let mut triangle = mismatched_table_context();
-        TriangleOscillator
+        let triangle_err = TriangleOscillator
             .init(&mut triangle)
-            .expect("ngspice triangle reports mismatched tables but does not fail initialization");
-        TriangleOscillator
-            .evaluate(&mut triangle)
-            .expect("ngspice triangle returns without fatal error on mismatched tables");
-        assert_eq!(triangle.output("out"), 0.0);
+            .expect_err("triangle must reject mismatched frequency tables");
+        let triangle_message = triangle_err.to_string();
+        assert!(
+            triangle_message.contains("cntl_array length must match freq_array length"),
+            "triangle error should explain mismatched frequency table lengths, got {triangle_message}"
+        );
     }
 
     #[test]
