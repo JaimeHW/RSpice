@@ -429,6 +429,7 @@ impl Netlist {
             "dc" => ".dc",
             "ac" => ".ac",
             "tran" => ".tran",
+            "save" => ".save",
             "meas" => return Self::promote_control_measure_command(".meas", &args),
             "measure" => return Self::promote_control_measure_command(".measure", &args),
             _ => return None,
@@ -566,7 +567,7 @@ impl Netlist {
                 diagnostics.push(ParseDiagnostic::warning(
                     line_num,
                     "control-block-ignored",
-                    ".control scripting ignored; simple analysis commands and supported settings are promoted into the parsed deck",
+                    ".control scripting ignored; simple analysis/output commands and supported settings are promoted into the parsed deck",
                 ));
                 result.push_str("* ");
                 result.push_str(line);
@@ -1291,6 +1292,10 @@ mod tests {
         assert_eq!(tran.2, None);
         assert_eq!(tran.3, None);
         assert!(tran.4);
+        assert_eq!(
+            netlist.saves.signals,
+            vec![SaveSignal::Raw("in".to_string())]
+        );
     }
 
     #[test]
