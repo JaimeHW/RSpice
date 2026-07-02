@@ -2,7 +2,55 @@ use super::*;
 
 pub(in crate::engine::builder) fn expression_references_circuit_state(expression: &str) -> bool {
     let upper = expression.to_ascii_uppercase();
-    upper.contains("V(") || upper.contains("I(")
+    if upper.contains("V(") || upper.contains("I(") || expression_has_runtime_identifier(expression)
+    {
+        return true;
+    }
+    crate::expr::parse_expression_strict(expression)
+        .is_ok_and(|expr| expression_references_runtime_quantity(&expr))
+}
+
+fn expression_has_runtime_identifier(expression: &str) -> bool {
+    let mut chars = expression.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if !(ch.is_ascii_alphabetic() || ch == '_') {
+            continue;
+        }
+        let mut ident = String::from(ch);
+        while let Some(next) = chars.peek().copied() {
+            if next.is_ascii_alphanumeric() || next == '_' {
+                ident.push(next);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        if ident.eq_ignore_ascii_case("time") {
+            return true;
+        }
+    }
+    false
+}
+
+fn expression_references_runtime_quantity(expr: &crate::expr::Expr) -> bool {
+    match expr {
+        crate::expr::Expr::NodeVoltage(_)
+        | crate::expr::Expr::BranchCurrent(_)
+        | crate::expr::Expr::LookupTable(_)
+        | crate::expr::Expr::Time
+        | crate::expr::Expr::Frequency => true,
+        crate::expr::Expr::Unary { operand, .. } => expression_references_runtime_quantity(operand),
+        crate::expr::Expr::Binary { left, right, .. } => {
+            expression_references_runtime_quantity(left)
+                || expression_references_runtime_quantity(right)
+        }
+        crate::expr::Expr::Function { args, .. } => {
+            args.iter().any(expression_references_runtime_quantity)
+        }
+        crate::expr::Expr::Const(_)
+        | crate::expr::Expr::StringLiteral(_)
+        | crate::expr::Expr::Temperature => false,
+    }
 }
 
 pub(in crate::engine::builder) fn temperature_param_to_celsius(value: f64) -> f64 {

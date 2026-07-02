@@ -53,7 +53,153 @@ pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
 mod history;
 pub(self) use history::*;
 
+#[derive(Debug, Clone, Copy)]
+struct DerivedTransientBranchCurrent {
+    kind: DerivedTransientBranchCurrentKind,
+    index: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DerivedTransientBranchCurrentKind {
+    LinearResistor,
+    BehavioralCurrentSource,
+}
+
 impl Engine {
+    fn derived_transient_branch_currents(
+        circuit: &crate::circuit::CircuitData,
+        existing_branch_names: &[String],
+    ) -> Vec<DerivedTransientBranchCurrent> {
+        let mut derived = Vec::new();
+        for (index, name) in circuit.resistors.names.iter().enumerate() {
+            if existing_branch_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            derived.push(DerivedTransientBranchCurrent {
+                kind: DerivedTransientBranchCurrentKind::LinearResistor,
+                index,
+            });
+        }
+        for (index, source) in circuit
+            .behavioral_sources
+            .current_sources
+            .iter()
+            .enumerate()
+        {
+            if existing_branch_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&source.name))
+                || derived.iter().any(|&branch| {
+                    Self::derived_transient_branch_name(circuit, branch)
+                        .eq_ignore_ascii_case(&source.name)
+                })
+            {
+                continue;
+            }
+            derived.push(DerivedTransientBranchCurrent {
+                kind: DerivedTransientBranchCurrentKind::BehavioralCurrentSource,
+                index,
+            });
+        }
+        derived
+    }
+
+    fn derived_transient_branch_name(
+        circuit: &crate::circuit::CircuitData,
+        branch: DerivedTransientBranchCurrent,
+    ) -> String {
+        match branch.kind {
+            DerivedTransientBranchCurrentKind::LinearResistor => {
+                circuit.resistors.names[branch.index].clone()
+            }
+            DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
+                circuit.behavioral_sources.current_sources[branch.index]
+                    .name
+                    .clone()
+            }
+        }
+    }
+
+    fn derived_transient_branch_current(
+        circuit: &mut crate::circuit::CircuitData,
+        solution: &[Value],
+        time: Value,
+        branch: DerivedTransientBranchCurrent,
+    ) -> Value {
+        match branch.kind {
+            DerivedTransientBranchCurrentKind::LinearResistor => {
+                let stamp = circuit.resistors.stamps[branch.index];
+                let v_pos = if stamp.pp.row == 0 {
+                    0.0
+                } else {
+                    solution.get(stamp.pp.row - 1).copied().unwrap_or(0.0)
+                };
+                let v_neg = if stamp.nn.row == 0 {
+                    0.0
+                } else {
+                    solution.get(stamp.nn.row - 1).copied().unwrap_or(0.0)
+                };
+                (v_pos - v_neg) * circuit.resistors.conductances[branch.index]
+            }
+            DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
+                circuit.behavioral_sources.current_sources[branch.index].evaluate(solution, time)
+            }
+        }
+    }
+
+    fn initial_transient_branch_currents(
+        circuit: &mut crate::circuit::CircuitData,
+        solution: &[Value],
+        num_nodes: usize,
+        time: Value,
+        derived_branches: &[DerivedTransientBranchCurrent],
+    ) -> Vec<Vec<Value>> {
+        let mut currents: Vec<Vec<Value>> = (0..circuit.num_branches())
+            .map(|i| vec![solution.get(num_nodes + i).copied().unwrap_or(0.0)])
+            .collect();
+        currents.extend(derived_branches.iter().map(|&branch| {
+            vec![Self::derived_transient_branch_current(
+                circuit, solution, time, branch,
+            )]
+        }));
+        currents
+    }
+
+    fn record_transient_solution_sample(
+        result: &mut TransientResult,
+        circuit: &mut crate::circuit::CircuitData,
+        solution: &[Value],
+        num_nodes: usize,
+        time: Value,
+        derived_branches: &[DerivedTransientBranchCurrent],
+    ) {
+        result.time.push(time);
+        for (i, voltages) in result.voltages.iter_mut().enumerate() {
+            voltages.push(solution.get(i).copied().unwrap_or(0.0));
+        }
+
+        let solved_branch_count = circuit.num_branches();
+        for (i, currents) in result
+            .branch_currents
+            .iter_mut()
+            .take(solved_branch_count)
+            .enumerate()
+        {
+            currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
+        }
+        for (branch, currents) in derived_branches
+            .iter()
+            .zip(result.branch_currents.iter_mut().skip(solved_branch_count))
+        {
+            currents.push(Self::derived_transient_branch_current(
+                circuit, solution, time, *branch,
+            ));
+        }
+    }
+
     fn apply_capacitor_element_initial_conditions(
         circuit: &crate::circuit::CircuitData,
         solution: &mut [Value],
@@ -527,15 +673,26 @@ impl Engine {
             );
         }
 
-        let branch_names = circuit.branch_names_sorted();
+        let mut branch_names = circuit.branch_names_sorted();
+        let derived_branch_currents =
+            Self::derived_transient_branch_currents(&circuit, &branch_names);
+        branch_names.extend(
+            derived_branch_currents
+                .iter()
+                .map(|&branch| Self::derived_transient_branch_name(&circuit, branch)),
+        );
         let mut result = TransientResult {
             time: vec![resume_time],
             voltages: (0..num_nodes)
                 .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),
-            branch_currents: (0..circuit.num_branches())
-                .map(|i| vec![solution.get(num_nodes + i).copied().unwrap_or(0.0)])
-                .collect(),
+            branch_currents: Self::initial_transient_branch_currents(
+                &mut circuit,
+                &solution,
+                num_nodes,
+                resume_time,
+                &derived_branch_currents,
+            ),
             num_nodes,
             node_names,
             branch_names,
@@ -2020,13 +2177,14 @@ impl Engine {
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
                         log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
                     }
-                    result.time.push(t);
-                    for (i, voltages) in result.voltages.iter_mut().enumerate() {
-                        voltages.push(solution.get(i).copied().unwrap_or(0.0));
-                    }
-                    for (i, currents) in result.branch_currents.iter_mut().enumerate() {
-                        currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
-                    }
+                    Self::record_transient_solution_sample(
+                        &mut result,
+                        &mut circuit,
+                        &solution,
+                        num_nodes,
+                        t,
+                        &derived_branch_currents,
+                    );
                     circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                     result.record_digital_snapshot(
                         t,
@@ -2805,13 +2963,14 @@ impl Engine {
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
                         log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
                     }
-                    result.time.push(t);
-                    for (i, voltages) in result.voltages.iter_mut().enumerate() {
-                        voltages.push(solution.get(i).copied().unwrap_or(0.0));
-                    }
-                    for (i, currents) in result.branch_currents.iter_mut().enumerate() {
-                        currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
-                    }
+                    Self::record_transient_solution_sample(
+                        &mut result,
+                        &mut circuit,
+                        &solution,
+                        num_nodes,
+                        t,
+                        &derived_branch_currents,
+                    );
                     circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                     result.record_digital_snapshot(
                         t,
@@ -3026,13 +3185,14 @@ impl Engine {
             }
 
             // Store results
-            result.time.push(t);
-            for (i, voltages) in result.voltages.iter_mut().enumerate() {
-                voltages.push(solution.get(i).copied().unwrap_or(0.0));
-            }
-            for (i, currents) in result.branch_currents.iter_mut().enumerate() {
-                currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
-            }
+            Self::record_transient_solution_sample(
+                &mut result,
+                &mut circuit,
+                &solution,
+                num_nodes,
+                t,
+                &derived_branch_currents,
+            );
             circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
             result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
             if first_accepted_transient_step {

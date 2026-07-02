@@ -4282,14 +4282,12 @@ impl XyceTestRunner {
                     )?;
                 }
                 ElementKind::Resistor { value_expr, .. } => {
-                    if value_expr
-                        .as_deref()
-                        .is_some_and(Self::expression_references_time_symbol)
-                    {
-                        return Err(format!(
-                            "native static .PRINT TRAN comparison does not yet support time-dependent resistor value expressions; element '{}' references TIME",
-                            element.name
-                        ));
+                    if let Some(expression) = value_expr {
+                        Self::validate_transient_behavioral_expression(
+                            &element.name,
+                            expression,
+                            params,
+                        )?;
                     }
                 }
                 ElementKind::Capacitor {
@@ -4449,28 +4447,6 @@ impl XyceTestRunner {
                 .iter()
                 .any(Self::passive_value_expression_depends_on_runtime_quantity),
         }
-    }
-
-    fn expression_references_time_symbol(expression: &str) -> bool {
-        let mut chars = expression.chars().peekable();
-        while let Some(ch) = chars.next() {
-            if !(ch.is_ascii_alphabetic() || ch == '_') {
-                continue;
-            }
-            let mut ident = String::from(ch);
-            while let Some(next) = chars.peek().copied() {
-                if next.is_ascii_alphanumeric() || next == '_' {
-                    ident.push(next);
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-            if ident.eq_ignore_ascii_case("time") {
-                return true;
-            }
-        }
-        false
     }
 
     fn validate_tran_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
@@ -7205,11 +7181,13 @@ impl XyceTestRunner {
         matches!(
             kind,
             ElementKind::VoltageSource(_)
+                | ElementKind::Resistor { .. }
                 | ElementKind::Inductor { .. }
                 | ElementKind::JilesAthertonInductor { .. }
                 | ElementKind::Vcvs { .. }
                 | ElementKind::Ccvs { .. }
                 | ElementKind::BehavioralVoltage { .. }
+                | ElementKind::BehavioralCurrent { .. }
         )
     }
 
