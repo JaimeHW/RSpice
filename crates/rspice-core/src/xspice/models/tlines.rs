@@ -1393,11 +1393,11 @@ fn tline_parameters() -> &'static [ParamSpec] {
 }
 
 fn tline_length(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "l", 1.0)
+    positive_param(ctx, "l", 1.0)
 }
 
 fn tline_impedance(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "z", 50.0)
+    positive_param(ctx, "z", 50.0)
 }
 
 fn tline_attenuation(ctx: &CmContext) -> CmResult<Value> {
@@ -1570,7 +1570,7 @@ fn mlin_parameters() -> &'static [ParamSpec] {
 }
 
 fn mlin_length(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "l", 1.0e-2)
+    positive_param(ctx, "l", 1.0e-2)
 }
 
 fn mlin_tran_model(ctx: &CmContext) -> CmResult<i64> {
@@ -1770,23 +1770,23 @@ fn cpline_parameters() -> &'static [ParamSpec] {
 }
 
 fn cpline_length(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "l", 1.0)
+    positive_param(ctx, "l", 1.0)
 }
 
 fn cpline_even_impedance(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "ze", 50.0)
+    positive_param(ctx, "ze", 50.0)
 }
 
 fn cpline_odd_impedance(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "zo", 50.0)
+    positive_param(ctx, "zo", 50.0)
 }
 
 fn cpline_even_permittivity(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "ere", 1.0)
+    positive_param(ctx, "ere", 1.0)
 }
 
 fn cpline_odd_permittivity(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "ero", 1.0)
+    positive_param(ctx, "ero", 1.0)
 }
 
 fn cpline_even_attenuation(ctx: &CmContext) -> CmResult<Value> {
@@ -1963,7 +1963,7 @@ fn cpmlin_parameters() -> &'static [ParamSpec] {
 }
 
 fn cpmlin_length(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "l", 1.0)
+    positive_param(ctx, "l", 1.0)
 }
 
 fn cpmlin_tran_model(ctx: &CmContext) -> CmResult<i64> {
@@ -2849,6 +2849,29 @@ mod tests {
     }
 
     #[test]
+    fn transmission_lines_reject_nonpositive_physical_params() {
+        let mut tline = CmContext::new();
+        tline.set_param("z", 0.0);
+        assert_invalid_param(GenericTransmissionLine.init(&mut tline), "z");
+
+        let mut mline = microstrip_cache_context();
+        mline.set_param("l", 0.0);
+        assert_invalid_param(MicrostripLine.init(&mut mline), "l");
+
+        let mut cpline = CmContext::new();
+        cpline.set_param("ze", -50.0);
+        assert_invalid_param(CoupledTransmissionLine.init(&mut cpline), "ze");
+
+        let mut cpline_er = CmContext::new();
+        cpline_er.set_param("ero", 0.0);
+        assert_invalid_param(CoupledTransmissionLine.init(&mut cpline_er), "ero");
+
+        let mut cpmlin = coupled_microstrip_cache_context();
+        cpmlin.set_param("l", -1.0);
+        assert_invalid_param(CoupledMicrostripLine.init(&mut cpmlin), "l");
+    }
+
+    #[test]
     fn two_port_ac_impedance_caches_reuse_matching_entries_and_invalidate() {
         let frequency = 1.0e9;
 
@@ -2966,5 +2989,12 @@ mod tests {
             cpmlin_ac_impedances(&cpmlin, frequency).expect("changed cpmlin spacing recomputes"),
             cpmlin_sentinel
         );
+    }
+
+    fn assert_invalid_param<T: std::fmt::Debug>(result: CmResult<T>, expected: &str) {
+        match result {
+            Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected),
+            other => panic!("expected InvalidParameter for {expected}, got {other:?}"),
+        }
     }
 }
