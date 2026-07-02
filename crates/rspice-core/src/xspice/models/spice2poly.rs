@@ -29,7 +29,6 @@ struct PolyEval {
 #[derive(Debug, Clone)]
 struct PolyTerm {
     coefficient: Value,
-    exponents: Vec<usize>,
     active_exponents: Vec<(usize, usize)>,
 }
 
@@ -270,7 +269,6 @@ fn build_poly_plan(input_count: usize, coef: &[Value]) -> CmResult<Arc<PolyPlan>
             .collect();
         terms.push(PolyTerm {
             coefficient,
-            exponents: exponents.clone(),
             active_exponents,
         });
     }
@@ -621,25 +619,13 @@ mod tests {
         assert_eq!(
             plan.terms
                 .iter()
-                .map(|term| (term.coefficient, term.exponents.as_slice()))
+                .map(|term| (term.coefficient, term.active_exponents.as_slice()))
                 .collect::<Vec<_>>(),
             vec![
-                (3.0, &[0, 1][..]),
-                (5.0, &[1, 1][..]),
-                (7.0, &[3, 0][..]),
-                (10.0, &[0, 3][..]),
-            ]
-        );
-        assert_eq!(
-            plan.terms
-                .iter()
-                .map(|term| term.active_exponents.as_slice())
-                .collect::<Vec<_>>(),
-            vec![
-                &[(1, 1)][..],
-                &[(0, 1), (1, 1)][..],
-                &[(0, 3)][..],
-                &[(1, 3)][..],
+                (3.0, &[(1, 1)][..]),
+                (5.0, &[(0, 1), (1, 1)][..]),
+                (7.0, &[(0, 3)][..]),
+                (10.0, &[(1, 3)][..]),
             ]
         );
 
