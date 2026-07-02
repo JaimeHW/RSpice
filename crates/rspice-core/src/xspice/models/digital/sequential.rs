@@ -59,12 +59,20 @@ fn output_value(code: i64) -> DigitalValue {
     }
 }
 
-fn ic_code(ctx: &CmContext) -> i64 {
-    match (ctx.param("ic").round() as i64).clamp(OFFICIAL_IC_MIN, OFFICIAL_IC_MAX) {
+fn ic_code(ctx: &CmContext) -> CmResult<i64> {
+    let value = ctx.param("ic");
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: "ic".to_string(),
+            message: format!("digital sequential ic must be finite, got {value}"),
+        });
+    }
+    let code = match (value.round() as i64).clamp(OFFICIAL_IC_MIN, OFFICIAL_IC_MAX) {
         0 => 0,
         1 => 1,
         _ => -1,
-    }
+    };
+    Ok(code)
 }
 
 fn invert_code(code: i64) -> i64 {
@@ -189,7 +197,7 @@ fn evaluate_edge_model(
     let old_output = ctx.int_state(EDGE_PREV_OUT);
 
     let output = if ctx.time == 0.0 {
-        let initial = initial_async_output(ic_code(ctx), set, reset);
+        let initial = initial_async_output(ic_code(ctx)?, set, reset);
         drive_outputs(ctx, initial, 0.0, 0.0);
         initial
     } else {
@@ -305,6 +313,7 @@ impl CodeModel for DFlipFlop {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ic_code(ctx)?;
         ctx.allocate_int_states(EDGE_STATE_COUNT);
         Ok(())
     }
@@ -350,6 +359,7 @@ impl CodeModel for JkFlipFlop {
         PARAMS.get_or_init(|| edge_parameters("jk_load"))
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ic_code(ctx)?;
         ctx.allocate_int_states(EDGE_STATE_COUNT);
         Ok(())
     }
@@ -394,6 +404,7 @@ impl CodeModel for TFlipFlop {
         PARAMS.get_or_init(|| edge_parameters("t_load"))
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ic_code(ctx)?;
         ctx.allocate_int_states(EDGE_STATE_COUNT);
         Ok(())
     }
@@ -528,6 +539,33 @@ mod tests {
         let mut rise_ctx = initialized_dff_context();
         rise_ctx.set_param("rise_delay", f64::NAN);
         assert_invalid_param(DFlipFlop.evaluate(&mut rise_ctx), "rise_delay");
+    }
+
+    #[test]
+    fn sequential_models_reject_nonfinite_initial_conditions() {
+        let mut edge_init_ctx = CmContext::new();
+        edge_init_ctx.set_param("ic", f64::NAN);
+        assert_invalid_param(DFlipFlop.init(&mut edge_init_ctx), "ic");
+
+        let mut edge_eval_ctx = CmContext::new();
+        edge_eval_ctx.set_param("ic", 0.0);
+        TFlipFlop
+            .init(&mut edge_eval_ctx)
+            .expect("finite tff ic initializes");
+        edge_eval_ctx.set_param("ic", f64::INFINITY);
+        assert_invalid_param(TFlipFlop.evaluate(&mut edge_eval_ctx), "ic");
+
+        let mut dlatch_ctx = CmContext::new();
+        dlatch_ctx.set_param("ic", f64::NEG_INFINITY);
+        assert_invalid_param(DLatch.init(&mut dlatch_ctx), "ic");
+
+        let mut srlatch_ctx = CmContext::new();
+        srlatch_ctx.set_param("ic", 0.0);
+        SrLatch
+            .init(&mut srlatch_ctx)
+            .expect("finite srlatch ic initializes");
+        srlatch_ctx.set_param("ic", f64::NAN);
+        assert_invalid_param(SrLatch.evaluate(&mut srlatch_ctx), "ic");
     }
 
     #[test]
@@ -993,6 +1031,7 @@ impl CodeModel for SrFlipFlop {
         PARAMS.get_or_init(|| edge_parameters("sr_load"))
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ic_code(ctx)?;
         ctx.allocate_int_states(EDGE_STATE_COUNT);
         Ok(())
     }
@@ -1102,6 +1141,7 @@ impl CodeModel for DLatch {
         })
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ic_code(ctx)?;
         ctx.allocate_int_states(DLATCH_STATE_COUNT);
         Ok(())
     }
@@ -1123,7 +1163,7 @@ impl CodeModel for DLatch {
         let old_output = ctx.int_state(DLATCH_PREV_OUT);
 
         let output = if ctx.time == 0.0 {
-            let initial = dlatch_initial_output(ic_code(ctx), data, enable, set, reset);
+            let initial = dlatch_initial_output(ic_code(ctx)?, data, enable, set, reset);
             drive_outputs(ctx, initial, 0.0, 0.0);
             initial
         } else {
@@ -1273,6 +1313,7 @@ impl CodeModel for SrLatch {
         })
     }
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        ic_code(ctx)?;
         ctx.allocate_int_states(SRLATCH_STATE_COUNT);
         Ok(())
     }
@@ -1296,7 +1337,7 @@ impl CodeModel for SrLatch {
         let old_output = ctx.int_state(SRLATCH_PREV_OUT);
 
         let output = if ctx.time == 0.0 {
-            let initial = srlatch_initial_output(ic_code(ctx), s, r, enable, set, reset);
+            let initial = srlatch_initial_output(ic_code(ctx)?, s, r, enable, set, reset);
             drive_outputs(ctx, initial, 0.0, 0.0);
             initial
         } else {
