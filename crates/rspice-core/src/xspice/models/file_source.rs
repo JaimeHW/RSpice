@@ -278,7 +278,15 @@ fn parse_filesource_contents(
         for value_index in 0..width {
             offset = skip_filesource_data_delimiters(trimmed_start, offset);
             if offset >= trimmed_start.len() {
-                break;
+                return Err(filesource_line_error(
+                    file,
+                    line_number,
+                    format!(
+                        "expected {} columns, found {}",
+                        expected_columns,
+                        value_index + 1
+                    ),
+                ));
             }
             let Some((value, len)) = parse_filesource_value_token(
                 file,
@@ -287,7 +295,11 @@ fn parse_filesource_contents(
                 value_index,
             )?
             else {
-                break;
+                return Err(filesource_line_error(
+                    file,
+                    line_number,
+                    format!("value[{value_index}] must start with a numeric value"),
+                ));
             };
             fields.push(RawFileSourceField {
                 line: line_number,
@@ -1033,8 +1045,8 @@ mod tests {
     }
 
     #[test]
-    fn filesource_transforms_fields_before_stream_chunking_like_ngspice() {
-        let raw_fields = parse_filesource_contents(
+    fn filesource_rejects_incomplete_data_rows() {
+        let err = parse_filesource_contents(
             "stim.txt",
             2,
             "\
@@ -1042,24 +1054,12 @@ mod tests {
 1 20 30
 ",
         )
-        .expect("parse short filesource stream");
+        .expect_err("short filesource row must not corrupt following rows");
+        let message = err.to_string();
 
-        let mut ctx = CmContext::new();
-        ctx.set_string_param("file", "stim.txt");
-        ctx.set_param("timeoffset", 5.0);
-        ctx.set_param("timescale", 2.0);
-        ctx.set_param("timerelative", 0.0);
-        ctx.set_real_vector_param("amploffset", vec![1.0, 2.0]);
-        ctx.set_real_vector_param("amplscale", vec![10.0, 100.0]);
-
-        let rows = transform_rows(&ctx, &raw_fields, 2).expect("transform rows");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].time, 5.0);
-        assert_eq!(rows.row_values(0), &[101.0, 7.0]);
-        assert_eq!(
-            rows.values,
-            vec![101.0, 7.0],
-            "transformed filesource values should be stored contiguously"
+        assert!(
+            message.contains("line 1: expected 3 columns, found 2"),
+            "incomplete filesource row should report the failing line, got {message}"
         );
     }
 
