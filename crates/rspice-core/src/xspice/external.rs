@@ -958,7 +958,13 @@ mod native_cosim {
         parameter_name: &str,
         args: &[String],
     ) -> CmResult<(Vec<CString>, Vec<*const c_char>)> {
-        let mut strings = Vec::with_capacity(args.len());
+        let mut strings = Vec::new();
+        strings
+            .try_reserve_exact(args.len())
+            .map_err(|err| CmError::InvalidParameter {
+                name: parameter_name.to_string(),
+                message: format!("unable to reserve {} argument string(s): {err}", args.len()),
+            })?;
         for arg in args {
             strings.push(
                 CString::new(arg.as_str()).map_err(|_| CmError::InvalidParameter {
@@ -967,7 +973,17 @@ mod native_cosim {
                 })?,
             );
         }
-        let mut pointers: Vec<*const c_char> = strings.iter().map(|arg| arg.as_ptr()).collect();
+        let mut pointers = Vec::new();
+        let pointer_count = strings.len().saturating_add(1);
+        pointers
+            .try_reserve_exact(pointer_count)
+            .map_err(|err| CmError::InvalidParameter {
+                name: parameter_name.to_string(),
+                message: format!("unable to reserve {pointer_count} argument pointer(s): {err}"),
+            })?;
+        for arg in &strings {
+            pointers.push(arg.as_ptr());
+        }
         pointers.push(std::ptr::null());
         Ok((strings, pointers))
     }
