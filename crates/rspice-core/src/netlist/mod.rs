@@ -6043,6 +6043,55 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_pindly_honors_mntymxdly_max_mode() {
+        let netlist = Netlist::parse(
+            "pspice u pindly max delay mode\n\
+             U22 PINDLY(1,0,0) $G_DPWR $G_DGND internal output IO_STD MNTYMXDLY=2\n\
+             + PINDLY:\n\
+             +   output = {CASE(DELAY(2ns,4ns,8ns))}\n\
+             .end\n",
+        )
+        .expect("PSpice PINDLY should honor MNTYMXDLY=2 as max delay");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { params, .. } => {
+                assert!(params.iter().any(|(name, value)| {
+                    name == "rise_delay" && (*value - 8.0e-9).abs() < 1.0e-21
+                }));
+                assert!(params.iter().any(|(name, value)| {
+                    name == "fall_delay" && (*value - 8.0e-9).abs() < 1.0e-21
+                }));
+            }
+            other => panic!("expected PINDLY buffer lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_pindly_honors_parametric_mntymxdly_min_mode() {
+        let netlist = Netlist::parse(
+            "pspice u pindly parametric min delay mode\n\
+             .param dlymode=1\n\
+             U23 PINDLY(1,0,0) $G_DPWR $G_DGND internal output IO_STD MNTYMXDLY={dlymode}\n\
+             + PINDLY:\n\
+             +   output = {CASE(DELAY(2ns,4ns,8ns))}\n\
+             .end\n",
+        )
+        .expect("PSpice PINDLY should resolve parametric MNTYMXDLY");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { params, .. } => {
+                assert!(params.iter().any(|(name, value)| {
+                    name == "rise_delay" && (*value - 2.0e-9).abs() < 1.0e-21
+                }));
+                assert!(params.iter().any(|(name, value)| {
+                    name == "fall_delay" && (*value - 2.0e-9).abs() < 1.0e-21
+                }));
+            }
+            other => panic!("expected PINDLY buffer lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pspice_u_unsupported_frontend_families_fail_closed() {
         let err = Netlist::parse(
             "pspice u constraint unsupported slice\n\

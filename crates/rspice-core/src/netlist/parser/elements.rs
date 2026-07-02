@@ -709,6 +709,7 @@ pub(super) fn parse_pspice_u_device(
     line: &str,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let mut fields = split_spice_fields(line);
     join_split_pspice_u_type_dimensions(&mut fields);
@@ -917,6 +918,7 @@ pub(super) fn parse_pspice_u_device(
             line,
             line_num,
             elements,
+            params,
         ),
         "OR3" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -1807,6 +1809,13 @@ struct PspicePindlyEntry {
     delay: Option<Value>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PspicePindlyDelayMode {
+    Min,
+    Typ,
+    Max,
+}
+
 fn parse_pspice_u_pindly(
     name: &str,
     fields: &[String],
@@ -1814,6 +1823,7 @@ fn parse_pspice_u_pindly(
     line: &str,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let Some((io_count, enable_count, reference_count)) = shape else {
         return Err(ParseError::Syntax {
@@ -1890,11 +1900,12 @@ fn parse_pspice_u_pindly(
         pspice_u_required_digital_node(pin, "PINDLY reference", fields, line_num, elements)?;
     }
 
+    let delay_mode = pspice_u_pindly_delay_mode(fields, section_index, params, line_num);
     if let Some(section) = pspice_u_behavior_section(line, "PINDLY:") {
-        apply_pspice_u_pindly_delay_section(section, &mut entries, false);
+        apply_pspice_u_pindly_delay_section(section, &mut entries, delay_mode, false);
     }
     if let Some(section) = pspice_u_behavior_section(line, "TRISTATE:") {
-        apply_pspice_u_pindly_tristate_section(section, &mut entries);
+        apply_pspice_u_pindly_tristate_section(section, &mut entries, delay_mode);
     }
 
     for (index, entry) in entries.into_iter().enumerate() {
@@ -1968,11 +1979,12 @@ fn pspice_u_behavior_section<'a>(line: &'a str, section: &str) -> Option<&'a str
 fn apply_pspice_u_pindly_delay_section(
     section: &str,
     entries: &mut [PspicePindlyEntry],
+    delay_mode: PspicePindlyDelayMode,
     tristate: bool,
 ) {
     let mut parser = PspicePindlySectionParser::new(section);
     while let Some((outputs, block)) = parser.next_assignment() {
-        let delay = pspice_u_pindly_delay_from_block(block).unwrap_or(10.0e-9);
+        let delay = pspice_u_pindly_delay_from_block(block, delay_mode).unwrap_or(10.0e-9);
         for output in outputs {
             if let Some(entry) = entries
                 .iter_mut()
@@ -1987,14 +1999,18 @@ fn apply_pspice_u_pindly_delay_section(
     }
 }
 
-fn apply_pspice_u_pindly_tristate_section(section: &str, entries: &mut [PspicePindlyEntry]) {
+fn apply_pspice_u_pindly_tristate_section(
+    section: &str,
+    entries: &mut [PspicePindlyEntry],
+    delay_mode: PspicePindlyDelayMode,
+) {
     let (body, enable) = pspice_u_pindly_tristate_enable(section);
     let Some(enable) = enable else {
         return;
     };
     let mut parser = PspicePindlySectionParser::new(body);
     while let Some((outputs, block)) = parser.next_assignment() {
-        let delay = pspice_u_pindly_delay_from_block(block).unwrap_or(10.0e-9);
+        let delay = pspice_u_pindly_delay_from_block(block, delay_mode).unwrap_or(10.0e-9);
         for output in outputs {
             if let Some(entry) = entries
                 .iter_mut()
@@ -2005,6 +2021,53 @@ fn apply_pspice_u_pindly_tristate_section(section: &str, entries: &mut [PspicePi
             }
         }
     }
+}
+
+fn pspice_u_pindly_delay_mode(
+    fields: &[String],
+    section_index: usize,
+    params: &ParamContext,
+    line_num: usize,
+) -> PspicePindlyDelayMode {
+    let Some(raw_value) = pspice_u_assignment_value(fields, section_index, "MNTYMXDLY") else {
+        return PspicePindlyDelayMode::Typ;
+    };
+    let Ok(value) = parse_numeric_field_value(raw_value, params, line_num) else {
+        return PspicePindlyDelayMode::Typ;
+    };
+
+    match value.round() as i64 {
+        1 => PspicePindlyDelayMode::Min,
+        2 => PspicePindlyDelayMode::Max,
+        _ => PspicePindlyDelayMode::Typ,
+    }
+}
+
+fn pspice_u_assignment_value<'a>(
+    fields: &'a [String],
+    section_index: usize,
+    name: &str,
+) -> Option<&'a str> {
+    let limit = section_index.min(fields.len());
+    let mut index = 0usize;
+    while index < limit {
+        let field = fields[index].trim();
+        if let Some((lhs, rhs)) = field.split_once('=') {
+            if lhs.trim().eq_ignore_ascii_case(name) && !rhs.trim().is_empty() {
+                return Some(rhs.trim());
+            }
+        } else if field.eq_ignore_ascii_case(name) {
+            let mut value_index = index + 1;
+            if value_index < limit && fields[value_index].trim() == "=" {
+                value_index += 1;
+            }
+            if value_index < limit {
+                return Some(fields[value_index].trim());
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 fn pspice_u_pindly_tristate_enable(section: &str) -> (&str, Option<XspicePort>) {
@@ -2148,7 +2211,10 @@ impl<'a> PspicePindlySectionParser<'a> {
     }
 }
 
-fn pspice_u_pindly_delay_from_block(block: &str) -> Option<Value> {
+fn pspice_u_pindly_delay_from_block(
+    block: &str,
+    delay_mode: PspicePindlyDelayMode,
+) -> Option<Value> {
     let upper = block.to_ascii_uppercase();
     let mut search_start = 0usize;
     let mut selected = None;
@@ -2158,7 +2224,7 @@ fn pspice_u_pindly_delay_from_block(block: &str) -> Option<Value> {
         let Some(args_end) = rest.find(')') else {
             break;
         };
-        if let Some(delay) = pspice_u_pindly_delay_args(&rest[..args_end])
+        if let Some(delay) = pspice_u_pindly_delay_args(&rest[..args_end], delay_mode)
             && selected.is_none_or(|current| delay > current)
         {
             selected = Some(delay);
@@ -2168,7 +2234,7 @@ fn pspice_u_pindly_delay_from_block(block: &str) -> Option<Value> {
     selected
 }
 
-fn pspice_u_pindly_delay_args(args: &str) -> Option<Value> {
+fn pspice_u_pindly_delay_args(args: &str, delay_mode: PspicePindlyDelayMode) -> Option<Value> {
     let mut values = args
         .split(',')
         .take(3)
@@ -2178,10 +2244,26 @@ fn pspice_u_pindly_delay_args(args: &str) -> Option<Value> {
         values.push(None);
     }
 
-    if let Some(typ) = values[1] {
+    match delay_mode {
+        PspicePindlyDelayMode::Min => {
+            values[0].or_else(|| pspice_u_pindly_typ_delay(values[0], values[1], values[2]))
+        }
+        PspicePindlyDelayMode::Typ => pspice_u_pindly_typ_delay(values[0], values[1], values[2]),
+        PspicePindlyDelayMode::Max => {
+            values[2].or_else(|| pspice_u_pindly_typ_delay(values[0], values[1], values[2]))
+        }
+    }
+}
+
+fn pspice_u_pindly_typ_delay(
+    min: Option<Value>,
+    typ: Option<Value>,
+    max: Option<Value>,
+) -> Option<Value> {
+    if let Some(typ) = typ {
         return Some(typ);
     }
-    match (values[0], values[2]) {
+    match (min, max) {
         (Some(min), Some(max)) => Some((min + max) * 0.5),
         (Some(min), None) => Some(min),
         (None, Some(max)) => Some(max),
