@@ -71,9 +71,15 @@ fn d_ram_error(message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("d_ram: {}", message.into()))
 }
 
-fn d_ram_read_delay(ctx: &CmContext) -> Value {
-    ctx.param_or("read_delay", 100.0e-9)
-        .max(D_RAM_READ_DELAY_MIN)
+fn d_ram_read_delay(ctx: &CmContext) -> CmResult<Value> {
+    let value = ctx.param_or("read_delay", 100.0e-9);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: "read_delay".to_string(),
+            message: format!("delay must be finite, got {value}"),
+        });
+    }
+    Ok(value.max(D_RAM_READ_DELAY_MIN))
 }
 
 fn d_ram_integer_param(ctx: &CmContext, name: &str, default: Value, min: i64, max: i64) -> i64 {
@@ -615,7 +621,7 @@ impl CodeModel for DigitalRam {
         let select = d_ram_select_code(ctx, shape, &inputs.select);
         let address_index = d_ram_address_index(&inputs.address);
         let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX);
-        let read_delay = d_ram_read_delay(ctx);
+        let read_delay = d_ram_read_delay(ctx)?;
 
         let result = if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
             (|| {
@@ -773,6 +779,13 @@ mod tests {
         evaluate_ram_with_phase(ctx, time, EvaluationPhase::DirectEvaluation);
     }
 
+    fn assert_invalid_param(result: CmResult<()>, expected_name: &str) {
+        match result {
+            Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected_name),
+            other => panic!("expected InvalidParameter for {expected_name}, got {other:?}"),
+        }
+    }
+
     fn take_data_out(ctx: &mut CmContext) -> (DigitalValue, Value) {
         let mut events = ctx.take_pending_events();
         let event = events
@@ -790,6 +803,15 @@ mod tests {
             .find(|event| event.port_name == "data_out")
             .expect("data_out event is scheduled");
         (event.values, event.delay)
+    }
+
+    #[test]
+    fn d_ram_rejects_nonfinite_read_delay() {
+        let mut ctx = ram_context();
+        ctx.set_param("read_delay", f64::INFINITY);
+        DigitalRam.init(&mut ctx).expect("d_ram initializes");
+
+        assert_invalid_param(DigitalRam.evaluate(&mut ctx), "read_delay");
     }
 
     #[test]
