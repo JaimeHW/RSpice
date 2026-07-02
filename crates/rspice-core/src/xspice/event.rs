@@ -298,19 +298,37 @@ impl EventQueue {
     /// Cancel all events for a specific node
     pub fn cancel_node_events(&mut self, node_id: usize) {
         let active_event_priorities = &self.active_event_priorities;
+        let mut removed_active_event = false;
         self.events.retain(|event| {
-            active_event_priorities.contains(&event.priority) && event.node_id != node_id
+            let is_active = active_event_priorities.contains(&event.priority);
+            if is_active && event.node_id == node_id {
+                removed_active_event = true;
+                false
+            } else {
+                is_active
+            }
         });
-        self.rebuild_indexes();
+        if removed_active_event {
+            self.rebuild_indexes();
+        }
     }
 
     /// Cancel all events for a specific instance
     pub fn cancel_instance_events(&mut self, instance: &str) {
         let active_event_priorities = &self.active_event_priorities;
+        let mut removed_active_event = false;
         self.events.retain(|event| {
-            active_event_priorities.contains(&event.priority) && event.instance != instance
+            let is_active = active_event_priorities.contains(&event.priority);
+            if is_active && event.instance == instance {
+                removed_active_event = true;
+                false
+            } else {
+                is_active
+            }
         });
-        self.rebuild_indexes();
+        if removed_active_event {
+            self.rebuild_indexes();
+        }
     }
 
     /// Clear all pending events
@@ -405,14 +423,25 @@ impl EventQueue {
     }
 
     fn rebuild_indexes(&mut self) {
-        self.active_event_priorities.clear();
-        self.active_times.clear();
-        self.driver_event_priorities.clear();
-        let events: Vec<_> = self.events.iter().cloned().collect();
-        for event in events {
+        let mut active_event_priorities = HashSet::with_capacity(self.events.len());
+        let mut active_times = BTreeMap::new();
+        let mut driver_event_priorities: HashMap<EventDriverKey, BTreeMap<EventTimeKey, Vec<u64>>> =
+            HashMap::with_capacity(self.events.len());
+        for event in self.events.iter() {
             let driver_key = event.driver_key();
-            self.insert_active_event(&driver_key, EventTimeKey(event.time), event.priority);
+            let time = EventTimeKey(event.time);
+            active_event_priorities.insert(event.priority);
+            *active_times.entry(time).or_insert(0) += 1;
+            driver_event_priorities
+                .entry(driver_key)
+                .or_default()
+                .entry(time)
+                .or_default()
+                .push(event.priority);
         }
+        self.active_event_priorities = active_event_priorities;
+        self.active_times = active_times;
+        self.driver_event_priorities = driver_event_priorities;
     }
 }
 
