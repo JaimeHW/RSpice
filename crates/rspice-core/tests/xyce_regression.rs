@@ -1014,22 +1014,26 @@ fn test_xyce_semiconductor_capacitor_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/SEMIC_CAPACITOR/semicap.cir";
 
-    let result = runner.run_test(root.join(relative));
+    for relative in [
+        "Netlists/SEMIC_CAPACITOR/semicap.cir",
+        "Netlists/SEMIC_CAPACITOR/semicap_subc.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
 
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native Xyce semiconductor capacitor transient comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
-    assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
-    );
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce semiconductor capacitor transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
 }
 
 #[test]

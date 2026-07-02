@@ -4674,6 +4674,25 @@ impl XyceTestRunner {
     }
 
     fn validate_native_transient_contract(netlist: &Netlist) -> Result<(), String> {
+        if netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            let flattened =
+                crate::netlist::flatten_netlist_with_models(netlist).map_err(|err| {
+                    format!(
+                        "native static .PRINT TRAN comparison could not flatten subcircuits: {err}"
+                    )
+                })?;
+            Self::validate_transparent_single_passive_subcircuits(netlist, &flattened.elements)?;
+            let mut flat_netlist = netlist.clone();
+            flat_netlist.elements = flattened.elements;
+            flat_netlist.models.extend(flattened.scoped_models);
+            flat_netlist.subcircuits.clear();
+            return Self::validate_native_transient_contract(&flat_netlist);
+        }
+
         let elements = &netlist.elements;
         let params = &netlist.params;
         for element in elements {
@@ -4815,6 +4834,47 @@ impl XyceTestRunner {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn validate_transparent_single_passive_subcircuits(
+        netlist: &Netlist,
+        flattened_elements: &[crate::netlist::Element],
+    ) -> Result<(), String> {
+        for element in &netlist.elements {
+            if !matches!(element.kind, ElementKind::Subcircuit { .. }) {
+                continue;
+            }
+            let prefix = format!("{}.", element.name).to_ascii_lowercase();
+            let mut members = flattened_elements
+                .iter()
+                .filter(|flattened| flattened.name.to_ascii_lowercase().starts_with(&prefix));
+
+            let Some(member) = members.next() else {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison could not find flattened members for subcircuit '{}'",
+                    element.name
+                ));
+            };
+            if members.next().is_some() {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison currently supports transparent single-device passive subcircuits; subcircuit '{}' expands to multiple elements and requires a broader hierarchical transient oracle contract",
+                    element.name
+                ));
+            }
+            if !matches!(
+                member.kind,
+                ElementKind::Resistor { .. }
+                    | ElementKind::Capacitor { .. }
+                    | ElementKind::Inductor { .. }
+            ) {
+                return Err(format!(
+                    "native static .PRINT TRAN comparison currently supports transparent single-device passive subcircuits; subcircuit '{}' expands to unsupported element '{}'",
+                    element.name, member.name
+                ));
+            }
+        }
+
         Ok(())
     }
 
