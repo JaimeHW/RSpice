@@ -30,18 +30,8 @@ fn official_bridge_control(value: Value) -> i64 {
     }
 }
 
-fn adc_bridge_state(input: Value, previous: i64, in_low: Value, in_high: Value) -> i64 {
-    if in_high < in_low {
-        if input > in_low {
-            1
-        } else if input < in_high {
-            0
-        } else if previous == ADC_UNINITIALIZED_STATE {
-            -1
-        } else {
-            previous
-        }
-    } else if input <= in_low {
+fn adc_bridge_state(input: Value, _previous: i64, in_low: Value, in_high: Value) -> i64 {
+    if input <= in_low {
         0
     } else if input >= in_high {
         1
@@ -1520,12 +1510,12 @@ mod tests {
     }
 
     #[test]
-    fn adc_bridge_inverted_thresholds_hold_previous_state_in_hysteresis_band() {
+    fn adc_bridge_inverted_thresholds_match_ngspice_low_first_overlap() {
         assert_eq!(adc_bridge_state(1.2, -1, 0.9, 0.1), 1);
         assert_eq!(adc_bridge_state(-0.2, -1, 0.9, 0.1), 0);
-        assert_eq!(adc_bridge_state(0.5, 1, 0.9, 0.1), 1);
+        assert_eq!(adc_bridge_state(0.5, 1, 0.9, 0.1), 0);
         assert_eq!(adc_bridge_state(0.5, 0, 0.9, 0.1), 0);
-        assert_eq!(adc_bridge_state(0.5, ADC_UNINITIALIZED_STATE, 0.9, 0.1), -1);
+        assert_eq!(adc_bridge_state(0.5, ADC_UNINITIALIZED_STATE, 0.9, 0.1), 0);
     }
 
     #[test]
