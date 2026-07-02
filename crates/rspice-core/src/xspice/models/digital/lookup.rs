@@ -243,16 +243,20 @@ fn d_genlut_expand_param_values(
 ) -> CmResult<Arc<[Value]>> {
     let values = ctx.real_vector_param(name).unwrap_or(&[]);
     let fallback = values.last().copied().unwrap_or(default);
-    let expanded = (0..width)
-        .map(|index| {
-            let value = values.get(index).copied().unwrap_or(fallback);
-            if clamp_delay {
-                d_lookup_delay(name, value)
-            } else {
-                d_lookup_finite_delay(name, value)
-            }
-        })
-        .collect::<CmResult<Vec<_>>>()?;
+    let mut expanded = Vec::new();
+    expanded.try_reserve_exact(width).map_err(|err| {
+        d_genlut_error(format!(
+            "unable to reserve storage for {width} {name} entries: {err}"
+        ))
+    })?;
+    for index in 0..width {
+        let value = values.get(index).copied().unwrap_or(fallback);
+        expanded.push(if clamp_delay {
+            d_lookup_delay(name, value)
+        } else {
+            d_lookup_finite_delay(name, value)
+        }?);
+    }
     Ok(expanded.into())
 }
 
