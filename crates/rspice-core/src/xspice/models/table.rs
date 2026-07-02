@@ -381,6 +381,23 @@ fn table_line_error(model: &str, file: &str, line: usize, message: impl Into<Str
     ))
 }
 
+fn table_eval_error(message: impl Into<String>) -> CmError {
+    CmError::EvaluationError(format!("table interpolation: {}", message.into()))
+}
+
+fn resize_table_scratch(context: &str, values: &mut Vec<Value>, len: usize) -> CmResult<()> {
+    if values.capacity() < len {
+        let additional = len - values.capacity();
+        values.try_reserve_exact(additional).map_err(|err| {
+            table_eval_error(format!(
+                "{context}: unable to reserve {len} value(s): {err}"
+            ))
+        })?;
+    }
+    values.resize(len, 0.0);
+    Ok(())
+}
+
 fn invalid_table_param(name: &str, message: impl Into<String>) -> CmError {
     CmError::InvalidParameter {
         name: name.to_string(),
@@ -1062,7 +1079,7 @@ fn eno_window_start(index: usize, order: usize, len: usize) -> usize {
     }
 }
 
-fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> Eno1dEval {
+fn eno1d_eval(samples: &[Value], order: usize, index: usize, offset: Value) -> CmResult<Eno1dEval> {
     let mut scratch = Vec::new();
     eno1d_eval_with_scratch(samples, order, index, offset, &mut scratch)
 }
@@ -1073,7 +1090,7 @@ fn eno1d_eval_with_scratch(
     index: usize,
     offset: Value,
     scratch: &mut Vec<Value>,
-) -> Eno1dEval {
+) -> CmResult<Eno1dEval> {
     debug_assert!(order >= 2);
     debug_assert!(order <= samples.len());
     debug_assert!(index < samples.len());
@@ -1087,7 +1104,7 @@ fn eno1d_eval_with_scratch(
         |degree: usize| -> usize { degree * window_len - degree.saturating_sub(1) * degree / 2 };
 
     let total_len = order * window_len - order.saturating_sub(1) * order / 2;
-    scratch.resize(total_len, 0.0);
+    resize_table_scratch("1-D ENO scratch", scratch, total_len)?;
     scratch[..window_len].copy_from_slice(&samples[start_lo..window_end]);
     for degree in 1..order {
         let previous = row_offset(degree - 1);
@@ -1131,10 +1148,10 @@ fn eno1d_eval_with_scratch(
     }
 
     let scale = 1.0 / stencil_count.max(1) as Value;
-    Eno1dEval {
+    Ok(Eno1dEval {
         value: value * scale,
         derivative: derivative * scale,
-    }
+    })
 }
 
 fn eno2d_eval_grid<'a, F>(
@@ -1145,7 +1162,7 @@ fn eno2d_eval_grid<'a, F>(
     y_index: usize,
     x_offset: Value,
     y_offset: Value,
-) -> Eno2dEval
+) -> CmResult<Eno2dEval>
 where
     F: FnMut(usize) -> &'a [Value],
 {
@@ -1181,7 +1198,7 @@ fn eno2d_eval_grid_with_scratch<'a, F>(
     dx_along_y: &mut Vec<Value>,
     x_scratch: &mut Vec<Value>,
     y_scratch: &mut Vec<Value>,
-) -> Eno2dEval
+) -> CmResult<Eno2dEval>
 where
     F: FnMut(usize) -> &'a [Value],
 {
@@ -1189,22 +1206,23 @@ where
     let y_window = 2 * order - 2;
     let y_local_index = y_index - y_window_start;
 
-    values_along_y.resize(y_window, 0.0);
-    dx_along_y.resize(y_window, 0.0);
+    resize_table_scratch("2-D ENO value scratch", values_along_y, y_window)?;
+    resize_table_scratch("2-D ENO dx scratch", dx_along_y, y_window)?;
     for (slot, row_index) in (y_window_start..y_window_start + y_window).enumerate() {
         let row = row_at(row_index);
-        let eval = eno1d_eval_with_scratch(row, order, x_index, x_offset, x_scratch);
+        let eval = eno1d_eval_with_scratch(row, order, x_index, x_offset, x_scratch)?;
         values_along_y[slot] = eval.value;
         dx_along_y[slot] = eval.derivative;
     }
 
-    let y_eval = eno1d_eval_with_scratch(values_along_y, order, y_local_index, y_offset, y_scratch);
-    let dx_eval = eno1d_eval_with_scratch(dx_along_y, order, y_local_index, y_offset, y_scratch);
-    Eno2dEval {
+    let y_eval =
+        eno1d_eval_with_scratch(values_along_y, order, y_local_index, y_offset, y_scratch)?;
+    let dx_eval = eno1d_eval_with_scratch(dx_along_y, order, y_local_index, y_offset, y_scratch)?;
+    Ok(Eno2dEval {
         value: y_eval.value,
         dx: dx_eval.value,
         dy: y_eval.derivative,
-    }
+    })
 }
 
 fn table2d_eno_derivatives(
@@ -1212,7 +1230,7 @@ fn table2d_eno_derivatives(
     order: usize,
     x_axis: AxisEval,
     y_axis: AxisEval,
-) -> Eno2dEval {
+) -> CmResult<Eno2dEval> {
     let mut scratch = TableEvalScratch::default();
     table2d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, &mut scratch)
 }
@@ -1223,7 +1241,7 @@ fn table2d_eno_derivatives_with_scratch(
     x_axis: AxisEval,
     y_axis: AxisEval,
     scratch: &mut TableEvalScratch,
-) -> Eno2dEval {
+) -> CmResult<Eno2dEval> {
     eno2d_eval_grid_with_scratch(
         table.y.len(),
         &mut |y| table2d_row(table, y),
@@ -1245,7 +1263,7 @@ fn table3d_eno_derivatives(
     x_axis: AxisEval,
     y_axis: AxisEval,
     z_axis: AxisEval,
-) -> Eno3dEval {
+) -> CmResult<Eno3dEval> {
     let mut scratch = TableEvalScratch::default();
     table3d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, z_axis, &mut scratch)
 }
@@ -1257,7 +1275,7 @@ fn table3d_eno_derivatives_with_scratch(
     y_axis: AxisEval,
     z_axis: AxisEval,
     scratch: &mut TableEvalScratch,
-) -> Eno3dEval {
+) -> CmResult<Eno3dEval> {
     let yz_window = 2 * order - 2;
     let y_window_start = eno_window_start(y_axis.eno_index, order, table.y.len());
     let z_window_start = eno_window_start(z_axis.eno_index, order, table.z.len());
@@ -1265,8 +1283,12 @@ fn table3d_eno_derivatives_with_scratch(
     let z_local_index = z_axis.eno_index - z_window_start;
 
     let yz_len = yz_window * yz_window;
-    scratch.values_over_zy.resize(yz_len, 0.0);
-    scratch.dx_over_zy.resize(yz_len, 0.0);
+    resize_table_scratch(
+        "3-D ENO yz value scratch",
+        &mut scratch.values_over_zy,
+        yz_len,
+    )?;
+    resize_table_scratch("3-D ENO yz dx scratch", &mut scratch.dx_over_zy, yz_len)?;
     for (z_slot, z) in (z_window_start..z_window_start + yz_window).enumerate() {
         for (y_slot, y) in (y_window_start..y_window_start + yz_window).enumerate() {
             let eval = eno1d_eval_with_scratch(
@@ -1275,7 +1297,7 @@ fn table3d_eno_derivatives_with_scratch(
                 x_axis.eno_index,
                 x_axis.eno_offset,
                 &mut scratch.x_scratch,
-            );
+            )?;
             let slot = z_slot * yz_window + y_slot;
             scratch.values_over_zy[slot] = eval.value;
             scratch.dx_over_zy[slot] = eval.derivative;
@@ -1297,7 +1319,7 @@ fn table3d_eno_derivatives_with_scratch(
         &mut scratch.dx_along_y,
         &mut scratch.yz_x_scratch,
         &mut scratch.yz_y_scratch,
-    );
+    )?;
     let dx_eval = eno2d_eval_grid_with_scratch(
         yz_window,
         &mut |row| {
@@ -1313,16 +1335,21 @@ fn table3d_eno_derivatives_with_scratch(
         &mut scratch.dx_along_y,
         &mut scratch.yz_x_scratch,
         &mut scratch.yz_y_scratch,
-    );
+    )?;
 
-    Eno3dEval {
+    Ok(Eno3dEval {
         dx: dx_eval.value,
         dy: yz_eval.dx,
         dz: yz_eval.dy,
-    }
+    })
 }
 
-fn evaluate_table2d_data(table: &Table2DData, order: usize, x: Value, y: Value) -> TableEval2D {
+fn evaluate_table2d_data(
+    table: &Table2DData,
+    order: usize,
+    x: Value,
+    y: Value,
+) -> CmResult<TableEval2D> {
     let mut scratch = TableEvalScratch::default();
     evaluate_table2d_data_with_scratch(table, order, x, y, &mut scratch)
 }
@@ -1333,7 +1360,7 @@ fn evaluate_table2d_data_with_scratch(
     x: Value,
     y: Value,
     scratch: &mut TableEvalScratch,
-) -> TableEval2D {
+) -> CmResult<TableEval2D> {
     let x_axis = axis_eval(&table.x, x);
     let y_axis = axis_eval(&table.y, y);
     let x0 = x_axis.lower;
@@ -1355,11 +1382,11 @@ fn evaluate_table2d_data_with_scratch(
         + one_minus_tx * ty * v01
         + tx * ty * v11;
 
-    let derivatives = table2d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, scratch);
+    let derivatives = table2d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, scratch)?;
     let dx = derivatives.dx / x_axis.local_diff * x_axis.derivative_scale;
     let dy = derivatives.dy / y_axis.local_diff * y_axis.derivative_scale;
 
-    TableEval2D { value, dx, dy }
+    Ok(TableEval2D { value, dx, dy })
 }
 
 fn evaluate_table3d_data(
@@ -1368,7 +1395,7 @@ fn evaluate_table3d_data(
     x: Value,
     y: Value,
     z: Value,
-) -> TableEval3D {
+) -> CmResult<TableEval3D> {
     let mut scratch = TableEvalScratch::default();
     evaluate_table3d_data_with_scratch(table, order, x, y, z, &mut scratch)
 }
@@ -1380,7 +1407,7 @@ fn evaluate_table3d_data_with_scratch(
     y: Value,
     z: Value,
     scratch: &mut TableEvalScratch,
-) -> TableEval3D {
+) -> CmResult<TableEval3D> {
     let x_axis = axis_eval(&table.x, x);
     let y_axis = axis_eval(&table.y, y);
     let z_axis = axis_eval(&table.z, z);
@@ -1411,14 +1438,14 @@ fn evaluate_table3d_data_with_scratch(
     }
 
     let derivatives =
-        table3d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, z_axis, scratch);
+        table3d_eno_derivatives_with_scratch(table, order, x_axis, y_axis, z_axis, scratch)?;
 
-    TableEval3D {
+    Ok(TableEval3D {
         value,
         dx: derivatives.dx / x_axis.local_diff * x_axis.derivative_scale,
         dy: derivatives.dy / y_axis.local_diff * y_axis.derivative_scale,
         dz: derivatives.dz / z_axis.local_diff * z_axis.derivative_scale,
-    }
+    })
 }
 
 fn table_file_param<'a>(ctx: &'a CmContext, kind: TableKind) -> &'a str {
@@ -1485,9 +1512,9 @@ fn scaled_table2d_eval_from_parts_with_scratch(
     offset: Value,
     gain: Value,
     scratch: &mut TableEvalScratch,
-) -> TableEval2D {
-    let raw = evaluate_table2d_data_with_scratch(table, order, inx, iny, scratch);
-    scale_table2d_eval(raw, offset, gain)
+) -> CmResult<TableEval2D> {
+    let raw = evaluate_table2d_data_with_scratch(table, order, inx, iny, scratch)?;
+    Ok(scale_table2d_eval(raw, offset, gain))
 }
 
 fn scaled_table2d_eval_from_parts(
@@ -1497,9 +1524,9 @@ fn scaled_table2d_eval_from_parts(
     iny: Value,
     offset: Value,
     gain: Value,
-) -> TableEval2D {
-    let raw = evaluate_table2d_data(table, order, inx, iny);
-    scale_table2d_eval(raw, offset, gain)
+) -> CmResult<TableEval2D> {
+    let raw = evaluate_table2d_data(table, order, inx, iny)?;
+    Ok(scale_table2d_eval(raw, offset, gain))
 }
 
 fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
@@ -1516,14 +1543,7 @@ fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
     {
         return Ok(resource.result);
     }
-    Ok(scaled_table2d_eval_from_parts(
-        table.as_ref(),
-        order,
-        inx,
-        iny,
-        offset,
-        gain,
-    ))
+    scaled_table2d_eval_from_parts(table.as_ref(), order, inx, iny, offset, gain)
 }
 
 fn scaled_table2d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval2D> {
@@ -1550,7 +1570,7 @@ fn scaled_table2d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval2D> {
             gain,
             scratch,
         )
-    });
+    })?;
     ctx.set_resource(
         TABLE2D_EVAL_RESOURCE,
         Arc::new(Table2DEvalResource { signature, result }),
@@ -1576,9 +1596,9 @@ fn scaled_table3d_eval_from_parts_with_scratch(
     offset: Value,
     gain: Value,
     scratch: &mut TableEvalScratch,
-) -> TableEval3D {
-    let raw = evaluate_table3d_data_with_scratch(table, order, inx, iny, inz, scratch);
-    scale_table3d_eval(raw, offset, gain)
+) -> CmResult<TableEval3D> {
+    let raw = evaluate_table3d_data_with_scratch(table, order, inx, iny, inz, scratch)?;
+    Ok(scale_table3d_eval(raw, offset, gain))
 }
 
 fn scaled_table3d_eval_from_parts(
@@ -1589,9 +1609,9 @@ fn scaled_table3d_eval_from_parts(
     inz: Value,
     offset: Value,
     gain: Value,
-) -> TableEval3D {
-    let raw = evaluate_table3d_data(table, order, inx, iny, inz);
-    scale_table3d_eval(raw, offset, gain)
+) -> CmResult<TableEval3D> {
+    let raw = evaluate_table3d_data(table, order, inx, iny, inz)?;
+    Ok(scale_table3d_eval(raw, offset, gain))
 }
 
 fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
@@ -1609,15 +1629,7 @@ fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
     {
         return Ok(resource.result);
     }
-    Ok(scaled_table3d_eval_from_parts(
-        table.as_ref(),
-        order,
-        inx,
-        iny,
-        inz,
-        offset,
-        gain,
-    ))
+    scaled_table3d_eval_from_parts(table.as_ref(), order, inx, iny, inz, offset, gain)
 }
 
 fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
@@ -1646,7 +1658,7 @@ fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
             gain,
             scratch,
         )
-    });
+    })?;
     ctx.set_resource(
         TABLE3D_EVAL_RESOURCE,
         Arc::new(Table3DEvalResource { signature, result }),
@@ -2041,7 +2053,7 @@ mod tests {
             })
             .collect();
 
-        let eval = eno1d_eval(&samples, 3, 31, 0.25);
+        let eval = eno1d_eval(&samples, 3, 31, 0.25).expect("1-D ENO evaluates");
         let x = 31.25;
         let expected_value = 0.5 * x * x + 2.0 * x + 1.0;
         let expected_derivative = x + 2.0;
@@ -2060,14 +2072,16 @@ mod tests {
             .collect();
         let mut scratch = Vec::new();
 
-        let fast = eno1d_eval_with_scratch(&samples, 4, 31, 0.4, &mut scratch);
-        let expected = eno1d_eval(&samples, 4, 31, 0.4);
+        let fast = eno1d_eval_with_scratch(&samples, 4, 31, 0.4, &mut scratch)
+            .expect("1-D ENO evaluates with scratch");
+        let expected = eno1d_eval(&samples, 4, 31, 0.4).expect("1-D ENO evaluates");
         assert_eq!(fast.value, expected.value);
         assert_eq!(fast.derivative, expected.derivative);
 
         let capacity = scratch.capacity();
-        let again = eno1d_eval_with_scratch(&samples, 4, 32, 0.1, &mut scratch);
-        let expected_again = eno1d_eval(&samples, 4, 32, 0.1);
+        let again = eno1d_eval_with_scratch(&samples, 4, 32, 0.1, &mut scratch)
+            .expect("1-D ENO reevaluates with scratch");
+        let expected_again = eno1d_eval(&samples, 4, 32, 0.1).expect("1-D ENO reevaluates");
         assert_eq!(scratch.capacity(), capacity);
         assert_eq!(again.value, expected_again.value);
         assert_eq!(again.derivative, expected_again.derivative);
@@ -2083,8 +2097,9 @@ mod tests {
             .collect();
         let mut scratch = vec![Value::NAN; 128];
 
-        let fast = eno1d_eval_with_scratch(&samples, 4, 7, 0.25, &mut scratch);
-        let expected = eno1d_eval(&samples, 4, 7, 0.25);
+        let fast = eno1d_eval_with_scratch(&samples, 4, 7, 0.25, &mut scratch)
+            .expect("1-D ENO evaluates with dirty scratch");
+        let expected = eno1d_eval(&samples, 4, 7, 0.25).expect("1-D ENO evaluates");
 
         assert!(fast.value.is_finite());
         assert!(fast.derivative.is_finite());
@@ -2162,8 +2177,9 @@ mod tests {
         };
         let mut scratch = TableEvalScratch::default();
 
-        let fast = evaluate_table2d_data_with_scratch(&table, 3, 1.4, 2.2, &mut scratch);
-        let expected = evaluate_table2d_data(&table, 3, 1.4, 2.2);
+        let fast = evaluate_table2d_data_with_scratch(&table, 3, 1.4, 2.2, &mut scratch)
+            .expect("table2d evaluates with scratch");
+        let expected = evaluate_table2d_data(&table, 3, 1.4, 2.2).expect("table2d evaluates");
         assert_eq!(fast.value, expected.value);
         assert_eq!(fast.dx, expected.dx);
         assert_eq!(fast.dy, expected.dy);
@@ -2174,8 +2190,10 @@ mod tests {
             scratch.x_scratch.capacity(),
             scratch.y_scratch.capacity(),
         );
-        let again = evaluate_table2d_data_with_scratch(&table, 3, 2.1, 1.6, &mut scratch);
-        let expected_again = evaluate_table2d_data(&table, 3, 2.1, 1.6);
+        let again = evaluate_table2d_data_with_scratch(&table, 3, 2.1, 1.6, &mut scratch)
+            .expect("table2d reevaluates with scratch");
+        let expected_again =
+            evaluate_table2d_data(&table, 3, 2.1, 1.6).expect("table2d reevaluates");
         assert_eq!(
             (
                 scratch.values_along_y.capacity(),
@@ -2212,8 +2230,9 @@ mod tests {
             ..TableEvalScratch::default()
         };
 
-        let fast = evaluate_table2d_data_with_scratch(&table, 3, 1.4, 2.2, &mut scratch);
-        let expected = evaluate_table2d_data(&table, 3, 1.4, 2.2);
+        let fast = evaluate_table2d_data_with_scratch(&table, 3, 1.4, 2.2, &mut scratch)
+            .expect("table2d evaluates with dirty scratch");
+        let expected = evaluate_table2d_data(&table, 3, 1.4, 2.2).expect("table2d evaluates");
 
         assert!(fast.value.is_finite());
         assert!(fast.dx.is_finite());
@@ -2242,8 +2261,9 @@ mod tests {
         };
         let mut scratch = TableEvalScratch::default();
 
-        let fast = evaluate_table3d_data_with_scratch(&table, 3, 1.4, 2.2, 0.7, &mut scratch);
-        let expected = evaluate_table3d_data(&table, 3, 1.4, 2.2, 0.7);
+        let fast = evaluate_table3d_data_with_scratch(&table, 3, 1.4, 2.2, 0.7, &mut scratch)
+            .expect("table3d evaluates with scratch");
+        let expected = evaluate_table3d_data(&table, 3, 1.4, 2.2, 0.7).expect("table3d evaluates");
         assert_eq!(fast.value, expected.value);
         assert_eq!(fast.dx, expected.dx);
         assert_eq!(fast.dy, expected.dy);
@@ -2258,8 +2278,10 @@ mod tests {
             scratch.yz_x_scratch.capacity(),
             scratch.yz_y_scratch.capacity(),
         );
-        let again = evaluate_table3d_data_with_scratch(&table, 3, 2.1, 1.6, 3.2, &mut scratch);
-        let expected_again = evaluate_table3d_data(&table, 3, 2.1, 1.6, 3.2);
+        let again = evaluate_table3d_data_with_scratch(&table, 3, 2.1, 1.6, 3.2, &mut scratch)
+            .expect("table3d reevaluates with scratch");
+        let expected_again =
+            evaluate_table3d_data(&table, 3, 2.1, 1.6, 3.2).expect("table3d reevaluates");
         assert_eq!(
             (
                 scratch.values_over_zy.capacity(),
@@ -2306,8 +2328,9 @@ mod tests {
             yz_y_scratch: vec![Value::NAN; 64],
         };
 
-        let fast = evaluate_table3d_data_with_scratch(&table, 3, 1.4, 2.2, 0.7, &mut scratch);
-        let expected = evaluate_table3d_data(&table, 3, 1.4, 2.2, 0.7);
+        let fast = evaluate_table3d_data_with_scratch(&table, 3, 1.4, 2.2, 0.7, &mut scratch)
+            .expect("table3d evaluates with dirty scratch");
+        let expected = evaluate_table3d_data(&table, 3, 1.4, 2.2, 0.7).expect("table3d evaluates");
 
         assert!(fast.value.is_finite());
         assert!(fast.dx.is_finite());
