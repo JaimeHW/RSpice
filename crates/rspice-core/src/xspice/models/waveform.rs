@@ -67,6 +67,17 @@ fn invalid_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
+fn reserve_control_points(point_count: usize) -> CmResult<Vec<ControlPoint>> {
+    let mut table = Vec::new();
+    table.try_reserve_exact(point_count).map_err(|err| {
+        invalid_param(
+            "cntl_array/freq_array",
+            format!("unable to reserve {point_count} control point(s): {err}"),
+        )
+    })?;
+    Ok(table)
+}
+
 fn waveform_ports() -> &'static [PortSpec] {
     static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
     PORTS.get_or_init(|| {
@@ -210,7 +221,7 @@ fn controlled_frequency_table_optional_uncached(
         ));
     }
 
-    let mut table: Vec<ControlPoint> = Vec::with_capacity(controls.len());
+    let mut table = reserve_control_points(controls.len())?;
     for (idx, (&control, &frequency)) in controls.iter().zip(frequencies).enumerate() {
         if !control.is_finite() {
             return Err(invalid_param(
