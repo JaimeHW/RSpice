@@ -30,6 +30,17 @@ fn d_process_error(message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("d_process: {}", message.into()))
 }
 
+fn d_process_delay(ctx: &CmContext, name: &str, default: f64) -> CmResult<f64> {
+    let value = ctx.param_or(name, default);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("value must be finite, got {value}"),
+        });
+    }
+    Ok(value)
+}
+
 #[derive(Default)]
 struct DigitalProcessIoScratch {
     input_bytes: Vec<u8>,
@@ -316,7 +327,7 @@ impl CodeModel for DigitalProcess {
                 };
 
                 if exchange_ok {
-                    let clk_delay = ctx.param_or("clk_delay", 1.0e-9);
+                    let clk_delay = d_process_delay(ctx, "clk_delay", 1.0e-9)?;
                     for index in 0..output_width {
                         let new_code = output_code(&scratch.output_bytes, index);
                         if new_code != ctx.int_state(STATE_DOUT_START + index) {
@@ -347,6 +358,20 @@ mod tests {
     use crate::xspice::AnalysisType;
     use crate::xspice::context::InputValue;
     use crate::xspice::{ParamType, PortDirection};
+
+    struct StaticProcessRuntime;
+
+    impl DigitalProcessRuntime for StaticProcessRuntime {
+        fn exchange(
+            &mut self,
+            _signed_time: f64,
+            _input_bytes: &[u8],
+            output_bytes: &mut [u8],
+        ) -> CmResult<()> {
+            output_bytes.fill(1);
+            Ok(())
+        }
+    }
 
     #[test]
     fn d_process_metadata_matches_ngspice46_interface() {
@@ -398,6 +423,44 @@ mod tests {
         assert_eq!(params[5].default, 1.0e-12);
         assert_eq!(params[6].default, 1.0e-12);
         assert_eq!(params[7].default, 1.0e-12);
+    }
+
+    #[test]
+    fn d_process_rejects_nonfinite_clk_delay_before_queueing_outputs() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.time = 1.0e-9;
+        ctx.set_port_width("in", 0);
+        ctx.set_port_width("out", 1);
+        ctx.allocate_int_states(STATE_DOUT_START + 1);
+        ctx.set_int_state(STATE_PREV_CLK, STATE_ZERO);
+        ctx.set_int_state(STATE_PREV_RESET, STATE_ZERO);
+        ctx.set_int_state(STATE_RNG, D_PROCESS_RNG_SEED);
+        ctx.set_int_state(STATE_DOUT_START, STATE_UNKNOWN);
+        ctx.set_param("clk_delay", f64::NAN);
+        ctx.set_input_digital("clk", DigitalValue::one());
+        ctx.set_input_digital("reset", DigitalValue::zero());
+        let runtime: Arc<DigitalProcessRuntimeResource> =
+            Arc::new(Mutex::new(Box::new(StaticProcessRuntime)));
+        ctx.set_resource(RESOURCE_RUNTIME, runtime);
+        ctx.set_resource(
+            RESOURCE_IO_SCRATCH,
+            Arc::new(DigitalProcessIoScratch::default()),
+        );
+
+        let err = DigitalProcess
+            .evaluate(&mut ctx)
+            .expect_err("nonfinite d_process clk_delay must fail evaluation");
+
+        assert!(
+            err.to_string().contains("clk_delay"),
+            "error should identify clk_delay, got {err:?}"
+        );
+        assert!(
+            ctx.take_pending_events().is_empty(),
+            "d_process must not queue outputs after rejecting clk_delay"
+        );
+        assert_eq!(ctx.int_state(STATE_DOUT_START), STATE_UNKNOWN);
     }
 
     #[test]
