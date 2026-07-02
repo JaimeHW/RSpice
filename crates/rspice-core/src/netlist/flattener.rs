@@ -1583,6 +1583,86 @@ impl<'a> Flattener<'a> {
         })
     }
 
+    fn resolve_deferred_xspice_model_complex_vector(
+        &self,
+        model_name: &str,
+        param_name: &str,
+        entries: Vec<super::DeferredXspiceStringVectorEntry>,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<Vec<String>, ParseError> {
+        entries
+            .into_iter()
+            .map(|entry| match entry {
+                super::DeferredXspiceStringVectorEntry::Resolved(value) => Ok(value),
+                super::DeferredXspiceStringVectorEntry::Complex { real, imag } => self
+                    .resolve_deferred_xspice_model_complex_string(
+                        model_name,
+                        param_name,
+                        &real,
+                        &imag,
+                        scope,
+                        element_path,
+                    ),
+            })
+            .collect()
+    }
+
+    fn resolve_deferred_xspice_model_complex_string(
+        &self,
+        model_name: &str,
+        param_name: &str,
+        real_expr: &str,
+        imag_expr: &str,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<String, ParseError> {
+        let real = self.resolve_deferred_xspice_model_complex_component(
+            model_name,
+            param_name,
+            real_expr,
+            scope,
+            element_path,
+            "real",
+        )?;
+        let imag = self.resolve_deferred_xspice_model_complex_component(
+            model_name,
+            param_name,
+            imag_expr,
+            scope,
+            element_path,
+            "imaginary",
+        )?;
+
+        Ok(format!(
+            "<{} {}>",
+            format_xspice_complex_component(real),
+            format_xspice_complex_component(imag)
+        ))
+    }
+
+    fn resolve_deferred_xspice_model_complex_component(
+        &self,
+        model_name: &str,
+        param_name: &str,
+        expr: &str,
+        scope: &ParamContext,
+        element_path: &str,
+        component: &str,
+    ) -> Result<Value, ParseError> {
+        resolve_parametric_value(
+            &ParametricValue::Expression(expr.to_string()),
+            scope,
+            &self.random,
+        )
+        .map_err(|err| {
+            ParseError::InvalidValue(format!(
+                "XSPICE model '{}' complex parameter '{}' for scoped instance '{}' could not resolve {} expression '{}': {}",
+                model_name, param_name, element_path, component, expr, err
+            ))
+        })
+    }
+
     fn resolve_external_subcircuit_params(
         &self,
         mut element: Element,
@@ -1667,6 +1747,35 @@ impl<'a> Flattener<'a> {
         scoped_model.real_vector_expr_params.clear();
 
         for (name, expr) in &model_def.expr_params {
+            if let Some((real_expr, imag_expr)) = super::parse_deferred_xspice_complex(expr) {
+                let value = self.resolve_deferred_xspice_model_complex_string(
+                    model_name,
+                    name,
+                    &real_expr,
+                    &imag_expr,
+                    scope,
+                    element_path,
+                )?;
+                replace_model_param(&mut scoped_model, name);
+                scoped_model.string_params.push((name.clone(), value));
+                continue;
+            }
+
+            if let Some(entries) = super::parse_deferred_xspice_complex_vector(expr) {
+                let values = self.resolve_deferred_xspice_model_complex_vector(
+                    model_name,
+                    name,
+                    entries,
+                    scope,
+                    element_path,
+                )?;
+                replace_model_param(&mut scoped_model, name);
+                scoped_model
+                    .string_vector_params
+                    .push((name.clone(), values));
+                continue;
+            }
+
             if let Some(value) = scope.get_string(expr) {
                 push_scoped_model_string_value(
                     &mut scoped_model,

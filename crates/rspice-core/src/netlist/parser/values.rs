@@ -265,9 +265,23 @@ pub(super) fn parse_model_params(
                         string_params.push((name, value));
                     }
                     TokenKind::Other('<') => {
-                        let value =
-                            parse_model_complex_literal_string(stream, line_num, &name, params)?;
-                        string_params.push((name, value));
+                        match parse_model_complex_literal(
+                            stream,
+                            line_num,
+                            &name,
+                            params,
+                            defer_expression_params,
+                        )? {
+                            ParsedModelComplexLiteral::Resolved(value) => {
+                                string_params.push((name, value));
+                            }
+                            ParsedModelComplexLiteral::Deferred { real, imag } => {
+                                expr_params.push((
+                                    name,
+                                    crate::netlist::encode_deferred_xspice_complex(&real, &imag),
+                                ));
+                            }
+                        }
                     }
                     TokenKind::Number(_)
                         if crate::netlist::xspice_param_preserves_numeric_string(&name)
@@ -389,9 +403,20 @@ pub(super) fn parse_model_params(
                                 defer_expression_params,
                             )
                         {
-                            let values =
-                                parse_model_string_vector(stream, line_num, &name, params)?;
-                            string_vector_params.push((name, values));
+                            match parse_model_string_vector(
+                                stream,
+                                line_num,
+                                &name,
+                                params,
+                                defer_expression_params,
+                            )? {
+                                ParsedModelStringVector::Resolved(values) => {
+                                    string_vector_params.push((name, values));
+                                }
+                                ParsedModelStringVector::Deferred(expr) => {
+                                    expr_params.push((name, expr));
+                                }
+                            }
                         } else {
                             match parse_model_real_vector(
                                 stream,
@@ -521,6 +546,21 @@ enum BareModelIdentString {
 
 enum ParsedModelScalarExpression {
     Resolved(Value),
+    Deferred(String),
+}
+
+enum ParsedModelComplexComponent {
+    Resolved(Value),
+    Deferred(String),
+}
+
+enum ParsedModelComplexLiteral {
+    Resolved(String),
+    Deferred { real: String, imag: String },
+}
+
+enum ParsedModelStringVector {
+    Resolved(Vec<String>),
     Deferred(String),
 }
 
@@ -885,7 +925,8 @@ fn parse_model_string_vector(
     line_num: usize,
     name: &str,
     params: &ParamContext,
-) -> Result<Vec<String>, ParseError> {
+    defer_expression_params: bool,
+) -> Result<ParsedModelStringVector, ParseError> {
     if !stream.consume(&TokenKind::LBracket) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -894,29 +935,61 @@ fn parse_model_string_vector(
     }
 
     let mut values = Vec::new();
+    let mut deferred_entries = Vec::new();
     loop {
         skip_commas(stream);
 
         match &stream.peek().kind {
             TokenKind::RBracket => {
                 stream.advance();
-                if values.is_empty() {
+                if deferred_entries.is_empty() {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: format!("Model parameter vector '{}' cannot be empty", name),
                     });
                 }
-                return Ok(values);
+                if deferred_entries.iter().any(|entry| {
+                    matches!(
+                        entry,
+                        crate::netlist::DeferredXspiceStringVectorEntry::Complex { .. }
+                    )
+                }) {
+                    return Ok(ParsedModelStringVector::Deferred(
+                        crate::netlist::encode_deferred_xspice_complex_vector(&deferred_entries),
+                    ));
+                }
+                return Ok(ParsedModelStringVector::Resolved(values));
             }
             TokenKind::StringLit(value) => {
                 let value = value.clone();
                 stream.advance();
+                deferred_entries.push(crate::netlist::DeferredXspiceStringVectorEntry::Resolved(
+                    value.clone(),
+                ));
                 values.push(value);
             }
             TokenKind::Other('<') => {
-                values.push(parse_model_complex_literal_string(
-                    stream, line_num, name, params,
-                )?);
+                match parse_model_complex_literal(
+                    stream,
+                    line_num,
+                    name,
+                    params,
+                    defer_expression_params,
+                )? {
+                    ParsedModelComplexLiteral::Resolved(value) => {
+                        deferred_entries.push(
+                            crate::netlist::DeferredXspiceStringVectorEntry::Resolved(
+                                value.clone(),
+                            ),
+                        );
+                        values.push(value);
+                    }
+                    ParsedModelComplexLiteral::Deferred { real, imag } => {
+                        deferred_entries.push(
+                            crate::netlist::DeferredXspiceStringVectorEntry::Complex { real, imag },
+                        );
+                    }
+                }
             }
             TokenKind::RParen | TokenKind::Newline | TokenKind::Eof => {
                 return Err(ParseError::Syntax {
@@ -925,9 +998,11 @@ fn parse_model_string_vector(
                 });
             }
             _ => {
-                values.push(parse_model_string_vector_bare_value(
-                    stream, line_num, name,
-                )?);
+                let value = parse_model_string_vector_bare_value(stream, line_num, name)?;
+                deferred_entries.push(crate::netlist::DeferredXspiceStringVectorEntry::Resolved(
+                    value.clone(),
+                ));
+                values.push(value);
             }
         }
     }
@@ -983,12 +1058,13 @@ fn parse_model_string_vector_bare_value(
     Ok(value)
 }
 
-fn parse_model_complex_literal_string(
+fn parse_model_complex_literal(
     stream: &mut TokenStream,
     line_num: usize,
     name: &str,
     params: &ParamContext,
-) -> Result<String, ParseError> {
+    defer_expression_params: bool,
+) -> Result<ParsedModelComplexLiteral, ParseError> {
     if !matches!(stream.peek().kind, TokenKind::Other('<')) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -1001,26 +1077,22 @@ fn parse_model_complex_literal_string(
     }
     stream.advance();
 
-    let Some(real) = try_signed_model_value(stream, params) else {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "Expected real part in complex model parameter '{}', found {}",
-                name,
-                stream.peek().kind
-            ),
-        });
-    };
-    let Some(imag) = try_signed_model_value(stream, params) else {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: format!(
-                "Expected imaginary part in complex model parameter '{}', found {}",
-                name,
-                stream.peek().kind
-            ),
-        });
-    };
+    let real = parse_model_complex_component(
+        stream,
+        line_num,
+        name,
+        params,
+        "real",
+        defer_expression_params,
+    )?;
+    let imag = parse_model_complex_component(
+        stream,
+        line_num,
+        name,
+        params,
+        "imaginary",
+        defer_expression_params,
+    )?;
 
     skip_commas(stream);
     if !stream.consume(&TokenKind::Other('>')) {
@@ -1034,11 +1106,151 @@ fn parse_model_complex_literal_string(
         });
     }
 
-    Ok(format!(
-        "<{} {}>",
-        format_compact_number(real),
-        format_compact_number(imag)
-    ))
+    match (real, imag) {
+        (
+            ParsedModelComplexComponent::Resolved(real),
+            ParsedModelComplexComponent::Resolved(imag),
+        ) => Ok(ParsedModelComplexLiteral::Resolved(format!(
+            "<{} {}>",
+            format_compact_number(real),
+            format_compact_number(imag)
+        ))),
+        (real, imag) => Ok(ParsedModelComplexLiteral::Deferred {
+            real: model_complex_component_expr(real),
+            imag: model_complex_component_expr(imag),
+        }),
+    }
+}
+
+fn parse_model_complex_component(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+    params: &ParamContext,
+    component: &str,
+    defer_expression_params: bool,
+) -> Result<ParsedModelComplexComponent, ParseError> {
+    skip_commas(stream);
+
+    let sign = match &stream.peek().kind {
+        TokenKind::Plus => {
+            stream.advance();
+            1.0
+        }
+        TokenKind::Minus => {
+            stream.advance();
+            -1.0
+        }
+        _ => 1.0,
+    };
+
+    let expr =
+        collect_model_complex_component_expression(stream).ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected {component} part in complex model parameter '{}', found {}",
+                name,
+                stream.peek().kind
+            ),
+        })?;
+
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value(&expr) {
+        return Ok(ParsedModelComplexComponent::Resolved(sign * value));
+    }
+    if let Some(value) = parse_boolean_literal(&expr) {
+        return Ok(ParsedModelComplexComponent::Resolved(sign * value));
+    }
+    if defer_expression_params {
+        return Ok(ParsedModelComplexComponent::Deferred(signed_model_expr(
+            sign, expr,
+        )));
+    }
+
+    let value = eval_expression(&expr, params).map_err(|err| {
+        ParseError::InvalidValue(format!(
+            "line {}: complex model parameter '{}' {} expression '{}' could not be resolved: {}",
+            line_num, name, component, expr, err
+        ))
+    })?;
+    Ok(ParsedModelComplexComponent::Resolved(sign * value))
+}
+
+fn model_complex_component_expr(component: ParsedModelComplexComponent) -> String {
+    match component {
+        ParsedModelComplexComponent::Resolved(value) => format_compact_number(value),
+        ParsedModelComplexComponent::Deferred(expr) => expr,
+    }
+}
+
+fn signed_model_expr(sign: Value, expr: String) -> String {
+    if sign < 0.0 {
+        format!("-({expr})")
+    } else {
+        expr
+    }
+}
+
+fn collect_model_complex_component_expression(stream: &mut TokenStream) -> Option<String> {
+    let mut pieces = Vec::new();
+    let mut previous_end = None;
+    let mut paren_depth = 0usize;
+    let mut offset = 0usize;
+
+    loop {
+        let token = stream.peek_n(offset);
+        if let Some(end) = previous_end
+            && token.span.start != end
+        {
+            break;
+        }
+
+        let piece = match &token.kind {
+            TokenKind::Comma | TokenKind::Newline | TokenKind::Eof if paren_depth == 0 => break,
+            TokenKind::Other('>') if paren_depth == 0 => break,
+            TokenKind::Ident(_)
+            | TokenKind::Number(_)
+            | TokenKind::Expression(_)
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::Other(_) => model_complex_component_piece(token),
+            TokenKind::LParen => {
+                paren_depth += 1;
+                model_complex_component_piece(token)
+            }
+            TokenKind::RParen if paren_depth > 0 => {
+                paren_depth -= 1;
+                model_complex_component_piece(token)
+            }
+            _ => break,
+        };
+
+        if piece.is_empty() {
+            break;
+        }
+        previous_end = Some(token.span.end);
+        pieces.push(piece);
+        offset += 1;
+    }
+
+    if pieces.is_empty() || paren_depth != 0 {
+        return None;
+    }
+
+    for _ in 0..offset {
+        stream.advance();
+    }
+    Some(pieces.join(""))
+}
+
+fn model_complex_component_piece(token: &Token) -> String {
+    match &token.kind {
+        TokenKind::Expression(expr) => format!("({expr})"),
+        TokenKind::Number(value) if token.lexeme.is_empty() => format_compact_number(*value),
+        _ if !token.lexeme.is_empty() => token.lexeme.clone(),
+        _ => token.kind.to_string(),
+    }
 }
 
 enum ParsedModelRealVector {

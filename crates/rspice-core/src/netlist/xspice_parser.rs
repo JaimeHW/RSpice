@@ -1621,8 +1621,22 @@ fn parse_string_vector_param(
                     .iter()
                     .any(|entry| matches!(entry, XspiceStringVectorEntry::DeferredComplex { .. }))
                 {
+                    let deferred_entries = entries
+                        .iter()
+                        .map(|entry| match entry {
+                            XspiceStringVectorEntry::Resolved(value) => {
+                                DeferredXspiceStringVectorEntry::Resolved(value.clone())
+                            }
+                            XspiceStringVectorEntry::DeferredComplex { real, imag } => {
+                                DeferredXspiceStringVectorEntry::Complex {
+                                    real: real.clone(),
+                                    imag: imag.clone(),
+                                }
+                            }
+                        })
+                        .collect::<Vec<_>>();
                     return Ok(XspiceParamValue::StringVectorDeferred(
-                        encode_deferred_xspice_complex_vector(&entries),
+                        encode_deferred_xspice_complex_vector(&deferred_entries),
                     ));
                 }
 
@@ -1921,7 +1935,7 @@ fn xspice_complex_component_piece(token: &Token) -> String {
     }
 }
 
-fn encode_deferred_xspice_complex(real: &str, imag: &str) -> String {
+pub(crate) fn encode_deferred_xspice_complex(real: &str, imag: &str) -> String {
     let mut encoded = String::from(DEFERRED_XSPICE_COMPLEX_PREFIX);
     push_len_segment(&mut encoded, real);
     push_len_segment(&mut encoded, imag);
@@ -1939,15 +1953,17 @@ pub(crate) fn parse_deferred_xspice_complex(value: &str) -> Option<(String, Stri
     }
 }
 
-fn encode_deferred_xspice_complex_vector(entries: &[XspiceStringVectorEntry]) -> String {
+pub(crate) fn encode_deferred_xspice_complex_vector(
+    entries: &[DeferredXspiceStringVectorEntry],
+) -> String {
     let mut encoded = String::from(DEFERRED_XSPICE_COMPLEX_VECTOR_PREFIX);
     for entry in entries {
         match entry {
-            XspiceStringVectorEntry::Resolved(value) => {
+            DeferredXspiceStringVectorEntry::Resolved(value) => {
                 encoded.push('s');
                 push_len_segment(&mut encoded, value);
             }
-            XspiceStringVectorEntry::DeferredComplex { real, imag } => {
+            DeferredXspiceStringVectorEntry::Complex { real, imag } => {
                 encoded.push('c');
                 push_len_segment(&mut encoded, real);
                 push_len_segment(&mut encoded, imag);

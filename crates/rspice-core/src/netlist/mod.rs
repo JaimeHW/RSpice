@@ -41,7 +41,8 @@ pub use topology::{
     TopologyReduction, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, reduce_supernode_topology,
 };
 pub(crate) use xspice_parser::{
-    DeferredXspiceStringVectorEntry, parse_deferred_xspice_complex,
+    DeferredXspiceStringVectorEntry, encode_deferred_xspice_complex,
+    encode_deferred_xspice_complex_vector, parse_deferred_xspice_complex,
     parse_deferred_xspice_complex_vector, parse_xspice_string_vector_literal,
     xspice_model_param_accepts_bare_string, xspice_param_prefers_string_vector,
     xspice_param_preserves_numeric_string,
@@ -3248,6 +3249,68 @@ mod tests {
                 .all(|model| model.real_vector_expr_params.is_empty()),
             "scoped XSPICE model vector expressions should resolve during flattening"
         );
+    }
+
+    #[test]
+    fn xspice_subckt_model_complex_params_resolve_per_instance() {
+        let netlist = Netlist::parse(
+            "xspice subckt inline model complex params\n\
+             .subckt xcmp in out r=1 i=2 ar=3 ai=4\n\
+             A1 in out cmpmodel\n\
+             .model cmpmodel print_param_types (complex=<r i> complex_array=[<ar ai> <r*2 {i+1}>])\n\
+             .ends xcmp\n\
+             X1 a b xcmp r=5 i=6 ar=7 ai=8\n\
+             X2 c d xcmp r=9 i=10 ar=11 ai=12\n\
+             .end\n",
+        )
+        .expect("subckt-local XSPICE complex model params parse");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("scoped model complex params flatten");
+        let model_for = |element_name: &str| -> &str {
+            flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Xspice { model, .. } if element.name == element_name => {
+                        Some(model.as_str())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("flattened XSPICE element {element_name} exists"))
+        };
+
+        let complex_for = |model_name: &str| -> (&str, Vec<String>) {
+            let model = flattened
+                .scoped_models
+                .iter()
+                .find(|model| model.name == model_name)
+                .unwrap_or_else(|| panic!("scoped model {model_name} exists"));
+            assert!(
+                model.expr_params.is_empty(),
+                "scoped XSPICE complex model expressions should resolve during flattening"
+            );
+            let complex = model
+                .string_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("complex"))
+                .map(|(_, value)| value.as_str())
+                .unwrap_or_else(|| panic!("scoped model {model_name} has complex"));
+            let complex_array = model
+                .string_vector_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("complex_array"))
+                .map(|(_, values)| values.clone())
+                .unwrap_or_else(|| panic!("scoped model {model_name} has complex_array"));
+            (complex, complex_array)
+        };
+
+        let (x1_complex, x1_array) = complex_for(model_for("X1.A1"));
+        let (x2_complex, x2_array) = complex_for(model_for("X2.A1"));
+        assert_eq!(x1_complex, "<5 6>");
+        assert_eq!(x1_array, vec!["<7 8>".to_string(), "<10 7>".to_string()]);
+        assert_eq!(x2_complex, "<9 10>");
+        assert_eq!(x2_array, vec!["<11 12>".to_string(), "<18 11>".to_string()]);
     }
 
     #[test]
