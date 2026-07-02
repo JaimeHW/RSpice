@@ -133,12 +133,18 @@ fn is_digital_table_data_line(line: &str) -> bool {
         && !trimmed.starts_with('*')
         && !trimmed.starts_with('#')
         && !trimmed.starts_with(';')
+        && !trimmed.starts_with('$')
 }
 
 fn tokenize_digital_table_line<'line>(line: &'line str, tokens: &mut Vec<&'line str>) {
     tokens.clear();
+    let uncommented = line
+        .split(|ch: char| matches!(ch, '#' | ';' | '$'))
+        .next()
+        .unwrap_or(line);
     tokens.extend(
-        line.split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
+        uncommented
+            .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
             .filter(|token| !token.is_empty()),
     );
 }
@@ -1430,6 +1436,10 @@ mod tests {
             vec!["2n", "Uz"],
             "tokenizing a shorter row must clear stale tokens from the reusable buffer"
         );
+
+        assert!(!is_digital_table_data_line("  * indented comment"));
+        tokenize_digital_table_line("3n 1s ; trailing comment", &mut tokens);
+        assert_eq!(tokens, vec!["3n", "1s"]);
     }
 
     #[test]
