@@ -674,6 +674,17 @@ pub trait CodeModel: Send + Sync {
         false
     }
 
+    /// Whether this model's transient MNA contribution is affine in the
+    /// current solution and has no hidden time-step state.
+    ///
+    /// Circuits containing only these XSPICE models and otherwise-linear
+    /// devices can use the direct transient linear solve path. Models with
+    /// breakpoints, memory, dynamic transfer functions, or operating-point
+    /// regions that can switch during a Newton step must keep the default.
+    fn has_memoryless_linear_transient_stamp(&self) -> bool {
+        false
+    }
+
     /// Initialize instance state
     ///
     /// Called once when the instance is created.

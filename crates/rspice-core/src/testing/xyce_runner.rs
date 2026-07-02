@@ -493,6 +493,14 @@ enum XyceReferenceColumn {
     Probe { name: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct XyceTransientReferenceLayout {
+    stepnum_column: Option<usize>,
+    index_column: Option<usize>,
+    time_column: usize,
+    data_column_offset: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceLeadCurrentProbe {
     terminal: XyceLeadCurrentTerminal,
@@ -1592,17 +1600,20 @@ impl XyceTestRunner {
                     ));
                 }
                 let mut has_file_output = false;
-                let mut primary_format: Option<String> = None;
                 let mut index = 2usize;
                 while index < token_refs.len() {
                     if let Some((raw_key, raw_value, consumed)) =
                         Self::print_option_assignment(&token_refs, index)
                     {
+                        let value = raw_value.trim().trim_matches(['"', '\'']);
                         match raw_key.trim().to_ascii_lowercase().as_str() {
                             "file" => has_file_output = true,
                             "format" => {
-                                primary_format =
-                                    Some(raw_value.trim().trim_matches(['"', '\'']).to_string())
+                                if !Self::tran_print_format_is_prn_compatible(value) {
+                                    return Err(format!(
+                                        "wrapper-origin transient .prn contract does not cover .PRINT TRAN FORMAT={value}"
+                                    ));
+                                }
                             }
                             _ => {}
                         }
@@ -1612,25 +1623,9 @@ impl XyceTestRunner {
                     index += 1;
                 }
                 if !has_file_output {
-                    if primary_format.as_deref().is_some_and(|format| {
-                        matches!(format.to_ascii_lowercase().as_str(), "gnuplot" | "splot")
-                    }) {
-                        return Err(format!(
-                            "wrapper-origin transient .prn contract does not cover primary .PRINT TRAN FORMAT={}",
-                            primary_format.unwrap()
-                        ));
-                    }
                     primary_tran_print_count += 1;
                 }
                 continue;
-            }
-            if command.eq_ignore_ascii_case(".options")
-                && trimmed.to_ascii_lowercase().contains("add_stepnum_col")
-            {
-                return Err(
-                    "wrapper-origin transient .prn contract does not cover .OPTIONS OUTPUT ADD_STEPNUM_COL"
-                        .to_string(),
-                );
             }
             if Self::is_extra_wrapper_tran_output_analysis_command(command) {
                 return Err(format!(
@@ -1811,7 +1806,9 @@ impl XyceTestRunner {
         relative_path: &str,
     ) -> Option<XyceComparisonTolerance> {
         match Self::normalize_manifest_key(relative_path).as_str() {
-            "netlists/output/tran/tran-prn-noindex.cir" => Some(XyceComparisonTolerance {
+            "netlists/output/tran/tran-prn-noindex.cir"
+            | "netlists/output/tran/tran-step-gnuplot.cir"
+            | "netlists/output/tran/tran-stepnum-col.cir" => Some(XyceComparisonTolerance {
                 relative: 1.0e-3,
                 absolute: 1.0e-5,
                 zero: Some(1.0e-8),
@@ -1824,6 +1821,13 @@ impl XyceTestRunner {
         matches!(
             format.to_ascii_lowercase().as_str(),
             "std" | "tecplot" | "touchstone" | "touchstone2" | "noindex" | "gnuplot" | "splot"
+        )
+    }
+
+    fn tran_print_format_is_prn_compatible(format: &str) -> bool {
+        matches!(
+            format.to_ascii_lowercase().as_str(),
+            "std" | "tecplot" | "noindex" | "gnuplot" | "splot"
         )
     }
 
@@ -2184,7 +2188,9 @@ impl XyceTestRunner {
                 };
 
                 if mismatches.is_empty() {
-                    return self.passed_result(deck, start, contract);
+                    return self.passed_or_tran_side_output_failure(
+                        deck, start, contract, &plan, &netlist, &result,
+                    );
                 }
 
                 best_mismatches = Some(mismatches);
@@ -2232,7 +2238,14 @@ impl XyceTestRunner {
                 ) {
                     Ok(locked_mismatches) => {
                         if locked_mismatches.is_empty() {
-                            return self.passed_result(deck, start, contract);
+                            return self.passed_or_tran_side_output_failure(
+                                deck,
+                                start,
+                                contract,
+                                &plan,
+                                &netlist,
+                                &locked_result,
+                            );
                         }
                         if best_mismatches
                             .as_ref()
@@ -2283,7 +2296,14 @@ impl XyceTestRunner {
                     ) {
                         Ok(backward_euler_mismatches) => {
                             if backward_euler_mismatches.is_empty() {
-                                return self.passed_result(deck, start, contract);
+                                return self.passed_or_tran_side_output_failure(
+                                    deck,
+                                    start,
+                                    contract,
+                                    &plan,
+                                    &netlist,
+                                    &backward_euler_result,
+                                );
                             }
                             if best_mismatches
                                 .as_ref()
@@ -2384,7 +2404,9 @@ impl XyceTestRunner {
             match self.compare_step_tran_runs(&plan, &step_runs, &step_references, &abort, false) {
                 Ok(mismatches) => {
                     if mismatches.is_empty() {
-                        return self.passed_result(deck, start, contract);
+                        return self.passed_or_step_tran_side_output_failure(
+                            deck, start, contract, &plan, &step_runs, &abort, false,
+                        );
                     }
                     Some(mismatches)
                 }
@@ -2405,9 +2427,10 @@ impl XyceTestRunner {
                         true,
                     );
                     return match locked_result {
-                        Ok(locked_mismatches) if locked_mismatches.is_empty() => {
-                            self.passed_result(deck, start, contract)
-                        }
+                        Ok(locked_mismatches) if locked_mismatches.is_empty() => self
+                            .passed_or_step_tran_side_output_failure(
+                                deck, start, contract, &plan, &step_runs, &abort, true,
+                            ),
                         Ok(locked_mismatches) => self.failure_result(
                             deck,
                             start,
@@ -2435,7 +2458,9 @@ impl XyceTestRunner {
             self.compare_step_tran_runs(&plan, &step_runs, &step_references, &abort, true)
         {
             if locked_mismatches.is_empty() {
-                return self.passed_result(deck, start, contract);
+                return self.passed_or_step_tran_side_output_failure(
+                    deck, start, contract, &plan, &step_runs, &abort, true,
+                );
             }
             if locked_mismatches.len() < mismatches.len() {
                 return self.failure_result(
@@ -2466,6 +2491,25 @@ impl XyceTestRunner {
     fn compare_step_tran_runs(
         &self,
         plan: &XyceStaticTranPlan,
+        step_runs: &[XyceStepRun],
+        step_references: &[XycePrnTable],
+        abort: &dyn AbortSignal,
+        locked_time_grid: bool,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_step_tran_runs_with_print(
+            plan,
+            &plan.print,
+            step_runs,
+            step_references,
+            abort,
+            locked_time_grid,
+        )
+    }
+
+    fn compare_step_tran_runs_with_print(
+        &self,
+        plan: &XyceStaticTranPlan,
+        print: &XycePrintRequest,
         step_runs: &[XyceStepRun],
         step_references: &[XycePrnTable],
         abort: &dyn AbortSignal,
@@ -2518,7 +2562,7 @@ impl XyceTestRunner {
             let mut step_mismatches = self
                 .compare_tran_prn_reference(
                     reference,
-                    &plan.print,
+                    print,
                     &run.netlist,
                     &plan.source,
                     &result,
@@ -2538,6 +2582,158 @@ impl XyceTestRunner {
             row_offset += reference.rows.len();
         }
         Ok(mismatches)
+    }
+
+    fn passed_or_tran_side_output_failure(
+        &self,
+        deck: &XyceDeck,
+        start: Instant,
+        contract: &str,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> XyceTestResult {
+        match self.compare_tran_side_outputs(plan, netlist, result) {
+            Ok(mismatches) if mismatches.is_empty() => self.passed_result(deck, start, contract),
+            Ok(mismatches) => self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce transient side-output mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            ),
+            Err(err) => self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("transient side-output comparison error: {err}"),
+                Vec::new(),
+            ),
+        }
+    }
+
+    fn passed_or_step_tran_side_output_failure(
+        &self,
+        deck: &XyceDeck,
+        start: Instant,
+        contract: &str,
+        plan: &XyceStaticTranPlan,
+        step_runs: &[XyceStepRun],
+        abort: &dyn AbortSignal,
+        locked_time_grid: bool,
+    ) -> XyceTestResult {
+        match self.compare_step_tran_side_outputs(plan, step_runs, abort, locked_time_grid) {
+            Ok(mismatches) if mismatches.is_empty() => self.passed_result(deck, start, contract),
+            Ok(mismatches) => self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce stepped transient side-output mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            ),
+            Err(err) => self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("stepped transient side-output comparison error: {err}"),
+                Vec::new(),
+            ),
+        }
+    }
+
+    fn compare_tran_side_outputs(
+        &self,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let side_outputs = Self::prn_compatible_tran_side_output_requests(&plan.source)?;
+        let mut all_mismatches = Vec::new();
+        for request in side_outputs {
+            let file = request
+                .file
+                .as_deref()
+                .expect("side output request has FILE= set");
+            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
+                format!(
+                    "failed to parse transient side-output oracle {}: {err}",
+                    self.display_path(&reference_path)
+                )
+            })?;
+            let print = XycePrintRequest {
+                probes: request.probes,
+            };
+            let mut mismatches = self.compare_tran_prn_reference(
+                &reference,
+                &print,
+                netlist,
+                &plan.source,
+                result,
+                plan.wrapper_tolerance,
+            )?;
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{file}:{}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(all_mismatches)
+    }
+
+    fn compare_step_tran_side_outputs(
+        &self,
+        plan: &XyceStaticTranPlan,
+        step_runs: &[XyceStepRun],
+        abort: &dyn AbortSignal,
+        locked_time_grid: bool,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let side_outputs = Self::prn_compatible_tran_side_output_requests(&plan.source)?;
+        let mut all_mismatches = Vec::new();
+        for request in side_outputs {
+            let file = request
+                .file
+                .as_deref()
+                .expect("side output request has FILE= set");
+            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
+                format!(
+                    "failed to parse transient side-output oracle {}: {err}",
+                    self.display_path(&reference_path)
+                )
+            })?;
+            let step_references = Self::split_transient_step_reference(&reference, step_runs.len())
+                .map_err(|err| format!("{file}: {err}"))?;
+            let print = XycePrintRequest {
+                probes: request.probes,
+            };
+            let mut mismatches = self.compare_step_tran_runs_with_print(
+                plan,
+                &print,
+                step_runs,
+                &step_references,
+                abort,
+                locked_time_grid,
+            )?;
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{file}:{}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(all_mismatches)
     }
 
     fn split_transient_step_reference(
@@ -2583,12 +2779,41 @@ impl XyceTestRunner {
             if start == end {
                 return Err("stepped transient reference contains an empty step table".to_string());
             }
-            references.push(XycePrnTable {
+            let reference = XycePrnTable {
                 columns: reference.columns.clone(),
                 rows: reference.rows[start..end].to_vec(),
-            });
+            };
+            Self::validate_transient_stepnum_column(&reference, references.len())?;
+            references.push(reference);
         }
         Ok(references)
+    }
+
+    fn validate_transient_stepnum_column(
+        reference: &XycePrnTable,
+        expected_step_index: usize,
+    ) -> Result<(), String> {
+        let layout = Self::transient_reference_layout(reference)?;
+        let Some(stepnum_column) = layout.stepnum_column else {
+            return Ok(());
+        };
+        let expected_step_index = expected_step_index as Value;
+        for (row_index, row) in reference.rows.iter().enumerate() {
+            let stepnum = *row.get(stepnum_column).ok_or_else(|| {
+                format!("row {row_index} has no STEPNUM column at index {stepnum_column}")
+            })?;
+            if !stepnum.is_finite() {
+                return Err(format!(
+                    "row {row_index} has non-finite STEPNUM value {stepnum}"
+                ));
+            }
+            if (stepnum - expected_step_index).abs() > f64::EPSILON {
+                return Err(format!(
+                    "row {row_index} has STEPNUM {stepnum}, expected {expected_step_index}"
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn compare_gnuplot_splot_side_output_batches(
@@ -2682,6 +2907,20 @@ impl XyceTestRunner {
             .filter(|request| {
                 request.file.is_some()
                     && Self::dc_print_format_is_prn_compatible(
+                        request.format.as_deref().unwrap_or("STD"),
+                    )
+            })
+            .collect())
+    }
+
+    fn prn_compatible_tran_side_output_requests(
+        source: &str,
+    ) -> Result<Vec<XycePrintOutputRequest>, String> {
+        Ok(Self::print_output_requests(source, "TRAN")?
+            .into_iter()
+            .filter(|request| {
+                request.file.is_some()
+                    && Self::tran_print_format_is_prn_compatible(
                         request.format.as_deref().unwrap_or("STD"),
                     )
             })
@@ -3698,23 +3937,9 @@ impl XyceTestRunner {
         result: &TransientResult,
         wrapper_tolerance: Option<XyceComparisonTolerance>,
     ) -> Result<Vec<XyceValueMismatch>, String> {
-        if reference.columns.is_empty() {
-            return Err("reference table has no columns".to_string());
-        }
-        let has_index_column = reference
-            .columns
-            .first()
-            .is_some_and(|column| column.eq_ignore_ascii_case("Index"));
-        let time_column = usize::from(has_index_column);
-        if reference
-            .columns
-            .get(time_column)
-            .is_none_or(|column| Self::normalize_probe(column) != "time")
-        {
-            return Err("expected Xyce transient .prn table to contain a TIME column".to_string());
-        }
-        let data_column_offset = time_column + 1;
-        let data_columns = Self::reference_tran_data_columns(reference, print, data_column_offset)?;
+        let layout = Self::transient_reference_layout(reference)?;
+        let data_columns =
+            Self::reference_tran_data_columns(reference, print, layout.data_column_offset)?;
         let comp_columns = data_columns
             .iter()
             .map(|probe| XyceReferenceColumn::Probe {
@@ -3734,8 +3959,8 @@ impl XyceTestRunner {
                     reference.columns.len()
                 ));
             }
-            if has_index_column {
-                let expected_index = row[0];
+            if let Some(index_column) = layout.index_column {
+                let expected_index = row[index_column];
                 let actual_index = row_index as f64;
                 if (expected_index - actual_index).abs() > self.config.absolute_tolerance {
                     mismatches.push(XyceValueMismatch {
@@ -3751,13 +3976,13 @@ impl XyceTestRunner {
                 }
             }
 
-            let time = row[time_column];
+            let time = row[layout.time_column];
             if !time.is_finite() {
                 return Err(format!("row {row_index} has non-finite TIME value {time}"));
             }
 
             for (column_index, probe) in data_columns.iter().enumerate() {
-                let expected = row[column_index + data_column_offset];
+                let expected = row[column_index + layout.data_column_offset];
                 let actual = Self::evaluate_tran_probe(probe, netlist, result, time)?;
                 let normalized_probe = Self::normalize_probe(probe);
                 let tolerance = comp_tolerances
@@ -4185,16 +4410,55 @@ impl XyceTestRunner {
     }
 
     fn reference_time_column_index(reference: &XycePrnTable) -> Option<usize> {
-        let has_index_column = reference
+        Self::transient_reference_layout(reference)
+            .ok()
+            .map(|layout| layout.time_column)
+    }
+
+    fn transient_reference_layout(
+        reference: &XycePrnTable,
+    ) -> Result<XyceTransientReferenceLayout, String> {
+        if reference.columns.is_empty() {
+            return Err("reference table has no columns".to_string());
+        }
+
+        let mut cursor = 0usize;
+        let stepnum_column = reference
             .columns
-            .first()
-            .is_some_and(|column| column.eq_ignore_ascii_case("Index"));
-        let time_column = usize::from(has_index_column);
-        reference
+            .get(cursor)
+            .is_some_and(|column| column.eq_ignore_ascii_case("STEPNUM"))
+            .then(|| {
+                let column = cursor;
+                cursor += 1;
+                column
+            });
+        let index_column = reference
+            .columns
+            .get(cursor)
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            .then(|| {
+                let column = cursor;
+                cursor += 1;
+                column
+            });
+        let time_column = cursor;
+        if reference
             .columns
             .get(time_column)
-            .is_some_and(|column| Self::normalize_probe(column) == "time")
-            .then_some(time_column)
+            .is_none_or(|column| Self::normalize_probe(column) != "time")
+        {
+            return Err(format!(
+                "expected Xyce transient .prn table to contain optional STEPNUM/Index metadata followed by TIME, got columns {:?}",
+                reference.columns
+            ));
+        }
+
+        Ok(XyceTransientReferenceLayout {
+            stepnum_column,
+            index_column,
+            time_column,
+            data_column_offset: time_column + 1,
+        })
     }
 
     fn default_prn_time_quantization_tolerance(time: Value) -> Value {
@@ -10638,6 +10902,61 @@ Values:
             .expect("transient PRN time grid should parse");
 
         assert_eq!(grid, vec![0.0, 1.0e-9, 4.0e-9]);
+    }
+
+    #[test]
+    fn reference_time_grid_accepts_stepnum_transient_prn_metadata() {
+        let table = XycePrnTable {
+            columns: ["STEPNUM", "Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![2.0, 0.0, 0.0, 1.0],
+                vec![2.0, 1.0, 1.0e-9, 2.0],
+                vec![2.0, 2.0, 4.0e-9, 3.0],
+            ],
+        };
+
+        let layout = XyceTestRunner::transient_reference_layout(&table)
+            .expect("STEPNUM/Index/TIME layout should parse");
+        let grid = XyceTestRunner::reference_time_grid(&table)
+            .expect("transient PRN time grid should parse");
+
+        assert_eq!(layout.stepnum_column, Some(0));
+        assert_eq!(layout.index_column, Some(1));
+        assert_eq!(layout.time_column, 2);
+        assert_eq!(layout.data_column_offset, 3);
+        assert_eq!(grid, vec![0.0, 1.0e-9, 4.0e-9]);
+    }
+
+    #[test]
+    fn split_transient_step_reference_validates_stepnum_metadata() {
+        let table = XycePrnTable {
+            columns: ["STEPNUM", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0],
+                vec![0.0, 1.0e-9, 2.0],
+                vec![1.0, 0.0, 3.0],
+                vec![1.0, 1.0e-9, 4.0],
+            ],
+        };
+
+        let steps = XyceTestRunner::split_transient_step_reference(&table, 2)
+            .expect("STEPNUM/TIME transient reference should split");
+
+        assert_eq!(steps.len(), 2);
+        assert_eq!(
+            steps[0].rows,
+            vec![vec![0.0, 0.0, 1.0], vec![0.0, 1.0e-9, 2.0]]
+        );
+        assert_eq!(
+            steps[1].rows,
+            vec![vec![1.0, 0.0, 3.0], vec![1.0, 1.0e-9, 4.0]]
+        );
     }
 
     #[test]

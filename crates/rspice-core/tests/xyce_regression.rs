@@ -620,6 +620,8 @@ fn test_xyce_sin_source_step_transient_output_cases_run() {
 
     for relative in [
         "Netlists/Output/TRAN/tran-step-prn.cir",
+        "Netlists/Output/TRAN/tran-step-gnuplot.cir",
+        "Netlists/Output/TRAN/tran-stepnum-col.cir",
         "Netlists/Output/TRAN/tran-step-tecplot.cir",
     ] {
         assert!(
