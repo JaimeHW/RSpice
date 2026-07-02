@@ -830,6 +830,13 @@ impl CmContext {
         }
     }
 
+    /// Set analog vector input values by name.
+    pub fn set_input_analog_vector(&mut self, name: &str, values: &[Value]) -> CmResult<()> {
+        self.set_input_analog_vector_from_fn(name, values.len(), |index| {
+            AnalogValue::new(values[index])
+        })
+    }
+
     /// Set digital input by name
     pub fn set_input_digital(&mut self, name: &str, value: DigitalValue) {
         match self.inputs.get_mut(name) {

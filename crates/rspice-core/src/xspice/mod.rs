@@ -43,6 +43,7 @@
 //! let instance = XspiceInstance::new("A1", model, &ports, &params);
 //! ```
 
+pub mod conformance;
 mod context;
 mod data_file;
 mod digital;
