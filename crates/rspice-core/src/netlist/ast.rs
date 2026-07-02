@@ -1748,6 +1748,9 @@ pub struct SimulationOptions {
     /// 0 = default transport, 1 = default inertial,
     /// 2 = force transport, 3 = force inertial.
     pub digital_delay_type: Option<i64>,
+    /// Ngspice `esave` event-output policy for XSPICE digital traces.
+    /// `None` keeps the default of recording event traces.
+    pub xspice_event_trace_save: Option<bool>,
     /// Maximum Newton-Raphson iterations (default: 150)
     pub itl1: Option<usize>,
     /// DC transfer curve iterations (default: 50)
@@ -1838,6 +1841,9 @@ impl SimulationOptions {
         }
         if other.digital_delay_type.is_some() {
             self.digital_delay_type = other.digital_delay_type;
+        }
+        if other.xspice_event_trace_save.is_some() {
+            self.xspice_event_trace_save = other.xspice_event_trace_save;
         }
         if other.itl1.is_some() {
             self.itl1 = other.itl1;

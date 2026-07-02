@@ -397,6 +397,9 @@ impl Netlist {
             if let Some(command) = Self::promote_control_netlist_command(line) {
                 promoted.push(command);
             }
+            if let Some(command) = Self::promote_control_esave_command(line) {
+                promoted.push(command);
+            }
             if let Some(command) = Self::promote_control_set_command(line) {
                 promoted.push(command);
             }
@@ -462,6 +465,26 @@ impl Netlist {
             promoted.push_str(&normalize_control_analysis_token(part));
         }
         Some(promoted)
+    }
+
+    fn promote_control_esave_command(line: &str) -> Option<String> {
+        let body = strip_control_inline_comment(line).trim();
+        if body.is_empty() || body.starts_with('*') {
+            return None;
+        }
+
+        let body = body.strip_prefix('.').unwrap_or(body);
+        let mut parts = body.split_whitespace();
+        let command = parts.next()?;
+        if !command.eq_ignore_ascii_case("esave") {
+            return None;
+        }
+
+        match parts.next()?.to_ascii_lowercase().as_str() {
+            "none" => Some(".options xspice_esave=0".to_string()),
+            "all" => Some(".options xspice_esave=1".to_string()),
+            _ => None,
+        }
     }
 
     fn promote_control_set_command(line: &str) -> Option<String> {

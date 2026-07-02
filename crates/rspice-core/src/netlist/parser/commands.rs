@@ -754,6 +754,11 @@ pub(super) fn parse_options_command(
                 options.digital_delay_type =
                     Some(parse_digital_delay_type_option(value, line_num)?);
             }
+            (Some("XSPICE"), "ESAVE" | "EVENT_SAVE" | "EVENTSAVE")
+            | (None, "XSPICE_ESAVE" | "XSPICE_EVENT_SAVE" | "XSPICE_EVENTSAVE") => {
+                options.xspice_event_trace_save =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
             (_, "CHGTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.chgtol = Some(parse_positive_real_option("CHGTOL", value, line_num)?);

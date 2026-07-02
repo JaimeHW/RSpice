@@ -544,6 +544,7 @@ impl Engine {
         resume: Option<&TransientCheckpoint>,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
         let fingerprint = netlist_fingerprint(netlist);
+        let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let mut circuit = self.build_circuit(netlist)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             let result = TransientResult {
@@ -864,8 +865,14 @@ impl Engine {
         };
         let mut digital_snapshot = Vec::new();
         let mut digital_trace_indices = HashMap::new();
-        circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-        result.record_digital_snapshot(resume_time, &digital_snapshot, &mut digital_trace_indices);
+        if record_xspice_event_traces {
+            circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+            result.record_digital_snapshot(
+                resume_time,
+                &digital_snapshot,
+                &mut digital_trace_indices,
+            );
+        }
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let mut voltage_lte_excluded_nodes = circuit.xspice_transient_voltage_lte_excluded_nodes();
@@ -2354,12 +2361,14 @@ impl Engine {
                         t,
                         &derived_branch_currents,
                     );
-                    circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-                    result.record_digital_snapshot(
-                        t,
-                        &digital_snapshot,
-                        &mut digital_trace_indices,
-                    );
+                    if record_xspice_event_traces {
+                        circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+                        result.record_digital_snapshot(
+                            t,
+                            &digital_snapshot,
+                            &mut digital_trace_indices,
+                        );
+                    }
 
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
@@ -3145,12 +3154,14 @@ impl Engine {
                         t,
                         &derived_branch_currents,
                     );
-                    circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-                    result.record_digital_snapshot(
-                        t,
-                        &digital_snapshot,
-                        &mut digital_trace_indices,
-                    );
+                    if record_xspice_event_traces {
+                        circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+                        result.record_digital_snapshot(
+                            t,
+                            &digital_snapshot,
+                            &mut digital_trace_indices,
+                        );
+                    }
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
                         timestep.preferred_min_dt(),
@@ -3372,8 +3383,10 @@ impl Engine {
                 t,
                 &derived_branch_currents,
             );
-            circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
-            result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
+            if record_xspice_event_traces {
+                circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
+                result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
+            }
             if first_accepted_transient_step {
                 timestep.set_max_dt(hinted_max_step);
                 timestep.force_step(dt);

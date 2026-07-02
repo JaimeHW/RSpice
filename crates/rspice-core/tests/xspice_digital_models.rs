@@ -1653,6 +1653,31 @@ a_src [d] src
 }
 
 #[test]
+fn control_esave_none_suppresses_digital_event_trace_output() {
+    let result = run_temp_deck(
+        "rspice-d-source-esave-none",
+        "0 0s\n1n 1s\n2n Uu\n",
+        "\
+* d_source esave none trace policy
+a_src [d] src
+.model src d_source (input_file=\"stim.stim\")
+.control
+esave none
+.endc
+.end
+",
+        2.5e-9,
+        100.0e-12,
+    );
+
+    assert!(
+        result.digital_traces.is_empty(),
+        "esave none should suppress digital event trace output, got {:?}",
+        result.digital_traces
+    );
+}
+
+#[test]
 fn d_buffer_inertial_unknown_third_value_uses_stable_previous_delay_like_ngspice() {
     let result = run_temp_deck(
         "rspice-d-buffer-inertial-unknown-third",
