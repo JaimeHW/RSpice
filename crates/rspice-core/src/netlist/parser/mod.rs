@@ -13,9 +13,9 @@ use super::{
     AnalysisCommand, BjtType, DataTable, Element, ElementKind, FreqVariation, InitialCondition,
     JfetType, MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist,
     NodeSet, ParamContext, ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType,
-    PoleZeroTransferType, PspiceUTiming, SaveSet, SaveSignal, SensitivityAcSweep,
-    SimulationOptions, SourceSpec, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
-    SubcircuitDef, SwitchState, VerilogAInclude,
+    PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal,
+    SensitivityAcSweep, SimulationOptions, SourceSpec, StatisticalParamMode, StepCommand,
+    StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -422,8 +422,9 @@ fn normalize_pspice_u_timing_in_elements(
             continue;
         }
         let alias_name = unique_pspice_u_timing_model_name(scope, &element.name, existing_names);
-        let alias = pspice_u_timing_alias_model(&alias_name, model, timing_model)
-            .expect("supported PSpice U timing model should create an alias");
+        let alias =
+            pspice_u_timing_alias_model(&alias_name, model, timing_model, timing.delay_mode)
+                .expect("supported PSpice U timing model should create an alias");
 
         *model = alias_name;
         generated_models.push(alias);
@@ -447,6 +448,7 @@ fn pspice_u_timing_alias_model(
     alias_name: &str,
     code_model: &str,
     timing_model: &ModelDef,
+    delay_mode: PspiceUTimingMode,
 ) -> Option<ModelDef> {
     if timing_model.model_type.eq_ignore_ascii_case("UGATE")
         && pspice_u_gate_model_accepts_ugate_timing(code_model)
@@ -455,6 +457,7 @@ fn pspice_u_timing_alias_model(
             alias_name,
             code_model,
             timing_model,
+            delay_mode,
         ));
     }
 
@@ -465,6 +468,7 @@ fn pspice_u_timing_alias_model(
             alias_name,
             code_model,
             timing_model,
+            delay_mode,
         ));
     }
 
@@ -475,6 +479,7 @@ fn pspice_u_timing_alias_model(
             alias_name,
             code_model,
             timing_model,
+            delay_mode,
         ));
     }
 
@@ -485,6 +490,7 @@ fn pspice_u_timing_alias_model(
             alias_name,
             code_model,
             timing_model,
+            delay_mode,
         ));
     }
 
@@ -495,6 +501,7 @@ fn pspice_u_timing_alias_model(
             alias_name,
             code_model,
             timing_model,
+            delay_mode,
         ));
     }
 
@@ -531,6 +538,7 @@ fn pspice_ugate_alias_model(
     alias_name: &str,
     code_model: &str,
     timing_model: &ModelDef,
+    delay_mode: PspiceUTimingMode,
 ) -> ModelDef {
     const PSPICE_U_DEFAULT_DELAY: Value = 1.0e-12;
 
@@ -541,6 +549,7 @@ fn pspice_ugate_alias_model(
         &["TPLHTY", "TPLHMN", "TPLHMX"],
         "rise_delay",
         PSPICE_U_DEFAULT_DELAY,
+        delay_mode,
         &mut params,
         &mut expr_params,
     );
@@ -549,6 +558,7 @@ fn pspice_ugate_alias_model(
         &["TPHLTY", "TPHLMN", "TPHLMX"],
         "fall_delay",
         PSPICE_U_DEFAULT_DELAY,
+        delay_mode,
         &mut params,
         &mut expr_params,
     );
@@ -569,11 +579,13 @@ fn pspice_udly_alias_model(
     alias_name: &str,
     code_model: &str,
     timing_model: &ModelDef,
+    delay_mode: PspiceUTimingMode,
 ) -> ModelDef {
     let mut params = vec![("inertial_delay".to_string(), 0.0)];
     let mut expr_params = Vec::new();
-    let delay = pspice_timing_delay_estimate(timing_model, &["DLYTY", "DLYMN", "DLYMX"])
-        .unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
+    let delay =
+        pspice_timing_delay_estimate(timing_model, &["DLYTY", "DLYMN", "DLYMX"], delay_mode)
+            .unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
 
     push_pspice_timing_delay("rise_delay", delay.clone(), &mut params, &mut expr_params);
     push_pspice_timing_delay("fall_delay", delay, &mut params, &mut expr_params);
@@ -594,12 +606,15 @@ fn pspice_utgate_alias_model(
     alias_name: &str,
     code_model: &str,
     timing_model: &ModelDef,
+    delay_mode: PspiceUTimingMode,
 ) -> ModelDef {
     let mut params = vec![("inertial_delay".to_string(), 1.0)];
     let mut expr_params = Vec::new();
 
-    let rising = pspice_timing_delay_estimate(timing_model, &["TPLHTY", "TPLHMN", "TPLHMX"]);
-    let falling = pspice_timing_delay_estimate(timing_model, &["TPHLTY", "TPHLMN", "TPHLMX"]);
+    let rising =
+        pspice_timing_delay_estimate(timing_model, &["TPLHTY", "TPLHMN", "TPLHMX"], delay_mode);
+    let falling =
+        pspice_timing_delay_estimate(timing_model, &["TPHLTY", "TPHLMN", "TPHLMX"], delay_mode);
     let delay =
         pspice_select_longer_delay(rising, falling).unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
     push_pspice_timing_delay("delay", delay, &mut params, &mut expr_params);
@@ -620,6 +635,7 @@ fn pspice_ugff_alias_model(
     alias_name: &str,
     code_model: &str,
     timing_model: &ModelDef,
+    delay_mode: PspiceUTimingMode,
 ) -> ModelDef {
     let mut params = vec![
         ("rise_delay".to_string(), 1.0e-9),
@@ -627,10 +643,16 @@ fn pspice_ugff_alias_model(
     ];
     let mut expr_params = Vec::new();
 
-    let data_rise =
-        pspice_timing_delay_estimate(timing_model, &["TPDQLHTY", "TPDQLHMN", "TPDQLHMX"]);
-    let data_fall =
-        pspice_timing_delay_estimate(timing_model, &["TPDQHLTY", "TPDQHLMN", "TPDQHLMX"]);
+    let data_rise = pspice_timing_delay_estimate(
+        timing_model,
+        &["TPDQLHTY", "TPDQLHMN", "TPDQLHMX"],
+        delay_mode,
+    );
+    let data_fall = pspice_timing_delay_estimate(
+        timing_model,
+        &["TPDQHLTY", "TPDQHLMN", "TPDQHLMX"],
+        delay_mode,
+    );
     if let Some(delay) = pspice_select_longer_delay(data_rise, data_fall) {
         let target = if code_model.eq_ignore_ascii_case("d_srlatch") {
             "sr_delay"
@@ -640,15 +662,21 @@ fn pspice_ugff_alias_model(
         push_pspice_timing_delay(target, delay, &mut params, &mut expr_params);
     }
 
-    let gate_rise =
-        pspice_timing_delay_estimate(timing_model, &["TPGQLHTY", "TPGQLHMN", "TPGQLHMX"]);
-    let gate_fall =
-        pspice_timing_delay_estimate(timing_model, &["TPGQHLTY", "TPGQHLMN", "TPGQHLMX"]);
+    let gate_rise = pspice_timing_delay_estimate(
+        timing_model,
+        &["TPGQLHTY", "TPGQLHMN", "TPGQLHMX"],
+        delay_mode,
+    );
+    let gate_fall = pspice_timing_delay_estimate(
+        timing_model,
+        &["TPGQHLTY", "TPGQHLMN", "TPGQHLMX"],
+        delay_mode,
+    );
     if let Some(delay) = pspice_select_longer_delay(gate_rise, gate_fall) {
         push_pspice_timing_delay("enable_delay", delay, &mut params, &mut expr_params);
     }
 
-    push_pspice_pcq_set_reset_delays(timing_model, &mut params, &mut expr_params);
+    push_pspice_pcq_set_reset_delays(timing_model, delay_mode, &mut params, &mut expr_params);
 
     ModelDef {
         name: alias_name.to_string(),
@@ -666,6 +694,7 @@ fn pspice_ueff_alias_model(
     alias_name: &str,
     code_model: &str,
     timing_model: &ModelDef,
+    delay_mode: PspiceUTimingMode,
 ) -> ModelDef {
     let mut params = vec![
         ("rise_delay".to_string(), 1.0e-9),
@@ -673,15 +702,21 @@ fn pspice_ueff_alias_model(
     ];
     let mut expr_params = Vec::new();
 
-    let clk_rise =
-        pspice_timing_delay_estimate(timing_model, &["TPCLKQLHTY", "TPCLKQLHMN", "TPCLKQLHMX"]);
-    let clk_fall =
-        pspice_timing_delay_estimate(timing_model, &["TPCLKQHLTY", "TPCLKQHLMN", "TPCLKQHLMX"]);
+    let clk_rise = pspice_timing_delay_estimate(
+        timing_model,
+        &["TPCLKQLHTY", "TPCLKQLHMN", "TPCLKQLHMX"],
+        delay_mode,
+    );
+    let clk_fall = pspice_timing_delay_estimate(
+        timing_model,
+        &["TPCLKQHLTY", "TPCLKQHLMN", "TPCLKQHLMX"],
+        delay_mode,
+    );
     if let Some(delay) = pspice_select_longer_delay(clk_rise, clk_fall) {
         push_pspice_timing_delay("clk_delay", delay, &mut params, &mut expr_params);
     }
 
-    push_pspice_pcq_set_reset_delays(timing_model, &mut params, &mut expr_params);
+    push_pspice_pcq_set_reset_delays(timing_model, delay_mode, &mut params, &mut expr_params);
 
     ModelDef {
         name: alias_name.to_string(),
@@ -697,13 +732,20 @@ fn pspice_ueff_alias_model(
 
 fn push_pspice_pcq_set_reset_delays(
     timing_model: &ModelDef,
+    delay_mode: PspiceUTimingMode,
     params: &mut Vec<(String, Value)>,
     expr_params: &mut Vec<(String, String)>,
 ) {
-    let set_delay =
-        pspice_timing_delay_estimate(timing_model, &["TPPCQLHTY", "TPPCQLHMN", "TPPCQLHMX"]);
-    let reset_delay =
-        pspice_timing_delay_estimate(timing_model, &["TPPCQHLTY", "TPPCQHLMN", "TPPCQHLMX"]);
+    let set_delay = pspice_timing_delay_estimate(
+        timing_model,
+        &["TPPCQLHTY", "TPPCQLHMN", "TPPCQLHMX"],
+        delay_mode,
+    );
+    let reset_delay = pspice_timing_delay_estimate(
+        timing_model,
+        &["TPPCQHLTY", "TPPCQHLMN", "TPPCQHLMX"],
+        delay_mode,
+    );
     match (set_delay, reset_delay) {
         (Some(set), Some(reset)) => {
             push_pspice_timing_delay("set_delay", set, params, expr_params);
@@ -722,30 +764,15 @@ fn push_pspice_timing_delay_param(
     source_names: &[&str],
     target_name: &str,
     default_value: Value,
+    delay_mode: PspiceUTimingMode,
     params: &mut Vec<(String, Value)>,
     expr_params: &mut Vec<(String, String)>,
 ) {
-    if let Some((_, value)) = source_names.iter().find_map(|source_name| {
-        timing_model
-            .params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(source_name))
-    }) {
-        params.push((target_name.to_string(), *value));
-        return;
+    if let Some(delay) = pspice_timing_delay_estimate(timing_model, source_names, delay_mode) {
+        push_pspice_timing_delay(target_name, delay, params, expr_params);
+    } else {
+        params.push((target_name.to_string(), default_value));
     }
-
-    if let Some((_, expr)) = source_names.iter().find_map(|source_name| {
-        timing_model
-            .expr_params
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(source_name))
-    }) {
-        expr_params.push((target_name.to_string(), expr.clone()));
-        return;
-    }
-
-    params.push((target_name.to_string(), default_value));
 }
 
 #[derive(Clone)]
@@ -757,8 +784,9 @@ enum PspiceTimingDelay {
 fn pspice_timing_delay_estimate(
     timing_model: &ModelDef,
     source_names: &[&str],
+    delay_mode: PspiceUTimingMode,
 ) -> Option<PspiceTimingDelay> {
-    for source_name in source_names {
+    for source_name in pspice_timing_delay_source_order(source_names, delay_mode) {
         if let Some((_, value)) = timing_model
             .params
             .iter()
@@ -777,6 +805,20 @@ fn pspice_timing_delay_estimate(
     }
 
     None
+}
+
+fn pspice_timing_delay_source_order<'a>(
+    source_names: &'a [&'a str],
+    delay_mode: PspiceUTimingMode,
+) -> impl Iterator<Item = &'a str> {
+    let order = match delay_mode {
+        PspiceUTimingMode::Min => [1usize, 0, 2],
+        PspiceUTimingMode::Typ => [0usize, 1, 2],
+        PspiceUTimingMode::Max => [2usize, 0, 1],
+    };
+    order
+        .into_iter()
+        .filter_map(|index| source_names.get(index).copied())
 }
 
 fn pspice_select_longer_delay(

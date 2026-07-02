@@ -723,7 +723,9 @@ pub(super) fn parse_pspice_u_device(
     let name = fields[0].to_ascii_uppercase();
 
     if let Some(gate) = parse_pspice_simple_u_gate(&fields[1]) {
-        return parse_pspice_simple_u_gate_instance(&name, &fields, gate, line_num, elements);
+        return parse_pspice_simple_u_gate_instance(
+            &name, &fields, gate, line_num, elements, params,
+        );
     }
 
     let (kind, count) = parse_pspice_u_kind_and_count(&fields[1]);
@@ -735,6 +737,7 @@ pub(super) fn parse_pspice_u_device(
             false,
             line_num,
             elements,
+            params,
         ),
         "BUFA" => parse_pspice_u_unary_gate_array(
             &name,
@@ -743,10 +746,25 @@ pub(super) fn parse_pspice_u_device(
             "d_buffer",
             line_num,
             elements,
+            params,
         ),
-        "DFF" => parse_pspice_u_dff(&name, &fields, count.unwrap_or(1), line_num, elements),
-        "DLYLINE" => parse_pspice_u_dlyline(&name, &fields, line_num, elements),
-        "DLTCH" => parse_pspice_u_dlatch(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "DFF" => parse_pspice_u_dff(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            line_num,
+            elements,
+            params,
+        ),
+        "DLYLINE" => parse_pspice_u_dlyline(&name, &fields, line_num, elements, params),
+        "DLTCH" => parse_pspice_u_dlatch(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            line_num,
+            elements,
+            params,
+        ),
         "INVA" => parse_pspice_u_unary_gate_array(
             &name,
             &fields,
@@ -754,11 +772,25 @@ pub(super) fn parse_pspice_u_device(
             "d_inverter",
             line_num,
             elements,
+            params,
         ),
-        "INV3" | "INV3A" => {
-            parse_pspice_u_tristate(&name, &fields, count.unwrap_or(1), true, line_num, elements)
-        }
-        "JKFF" => parse_pspice_u_jkff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "INV3" | "INV3A" => parse_pspice_u_tristate(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            true,
+            line_num,
+            elements,
+            params,
+        ),
+        "JKFF" => parse_pspice_u_jkff(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            line_num,
+            elements,
+            params,
+        ),
         "LOGICEXP" => parse_pspice_u_logicexp(
             &name,
             &fields,
@@ -774,6 +806,7 @@ pub(super) fn parse_pspice_u_device(
             "d_and",
             line_num,
             elements,
+            params,
         ),
         "AND3" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -782,6 +815,7 @@ pub(super) fn parse_pspice_u_device(
             "d_and",
             line_num,
             elements,
+            params,
         ),
         "AND3A" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -790,6 +824,7 @@ pub(super) fn parse_pspice_u_device(
             "d_and",
             line_num,
             elements,
+            params,
         ),
         "AO" => parse_pspice_u_compound_gate(
             &name,
@@ -800,6 +835,7 @@ pub(super) fn parse_pspice_u_device(
             "$D_HI",
             line_num,
             elements,
+            params,
         ),
         "AOI" => parse_pspice_u_compound_gate(
             &name,
@@ -810,6 +846,7 @@ pub(super) fn parse_pspice_u_device(
             "$D_HI",
             line_num,
             elements,
+            params,
         ),
         "NANDA" => parse_pspice_u_vector_gate_array(
             &name,
@@ -818,6 +855,7 @@ pub(super) fn parse_pspice_u_device(
             "d_nand",
             line_num,
             elements,
+            params,
         ),
         "NAND3" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -826,6 +864,7 @@ pub(super) fn parse_pspice_u_device(
             "d_nand",
             line_num,
             elements,
+            params,
         ),
         "NAND3A" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -834,6 +873,7 @@ pub(super) fn parse_pspice_u_device(
             "d_nand",
             line_num,
             elements,
+            params,
         ),
         "NORA" => parse_pspice_u_vector_gate_array(
             &name,
@@ -842,6 +882,7 @@ pub(super) fn parse_pspice_u_device(
             "d_nor",
             line_num,
             elements,
+            params,
         ),
         "NOR3" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -850,6 +891,7 @@ pub(super) fn parse_pspice_u_device(
             "d_nor",
             line_num,
             elements,
+            params,
         ),
         "NOR3A" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -858,6 +900,7 @@ pub(super) fn parse_pspice_u_device(
             "d_nor",
             line_num,
             elements,
+            params,
         ),
         "NXORA" => parse_pspice_u_vector_gate_array(
             &name,
@@ -866,6 +909,7 @@ pub(super) fn parse_pspice_u_device(
             "d_xnor",
             line_num,
             elements,
+            params,
         ),
         "NXOR3" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -874,6 +918,7 @@ pub(super) fn parse_pspice_u_device(
             "d_xnor",
             line_num,
             elements,
+            params,
         ),
         "NXOR3A" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -882,6 +927,7 @@ pub(super) fn parse_pspice_u_device(
             "d_xnor",
             line_num,
             elements,
+            params,
         ),
         "ORA" => parse_pspice_u_vector_gate_array(
             &name,
@@ -890,6 +936,7 @@ pub(super) fn parse_pspice_u_device(
             "d_or",
             line_num,
             elements,
+            params,
         ),
         "OA" => parse_pspice_u_compound_gate(
             &name,
@@ -900,6 +947,7 @@ pub(super) fn parse_pspice_u_device(
             "$D_LO",
             line_num,
             elements,
+            params,
         ),
         "OAI" => parse_pspice_u_compound_gate(
             &name,
@@ -910,6 +958,7 @@ pub(super) fn parse_pspice_u_device(
             "$D_LO",
             line_num,
             elements,
+            params,
         ),
         "PINDLY" => parse_pspice_u_pindly(
             &name,
@@ -927,6 +976,7 @@ pub(super) fn parse_pspice_u_device(
             "d_or",
             line_num,
             elements,
+            params,
         ),
         "OR3A" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -935,6 +985,7 @@ pub(super) fn parse_pspice_u_device(
             "d_or",
             line_num,
             elements,
+            params,
         ),
         "PULLDN" | "PULLDOWN" => parse_pspice_u_pull(
             &name,
@@ -952,7 +1003,14 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
-        "SRFF" => parse_pspice_u_srlatch(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "SRFF" => parse_pspice_u_srlatch(
+            &name,
+            &fields,
+            count.unwrap_or(1),
+            line_num,
+            elements,
+            params,
+        ),
         "XORA" => parse_pspice_u_vector_gate_array(
             &name,
             &fields,
@@ -960,6 +1018,7 @@ pub(super) fn parse_pspice_u_device(
             "d_xor",
             line_num,
             elements,
+            params,
         ),
         "XOR3" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -968,6 +1027,7 @@ pub(super) fn parse_pspice_u_device(
             "d_xor",
             line_num,
             elements,
+            params,
         ),
         "XOR3A" => parse_pspice_u_tristate_vector_gate_array(
             &name,
@@ -976,6 +1036,7 @@ pub(super) fn parse_pspice_u_device(
             "d_xor",
             line_num,
             elements,
+            params,
         ),
         _ => Err(ParseError::Syntax {
             line: line_num,
@@ -1019,6 +1080,7 @@ fn parse_pspice_simple_u_gate_instance(
     gate: PspiceSimpleUGate,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let pins = &fields[4..]; // fields[2] and fields[3] are DPWR/DGND pins.
     if pins.len() < gate.input_count + 1 {
@@ -1051,8 +1113,7 @@ fn parse_pspice_simple_u_gate_instance(
 
     let pspice_u_timing = pins
         .get(gate.input_count + 1)
-        .and_then(|token| pspice_u_timing_model_token(token))
-        .map(|timing_model| PspiceUTiming { timing_model });
+        .and_then(|token| pspice_u_timing_from_token(token, fields, params, line_num));
     push_pspice_u_xspice_element_with_timing(
         elements,
         name.to_string(),
@@ -1070,6 +1131,7 @@ fn parse_pspice_u_dff(
     count: usize,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     if count == 0 {
         return Err(ParseError::Syntax {
@@ -1096,8 +1158,7 @@ fn parse_pspice_u_dff(
     let prebar = pspice_u_active_low_control_port(&pins[0], elements);
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let clk = pspice_u_required_digital_port(&pins[2], "clock", fields, line_num, elements)?;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
     let d_offset = 3;
     let q_offset = d_offset + count;
     let qb_offset = q_offset + count;
@@ -1133,6 +1194,7 @@ fn parse_pspice_u_vector_gate_array(
     model: &str,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let Some((input_count, gate_count)) = shape else {
         return Err(ParseError::Syntax {
@@ -1179,8 +1241,7 @@ fn parse_pspice_u_vector_gate_array(
     }
 
     let output_offset = input_total;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
     for gate_index in 0..gate_count {
         let input_start = gate_index * input_count;
         let inputs = pins[input_start..input_start + input_count]
@@ -1216,6 +1277,7 @@ fn parse_pspice_u_unary_gate_array(
     model: &str,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     if count == 0 {
         return Err(ParseError::Syntax {
@@ -1240,8 +1302,7 @@ fn parse_pspice_u_unary_gate_array(
     }
 
     let output_offset = count;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
     for index in 0..count {
         let input =
             pspice_u_required_digital_port(&pins[index], "gate input", fields, line_num, elements)?;
@@ -1719,6 +1780,7 @@ fn parse_pspice_u_tristate_vector_gate_array(
     primary_model: &str,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let Some((input_count, gate_count)) = shape else {
         return Err(ParseError::Syntax {
@@ -1768,8 +1830,7 @@ fn parse_pspice_u_tristate_vector_gate_array(
     let enable =
         pspice_u_required_digital_port(&pins[input_total], "enable", fields, line_num, elements)?;
     let output_offset = input_total + 1;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
 
     for gate_index in 0..gate_count {
         let input_start = gate_index * input_count;
@@ -1807,13 +1868,6 @@ struct PspicePindlyEntry {
     output: String,
     enable: Option<XspicePort>,
     delay: Option<Value>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PspicePindlyDelayMode {
-    Min,
-    Typ,
-    Max,
 }
 
 fn parse_pspice_u_pindly(
@@ -1900,7 +1954,7 @@ fn parse_pspice_u_pindly(
         pspice_u_required_digital_node(pin, "PINDLY reference", fields, line_num, elements)?;
     }
 
-    let delay_mode = pspice_u_pindly_delay_mode(fields, section_index, params, line_num);
+    let delay_mode = pspice_u_delay_mode(fields, section_index, params, line_num);
     if let Some(section) = pspice_u_behavior_section(line, "PINDLY:") {
         apply_pspice_u_pindly_delay_section(section, &mut entries, delay_mode, false);
     }
@@ -1979,7 +2033,7 @@ fn pspice_u_behavior_section<'a>(line: &'a str, section: &str) -> Option<&'a str
 fn apply_pspice_u_pindly_delay_section(
     section: &str,
     entries: &mut [PspicePindlyEntry],
-    delay_mode: PspicePindlyDelayMode,
+    delay_mode: PspiceUTimingMode,
     tristate: bool,
 ) {
     let mut parser = PspicePindlySectionParser::new(section);
@@ -2002,7 +2056,7 @@ fn apply_pspice_u_pindly_delay_section(
 fn apply_pspice_u_pindly_tristate_section(
     section: &str,
     entries: &mut [PspicePindlyEntry],
-    delay_mode: PspicePindlyDelayMode,
+    delay_mode: PspiceUTimingMode,
 ) {
     let (body, enable) = pspice_u_pindly_tristate_enable(section);
     let Some(enable) = enable else {
@@ -2023,23 +2077,23 @@ fn apply_pspice_u_pindly_tristate_section(
     }
 }
 
-fn pspice_u_pindly_delay_mode(
+fn pspice_u_delay_mode(
     fields: &[String],
     section_index: usize,
     params: &ParamContext,
     line_num: usize,
-) -> PspicePindlyDelayMode {
+) -> PspiceUTimingMode {
     let Some(raw_value) = pspice_u_assignment_value(fields, section_index, "MNTYMXDLY") else {
-        return PspicePindlyDelayMode::Typ;
+        return PspiceUTimingMode::Typ;
     };
     let Ok(value) = parse_numeric_field_value(raw_value, params, line_num) else {
-        return PspicePindlyDelayMode::Typ;
+        return PspiceUTimingMode::Typ;
     };
 
     match value.round() as i64 {
-        1 => PspicePindlyDelayMode::Min,
-        2 => PspicePindlyDelayMode::Max,
-        _ => PspicePindlyDelayMode::Typ,
+        1 => PspiceUTimingMode::Min,
+        2 => PspiceUTimingMode::Max,
+        _ => PspiceUTimingMode::Typ,
     }
 }
 
@@ -2211,10 +2265,7 @@ impl<'a> PspicePindlySectionParser<'a> {
     }
 }
 
-fn pspice_u_pindly_delay_from_block(
-    block: &str,
-    delay_mode: PspicePindlyDelayMode,
-) -> Option<Value> {
+fn pspice_u_pindly_delay_from_block(block: &str, delay_mode: PspiceUTimingMode) -> Option<Value> {
     let upper = block.to_ascii_uppercase();
     let mut search_start = 0usize;
     let mut selected = None;
@@ -2234,7 +2285,7 @@ fn pspice_u_pindly_delay_from_block(
     selected
 }
 
-fn pspice_u_pindly_delay_args(args: &str, delay_mode: PspicePindlyDelayMode) -> Option<Value> {
+fn pspice_u_pindly_delay_args(args: &str, delay_mode: PspiceUTimingMode) -> Option<Value> {
     let mut values = args
         .split(',')
         .take(3)
@@ -2245,11 +2296,11 @@ fn pspice_u_pindly_delay_args(args: &str, delay_mode: PspicePindlyDelayMode) -> 
     }
 
     match delay_mode {
-        PspicePindlyDelayMode::Min => {
+        PspiceUTimingMode::Min => {
             values[0].or_else(|| pspice_u_pindly_typ_delay(values[0], values[1], values[2]))
         }
-        PspicePindlyDelayMode::Typ => pspice_u_pindly_typ_delay(values[0], values[1], values[2]),
-        PspicePindlyDelayMode::Max => {
+        PspiceUTimingMode::Typ => pspice_u_pindly_typ_delay(values[0], values[1], values[2]),
+        PspiceUTimingMode::Max => {
             values[2].or_else(|| pspice_u_pindly_typ_delay(values[0], values[1], values[2]))
         }
     }
@@ -2303,6 +2354,7 @@ fn parse_pspice_u_compound_gate(
     ignored_constant: &str,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let Some((input_count, term_count)) = shape else {
         return Err(ParseError::Syntax {
@@ -2354,8 +2406,8 @@ fn parse_pspice_u_compound_gate(
         line_num,
         elements,
     )?;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[input_total + 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing =
+        pspice_u_timing_from_token(&pins[input_total + 1], fields, params, line_num);
     let mut term_outputs = Vec::with_capacity(term_count);
 
     for term_index in 0..term_count {
@@ -2523,6 +2575,7 @@ fn parse_pspice_u_dlyline(
     fields: &[String],
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let pins = &fields[4..];
     if pins.len() < 3 {
@@ -2539,8 +2592,7 @@ fn parse_pspice_u_dlyline(
         pspice_u_required_digital_port(&pins[0], "delay-line input", fields, line_num, elements)?;
     let output =
         pspice_u_required_digital_port(&pins[1], "delay-line output", fields, line_num, elements)?;
-    let pspice_u_timing =
-        pspice_u_timing_model_token(&pins[2]).map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[2], fields, params, line_num);
     push_pspice_u_xspice_element_with_timing(
         elements,
         name.to_string(),
@@ -2558,6 +2610,7 @@ fn parse_pspice_u_jkff(
     count: usize,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     if count == 0 {
         return Err(ParseError::Syntax {
@@ -2585,8 +2638,7 @@ fn parse_pspice_u_jkff(
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let clkbar =
         pspice_u_required_inverted_digital_port(&pins[2], "clock", fields, line_num, elements)?;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
     let j_offset = 3;
     let k_offset = j_offset + count;
     let q_offset = k_offset + count;
@@ -2629,6 +2681,7 @@ fn parse_pspice_u_dlatch(
     count: usize,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     if count == 0 {
         return Err(ParseError::Syntax {
@@ -2655,8 +2708,7 @@ fn parse_pspice_u_dlatch(
     let prebar = pspice_u_active_low_control_port(&pins[0], elements);
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let enable = pspice_u_required_digital_port(&pins[2], "enable", fields, line_num, elements)?;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
     let d_offset = 3;
     let q_offset = d_offset + count;
     let qb_offset = q_offset + count;
@@ -2691,6 +2743,7 @@ fn parse_pspice_u_srlatch(
     count: usize,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     if count == 0 {
         return Err(ParseError::Syntax {
@@ -2717,8 +2770,7 @@ fn parse_pspice_u_srlatch(
     let prebar = pspice_u_active_low_control_port(&pins[0], elements);
     let clrbar = pspice_u_active_low_control_port(&pins[1], elements);
     let enable = pspice_u_required_digital_port(&pins[2], "enable", fields, line_num, elements)?;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
     let s_offset = 3;
     let r_offset = s_offset + count;
     let q_offset = r_offset + count;
@@ -2770,6 +2822,7 @@ fn parse_pspice_u_tristate(
     invert_input: bool,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     if count == 0 {
         return Err(ParseError::Syntax {
@@ -2796,8 +2849,7 @@ fn parse_pspice_u_tristate(
     let enable =
         pspice_u_required_digital_port(&pins[count], "enable", fields, line_num, elements)?;
     let output_offset = count + 1;
-    let pspice_u_timing = pspice_u_timing_model_token(&pins[required - 1])
-        .map(|timing_model| PspiceUTiming { timing_model });
+    let pspice_u_timing = pspice_u_timing_from_token(&pins[required - 1], fields, params, line_num);
 
     for index in 0..count {
         let input = if invert_input {
@@ -3078,6 +3130,19 @@ fn pspice_u_timing_model_token(raw: &str) -> Option<String> {
         return None;
     }
     Some(trimmed.to_ascii_uppercase())
+}
+
+fn pspice_u_timing_from_token(
+    raw: &str,
+    fields: &[String],
+    params: &ParamContext,
+    line_num: usize,
+) -> Option<PspiceUTiming> {
+    let timing_model = pspice_u_timing_model_token(raw)?;
+    Some(PspiceUTiming {
+        timing_model,
+        delay_mode: pspice_u_delay_mode(fields, fields.len(), params, line_num),
+    })
 }
 
 fn pspice_u_is_no_connect(raw: &str) -> bool {

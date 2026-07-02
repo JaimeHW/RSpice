@@ -4753,6 +4753,39 @@ mod tests {
     }
 
     #[test]
+    fn pspice_u_gate_ugate_timing_honors_mntymxdly_max_mode() {
+        let netlist = Netlist::parse(
+            "pspice u gate max timing\n\
+             U1 NAND(2) $G_DPWR $G_DGND a b y DLY MNTYMXDLY=2 IO_LEVEL=0\n\
+             .model DLY UGATE (TPLHMN=1n TPLHTY=2n TPLHMX=3n TPHLMN=4n TPHLTY=5n TPHLMX=6n)\n\
+             .end\n",
+        )
+        .expect("PSpice UGATE timing should honor MNTYMXDLY=2");
+
+        let alias_name = match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, .. } => model.as_str(),
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "rise_delay" && (*value - 3.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "fall_delay" && (*value - 6.0e-9).abs() < 1.0e-21 })
+        );
+    }
+
+    #[test]
     fn pspice_u_dff_ueff_timing_creates_xspice_model_alias() {
         let netlist = Netlist::parse(
             "pspice u dff timing\n\
@@ -4927,6 +4960,40 @@ mod tests {
                 .params
                 .iter()
                 .any(|(name, value)| { name == "inertial_delay" && value.abs() < f64::EPSILON })
+        );
+    }
+
+    #[test]
+    fn pspice_u_dlyline_udly_timing_honors_parametric_mntymxdly_min_mode() {
+        let netlist = Netlist::parse(
+            "pspice u dlyline min timing\n\
+             .param dlymode=1\n\
+             U9 DLYLINE $G_DPWR $G_DGND in out dly MNTYMXDLY={dlymode}\n\
+             .model DLY UDLY (DLYMN=2n DLYTY=5n DLYMX=9n)\n\
+             .end\n",
+        )
+        .expect("PSpice UDLY timing should resolve parametric MNTYMXDLY");
+
+        let alias_name = match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, .. } => model.as_str(),
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "rise_delay" && (*value - 2.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "fall_delay" && (*value - 2.0e-9).abs() < 1.0e-21 })
         );
     }
 

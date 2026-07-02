@@ -461,6 +461,21 @@ pub enum ElementKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PspiceUTiming {
     pub timing_model: String,
+    pub delay_mode: PspiceUTimingMode,
+}
+
+/// PSpice min/typ/max timing selection carried by MNTYMXDLY.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PspiceUTimingMode {
+    Min,
+    Typ,
+    Max,
+}
+
+impl Default for PspiceUTimingMode {
+    fn default() -> Self {
+        Self::Typ
+    }
 }
 
 /// Switch initial state
