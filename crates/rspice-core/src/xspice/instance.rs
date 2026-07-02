@@ -257,6 +257,71 @@ fn vector_connection_len(connection: &PortConnection) -> Option<usize> {
     }
 }
 
+fn port_declares_event_type(port: &PortSpec) -> bool {
+    if port.allowed_types.is_empty() {
+        port.default_type.is_event_driven()
+    } else {
+        port.allowed_types
+            .iter()
+            .copied()
+            .any(|port_type| port_type.is_event_driven())
+    }
+}
+
+fn for_each_event_connection_node(
+    connection: &PortConnection,
+    mut visit: impl FnMut(usize, usize),
+) {
+    match connection {
+        PortConnection::Digital(node)
+        | PortConnection::DigitalInverted(node)
+        | PortConnection::Real(node) => visit(0, *node),
+        PortConnection::DigitalVector(nodes) | PortConnection::RealVector(nodes) => {
+            for (index, node) in nodes.iter().copied().enumerate() {
+                visit(index, node);
+            }
+        }
+        PortConnection::DigitalVectorMapped(nodes) => {
+            for (index, node) in nodes.iter().enumerate() {
+                visit(index, node.node);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn set_context_event_total_load(
+    context: &mut CmContext,
+    port_name: &str,
+    connection: &PortConnection,
+    event_total_loads: &HashMap<usize, Value>,
+) {
+    match connection {
+        PortConnection::Digital(node)
+        | PortConnection::DigitalInverted(node)
+        | PortConnection::Real(node) => {
+            context.set_port_total_load(
+                port_name,
+                event_total_loads.get(node).copied().unwrap_or(0.0),
+            );
+        }
+        PortConnection::DigitalVector(nodes) | PortConnection::RealVector(nodes) => {
+            context.set_port_vector_total_loads_from_fn(port_name, nodes.len(), |index| {
+                event_total_loads.get(&nodes[index]).copied().unwrap_or(0.0)
+            });
+        }
+        PortConnection::DigitalVectorMapped(nodes) => {
+            context.set_port_vector_total_loads_from_fn(port_name, nodes.len(), |index| {
+                event_total_loads
+                    .get(&nodes[index].node)
+                    .copied()
+                    .unwrap_or(0.0)
+            });
+        }
+        _ => {}
+    }
+}
+
 fn validate_branch_ordinal(
     instance_name: &str,
     port_name: &str,
@@ -1098,6 +1163,64 @@ impl XspiceInstance {
         self.context.set_param(name, value);
     }
 
+    fn declared_param_spec(&self, name: &str) -> Option<&ParamSpec> {
+        self.model
+            .parameters()
+            .iter()
+            .find(|spec| spec.name.eq_ignore_ascii_case(name))
+    }
+
+    fn event_load_from_param(&self, name: &str, element_index: usize) -> Option<Value> {
+        let spec = self.declared_param_spec(name)?;
+        match spec.param_type {
+            ParamType::Real => Some(self.context.param(&spec.name)),
+            ParamType::RealVector => {
+                let values = self.context.real_vector_param(&spec.name).unwrap_or(&[]);
+                values
+                    .get(element_index)
+                    .or_else(|| values.last())
+                    .copied()
+                    .or(Some(1.0e-12))
+            }
+            _ => None,
+        }
+        .filter(|value| value.is_finite())
+    }
+
+    fn event_load_for_port(&self, port_name: &str, element_index: usize) -> Option<Value> {
+        let name = port_name.to_ascii_lowercase();
+        let mut candidates = vec![format!("{name}_load")];
+        match name.as_str() {
+            "in" | "d" | "dir" => candidates.push("input_load".to_string()),
+            "data" | "data_in" => candidates.push("data_load".to_string()),
+            "j" | "k" => candidates.push("jk_load".to_string()),
+            "s" | "r" => candidates.push("sr_load".to_string()),
+            "write_en" => candidates.push("enable_load".to_string()),
+            "out" => candidates.push("load".to_string()),
+            _ => {}
+        }
+
+        candidates
+            .into_iter()
+            .find_map(|candidate| self.event_load_from_param(&candidate, element_index))
+    }
+
+    /// Visit event-node load contributions declared by ngspice-style LOAD(port)
+    /// model parameters.
+    pub(crate) fn for_each_event_load_contribution(&self, mut visit: impl FnMut(usize, Value)) {
+        for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
+            if !port_declares_event_type(port) {
+                continue;
+            }
+
+            for_each_event_connection_node(connection, |element_index, node| {
+                if let Some(load) = self.event_load_for_port(&port.name, element_index) {
+                    visit(node, load);
+                }
+            });
+        }
+    }
+
     /// Set transient run context for code models with ngspice run-context defaults.
     pub(crate) fn set_transient_run_context(&mut self, tstep: Option<Value>, tstop: Option<Value>) {
         self.context.set_transient_run_context(tstep, tstop);
@@ -1133,6 +1256,7 @@ impl XspiceInstance {
     /// # Arguments
     /// * `voltages` - Circuit node voltages (index 0 = node 1)
     /// * `digital_values` - Digital node values
+    /// * `event_total_loads` - ngspice-style total LOAD() per event node
     /// * `real_values` - Real-valued event node values
     pub fn update_inputs(
         &mut self,
@@ -1140,6 +1264,7 @@ impl XspiceInstance {
         num_nodes: usize,
         digital_values: &HashMap<usize, DigitalValue>,
         digital_event_times: &HashMap<usize, Value>,
+        event_total_loads: &HashMap<usize, Value>,
         real_values: &HashMap<usize, Value>,
         real_event_times: &HashMap<usize, Value>,
         current_source_values: &[Value],
@@ -1168,6 +1293,13 @@ impl XspiceInstance {
         let ports = &self.ports;
 
         for (i, port) in ports.iter().enumerate() {
+            set_context_event_total_load(
+                &mut self.context,
+                &port.name,
+                &self.connections[i],
+                event_total_loads,
+            );
+
             if port.direction != super::PortDirection::In
                 && port.direction != super::PortDirection::InOut
             {
@@ -2733,6 +2865,63 @@ mod tests {
     }
 
     #[test]
+    fn event_load_contributions_feed_port_total_loads() {
+        let mut model = model_with_ports(vec![
+            PortSpec::vector_input("in", PortType::Digital),
+            PortSpec::input("enable", PortType::Digital),
+            PortSpec::output("out", PortType::Digital),
+        ]);
+        model.params = vec![
+            ParamSpec::real("input_load", 1.0e-12),
+            ParamSpec::real("enable_load", 1.0e-12),
+            ParamSpec::real("load", 1.0e-12),
+        ];
+        let mut instance = XspiceInstance::new(
+            "Aload",
+            Arc::new(model),
+            vec![
+                PortConnection::DigitalVector(vec![1, 2]),
+                PortConnection::Digital(1),
+                PortConnection::Digital(3),
+            ],
+            &[
+                ("input_load".to_string(), 2.0e-12),
+                ("enable_load".to_string(), 4.0e-12),
+                ("load".to_string(), 8.0e-12),
+            ],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("event-load instance constructs");
+
+        let mut event_total_loads = HashMap::new();
+        instance.for_each_event_load_contribution(|node, load| {
+            *event_total_loads.entry(node).or_insert(0.0) += load;
+        });
+
+        assert_eq!(event_total_loads.get(&1).copied(), Some(6.0e-12));
+        assert_eq!(event_total_loads.get(&2).copied(), Some(2.0e-12));
+        assert_eq!(event_total_loads.get(&3).copied(), Some(8.0e-12));
+
+        instance.update_inputs(
+            &[],
+            0,
+            &HashMap::new(),
+            &HashMap::new(),
+            &event_total_loads,
+            &HashMap::new(),
+            &HashMap::new(),
+            &[],
+        );
+
+        assert_eq!(instance.context.port_vector_total_load("in", 0), 6.0e-12);
+        assert_eq!(instance.context.port_vector_total_load("in", 1), 2.0e-12);
+        assert_eq!(instance.context.port_total_load("enable"), 6.0e-12);
+        assert_eq!(instance.context.port_total_load("out"), 8.0e-12);
+    }
+
+    #[test]
     fn instance_converts_string_channels_to_complex_parameters() {
         let instance = XspiceInstance::new_with_string_vectors(
             "Acomplex",
@@ -3182,6 +3371,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
             &[],
         );
         instance.context.set_output("out", 7.0);
@@ -3280,6 +3470,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
             &[],
         );
 
@@ -3325,6 +3516,7 @@ mod tests {
             2,
             &digital_values,
             &digital_event_times,
+            &HashMap::new(),
             &real_values,
             &HashMap::new(),
             &[],
@@ -3358,6 +3550,7 @@ mod tests {
             2,
             &digital_values,
             &digital_event_times,
+            &HashMap::new(),
             &real_values,
             &HashMap::new(),
             &[],
@@ -3464,6 +3657,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
             &[],
         );
         instance
@@ -3485,6 +3679,7 @@ mod tests {
         instance.update_inputs(
             &[0.0; 10],
             7,
+            &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
@@ -3529,6 +3724,7 @@ mod tests {
         instance.update_inputs(
             &[0.0; 8],
             5,
+            &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
@@ -3652,6 +3848,7 @@ mod tests {
             instance.update_inputs(
                 &[0.0],
                 1,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),

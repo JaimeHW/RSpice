@@ -59,6 +59,7 @@ impl CircuitData {
             xspice_digital_values: HashMap::new(),
             xspice_digital_drivers: HashMap::new(),
             xspice_digital_event_times: HashMap::new(),
+            xspice_event_loads: HashMap::new(),
             xspice_real_values: HashMap::new(),
             xspice_real_drivers: HashMap::new(),
             xspice_real_event_times: HashMap::new(),

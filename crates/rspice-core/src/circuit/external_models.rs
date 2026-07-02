@@ -92,6 +92,9 @@ impl CircuitData {
             .ports()
             .iter()
             .any(|port| port.default_type.is_event_driven());
+        instance.for_each_event_load_contribution(|node, load| {
+            *self.xspice_event_loads.entry(node).or_insert(0.0) += load;
+        });
         self.xspice_instances.push(instance);
     }
 
@@ -265,6 +268,8 @@ impl CircuitData {
         } else {
             1
         };
+        let num_nodes = self.num_nodes;
+        let event_loads = &self.xspice_event_loads;
 
         for pass in 0..max_event_passes {
             let digital_values = &mut self.xspice_digital_values;
@@ -292,9 +297,10 @@ impl CircuitData {
             for instance in &mut self.xspice_instances {
                 instance.update_inputs(
                     solution,
-                    self.num_nodes,
+                    num_nodes,
                     digital_values,
                     digital_event_times,
+                    event_loads,
                     real_values,
                     real_event_times,
                     &current_source_values,

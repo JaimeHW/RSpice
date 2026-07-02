@@ -413,6 +413,10 @@ pub struct CmContext {
     input_event_times: HashMap<String, Value>,
     /// Last event time for vector digital input ports, per element.
     input_vector_event_times: HashMap<String, Vec<Option<Value>>>,
+    /// ngspice-style total event-node load per scalar event port.
+    port_total_loads: HashMap<String, Value>,
+    /// ngspice-style total event-node load per vector event port element.
+    port_vector_total_loads: HashMap<String, Vec<Value>>,
     /// Output port values by name
     outputs: HashMap<String, OutputValue>,
     /// Connected analog node index per scalar analog port (0 = ground).
@@ -527,6 +531,8 @@ impl CmContext {
             inputs: HashMap::new(),
             input_event_times: HashMap::new(),
             input_vector_event_times: HashMap::new(),
+            port_total_loads: HashMap::new(),
+            port_vector_total_loads: HashMap::new(),
             outputs: HashMap::new(),
             port_nodes: HashMap::new(),
             port_terminals: HashMap::new(),
@@ -659,6 +665,24 @@ impl CmContext {
         self.input_event_times.get(name).copied()
     }
 
+    /// ngspice-compatible `TOTAL_LOAD(port)` value for a scalar event port.
+    pub fn port_total_load(&self, name: &str) -> Value {
+        self.port_total_loads.get(name).copied().unwrap_or(0.0)
+    }
+
+    /// ngspice-compatible `TOTAL_LOAD(port[index])` value for an event vector port.
+    pub fn port_vector_total_load(&self, name: &str, index: usize) -> Value {
+        self.port_vector_total_loads
+            .get(name)
+            .and_then(|loads| loads.get(index).copied())
+            .unwrap_or(0.0)
+    }
+
+    /// Borrow all per-element total loads for an event vector port.
+    pub fn port_vector_total_loads(&self, name: &str) -> Option<&[Value]> {
+        self.port_vector_total_loads.get(name).map(Vec::as_slice)
+    }
+
     /// Get analog input vector
     pub fn input_vector(&self, name: &str) -> Vec<Value> {
         self.inputs
@@ -754,6 +778,40 @@ impl CmContext {
             None => {
                 self.inputs
                     .insert(name.to_string(), InputValue::Real(value));
+            }
+        }
+    }
+
+    /// Set ngspice-style total event-node load for a scalar port.
+    pub(crate) fn set_port_total_load(&mut self, name: &str, value: Value) {
+        match self.port_total_loads.get_mut(name) {
+            Some(existing) => *existing = value,
+            None => {
+                self.port_total_loads.insert(name.to_string(), value);
+            }
+        }
+    }
+
+    /// Set ngspice-style total event-node loads for a vector port.
+    pub(crate) fn set_port_vector_total_loads_from_fn<F>(
+        &mut self,
+        name: &str,
+        value_count: usize,
+        mut value_at: F,
+    ) where
+        F: FnMut(usize) -> Value,
+    {
+        match self.port_vector_total_loads.get_mut(name) {
+            Some(values) => {
+                refill_vec_from_fn(values, value_count, value_at);
+            }
+            None => {
+                let mut values = Vec::with_capacity(value_count);
+                for index in 0..value_count {
+                    values.push(value_at(index));
+                }
+                self.port_vector_total_loads
+                    .insert(name.to_string(), values);
             }
         }
     }

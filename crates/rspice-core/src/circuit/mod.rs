@@ -365,6 +365,8 @@ pub struct CircuitData {
     pub(crate) xspice_digital_drivers: XspiceDigitalDrivers,
     /// Last event time per XSPICE digital node.
     pub(crate) xspice_digital_event_times: HashMap<NodeId, Value>,
+    /// ngspice-style total LOAD() contribution per event node.
+    pub(crate) xspice_event_loads: HashMap<NodeId, Value>,
     /// Circuit-level real-valued event node values driven by XSPICE events.
     pub(crate) xspice_real_values: HashMap<NodeId, Value>,
     /// Per-output real-valued event drivers, summed onto real nodes.
