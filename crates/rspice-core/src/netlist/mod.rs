@@ -3049,6 +3049,61 @@ mod tests {
     }
 
     #[test]
+    fn xspice_subckt_model_scalar_expression_resolves_per_instance() {
+        let netlist = Netlist::parse(
+            "xspice subckt inline model scalar expression\n\
+             .subckt gaincell in out base=1 scale=2\n\
+             A1 in out gainmodel\n\
+             .model gainmodel gain (gain=base*scale in_offset=0 out_offset=0)\n\
+             .ends gaincell\n\
+             X1 a b gaincell base=4 scale=5\n\
+             X2 c d gaincell base=6 scale=7\n\
+             .end\n",
+        )
+        .expect("subckt-local XSPICE scalar model expressions parse");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("scoped model scalar expressions flatten");
+        let model_for = |element_name: &str| -> &str {
+            flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Xspice { model, .. } if element.name == element_name => {
+                        Some(model.as_str())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("flattened XSPICE element {element_name} exists"))
+        };
+
+        let gain_for = |model_name: &str| -> f64 {
+            flattened
+                .scoped_models
+                .iter()
+                .find(|model| model.name == model_name)
+                .and_then(|model| {
+                    assert!(
+                        model.expr_params.is_empty(),
+                        "scoped model scalar expressions should resolve during flattening"
+                    );
+                    model
+                        .params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("gain"))
+                        .map(|(_, value)| *value)
+                })
+                .unwrap_or_else(|| panic!("scoped model {model_name} has gain"))
+        };
+
+        let x1_model = model_for("X1.A1");
+        let x2_model = model_for("X2.A1");
+        assert_ne!(x1_model, x2_model);
+        assert_eq!(gain_for(x1_model), 20.0);
+        assert_eq!(gain_for(x2_model), 42.0);
+    }
+
+    #[test]
     fn xspice_subckt_model_vector_entries_resolve_per_instance() {
         let netlist = Netlist::parse(
             "xspice subckt inline model vector entries\n\

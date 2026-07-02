@@ -316,6 +316,19 @@ pub(super) fn parse_model_params(
                                 &name,
                                 &value,
                             )?;
+                        } else if xspice_model_type_accepts_contiguous_expressions(model_type)
+                            && let Some(value) = try_xspice_model_scalar_expression(
+                                stream,
+                                params,
+                                defer_expression_params,
+                            )
+                        {
+                            push_model_scalar_expression_param(
+                                &mut numeric_params,
+                                &mut expr_params,
+                                name,
+                                value,
+                            );
                         } else if let Some(value) = try_signed_model_value(stream, params) {
                             numeric_params.push((name, value));
                         } else {
@@ -392,7 +405,20 @@ pub(super) fn parse_model_params(
                         )?;
                     }
                     _ => {
-                        if stream.consume(&TokenKind::LParen) {
+                        if xspice_model_type_accepts_contiguous_expressions(model_type)
+                            && let Some(value) = try_xspice_model_scalar_expression(
+                                stream,
+                                params,
+                                defer_expression_params,
+                            )
+                        {
+                            push_model_scalar_expression_param(
+                                &mut numeric_params,
+                                &mut expr_params,
+                                name,
+                                value,
+                            );
+                        } else if stream.consume(&TokenKind::LParen) {
                             if let Some(value) = try_signed_model_value(stream, params) {
                                 numeric_params.push((name, value));
                             }
@@ -473,6 +499,94 @@ pub(super) fn parse_model_params(
 enum BareModelIdentString {
     Literal(String),
     Deferred(String),
+}
+
+enum ParsedModelScalarExpression {
+    Resolved(Value),
+    Deferred(String),
+}
+
+fn push_model_scalar_expression_param(
+    numeric_params: &mut Vec<(String, Value)>,
+    expr_params: &mut Vec<(String, String)>,
+    name: String,
+    value: ParsedModelScalarExpression,
+) {
+    match value {
+        ParsedModelScalarExpression::Resolved(value) => {
+            numeric_params.push((name, value));
+        }
+        ParsedModelScalarExpression::Deferred(expr) => {
+            expr_params.push((name, expr));
+        }
+    }
+}
+
+fn xspice_model_type_accepts_contiguous_expressions(model_type: Option<&str>) -> bool {
+    model_type
+        .map(crate::xspice::CodeModelRegistry::is_builtin_model_name)
+        .unwrap_or(false)
+}
+
+fn try_xspice_model_scalar_expression(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+    defer_expression_params: bool,
+) -> Option<ParsedModelScalarExpression> {
+    let first = stream.peek().clone();
+    if !model_scalar_expression_token_can_start(&first.kind) {
+        return None;
+    }
+
+    let mut probe = stream.clone();
+    let expr = collect_contiguous_expression(&mut probe)?;
+    if !model_scalar_expression_is_compound(&first, &expr) {
+        return None;
+    }
+
+    let expr = collect_contiguous_expression(stream)?;
+    if let Ok(value) = crate::netlist::lexer::parse_spice_value(&expr) {
+        return Some(ParsedModelScalarExpression::Resolved(value));
+    }
+    if let Some(value) = parse_boolean_literal(&expr) {
+        return Some(ParsedModelScalarExpression::Resolved(value));
+    }
+    if defer_expression_params {
+        return Some(ParsedModelScalarExpression::Deferred(expr));
+    }
+
+    match eval_expression(&expr, params) {
+        Ok(value) => Some(ParsedModelScalarExpression::Resolved(value)),
+        Err(_) => Some(ParsedModelScalarExpression::Deferred(expr)),
+    }
+}
+
+fn model_scalar_expression_token_can_start(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Ident(_)
+            | TokenKind::Number(_)
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::LParen
+    )
+}
+
+fn model_scalar_expression_is_compound(first: &Token, expr: &str) -> bool {
+    model_scalar_expression_first_piece(first)
+        .map(|piece| piece != expr)
+        .unwrap_or(false)
+}
+
+fn model_scalar_expression_first_piece(token: &Token) -> Option<String> {
+    match &token.kind {
+        TokenKind::Ident(value) => Some(value.clone()),
+        TokenKind::Number(value) if token.lexeme.is_empty() => Some(format_compact_number(*value)),
+        TokenKind::Number(_) | TokenKind::Plus | TokenKind::Minus | TokenKind::LParen => {
+            Some(token.lexeme.clone())
+        }
+        _ => None,
+    }
 }
 
 fn bare_model_ident_string_value(
