@@ -132,13 +132,20 @@ fn next_unknown_input_bit(seed: &mut u32) -> bool {
     *seed & 1 != 0
 }
 
-fn resize_zeroed(bytes: &mut Vec<u8>, len: usize) {
+fn resize_zeroed(bytes: &mut Vec<u8>, len: usize) -> CmResult<()> {
     bytes.clear();
+    if bytes.capacity() < len {
+        let additional = len - bytes.capacity();
+        bytes.try_reserve_exact(additional).map_err(|err| {
+            d_process_error(format!("unable to reserve {len} I/O byte(s): {err}"))
+        })?;
+    }
     bytes.resize(len, 0);
+    Ok(())
 }
 
-fn pack_input_bits(ctx: &mut CmContext, input_width: usize, bytes: &mut Vec<u8>) {
-    resize_zeroed(bytes, packed_byte_len(input_width));
+fn pack_input_bits(ctx: &mut CmContext, input_width: usize, bytes: &mut Vec<u8>) -> CmResult<()> {
+    resize_zeroed(bytes, packed_byte_len(input_width))?;
     let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
     let mut rng_seed = ctx.int_state(STATE_RNG) as u32;
     let mut rng_changed = false;
@@ -161,6 +168,7 @@ fn pack_input_bits(ctx: &mut CmContext, input_width: usize, bytes: &mut Vec<u8>)
     if rng_changed {
         ctx.set_int_state(STATE_RNG, rng_seed as i64);
     }
+    Ok(())
 }
 
 fn output_code(output_bytes: &[u8], bit_index: usize) -> i64 {
@@ -296,8 +304,8 @@ impl CodeModel for DigitalProcess {
 
         if prev_clk_code != STATE_ONE && clk_code == STATE_ONE {
             with_io_scratch(ctx, |ctx, scratch| {
-                pack_input_bits(ctx, input_width, &mut scratch.input_bytes);
-                resize_zeroed(&mut scratch.output_bytes, packed_byte_len(output_width));
+                pack_input_bits(ctx, input_width, &mut scratch.input_bytes)?;
+                resize_zeroed(&mut scratch.output_bytes, packed_byte_len(output_width))?;
                 let signed_time = if reset_code == STATE_ONE {
                     -ctx.time
                 } else {
@@ -512,7 +520,7 @@ mod tests {
         }
 
         let mut bytes = Vec::new();
-        pack_input_bits(&mut ctx, 9, &mut bytes);
+        pack_input_bits(&mut ctx, 9, &mut bytes).expect("pack input bits");
 
         assert_eq!(bytes, vec![expected_first_byte, 0b0000_0001]);
         assert_eq!(ctx.int_state(STATE_RNG) as u32, expected_seed);
@@ -520,7 +528,7 @@ mod tests {
         let first_ptr = bytes.as_ptr();
         let first_capacity = bytes.capacity();
         ctx.set_input("in", InputValue::DigitalVector(vec![DigitalValue::zero()]));
-        pack_input_bits(&mut ctx, 9, &mut bytes);
+        pack_input_bits(&mut ctx, 9, &mut bytes).expect("pack input bits");
 
         assert_eq!(bytes, vec![0, 0]);
         assert_eq!(bytes.as_ptr(), first_ptr);
