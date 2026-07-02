@@ -137,6 +137,7 @@ pub(super) struct ParsedModelParams {
     pub(super) string: Vec<(String, String)>,
     pub(super) string_vector: Vec<(String, Vec<String>)>,
     pub(super) real_vector: Vec<(String, Vec<Value>)>,
+    pub(super) real_vector_expr: Vec<(String, Vec<String>)>,
     pub(super) integer_vector: Vec<(String, Vec<i64>)>,
 }
 
@@ -164,6 +165,7 @@ pub(super) fn parse_model_params(
     let mut string_params = Vec::new();
     let mut string_vector_params = Vec::new();
     let mut real_vector_params = Vec::new();
+    let mut real_vector_expr_params = Vec::new();
     let integer_vector_params = Vec::new();
 
     let opened_paren = stream.consume(&TokenKind::LParen);
@@ -184,6 +186,7 @@ pub(super) fn parse_model_params(
                     string: string_params,
                     string_vector: string_vector_params,
                     real_vector: real_vector_params,
+                    real_vector_expr: real_vector_expr_params,
                     integer_vector: integer_vector_params,
                 });
             }
@@ -193,6 +196,7 @@ pub(super) fn parse_model_params(
                     || !string_params.is_empty()
                     || !string_vector_params.is_empty()
                     || !real_vector_params.is_empty()
+                    || !real_vector_expr_params.is_empty()
                     || !integer_vector_params.is_empty();
                 if has_params {
                     stream.advance();
@@ -204,6 +208,7 @@ pub(super) fn parse_model_params(
                             string: string_params,
                             string_vector: string_vector_params,
                             real_vector: real_vector_params,
+                            real_vector_expr: real_vector_expr_params,
                             integer_vector: integer_vector_params,
                         });
                     }
@@ -219,6 +224,7 @@ pub(super) fn parse_model_params(
                     || !string_params.is_empty()
                     || !string_vector_params.is_empty()
                     || !real_vector_params.is_empty()
+                    || !real_vector_expr_params.is_empty()
                     || !integer_vector_params.is_empty();
                 if allow_missing_close && has_params {
                     return Ok(ParsedModelParams {
@@ -227,6 +233,7 @@ pub(super) fn parse_model_params(
                         string: string_params,
                         string_vector: string_vector_params,
                         real_vector: real_vector_params,
+                        real_vector_expr: real_vector_expr_params,
                         integer_vector: integer_vector_params,
                     });
                 }
@@ -345,14 +352,30 @@ pub(super) fn parse_model_params(
                     TokenKind::LBracket => {
                         if crate::netlist::xspice_param_prefers_string_vector(&name)
                             || model_vector_starts_with_complex(stream)
-                            || model_vector_starts_with_string(stream, params)
+                            || model_vector_starts_with_string(
+                                stream,
+                                params,
+                                defer_expression_params,
+                            )
                         {
                             let values =
                                 parse_model_string_vector(stream, line_num, &name, params)?;
                             string_vector_params.push((name, values));
                         } else {
-                            let values = parse_model_real_vector(stream, line_num, &name, params)?;
-                            real_vector_params.push((name, values));
+                            match parse_model_real_vector(
+                                stream,
+                                line_num,
+                                &name,
+                                params,
+                                defer_expression_params,
+                            )? {
+                                ParsedModelRealVector::Resolved(values) => {
+                                    real_vector_params.push((name, values));
+                                }
+                                ParsedModelRealVector::Deferred(exprs) => {
+                                    real_vector_expr_params.push((name, exprs));
+                                }
+                            }
                         }
                     }
                     kind if model_param_accepts_bare_string(&name, model_type)
@@ -442,6 +465,7 @@ pub(super) fn parse_model_params(
         string: string_params,
         string_vector: string_vector_params,
         real_vector: real_vector_params,
+        real_vector_expr: real_vector_expr_params,
         integer_vector: integer_vector_params,
     })
 }
@@ -666,7 +690,11 @@ pub(super) fn parse_model_vector_string_literal(
     ))
 }
 
-fn model_vector_starts_with_string(stream: &TokenStream, params: &ParamContext) -> bool {
+fn model_vector_starts_with_string(
+    stream: &TokenStream,
+    params: &ParamContext,
+    defer_expression_params: bool,
+) -> bool {
     let mut offset = 1usize;
     loop {
         match &stream.peek_n(offset).kind {
@@ -676,12 +704,14 @@ fn model_vector_starts_with_string(stream: &TokenStream, params: &ParamContext) 
                 return !token_can_start_model_real_vector_value(
                     &stream.peek_n(offset).kind,
                     params,
+                    defer_expression_params,
                 );
             }
             TokenKind::Plus | TokenKind::Minus => {
                 return !token_can_start_model_real_vector_value(
                     &stream.peek_n(offset + 1).kind,
                     params,
+                    defer_expression_params,
                 );
             }
             _ => return false,
@@ -700,11 +730,17 @@ fn model_vector_starts_with_complex(stream: &TokenStream) -> bool {
     }
 }
 
-fn token_can_start_model_real_vector_value(kind: &TokenKind, params: &ParamContext) -> bool {
+fn token_can_start_model_real_vector_value(
+    kind: &TokenKind,
+    params: &ParamContext,
+    defer_expression_params: bool,
+) -> bool {
     match kind {
         TokenKind::Number(_) | TokenKind::Expression(_) => true,
         TokenKind::Ident(s) => {
-            params.get(s).is_some() || crate::netlist::lexer::parse_spice_value(s).is_ok()
+            defer_expression_params
+                || params.get(s).is_some()
+                || crate::netlist::lexer::parse_spice_value(s).is_ok()
         }
         _ => false,
     }
@@ -871,12 +907,23 @@ fn parse_model_complex_literal_string(
     ))
 }
 
+enum ParsedModelRealVector {
+    Resolved(Vec<Value>),
+    Deferred(Vec<String>),
+}
+
+enum ParsedModelRealVectorEntry {
+    Resolved(Value),
+    Deferred(String),
+}
+
 fn parse_model_real_vector(
     stream: &mut TokenStream,
     line_num: usize,
     name: &str,
     params: &ParamContext,
-) -> Result<Vec<Value>, ParseError> {
+    defer_expression_params: bool,
+) -> Result<ParsedModelRealVector, ParseError> {
     if !stream.consume(&TokenKind::LBracket) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -884,20 +931,42 @@ fn parse_model_real_vector(
         });
     }
 
-    let mut values = Vec::new();
+    let mut entries = Vec::new();
     loop {
         skip_commas(stream);
 
         match &stream.peek().kind {
             TokenKind::RBracket => {
                 stream.advance();
-                if values.is_empty() {
+                if entries.is_empty() {
                     return Err(ParseError::Syntax {
                         line: line_num,
                         message: format!("Model parameter vector '{}' cannot be empty", name),
                     });
                 }
-                return Ok(values);
+                if entries
+                    .iter()
+                    .any(|entry| matches!(entry, ParsedModelRealVectorEntry::Deferred(_)))
+                {
+                    let exprs = entries
+                        .into_iter()
+                        .map(|entry| match entry {
+                            ParsedModelRealVectorEntry::Resolved(value) => {
+                                format_compact_number(value)
+                            }
+                            ParsedModelRealVectorEntry::Deferred(expr) => expr,
+                        })
+                        .collect();
+                    return Ok(ParsedModelRealVector::Deferred(exprs));
+                }
+                let values = entries
+                    .into_iter()
+                    .map(|entry| match entry {
+                        ParsedModelRealVectorEntry::Resolved(value) => value,
+                        ParsedModelRealVectorEntry::Deferred(_) => unreachable!(),
+                    })
+                    .collect();
+                return Ok(ParsedModelRealVector::Resolved(values));
             }
             TokenKind::RParen | TokenKind::Newline | TokenKind::Eof => {
                 return Err(ParseError::Syntax {
@@ -908,27 +977,108 @@ fn parse_model_real_vector(
             _ => {}
         }
 
-        let Some(value) = try_signed_model_value(stream, params) else {
+        entries.push(parse_model_real_vector_entry(
+            stream,
+            line_num,
+            name,
+            params,
+            defer_expression_params,
+        )?);
+    }
+}
+
+fn parse_model_real_vector_entry(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+    params: &ParamContext,
+    defer_expression_params: bool,
+) -> Result<ParsedModelRealVectorEntry, ParseError> {
+    let sign = match &stream.peek().kind {
+        TokenKind::Plus => {
+            stream.advance();
+            1.0
+        }
+        TokenKind::Minus => {
+            stream.advance();
+            -1.0
+        }
+        _ => 1.0,
+    };
+
+    let signed_expr = |expr: String| {
+        if sign < 0.0 {
+            format!("-({expr})")
+        } else {
+            expr
+        }
+    };
+
+    let entry = match &stream.peek().kind {
+        TokenKind::Number(value) => {
+            let value = sign * *value;
+            stream.advance();
+            ParsedModelRealVectorEntry::Resolved(value)
+        }
+        TokenKind::Expression(expr) => {
+            let expr = expr.clone();
+            stream.advance();
+            if defer_expression_params {
+                ParsedModelRealVectorEntry::Deferred(signed_expr(expr))
+            } else {
+                let value = eval_expression(&expr, params).map_err(|err| {
+                    ParseError::InvalidValue(format!(
+                        "line {}: model parameter vector '{}' expression '{}' could not be resolved: {}",
+                        line_num, name, expr, err
+                    ))
+                })?;
+                ParsedModelRealVectorEntry::Resolved(sign * value)
+            }
+        }
+        TokenKind::Ident(raw) => {
+            let raw = raw.clone();
+            stream.advance();
+            if let Ok(value) = crate::netlist::lexer::parse_spice_value(&raw) {
+                ParsedModelRealVectorEntry::Resolved(sign * value)
+            } else if let Some(value) = parse_boolean_literal(&raw) {
+                ParsedModelRealVectorEntry::Resolved(sign * value)
+            } else if defer_expression_params {
+                ParsedModelRealVectorEntry::Deferred(signed_expr(raw))
+            } else if let Some(value) = params.get(&raw) {
+                ParsedModelRealVectorEntry::Resolved(sign * value)
+            } else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Expected numeric value in model parameter vector '{}', found identifier '{}'",
+                        name, raw
+                    ),
+                });
+            }
+        }
+        other => {
             return Err(ParseError::Syntax {
-                line: stream.line(),
+                line: line_num,
                 message: format!(
                     "Expected numeric value in model parameter vector '{}', found {}",
-                    name,
-                    stream.peek().kind
+                    name, other
                 ),
             });
-        };
-
-        if !value.is_finite() {
-            return Err(ParseError::InvalidValue(format!(
-                "line {}: model parameter vector '{}' contains non-finite value {}",
-                stream.line(),
-                name,
-                value
-            )));
         }
-        values.push(value);
+    };
+
+    if let ParsedModelRealVectorEntry::Resolved(value) = &entry
+        && !value.is_finite()
+    {
+        return Err(ParseError::InvalidValue(format!(
+            "line {}: model parameter vector '{}' contains non-finite value {}",
+            stream.line(),
+            name,
+            value
+        )));
     }
+
+    Ok(entry)
 }
 
 fn try_dotted_model_version(stream: &mut TokenStream) -> Option<String> {

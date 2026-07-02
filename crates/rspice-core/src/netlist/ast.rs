@@ -1868,6 +1868,7 @@ pub struct ModelDef {
     pub string_params: Vec<(String, String)>,
     pub string_vector_params: Vec<(String, Vec<String>)>,
     pub real_vector_params: Vec<(String, Vec<Value>)>,
+    pub real_vector_expr_params: Vec<(String, Vec<String>)>,
     pub integer_vector_params: Vec<(String, Vec<i64>)>,
 }
 

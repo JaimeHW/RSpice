@@ -615,6 +615,7 @@ fn pspice_ugate_alias_model(
         string_params: Vec::new(),
         string_vector_params: Vec::new(),
         real_vector_params: Vec::new(),
+        real_vector_expr_params: Vec::new(),
         integer_vector_params: Vec::new(),
     }
 }
@@ -642,6 +643,7 @@ fn pspice_udly_alias_model(
         string_params: Vec::new(),
         string_vector_params: Vec::new(),
         real_vector_params: Vec::new(),
+        real_vector_expr_params: Vec::new(),
         integer_vector_params: Vec::new(),
     }
 }
@@ -671,6 +673,7 @@ fn pspice_utgate_alias_model(
         string_params: Vec::new(),
         string_vector_params: Vec::new(),
         real_vector_params: Vec::new(),
+        real_vector_expr_params: Vec::new(),
         integer_vector_params: Vec::new(),
     }
 }
@@ -730,6 +733,7 @@ fn pspice_ugff_alias_model(
         string_params: Vec::new(),
         string_vector_params: Vec::new(),
         real_vector_params: Vec::new(),
+        real_vector_expr_params: Vec::new(),
         integer_vector_params: Vec::new(),
     }
 }
@@ -770,6 +774,7 @@ fn pspice_ueff_alias_model(
         string_params: Vec::new(),
         string_vector_params: Vec::new(),
         real_vector_params: Vec::new(),
+        real_vector_expr_params: Vec::new(),
         integer_vector_params: Vec::new(),
     }
 }

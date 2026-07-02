@@ -3049,6 +3049,61 @@ mod tests {
     }
 
     #[test]
+    fn xspice_subckt_model_vector_entries_resolve_per_instance() {
+        let netlist = Netlist::parse(
+            "xspice subckt inline model vector entries\n\
+             .subckt clocker out base=1e3 scale=2\n\
+             Aclk null [out] oscmodel\n\
+             .model oscmodel d_osc(cntl_array=[-1 1] freq_array=[base base*scale])\n\
+             .ends clocker\n\
+             X1 one clocker base=10 scale=3\n\
+             X2 two clocker base=20 scale=4\n\
+             .end\n",
+        )
+        .expect("subckt-local XSPICE vector model expressions parse");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("scoped model vector entries flatten");
+        let model_for = |element_name: &str| -> &str {
+            flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Xspice { model, .. } if element.name == element_name => {
+                        Some(model.as_str())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("flattened XSPICE element {element_name} exists"))
+        };
+
+        let vector_for = |model_name: &str| -> Vec<Value> {
+            flattened
+                .scoped_models
+                .iter()
+                .find(|model| model.name == model_name)
+                .and_then(|model| {
+                    model
+                        .real_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("freq_array"))
+                        .map(|(_, values)| values.clone())
+                })
+                .unwrap_or_else(|| panic!("scoped model {model_name} has freq_array"))
+        };
+
+        assert_eq!(vector_for(model_for("X1.ACLK")), vec![10.0, 30.0]);
+        assert_eq!(vector_for(model_for("X2.ACLK")), vec![20.0, 80.0]);
+        assert!(
+            flattened
+                .scoped_models
+                .iter()
+                .all(|model| model.real_vector_expr_params.is_empty()),
+            "scoped XSPICE model vector expressions should resolve during flattening"
+        );
+    }
+
+    #[test]
     fn xspice_subckt_flattening_remaps_xspice_port_ast_nodes() {
         let netlist = Netlist::parse(
             "xspice subckt ports remap\n\

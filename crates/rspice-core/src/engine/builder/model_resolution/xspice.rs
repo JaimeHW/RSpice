@@ -351,6 +351,49 @@ fn resolve_instance_real_vector_expression_params(
     Ok(resolved)
 }
 
+fn resolve_model_real_vector_expression_params(
+    netlist: &Netlist,
+    model_def: &crate::netlist::ModelDef,
+    code_model: &dyn crate::xspice::CodeModel,
+) -> Result<Vec<(String, Vec<f64>)>, SimulationError> {
+    if model_def.real_vector_expr_params.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let current_temp_c = netlist.options.temp.unwrap_or(27.0);
+    let tnom_c = netlist.options.tnom.unwrap_or(27.0);
+    let ctx = build_model_eval_context(netlist, model_def, current_temp_c, tnom_c);
+    let mut resolved = Vec::with_capacity(model_def.real_vector_expr_params.len());
+
+    for (name, exprs) in &model_def.real_vector_expr_params {
+        let mut values = Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            let value = crate::netlist::expr::eval_expression(expr, &ctx).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "XSPICE model '{}' vector parameter '{}' could not resolve expression '{}': {}",
+                    code_model.name(),
+                    name,
+                    expr,
+                    err
+                ))
+            })?;
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "XSPICE model '{}' vector parameter '{}' expression '{}' resolved to non-finite value {}",
+                    code_model.name(),
+                    name,
+                    expr,
+                    value
+                )));
+            }
+            values.push(value);
+        }
+        resolved.push((name.clone(), values));
+    }
+
+    Ok(resolved)
+}
+
 fn resolve_instance_string_vector_expression_params(
     netlist: &Netlist,
     model_name: &str,
@@ -544,6 +587,13 @@ fn reject_native_xtradev_non_scalar_params(
         )));
     }
     for (name, _) in &model_def.real_vector_params {
+        validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
+             '{name}' must be a scalar numeric value"
+        )));
+    }
+    for (name, _) in &model_def.real_vector_expr_params {
         validate_native_xtradev_param_name(kind, element_name, model_name, name)?;
         return Err(SimulationError::Circuit(format!(
             "XSPICE xtradev {kind} instance '{element_name}' model '{model_name}' parameter \
@@ -979,6 +1029,8 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
     );
 
     let expr_params = resolve_scalar_expression_params(netlist, model_def, code_model.as_ref())?;
+    let model_real_vector_expr_params =
+        resolve_model_real_vector_expression_params(netlist, model_def, code_model.as_ref())?;
     let instance_expr_params = resolve_scalar_instance_expression_params(
         netlist,
         Some(model_def),
@@ -994,8 +1046,12 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
     )?;
     let string_vector_params =
         resolve_string_vector_params(code_model.as_ref(), &model_def.string_vector_params)?;
+    let model_real_vector_params = merge_vector_params(
+        &model_def.real_vector_params,
+        &model_real_vector_expr_params,
+    );
     let (real_vector_params, mut integer_vector_params) =
-        resolve_vector_params(code_model.as_ref(), &model_def.real_vector_params)?;
+        resolve_vector_params(code_model.as_ref(), &model_real_vector_params)?;
     let instance_string_vector_params =
         resolve_string_vector_params(code_model.as_ref(), &instance_string_vector_params)?;
     let (instance_real_vector_params, instance_integer_vector_params) =

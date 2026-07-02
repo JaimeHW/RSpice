@@ -1567,6 +1567,7 @@ impl<'a> Flattener<'a> {
         let mut scoped_model = model_def.clone();
         scoped_model.name = scoped_name.clone();
         scoped_model.expr_params.clear();
+        scoped_model.real_vector_expr_params.clear();
 
         for (name, expr) in &model_def.expr_params {
             if let Some(value) = scope.get_string(expr) {
@@ -1607,6 +1608,50 @@ impl<'a> Flattener<'a> {
                         name, model_name, element_path, err
                     )));
                 }
+            }
+        }
+
+        for (name, exprs) in &model_def.real_vector_expr_params {
+            let mut values = Vec::with_capacity(exprs.len());
+            let mut first_error = None;
+
+            for expr in exprs {
+                match super::expr::eval_expression(expr, scope) {
+                    Ok(value) if value.is_finite() => values.push(value),
+                    Ok(value) => {
+                        return Err(ParseError::InvalidValue(format!(
+                            "model vector parameter '{}' for scoped model '{}' expression '{}' resolved to non-finite value {}",
+                            name, model_name, expr, value
+                        )));
+                    }
+                    Err(err) => {
+                        first_error.get_or_insert_with(|| (expr.clone(), err));
+                        break;
+                    }
+                }
+            }
+
+            if let Some((expr, err)) = first_error {
+                if preserve_unresolved {
+                    scoped_model
+                        .real_vector_expr_params
+                        .push((name.clone(), exprs.clone()));
+                    log::debug!(
+                        "Preserved unresolved vector expression parameter '{}' entry '{}' for scoped model '{}': {}",
+                        name,
+                        expr,
+                        model_name,
+                        err
+                    );
+                } else {
+                    return Err(ParseError::InvalidValue(format!(
+                        "model vector parameter '{}' for scoped model '{}' could not resolve expression '{}' against subcircuit instance '{}': {}",
+                        name, model_name, expr, element_path, err
+                    )));
+                }
+            } else {
+                replace_model_param(&mut scoped_model, name);
+                scoped_model.real_vector_params.push((name.clone(), values));
             }
         }
 
@@ -1882,6 +1927,9 @@ fn replace_model_param(model: &mut ModelDef, name: &str) {
         .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
     model
         .real_vector_params
+        .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    model
+        .real_vector_expr_params
         .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
     model
         .integer_vector_params

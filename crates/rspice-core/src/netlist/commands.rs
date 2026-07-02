@@ -128,6 +128,7 @@ pub fn parse_command(
                 string_params: Vec::new(),
                 string_vector_params: Vec::new(),
                 real_vector_params: Vec::new(),
+                real_vector_expr_params: Vec::new(),
                 integer_vector_params: Vec::new(),
             });
         }
