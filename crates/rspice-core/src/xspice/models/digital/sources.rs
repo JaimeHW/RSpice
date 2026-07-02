@@ -138,10 +138,7 @@ fn is_digital_table_data_line(line: &str) -> bool {
 
 fn tokenize_digital_table_line<'line>(line: &'line str, tokens: &mut Vec<&'line str>) {
     tokens.clear();
-    let uncommented = line
-        .split(|ch: char| matches!(ch, '#' | ';' | '$'))
-        .next()
-        .unwrap_or(line);
+    let uncommented = line.split(['#', ';', '$']).next().unwrap_or(line);
     tokens.extend(
         uncommented
             .split(|ch: char| ch.is_ascii_whitespace() || matches!(ch, '=' | '(' | ')' | ','))
@@ -149,30 +146,92 @@ fn tokenize_digital_table_line<'line>(line: &'line str, tokens: &mut Vec<&'line 
     );
 }
 
-fn parse_d_source_token(input_file: &str, line: usize, token: &str) -> CmResult<DigitalValue> {
-    let value = match token {
-        "0s" => DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
-        "1s" => DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
-        "Us" => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Strong),
-        "0r" => DigitalValue::new(DigitalState::ZeroR, DigitalStrength::Resistive),
-        "1r" => DigitalValue::new(DigitalState::OneR, DigitalStrength::Resistive),
-        "Ur" => DigitalValue::new(DigitalState::UnknownR, DigitalStrength::Resistive),
-        "0z" => DigitalValue::new(DigitalState::ZeroZ, DigitalStrength::HighZ),
-        "1z" => DigitalValue::new(DigitalState::OneZ, DigitalStrength::HighZ),
-        "Uz" => DigitalValue::new(DigitalState::UnknownZ, DigitalStrength::HighZ),
-        "0u" => DigitalValue::new(DigitalState::Zero, DigitalStrength::Undetermined),
-        "1u" => DigitalValue::new(DigitalState::One, DigitalStrength::Undetermined),
-        "Uu" => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined),
-        _ => {
-            return Err(d_source_error(
-                input_file,
-                line,
-                format!("invalid digital token '{token}'"),
-            ));
-        }
+fn digital_table_output_code(token: &str) -> Option<i64> {
+    let bytes = token.as_bytes();
+    if bytes.len() != 2 {
+        return None;
+    }
+    let state = bytes[0];
+    let strength = bytes[1];
+    let state_code = match state {
+        b'0' => 0,
+        b'1' => 1,
+        b'u' | b'U' => 2,
+        _ => return None,
     };
+    let strength_offset = match strength {
+        b's' | b'S' => 0,
+        b'r' | b'R' => 3,
+        b'z' | b'Z' => 6,
+        b'u' | b'U' => 9,
+        _ => return None,
+    };
+    Some(strength_offset + state_code)
+}
 
-    Ok(value)
+fn digital_table_output_from_code(code: i64) -> Option<DigitalValue> {
+    match code {
+        0 => Some(DigitalValue::new(
+            DigitalState::Zero,
+            DigitalStrength::Strong,
+        )),
+        1 => Some(DigitalValue::new(
+            DigitalState::One,
+            DigitalStrength::Strong,
+        )),
+        2 => Some(DigitalValue::new(
+            DigitalState::Unknown,
+            DigitalStrength::Strong,
+        )),
+        3 => Some(DigitalValue::new(
+            DigitalState::ZeroR,
+            DigitalStrength::Resistive,
+        )),
+        4 => Some(DigitalValue::new(
+            DigitalState::OneR,
+            DigitalStrength::Resistive,
+        )),
+        5 => Some(DigitalValue::new(
+            DigitalState::UnknownR,
+            DigitalStrength::Resistive,
+        )),
+        6 => Some(DigitalValue::new(
+            DigitalState::ZeroZ,
+            DigitalStrength::HighZ,
+        )),
+        7 => Some(DigitalValue::new(
+            DigitalState::OneZ,
+            DigitalStrength::HighZ,
+        )),
+        8 => Some(DigitalValue::new(
+            DigitalState::UnknownZ,
+            DigitalStrength::HighZ,
+        )),
+        9 => Some(DigitalValue::new(
+            DigitalState::Zero,
+            DigitalStrength::Undetermined,
+        )),
+        10 => Some(DigitalValue::new(
+            DigitalState::One,
+            DigitalStrength::Undetermined,
+        )),
+        11 => Some(DigitalValue::new(
+            DigitalState::Unknown,
+            DigitalStrength::Undetermined,
+        )),
+        _ => None,
+    }
+}
+
+fn parse_d_source_token(input_file: &str, line: usize, token: &str) -> CmResult<DigitalValue> {
+    let Some(code) = digital_table_output_code(token) else {
+        return Err(d_source_error(
+            input_file,
+            line,
+            format!("invalid digital token '{token}'"),
+        ));
+    };
+    Ok(digital_table_output_from_code(code).expect("valid digital output code"))
 }
 
 fn parse_d_source_contents(
@@ -787,43 +846,19 @@ fn parse_d_state_i64(state_file: &str, line: usize, token: &str) -> CmResult<i64
 }
 
 fn parse_d_state_output_code(state_file: &str, line: usize, token: &str) -> CmResult<i64> {
-    match token {
-        "0s" => Ok(0),
-        "1s" => Ok(1),
-        "Us" => Ok(2),
-        "0r" => Ok(3),
-        "1r" => Ok(4),
-        "Ur" => Ok(5),
-        "0z" => Ok(6),
-        "1z" => Ok(7),
-        "Uz" => Ok(8),
-        "0u" => Ok(9),
-        "1u" => Ok(10),
-        "Uu" => Ok(11),
-        _ => Err(d_state_error(
+    if let Some(code) = digital_table_output_code(token) {
+        Ok(code)
+    } else {
+        Err(d_state_error(
             state_file,
             line,
             format!("invalid digital token '{token}'"),
-        )),
+        ))
     }
 }
 
 fn d_state_output_from_code(code: i64) -> DigitalValue {
-    match code {
-        0 => DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
-        1 => DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
-        2 => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Strong),
-        3 => DigitalValue::new(DigitalState::ZeroR, DigitalStrength::Resistive),
-        4 => DigitalValue::new(DigitalState::OneR, DigitalStrength::Resistive),
-        5 => DigitalValue::new(DigitalState::UnknownR, DigitalStrength::Resistive),
-        6 => DigitalValue::new(DigitalState::ZeroZ, DigitalStrength::HighZ),
-        7 => DigitalValue::new(DigitalState::OneZ, DigitalStrength::HighZ),
-        8 => DigitalValue::new(DigitalState::UnknownZ, DigitalStrength::HighZ),
-        9 => DigitalValue::new(DigitalState::Zero, DigitalStrength::Undetermined),
-        10 => DigitalValue::new(DigitalState::One, DigitalStrength::Undetermined),
-        11 => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined),
-        _ => DigitalValue::unknown(),
-    }
+    digital_table_output_from_code(code).unwrap_or_else(DigitalValue::unknown)
 }
 
 fn parse_d_state_file(
@@ -1440,6 +1475,15 @@ mod tests {
         assert!(!is_digital_table_data_line("  * indented comment"));
         tokenize_digital_table_line("3n 1s ; trailing comment", &mut tokens);
         assert_eq!(tokens, vec!["3n", "1s"]);
+    }
+
+    #[test]
+    fn digital_table_output_tokens_accept_common_case_variants() {
+        assert_eq!(digital_table_output_code("0S"), Some(0));
+        assert_eq!(digital_table_output_code("ur"), Some(5));
+        assert_eq!(digital_table_output_code("UZ"), Some(8));
+        assert_eq!(digital_table_output_code("1U"), Some(10));
+        assert!(digital_table_output_code("zz").is_none());
     }
 
     #[test]
