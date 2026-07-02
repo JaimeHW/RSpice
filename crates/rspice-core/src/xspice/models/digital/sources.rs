@@ -366,6 +366,26 @@ fn d_source_input_file(ctx: &CmContext) -> &str {
         .unwrap_or("source.txt")
 }
 
+fn d_source_breakpoint_times(input_file: &str) -> CmResult<Vec<Value>> {
+    let contents = data_file::read_to_string(input_file)
+        .map_err(|err| d_source_file_error(input_file, err))?;
+    let mut tokens = Vec::new();
+    let mut times = Vec::new();
+    for line in contents
+        .lines()
+        .filter(|line| is_digital_table_data_line(line))
+    {
+        tokenize_digital_table_line(line, &mut tokens);
+        if let Some(time_token) = tokens.first() {
+            let time = data_file::parse_ngspice_spice_value(time_token);
+            if time.is_finite() {
+                times.push(time);
+            }
+        }
+    }
+    Ok(times)
+}
+
 impl CodeModel for DigitalSource {
     fn name(&self) -> &str {
         "d_source"
@@ -438,9 +458,7 @@ impl CodeModel for DigitalSource {
     }
 
     fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
-        let width = ctx.port_width("out");
-        let (_, rows) = load_d_source_rows(d_source_input_file(ctx), width);
-        rows.map(|rows| rows.rows.iter().map(|row| row.time).collect())
+        d_source_breakpoint_times(d_source_input_file(ctx))
     }
 }
 
