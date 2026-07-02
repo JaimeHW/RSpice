@@ -280,6 +280,18 @@ fn positive_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value
     }
 }
 
+fn dielectric_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value> {
+    let value = ctx.param_or(name, default);
+    if value.is_finite() && value >= 1.0 {
+        Ok(value)
+    } else {
+        Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("expected dielectric constant >= 1, got {value}"),
+        })
+    }
+}
+
 fn nonnegative_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value> {
     let value = ctx.param_or(name, default);
     if value.is_finite() && value >= 0.0 {
@@ -854,7 +866,7 @@ fn analyse_microstrip_loss(
                 skin_resistance / (zl_eff1 * w) * current_distribution * roughness_factor;
         }
 
-        if frequency != 0.0 {
+        if frequency != 0.0 && er > 1.0 {
             let free_space_wavelength = C0 / frequency;
             dielectric_loss =
                 std::f64::consts::PI * er / (er - 1.0) * (er_eff - 1.0) / er_eff.sqrt() * tan_delta
@@ -872,7 +884,7 @@ fn microstrip_propagation_uncached(
     let w = positive_param(ctx, "w", 1.0e-3)?;
     let h = positive_param(ctx, "h", 1.0e-3)?;
     let t = nonnegative_param(ctx, "t", 35.0e-6)?;
-    let er = positive_param(ctx, "er", 9.8)?;
+    let er = dielectric_param(ctx, "er", 9.8)?;
     let tan_delta = finite_param(ctx, "tand", 2.0e-4)?;
     let rho = nonnegative_param(ctx, "rho", 0.022e-6)?;
     let roughness = finite_param(ctx, "d", 0.15e-6)?;
@@ -1224,7 +1236,7 @@ fn coupled_microstrip_propagation_uncached(
     let s = positive_param(ctx, "s", 1.0e-3)?;
     let h = positive_param(ctx, "h", 1.0e-3)?;
     let t = nonnegative_param(ctx, "t", 35.0e-6)?;
-    let er = positive_param(ctx, "er", 9.8)?;
+    let er = dielectric_param(ctx, "er", 9.8)?;
     let tan_delta = finite_param(ctx, "tand", 2.0e-4)?;
     let rho = nonnegative_param(ctx, "rho", 0.022e-6)?;
     let roughness = finite_param(ctx, "d", 0.15e-6)?;
@@ -1363,7 +1375,7 @@ fn msopen_admittance(ctx: &CmContext, frequency: Value) -> CmResult<Complex64> {
     let w = positive_param(ctx, "w", 1.0e-3)?;
     let h = positive_param(ctx, "h", 1.0e-3)?;
     let t = nonnegative_param(ctx, "t", 35.0e-6)?;
-    let er = positive_param(ctx, "er", 9.8)?;
+    let er = dielectric_param(ctx, "er", 9.8)?;
 
     let (substrate_model, dispersion_model) = microstrip_selector_params(ctx)?;
     let open_model = finite_integer_param(ctx, "msopen_model", MSOPEN_KIRSCHNING)?;
@@ -2935,6 +2947,54 @@ mod tests {
         let mut cpmlin = coupled_microstrip_cache_context();
         cpmlin.set_param("l", -1.0);
         assert_invalid_param(CoupledMicrostripLine.init(&mut cpmlin), "l");
+    }
+
+    #[test]
+    fn microstrip_models_handle_air_dielectric_limit() {
+        let mut mline = microstrip_cache_context();
+        mline.set_param("er", 1.0);
+        let propagation =
+            microstrip_propagation_uncached(&mline, 1.0e9).expect("air microstrip propagation");
+        assert!(propagation.zl.is_finite());
+        assert!(propagation.alpha.is_finite());
+        assert!(propagation.beta.is_finite());
+        assert!(propagation.er_eff.is_finite());
+
+        let mut cpmlin = coupled_microstrip_cache_context();
+        cpmlin.set_param("er", 1.0);
+        let propagation = coupled_microstrip_propagation_uncached(&cpmlin, 1.0e9)
+            .expect("air coupled microstrip propagation");
+        for value in [
+            propagation.ze,
+            propagation.zo,
+            propagation.alpha_even,
+            propagation.alpha_odd,
+            propagation.beta_even,
+            propagation.beta_odd,
+        ] {
+            assert!(
+                value.is_finite(),
+                "expected finite air substrate value, got {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn microstrip_models_reject_subunity_dielectric_constants() {
+        let mut mline = microstrip_cache_context();
+        mline.set_param("er", 0.5);
+        assert_invalid_param(microstrip_propagation_uncached(&mline, 1.0e9), "er");
+
+        let mut cpmlin = coupled_microstrip_cache_context();
+        cpmlin.set_param("er", 0.5);
+        assert_invalid_param(
+            coupled_microstrip_propagation_uncached(&cpmlin, 1.0e9),
+            "er",
+        );
+
+        let mut msopen = microstrip_cache_context();
+        msopen.set_param("er", 0.5);
+        assert_invalid_param(MicrostripOpenEnd.init(&mut msopen), "er");
     }
 
     #[test]
