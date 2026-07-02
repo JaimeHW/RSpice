@@ -654,6 +654,24 @@ fn table_order(ctx: &CmContext) -> CmResult<usize> {
     Ok(order.round().max(2.0) as usize)
 }
 
+fn table_scale_param(ctx: &CmContext, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(invalid_table_param(
+            name,
+            format!("value must be finite, got {value}"),
+        ));
+    }
+    Ok(value)
+}
+
+fn table_scale_params(ctx: &CmContext) -> CmResult<(Value, Value)> {
+    Ok((
+        table_scale_param(ctx, "offset")?,
+        table_scale_param(ctx, "gain")?,
+    ))
+}
+
 fn validate_table2d_order(table: &Table2DData, order: usize) -> CmResult<()> {
     let y_window = 2 * order - 2;
     if order > table.x.len() || y_window > table.y.len() {
@@ -1349,26 +1367,28 @@ fn table_arc_id<T>(table: &Arc<T>) -> usize {
 }
 
 fn table2d_eval_signature(
-    ctx: &CmContext,
     table: &Arc<Table2DData>,
     order: usize,
+    offset: Value,
+    gain: Value,
     inx: Value,
     iny: Value,
 ) -> Table2DEvalSignature {
     Table2DEvalSignature {
         table_id: table_arc_id(table),
         order,
-        offset: ctx.param("offset"),
-        gain: ctx.param("gain"),
+        offset,
+        gain,
         inx,
         iny,
     }
 }
 
 fn table3d_eval_signature(
-    ctx: &CmContext,
     table: &Arc<Table3DData>,
     order: usize,
+    offset: Value,
+    gain: Value,
     inx: Value,
     iny: Value,
     inz: Value,
@@ -1376,8 +1396,8 @@ fn table3d_eval_signature(
     Table3DEvalSignature {
         table_id: table_arc_id(table),
         order,
-        offset: ctx.param("offset"),
-        gain: ctx.param("gain"),
+        offset,
+        gain,
         inx,
         iny,
         inz,
@@ -1406,14 +1426,15 @@ fn scaled_table2d_eval_from_parts_with_scratch(
 }
 
 fn scaled_table2d_eval_from_parts(
-    ctx: &CmContext,
     table: &Table2DData,
     order: usize,
     inx: Value,
     iny: Value,
+    offset: Value,
+    gain: Value,
 ) -> TableEval2D {
     let raw = evaluate_table2d_data(table, order, inx, iny);
-    scale_table2d_eval(raw, ctx.param("offset"), ctx.param("gain"))
+    scale_table2d_eval(raw, offset, gain)
 }
 
 fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
@@ -1421,20 +1442,22 @@ fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
     let table = load_table2d_from_context(ctx, file)?;
     let order = table_order(ctx)?;
     validate_table2d_order(&table, order)?;
+    let (offset, gain) = table_scale_params(ctx)?;
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
-    let signature = table2d_eval_signature(ctx, &table, order, inx, iny);
+    let signature = table2d_eval_signature(&table, order, offset, gain, inx, iny);
     if let Some(resource) = ctx.resource::<Table2DEvalResource>(TABLE2D_EVAL_RESOURCE)
         && resource.signature == signature
     {
         return Ok(resource.result);
     }
     Ok(scaled_table2d_eval_from_parts(
-        ctx,
         table.as_ref(),
         order,
         inx,
         iny,
+        offset,
+        gain,
     ))
 }
 
@@ -1443,16 +1466,15 @@ fn scaled_table2d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval2D> {
     let table = load_table2d_for_context(ctx, &file)?;
     let order = table_order(ctx)?;
     validate_table2d_order(&table, order)?;
+    let (offset, gain) = table_scale_params(ctx)?;
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
-    let signature = table2d_eval_signature(ctx, &table, order, inx, iny);
+    let signature = table2d_eval_signature(&table, order, offset, gain, inx, iny);
     if let Some(resource) = ctx.resource::<Table2DEvalResource>(TABLE2D_EVAL_RESOURCE)
         && resource.signature == signature
     {
         return Ok(resource.result);
     }
-    let offset = ctx.param("offset");
-    let gain = ctx.param("gain");
     let result = with_table_eval_scratch_mut(ctx, |scratch| {
         scaled_table2d_eval_from_parts_with_scratch(
             table.as_ref(),
@@ -1495,15 +1517,16 @@ fn scaled_table3d_eval_from_parts_with_scratch(
 }
 
 fn scaled_table3d_eval_from_parts(
-    ctx: &CmContext,
     table: &Table3DData,
     order: usize,
     inx: Value,
     iny: Value,
     inz: Value,
+    offset: Value,
+    gain: Value,
 ) -> TableEval3D {
     let raw = evaluate_table3d_data(table, order, inx, iny, inz);
-    scale_table3d_eval(raw, ctx.param("offset"), ctx.param("gain"))
+    scale_table3d_eval(raw, offset, gain)
 }
 
 fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
@@ -1511,22 +1534,24 @@ fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
     let table = load_table3d_from_context(ctx, file)?;
     let order = table_order(ctx)?;
     validate_table3d_order(&table, order)?;
+    let (offset, gain) = table_scale_params(ctx)?;
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
     let inz = ctx.input("inz");
-    let signature = table3d_eval_signature(ctx, &table, order, inx, iny, inz);
+    let signature = table3d_eval_signature(&table, order, offset, gain, inx, iny, inz);
     if let Some(resource) = ctx.resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
         && resource.signature == signature
     {
         return Ok(resource.result);
     }
     Ok(scaled_table3d_eval_from_parts(
-        ctx,
         table.as_ref(),
         order,
         inx,
         iny,
         inz,
+        offset,
+        gain,
     ))
 }
 
@@ -1535,17 +1560,16 @@ fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
     let table = load_table3d_for_context(ctx, &file)?;
     let order = table_order(ctx)?;
     validate_table3d_order(&table, order)?;
+    let (offset, gain) = table_scale_params(ctx)?;
     let inx = ctx.input("inx");
     let iny = ctx.input("iny");
     let inz = ctx.input("inz");
-    let signature = table3d_eval_signature(ctx, &table, order, inx, iny, inz);
+    let signature = table3d_eval_signature(&table, order, offset, gain, inx, iny, inz);
     if let Some(resource) = ctx.resource::<Table3DEvalResource>(TABLE3D_EVAL_RESOURCE)
         && resource.signature == signature
     {
         return Ok(resource.result);
     }
-    let offset = ctx.param("offset");
-    let gain = ctx.param("gain");
     let result = with_table_eval_scratch_mut(ctx, |scratch| {
         scaled_table3d_eval_from_parts_with_scratch(
             table.as_ref(),
@@ -1651,6 +1675,7 @@ impl CodeModel for Table2D {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let order = table_order(ctx)?;
+        table_scale_params(ctx)?;
         let file = table_file_param(ctx, TableKind::Table2D).to_string();
         let table = load_table2d_for_context(ctx, &file)?;
         validate_table2d_order(&table, order)
@@ -1707,6 +1732,7 @@ impl CodeModel for Table3D {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let order = table_order(ctx)?;
+        table_scale_params(ctx)?;
         let file = table_file_param(ctx, TableKind::Table3D).to_string();
         let table = load_table3d_for_context(ctx, &file)?;
         validate_table3d_order(&table, order)
@@ -1769,6 +1795,31 @@ mod tests {
             .get_or_init(|| std::sync::Mutex::new(()))
             .lock()
             .expect("data-file test guard")
+    }
+
+    fn table2d_context(file: &str) -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.set_string_param("file", file);
+        ctx.set_param("order", 2.0);
+        ctx.set_param("offset", 0.0);
+        ctx.set_param("gain", 1.0);
+        ctx.set_input_analog("inx", 0.5);
+        ctx.set_input_analog("iny", 0.5);
+        ctx.init_output("out", PortType::Current);
+        ctx
+    }
+
+    fn table3d_context(file: &str) -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.set_string_param("file", file);
+        ctx.set_param("order", 2.0);
+        ctx.set_param("offset", 0.0);
+        ctx.set_param("gain", 1.0);
+        ctx.set_input_analog("inx", 0.5);
+        ctx.set_input_analog("iny", 0.5);
+        ctx.set_input_analog("inz", 0.5);
+        ctx.init_output("out", PortType::Current);
+        ctx
     }
 
     fn poison_table2d_cache_lock() {
@@ -2301,6 +2352,88 @@ mod tests {
         assert_ne!(changed_gain, sentinel);
 
         let _ = data_file::unregister_data_file(file);
+    }
+
+    #[test]
+    fn table_models_reject_nonfinite_scale_params() {
+        let _guard = data_file_test_guard();
+        let table2d_file = "virtual://table2d/nonfinite-scale-params";
+        let table3d_file = "virtual://table3d/nonfinite-scale-params";
+        let _ = data_file::unregister_data_file(table2d_file);
+        let _ = data_file::unregister_data_file(table3d_file);
+        data_file::register_data_file(
+            table2d_file,
+            "\
+2
+2
+0 1
+0 1
+1 2
+3 4
+",
+        )
+        .expect("register virtual table2d data");
+        data_file::register_data_file(
+            table3d_file,
+            "\
+2
+2
+2
+0 1
+0 1
+0 1
+1 2
+3 4
+5 6
+7 8
+",
+        )
+        .expect("register virtual table3d data");
+
+        let mut ctx = table2d_context(table2d_file);
+        ctx.set_param("offset", f64::NAN);
+        let err = Table2D
+            .init(&mut ctx)
+            .expect_err("table2d must reject nonfinite offset during init");
+        assert!(
+            matches!(&err, CmError::InvalidParameter { .. }),
+            "table2d offset produced {err:?}"
+        );
+        assert!(
+            err.to_string().contains("offset"),
+            "table2d error should name rejected offset: {err}"
+        );
+
+        let mut ctx = table3d_context(table3d_file);
+        ctx.set_param("gain", f64::INFINITY);
+        let err = Table3D
+            .init(&mut ctx)
+            .expect_err("table3d must reject nonfinite gain during init");
+        assert!(
+            matches!(&err, CmError::InvalidParameter { .. }),
+            "table3d gain produced {err:?}"
+        );
+        assert!(
+            err.to_string().contains("gain"),
+            "table3d error should name rejected gain: {err}"
+        );
+
+        let mut ctx = table2d_context(table2d_file);
+        Table2D.init(&mut ctx).expect("table2d initializes");
+        ctx.set_param("gain", f64::NEG_INFINITY);
+        Table2D
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite table2d gain must fail during evaluation");
+
+        let mut ctx = table3d_context(table3d_file);
+        Table3D.init(&mut ctx).expect("table3d initializes");
+        ctx.set_param("offset", f64::INFINITY);
+        Table3D
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite table3d offset must fail during evaluation");
+
+        let _ = data_file::unregister_data_file(table2d_file);
+        let _ = data_file::unregister_data_file(table3d_file);
     }
 
     #[test]
