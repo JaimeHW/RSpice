@@ -659,13 +659,24 @@ fn bidi_current_target(
                 } else {
                     ((voltage - voc) * g_high, g_high)
                 }
-            } else if voltage < params.out_low {
-                ((voltage - params.out_high) * g_high, g_high)
-            } else if voltage >= params.out_high {
-                ((voltage - params.out_low) * g_low, g_low)
+            } else if params.out_low <= params.out_high {
+                bidi_resistive_unknown_target(
+                    voltage,
+                    voc,
+                    params.out_low,
+                    g_low,
+                    params.out_high,
+                    g_high,
+                )
             } else {
-                let partial = g_low + g_high;
-                ((voltage - voc) * partial, partial)
+                bidi_resistive_unknown_target(
+                    voltage,
+                    voc,
+                    params.out_high,
+                    g_high,
+                    params.out_low,
+                    g_low,
+                )
             };
             (
                 target,
@@ -687,6 +698,30 @@ fn bidi_current_target(
     }
 
     (target, partial, range)
+}
+
+fn bidi_resistive_unknown_target(
+    voltage: Value,
+    voc: Value,
+    lower_rail: Value,
+    lower_conductance: Value,
+    upper_rail: Value,
+    upper_conductance: Value,
+) -> (Value, Value) {
+    if voltage < lower_rail {
+        (
+            (voltage - upper_rail) * upper_conductance,
+            upper_conductance,
+        )
+    } else if voltage >= upper_rail {
+        (
+            (voltage - lower_rail) * lower_conductance,
+            lower_conductance,
+        )
+    } else {
+        let partial = lower_conductance + upper_conductance;
+        ((voltage - voc) * partial, partial)
+    }
 }
 
 fn bidi_advance_current(
@@ -1703,6 +1738,30 @@ mod tests {
         ctx.set_param("drive_high", 0.03);
         ctx.set_param("drive_low", 0.03);
         assert_eq!(bidi_target_svoc(drive, bidi_params(&ctx)), 0.5);
+    }
+
+    #[test]
+    fn bidi_bridge_resistive_unknown_drive_orders_inverted_output_rails() {
+        let mut ctx = CmContext::new();
+        set_bidi_default_params(&mut ctx, 0.0);
+        ctx.set_param("out_low", 5.0);
+        ctx.set_param("out_high", 0.0);
+        ctx.set_param("r_low", 10_000.0);
+        ctx.set_param("r_high", 20_000.0);
+        let params = bidi_params(&ctx);
+        let drive = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Resistive);
+
+        let (below_current, below_partial, _) = bidi_current_target(-1.0, drive, 0.5, params);
+        assert!((below_current + 0.0006).abs() <= 1.0e-15);
+        assert!((below_partial - 0.0001).abs() <= 1.0e-15);
+
+        let (middle_current, middle_partial, _) = bidi_current_target(2.5, drive, 0.5, params);
+        assert!(middle_current.abs() <= 1.0e-15);
+        assert!((middle_partial - 0.00015).abs() <= 1.0e-15);
+
+        let (above_current, above_partial, _) = bidi_current_target(6.0, drive, 0.5, params);
+        assert!((above_current - 0.0003).abs() <= 1.0e-15);
+        assert!((above_partial - 0.00005).abs() <= 1.0e-15);
     }
 
     fn set_bidi_default_params(ctx: &mut CmContext, smooth: Value) {
