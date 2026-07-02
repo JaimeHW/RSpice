@@ -23,6 +23,10 @@ use super::{
 const MAX_STAMP_HELPER_LINES: usize = 512;
 const MAX_STAMP_HELPERS_PER_MODULE: usize = 16;
 const MAX_LOCAL_VARIABLE_STORAGE_SLOTS: usize = 16_384;
+const MAX_LOCAL_ASSIGNMENT_TUPLE_LANES: usize = 16;
+const STAMP_LOCAL_FIELDS_PER_LINE: usize = 4;
+const MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
+const MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
@@ -348,6 +352,7 @@ pub(super) fn generate_hybrid_device(
             format!("invalid scalar OptIR: {diagnostics:?}"),
         )
     })?;
+    reject_oversized_scalar_hybrid_shape(artifact)?;
     let current_roots = super::scalar::scalarizable_current_equation_roots(artifact)?;
     let potential_roots = super::scalar::scalarizable_potential_equation_roots(artifact)?;
     let large_signal_roots: HashMap<_, _> =
@@ -374,6 +379,42 @@ pub(super) fn generate_hybrid_device(
         static_cache,
     };
     generate_device_with_scalar_hybrid_plan(artifact, options, Some(&scalar_hybrid_plan), true)
+}
+
+fn reject_oversized_scalar_hybrid_shape(
+    artifact: &CanonicalIrArtifact,
+) -> Result<(), RustBackendError> {
+    let runtime_loop_assignments: usize = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .map(|runtime_loop| runtime_loop.assignments.len())
+        .sum();
+    if runtime_loop_assignments > MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS {
+        return Err(unsupported(
+            artifact,
+            format!(
+                "scalar-hybrid runtime loops have {runtime_loop_assignments} assignments; current generated-code budget is {MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS}"
+            ),
+        ));
+    }
+
+    let runtime_loop_variables: usize = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .map(|runtime_loop| runtime_loop.variables.len())
+        .sum();
+    if runtime_loop_variables > MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES {
+        return Err(unsupported(
+            artifact,
+            format!(
+                "scalar-hybrid runtime loops have {runtime_loop_variables} variables; current generated-code budget is {MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES}"
+            ),
+        ));
+    }
+
+    Ok(())
 }
 
 fn generate_device_with_scalar_hybrid_plan(
@@ -28264,8 +28305,15 @@ fn materialize_local_variable_frame(source: &mut String) {
 
 fn emit_stamp_local_frame(local_names: &[String]) -> String {
     let mut out = String::from("#[derive(Default)]\npub(crate) struct StampLocals {\n");
-    for name in local_names {
-        out.push_str(&format!("    pub(crate) {name}: f64,\n"));
+    for chunk in local_names.chunks(STAMP_LOCAL_FIELDS_PER_LINE) {
+        out.push_str("    ");
+        for (index, name) in chunk.iter().enumerate() {
+            if index > 0 {
+                out.push(' ');
+            }
+            out.push_str(&format!("pub(crate) {name}: f64,"));
+        }
+        out.push('\n');
     }
     out.push_str("}\n\n");
     out
@@ -30028,6 +30076,24 @@ fn emit_assignment_statement(
             prefix,
         );
     }
+    if let Some(target_variable) = target_local_variable.as_ref()
+        && emit_local_conditional_noop_assignment(
+            artifact,
+            assignment,
+            parameter_fields,
+            variables,
+            target_variable,
+            out,
+            ddt_slots,
+            branch_current_unknowns,
+            derivatives_live,
+            reactive,
+            indent,
+            prefix,
+        )?
+    {
+        return Ok(());
+    }
     let lowered = if reactive {
         let branch_currents = HashMap::new();
         lower_reactive_assignment_expr_with_branch_currents(
@@ -30207,19 +30273,12 @@ fn emit_local_variable_assignment_store(
     reactive: bool,
     indent: &str,
 ) -> Result<(), RustBackendError> {
-    out.push_str(&format!(
-        "{indent}{} = {};\n",
-        target_variable.value, lowered.value
-    ));
-    assign_local_derivative_lanes(
+    assign_local_value_and_derivative_lanes(
         artifact,
+        &target_variable.value,
+        &lowered.value,
         &target_variable.derivatives,
         &lowered.derivatives,
-        out,
-        indent,
-    )?;
-    assign_local_derivative_lanes(
-        artifact,
         &target_variable.branch_derivatives,
         &lowered.branch_derivatives,
         out,
@@ -30227,19 +30286,12 @@ fn emit_local_variable_assignment_store(
     )?;
 
     if reactive {
-        out.push_str(&format!(
-            "{indent}{} = {};\n",
-            target_variable.reactive_value, lowered.reactive_value
-        ));
-        assign_local_derivative_lanes(
+        assign_local_value_and_derivative_lanes(
             artifact,
+            &target_variable.reactive_value,
+            &lowered.reactive_value,
             &target_variable.reactive_derivatives,
             &lowered.reactive_derivatives,
-            out,
-            indent,
-        )?;
-        assign_local_derivative_lanes(
-            artifact,
             &target_variable.reactive_branch_derivatives,
             &lowered.reactive_branch_derivatives,
             out,
@@ -30252,14 +30304,145 @@ fn emit_local_variable_assignment_store(
     Ok(())
 }
 
-fn assign_local_derivative_lanes(
+#[allow(clippy::too_many_arguments)]
+fn emit_local_conditional_noop_assignment(
     artifact: &CanonicalIrArtifact,
-    targets: &[String],
-    values: &[String],
+    assignment: &crate::canonical_ir::HirAssignment,
+    parameter_fields: &HashMap<String, String>,
+    variables: &mut HashMap<String, LoweredVariable>,
+    target_variable: &LoweredVariable,
+    out: &mut String,
+    ddt_slots: &DdtSlots,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+    derivatives_live: bool,
+    reactive: bool,
+    indent: &str,
+    prefix: &str,
+) -> Result<bool, RustBackendError> {
+    let branch_axis_count = branch_derivative_axis_count(branch_current_unknowns);
+    let (condition, store_expr, invert_condition, condition_lines) = {
+        let mut emitter = CompactAdEmitter {
+            artifact,
+            prefix,
+            parameter_fields,
+            variables,
+            ddt_slots,
+            branch_current_unknowns,
+            ad_branch_axis_count: branch_axis_count,
+            emitted: HashMap::new(),
+            repeated_ad_counts: HashMap::new(),
+            repeated_ad_locals: HashMap::new(),
+            condition_values: HashMap::new(),
+            condition_counter: 0,
+            lines: Vec::new(),
+        };
+        let Some((condition, store_expr, invert_condition)) = emitter
+            .noop_conditional_assignment(assignment.expr.id, assignment.target_name.as_str())?
+        else {
+            return Ok(false);
+        };
+        let condition = emitter.lower_condition(condition)?;
+        (
+            condition,
+            store_expr,
+            invert_condition,
+            std::mem::take(&mut emitter.lines),
+        )
+    };
+
+    let branch_currents = HashMap::new();
+    let lowered = if reactive {
+        lower_reactive_assignment_expr_with_branch_currents(
+            artifact,
+            store_expr,
+            prefix,
+            parameter_fields,
+            variables,
+            ddt_slots,
+            &branch_currents,
+            branch_current_unknowns,
+        )?
+    } else if derivatives_live {
+        lower_assignment_expr_with_branch_currents(
+            artifact,
+            store_expr,
+            prefix,
+            parameter_fields,
+            variables,
+            ddt_slots,
+            &branch_currents,
+            branch_current_unknowns,
+        )?
+    } else {
+        lower_value_assignment_expr_with_branch_currents(
+            artifact,
+            store_expr,
+            prefix,
+            parameter_fields,
+            variables,
+            ddt_slots,
+            &branch_currents,
+            branch_current_unknowns,
+        )?
+    };
+
+    for line in condition_lines {
+        out.push_str(indent);
+        out.push_str(&line);
+        out.push('\n');
+    }
+    let condition = if invert_condition {
+        negate_condition(&condition)
+    } else {
+        condition
+    };
+    out.push_str(&format!("{indent}if {condition} {{\n"));
+    let branch_indent = format!("{indent}    ");
+    for line in &lowered.lines {
+        out.push_str(&branch_indent);
+        out.push_str(line);
+        out.push('\n');
+    }
+    let prior_has_reactive = target_variable.has_reactive;
+    emit_local_variable_assignment_store(
+        artifact,
+        assignment.target_name.as_str(),
+        target_variable.clone(),
+        lowered,
+        variables,
+        out,
+        reactive,
+        &branch_indent,
+    )?;
+    if let Some(target) = variables.get_mut(assignment.target_name.as_str()) {
+        target.has_reactive |= prior_has_reactive;
+    }
+    out.push_str(&format!("{indent}}}\n"));
+    Ok(true)
+}
+
+fn assign_local_value_and_derivative_lanes(
+    artifact: &CanonicalIrArtifact,
+    value_target: &str,
+    value: &str,
+    derivative_targets: &[String],
+    derivative_values: &[String],
+    branch_derivative_targets: &[String],
+    branch_derivative_values: &[String],
     out: &mut String,
     indent: &str,
 ) -> Result<(), RustBackendError> {
-    assign_local_derivative_lane_lines(targets, values, out, indent).map_err(|message| {
+    assign_local_value_and_derivative_lane_lines(
+        value_target,
+        value,
+        derivative_targets,
+        derivative_values,
+        branch_derivative_targets,
+        branch_derivative_values,
+        out,
+        indent,
+    )
+    .map_err(|message| {
         RustBackendError::internal(
             artifact.metadata.source_package.as_str(),
             artifact.mir.module_name.as_str(),
@@ -30268,6 +30451,71 @@ fn assign_local_derivative_lanes(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
+fn assign_local_value_and_derivative_lane_lines(
+    value_target: &str,
+    value: &str,
+    derivative_targets: &[String],
+    derivative_values: &[String],
+    branch_derivative_targets: &[String],
+    branch_derivative_values: &[String],
+    out: &mut String,
+    indent: &str,
+) -> Result<(), String> {
+    let mut pairs = vec![(value_target, value)];
+    collect_local_derivative_lane_pairs(&mut pairs, derivative_targets, derivative_values)?;
+    collect_local_derivative_lane_pairs(
+        &mut pairs,
+        branch_derivative_targets,
+        branch_derivative_values,
+    )?;
+    push_local_assignment_pairs(&pairs, out, indent);
+    Ok(())
+}
+
+fn collect_local_derivative_lane_pairs<'a>(
+    pairs: &mut Vec<(&'a str, &'a str)>,
+    targets: &'a [String],
+    values: &'a [String],
+) -> Result<(), String> {
+    for lane in 0..targets.len().max(values.len()) {
+        let target = targets.get(lane).map(String::as_str).unwrap_or("0.0");
+        let value = values.get(lane).map(String::as_str).unwrap_or("0.0");
+        if target == "0.0" {
+            if !is_zero_derivative(value) {
+                return Err(format!(
+                    "nonzero derivative {value} assigned to non-live local lane {lane}",
+                ));
+            }
+            continue;
+        }
+        pairs.push((target, value));
+    }
+    Ok(())
+}
+
+fn push_local_assignment_pairs(pairs: &[(&str, &str)], out: &mut String, indent: &str) {
+    for chunk in pairs.chunks(MAX_LOCAL_ASSIGNMENT_TUPLE_LANES) {
+        if let [(target, value)] = chunk {
+            out.push_str(&format!("{indent}{target} = {value};\n"));
+            continue;
+        }
+        out.push_str(indent);
+        out.push('(');
+        for (target, _) in chunk {
+            out.push_str(target);
+            out.push_str(", ");
+        }
+        out.push_str(") = (");
+        for (_, value) in chunk {
+            out.push_str(value);
+            out.push_str(", ");
+        }
+        out.push_str(");\n");
+    }
+}
+
+#[cfg(test)]
 fn assign_local_derivative_lane_lines(
     targets: &[String],
     values: &[String],
@@ -45098,11 +45346,14 @@ fn branch_derivative_axis_count(
 #[cfg(test)]
 mod dense_derivative_ref_tests {
     use super::{
-        ScratchDerivativeKind, ScratchDerivativeRow, assign_local_derivative_lane_lines,
-        direct_scratch_derivative_row, emit_dense_derivative_refs,
+        DdtSlots, HirExprKind, HirStatement, LoweredVariable, ScratchDerivativeKind,
+        ScratchDerivativeRow, assign_local_derivative_lane_lines,
+        assign_local_value_and_derivative_lane_lines, direct_scratch_derivative_row,
+        emit_dense_derivative_refs, emit_local_conditional_noop_assignment, emit_stamp_local_frame,
         helper_module_uses_ad_value_alias, index_or_mixed_helper_name, is_inline_derivative_expr,
         local_variable_ad_value_expr, reconcile_helper_super_imports,
     };
+    use std::collections::HashMap;
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
@@ -45209,6 +45460,143 @@ impl Instance {
         assert_eq!(
             out,
             "        var_drive_db0 = rhs_db0;\n        var_drive_db1 = 0.0;\n        var_drive_db2 = 0.0;\n"
+        );
+    }
+
+    #[test]
+    fn local_value_assignment_groups_live_derivative_lanes() {
+        let derivative_targets = strings(&["var_drive_dn0", "0.0"]);
+        let derivative_values = strings(&["rhs_dn0", "0.0"]);
+        let branch_derivative_targets = strings(&["var_drive_db0", "var_drive_db1"]);
+        let branch_derivative_values = strings(&["rhs_db0"]);
+        let mut out = String::new();
+
+        assign_local_value_and_derivative_lane_lines(
+            "var_drive",
+            "rhs",
+            &derivative_targets,
+            &derivative_values,
+            &branch_derivative_targets,
+            &branch_derivative_values,
+            &mut out,
+            "        ",
+        )
+        .expect("assign compact local value and derivatives");
+
+        assert_eq!(
+            out,
+            "        (var_drive, var_drive_dn0, var_drive_db0, var_drive_db1, ) = (rhs, rhs_dn0, rhs_db0, 0.0, );\n"
+        );
+    }
+
+    #[test]
+    fn stamp_local_frame_groups_fields() {
+        let names = strings(&["var_a", "var_a_dn0", "var_a_dn1", "var_b", "var_b_dn0"]);
+
+        let frame = emit_stamp_local_frame(&names);
+
+        assert!(frame.contains(
+            "    pub(crate) var_a: f64, pub(crate) var_a_dn0: f64, pub(crate) var_a_dn1: f64, pub(crate) var_b: f64,\n"
+        ));
+        assert!(frame.contains("    pub(crate) var_b_dn0: f64,\n"));
+    }
+
+    #[test]
+    fn local_noop_conditionals_emit_guarded_store() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module local_noop_conditional_guard(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real enable = 1.0;
+    real state, drive;
+    analog begin
+        state = 0.0;
+        drive = V(p, n);
+        state = (enable != 0.0) ? drive : state;
+        I(p, n) <+ state;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+        let assignment = artifact
+            .hir
+            .statements
+            .iter()
+            .filter_map(|statement| match statement {
+                HirStatement::Assignment(assignment)
+                    if assignment.target_name == "state"
+                        && matches!(
+                            artifact.mir.expressions[usize::from(assignment.expr.id)].kind,
+                            HirExprKind::Conditional { .. }
+                        ) =>
+                {
+                    Some(assignment)
+                }
+                _ => None,
+            })
+            .next()
+            .expect("conditional state assignment");
+        let state = LoweredVariable {
+            value: "var_state".to_string(),
+            condition: None,
+            derivatives: strings(&["var_state_dn0", "var_state_dn1"]),
+            branch_derivatives: Vec::new(),
+            has_reactive: false,
+            reactive_value: "0.0".to_string(),
+            reactive_derivatives: strings(&["0.0", "0.0"]),
+            reactive_branch_derivatives: Vec::new(),
+        };
+        let drive = LoweredVariable {
+            value: "var_drive".to_string(),
+            condition: None,
+            derivatives: strings(&["var_drive_dn0", "var_drive_dn1"]),
+            branch_derivatives: Vec::new(),
+            has_reactive: false,
+            reactive_value: "0.0".to_string(),
+            reactive_derivatives: strings(&["0.0", "0.0"]),
+            reactive_branch_derivatives: Vec::new(),
+        };
+        let mut variables = HashMap::from([
+            ("state".to_string(), state.clone()),
+            ("drive".to_string(), drive),
+        ]);
+        let parameter_fields = HashMap::from([("enable".to_string(), "p0".to_string())]);
+        let ddt_slots = DdtSlots::default();
+        let branch_current_unknowns = HashMap::new();
+        let mut out = String::new();
+
+        assert!(
+            emit_local_conditional_noop_assignment(
+                &artifact,
+                assignment,
+                &parameter_fields,
+                &mut variables,
+                &state,
+                &mut out,
+                &ddt_slots,
+                &branch_current_unknowns,
+                true,
+                false,
+                "        ",
+                "assign0",
+            )
+            .expect("emit local no-op conditional")
+        );
+
+        assert!(out.contains("        if (params.p0 != 0.0) {\n"), "{out}");
+        assert!(
+            out.contains(
+                "            (var_state, var_state_dn0, var_state_dn1, ) = (var_drive, var_drive_dn0, var_drive_dn1, );\n"
+            ),
+            "{out}"
+        );
+        assert!(
+            !out.contains("else {\n        (var_state")
+                && !out.contains("else {\n            (var_state"),
+            "{out}"
         );
     }
 
