@@ -2,6 +2,9 @@
 
 #![allow(clippy::type_complexity)]
 use crate::Value;
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
+use std::ops::Bound::{Excluded, Unbounded};
 
 type ChargeLteInputs<'a> = (&'a [Value], &'a [Value], &'a [Value], &'a [Value]);
 const TRAPGEAR_SIGN_CHANGE_FLOOR: Value = crate::constants::VNTOL;
@@ -144,6 +147,29 @@ const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
 /// post-breakpoint state of ideal energy-storage devices.
 const BREAKPOINT_RESTART_STEP_SCALE: Value = 0.005;
 
+#[derive(Debug, Clone, Copy)]
+struct BreakpointTimeKey(Value);
+
+impl PartialEq for BreakpointTimeKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.total_cmp(&other.0) == Ordering::Equal
+    }
+}
+
+impl Eq for BreakpointTimeKey {}
+
+impl PartialOrd for BreakpointTimeKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for BreakpointTimeKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
 /// Breakpoint manager for handling discontinuities
 ///
 /// Ensures solver lands exactly on breakpoints and restarts from the same
@@ -157,7 +183,7 @@ pub struct BreakpointManager {
     /// Code-model event requests are re-issued from accepted model state. They
     /// should therefore replace the prior runtime schedule instead of
     /// accumulating with source/permanent breakpoints.
-    runtime_breakpoints: Vec<Value>,
+    runtime_breakpoints: BTreeSet<BreakpointTimeKey>,
     /// Index of next unprocessed breakpoint (for efficiency)
     current_index: usize,
     /// Flag indicating we just passed a breakpoint
@@ -182,7 +208,7 @@ impl BreakpointManager {
     pub fn new_with_tolerance(tolerance: Value) -> Self {
         Self {
             breakpoints: Vec::new(),
-            runtime_breakpoints: Vec::new(),
+            runtime_breakpoints: BTreeSet::new(),
             current_index: 0,
             just_passed_breakpoint: false,
             saved_delta_before_breakpoint: None,
@@ -221,7 +247,7 @@ impl BreakpointManager {
             ) {
                 continue;
             }
-            Self::insert_sorted_unique(&mut self.runtime_breakpoints, time, self.tolerance);
+            Self::insert_runtime_unique(&mut self.runtime_breakpoints, time, self.tolerance);
         }
     }
 
@@ -243,6 +269,29 @@ impl BreakpointManager {
         }
         let pos = Self::sorted_insert_position(values, time);
         Self::neighbors_within_tolerance(values, pos, time, tolerance)
+    }
+
+    fn insert_runtime_unique(
+        values: &mut BTreeSet<BreakpointTimeKey>,
+        time: Value,
+        tolerance: Value,
+    ) -> bool {
+        if !time.is_finite() || Self::contains_runtime_within_tolerance(values, time, tolerance) {
+            return false;
+        }
+        values.insert(BreakpointTimeKey(time))
+    }
+
+    fn contains_runtime_within_tolerance(
+        values: &BTreeSet<BreakpointTimeKey>,
+        time: Value,
+        tolerance: Value,
+    ) -> bool {
+        let lower = time - tolerance;
+        values
+            .range((Excluded(BreakpointTimeKey(lower)), Unbounded))
+            .next()
+            .is_some_and(|existing| (existing.0 - time).abs() < tolerance)
     }
 
     fn sorted_insert_position(values: &[Value], time: Value) -> usize {
@@ -285,9 +334,12 @@ impl BreakpointManager {
             .find(|&t| t > time + self.tolerance);
         let runtime = self
             .runtime_breakpoints
-            .iter()
-            .copied()
-            .find(|&t| t > time + self.tolerance);
+            .range((
+                Excluded(BreakpointTimeKey(time + self.tolerance)),
+                Unbounded,
+            ))
+            .next()
+            .map(|time| time.0);
         match (permanent, runtime) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (Some(a), None) => Some(a),
@@ -303,8 +355,7 @@ impl BreakpointManager {
         {
             self.current_index += 1;
         }
-        self.runtime_breakpoints
-            .retain(|&bp| bp > time + self.tolerance);
+        self.remove_runtime_through(time);
     }
 
     /// Check if current time is exactly at a breakpoint
@@ -312,20 +363,29 @@ impl BreakpointManager {
         self.breakpoints
             .iter()
             .skip(self.current_index)
-            .chain(self.runtime_breakpoints.iter())
             .any(|&bp| (time - bp).abs() < self.tolerance)
+            || self
+                .runtime_breakpoints
+                .iter()
+                .any(|bp| (time - bp.0).abs() < self.tolerance)
     }
 
     /// Return the exact breakpoint time when `time` is within the breakpoint
     /// tolerance. This keeps source evaluation and breakpoint bookkeeping on
     /// the same side of discontinuities after floating-point timestep cuts.
     pub fn snap_to_breakpoint(&self, time: Value) -> Value {
-        self.breakpoints
+        if let Some(&breakpoint) = self
+            .breakpoints
             .iter()
             .skip(self.current_index)
-            .chain(self.runtime_breakpoints.iter())
             .find(|&&bp| (time - bp).abs() < self.tolerance)
-            .copied()
+        {
+            return breakpoint;
+        }
+        self.runtime_breakpoints
+            .iter()
+            .find(|breakpoint| (time - breakpoint.0).abs() < self.tolerance)
+            .map(|breakpoint| breakpoint.0)
             .unwrap_or(time)
     }
 
@@ -369,8 +429,7 @@ impl BreakpointManager {
         {
             self.current_index += 1;
         }
-        self.runtime_breakpoints
-            .retain(|&bp| bp > time + self.tolerance);
+        self.remove_runtime_through(time);
         self.just_passed_breakpoint = true;
         let next_gap = self
             .next_after(time)
@@ -418,6 +477,20 @@ impl BreakpointManager {
     /// Borrow the sorted breakpoint schedule.
     pub fn times(&self) -> &[Value] {
         &self.breakpoints
+    }
+
+    fn remove_runtime_through(&mut self, time: Value) {
+        let cutoff = time + self.tolerance;
+        let mut retained = self
+            .runtime_breakpoints
+            .split_off(&BreakpointTimeKey(cutoff));
+        while retained
+            .first()
+            .is_some_and(|breakpoint| breakpoint.0 <= cutoff)
+        {
+            retained.pop_first();
+        }
+        self.runtime_breakpoints = retained;
     }
 }
 
@@ -508,7 +581,21 @@ mod breakpoint_manager_tests {
             -1.0,
         ]);
 
-        assert_eq!(breakpoints.runtime_breakpoints, vec![4.0e-9, 5.0e-9]);
+        let runtime_breakpoints = breakpoints
+            .runtime_breakpoints
+            .iter()
+            .map(|time| time.0)
+            .collect::<Vec<_>>();
+        assert_eq!(runtime_breakpoints, vec![4.0e-9, 5.0e-9]);
+        assert_eq!(breakpoints.next_after(3.5e-9), Some(4.0e-9));
+
+        breakpoints.discard_through(4.0e-9);
+        let remaining_runtime_breakpoints = breakpoints
+            .runtime_breakpoints
+            .iter()
+            .map(|time| time.0)
+            .collect::<Vec<_>>();
+        assert_eq!(remaining_runtime_breakpoints, vec![5.0e-9]);
     }
 
     #[test]
