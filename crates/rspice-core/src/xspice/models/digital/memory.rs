@@ -592,6 +592,10 @@ impl CodeModel for DigitalRam {
         })
     }
 
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let shape = d_ram_cached_shape(ctx)?;
         ctx.allocate_int_states(d_ram_state_len(shape));
