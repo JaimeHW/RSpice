@@ -197,10 +197,7 @@ fn d_lut_index_for_width(inputs: &[DigitalValue], input_width: usize) -> CmResul
         match input.state.logic_level() {
             Some(false) => {}
             Some(true) => {
-                let mask = 1usize.checked_shl(bit as u32).ok_or_else(|| {
-                    d_lut_error(format!("input vector width {input_width} is too large"))
-                })?;
-                index |= mask;
+                index |= 1usize << bit;
             }
             None => return Ok(None),
         }
