@@ -732,7 +732,6 @@ fn bidi_drive_current(
         };
     }
 
-    let step = bidi_analog_step(ctx);
     let mut svoc = ctx.state_prev(BIDI_STATE_SVOC_BASE + index).clamp(0.0, 1.0);
     let mut current = ctx.state_prev(bidi_state_base(width) + index);
     if !current.is_finite() {
@@ -740,7 +739,7 @@ fn bidi_drive_current(
     }
     let mut partial = 0.0;
     for segment in bidi_analog_segments(ctx, index, drive, width) {
-        svoc = bidi_advance_svoc(svoc, segment.drive, step, params);
+        svoc = bidi_advance_svoc(svoc, segment.drive, segment.interval, params);
         let (target, segment_partial, range) =
             bidi_current_target(voltage, segment.drive, svoc, params);
         partial = segment_partial;
@@ -1806,7 +1805,7 @@ mod tests {
     }
 
     #[test]
-    fn bidi_bridge_mid_step_dac_event_applies_full_step_svoc_per_segment_like_ngspice() {
+    fn bidi_bridge_mid_step_dac_event_advances_svoc_by_segment_interval() {
         let mut ctx = CmContext::new();
         set_bidi_default_params(&mut ctx, 0.0);
         ctx.set_param("r_stl", 10.0);
@@ -1842,8 +1841,8 @@ mod tests {
             .expect("bidi_bridge evaluates");
 
         assert!(
-            ctx.state(BIDI_STATE_SVOC_BASE).abs() <= 1.0e-15,
-            "ngspice advances bidi_bridge svoc by the full analog step for each split segment; got {}",
+            (ctx.state(BIDI_STATE_SVOC_BASE) - 0.75).abs() <= 1.0e-15,
+            "bidi_bridge should advance normalized open-circuit voltage by split event intervals, got {}",
             ctx.state(BIDI_STATE_SVOC_BASE)
         );
     }
