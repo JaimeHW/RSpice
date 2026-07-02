@@ -401,6 +401,65 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_lowers_guarded_internal_node_nqs_ddt() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_internal_node_nqs_ddt(p, n);
+    inout p, n;
+    electrical p, n;
+    electrical depl_A;
+    parameter real corecovery = 1.0 from [0:1];
+    parameter real depnqs = 1.0 from (0:inf);
+    real w_dep_a, w_qs_a, w_nqs_a, iw_nqs_a;
+    analog begin
+        w_dep_a = V(p, n);
+        w_qs_a = 0.0;
+        w_nqs_a = 0.0;
+        iw_nqs_a = 0.0;
+        if (corecovery > 0.0) begin
+            if (depnqs > 0.0) begin
+                w_qs_a = w_dep_a;
+                w_nqs_a = 2.0 * V(depl_A);
+                iw_nqs_a = (w_nqs_a - w_qs_a) / depnqs;
+            end else begin
+                w_qs_a = w_dep_a;
+                w_nqs_a = w_nqs_a;
+                iw_nqs_a = iw_nqs_a;
+            end
+        end
+        if (corecovery > 0.0 && depnqs > 0.0) begin
+            I(depl_A) <+ iw_nqs_a + ddt(w_nqs_a);
+        end else begin
+            V(depl_A) <+ 0.0;
+        end
+        I(p, n) <+ w_qs_a;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("guarded internal-node NQS DDT should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("eval_ddt("), "{stamp}");
+        assert!(stamp.contains("stamp_current_reactive"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_direct_branch_flow_ddt_potential() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
