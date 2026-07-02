@@ -1179,6 +1179,13 @@ impl XspiceInstance {
         self.model.requires_conservative_newton_damping()
     }
 
+    /// Whether this instance can participate in the direct linear transient
+    /// solve path.
+    #[inline]
+    pub fn has_memoryless_linear_transient_stamp(&self) -> bool {
+        self.model.has_memoryless_linear_transient_stamp()
+    }
+
     /// Get port specifications
     pub fn ports(&self) -> &[PortSpec] {
         &self.ports
