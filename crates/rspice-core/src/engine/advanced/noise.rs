@@ -1122,6 +1122,9 @@ impl Engine {
         let one = node(circuit, "1")?;
 
         let device = &circuit.ekv3s.devices[0];
+        if !device.is_validated_nmos150() {
+            return Err(reject("fixture requires the validated NMOS150 EKV3 card"));
+        }
         if device.node_drain != d
             || device.node_gate != g
             || device.node_source != s

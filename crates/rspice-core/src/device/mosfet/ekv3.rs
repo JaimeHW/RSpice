@@ -1,9 +1,9 @@
-//! Native EKV3 `LEVEL=301` NMOS150 compatibility slice.
+//! Native EKV3 `LEVEL=301` 150 nm compatibility slices.
 //!
-//! The supported surface is intentionally narrow: the VA-Models 150 nm NMOS
-//! card, four terminals, `W=L=150 nm`, `NF=1`, source-backed `ekv3_rf` DC
-//! current equations, and the existing Xyce VANOISE small-signal/noise
-//! operating point.
+//! The supported surface is intentionally narrow: the VA-Models/Xyce 150 nm
+//! NMOS and PMOS cards, four terminals, `W=L=150 nm`, `NF=1`, source-backed
+//! `ekv3_rf` DC current equations, and the existing Xyce NMOS VANOISE
+//! small-signal/noise operating point.
 //! Other EKV3 cards and analyses fail closed in the builder/engine.
 
 use super::mosfet::MosType;
@@ -21,8 +21,6 @@ const BULK_IDX: usize = 3;
 const VALIDATED_W: Value = 150.0e-9;
 const VALIDATED_L: Value = 150.0e-9;
 const VALIDATED_NF: Value = 1.0;
-const EKV3_NMOS150_DW: Value = -45.3e-9;
-const EKV3_NMOS150_RLX: Value = 170.0e-6;
 const EKV3_MINIMUM_RESISTANCE: Value = 1.0e-3;
 const VANOISE_DRAIN_L_H: Value = 1.0e-3;
 const VANOISE_DRAIN_C_F: Value = 1.0e-3;
@@ -107,8 +105,303 @@ const EKV3_NMOS150_PARAMS: &[(&str, Value)] = &[
     ("TCVWL", 0.0),
 ];
 
-const EKV3_OPTIONAL_MODEL_PARAMS: &[(&str, Value)] = &[("TYPE", 1.0)];
+const EKV3_PMOS150_PARAMS: &[(&str, Value)] = &[
+    ("LEVEL", 301.0),
+    ("SIGN", -1.0),
+    ("TG", 1.0),
+    ("SCALE", 1.0),
+    ("XL", 0.0),
+    ("XW", 0.0),
+    ("COX", 8.80e-3),
+    ("GAMMAG", 300.0),
+    ("AQMA", 400.0e-3),
+    ("AQMI", 1.0),
+    ("ETAQM", 0.75),
+    ("VTO", -940.0e-3),
+    ("PHIF", 452.0e-3),
+    ("GAMMA", 610.0e-3),
+    ("XJ", 50.0e-9),
+    ("N0", 1.050),
+    ("KP", 82.0e-6),
+    ("E0", 2.10e6),
+    ("E1", 760.0e6),
+    ("ETA", 0.0),
+    ("ZC", 1.0e-6),
+    ("THC", 0.0),
+    ("PDITS", 0.0),
+    ("PDITSD", 0.9),
+    ("PDITSL", 0.0),
+    ("FPROUT", 1.4e6),
+    ("DDITS", 0.16),
+    ("AVTO", 0.0),
+    ("AKP", 0.0),
+    ("AGAMMA", 0.0),
+    ("UCRIT", 5.5e6),
+    ("DELTA", 2.0),
+    ("LAMBDA", 0.54),
+    ("ACLM", 0.83),
+    ("DL", -24.2e-9),
+    ("DLC", 0.0),
+    ("WDL", 7.0e-15),
+    ("LL", 0.0),
+    ("LLN", 1.0),
+    ("DW", -7.2e-9),
+    ("DWC", 0.0),
+    ("LDW", 500.0e-18),
+    ("LETA0", 0.0),
+    ("LETA", 1.0),
+    ("LETA2", 0.0),
+    ("WETA", 1.0),
+    ("NCS", 1.0),
+    ("ETAD", 1.1),
+    ("SIGMAD", 0.3),
+    ("LR", 55.0e-9),
+    ("QLR", -2.9e-3),
+    ("NLR", 11.0e-3),
+    ("FLR", 1.34),
+    ("WR", 80.0e-9),
+    ("QWR", 4.5e-3),
+    ("NWR", 14.5e-3),
+    ("RLX", 700.0e-6),
+    ("LOV", 16.0e-9),
+    ("GAMMAOV", 4.2),
+    ("VFBOV", 0.0),
+    ("KJF", 210.0e-12),
+    ("CJF", 300.0e-3),
+    ("KG", 10.0e-6),
+    ("XB", 5.5),
+    ("EB", 21.0e9),
+    ("LOVIG", 3.0e-12),
+    ("TNOM", 30.0),
+    ("TCV", -1.250e-3),
+    ("BEX", -850.0e-3),
+    ("TE0EX", 0.0),
+    ("TE1EX", -4.0),
+    ("TETA", 0.0),
+    ("UCEX", 1.7),
+    ("TLAMBDA", 0.0),
+    ("TCVL", 0.0),
+    ("TCVW", 0.0),
+    ("TCVWL", 0.0),
+];
+
+const EKV3_NMOS150_OPTIONAL_MODEL_PARAMS: &[(&str, Value)] = &[("TYPE", 1.0)];
+const EKV3_PMOS150_OPTIONAL_MODEL_PARAMS: &[(&str, Value)] = &[("TYPE", -1.0)];
 const EKV3_INSTANCE_PARAMS: &[&str] = &["W", "WIDTH", "L", "LENGTH", "NF"];
+
+#[derive(Debug)]
+struct Ekv3ModelSpec {
+    label: &'static str,
+    mos_type: MosType,
+    params: &'static [(&'static str, Value)],
+    optional_params: &'static [(&'static str, Value)],
+    sign: Value,
+    tg: Value,
+    scale: Value,
+    cox: Value,
+    gammag: Value,
+    aqma: Value,
+    aqmi: Value,
+    etaqm: Value,
+    vto: Value,
+    phif: Value,
+    gamma: Value,
+    xj: Value,
+    n0: Value,
+    kp: Value,
+    e0: Value,
+    e1: Value,
+    eta: Value,
+    zc: Value,
+    thc: Value,
+    pdits: Value,
+    pditsd: Value,
+    pditsl: Value,
+    fprout: Value,
+    ddits: Value,
+    ucrit: Value,
+    delta: Value,
+    lambda: Value,
+    aclm: Value,
+    dl: Value,
+    wdl: Value,
+    ll: Value,
+    lln: Value,
+    dw: Value,
+    ldw: Value,
+    leta0: Value,
+    leta: Value,
+    weta: Value,
+    ncs: Value,
+    etad: Value,
+    sigmad: Value,
+    lr: Value,
+    qlr: Value,
+    nlr: Value,
+    flr: Value,
+    wr: Value,
+    qwr: Value,
+    nwr: Value,
+    rlx: Value,
+    gammaov: Value,
+    vfbov: Value,
+    kg: Value,
+    xb: Value,
+    eb: Value,
+    lovig: Value,
+    tnom: Value,
+    tcv: Value,
+    bex: Value,
+    te0ex: Value,
+    te1ex: Value,
+    teta: Value,
+    ucex: Value,
+    tlambda: Value,
+}
+
+impl Ekv3ModelSpec {
+    fn is_nmos150(&self) -> bool {
+        self.mos_type == MosType::Nmos
+    }
+}
+
+const EKV3_NMOS150_SPEC: Ekv3ModelSpec = Ekv3ModelSpec {
+    label: "NMOS150",
+    mos_type: MosType::Nmos,
+    params: EKV3_NMOS150_PARAMS,
+    optional_params: EKV3_NMOS150_OPTIONAL_MODEL_PARAMS,
+    sign: 1.0,
+    tg: -1.0,
+    scale: 1.0,
+    cox: 8.58e-3,
+    gammag: 18.4,
+    aqma: 0.0,
+    aqmi: 0.0,
+    etaqm: 0.75,
+    vto: 400.0e-3,
+    phif: 450.0e-3,
+    gamma: 300.0e-3,
+    xj: 30.0e-9,
+    n0: 1.025,
+    kp: 390.0e-6,
+    e0: 438.0e6,
+    e1: 159.0e6,
+    eta: 0.57,
+    zc: 1.0e-6,
+    thc: 0.0,
+    pdits: 2.58e-6,
+    pditsd: 0.91,
+    pditsl: 0.0,
+    fprout: 1.85e6,
+    ddits: 0.1,
+    ucrit: 5.0e6,
+    delta: 1.5,
+    lambda: 0.5,
+    aclm: 0.85,
+    dl: -16.7e-9,
+    wdl: 0.0,
+    ll: 0.0,
+    lln: 1.0,
+    dw: -45.3e-9,
+    ldw: 0.0,
+    leta0: 1.0e6,
+    leta: 1.3,
+    weta: 1.0,
+    ncs: 0.5,
+    etad: 0.75,
+    sigmad: 1.0,
+    lr: 100.0e-9,
+    qlr: 580.0e-6,
+    nlr: 100.0e-3,
+    flr: 2.0,
+    wr: 80.0e-9,
+    qwr: 500.0e-6,
+    nwr: 12.0e-3,
+    rlx: 170.0e-6,
+    gammaov: 5.0,
+    vfbov: 0.0,
+    kg: 50.0e-6,
+    xb: 5.5,
+    eb: 21.0e9,
+    lovig: 40.0e-12,
+    tnom: 30.0,
+    tcv: 600.0e-6,
+    bex: -1.6,
+    te0ex: -4.15,
+    te1ex: 0.0,
+    teta: 2.0e-3,
+    ucex: 1.2,
+    tlambda: 0.15,
+};
+
+const EKV3_PMOS150_SPEC: Ekv3ModelSpec = Ekv3ModelSpec {
+    label: "PMOS150",
+    mos_type: MosType::Pmos,
+    params: EKV3_PMOS150_PARAMS,
+    optional_params: EKV3_PMOS150_OPTIONAL_MODEL_PARAMS,
+    sign: -1.0,
+    tg: 1.0,
+    scale: 1.0,
+    cox: 8.80e-3,
+    gammag: 300.0,
+    aqma: 400.0e-3,
+    aqmi: 1.0,
+    etaqm: 0.75,
+    vto: -940.0e-3,
+    phif: 452.0e-3,
+    gamma: 610.0e-3,
+    xj: 50.0e-9,
+    n0: 1.050,
+    kp: 82.0e-6,
+    e0: 2.10e6,
+    e1: 760.0e6,
+    eta: 0.0,
+    zc: 1.0e-6,
+    thc: 0.0,
+    pdits: 0.0,
+    pditsd: 0.9,
+    pditsl: 0.0,
+    fprout: 1.4e6,
+    ddits: 0.16,
+    ucrit: 5.5e6,
+    delta: 2.0,
+    lambda: 0.54,
+    aclm: 0.83,
+    dl: -24.2e-9,
+    wdl: 7.0e-15,
+    ll: 0.0,
+    lln: 1.0,
+    dw: -7.2e-9,
+    ldw: 500.0e-18,
+    leta0: 0.0,
+    leta: 1.0,
+    weta: 1.0,
+    ncs: 1.0,
+    etad: 1.1,
+    sigmad: 0.3,
+    lr: 55.0e-9,
+    qlr: -2.9e-3,
+    nlr: 11.0e-3,
+    flr: 1.34,
+    wr: 80.0e-9,
+    qwr: 4.5e-3,
+    nwr: 14.5e-3,
+    rlx: 700.0e-6,
+    gammaov: 4.2,
+    vfbov: 0.0,
+    kg: 10.0e-6,
+    xb: 5.5,
+    eb: 21.0e9,
+    lovig: 3.0e-12,
+    tnom: 30.0,
+    tcv: -1.250e-3,
+    bex: -850.0e-3,
+    te0ex: 0.0,
+    te1ex: -4.0,
+    teta: 0.0,
+    ucex: 1.7,
+    tlambda: 0.0,
+};
 
 #[derive(Debug, Clone, Copy)]
 struct VanoiseOraclePoint {
@@ -185,6 +478,7 @@ pub struct Ekv3Device {
     pub node_gate: NodeId,
     pub node_source: NodeId,
     pub node_bulk: NodeId,
+    model_spec: &'static Ekv3ModelSpec,
     temperature_kelvin: Value,
     last_values: [Value; NODE_COUNT],
     converged_values: [Value; NODE_COUNT],
@@ -203,11 +497,11 @@ impl Ekv3Device {
         instance_params: &[(String, Value)],
         temperature_kelvin: Value,
     ) -> Result<Self, String> {
-        validate_model_params(mos_type, model_params)?;
-        validate_instance_params(instance_params)?;
+        let model_spec = validate_model_params(mos_type, model_params)?;
+        validate_instance_params(model_spec, instance_params)?;
         if !temperature_kelvin.is_finite() || temperature_kelvin <= 0.0 {
             return Err(format!(
-                "native EKV3 NMOS150 slice requires a finite positive simulation temperature; got {temperature_kelvin}"
+                "native EKV3 150 nm slice requires a finite positive simulation temperature; got {temperature_kelvin}"
             ));
         }
         Ok(Self {
@@ -216,6 +510,7 @@ impl Ekv3Device {
             node_gate: gate,
             node_source: source,
             node_bulk: bulk,
+            model_spec,
             temperature_kelvin,
             last_values: [0.0; NODE_COUNT],
             converged_values: [0.0; NODE_COUNT],
@@ -238,7 +533,7 @@ impl Ekv3Device {
     }
 
     fn stamp_linearized_at(&self, values: [Value; NODE_COUNT], matrix: &mut impl MatrixStamper) {
-        let op = ekv3_nmos150_rf_eval(values, self.temperature_kelvin);
+        let op = ekv3_rf_eval(self.model_spec, values, self.temperature_kelvin);
         let nodes = self.nodes();
         for row in 0..NODE_COUNT {
             if nodes[row] == 0 {
@@ -255,13 +550,17 @@ impl Ekv3Device {
         }
     }
 
+    pub(crate) fn is_validated_nmos150(&self) -> bool {
+        self.model_spec.is_nmos150()
+    }
+
     pub(crate) fn stamp_ac_transadmittance_delta(
         &self,
         frequency_hz: Value,
         mut add_real: impl FnMut(NodeId, NodeId, Value),
     ) {
         let target = oracle_transadmittance_at(frequency_hz);
-        let op = ekv3_nmos150_rf_eval(self.last_values, self.temperature_kelvin);
+        let op = ekv3_rf_eval(self.model_spec, self.last_values, self.temperature_kelvin);
         let wanted = [0.0, target, -target, 0.0];
         let nodes = self.nodes();
         for (col, wanted) in wanted.iter().enumerate() {
@@ -287,7 +586,7 @@ impl Ekv3Device {
 
     pub fn op_values(&self) -> Ekv3Op {
         let [vd, vg, vs, vb] = self.last_values;
-        let op = ekv3_nmos150_rf_eval(self.last_values, self.temperature_kelvin);
+        let op = ekv3_rf_eval(self.model_spec, self.last_values, self.temperature_kelvin);
         Ekv3Op {
             id: op.channel_id,
             vgs: vg - vs,
@@ -326,8 +625,12 @@ impl NonlinearDevice for Ekv3Device {
     }
 }
 
-fn ekv3_nmos150_rf_eval(values: [Value; NODE_COUNT], temperature_kelvin: Value) -> Ekv3Eval {
-    let currents = ekv3_nmos150_rf_terminal_currents(values, temperature_kelvin);
+fn ekv3_rf_eval(
+    spec: &'static Ekv3ModelSpec,
+    values: [Value; NODE_COUNT],
+    temperature_kelvin: Value,
+) -> Ekv3Eval {
+    let currents = ekv3_rf_terminal_currents(spec, values, temperature_kelvin);
     let mut terminal_derivatives = [[0.0; NODE_COUNT]; NODE_COUNT];
     let mut channel_derivatives = [0.0; NODE_COUNT];
     for col in 0..NODE_COUNT {
@@ -336,8 +639,8 @@ fn ekv3_nmos150_rf_eval(values: [Value; NODE_COUNT], temperature_kelvin: Value) 
         let mut minus = values;
         plus[col] += step;
         minus[col] -= step;
-        let hi = ekv3_nmos150_rf_terminal_currents(plus, temperature_kelvin);
-        let lo = ekv3_nmos150_rf_terminal_currents(minus, temperature_kelvin);
+        let hi = ekv3_rf_terminal_currents(spec, plus, temperature_kelvin);
+        let lo = ekv3_rf_terminal_currents(spec, minus, temperature_kelvin);
         channel_derivatives[col] = (hi.channel_id - lo.channel_id) / (2.0 * step);
         for row in 0..NODE_COUNT {
             terminal_derivatives[row][col] =
@@ -352,22 +655,23 @@ fn ekv3_nmos150_rf_eval(values: [Value; NODE_COUNT], temperature_kelvin: Value) 
     }
 }
 
-fn ekv3_nmos150_rf_terminal_currents(
+fn ekv3_rf_terminal_currents(
+    spec: &'static Ekv3ModelSpec,
     values: [Value; NODE_COUNT],
     temperature_kelvin: Value,
 ) -> Ekv3RfCurrents {
-    let channel_id = ekv3_nmos150_rf_current(values, temperature_kelvin);
-    let rd = ekv3_nmos150_rf_series_resistance();
+    let channel_id = ekv3_rf_current(spec, values, temperature_kelvin);
+    let rd = ekv3_rf_series_resistance(spec);
     let rs = rd;
     let mut internal = values;
     internal[DRAIN_IDX] -= channel_id * rd;
     internal[SOURCE_IDX] += channel_id * rs;
 
-    let intrinsic = ekv3_nmos150_intrinsic_currents(internal, temperature_kelvin);
+    let intrinsic = ekv3_intrinsic_currents(spec, internal, temperature_kelvin);
     let (d_gt_s, s_gt_d) = {
         let vd_ext = internal[DRAIN_IDX] - internal[BULK_IDX];
         let vs_ext = internal[SOURCE_IDX] - internal[BULK_IDX];
-        if vd_ext >= vs_ext {
+        if spec.sign * vd_ext >= spec.sign * vs_ext {
             (1.0, 0.0)
         } else {
             (0.0, 1.0)
@@ -378,15 +682,17 @@ fn ekv3_nmos150_rf_terminal_currents(
     terminal_currents[DRAIN_IDX] += channel_id;
     terminal_currents[SOURCE_IDX] -= channel_id;
 
-    let drain_gate_current = -(d_gt_s * intrinsic.igd
-        + s_gt_d * intrinsic.igs
-        + d_gt_s * intrinsic.igd_ov
-        + s_gt_d * intrinsic.igs_ov);
-    let source_gate_current = -(d_gt_s * intrinsic.igs
-        + s_gt_d * intrinsic.igd
-        + d_gt_s * intrinsic.igs_ov
-        + s_gt_d * intrinsic.igd_ov);
-    let bulk_gate_current = -intrinsic.igb;
+    let drain_gate_current = -spec.sign
+        * (d_gt_s * intrinsic.igd
+            + s_gt_d * intrinsic.igs
+            + d_gt_s * intrinsic.igd_ov
+            + s_gt_d * intrinsic.igs_ov);
+    let source_gate_current = -spec.sign
+        * (d_gt_s * intrinsic.igs
+            + s_gt_d * intrinsic.igd
+            + d_gt_s * intrinsic.igs_ov
+            + s_gt_d * intrinsic.igd_ov);
+    let bulk_gate_current = -spec.sign * intrinsic.igb;
 
     terminal_currents[DRAIN_IDX] += drain_gate_current;
     terminal_currents[GATE_IDX] -= drain_gate_current;
@@ -401,14 +707,18 @@ fn ekv3_nmos150_rf_terminal_currents(
     }
 }
 
-fn ekv3_nmos150_rf_current(values: [Value; NODE_COUNT], temperature_kelvin: Value) -> Value {
-    let rd = ekv3_nmos150_rf_series_resistance();
+fn ekv3_rf_current(
+    spec: &'static Ekv3ModelSpec,
+    values: [Value; NODE_COUNT],
+    temperature_kelvin: Value,
+) -> Value {
+    let rd = ekv3_rf_series_resistance(spec);
     let rs = rd;
     let f_at = |current: Value| {
         let mut internal = values;
         internal[DRAIN_IDX] -= current * rd;
         internal[SOURCE_IDX] += current * rs;
-        ekv3_nmos150_intrinsic_currents(internal, temperature_kelvin).channel_id - current
+        ekv3_intrinsic_currents(spec, internal, temperature_kelvin).channel_id - current
     };
 
     let f0 = f_at(0.0);
@@ -480,73 +790,82 @@ fn ekv3_nmos150_rf_current(values: [Value; NODE_COUNT], temperature_kelvin: Valu
     0.5 * (lo + hi)
 }
 
-fn ekv3_nmos150_rf_series_resistance() -> Value {
+fn ekv3_rf_series_resistance(spec: &Ekv3ModelSpec) -> Value {
+    let l = VALIDATED_L * spec.scale;
     let wf = VALIDATED_W / VALIDATED_NF;
-    let weff = (wf + EKV3_NMOS150_DW).max(1.0e-9);
+    let w = wf * spec.scale;
+    let weff = (w + spec.dw + spec.ldw / l).max(1.0e-9);
     let weff_nf = weff * VALIDATED_NF;
-    (EKV3_NMOS150_RLX / weff_nf).max(EKV3_MINIMUM_RESISTANCE)
+    (spec.rlx / weff_nf).max(EKV3_MINIMUM_RESISTANCE)
 }
 
-fn ekv3_nmos150_intrinsic_currents(
+#[allow(non_snake_case)]
+fn ekv3_intrinsic_currents(
+    spec: &'static Ekv3ModelSpec,
     values: [Value; NODE_COUNT],
     temperature_kelvin: Value,
 ) -> Ekv3IntrinsicCurrents {
-    const SIGN: Value = 1.0;
-    const SCALE: Value = 1.0;
-    const COX: Value = 8.58e-3;
-    const GAMMAG: Value = 18.4;
-    const AQMA: Value = 0.0;
-    const AQMI: Value = 0.0;
-    const ETAQM: Value = 0.75;
-    const VTO: Value = 400.0e-3;
-    const PHIF: Value = 450.0e-3;
-    const GAMMA: Value = 300.0e-3;
-    const XJ: Value = 30.0e-9;
-    const N0: Value = 1.025;
-    const KP: Value = 390.0e-6;
-    const E0: Value = 438.0e6;
-    const E1: Value = 159.0e6;
-    const ETA: Value = 0.57;
-    const ZC: Value = 1.0e-6;
-    const THC: Value = 0.0;
-    const PDITS: Value = 2.58e-6;
-    const PDITSD: Value = 0.91;
-    const PDITSL: Value = 0.0;
-    const FPROUT: Value = 1.85e6;
-    const DDITS: Value = 0.1;
-    const UCRIT: Value = 5.0e6;
-    const DELTA: Value = 1.5;
-    const LAMBDA: Value = 0.5;
-    const ACLM: Value = 0.85;
-    const DL: Value = -16.7e-9;
-    const DW: Value = EKV3_NMOS150_DW;
-    const LETA0: Value = 1.0e6;
-    const LETA: Value = 1.3;
-    const WETA: Value = 1.0;
-    const NCS: Value = 0.5;
-    const ETAD: Value = 0.75;
-    const SIGMAD: Value = 1.0;
-    const LR: Value = 100.0e-9;
-    const QLR: Value = 580.0e-6;
-    const NLR: Value = 100.0e-3;
-    const FLR: Value = 2.0;
-    const WR: Value = 80.0e-9;
-    const QWR: Value = 500.0e-6;
-    const NWR: Value = 12.0e-3;
-    const GAMMAOV: Value = 5.0;
-    const VFBOV: Value = 0.0;
-    const KG: Value = 50.0e-6;
-    const XB: Value = 5.5;
-    const EB: Value = 21.0e9;
-    const LOVIG: Value = 40.0e-12;
-    const TNOM: Value = 30.0;
-    const TCV: Value = 600.0e-6;
-    const BEX: Value = -1.6;
-    const TE0EX: Value = -4.15;
-    const TE1EX: Value = 0.0;
-    const TETA: Value = 2.0e-3;
-    const UCEX: Value = 1.2;
-    const TLAMBDA: Value = 0.15;
+    let SIGN = spec.sign;
+    let TG = spec.tg;
+    let SCALE = spec.scale;
+    let COX = spec.cox;
+    let GAMMAG = spec.gammag;
+    let AQMA = spec.aqma;
+    let AQMI = spec.aqmi;
+    let ETAQM = spec.etaqm;
+    let VTO = spec.vto;
+    let PHIF = spec.phif;
+    let GAMMA = spec.gamma;
+    let XJ = spec.xj;
+    let N0 = spec.n0;
+    let KP = spec.kp;
+    let E0 = spec.e0;
+    let E1 = spec.e1;
+    let ETA = spec.eta;
+    let ZC = spec.zc;
+    let THC = spec.thc;
+    let PDITS = spec.pdits;
+    let PDITSD = spec.pditsd;
+    let PDITSL = spec.pditsl;
+    let FPROUT = spec.fprout;
+    let DDITS = spec.ddits;
+    let UCRIT = spec.ucrit;
+    let DELTA = spec.delta;
+    let LAMBDA = spec.lambda;
+    let ACLM = spec.aclm;
+    let DL = spec.dl;
+    let WDL = spec.wdl;
+    let LL = spec.ll;
+    let LLN = spec.lln;
+    let DW = spec.dw;
+    let LDW = spec.ldw;
+    let LETA0 = spec.leta0;
+    let LETA = spec.leta;
+    let WETA = spec.weta;
+    let NCS = spec.ncs;
+    let ETAD = spec.etad;
+    let SIGMAD = spec.sigmad;
+    let LR = spec.lr;
+    let QLR = spec.qlr;
+    let NLR = spec.nlr;
+    let FLR = spec.flr;
+    let WR = spec.wr;
+    let QWR = spec.qwr;
+    let NWR = spec.nwr;
+    let GAMMAOV = spec.gammaov;
+    let VFBOV = spec.vfbov;
+    let KG = spec.kg;
+    let XB = spec.xb;
+    let EB = spec.eb;
+    let LOVIG = spec.lovig;
+    let TNOM = spec.tnom;
+    let TCV = spec.tcv;
+    let BEX = spec.bex;
+    let TE0EX = spec.te0ex;
+    let TE1EX = spec.te1ex;
+    let TETA = spec.teta;
+    let UCEX = spec.ucex;
+    let TLAMBDA = spec.tlambda;
     const IBB: Value = 300.0e6;
     const IBBT: Value = 800.0e-6;
 
@@ -572,8 +891,12 @@ fn ekv3_nmos150_intrinsic_currents(
     let l = VALIDATED_L * SCALE;
     let wf = VALIDATED_W / VALIDATED_NF;
     let w = wf * SCALE;
-    let mut leff = l + DL;
-    let mut weff = w + DW;
+    let mut leff = if LL == 0.0 {
+        l + DL + WDL / w
+    } else {
+        l + DL + WDL / w - LL * lexp(LLN * (1.0 / l).ln())
+    };
+    let mut weff = w + DW + LDW / l;
     leff = leff.max(1.0e-9);
     weff = weff.max(1.0e-9);
 
@@ -796,7 +1119,7 @@ fn ekv3_nmos150_intrinsic_currents(
     let powqsqdpp1_2 = 1.0 / (qsqdpp1 * qsqdpp1);
     let i = if_ - irp;
 
-    let nq = nq(psi_p, sqrt_psi_p, qs, qdp, dpd, gamma_b_chsh, gamma_g2);
+    let nq = nq(psi_p, sqrt_psi_p, qs, qdp, dpd, gamma_b_chsh, gamma_g2, TG);
     let v_o = vg_p_chsh - psi_p0;
     let qr1 = 3.0 * ONESQRT2 * gamma_b_chsh;
     let qbo = if vg_p < 0.0 {
@@ -833,6 +1156,7 @@ fn ekv3_nmos150_intrinsic_currents(
         v_o_qme,
         gamma_g2,
         inv_dqmip1,
+        TG,
     );
     let qi = qs_charge + qd_charge;
     let qb = qg_charge - qi;
@@ -865,9 +1189,9 @@ fn ekv3_nmos150_intrinsic_currents(
     let ispec_dits = ispec * dits_factor;
     let ids = i * ispec_dits;
     let channel_id = SIGN * d_gt_s_flag * ids;
-    let (igd, igs, igb, igd_ov, igs_ov) = ekv3_nmos150_gate_currents(
+    let (igd, igs, igb, igd_ov, igs_ov) = ekv3_gate_currents(
         psi_p, v_o_qme, qs, if_, irp, nq, vg, vfb, vd, vs, gamma_g, gamma_g2, gamma_ov, gamma_ov2,
-        vfb_ov, xb, ub, leff, weff_nf, ut2, tox2, KG, LOVIG,
+        vfb_ov, xb, ub, leff, weff_nf, ut2, tox2, KG, LOVIG, TG,
     );
 
     Ekv3IntrinsicCurrents {
@@ -881,7 +1205,7 @@ fn ekv3_nmos150_intrinsic_currents(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn ekv3_nmos150_gate_currents(
+fn ekv3_gate_currents(
     psi_p: Value,
     v_o_qme: Value,
     qs: Value,
@@ -905,8 +1229,9 @@ fn ekv3_nmos150_gate_currents(
     tox2: Value,
     kg: Value,
     lovig: Value,
+    tg: Value,
 ) -> (Value, Value, Value, Value, Value) {
-    let (psi_ox, dpsi_dq) = if psi_p > 0.0 {
+    let (psi_ox, dpsi_dq) = if (psi_p > 0.0 && tg < 0.0) || (psi_p < 0.0 && tg > 0.0) {
         let v1_gc = (0.25 + (v_o_qme + 2.0 * qs) / gamma_g2).sqrt();
         let v2_gc = 0.5 + v1_gc;
         let psi_ox = (v_o_qme + 2.0 * qs) / v2_gc;
@@ -1035,12 +1360,17 @@ fn nq(
     dpd: Value,
     gamma_b: Value,
     gamma_g2: Value,
+    tg: Value,
 ) -> Value {
     let tmp_psi_sa = psi_p - qs - qd;
     let sqrt_psi_sa = maxa(tmp_psi_sa, 1.0e-4, 1.0e-2).sqrt();
-    let z0 = 1.0 + dpd + gamma_b / (sqrt_psi_p + sqrt_psi_sa);
-    let zk = 0.5 + dpd * sqrt_psi_sa / gamma_b;
-    z0 / (zk + (zk * zk + z0 * (qs + qd) / gamma_g2).sqrt())
+    if tg < 0.0 {
+        let z0 = 1.0 + dpd + gamma_b / (sqrt_psi_p + sqrt_psi_sa);
+        let zk = 0.5 + dpd * sqrt_psi_sa / gamma_b;
+        z0 / (zk + (zk * zk + z0 * (qs + qd) / gamma_g2).sqrt())
+    } else {
+        1.0 + gamma_b / (sqrt_psi_p + sqrt_psi_sa)
+    }
 }
 
 fn qx(
@@ -1072,23 +1402,34 @@ fn qg(
     v_o: Value,
     gamma_g2: Value,
     inv_dqmip1: Value,
+    tg: Value,
 ) -> Value {
     if psi_p > 2.0 {
-        let v1_qg = v_o + 2.0 * qs * inv_dqmip1;
-        let v2_qg = v_o + 2.0 * qd * inv_dqmip1;
-        let k1 = (0.25 + v1_qg / gamma_g2).sqrt();
-        let k2 = (0.25 + v2_qg / gamma_g2).sqrt();
-        let k12 = k1 + k2;
-        let k12_2 = k12 * k12;
-        let k12_3 = k12_2 * k12;
-        v1_qg / (1.0 + 2.0 * k1)
-            + v2_qg / (1.0 + 2.0 * k2)
-            + inv_dqmip1
-                * (1.0 / 3.0)
-                * (powqs_qd2 / k12_3)
-                * (0.8 * (k12_2 + k1 * k2) / qsqd1 + 2.0 / gamma_g2)
+        if tg < 0.0 {
+            let v1_qg = v_o + 2.0 * qs * inv_dqmip1;
+            let v2_qg = v_o + 2.0 * qd * inv_dqmip1;
+            let k1 = (0.25 + v1_qg / gamma_g2).sqrt();
+            let k2 = (0.25 + v2_qg / gamma_g2).sqrt();
+            let k12 = k1 + k2;
+            let k12_2 = k12 * k12;
+            let k12_3 = k12_2 * k12;
+            v1_qg / (1.0 + 2.0 * k1)
+                + v2_qg / (1.0 + 2.0 * k2)
+                + inv_dqmip1
+                    * (1.0 / 3.0)
+                    * (powqs_qd2 / k12_3)
+                    * (0.8 * (k12_2 + k1 * k2) / qsqd1 + 2.0 / gamma_g2)
+        } else {
+            v_o + qs + qd + inv_dqmip1 * (1.0 / 3.0) * powqs_qd2 / qsqd1
+        }
     } else if psi_p > 0.0 {
-        v_o / (0.5 + (0.25 + v_o / gamma_g2).sqrt())
+        if tg < 0.0 {
+            v_o / (0.5 + (0.25 + v_o / gamma_g2).sqrt())
+        } else {
+            v_o
+        }
+    } else if tg > 0.0 {
+        v_o / (0.5 + (0.25 - v_o / gamma_g2).sqrt())
     } else {
         v_o
     }
@@ -1118,52 +1459,57 @@ fn mina(x: Value, y: Value, a: Value) -> Value {
 fn validate_model_params(
     mos_type: MosType,
     model_params: &HashMap<String, Value>,
-) -> Result<(), String> {
-    if mos_type != MosType::Nmos {
-        return Err(
-            "native EKV3 NMOS150 slice currently supports the VA-Models/Xyce NMOS150 card only"
-                .to_string(),
-        );
-    }
+) -> Result<&'static Ekv3ModelSpec, String> {
+    let spec = match mos_type {
+        MosType::Nmos => &EKV3_NMOS150_SPEC,
+        MosType::Pmos => &EKV3_PMOS150_SPEC,
+    };
 
     for (name, value) in model_params {
         let upper = name.to_ascii_uppercase();
-        if let Some((_, expected)) = EKV3_NMOS150_PARAMS
+        if let Some((_, expected)) = spec
+            .params
             .iter()
-            .chain(EKV3_OPTIONAL_MODEL_PARAMS.iter())
+            .chain(spec.optional_params.iter())
             .find(|(param, _)| *param == upper)
         {
             if !approx_eq(*value, *expected) {
                 return Err(format!(
-                    "native EKV3 NMOS150 slice requires model parameter {upper}={expected}; got {value}"
+                    "native EKV3 {} slice requires model parameter {upper}={expected}; got {value}",
+                    spec.label
                 ));
             }
         } else {
             return Err(format!(
-                "native EKV3 NMOS150 slice does not support model parameter {name}={value}; unsupported EKV3 cards remain fail-closed"
+                "native EKV3 {} slice does not support model parameter {name}={value}; unsupported EKV3 cards remain fail-closed",
+                spec.label
             ));
         }
     }
 
-    for (name, expected) in EKV3_NMOS150_PARAMS {
-        let actual = finite_model(model_params, name)?;
+    for (name, expected) in spec.params {
+        let actual = finite_model(spec, model_params, name)?;
         if !approx_eq(actual, *expected) {
             return Err(format!(
-                "native EKV3 NMOS150 slice requires model parameter {name}={expected}; got {actual}"
+                "native EKV3 {} slice requires model parameter {name}={expected}; got {actual}",
+                spec.label
             ));
         }
     }
 
-    Ok(())
+    Ok(spec)
 }
 
-fn validate_instance_params(params: &[(String, Value)]) -> Result<(), String> {
-    let w = required_instance_alias(params, "W", "WIDTH", VALIDATED_W)?;
-    let l = required_instance_alias(params, "L", "LENGTH", VALIDATED_L)?;
-    let nf = required_instance(params, "NF", VALIDATED_NF)?;
-    require_instance("W", w, VALIDATED_W)?;
-    require_instance("L", l, VALIDATED_L)?;
-    require_instance("NF", nf, VALIDATED_NF)?;
+fn validate_instance_params(
+    spec: &'static Ekv3ModelSpec,
+    params: &[(String, Value)],
+) -> Result<(), String> {
+    let w = required_instance_alias(spec, params, "W", "WIDTH", VALIDATED_W)?;
+    let l = required_instance_alias(spec, params, "L", "LENGTH", VALIDATED_L)?;
+    let nf = required_instance(spec, params, "NF", VALIDATED_NF)?;
+    require_instance(spec, "W", w, VALIDATED_W)?;
+    require_instance(spec, "L", l, VALIDATED_L)?;
+    require_instance(spec, "NF", nf, VALIDATED_NF)?;
 
     for (name, value) in params {
         if EKV3_INSTANCE_PARAMS
@@ -1173,13 +1519,15 @@ fn validate_instance_params(params: &[(String, Value)]) -> Result<(), String> {
             continue;
         }
         return Err(format!(
-            "native EKV3 NMOS150 slice does not support instance parameter {name}={value}; unsupported EKV3 instances remain fail-closed"
+            "native EKV3 {} slice does not support instance parameter {name}={value}; unsupported EKV3 instances remain fail-closed",
+            spec.label
         ));
     }
     Ok(())
 }
 
 fn required_instance_alias(
+    spec: &'static Ekv3ModelSpec,
     params: &[(String, Value)],
     primary: &str,
     alias: &str,
@@ -1190,19 +1538,23 @@ fn required_instance_alias(
         instance_param(params, alias),
     ) {
         (Some(p), Some(a)) if !approx_eq(p, a) => Err(format!(
-            "native EKV3 NMOS150 slice instance uses conflicting {primary}/{alias} aliases {p} and {a}"
+            "native EKV3 {} slice instance uses conflicting {primary}/{alias} aliases {p} and {a}",
+            spec.label
         )),
         (Some(value), _) | (_, Some(value)) if value.is_finite() => Ok(value),
         (Some(value), _) | (_, Some(value)) => Err(format!(
-            "native EKV3 NMOS150 slice instance parameter {primary}/{alias} must be finite; got {value}"
+            "native EKV3 {} slice instance parameter {primary}/{alias} must be finite; got {value}",
+            spec.label
         )),
         (None, None) => Err(format!(
-            "native EKV3 NMOS150 slice requires explicit instance parameter {primary}={expected} or {alias}={expected}"
+            "native EKV3 {} slice requires explicit instance parameter {primary}={expected} or {alias}={expected}",
+            spec.label
         )),
     }
 }
 
 fn required_instance(
+    spec: &'static Ekv3ModelSpec,
     params: &[(String, Value)],
     name: &str,
     expected: Value,
@@ -1210,20 +1562,28 @@ fn required_instance(
     match instance_param(params, name) {
         Some(value) if value.is_finite() => Ok(value),
         Some(value) => Err(format!(
-            "native EKV3 NMOS150 slice instance parameter {name} must be finite; got {value}"
+            "native EKV3 {} slice instance parameter {name} must be finite; got {value}",
+            spec.label
         )),
         None => Err(format!(
-            "native EKV3 NMOS150 slice requires explicit instance parameter {name}={expected}"
+            "native EKV3 {} slice requires explicit instance parameter {name}={expected}",
+            spec.label
         )),
     }
 }
 
-fn require_instance(name: &str, actual: Value, expected: Value) -> Result<(), String> {
+fn require_instance(
+    spec: &'static Ekv3ModelSpec,
+    name: &str,
+    actual: Value,
+    expected: Value,
+) -> Result<(), String> {
     if approx_eq(actual, expected) {
         Ok(())
     } else {
         Err(format!(
-            "native EKV3 NMOS150 slice requires instance parameter {name}={expected}; got {actual}"
+            "native EKV3 {} slice requires instance parameter {name}={expected}; got {actual}",
+            spec.label
         ))
     }
 }
@@ -1236,12 +1596,21 @@ fn instance_param(params: &[(String, Value)], name: &str) -> Option<Value> {
         .map(|(_, value)| *value)
 }
 
-fn finite_model(params: &HashMap<String, Value>, name: &str) -> Result<Value, String> {
+fn finite_model(
+    spec: &'static Ekv3ModelSpec,
+    params: &HashMap<String, Value>,
+    name: &str,
+) -> Result<Value, String> {
     params
         .get(&name.to_ascii_uppercase())
         .copied()
         .filter(|value| value.is_finite())
-        .ok_or_else(|| format!("native EKV3 NMOS150 slice requires model parameter {name}"))
+        .ok_or_else(|| {
+            format!(
+                "native EKV3 {} slice requires model parameter {name}",
+                spec.label
+            )
+        })
 }
 
 fn oracle_transadmittance_at(frequency_hz: Value) -> Value {
