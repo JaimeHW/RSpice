@@ -7,7 +7,8 @@
 use super::digital::DigitalValue;
 use crate::Value;
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 
 //=============================================================================
 // Event Types
@@ -588,10 +589,12 @@ mod tests {
         ));
         assert_eq!(queue.len(), 2);
         assert_eq!(queue.next_event_time(), Some(1.0e-9));
-        assert!(queue
-            .driver_event_priorities
-            .get(&driver)
-            .is_some_and(|events| events.contains_key(&EventTimeKey(3.0e-9))));
+        assert!(
+            queue
+                .driver_event_priorities
+                .get(&driver)
+                .is_some_and(|events| events.contains_key(&EventTimeKey(3.0e-9)))
+        );
 
         queue.schedule(Event::new(
             2.0e-9,
@@ -601,19 +604,23 @@ mod tests {
             EventValue::Digital(DigitalValue::unknown()),
         ));
         assert_eq!(queue.len(), 2);
-        assert!(queue
-            .driver_event_priorities
-            .get(&driver)
-            .is_some_and(|events| !events.contains_key(&EventTimeKey(3.0e-9))
-                && events.contains_key(&EventTimeKey(2.0e-9))));
+        assert!(
+            queue
+                .driver_event_priorities
+                .get(&driver)
+                .is_some_and(|events| !events.contains_key(&EventTimeKey(3.0e-9))
+                    && events.contains_key(&EventTimeKey(2.0e-9)))
+        );
 
         let drained = queue.pop_events_at(1.0e-9);
         assert_eq!(drained.len(), 1);
         assert_eq!(queue.len(), 1);
-        assert!(queue
-            .driver_event_priorities
-            .get(&driver)
-            .is_some_and(|events| events.contains_key(&EventTimeKey(2.0e-9))));
+        assert!(
+            queue
+                .driver_event_priorities
+                .get(&driver)
+                .is_some_and(|events| events.contains_key(&EventTimeKey(2.0e-9)))
+        );
 
         queue.cancel_node_events(1);
         assert!(queue.active_event_priorities.is_empty());
@@ -709,8 +716,8 @@ mod tests {
 /// to process digital events or other discrete changes.
 #[derive(Debug, Default)]
 pub struct BreakpointManager {
-    /// Sorted list of breakpoint times
-    breakpoints: Vec<Value>,
+    /// Ordered set of breakpoint times.
+    breakpoints: BTreeSet<EventTimeKey>,
     /// Tolerance for breakpoint matching
     tolerance: Value,
 }
@@ -719,7 +726,7 @@ impl BreakpointManager {
     /// Create a new breakpoint manager
     pub fn new() -> Self {
         Self {
-            breakpoints: Vec::new(),
+            breakpoints: BTreeSet::new(),
             tolerance: 1e-18,
         }
     }
@@ -730,20 +737,11 @@ impl BreakpointManager {
             return;
         }
 
-        let pos = self.breakpoints.partition_point(|&bp| bp < time);
-        if self
-            .breakpoints
-            .get(pos)
-            .is_some_and(|&bp| (bp - time).abs() < self.tolerance)
-            || pos
-                .checked_sub(1)
-                .and_then(|prev| self.breakpoints.get(prev))
-                .is_some_and(|&bp| (bp - time).abs() < self.tolerance)
-        {
+        if self.has_breakpoint_within_tolerance(time) {
             return;
         }
 
-        self.breakpoints.insert(pos, time);
+        self.breakpoints.insert(EventTimeKey(time));
     }
 
     /// Get the next breakpoint after the given time
@@ -752,8 +750,10 @@ impl BreakpointManager {
             return None;
         }
         let cutoff = time + self.tolerance;
-        let pos = self.breakpoints.partition_point(|&bp| bp <= cutoff);
-        self.breakpoints.get(pos).copied()
+        self.breakpoints
+            .range((Excluded(EventTimeKey(cutoff)), Unbounded))
+            .next()
+            .map(|time| time.0)
     }
 
     /// Remove breakpoints at or before the given time
@@ -762,8 +762,14 @@ impl BreakpointManager {
             return;
         }
         let cutoff = time + self.tolerance;
-        let remove_count = self.breakpoints.partition_point(|&t| t <= cutoff);
-        self.breakpoints.drain(..remove_count);
+        let mut retained = self.breakpoints.split_off(&EventTimeKey(cutoff));
+        while retained
+            .first()
+            .is_some_and(|breakpoint| breakpoint.0 <= cutoff)
+        {
+            retained.pop_first();
+        }
+        self.breakpoints = retained;
     }
 
     /// Check if there's a breakpoint at the given time
@@ -771,11 +777,7 @@ impl BreakpointManager {
         if !time.is_finite() {
             return false;
         }
-        let lower = time - self.tolerance;
-        let pos = self.breakpoints.partition_point(|&t| t <= lower);
-        self.breakpoints
-            .get(pos)
-            .is_some_and(|&t| (t - time).abs() < self.tolerance)
+        self.has_breakpoint_within_tolerance(time)
     }
 
     /// Clear all breakpoints
@@ -788,12 +790,57 @@ impl BreakpointManager {
         if start.is_nan() || end.is_nan() || end <= start {
             return Vec::new();
         }
-        let start_pos = self.breakpoints.partition_point(|&t| t <= start);
-        let end_pos = self.breakpoints.partition_point(|&t| t <= end);
-        self.breakpoints[start_pos..end_pos].to_vec()
+        self.breakpoints
+            .range((Excluded(EventTimeKey(start)), Included(EventTimeKey(end))))
+            .map(|time| time.0)
+            .collect()
+    }
+
+    fn has_breakpoint_within_tolerance(&self, time: Value) -> bool {
+        let lower = time - self.tolerance;
+        self.breakpoints
+            .range((Excluded(EventTimeKey(lower)), Unbounded))
+            .next()
+            .is_some_and(|breakpoint| (breakpoint.0 - time).abs() < self.tolerance)
     }
 }
 
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod breakpoint_tests {
+    use super::*;
+
+    #[test]
+    fn breakpoint_manager_keeps_ordered_unique_times_with_tolerance() {
+        let mut breakpoints = BreakpointManager::new();
+
+        breakpoints.add(3.0e-9);
+        breakpoints.add(1.0e-9);
+        breakpoints.add(2.0e-9);
+        breakpoints.add(2.0e-9 + 0.5e-18);
+
+        assert_eq!(breakpoints.next_after(0.0), Some(1.0e-9));
+        assert_eq!(
+            breakpoints.in_interval(0.0, 3.0e-9),
+            vec![1.0e-9, 2.0e-9, 3.0e-9]
+        );
+        assert!(breakpoints.has_breakpoint_at(2.0e-9 + 0.5e-18));
+    }
+
+    #[test]
+    fn breakpoint_manager_removes_due_times_without_vec_shifts() {
+        let mut breakpoints = BreakpointManager::new();
+
+        for time in [4.0e-9, 1.0e-9, 3.0e-9, 2.0e-9] {
+            breakpoints.add(time);
+        }
+
+        breakpoints.remove_before(2.0e-9);
+
+        assert_eq!(breakpoints.next_after(0.0), Some(3.0e-9));
+        assert_eq!(breakpoints.in_interval(0.0, 5.0e-9), vec![3.0e-9, 4.0e-9]);
+    }
+}
