@@ -748,6 +748,7 @@ pub(super) fn parse_pspice_u_device(
             elements,
             params,
         ),
+        "CONSTRAINT" => parse_pspice_u_constraint(&name, &fields, count, line_num),
         "DFF" => parse_pspice_u_dff(
             &name,
             &fields,
@@ -1041,7 +1042,7 @@ pub(super) fn parse_pspice_u_device(
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, CONSTRAINT, DFF, DLTCH, DLYLINE, JKFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
                 fields[1]
             ),
         }),
@@ -1121,6 +1122,73 @@ fn parse_pspice_simple_u_gate_instance(
         ports,
         pspice_u_timing,
     );
+
+    Ok(())
+}
+
+fn parse_pspice_u_constraint(
+    name: &str,
+    fields: &[String],
+    count: Option<usize>,
+    line_num: usize,
+) -> Result<(), ParseError> {
+    let Some(input_count) = count else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice CONSTRAINT U-device '{}' requires a monitored pin count",
+                name
+            ),
+        });
+    };
+    if input_count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice CONSTRAINT U-device '{}' requires at least one monitored pin",
+                name
+            ),
+        });
+    }
+
+    let section_index = pspice_u_first_behavior_section_field(fields).unwrap_or(fields.len());
+    let pins = &fields[4..section_index];
+    let required = input_count
+        .checked_add(1)
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice CONSTRAINT U-device '{}' is too large", name),
+        })?;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice CONSTRAINT U-device '{}' requires {} monitored pin(s) and an I/O model",
+                name, input_count
+            ),
+        });
+    }
+
+    for pin in &pins[..input_count] {
+        if pspice_u_is_no_connect(pin) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "PSpice CONSTRAINT U-device '{}' cannot monitor {}",
+                    name, pin
+                ),
+            });
+        }
+    }
+    if pspice_u_timing_model_token(&pins[input_count]).is_none() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice CONSTRAINT U-device '{}' requires an I/O model after monitored pins",
+                name
+            ),
+        });
+    }
 
     Ok(())
 }

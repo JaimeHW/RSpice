@@ -6159,13 +6159,39 @@ mod tests {
     }
 
     #[test]
-    fn pspice_u_unsupported_frontend_families_fail_closed() {
-        let err = Netlist::parse(
-            "pspice u constraint unsupported slice\n\
-             U1 CONSTRAINT(1) $G_DPWR $G_DGND clk IO_STD\n\
+    fn pspice_u_constraint_accepts_timing_check_sections_without_outputs() {
+        let netlist = Netlist::parse(
+            "pspice u constraint timing checks\n\
+             U24 CONSTRAINT(3) $G_DPWR $G_DGND clk data en IO_STD IO_LEVEL=0\n\
+             + FREQ:\n\
+             +   NODE=clk\n\
+             +   MAXFREQ=32MEG\n\
+             + WIDTH:\n\
+             +   NODE=clk\n\
+             +   MIN_HI=15ns\n\
+             +   MIN_LO=15ns\n\
+             + SETUP_HOLD:\n\
+             +   CLOCK LH = clk\n\
+             +   DATA(1) = data\n\
+             +   SETUPTIME = 6ns\n\
              .end\n",
         )
-        .expect_err("CONSTRAINT lowering is not implemented in this slice");
+        .expect("PSpice CONSTRAINT timing checks should parse as non-driving metadata");
+
+        assert!(
+            netlist.elements.is_empty(),
+            "CONSTRAINT should not emit circuit-driving elements"
+        );
+    }
+
+    #[test]
+    fn pspice_u_unsupported_frontend_families_fail_closed() {
+        let err = Netlist::parse(
+            "pspice u ram unsupported slice\n\
+             U1 RAM(1) $G_DPWR $G_DGND addr data IO_STD\n\
+             .end\n",
+        )
+        .expect_err("RAM lowering is not implemented in this slice");
 
         assert!(
             err.to_string().contains("Unsupported PSpice U-device type"),
