@@ -197,12 +197,22 @@ impl CodeModel for Gain {
     }
 
     fn ac_gain(&self, ctx: &CmContext) -> Vec<Value> {
-        vec![ctx.param("gain")]
+        let gain = ctx.param("gain");
+        if gain.is_finite() {
+            vec![gain]
+        } else {
+            Vec::new()
+        }
     }
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
         if output_port.eq_ignore_ascii_case("out") {
-            vec![("in".to_string(), ctx.param("gain"))]
+            let gain = ctx.param("gain");
+            if gain.is_finite() {
+                vec![("in".to_string(), gain)]
+            } else {
+                Vec::new()
+            }
         } else {
             Vec::new()
         }
@@ -3009,6 +3019,24 @@ mod tests {
                 model.name()
             );
         }
+
+        let mut ctx = CmContext::new();
+        Gain.init(&mut ctx).expect("default gain params are valid");
+        ctx.set_param("gain", f64::NAN);
+        Gain.evaluate(&mut ctx)
+            .expect_err("mutated nonfinite gain params must fail at evaluation time");
+        assert!(
+            Gain.ac_gain(&ctx).is_empty(),
+            "mutated nonfinite gain must not produce AC gain"
+        );
+        assert!(
+            Gain.output_input_partials(&ctx, "out").is_empty(),
+            "mutated nonfinite gain must not produce DC partials"
+        );
+        assert!(
+            Gain.output_input_ac_partials(&ctx, "out", 1.0).is_empty(),
+            "mutated nonfinite gain must not produce AC partials"
+        );
     }
 
     #[test]
