@@ -51,8 +51,19 @@ fn transition_value(
     start_value + (target - start_value) * fraction
 }
 
-fn limited_event_delay(ctx: &CmContext, name: &str, default: Value) -> Value {
-    ctx.param_or(name, default).max(MIN_EVENT_DELAY)
+fn limited_event_delay(
+    ctx: &CmContext,
+    model: &str,
+    name: &str,
+    default: Value,
+) -> CmResult<Value> {
+    let delay = ctx.param_or(name, default);
+    if !delay.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "{model}: {name} must be finite, got {delay}"
+        )));
+    }
+    Ok(delay.max(MIN_EVENT_DELAY))
 }
 
 fn finite_event_delay(ctx: &CmContext, model: &str, name: &str, default: Value) -> CmResult<Value> {
@@ -198,7 +209,7 @@ impl CodeModel for DigitalToReal {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let delay = if ctx.time > 0.0 {
-            limited_event_delay(ctx, "delay", 1.0e-9)
+            limited_event_delay(ctx, "d_to_real", "delay", 1.0e-9)?
         } else {
             0.0
         };
@@ -355,7 +366,7 @@ impl CodeModel for RealDelay {
             ctx.set_output_real(
                 "out",
                 ctx.input_real("in").unwrap_or(0.0),
-                limited_event_delay(ctx, "delay", 1.0e-9),
+                limited_event_delay(ctx, "real_delay", "delay", 1.0e-9)?,
             );
         }
         if commit_outputs {
@@ -417,7 +428,7 @@ impl CodeModel for RealToVoltage {
             return Ok(());
         }
 
-        let transition_time = limited_event_delay(ctx, "transition_time", 1.0e-9);
+        let transition_time = limited_event_delay(ctx, "real_to_v", "transition_time", 1.0e-9)?;
         let accepted_output = ctx.state_prev(0);
         let accepted_target = ctx.state_prev(1);
         let accepted_start_time = ctx.state_prev(2);
@@ -593,6 +604,53 @@ mod tests {
             .expect("accepted real_delay step evaluates");
         assert_eq!(ctx.output_real("out"), Some(7.0));
         assert_eq!(ctx.int_state(0), 1);
+    }
+
+    #[test]
+    fn bounded_xtraevt_delays_reject_nonfinite_values() {
+        let mut d_to_real = CmContext::new();
+        d_to_real.analysis = AnalysisType::Transient;
+        d_to_real.time = 1.0e-9;
+        d_to_real.set_param("delay", f64::INFINITY);
+        d_to_real.set_input_digital("in", DigitalValue::one());
+        let err = DigitalToReal
+            .evaluate(&mut d_to_real)
+            .expect_err("d_to_real must reject nonfinite delay");
+        assert!(
+            err.to_string().contains("delay must be finite"),
+            "unexpected d_to_real error: {err:?}"
+        );
+        assert_eq!(d_to_real.output_real("out"), None);
+
+        let mut real_delay = CmContext::new();
+        real_delay.analysis = AnalysisType::Transient;
+        real_delay.set_param("delay", f64::INFINITY);
+        real_delay.set_input_real("in", 7.0);
+        real_delay.set_input_digital("clk", DigitalValue::zero());
+        RealDelay.init(&mut real_delay).expect("real_delay init");
+        real_delay.set_input_digital("clk", DigitalValue::one());
+        let err = RealDelay
+            .evaluate(&mut real_delay)
+            .expect_err("real_delay must reject nonfinite delay");
+        assert!(
+            err.to_string().contains("delay must be finite"),
+            "unexpected real_delay error: {err:?}"
+        );
+        assert_eq!(real_delay.output_real("out"), None);
+
+        let mut real_to_v = CmContext::new();
+        real_to_v.analysis = AnalysisType::Transient;
+        real_to_v.set_param("transition_time", f64::INFINITY);
+        real_to_v.set_input_real("in", 1.0);
+        RealToVoltage.init(&mut real_to_v).expect("real_to_v init");
+        let err = RealToVoltage
+            .evaluate(&mut real_to_v)
+            .expect_err("real_to_v must reject nonfinite transition_time");
+        assert!(
+            err.to_string().contains("transition_time must be finite"),
+            "unexpected real_to_v error: {err:?}"
+        );
+        assert!(real_to_v.take_requested_breakpoints().is_empty());
     }
 
     #[test]
