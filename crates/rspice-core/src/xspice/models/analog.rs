@@ -4152,6 +4152,86 @@ mod tests {
     }
 
     #[test]
+    fn calculus_models_reject_nonfinite_scalar_params() {
+        for (model, param, value) in [
+            (&Integrator as &dyn CodeModel, "in_offset", f64::NAN),
+            (&Integrator as &dyn CodeModel, "gain", f64::INFINITY),
+            (
+                &Integrator as &dyn CodeModel,
+                "out_lower_limit",
+                f64::NEG_INFINITY,
+            ),
+            (
+                &Integrator as &dyn CodeModel,
+                "out_upper_limit",
+                f64::INFINITY,
+            ),
+            (&Integrator as &dyn CodeModel, "limit_range", f64::NAN),
+            (&Integrator as &dyn CodeModel, "out_ic", f64::INFINITY),
+            (&Differentiator as &dyn CodeModel, "out_offset", f64::NAN),
+            (&Differentiator as &dyn CodeModel, "gain", f64::INFINITY),
+            (
+                &Differentiator as &dyn CodeModel,
+                "out_lower_limit",
+                f64::NEG_INFINITY,
+            ),
+            (
+                &Differentiator as &dyn CodeModel,
+                "out_upper_limit",
+                f64::INFINITY,
+            ),
+            (&Differentiator as &dyn CodeModel, "limit_range", f64::NAN),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_param(param, value);
+
+            let err = model
+                .init(&mut ctx)
+                .expect_err("calculus model must reject nonfinite scalar parameters");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "{} {param} produced {err:?}",
+                model.name()
+            );
+            assert!(
+                err.to_string().contains(param),
+                "{} error should name rejected parameter {param}: {err}",
+                model.name()
+            );
+        }
+
+        let mut ctx = CmContext::new();
+        Integrator
+            .init(&mut ctx)
+            .expect("default int params are valid");
+        ctx.set_param("gain", f64::NAN);
+        Integrator
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite int params must fail at evaluation time");
+        assert!(
+            Integrator
+                .output_input_ac_partials(&ctx, "out", 1.0)
+                .is_empty(),
+            "mutated nonfinite int gain must not produce AC partials"
+        );
+
+        let mut ctx = CmContext::new();
+        Differentiator
+            .init(&mut ctx)
+            .expect("default d_dt params are valid");
+        ctx.set_param("gain", f64::NAN);
+        Differentiator
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite d_dt params must fail at evaluation time");
+        assert!(
+            Differentiator
+                .output_input_ac_partials(&ctx, "out", 1.0)
+                .is_empty(),
+            "mutated nonfinite d_dt gain must not produce AC partials"
+        );
+    }
+
+    #[test]
     fn slew_does_not_commit_rollbackable_probe_state() {
         let mut ctx = CmContext::new();
         ctx.analysis = crate::xspice::AnalysisType::Transient;
@@ -4653,13 +4733,25 @@ impl CodeModel for Integrator {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(
+            ctx,
+            "int",
+            &[
+                "in_offset",
+                "gain",
+                "out_lower_limit",
+                "out_upper_limit",
+                "limit_range",
+                "out_ic",
+            ],
+        )?;
         // State layout:
         // state[0] = integrated output
         // state[1] = previous input sample for trapezoidal integration
         ctx.allocate_states(2);
 
         // Set initial condition
-        let ic = ctx.param("out_ic");
+        let ic = finite_analog_scalar_param(ctx, "int", "out_ic")?;
         ctx.set_state(0, ic);
         ctx.set_state(1, 0.0);
         ctx.advance_state();
@@ -4668,10 +4760,11 @@ impl CodeModel for Integrator {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let gain = ctx.param("gain");
-        let in_offset = ctx.param("in_offset");
-        let lower_limit = ctx.param("out_lower_limit");
-        let upper_limit = ctx.param("out_upper_limit");
+        let gain = finite_analog_scalar_param(ctx, "int", "gain")?;
+        let in_offset = finite_analog_scalar_param(ctx, "int", "in_offset")?;
+        let lower_limit = finite_analog_scalar_param(ctx, "int", "out_lower_limit")?;
+        let upper_limit = finite_analog_scalar_param(ctx, "int", "out_upper_limit")?;
+        let limit_range = finite_analog_scalar_param(ctx, "int", "limit_range")?;
         let (lower, upper) = if lower_limit <= upper_limit {
             (lower_limit, upper_limit)
         } else {
@@ -4702,15 +4795,8 @@ impl CodeModel for Integrator {
                 };
                 (prev_out + delta, partial)
             };
-        let (new_out, limit_partial) = limit_transfer(
-            raw_out,
-            0.0,
-            lower,
-            upper,
-            ctx.param("limit_range"),
-            1.0,
-            false,
-        );
+        let (new_out, limit_partial) =
+            limit_transfer(raw_out, 0.0, lower, upper, limit_range, 1.0, false);
 
         if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
             ctx.set_state(0, new_out);
@@ -4742,10 +4828,10 @@ impl CodeModel for Integrator {
         if !omega.is_finite() || omega == 0.0 {
             return Vec::new();
         }
-        vec![(
-            "in".to_string(),
-            Complex64::new(0.0, -ctx.param("gain") / omega),
-        )]
+        let Ok(gain) = finite_analog_scalar_param(ctx, "int", "gain") else {
+            return Vec::new();
+        };
+        vec![("in".to_string(), Complex64::new(0.0, -gain / omega))]
     }
 }
 
@@ -4839,17 +4925,28 @@ impl CodeModel for Differentiator {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(
+            ctx,
+            "d_dt",
+            &[
+                "out_offset",
+                "gain",
+                "out_lower_limit",
+                "out_upper_limit",
+                "limit_range",
+            ],
+        )?;
         // Allocate state for previous input
         ctx.allocate_states(1);
         Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let gain = ctx.param("gain");
-        let out_offset = ctx.param("out_offset");
-        let lower = ctx.param("out_lower_limit");
-        let upper = ctx.param("out_upper_limit");
-        let limit_range = ctx.param("limit_range");
+        let gain = finite_analog_scalar_param(ctx, "d_dt", "gain")?;
+        let out_offset = finite_analog_scalar_param(ctx, "d_dt", "out_offset")?;
+        let lower = finite_analog_scalar_param(ctx, "d_dt", "out_lower_limit")?;
+        let upper = finite_analog_scalar_param(ctx, "d_dt", "out_upper_limit")?;
+        let limit_range = finite_analog_scalar_param(ctx, "d_dt", "limit_range")?;
 
         let v_in = ctx.input("in");
         let dt = ctx.timestep;
@@ -4898,10 +4995,10 @@ impl CodeModel for Differentiator {
         if !omega.is_finite() {
             return Vec::new();
         }
-        vec![(
-            "in".to_string(),
-            Complex64::new(0.0, ctx.param("gain") * omega),
-        )]
+        let Ok(gain) = finite_analog_scalar_param(ctx, "d_dt", "gain") else {
+            return Vec::new();
+        };
+        vec![("in".to_string(), Complex64::new(0.0, gain * omega))]
     }
 }
 
