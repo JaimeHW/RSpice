@@ -382,6 +382,9 @@ impl Engine {
             for &time in switch.time_breakpoints() {
                 Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
             }
+            for time in switch.threshold_breakpoints(tstop, tstep_hint) {
+                Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+            }
         }
 
         for time in circuit

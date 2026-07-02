@@ -1802,6 +1802,60 @@ fn test_xyce_current_source_probe_cases_run() {
 }
 
 #[test]
+fn test_xyce_generic_switch_hysteresis_transient_branch_current_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/GSWITCH/gswitchHyst1.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a numeric Xyce generic switch branch-current transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
+fn test_xyce_current_and_voltage_switch_hysteresis_variants_stay_named_unsupported() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, reason) in [
+        (
+            "Netlists/ISWITCH/iswitchHyst1.cir",
+            "generic ISWITCH hysteresis",
+        ),
+        (
+            "Netlists/VSWITCH/VswitchHyst1.cir",
+            "VSWITCH ON/OFF hysteresis",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && result.expected_unsupported,
+            "{relative} should stay named unsupported until its Xyce switch hysteresis model is production-validated, got {result:?}"
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains(reason)),
+            "unsupported reason for {relative} should name '{reason}', got {result:?}"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_cccs_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

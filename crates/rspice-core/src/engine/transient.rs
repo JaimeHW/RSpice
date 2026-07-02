@@ -64,6 +64,9 @@ enum DerivedTransientBranchCurrentKind {
     LinearResistor,
     LinearCapacitor,
     BehavioralCurrentSource,
+    VoltageSwitch,
+    CurrentSwitch,
+    GenericSwitch,
 }
 
 impl Engine {
@@ -120,6 +123,54 @@ impl Engine {
                 index,
             });
         }
+        for (index, switch) in circuit.vswitches.iter().enumerate() {
+            if existing_branch_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&switch.name))
+                || derived.iter().any(|&branch| {
+                    Self::derived_transient_branch_name(circuit, branch)
+                        .eq_ignore_ascii_case(&switch.name)
+                })
+            {
+                continue;
+            }
+            derived.push(DerivedTransientBranchCurrent {
+                kind: DerivedTransientBranchCurrentKind::VoltageSwitch,
+                index,
+            });
+        }
+        for (index, switch) in circuit.iswitches.iter().enumerate() {
+            if existing_branch_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&switch.name))
+                || derived.iter().any(|&branch| {
+                    Self::derived_transient_branch_name(circuit, branch)
+                        .eq_ignore_ascii_case(&switch.name)
+                })
+            {
+                continue;
+            }
+            derived.push(DerivedTransientBranchCurrent {
+                kind: DerivedTransientBranchCurrentKind::CurrentSwitch,
+                index,
+            });
+        }
+        for (index, switch) in circuit.generic_switches.iter().enumerate() {
+            if existing_branch_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&switch.name))
+                || derived.iter().any(|&branch| {
+                    Self::derived_transient_branch_name(circuit, branch)
+                        .eq_ignore_ascii_case(&switch.name)
+                })
+            {
+                continue;
+            }
+            derived.push(DerivedTransientBranchCurrent {
+                kind: DerivedTransientBranchCurrentKind::GenericSwitch,
+                index,
+            });
+        }
         derived
     }
 
@@ -139,7 +190,35 @@ impl Engine {
                     .name
                     .clone()
             }
+            DerivedTransientBranchCurrentKind::VoltageSwitch => {
+                circuit.vswitches[branch.index].name.clone()
+            }
+            DerivedTransientBranchCurrentKind::CurrentSwitch => {
+                circuit.iswitches[branch.index].name.clone()
+            }
+            DerivedTransientBranchCurrentKind::GenericSwitch => {
+                circuit.generic_switches[branch.index].name.clone()
+            }
         }
+    }
+
+    fn solution_node_voltage(solution: &[Value], node: usize) -> Value {
+        if node == 0 {
+            0.0
+        } else {
+            solution.get(node - 1).copied().unwrap_or(0.0)
+        }
+    }
+
+    fn two_terminal_conductance_current(
+        solution: &[Value],
+        node_pos: usize,
+        node_neg: usize,
+        conductance: Value,
+    ) -> Value {
+        let v_pos = Self::solution_node_voltage(solution, node_pos);
+        let v_neg = Self::solution_node_voltage(solution, node_neg);
+        (v_pos - v_neg) * conductance
     }
 
     fn derived_transient_branch_current(
@@ -151,23 +230,45 @@ impl Engine {
         match branch.kind {
             DerivedTransientBranchCurrentKind::LinearResistor => {
                 let stamp = circuit.resistors.stamps[branch.index];
-                let v_pos = if stamp.pp.row == 0 {
-                    0.0
-                } else {
-                    solution.get(stamp.pp.row - 1).copied().unwrap_or(0.0)
-                };
-                let v_neg = if stamp.nn.row == 0 {
-                    0.0
-                } else {
-                    solution.get(stamp.nn.row - 1).copied().unwrap_or(0.0)
-                };
-                (v_pos - v_neg) * circuit.resistors.conductances[branch.index]
+                Self::two_terminal_conductance_current(
+                    solution,
+                    stamp.pp.row,
+                    stamp.nn.row,
+                    circuit.resistors.conductances[branch.index],
+                )
             }
             DerivedTransientBranchCurrentKind::LinearCapacitor => {
                 circuit.capacitors.i_prev[branch.index]
             }
             DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
                 circuit.behavioral_sources.current_sources[branch.index].evaluate(solution, time)
+            }
+            DerivedTransientBranchCurrentKind::VoltageSwitch => {
+                let switch = &circuit.vswitches[branch.index];
+                Self::two_terminal_conductance_current(
+                    solution,
+                    switch.node_pos,
+                    switch.node_neg,
+                    1.0 / switch.resistance().max(1.0e-30),
+                )
+            }
+            DerivedTransientBranchCurrentKind::CurrentSwitch => {
+                let switch = &circuit.iswitches[branch.index];
+                Self::two_terminal_conductance_current(
+                    solution,
+                    switch.node_pos,
+                    switch.node_neg,
+                    1.0 / switch.resistance().max(1.0e-30),
+                )
+            }
+            DerivedTransientBranchCurrentKind::GenericSwitch => {
+                let switch = &circuit.generic_switches[branch.index];
+                Self::two_terminal_conductance_current(
+                    solution,
+                    switch.node_pos,
+                    switch.node_neg,
+                    switch.conductance(),
+                )
             }
         }
     }

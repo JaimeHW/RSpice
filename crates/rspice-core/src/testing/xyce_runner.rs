@@ -4663,6 +4663,79 @@ impl XyceTestRunner {
                         *coefficient,
                     )?;
                 }
+                ElementKind::VSwitch { model, .. } => {
+                    if Self::netlist_model_has_any_param(
+                        netlist,
+                        model,
+                        &["VON", "VOFF", "VHON", "VHOFF", "ON", "OFF", "ONH", "OFFH"],
+                    ) {
+                        return Err(format!(
+                            "native static .PRINT TRAN comparison does not yet support Xyce VSWITCH ON/OFF hysteresis model '{}' on element '{}'",
+                            model, element.name
+                        ));
+                    }
+                }
+                ElementKind::ISwitch {
+                    control_element,
+                    model,
+                    ..
+                } => {
+                    if Self::netlist_model_has_any_param(
+                        netlist,
+                        model,
+                        &["IHON", "IHOFF", "ONH", "OFFH"],
+                    ) {
+                        return Err(format!(
+                            "native static .PRINT TRAN comparison does not yet support Xyce ISWITCH hysteresis model '{}' on element '{}'",
+                            model, element.name
+                        ));
+                    }
+                    Self::validate_current_controlled_source_probe(
+                        elements,
+                        "ISWITCH",
+                        &element.name,
+                        control_element,
+                    )?;
+                }
+                ElementKind::GenericSwitch {
+                    model,
+                    control_expression,
+                    ..
+                } => {
+                    if Self::netlist_model_is_current_switch(netlist, model) {
+                        if Self::netlist_model_has_any_param(
+                            netlist,
+                            model,
+                            &["IHON", "IHOFF", "ONH", "OFFH"],
+                        ) {
+                            return Err(format!(
+                                "native static .PRINT TRAN comparison does not yet support Xyce generic ISWITCH hysteresis model '{}' on element '{}'",
+                                model, element.name
+                            ));
+                        }
+                        let control_element =
+                            Self::direct_branch_current_control(control_expression).ok_or_else(
+                                || {
+                                    format!(
+                                        "native static .PRINT TRAN comparison does not support generic ISWITCH element '{}' with CONTROL expression '{}' because it is not a direct branch-current probe",
+                                        element.name, control_expression
+                                    )
+                                },
+                            )?;
+                        Self::validate_current_controlled_source_probe(
+                            elements,
+                            "generic ISWITCH",
+                            &element.name,
+                            &control_element,
+                        )?;
+                    } else {
+                        Self::validate_transient_generic_switch_expression(
+                            &element.name,
+                            control_expression,
+                            params,
+                        )?;
+                    }
+                }
                 _ => {
                     return Err(format!(
                         "native static .PRINT TRAN comparison currently supports independent, behavioral, and static R/L/C transient decks; element '{}' requires a broader transient oracle contract",
@@ -4687,6 +4760,34 @@ impl XyceTestRunner {
                 "native static .PRINT TRAN comparison does not support {source_kind} element '{element_name}' with non-finite {value_name} {value}"
             ))
         }
+    }
+
+    fn netlist_model_is_current_switch(netlist: &Netlist, model_name: &str) -> bool {
+        Self::find_model(&netlist.models, model_name).is_some_and(|model| {
+            matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "ISWITCH" | "ISW" | "CSW"
+            )
+        })
+    }
+
+    fn netlist_model_has_any_param(netlist: &Netlist, model_name: &str, names: &[&str]) -> bool {
+        Self::find_model(&netlist.models, model_name).is_some_and(|model| {
+            model.params.iter().any(|(name, _)| {
+                names
+                    .iter()
+                    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            }) || model.expr_params.iter().any(|(name, _)| {
+                names
+                    .iter()
+                    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+            })
+        })
+    }
+
+    fn direct_branch_current_control(expression: &str) -> Option<String> {
+        let normalized = Self::normalize_probe(expression);
+        Self::parse_current_probe(&normalized)
     }
 
     fn validate_current_controlled_source_probe(
@@ -4747,6 +4848,52 @@ impl XyceTestRunner {
         })?;
         let _validated_ast = ast;
         Ok(())
+    }
+
+    fn validate_transient_generic_switch_expression(
+        element_name: &str,
+        expression: &str,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<(), String> {
+        let prepared = prepare_behavioral_expression(expression, params).map_err(|err| {
+            format!(
+                "native static .PRINT TRAN comparison could not prepare generic switch CONTROL expression '{}' on element '{}': {err}",
+                expression, element_name
+            )
+        })?;
+        let ast = parse_expression_strict(&prepared).map_err(|err| {
+            format!(
+                "native static .PRINT TRAN comparison does not yet support generic switch CONTROL expression '{}' on element '{}': {err}",
+                expression, element_name
+            )
+        })?;
+        if Self::expression_depends_on_solution_quantity(&ast) {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not yet support generic switch CONTROL expression '{}' on element '{}' because it references circuit nodes or branch currents",
+                expression, element_name
+            ));
+        }
+        Ok(())
+    }
+
+    fn expression_depends_on_solution_quantity(expression: &Expr) -> bool {
+        match expression {
+            Expr::NodeVoltage(_) | Expr::BranchCurrent(_) => true,
+            Expr::Unary { operand, .. } => Self::expression_depends_on_solution_quantity(operand),
+            Expr::Binary { left, right, .. } => {
+                Self::expression_depends_on_solution_quantity(left)
+                    || Self::expression_depends_on_solution_quantity(right)
+            }
+            Expr::Function { args, .. } => args
+                .iter()
+                .any(Self::expression_depends_on_solution_quantity),
+            Expr::Const(_)
+            | Expr::StringLiteral(_)
+            | Expr::LookupTable(_)
+            | Expr::Time
+            | Expr::Frequency
+            | Expr::Temperature => false,
+        }
     }
 
     fn passive_value_expression_depends_on_runtime_quantity(expression: &Expr) -> bool {
@@ -7564,6 +7711,9 @@ impl XyceTestRunner {
                 | ElementKind::JilesAthertonInductor { .. }
                 | ElementKind::Vcvs { .. }
                 | ElementKind::Ccvs { .. }
+                | ElementKind::VSwitch { .. }
+                | ElementKind::ISwitch { .. }
+                | ElementKind::GenericSwitch { .. }
                 | ElementKind::BehavioralVoltage { .. }
                 | ElementKind::BehavioralCurrent { .. }
         )

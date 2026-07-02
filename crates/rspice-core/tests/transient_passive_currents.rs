@@ -157,3 +157,60 @@ r1 in out {10 + 1000*time}
         );
     }
 }
+
+#[test]
+fn transient_records_switch_branch_current_waveforms() {
+    let deck = "\
+* switch transient branch currents
+v1 vin 0 dc 5
+s1 vin vout vc 0 swv on
+vctrl vc 0 dc 2
+r_vs vout 0 100
+.model swv vswitch (vt=1 vh=0 ron=1 roff=100)
+
+v2 gin 0 dc 5
+sg1 gin gout swg off control={0}
+r_g gout 0 100
+.model swg switch (on=1 off=0 ron=1 roff=100)
+
+v3 win 0 dc 5
+ictrl ctrl 0 dc 1m
+vctrl_i ctrl 0 dc 0
+w1 win wout vctrl_i swi on
+r_is wout 0 100
+.model swi iswitch (it=1m ih=0 ron=1 roff=100)
+
+.tran 1u 3u
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 3.0e-6, 1.0e-6)
+        .expect("transient solves");
+
+    for (branch_name, node_name, load_resistance) in [
+        ("s1", "vout", 100.0),
+        ("sg1", "gout", 100.0),
+        ("w1", "wout", 100.0),
+    ] {
+        let branch_current = result
+            .try_branch_current_waveform_named(branch_name)
+            .unwrap_or_else(|| panic!("{branch_name} branch current waveform exists"));
+        let load_voltage = result
+            .try_voltage_waveform_named(node_name)
+            .unwrap_or_else(|| panic!("{node_name} voltage waveform exists"));
+
+        assert_eq!(branch_current.len(), result.time.len());
+        for (&time, (&current, &voltage)) in result
+            .time
+            .iter()
+            .zip(branch_current.iter().zip(load_voltage))
+        {
+            let expected_load_current = voltage / load_resistance;
+            assert!(
+                (current - expected_load_current).abs() < 1.0e-9,
+                "{branch_name} current should match load KCL at {time}, got {current} expected {expected_load_current}"
+            );
+        }
+    }
+}

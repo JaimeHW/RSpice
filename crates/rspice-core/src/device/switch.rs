@@ -53,6 +53,12 @@ pub enum SwitchState {
     Transitioning,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GenericSwitchHysteresisSide {
+    Off,
+    On,
+}
+
 //=============================================================================
 // Voltage-Controlled Switch
 //=============================================================================
@@ -795,8 +801,10 @@ pub struct GenericSwitch {
     /// Whether ONH/OFFH semantics are active
     pub hysteresis_enabled: bool,
 
+    /// Xyce-compatible stored normalized control state from the previous
+    /// accepted evaluation.
     last_state: Value,
-    hysteresis_rising: bool,
+    transition_hold: Option<GenericSwitchHysteresisSide>,
     current_conductance: Value,
 }
 
@@ -831,7 +839,7 @@ impl GenericSwitch {
             offh: 0.0,
             hysteresis_enabled: false,
             last_state: 0.0,
-            hysteresis_rising: true,
+            transition_hold: None,
             current_conductance: 1.0e-6,
         })
     }
@@ -844,6 +852,126 @@ impl GenericSwitch {
     /// Time instants where the control expression can change discontinuously.
     pub fn time_breakpoints(&self) -> &[Value] {
         &self.time_breakpoints
+    }
+
+    /// Time instants where a time-only control expression crosses switch
+    /// thresholds.
+    pub fn threshold_breakpoints(&self, tstop: Value, scan_step: Value) -> Vec<Value> {
+        if !(tstop.is_finite() && tstop > 0.0) {
+            return Vec::new();
+        }
+
+        let mut thresholds = vec![self.off, self.on];
+        if self.hysteresis_enabled {
+            thresholds.push(self.offh);
+            thresholds.push(self.onh);
+        }
+        thresholds.retain(|value| value.is_finite());
+        thresholds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        thresholds.dedup_by(|a, b| {
+            let scale = a.abs().max(b.abs()).max(1.0);
+            (*a - *b).abs() <= scale * 1.0e-12
+        });
+        if thresholds.is_empty() {
+            return Vec::new();
+        }
+
+        let mut step = if scan_step.is_finite() && scan_step > 0.0 {
+            scan_step
+        } else {
+            tstop / 1000.0
+        };
+        step = step.clamp(tstop / 1.0e6, tstop.max(f64::MIN_POSITIVE));
+        let time_tolerance = (step.abs() * 1.0e-9)
+            .max(tstop.abs() * 1.0e-14)
+            .max(1.0e-18);
+
+        let mut vm = Vm::new();
+        let mut breakpoints = Vec::new();
+        let mut t0 = 0.0;
+        let mut y0 = self.evaluate_control_at(t0, &mut vm);
+
+        while t0 < tstop {
+            let t1 = (t0 + step).min(tstop);
+            let y1 = self.evaluate_control_at(t1, &mut vm);
+            for &threshold in &thresholds {
+                self.push_threshold_crossing(
+                    threshold,
+                    t0,
+                    y0,
+                    t1,
+                    y1,
+                    time_tolerance,
+                    &mut breakpoints,
+                );
+            }
+            t0 = t1;
+            y0 = y1;
+        }
+
+        breakpoints.retain(|time| time.is_finite() && *time >= 0.0 && *time <= tstop);
+        breakpoints.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        breakpoints.dedup_by(|a, b| {
+            let scale = a.abs().max(b.abs()).max(1.0);
+            (*a - *b).abs() <= scale * 1.0e-12
+        });
+        breakpoints
+    }
+
+    fn push_threshold_crossing(
+        &self,
+        threshold: Value,
+        t0: Value,
+        y0: Value,
+        t1: Value,
+        y1: Value,
+        time_tolerance: Value,
+        breakpoints: &mut Vec<Value>,
+    ) {
+        let f0 = y0 - threshold;
+        let f1 = y1 - threshold;
+        if !f0.is_finite() || !f1.is_finite() {
+            return;
+        }
+        let value_tolerance = threshold.abs().max(y0.abs()).max(y1.abs()).max(1.0) * 1.0e-12;
+        if f0.abs() <= value_tolerance {
+            breakpoints.push(t0);
+            return;
+        }
+        if f1.abs() <= value_tolerance {
+            breakpoints.push(t1);
+            return;
+        }
+        if f0.signum() == f1.signum() {
+            return;
+        }
+
+        let mut left = t0;
+        let mut right = t1;
+        let mut left_value = f0;
+        let mut vm = Vm::new();
+        for _ in 0..64 {
+            let mid = 0.5 * (left + right);
+            if (right - left).abs() <= time_tolerance {
+                break;
+            }
+            let mid_value = self.evaluate_control_at(mid, &mut vm) - threshold;
+            if !mid_value.is_finite() {
+                return;
+            }
+            if mid_value.abs() <= value_tolerance {
+                left = mid;
+                right = mid;
+                break;
+            }
+            if left_value.signum() == mid_value.signum() {
+                left = mid;
+                left_value = mid_value;
+            } else {
+                right = mid;
+            }
+        }
+        breakpoints.push(0.5 * (left + right));
     }
 
     fn collect_time_breakpoints(expr: &Expr) -> Vec<Value> {
@@ -1014,12 +1142,12 @@ impl GenericSwitch {
         match state {
             SwitchState::On => {
                 self.last_state = 1.0;
-                self.hysteresis_rising = false;
+                self.transition_hold = None;
                 self.current_conductance = 1.0 / self.ron;
             }
             SwitchState::Off | SwitchState::Transitioning => {
                 self.last_state = 0.0;
-                self.hysteresis_rising = true;
+                self.transition_hold = None;
                 self.current_conductance = 1.0 / self.roff;
             }
         }
@@ -1029,6 +1157,12 @@ impl GenericSwitch {
     /// Current small-signal conductance.
     pub fn conductance(&self) -> Value {
         self.current_conductance
+    }
+
+    fn evaluate_control_at(&self, time: Value, vm: &mut Vm) -> Value {
+        let ctx = Context::transient(&[], &[], time);
+        let value = vm.execute(&self.program, &ctx);
+        if value.is_finite() { value } else { self.off }
     }
 
     fn evaluate_control(&mut self, time: Value) -> Value {
@@ -1069,36 +1203,46 @@ impl GenericSwitch {
 
         if !self.hysteresis_enabled {
             self.last_state = base_state;
+            self.transition_hold = None;
             return self.interpolated_conductance(base_state);
         }
 
-        if self.hysteresis_rising {
-            let state = (control - self.offh) / Self::safe_delta(self.on - self.offh);
-            if state <= 0.0 {
-                self.last_state = 0.0;
-                return 1.0 / self.roff;
-            }
-            if state >= 1.0 || base_state >= 1.0 {
-                self.last_state = 1.0;
-                self.hysteresis_rising = false;
-                return 1.0 / self.ron;
-            }
-            self.last_state = state;
-            return self.interpolated_conductance(state);
-        }
+        let previous_state = self.last_state;
+        let hys_on_state = (control - self.off) / Self::safe_delta(self.onh - self.off);
+        let hys_off_state = (control - self.offh) / Self::safe_delta(self.on - self.offh);
 
-        let latch_state = (control - self.off) / Self::safe_delta(self.onh - self.off);
-        if latch_state >= 1.0 {
-            self.last_state = 1.0;
+        if base_state >= 1.0 || (previous_state >= 1.0 && hys_on_state >= 1.0) {
+            self.last_state = hys_on_state;
+            self.transition_hold = None;
             return 1.0 / self.ron;
         }
-        if latch_state <= 0.0 || base_state <= 0.0 {
-            self.last_state = 0.0;
-            self.hysteresis_rising = true;
+
+        if base_state <= 0.0 || (previous_state <= 0.0 && hys_off_state <= 0.0) {
+            self.last_state = hys_off_state;
+            self.transition_hold = None;
             return 1.0 / self.roff;
         }
+
+        let mut interpolation_state = base_state;
+        match self.transition_hold.take() {
+            Some(GenericSwitchHysteresisSide::Off) => {
+                interpolation_state = hys_off_state;
+            }
+            Some(GenericSwitchHysteresisSide::On) => {
+                interpolation_state = hys_on_state;
+            }
+            None if previous_state <= 0.0 => {
+                interpolation_state = hys_off_state;
+                self.transition_hold = Some(GenericSwitchHysteresisSide::Off);
+            }
+            None if previous_state >= 1.0 => {
+                interpolation_state = hys_on_state;
+                self.transition_hold = Some(GenericSwitchHysteresisSide::On);
+            }
+            None => {}
+        }
         self.last_state = base_state;
-        self.interpolated_conductance(base_state)
+        self.interpolated_conductance(interpolation_state)
     }
 
     /// Stamp the switch conductance for a given analysis time.
@@ -1144,6 +1288,30 @@ mod tests {
     }
 
     #[test]
+    fn generic_switch_extracts_threshold_crossing_breakpoints() {
+        let params = std::collections::HashMap::from([
+            ("ON".to_string(), 1.0),
+            ("ONH".to_string(), 0.55),
+            ("OFF".to_string(), 0.0),
+            ("OFFH".to_string(), 0.25),
+        ]);
+        let switch = GenericSwitch::new("sw1".to_string(), 1, 0, "time")
+            .expect("valid generic switch expression")
+            .with_params(&params);
+
+        let breakpoints = switch.threshold_breakpoints(2.0, 0.1);
+
+        for expected in [0.0, 0.25, 0.55, 1.0] {
+            assert!(
+                breakpoints
+                    .iter()
+                    .any(|time| (time - expected).abs() < 1.0e-12),
+                "missing generic switch threshold breakpoint {expected}, got {breakpoints:?}"
+            );
+        }
+    }
+
+    #[test]
     fn generic_switch_hysteresis_keeps_xyce_branch_during_partial_transition() {
         let params = std::collections::HashMap::from([
             ("ON".to_string(), 1.0),
@@ -1165,7 +1333,13 @@ mod tests {
         assert!((switch.conductance_for_control(0.562_116_094) - 1.0).abs() < 1.0e-15);
 
         let falling_g = switch.conductance_for_control(0.381_041_069);
-        assert!((falling_g - 0.044_653_639_971).abs() < 1.0e-12);
+        assert!((falling_g - 0.354_599_436_328).abs() < 1.0e-12);
+
+        let held_falling_g = switch.conductance_for_control(0.381_041_069);
+        assert!((held_falling_g - 0.354_599_436_328).abs() < 1.0e-12);
+
+        let base_falling_g = switch.conductance_for_control(0.381_041_069);
+        assert!((base_falling_g - 0.044_653_639_971).abs() < 1.0e-12);
     }
 
     #[test]
