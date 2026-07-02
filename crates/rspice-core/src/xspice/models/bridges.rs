@@ -11,6 +11,7 @@ const OFFICIAL_BRIDGE_TIMING_MIN: Value = 1.0e-12;
 const OFFICIAL_BRIDGE_RESISTANCE_MIN: Value = 1.0e-6;
 const OFFICIAL_BRIDGE_CONTROL_MIN: i64 = 0;
 const OFFICIAL_BRIDGE_CONTROL_MAX: i64 = 2;
+const ADC_UNINITIALIZED_STATE: i64 = -2;
 
 fn official_bridge_timing(value: Value) -> Value {
     value.max(OFFICIAL_BRIDGE_TIMING_MIN)
@@ -35,6 +36,8 @@ fn adc_bridge_state(input: Value, previous: i64, in_low: Value, in_high: Value) 
             1
         } else if input < in_high {
             0
+        } else if previous == ADC_UNINITIALIZED_STATE {
+            -1
         } else {
             previous
         }
@@ -107,7 +110,7 @@ impl CodeModel for AdcBridge {
         let width = bridge_vector_width(ctx, "adc_bridge")?;
         ctx.allocate_int_states(width);
         for index in 0..width {
-            ctx.set_int_state(index, -1);
+            ctx.set_int_state(index, ADC_UNINITIALIZED_STATE);
         }
         Ok(())
     }
@@ -1476,7 +1479,32 @@ mod tests {
         assert_eq!(adc_bridge_state(-0.2, -1, 0.9, 0.1), 0);
         assert_eq!(adc_bridge_state(0.5, 1, 0.9, 0.1), 1);
         assert_eq!(adc_bridge_state(0.5, 0, 0.9, 0.1), 0);
-        assert_eq!(adc_bridge_state(0.5, -1, 0.9, 0.1), -1);
+        assert_eq!(adc_bridge_state(0.5, ADC_UNINITIALIZED_STATE, 0.9, 0.1), -1);
+    }
+
+    #[test]
+    fn adc_bridge_initial_unknown_region_queues_unknown_event() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 1);
+        ctx.set_port_width("out", 1);
+        ctx.set_param("in_low", 0.1);
+        ctx.set_param("in_high", 0.9);
+        ctx.set_param("rise_delay", 1.0e-9);
+        ctx.set_param("fall_delay", 1.0e-9);
+        ctx.init_output_vector("out", PortType::Digital, 1);
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(0.5)]));
+        ctx.time = 0.0;
+
+        AdcBridge.init(&mut ctx).expect("adc_bridge initializes");
+        AdcBridge
+            .evaluate(&mut ctx)
+            .expect("evaluates initial unknown region");
+
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].delay, 0.0);
+        assert_eq!(events[0].values[0], DigitalValue::unknown());
+        assert_eq!(ctx.int_state(0), -1);
     }
 
     #[test]
