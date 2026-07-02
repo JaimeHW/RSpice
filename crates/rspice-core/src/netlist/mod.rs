@@ -3077,7 +3077,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("flattened XSPICE element {element_name} exists"))
         };
 
-        let vector_for = |model_name: &str| -> Vec<Value> {
+        let vector_for = |model_name: &str| -> Vec<f64> {
             flattened
                 .scoped_models
                 .iter()
