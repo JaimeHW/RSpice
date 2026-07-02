@@ -1027,15 +1027,17 @@ fn xspice_auto_bridge_template_direction(kind: XspiceAutoBridgeKind) -> &'static
 fn find_xspice_auto_bridge_template<'a>(
     templates: &'a [XspiceAutoBridgeTemplate],
     bridge: &PlannedXspiceAutoBridge,
+    family_enabled: bool,
 ) -> Option<&'a XspiceAutoBridgeTemplate> {
     let type_name = xspice_auto_bridge_template_type_name(bridge.kind);
     let direction = xspice_auto_bridge_template_direction(bridge.kind);
 
-    if let Some(family) = bridge
-        .family
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+    if family_enabled
+        && let Some(family) = bridge
+            .family
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     {
         let family = family.strip_prefix('*').unwrap_or(family);
         if !family.is_empty() {
@@ -1412,6 +1414,7 @@ fn add_planned_xspice_auto_bridges(
     bridges: &[PlannedXspiceAutoBridge],
     templates: &[XspiceAutoBridgeTemplate],
     source_path: Option<&Path>,
+    family_enabled: bool,
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
@@ -1426,13 +1429,15 @@ fn add_planned_xspice_auto_bridges(
         }
 
         let bridge = &bridges[index];
-        let Some(template) = find_xspice_auto_bridge_template(templates, bridge) else {
+        let Some(template) = find_xspice_auto_bridge_template(templates, bridge, family_enabled)
+        else {
             consumed[index] = true;
             add_planned_xspice_auto_bridge(
                 circuit,
                 bridge,
                 &[],
                 source_path,
+                family_enabled,
                 temperature,
                 ramptime,
                 digital_delay_type,
@@ -1454,8 +1459,13 @@ fn add_planned_xspice_auto_bridges(
                 continue;
             }
             let candidate = &bridges[candidate_index];
-            if xspice_auto_bridge_template_group_compatible(templates, template, bridge, candidate)
-            {
+            if xspice_auto_bridge_template_group_compatible(
+                templates,
+                template,
+                bridge,
+                candidate,
+                family_enabled,
+            ) {
                 consumed[candidate_index] = true;
                 group.push(candidate);
             }
@@ -1480,14 +1490,15 @@ fn xspice_auto_bridge_template_group_compatible(
     template: &XspiceAutoBridgeTemplate,
     first: &PlannedXspiceAutoBridge,
     candidate: &PlannedXspiceAutoBridge,
+    family_enabled: bool,
 ) -> bool {
     if first.kind != candidate.kind || first.vcc != candidate.vcc {
         return false;
     }
 
-    find_xspice_auto_bridge_template(templates, candidate).is_some_and(|candidate_template| {
-        candidate_template.key.eq_ignore_ascii_case(&template.key)
-    })
+    find_xspice_auto_bridge_template(templates, candidate, family_enabled).is_some_and(
+        |candidate_template| candidate_template.key.eq_ignore_ascii_case(&template.key),
+    )
 }
 
 fn add_planned_xspice_auto_bridge(
@@ -1495,6 +1506,7 @@ fn add_planned_xspice_auto_bridge(
     bridge: &PlannedXspiceAutoBridge,
     templates: &[XspiceAutoBridgeTemplate],
     source_path: Option<&Path>,
+    family_enabled: bool,
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
@@ -1502,7 +1514,7 @@ fn add_planned_xspice_auto_bridge(
 ) -> Result<(), SimulationError> {
     use crate::xspice::PortConnection;
 
-    if let Some(template) = find_xspice_auto_bridge_template(templates, bridge) {
+    if let Some(template) = find_xspice_auto_bridge_template(templates, bridge, family_enabled) {
         let bridges = [bridge];
         return add_template_xspice_auto_bridge(
             circuit,
@@ -1785,6 +1797,35 @@ set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_
         assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
         assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -2.0);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
+    }
+
+    #[test]
+    fn auto_bridge_no_family_uses_generic_template() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge skips family-specific template when disabled
+.param vcc=5
+rload mix 0 1k
+.model pull d_pullup(family=\"74HCT\")
+apull [mix] pull
+.control
+set no_auto_bridge_family
+set auto_bridge_d_out = ( \".model generic_dac dac_bridge(out_low = -1 out_high = %g)\" \"ageneric%d [ %s ] [ %s ] generic_dac\" 1 )
+set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_high = %g)\" \"afamily%d [ %s ] [ %s ] family_dac\" 1 )
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -1.0);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
     }
 
@@ -4675,6 +4716,7 @@ impl Engine {
                     &auto_bridges,
                     &netlist.options.auto_bridge_templates,
                     netlist.source_path.as_deref(),
+                    netlist.options.auto_bridge_family.unwrap_or(true),
                     self.config.temperature,
                     self.config.ramptime,
                     self.config.digital_delay_type,

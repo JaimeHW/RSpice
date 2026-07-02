@@ -406,6 +406,9 @@ impl Netlist {
             if let Some(command) = Self::promote_control_auto_bridge_param_set_command(line) {
                 promoted.push(command);
             }
+            if let Some(command) = Self::promote_control_no_auto_bridge_family_set_command(line) {
+                promoted.push(command);
+            }
         }
 
         promoted
@@ -493,6 +496,26 @@ impl Netlist {
             ".RSPICE_AUTO_BRIDGE_PARAM {} {}",
             control_hex_encode(&node_type),
             control_hex_encode(&param_name)
+        ))
+    }
+
+    fn promote_control_no_auto_bridge_family_set_command(line: &str) -> Option<String> {
+        let body = strip_control_inline_comment(line).trim();
+        if body.is_empty() || body.starts_with('*') {
+            return None;
+        }
+
+        let body = body.strip_prefix('.').unwrap_or(body);
+        let mut parts = body.splitn(2, char::is_whitespace);
+        let command = parts.next()?;
+        if !command.eq_ignore_ascii_case("set") {
+            return None;
+        }
+
+        let no_family = control_no_auto_bridge_family_setting(parts.next().unwrap_or(""))?;
+        Some(format!(
+            ".RSPICE_AUTO_BRIDGE_FAMILY {}",
+            usize::from(!no_family)
         ))
     }
 
@@ -790,6 +813,59 @@ fn control_auto_bridge_param_assignment(assignments: &str) -> Option<(String, St
     }
 
     None
+}
+
+fn control_no_auto_bridge_family_setting(assignments: &str) -> Option<bool> {
+    let bytes = assignments.as_bytes();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        skip_control_ws(bytes, &mut index);
+        let key_start = index;
+        while bytes
+            .get(index)
+            .is_some_and(|byte| control_variable_name_byte(*byte))
+        {
+            index += 1;
+        }
+        if key_start == index {
+            index += 1;
+            continue;
+        }
+
+        let key = &assignments[key_start..index];
+        skip_control_ws(bytes, &mut index);
+        if !key.eq_ignore_ascii_case("no_auto_bridge_family") {
+            if bytes.get(index) == Some(&b'=') {
+                index += 1;
+                skip_control_ws(bytes, &mut index);
+                index = skip_control_assignment_value(assignments, index);
+            }
+            continue;
+        }
+
+        if bytes.get(index) != Some(&b'=') {
+            return Some(true);
+        }
+        index += 1;
+        skip_control_ws(bytes, &mut index);
+        let value = if bytes.get(index) == Some(&b'"') {
+            parse_control_quoted_string(assignments, &mut index)?
+        } else {
+            parse_control_unquoted_list_value(assignments, &mut index)?
+        };
+        return control_bool_value(&value);
+    }
+
+    None
+}
+
+fn control_bool_value(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 fn control_variable_name_byte(byte: u8) -> bool {
@@ -1266,6 +1342,22 @@ mod tests {
         .expect("control set auto_bridge_parm_d promotes to a structured selector");
 
         assert_eq!(netlist.options.auto_bridge_param_name("d"), Some("vdd"));
+    }
+
+    #[test]
+    fn control_block_no_auto_bridge_family_set_promotes_option() {
+        let netlist = Netlist::parse(
+            "control xspice auto bridge family disable\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             set no_auto_bridge_family\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control set no_auto_bridge_family promotes to a structured option");
+
+        assert_eq!(netlist.options.auto_bridge_family, Some(false));
     }
 
     #[test]

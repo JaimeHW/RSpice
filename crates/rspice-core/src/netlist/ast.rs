@@ -1780,6 +1780,9 @@ pub struct SimulationOptions {
     pub auto_bridge: Option<bool>,
     /// Ngspice-compatible `.options auto_bridge=2` generated bridge diagnostics.
     pub auto_bridge_show_generated: Option<bool>,
+    /// Ngspice-compatible `set no_auto_bridge_family` control variable.
+    /// Enabled by default; set to false to skip family-specific bridge lookup.
+    pub auto_bridge_family: Option<bool>,
     /// Ngspice-compatible XSPICE custom automatic bridge templates promoted
     /// from `.control` `set auto_bridge_* = (...)` variables.
     pub auto_bridge_templates: Vec<XspiceAutoBridgeTemplate>,
@@ -1871,6 +1874,9 @@ impl SimulationOptions {
         }
         if other.auto_bridge_show_generated.is_some() {
             self.auto_bridge_show_generated = other.auto_bridge_show_generated;
+        }
+        if other.auto_bridge_family.is_some() {
+            self.auto_bridge_family = other.auto_bridge_family;
         }
         for template in &other.auto_bridge_templates {
             self.set_auto_bridge_template(template.clone());

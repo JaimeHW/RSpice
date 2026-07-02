@@ -150,6 +150,9 @@ pub(super) fn parse_command(
         ".RSPICE_AUTO_BRIDGE_PARAM" => {
             parse_rspice_auto_bridge_param_command(stream, line_num, options)?;
         }
+        ".RSPICE_AUTO_BRIDGE_FAMILY" => {
+            parse_rspice_auto_bridge_family_command(stream, line_num, params, options)?;
+        }
         ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
             parse_param_statement(stream, line_num, params, deferred_body_params)?;
         }
@@ -341,6 +344,22 @@ fn parse_rspice_auto_bridge_param_command(
         node_type,
         param_name,
     });
+    Ok(())
+}
+
+fn parse_rspice_auto_bridge_family_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    options: &mut SimulationOptions,
+) -> Result<(), ParseError> {
+    let enabled = expect_value(stream, line_num, params)?;
+    if enabled != 0.0 && enabled != 1.0 {
+        return Err(ParseError::InvalidValue(format!(
+            "line {line_num}: RSpice auto-bridge family setting must be 0 or 1"
+        )));
+    }
+    options.auto_bridge_family = Some(enabled != 0.0);
     Ok(())
 }
 
