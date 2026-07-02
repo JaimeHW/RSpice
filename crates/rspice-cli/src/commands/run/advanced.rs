@@ -158,7 +158,11 @@ fn export_step_sweep(
 
             let mut sweep = crate::hdf5::Hdf5WaveformSection::new(step_name, sweep_vals.clone());
             for signal in &signals {
-                sweep.add_signal(signal.display_name.clone(), signal.values.clone());
+                sweep.add_typed_signal(
+                    signal.display_name.clone(),
+                    signal.kind.raw_variable_type(),
+                    signal.values.clone(),
+                );
             }
             data.dc_sweep = Some(sweep);
 
@@ -358,7 +362,11 @@ fn export_monte_carlo(
                 data.title = "Monte Carlo Samples".to_string();
                 let mut sweep = crate::hdf5::Hdf5WaveformSection::new("run", runs.clone());
                 for signal in &signals {
-                    sweep.add_signal(signal.display_name.clone(), signal.values.clone());
+                    sweep.add_typed_signal(
+                        signal.display_name.clone(),
+                        signal.kind.raw_variable_type(),
+                        signal.values.clone(),
+                    );
                 }
                 data.dc_sweep = Some(sweep);
                 crate::hdf5::write_hdf5(output_path, &data)
@@ -499,7 +507,11 @@ fn export_pss(
             data.title = "Periodic Steady State".to_string();
             let mut section = crate::hdf5::Hdf5WaveformSection::new("time", result.time.clone());
             for signal in &signals {
-                section.add_signal(signal.display_name.clone(), signal.values.clone());
+                section.add_typed_signal(
+                    signal.display_name.clone(),
+                    signal.kind.raw_variable_type(),
+                    signal.values.clone(),
+                );
             }
             data.transient = Some(section);
             crate::hdf5::write_hdf5(output_path, &data)

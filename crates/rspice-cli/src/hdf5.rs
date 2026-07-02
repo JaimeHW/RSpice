@@ -24,13 +24,23 @@ pub type Result<T> = std::result::Result<T, Hdf5Error>;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hdf5Signal {
     pub name: String,
+    pub var_type: String,
     pub values: Vec<f64>,
 }
 
 impl Hdf5Signal {
     pub fn new(name: impl Into<String>, values: Vec<f64>) -> Self {
+        Self::new_typed(name, "value", values)
+    }
+
+    pub fn new_typed(
+        name: impl Into<String>,
+        var_type: impl Into<String>,
+        values: Vec<f64>,
+    ) -> Self {
         Self {
             name: name.into(),
+            var_type: var_type.into(),
             values,
         }
     }
@@ -54,6 +64,16 @@ impl Hdf5WaveformSection {
 
     pub fn add_signal(&mut self, name: impl Into<String>, values: Vec<f64>) {
         self.signals.push(Hdf5Signal::new(name, values));
+    }
+
+    pub fn add_typed_signal(
+        &mut self,
+        name: impl Into<String>,
+        var_type: impl Into<String>,
+        values: Vec<f64>,
+    ) {
+        self.signals
+            .push(Hdf5Signal::new_typed(name, var_type, values));
     }
 
     fn validate(&self, section_name: &str) -> Result<()> {
@@ -286,6 +306,10 @@ fn add_waveform_section(
             &format!("{dataset_name}_name"),
             AttrValue::String(signal.name.clone()),
         );
+        group.set_attr(
+            &format!("{dataset_name}_type"),
+            AttrValue::String(signal.var_type.clone()),
+        );
         group
             .create_dataset(&dataset_name)
             .with_f64_data(&signal.values);
@@ -307,8 +331,10 @@ fn read_waveform_section(file: &Hdf5File, group_name: &str) -> Result<Hdf5Wavefo
     for index in 0..signal_count {
         let dataset_name = format!("signal_{index:04}");
         let signal_name = read_required_string_attr(&attrs, &format!("{dataset_name}_name"))?;
+        let signal_type = read_string_attr(&attrs, &format!("{dataset_name}_type"))?
+            .unwrap_or_else(|| "value".to_string());
         let values = group.dataset(&dataset_name)?.read_f64()?;
-        signals.push(Hdf5Signal::new(signal_name, values));
+        signals.push(Hdf5Signal::new_typed(signal_name, signal_type, values));
     }
 
     let section = Hdf5WaveformSection {

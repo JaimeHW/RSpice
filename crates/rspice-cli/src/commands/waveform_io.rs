@@ -438,7 +438,7 @@ fn load_hdf5(path: &Path) -> Result<ExportTable, CliError> {
             .signals
             .into_iter()
             .map(|signal| ExportColumn {
-                var_type: signal_var_type(&signal.name),
+                var_type: hdf5_signal_var_type(&signal),
                 name: signal.name,
                 data: ColumnData::Real(signal.values),
             })
@@ -497,10 +497,22 @@ fn complex_part_name(name: &str, prefix: &str) -> Option<String> {
 }
 
 fn signal_var_type(name: &str) -> String {
-    if name.trim_start().to_ascii_uppercase().starts_with("I(") {
+    let upper = name.trim_start().to_ascii_uppercase();
+    if upper.starts_with("D(") {
+        "digital".to_string()
+    } else if upper.starts_with("I(") {
         "current".to_string()
     } else {
         "voltage".to_string()
+    }
+}
+
+fn hdf5_signal_var_type(signal: &crate::hdf5::Hdf5Signal) -> String {
+    let var_type = signal.var_type.trim();
+    if var_type.is_empty() || var_type.eq_ignore_ascii_case("value") {
+        signal_var_type(&signal.name)
+    } else {
+        var_type.to_string()
     }
 }
 

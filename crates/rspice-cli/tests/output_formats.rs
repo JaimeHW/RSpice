@@ -415,3 +415,47 @@ fn transient_voltage_save_does_not_select_xspice_digital_trace() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn transient_hdf5_preserves_xspice_digital_type_when_converted() {
+    let dir = test_dir("tran_xspice_digital_hdf5_type");
+    let hdf5 = run_export(
+        &dir,
+        "tran_xspice_digital_hdf5_type",
+        XSPICE_DIGITAL_TRAN_DECK,
+        "hdf5",
+    );
+    let raw_ascii = dir.join("tran_xspice_digital_hdf5_type.raw");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("--quiet")
+        .arg("convert")
+        .arg(&hdf5)
+        .arg(&raw_ascii)
+        .arg("--from")
+        .arg("hdf5")
+        .arg("--to")
+        .arg("ascii")
+        .output()
+        .expect("convert hdf5 to ascii raw");
+
+    assert!(
+        output.status.success(),
+        "rspice convert failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let text = std::fs::read_to_string(&raw_ascii).expect("read ascii raw");
+    assert!(
+        text.lines().any(|line| {
+            line.split_whitespace()
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|fields| fields[0].eq_ignore_ascii_case("D(d)") && fields[1] == "digital")
+        }),
+        "converted rawfile should preserve digital variable type: {text}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

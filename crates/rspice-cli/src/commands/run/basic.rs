@@ -162,7 +162,11 @@ fn write_dc_op_output(
 
         let mut operating_point = Hdf5WaveformSection::new("point", vec![0.0]);
         for signal in &signals {
-            operating_point.add_signal(signal.display_name.clone(), signal.values.clone());
+            operating_point.add_typed_signal(
+                signal.display_name.clone(),
+                signal.kind.raw_variable_type(),
+                signal.values.clone(),
+            );
         }
         data.operating_point = Some(operating_point);
 
@@ -358,7 +362,11 @@ pub(super) fn run_dc_sweep(
 
                         let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
                         for signal in &signals {
-                            dc_sweep.add_signal(signal.display_name.clone(), signal.values.clone());
+                            dc_sweep.add_typed_signal(
+                                signal.display_name.clone(),
+                                signal.kind.raw_variable_type(),
+                                signal.values.clone(),
+                            );
                         }
                         data.dc_sweep = Some(dc_sweep);
 
@@ -577,8 +585,11 @@ pub(super) fn run_transient(
 
                         let mut transient = Hdf5WaveformSection::new("time", result.time.clone());
                         for signal in &signals {
-                            transient
-                                .add_signal(signal.display_name.clone(), signal.values.clone());
+                            transient.add_typed_signal(
+                                signal.display_name.clone(),
+                                signal.kind.raw_variable_type(),
+                                signal.values.clone(),
+                            );
                         }
                         data.transient = Some(transient);
 
