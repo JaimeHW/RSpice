@@ -97,7 +97,8 @@ fn real_to_v_output(
         target * gain
     } else {
         let fraction = (time - start_time) / transition_time;
-        (start_value + (target - start_value) * fraction) * gain
+        // ngspice's real_to_v model applies gain to the ramp delta only.
+        start_value + (target - start_value) * fraction * gain
     }
 }
 
@@ -778,7 +779,7 @@ mod tests {
     }
 
     #[test]
-    fn real_to_v_gain_scales_the_full_mid_transition_value() {
+    fn real_to_v_gain_scales_only_the_mid_transition_delta_like_ngspice() {
         let mut ctx = CmContext::new();
         ctx.set_param("gain", 2.0);
         ctx.set_param("transition_time", 1.0e-9);
@@ -809,8 +810,8 @@ mod tests {
 
         let out = ctx.output("out");
         assert!(
-            (out - 4.0).abs() < 1.0e-12,
-            "real_to_v should interpolate the real value and then apply gain, got {out}"
+            (out - 3.0).abs() < 1.0e-12,
+            "ngspice real_to_v applies gain only to the ramp delta term, got {out}"
         );
     }
 
