@@ -585,6 +585,16 @@ enum DStateRange {
     NonContiguous,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DStateParseShape {
+    header_len: usize,
+    header_output_end: usize,
+    header_input_start: usize,
+    header_next_idx: usize,
+    continuation_len: usize,
+    continuation_next_idx: usize,
+}
+
 #[derive(Debug, Clone)]
 struct DStatePackedMatchIndex {
     input_width: usize,
@@ -667,6 +677,21 @@ fn d_state_error(state_file: &str, line: usize, message: impl Into<String>) -> C
         line,
         message.into()
     ))
+}
+
+fn d_state_shape_error(
+    state_file: &str,
+    input_width: usize,
+    output_width: usize,
+    message: impl Into<String>,
+) -> CmError {
+    d_state_file_error(
+        state_file,
+        format!(
+            "shape {input_width} inputs x {output_width} outputs is too large: {}",
+            message.into()
+        ),
+    )
 }
 
 fn d_state_delay(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value> {
@@ -861,6 +886,116 @@ fn d_state_output_from_code(code: i64) -> DigitalValue {
     digital_table_output_from_code(code).unwrap_or_else(DigitalValue::unknown)
 }
 
+fn d_state_parse_shape(
+    state_file: &str,
+    input_width: usize,
+    output_width: usize,
+) -> CmResult<DStateParseShape> {
+    let header_len = output_width
+        .checked_add(input_width)
+        .and_then(|value| value.checked_add(3))
+        .ok_or_else(|| {
+            d_state_shape_error(
+                state_file,
+                input_width,
+                output_width,
+                "row width overflows usize",
+            )
+        })?;
+    let header_output_end = 1usize.checked_add(output_width).ok_or_else(|| {
+        d_state_shape_error(
+            state_file,
+            input_width,
+            output_width,
+            "output token range overflows usize",
+        )
+    })?;
+    let header_input_start = header_output_end;
+    let header_next_idx = header_len.checked_sub(1).ok_or_else(|| {
+        d_state_shape_error(
+            state_file,
+            input_width,
+            output_width,
+            "header row has no next-state token",
+        )
+    })?;
+    let continuation_len = input_width.checked_add(2).ok_or_else(|| {
+        d_state_shape_error(
+            state_file,
+            input_width,
+            output_width,
+            "continuation row width overflows usize",
+        )
+    })?;
+    let continuation_next_idx = continuation_len.checked_sub(1).ok_or_else(|| {
+        d_state_shape_error(
+            state_file,
+            input_width,
+            output_width,
+            "continuation row has no next-state token",
+        )
+    })?;
+
+    Ok(DStateParseShape {
+        header_len,
+        header_output_end,
+        header_input_start,
+        header_next_idx,
+        continuation_len,
+        continuation_next_idx,
+    })
+}
+
+fn d_state_reserve_tokens(
+    state_file: &str,
+    input_width: usize,
+    output_width: usize,
+    tokens: &mut Vec<&str>,
+    shape: DStateParseShape,
+) -> CmResult<()> {
+    let capacity = shape.header_len.max(shape.continuation_len);
+    tokens.try_reserve_exact(capacity).map_err(|err| {
+        d_state_shape_error(
+            state_file,
+            input_width,
+            output_width,
+            format!("unable to reserve {capacity} row tokens: {err}"),
+        )
+    })
+}
+
+fn d_state_reserve_row_inputs(
+    state_file: &str,
+    line: usize,
+    input_width: usize,
+    inputs: &mut Vec<Option<bool>>,
+) -> CmResult<()> {
+    inputs.try_reserve_exact(input_width).map_err(|err| {
+        d_state_error(
+            state_file,
+            line,
+            format!("unable to reserve {input_width} row inputs: {err}"),
+        )
+    })
+}
+
+fn d_state_reserve_row_outputs(
+    state_file: &str,
+    line: usize,
+    output_width: usize,
+    output_values: &mut Vec<DigitalValue>,
+) -> CmResult<()> {
+    output_values
+        .try_reserve_exact(output_width)
+        .map_err(|err| {
+            d_state_error(
+                state_file,
+                line,
+                format!("unable to reserve {output_width} row outputs: {err}"),
+            )
+        })
+}
+
 fn parse_d_state_file(
     state_file: &str,
     input_width: usize,
@@ -881,7 +1016,15 @@ fn parse_d_state_contents(
     let mut output_values = Vec::new();
     let mut last_state = None;
     let mut stale_bit_code = 0;
-    let mut tokens = Vec::with_capacity(output_width.saturating_add(input_width).saturating_add(3));
+    let parse_shape = d_state_parse_shape(state_file, input_width, output_width)?;
+    let mut tokens = Vec::new();
+    d_state_reserve_tokens(
+        state_file,
+        input_width,
+        output_width,
+        &mut tokens,
+        parse_shape,
+    )?;
 
     for (line_idx, line) in contents.lines().enumerate() {
         let line_no = line_idx + 1;
@@ -890,18 +1033,21 @@ fn parse_d_state_contents(
         }
 
         tokenize_digital_table_line(line, &mut tokens);
-        let header_len = output_width + input_width + 3;
-        let continuation_len = input_width + 2;
-        let (state, input_start, next_idx) = if tokens.len() == header_len {
+        let (state, input_start, next_idx) = if tokens.len() == parse_shape.header_len {
             let state = parse_d_state_i64(state_file, line_no, tokens[0])?;
-            for token in &tokens[1..1 + output_width] {
+            d_state_reserve_row_outputs(state_file, line_no, output_width, &mut output_values)?;
+            for token in &tokens[1..parse_shape.header_output_end] {
                 let code = parse_d_state_output_code(state_file, line_no, token)?;
                 stale_bit_code = code;
                 output_values.push(d_state_output_from_code(code));
             }
             last_state = Some(state);
-            (state, 1 + output_width, header_len - 1)
-        } else if tokens.len() == continuation_len {
+            (
+                state,
+                parse_shape.header_input_start,
+                parse_shape.header_next_idx,
+            )
+        } else if tokens.len() == parse_shape.continuation_len {
             let state = last_state.ok_or_else(|| {
                 d_state_error(
                     state_file,
@@ -909,26 +1055,35 @@ fn parse_d_state_contents(
                     "continuation row appears before any state header",
                 )
             })?;
+            d_state_reserve_row_outputs(state_file, line_no, output_width, &mut output_values)?;
             output_values.extend(std::iter::repeat_n(
                 d_state_output_from_code(stale_bit_code),
                 output_width,
             ));
-            (state, 0, continuation_len - 1)
+            (state, 0, parse_shape.continuation_next_idx)
         } else {
             return Err(d_state_error(
                 state_file,
                 line_no,
                 format!(
                     "expected {} header token(s) or {} continuation token(s), got {}",
-                    header_len,
-                    continuation_len,
+                    parse_shape.header_len,
+                    parse_shape.continuation_len,
                     tokens.len()
                 ),
             ));
         };
 
-        let mut inputs = Vec::with_capacity(input_width);
-        for token in &tokens[input_start..input_start + input_width] {
+        let mut inputs = Vec::new();
+        d_state_reserve_row_inputs(state_file, line_no, input_width, &mut inputs)?;
+        let input_end = input_start.checked_add(input_width).ok_or_else(|| {
+            d_state_error(
+                state_file,
+                line_no,
+                "input token range overflows usize for row shape",
+            )
+        })?;
+        for token in &tokens[input_start..input_end] {
             let input_code = parse_d_state_input_code(state_file, line_no, token)?;
             stale_bit_code = input_code;
             inputs.push(match input_code {
