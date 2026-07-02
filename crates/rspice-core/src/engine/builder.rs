@@ -1546,6 +1546,365 @@ fn parse_generated_xspice_auto_bridge_deck(
     Netlist::parse_with_path(generated_deck, synthetic_path)
 }
 
+fn add_generated_xspice_auto_bridge_resistor(
+    circuit: &mut CircuitData,
+    generated: &Netlist,
+    element: &Element,
+    temperature: crate::Value,
+) -> Result<(), SimulationError> {
+    let ElementKind::Resistor {
+        value,
+        value_expr,
+        model,
+        instance_params,
+        ..
+    } = &element.kind
+    else {
+        return Err(SimulationError::Circuit(format!(
+            "Generated XSPICE auto-bridge element '{}' is not a resistor",
+            element.name
+        )));
+    };
+    if element.nodes.len() != 2 {
+        return Err(SimulationError::Circuit(format!(
+            "Generated XSPICE auto-bridge resistor '{}' requires 2 nodes",
+            element.name
+        )));
+    }
+    if value_expr
+        .as_deref()
+        .is_some_and(expression_references_circuit_state)
+    {
+        return Err(SimulationError::Circuit(format!(
+            "Generated XSPICE auto-bridge resistor '{}' cannot use a circuit-state expression",
+            element.name
+        )));
+    }
+
+    let resistance = resolve_resistor_instance_value(
+        generated,
+        &element.name,
+        *value,
+        value_expr.as_deref(),
+        model.as_deref(),
+        instance_params,
+        temperature,
+    )?;
+    let small_signal_resistance =
+        resolve_resistor_small_signal_value(&element.name, resistance, instance_params)?;
+    let np = circuit.get_or_create_node(&element.nodes[0]);
+    let nn = circuit.get_or_create_node(&element.nodes[1]);
+    let zero_resistance_tol = generated
+        .options
+        .device_zero_resistance_tol
+        .unwrap_or(XYCE_DEFAULT_ZERO_RESISTANCE_TOL)
+        .max(0.0);
+    if resistance.is_finite() && resistance.abs() <= zero_resistance_tol {
+        if !small_signal_resistance.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Generated XSPICE auto-bridge resistor '{}' resolved to non-finite branch-form small-signal resistance {}",
+                element.name, small_signal_resistance
+            )));
+        }
+        let branch = circuit.allocate_branch_named(&element.name);
+        circuit.resistor_branches.add(
+            element.name.clone(),
+            np,
+            nn,
+            branch,
+            resistance,
+            small_signal_resistance,
+        );
+    } else {
+        circuit.resistors.add_with_small_signal(
+            element.name.clone(),
+            np,
+            nn,
+            resistance,
+            small_signal_resistance,
+        );
+    }
+    Ok(())
+}
+
+fn add_generated_xspice_auto_bridge_capacitor(
+    circuit: &mut CircuitData,
+    generated: &Netlist,
+    element: &Element,
+    temperature: crate::Value,
+    spice_dialect: SpiceDialect,
+) -> Result<(), SimulationError> {
+    let ElementKind::Capacitor {
+        value,
+        initial_voltage,
+        model,
+        instance_params,
+        ..
+    } = &element.kind
+    else {
+        return Err(SimulationError::Circuit(format!(
+            "Generated XSPICE auto-bridge element '{}' is not a capacitor",
+            element.name
+        )));
+    };
+    if element.nodes.len() != 2 {
+        return Err(SimulationError::Circuit(format!(
+            "Generated XSPICE auto-bridge capacitor '{}' requires 2 nodes",
+            element.name
+        )));
+    }
+
+    let capacitance = resolve_capacitor_instance_value(
+        generated,
+        &element.name,
+        *value,
+        model.as_deref(),
+        instance_params,
+        temperature,
+        spice_dialect,
+    )?;
+    let np = circuit.get_or_create_node(&element.nodes[0]);
+    let nn = circuit.get_or_create_node(&element.nodes[1]);
+    if let Some(ic) = *initial_voltage {
+        circuit
+            .capacitors
+            .add_with_ic(element.name.clone(), np, nn, capacitance, ic);
+    } else {
+        circuit
+            .capacitors
+            .add(element.name.clone(), np, nn, capacitance);
+    }
+    Ok(())
+}
+
+fn add_generated_xspice_auto_bridge_inductor(
+    circuit: &mut CircuitData,
+    generated: &Netlist,
+    element: &Element,
+    temperature: crate::Value,
+) -> Result<(), SimulationError> {
+    let ElementKind::Inductor {
+        value,
+        initial_current,
+        model,
+        instance_params,
+        ..
+    } = &element.kind
+    else {
+        return Err(SimulationError::Circuit(format!(
+            "Generated XSPICE auto-bridge element '{}' is not an inductor",
+            element.name
+        )));
+    };
+    if element.nodes.len() != 2 {
+        return Err(SimulationError::Circuit(format!(
+            "Generated XSPICE auto-bridge inductor '{}' requires 2 nodes",
+            element.name
+        )));
+    }
+
+    let inductance = resolve_inductor_instance_value(
+        generated,
+        &element.name,
+        *value,
+        model.as_deref(),
+        instance_params,
+        temperature,
+    )?;
+    let np = circuit.get_or_create_node(&element.nodes[0]);
+    let nn = circuit.get_or_create_node(&element.nodes[1]);
+    let branch = circuit.allocate_branch_named(&element.name);
+    if let Some(ic) = *initial_current {
+        circuit
+            .inductors
+            .add_with_ic(element.name.clone(), np, nn, branch, inductance, ic);
+    } else {
+        circuit
+            .inductors
+            .add(element.name.clone(), np, nn, branch, inductance);
+    }
+    Ok(())
+}
+
+fn add_generated_xspice_auto_bridge_instance(
+    circuit: &mut CircuitData,
+    generated: &Netlist,
+    element: &Element,
+    template_key: &str,
+    temperature: crate::Value,
+    ramptime: crate::Value,
+    digital_delay_type: Option<i64>,
+) -> Result<(), SimulationError> {
+    let ElementKind::Xspice {
+        model,
+        ports,
+        params,
+        expr_params,
+        string_params,
+        string_expr_params,
+        string_vector_params,
+        string_vector_expr_params,
+        real_vector_params,
+        real_vector_expr_params,
+        ..
+    } = &element.kind
+    else {
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE auto-bridge template '{}' generated non-XSPICE element '{}'",
+            template_key, element.name
+        )));
+    };
+
+    let resolved_model = resolve_xspice_model_instance(
+        generated,
+        &circuit.xspice_registry,
+        model,
+        params,
+        expr_params,
+        string_params,
+        string_expr_params,
+        string_vector_params,
+        string_vector_expr_params,
+        real_vector_params,
+        real_vector_expr_params,
+    )
+    .map_err(|e| {
+        SimulationError::Circuit(format!(
+            "Failed to resolve generated XSPICE auto-bridge model '{}' for template '{}': {}",
+            model, template_key, e
+        ))
+    })?;
+
+    let ports_spec = resolved_model.code_model.ports().to_vec();
+    let connections = coerce_xspice_connections(
+        circuit,
+        &ports_spec,
+        ports,
+        &element.name,
+        resolved_model.code_model.name(),
+    )?;
+
+    let mut instance = crate::xspice::XspiceInstance::new_with_string_vectors(
+        element.name.clone(),
+        resolved_model.code_model.clone(),
+        connections,
+        &resolved_model.numeric_params,
+        &resolved_model.string_params,
+        &resolved_model.string_vector_params,
+        &resolved_model.real_vector_params,
+        &resolved_model.integer_vector_params,
+    )
+    .map_err(|e| {
+        SimulationError::Circuit(format!(
+            "Failed to create generated XSPICE auto-bridge '{}': {}",
+            element.name, e
+        ))
+    })?;
+
+    instance.set_temperature(temperature);
+    instance.set_ramptime(ramptime);
+    instance.set_digital_delay_type(digital_delay_type);
+    assign_xspice_output_branches(circuit, &mut instance, &element.name)?;
+    instance.init().map_err(|e| {
+        SimulationError::Circuit(format!(
+            "Failed to initialize generated XSPICE auto-bridge '{}': {}",
+            element.name, e
+        ))
+    })?;
+
+    circuit.add_xspice_instance(instance);
+    Ok(())
+}
+
+fn add_generated_xspice_auto_bridge_subcircuit(
+    circuit: &mut CircuitData,
+    generated: &Netlist,
+    template: &XspiceAutoBridgeTemplate,
+    temperature: crate::Value,
+    ramptime: crate::Value,
+    digital_delay_type: Option<i64>,
+    spice_dialect: SpiceDialect,
+) -> Result<(), SimulationError> {
+    let flattened = flatten_netlist_with_models(generated).map_err(|e| {
+        SimulationError::Circuit(format!(
+            "Failed to flatten generated XSPICE auto-bridge template '{}': {}",
+            template.key, e
+        ))
+    })?;
+    if !flattened.scoped_initial_conditions.is_empty() || !flattened.scoped_node_sets.is_empty() {
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE auto-bridge template '{}' generated subcircuit startup directives; RSpice supports device/model cards in this path",
+            template.key
+        )));
+    }
+
+    let mut effective_generated;
+    let generated = if flattened.scoped_models.is_empty() {
+        generated
+    } else {
+        effective_generated = generated.clone();
+        effective_generated.models.extend(flattened.scoped_models);
+        &effective_generated
+    };
+
+    let mut added_xspice = false;
+    for element in &flattened.elements {
+        match &element.kind {
+            ElementKind::Resistor { .. } => {
+                add_generated_xspice_auto_bridge_resistor(
+                    circuit,
+                    generated,
+                    element,
+                    temperature,
+                )?;
+            }
+            ElementKind::Capacitor { .. } => {
+                add_generated_xspice_auto_bridge_capacitor(
+                    circuit,
+                    generated,
+                    element,
+                    temperature,
+                    spice_dialect,
+                )?;
+            }
+            ElementKind::Inductor { .. } => {
+                add_generated_xspice_auto_bridge_inductor(
+                    circuit,
+                    generated,
+                    element,
+                    temperature,
+                )?;
+            }
+            ElementKind::Xspice { .. } => {
+                add_generated_xspice_auto_bridge_instance(
+                    circuit,
+                    generated,
+                    element,
+                    &template.key,
+                    temperature,
+                    ramptime,
+                    digital_delay_type,
+                )?;
+                added_xspice = true;
+            }
+            _ => {
+                return Err(SimulationError::Circuit(format!(
+                    "XSPICE auto-bridge template '{}' generated unsupported subcircuit element '{}'; RSpice supports R/C/L passives and XSPICE A-device cards in generated bridge subcircuits",
+                    template.key, element.name
+                )));
+            }
+        }
+    }
+
+    if !added_xspice {
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE auto-bridge template '{}' generated no XSPICE A-device cards",
+            template.key
+        )));
+    }
+    Ok(())
+}
+
 fn add_template_xspice_auto_bridge(
     circuit: &mut CircuitData,
     bridges: &[&PlannedXspiceAutoBridge],
@@ -1554,6 +1913,7 @@ fn add_template_xspice_auto_bridge(
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
+    spice_dialect: SpiceDialect,
     node_names: Option<&[String]>,
 ) -> Result<(), SimulationError> {
     let Some(first_bridge) = bridges.first().copied() else {
@@ -1612,26 +1972,20 @@ fn add_template_xspice_auto_bridge(
     }
 
     let device_trimmed = device_card.trim_start();
-    if device_trimmed
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.eq_ignore_ascii_case(&'x'))
-    {
-        return Err(SimulationError::Circuit(format!(
-            "XSPICE auto-bridge template '{}' uses a subcircuit X-device; RSpice supports XSPICE A-device auto-bridge templates in this path",
-            template.key
-        )));
-    }
     if !device_trimmed
         .chars()
         .next()
-        .is_some_and(|ch| ch.eq_ignore_ascii_case(&'a'))
+        .is_some_and(|ch| ch.eq_ignore_ascii_case(&'a') || ch.eq_ignore_ascii_case(&'x'))
     {
         return Err(SimulationError::Circuit(format!(
-            "XSPICE auto-bridge template '{}' device card must be an XSPICE A-device card",
+            "XSPICE auto-bridge template '{}' device card must be an XSPICE A-device card or subcircuit X-device card",
             template.key
         )));
     }
+    let device_is_subcircuit = device_trimmed
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.eq_ignore_ascii_case(&'x'));
 
     let generated_deck =
         format!("RSpice generated XSPICE auto bridge\n{setup_card}\n{device_card}\n.end\n");
@@ -1643,6 +1997,27 @@ fn add_template_xspice_auto_bridge(
                     template.key, err
                 ))
             })?;
+    if device_is_subcircuit {
+        add_generated_xspice_auto_bridge_subcircuit(
+            circuit,
+            &generated,
+            template,
+            temperature,
+            ramptime,
+            digital_delay_type,
+            spice_dialect,
+        )?;
+        log::debug!(
+            "Generated XSPICE subcircuit auto-bridge on nodes {} from template {}",
+            node_list,
+            template.key
+        );
+        if node_names.is_some() {
+            log::info!("Generated XSPICE auto-bridge card: {}", device_card);
+        }
+        return Ok(());
+    }
+
     if generated.elements.len() != 1 {
         return Err(SimulationError::Circuit(format!(
             "XSPICE auto-bridge template '{}' must generate exactly one XSPICE A-device card",
@@ -1651,82 +2026,15 @@ fn add_template_xspice_auto_bridge(
     }
 
     let element = &generated.elements[0];
-    let ElementKind::Xspice {
-        model,
-        ports,
-        params,
-        expr_params,
-        string_params,
-        string_expr_params,
-        string_vector_params,
-        string_vector_expr_params,
-        real_vector_params,
-        real_vector_expr_params,
-        ..
-    } = &element.kind
-    else {
-        return Err(SimulationError::Circuit(format!(
-            "XSPICE auto-bridge template '{}' generated non-XSPICE element '{}'",
-            template.key, element.name
-        )));
-    };
-
-    let resolved_model = resolve_xspice_model_instance(
-        &generated,
-        &circuit.xspice_registry,
-        model,
-        params,
-        expr_params,
-        string_params,
-        string_expr_params,
-        string_vector_params,
-        string_vector_expr_params,
-        real_vector_params,
-        real_vector_expr_params,
-    )
-    .map_err(|e| {
-        SimulationError::Circuit(format!(
-            "Failed to resolve generated XSPICE auto-bridge model '{}' for template '{}': {}",
-            model, template.key, e
-        ))
-    })?;
-
-    let ports_spec = resolved_model.code_model.ports().to_vec();
-    let connections = coerce_xspice_connections(
+    add_generated_xspice_auto_bridge_instance(
         circuit,
-        &ports_spec,
-        ports,
-        &element.name,
-        resolved_model.code_model.name(),
+        &generated,
+        element,
+        &template.key,
+        temperature,
+        ramptime,
+        digital_delay_type,
     )?;
-
-    let mut instance = crate::xspice::XspiceInstance::new_with_string_vectors(
-        element.name.clone(),
-        resolved_model.code_model.clone(),
-        connections,
-        &resolved_model.numeric_params,
-        &resolved_model.string_params,
-        &resolved_model.string_vector_params,
-        &resolved_model.real_vector_params,
-        &resolved_model.integer_vector_params,
-    )
-    .map_err(|e| {
-        SimulationError::Circuit(format!(
-            "Failed to create generated XSPICE auto-bridge '{}': {}",
-            element.name, e
-        ))
-    })?;
-
-    instance.set_temperature(temperature);
-    instance.set_ramptime(ramptime);
-    instance.set_digital_delay_type(digital_delay_type);
-    assign_xspice_output_branches(circuit, &mut instance, &element.name)?;
-    instance.init().map_err(|e| {
-        SimulationError::Circuit(format!(
-            "Failed to initialize generated XSPICE auto-bridge '{}': {}",
-            element.name, e
-        ))
-    })?;
 
     log::debug!(
         "Generated XSPICE auto-bridge {} on nodes {} from template {}",
@@ -1737,7 +2045,6 @@ fn add_template_xspice_auto_bridge(
     if node_names.is_some() {
         log::info!("Generated XSPICE auto-bridge card: {}", device_card);
     }
-    circuit.add_xspice_instance(instance);
     Ok(())
 }
 
@@ -1750,6 +2057,7 @@ fn add_planned_xspice_auto_bridges(
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
+    spice_dialect: SpiceDialect,
     show_generated: bool,
 ) -> Result<(), SimulationError> {
     let node_names = show_generated.then(|| circuit.node_names_sorted());
@@ -1773,6 +2081,7 @@ fn add_planned_xspice_auto_bridges(
                 temperature,
                 ramptime,
                 digital_delay_type,
+                spice_dialect,
                 node_names.as_deref(),
             )?;
             continue;
@@ -1811,6 +2120,7 @@ fn add_planned_xspice_auto_bridges(
             temperature,
             ramptime,
             digital_delay_type,
+            spice_dialect,
             node_names.as_deref(),
         )?;
     }
@@ -1842,6 +2152,7 @@ fn add_planned_xspice_auto_bridge(
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
+    spice_dialect: SpiceDialect,
     node_names: Option<&[String]>,
 ) -> Result<(), SimulationError> {
     use crate::xspice::PortConnection;
@@ -1856,6 +2167,7 @@ fn add_planned_xspice_auto_bridge(
             temperature,
             ramptime,
             digital_delay_type,
+            spice_dialect,
             node_names,
         );
     }
@@ -2279,6 +2591,65 @@ set auto_bridge_d_out = ( \".include bridge_models.cir\" \"ainc%d [ %s ] [ %s ] 
         assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -0.5);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
+
+        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn auto_bridge_template_include_setup_builds_subcircuit_bridge() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rspice-auto-bridge-subckt-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        std::fs::write(
+            temp_dir.join("bridge_sub.cir"),
+            "\
+.subckt auto_buf dig ana vcc=5
+.model auto_dac dac_bridge(out_low = 0 out_high = {vcc})
+abuf [ dig ] [ internal ] auto_dac
+rint internal ana 100
+.ends
+",
+        )
+        .expect("write bridge subckt include file");
+
+        let deck_path = temp_dir.join("main.cir");
+        let netlist = Netlist::parse_with_path(
+            "\
+* auto bridge template subcircuit setup
+.param vcc=4.4
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.control
+set auto_bridge_d_out = ( \".include bridge_sub.cir\" \"xauto_buf%d %s %s auto_buf vcc=%g\" 1 )
+.endc
+.end
+",
+            &deck_path,
+        )
+        .expect("deck parses with source path");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
+        assert!(
+            circuit
+                .resistors
+                .names
+                .iter()
+                .any(|name| name.to_ascii_uppercase().contains("RINT")),
+            "generated bridge subcircuit should add the included rint resistor"
+        );
 
         std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
     }
@@ -5081,6 +5452,7 @@ impl Engine {
                     self.config.temperature,
                     self.config.ramptime,
                     self.config.digital_delay_type,
+                    self.config.spice_dialect,
                     netlist.options.auto_bridge_show_generated.unwrap_or(false),
                 )?;
             } else {
