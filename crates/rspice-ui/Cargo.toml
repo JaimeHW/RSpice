@@ -50,7 +50,7 @@ rustfft = "6.2"
 num-complex = "0.4"
 
 # Image encoding for GPU output
-png = "0.17"
+png = "0.18"
 base64 = "0.22"
 
 # Lazy initialization
