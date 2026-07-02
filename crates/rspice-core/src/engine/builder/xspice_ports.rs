@@ -332,6 +332,7 @@ fn explicit_xspice_port_type(
     use crate::xspice::PortType;
 
     match parsed_port {
+        XspicePort::AnalogVector(_) => Some(PortType::Voltage),
         XspicePort::Conductance(_) => Some(PortType::Conductance),
         XspicePort::ExplicitDigital(_) => Some(PortType::Digital),
         XspicePort::Current(_) => Some(PortType::Current),
@@ -363,6 +364,15 @@ fn pack_scalar_vector_port(
     let expects_real = port_spec.default_type == crate::xspice::PortType::Real;
     let mut nodes = Vec::with_capacity(parsed_ports.len());
     for port in parsed_ports {
+        if let Some(explicit_type) = explicit_xspice_port_type(port)
+            && !port_spec_allows_type(port_spec, explicit_type)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE port '{}' does not allow explicit {:?} connection {:?}",
+                port_spec.name, explicit_type, port
+            )));
+        }
+
         match port {
             XspicePort::Analog(name)
             | XspicePort::Digital(name)
