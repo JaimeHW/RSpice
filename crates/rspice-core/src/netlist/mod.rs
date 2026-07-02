@@ -394,7 +394,7 @@ impl Netlist {
                 continue;
             }
 
-            if let Some(command) = Self::promote_control_tran_command(line) {
+            if let Some(command) = Self::promote_control_netlist_command(line) {
                 promoted.push(command);
             }
             if let Some(command) = Self::promote_control_set_command(line) {
@@ -414,7 +414,7 @@ impl Netlist {
         promoted
     }
 
-    fn promote_control_tran_command(line: &str) -> Option<String> {
+    fn promote_control_netlist_command(line: &str) -> Option<String> {
         let body = strip_control_inline_comment(line).trim();
         if body.is_empty() || body.starts_with('*') {
             return None;
@@ -423,12 +423,40 @@ impl Netlist {
         let body = body.strip_prefix('.').unwrap_or(body);
         let mut parts = body.split_whitespace();
         let command = parts.next()?;
-        if !command.eq_ignore_ascii_case("tran") {
+        let args: Vec<&str> = parts.collect();
+        let promoted_command = match command.to_ascii_lowercase().as_str() {
+            "op" => ".op",
+            "dc" => ".dc",
+            "ac" => ".ac",
+            "tran" => ".tran",
+            "meas" => return Self::promote_control_measure_command(".meas", &args),
+            "measure" => return Self::promote_control_measure_command(".measure", &args),
+            _ => return None,
+        };
+
+        let mut promoted = String::from(promoted_command);
+        for part in args {
+            promoted.push(' ');
+            promoted.push_str(&normalize_control_analysis_token(part));
+        }
+        Some(promoted)
+    }
+
+    fn promote_control_measure_command(command: &str, args: &[&str]) -> Option<String> {
+        if args.len() < 4 {
             return None;
         }
 
-        let mut promoted = String::from(".tran");
-        for part in parts {
+        let measure_type = args[2].to_ascii_lowercase();
+        if !matches!(
+            measure_type.as_str(),
+            "avg" | "max" | "min" | "pp" | "rms" | "integ"
+        ) {
+            return None;
+        }
+
+        let mut promoted = String::from(command);
+        for part in args {
             promoted.push(' ');
             promoted.push_str(&normalize_control_analysis_token(part));
         }
@@ -1263,6 +1291,58 @@ mod tests {
         assert_eq!(tran.2, None);
         assert_eq!(tran.3, None);
         assert!(tran.4);
+    }
+
+    #[test]
+    fn control_block_promotes_core_analyses_and_measurements() {
+        let netlist = Netlist::parse(
+            "control analysis promotion\n\
+             v1 in 0 dc 1 ac 1\n\
+             r1 in out 1k\n\
+             r2 out 0 1k\n\
+             .csparam stopv=1\n\
+             .control\n\
+             op\n\
+             dc v1 0 $&stopv 0.5\n\
+             ac dec 3 1 1k\n\
+             meas ac gainmax max v(out) from=1 to=1k\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control-block core analyses and measurement parse");
+
+        assert!(netlist.analyses.iter().any(|analysis| matches!(analysis, AnalysisCommand::Op)));
+        assert!(netlist.analyses.iter().any(|analysis| {
+            matches!(
+                analysis,
+                AnalysisCommand::Dc {
+                    source,
+                    start,
+                    stop,
+                    step,
+                    ..
+                } if source.eq_ignore_ascii_case("v1")
+                    && *start == 0.0
+                    && (*stop - 1.0).abs() <= 1.0e-12
+                    && (*step - 0.5).abs() <= 1.0e-12
+            )
+        }));
+        assert!(netlist.analyses.iter().any(|analysis| {
+            matches!(
+                analysis,
+                AnalysisCommand::Ac {
+                    points,
+                    start_freq,
+                    stop_freq,
+                    ..
+                } if *points == 3
+                    && (*start_freq - 1.0).abs() <= 1.0e-12
+                    && (*stop_freq - 1.0e3).abs() <= 1.0e-9
+            )
+        }));
+        assert_eq!(netlist.measurements.len(), 1);
+        assert_eq!(netlist.measurements[0].analysis, "AC");
+        assert_eq!(netlist.measurements[0].name, "GAINMAX");
     }
 
     #[test]
