@@ -90,8 +90,13 @@ pub(crate) fn apply_save_set(signals: Vec<ScalarSignal>, saves: &SaveSet) -> Vec
     }
     with_differential_voltage_signals(signals, saves)
         .into_iter()
-        .filter(|signal| saves.selects(&signal.display_name))
+        .filter(|signal| signal_is_selected(signal, saves))
         .collect()
+}
+
+fn signal_is_selected(signal: &ScalarSignal, saves: &SaveSet) -> bool {
+    saves.selects(&signal.display_name)
+        || (signal.kind == SignalKind::Digital && saves.selects(&signal.raw_name))
 }
 
 /// Restrict complex (AC) signals to a netlist's output selection.
