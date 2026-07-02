@@ -342,24 +342,42 @@ pub(super) fn parse_model_params(
                             });
                         }
                     }
-                    TokenKind::Expression(expr) => {
-                        let expr = expr.clone();
-                        stream.advance();
-                        if defer_expression_params {
-                            expr_params.push((name, expr));
-                        } else if let Ok(value) = eval_expression(&expr, params) {
-                            numeric_params.push((name, value));
-                        } else if let Some(value) = params.get_string(&expr) {
-                            push_model_string_value(
-                                &mut string_params,
-                                &mut string_vector_params,
-                                &mut real_vector_params,
-                                line_num,
-                                &name,
+                    TokenKind::Expression(_) => {
+                        if xspice_model_type_accepts_contiguous_expressions(model_type)
+                            && let Some(value) = try_xspice_model_scalar_expression(
+                                stream,
+                                params,
+                                defer_expression_params,
+                            )
+                        {
+                            push_model_scalar_expression_param(
+                                &mut numeric_params,
+                                &mut expr_params,
+                                name,
                                 value,
-                            )?;
+                            );
                         } else {
-                            expr_params.push((name, expr));
+                            let TokenKind::Expression(expr) = &stream.peek().kind else {
+                                unreachable!("expression branch matched before fallback")
+                            };
+                            let expr = expr.clone();
+                            stream.advance();
+                            if defer_expression_params {
+                                expr_params.push((name, expr));
+                            } else if let Ok(value) = eval_expression(&expr, params) {
+                                numeric_params.push((name, value));
+                            } else if let Some(value) = params.get_string(&expr) {
+                                push_model_string_value(
+                                    &mut string_params,
+                                    &mut string_vector_params,
+                                    &mut real_vector_params,
+                                    line_num,
+                                    &name,
+                                    value,
+                                )?;
+                            } else {
+                                expr_params.push((name, expr));
+                            }
                         }
                     }
                     TokenKind::LBracket => {
@@ -566,6 +584,7 @@ fn model_scalar_expression_token_can_start(kind: &TokenKind) -> bool {
         kind,
         TokenKind::Ident(_)
             | TokenKind::Number(_)
+            | TokenKind::Expression(_)
             | TokenKind::Plus
             | TokenKind::Minus
             | TokenKind::LParen
@@ -581,6 +600,7 @@ fn model_scalar_expression_is_compound(first: &Token, expr: &str) -> bool {
 fn model_scalar_expression_first_piece(token: &Token) -> Option<String> {
     match &token.kind {
         TokenKind::Ident(value) => Some(value.clone()),
+        TokenKind::Expression(expr) => Some(format!("({expr})")),
         TokenKind::Number(value) if token.lexeme.is_empty() => Some(format_compact_number(*value)),
         TokenKind::Number(_) | TokenKind::Plus | TokenKind::Minus | TokenKind::LParen => {
             Some(token.lexeme.clone())

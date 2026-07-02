@@ -3054,7 +3054,7 @@ mod tests {
             "xspice subckt inline model scalar expression\n\
              .subckt gaincell in out base=1 scale=2\n\
              A1 in out gainmodel\n\
-             .model gainmodel gain (gain=base*scale in_offset=0 out_offset=0)\n\
+             .model gainmodel gain (gain=base*scale in_offset={base}*scale out_offset=0)\n\
              .ends gaincell\n\
              X1 a b gaincell base=4 scale=5\n\
              X2 c d gaincell base=6 scale=7\n\
@@ -3077,7 +3077,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("flattened XSPICE element {element_name} exists"))
         };
 
-        let gain_for = |model_name: &str| -> f64 {
+        let param_for = |model_name: &str, param_name: &str| -> f64 {
             flattened
                 .scoped_models
                 .iter()
@@ -3090,17 +3090,19 @@ mod tests {
                     model
                         .params
                         .iter()
-                        .find(|(name, _)| name.eq_ignore_ascii_case("gain"))
+                        .find(|(name, _)| name.eq_ignore_ascii_case(param_name))
                         .map(|(_, value)| *value)
                 })
-                .unwrap_or_else(|| panic!("scoped model {model_name} has gain"))
+                .unwrap_or_else(|| panic!("scoped model {model_name} has {param_name}"))
         };
 
         let x1_model = model_for("X1.A1");
         let x2_model = model_for("X2.A1");
         assert_ne!(x1_model, x2_model);
-        assert_eq!(gain_for(x1_model), 20.0);
-        assert_eq!(gain_for(x2_model), 42.0);
+        assert_eq!(param_for(x1_model, "gain"), 20.0);
+        assert_eq!(param_for(x1_model, "in_offset"), 20.0);
+        assert_eq!(param_for(x2_model, "gain"), 42.0);
+        assert_eq!(param_for(x2_model, "in_offset"), 42.0);
     }
 
     #[test]
