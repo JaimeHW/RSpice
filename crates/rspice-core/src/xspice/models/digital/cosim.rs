@@ -37,6 +37,7 @@ struct DigitalCosimInputScratch {
     inouts: Vec<DigitalValue>,
     input_events: Vec<DigitalCosimInputEvent>,
     results: Vec<DigitalCosimStep>,
+    output_changes: Vec<(usize, DigitalValue)>,
 }
 
 fn with_input_scratch<R>(
@@ -232,8 +233,9 @@ fn schedule_normalized_runtime_outputs(
     runtime_values: &[DigitalValue],
     width: usize,
     delay: Value,
+    changes: &mut Vec<(usize, DigitalValue)>,
 ) {
-    let mut changes = Vec::new();
+    changes.clear();
     let previous_values = ctx.output_digital_vector_values(port_name);
     for index in 0..width {
         let previous = previous_values
@@ -244,28 +246,50 @@ fn schedule_normalized_runtime_outputs(
             changes.push((index, value));
         }
     }
-    for (index, value) in changes {
+    for (index, value) in changes.iter().copied() {
         ctx.set_output_digital_vector_element(port_name, index, value, delay);
     }
 }
 
-fn apply_cosim_step(ctx: &mut CmContext, result: DigitalCosimStep) -> CmResult<()> {
+fn apply_cosim_step(
+    ctx: &mut CmContext,
+    result: DigitalCosimStep,
+    output_changes: &mut Vec<(usize, DigitalValue)>,
+) -> CmResult<()> {
     let output_width = ctx.port_width("d_out");
     let inout_width = ctx.port_width("d_inout");
     let delay = effective_output_delay(ctx, result.vtime);
 
     if output_width > 0 {
-        schedule_normalized_runtime_outputs(ctx, "d_out", &result.outputs, output_width, delay);
+        schedule_normalized_runtime_outputs(
+            ctx,
+            "d_out",
+            &result.outputs,
+            output_width,
+            delay,
+            output_changes,
+        );
     }
     if inout_width > 0 {
-        schedule_normalized_runtime_outputs(ctx, "d_inout", &result.inouts, inout_width, delay);
+        schedule_normalized_runtime_outputs(
+            ctx,
+            "d_inout",
+            &result.inouts,
+            inout_width,
+            delay,
+            output_changes,
+        );
     }
     Ok(())
 }
 
-fn apply_cosim_steps(ctx: &mut CmContext, results: &mut Vec<DigitalCosimStep>) -> CmResult<()> {
+fn apply_cosim_steps(
+    ctx: &mut CmContext,
+    results: &mut Vec<DigitalCosimStep>,
+    output_changes: &mut Vec<(usize, DigitalValue)>,
+) -> CmResult<()> {
     for result in results.drain(..) {
-        apply_cosim_step(ctx, result)?;
+        apply_cosim_step(ctx, result, output_changes)?;
     }
     Ok(())
 }
@@ -390,6 +414,7 @@ impl CodeModel for DigitalCosim {
                 inouts,
                 input_events,
                 results,
+                output_changes,
             } = input_scratch;
             fill_sized_digital_vector(ctx, "d_in", input_width, inputs);
             fill_sized_digital_vector(ctx, "d_inout", inout_width, inouts);
@@ -443,7 +468,7 @@ impl CodeModel for DigitalCosim {
                     digital_value_code(event.value),
                 );
             }
-            apply_cosim_steps(ctx, results)?;
+            apply_cosim_steps(ctx, results, output_changes)?;
             Ok(())
         })
     }
@@ -620,6 +645,7 @@ mod tests {
 
         ctx.time = 1.0e-9;
         let vtime = ctx.time;
+        let mut output_changes = Vec::new();
         apply_cosim_step(
             &mut ctx,
             DigitalCosimStep {
@@ -627,6 +653,7 @@ mod tests {
                 outputs: vec![DigitalValue::one()],
                 inouts: Vec::new(),
             },
+            &mut output_changes,
         )
         .expect("partial cosim step applies");
 
@@ -648,8 +675,10 @@ mod tests {
         }];
         let first_ptr = results.as_ptr();
         let first_capacity = results.capacity();
+        let mut output_changes = Vec::new();
 
-        apply_cosim_steps(&mut ctx, &mut results).expect("cosim result applies");
+        apply_cosim_steps(&mut ctx, &mut results, &mut output_changes)
+            .expect("cosim result applies");
 
         assert!(results.is_empty());
         assert_eq!(results.as_ptr(), first_ptr);
