@@ -701,38 +701,52 @@ impl BreakpointManager {
             return;
         }
 
-        // Check if already exists (within tolerance)
-        for &bp in &self.breakpoints {
-            if (bp - time).abs() < self.tolerance {
-                return;
-            }
+        let pos = self.breakpoints.partition_point(|&bp| bp < time);
+        if self
+            .breakpoints
+            .get(pos)
+            .is_some_and(|&bp| (bp - time).abs() < self.tolerance)
+            || pos
+                .checked_sub(1)
+                .and_then(|prev| self.breakpoints.get(prev))
+                .is_some_and(|&bp| (bp - time).abs() < self.tolerance)
+        {
+            return;
         }
 
-        // Insert in sorted order
-        match self.breakpoints.binary_search_by(|t| t.total_cmp(&time)) {
-            Ok(_) => {} // Already exists
-            Err(pos) => self.breakpoints.insert(pos, time),
-        }
+        self.breakpoints.insert(pos, time);
     }
 
     /// Get the next breakpoint after the given time
     pub fn next_after(&self, time: Value) -> Option<Value> {
-        self.breakpoints
-            .iter()
-            .find(|&&bp| bp > time + self.tolerance)
-            .copied()
+        if time.is_nan() {
+            return None;
+        }
+        let cutoff = time + self.tolerance;
+        let pos = self.breakpoints.partition_point(|&bp| bp <= cutoff);
+        self.breakpoints.get(pos).copied()
     }
 
     /// Remove breakpoints at or before the given time
     pub fn remove_before(&mut self, time: Value) {
-        self.breakpoints.retain(|&t| t > time + self.tolerance);
+        if time.is_nan() {
+            return;
+        }
+        let cutoff = time + self.tolerance;
+        let remove_count = self.breakpoints.partition_point(|&t| t <= cutoff);
+        self.breakpoints.drain(..remove_count);
     }
 
     /// Check if there's a breakpoint at the given time
     pub fn has_breakpoint_at(&self, time: Value) -> bool {
+        if !time.is_finite() {
+            return false;
+        }
+        let lower = time - self.tolerance;
+        let pos = self.breakpoints.partition_point(|&t| t <= lower);
         self.breakpoints
-            .iter()
-            .any(|&t| (t - time).abs() < self.tolerance)
+            .get(pos)
+            .is_some_and(|&t| (t - time).abs() < self.tolerance)
     }
 
     /// Clear all breakpoints
@@ -742,11 +756,12 @@ impl BreakpointManager {
 
     /// Get all breakpoints in an interval
     pub fn in_interval(&self, start: Value, end: Value) -> Vec<Value> {
-        self.breakpoints
-            .iter()
-            .copied()
-            .filter(|&t| t > start && t <= end)
-            .collect()
+        if start.is_nan() || end.is_nan() || end <= start {
+            return Vec::new();
+        }
+        let start_pos = self.breakpoints.partition_point(|&t| t <= start);
+        let end_pos = self.breakpoints.partition_point(|&t| t <= end);
+        self.breakpoints[start_pos..end_pos].to_vec()
     }
 }
 
