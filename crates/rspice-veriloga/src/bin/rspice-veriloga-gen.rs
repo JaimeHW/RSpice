@@ -2,8 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 use rspice_veriloga::rust_backend::{
-    generate_generated_builtin_subset_with_progress, regenerate_generated_builtins_with_progress,
-    validate_generated_builtins,
+    BuiltinBackendFallbackReason, generate_generated_builtin_subset_with_progress,
+    regenerate_generated_builtins_with_progress, validate_generated_builtins,
 };
 
 type CommandResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -61,6 +61,7 @@ fn run() -> CommandResult<()> {
                 report.backend_counts.hybrid,
                 report.backend_counts.legacy_device
             );
+            print_fallback_reasons(&report.fallback_reasons);
             println!(
                 "manifest: source_tree_digest={}, generator_digest={}",
                 report.manifest.source_tree_digest, report.manifest.generator_digest
@@ -88,6 +89,7 @@ fn run() -> CommandResult<()> {
                 report.backend_counts.hybrid,
                 report.backend_counts.legacy_device
             );
+            print_fallback_reasons(&report.fallback_reasons);
         }
         Command::CheckBuiltins => {
             if options.filter.is_some() {
@@ -106,6 +108,22 @@ fn run() -> CommandResult<()> {
         }
     }
     Ok(())
+}
+
+fn print_fallback_reasons(reasons: &[BuiltinBackendFallbackReason]) {
+    if reasons.is_empty() {
+        return;
+    }
+    println!("fallback reasons:");
+    for reason in reasons {
+        println!(
+            "  {} :: {} -> {:?}: {}",
+            reason.source.display(),
+            reason.module,
+            reason.backend,
+            reason.reason
+        );
+    }
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Options>> {

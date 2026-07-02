@@ -46,12 +46,22 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
 pub struct BuiltinGenerationReport {
     pub manifest: GeneratedBuiltinManifest,
     pub backend_counts: BuiltinBackendSelectionCounts,
+    pub fallback_reasons: Vec<BuiltinBackendFallbackReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltinSubsetGenerationReport {
     pub device_count: usize,
     pub backend_counts: BuiltinBackendSelectionCounts,
+    pub fallback_reasons: Vec<BuiltinBackendFallbackReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltinBackendFallbackReason {
+    pub source: PathBuf,
+    pub module: String,
+    pub backend: RustBackendSelection,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -89,7 +99,7 @@ pub fn regenerate_generated_builtins_with_progress(
 
     let source_tree_digest = tree_digest(model_root, false)?;
     let generator_digest = generator_digest(generator_root, false)?;
-    let (devices, backend_counts) =
+    let (devices, backend_counts, fallback_reasons) =
         generate_devices_with_stack(model_root.to_path_buf(), None, progress)?;
     if devices.is_empty() {
         return Err(format!(
@@ -114,6 +124,7 @@ pub fn regenerate_generated_builtins_with_progress(
     Ok(BuiltinGenerationReport {
         manifest,
         backend_counts,
+        fallback_reasons,
     })
 }
 
@@ -125,7 +136,7 @@ pub fn generate_generated_builtin_subset_with_progress(
 ) -> BuiltinResult<BuiltinSubsetGenerationReport> {
     validate_model_root(model_root)?;
 
-    let (devices, backend_counts) =
+    let (devices, backend_counts, fallback_reasons) =
         generate_devices_with_stack(model_root.to_path_buf(), Some(filter.to_string()), progress)?;
     if devices.is_empty() {
         return Err(format!(
@@ -141,6 +152,7 @@ pub fn generate_generated_builtin_subset_with_progress(
     Ok(BuiltinSubsetGenerationReport {
         device_count: devices.len(),
         backend_counts,
+        fallback_reasons,
     })
 }
 
@@ -410,7 +422,15 @@ fn generate_devices(
     model_root: &Path,
     filter: Option<&str>,
     progress: bool,
-) -> BuiltinResult<(Vec<GeneratedRustDevice>, BuiltinBackendSelectionCounts)> {
+) -> BuiltinResult<(
+    Vec<GeneratedRustDevice>,
+    BuiltinBackendSelectionCounts,
+    Vec<BuiltinBackendFallbackReason>,
+)> {
+    let model_root = model_root
+        .canonicalize()
+        .unwrap_or_else(|_| model_root.to_path_buf());
+    let model_root = model_root.as_path();
     let candidates = discover_veriloga_sources(model_root)?;
     let filter = filter.map(BuiltinSourceFilter::new).transpose()?;
     let work_items = builtin_module_work_items(model_root, &candidates, filter.as_ref());
@@ -421,6 +441,7 @@ fn generate_devices(
     let transpiler = RustTranspiler::new_auto(Default::default());
     let mut devices = Vec::new();
     let mut backend_counts = BuiltinBackendSelectionCounts::default();
+    let mut fallback_reasons = Vec::new();
     let mut module_index = 0usize;
 
     for item in work_items {
@@ -465,9 +486,26 @@ fn generate_devices(
         }
         let report = transpiler.transpile_with_report(&compiled.artifact)?;
         backend_counts.record(report.backend);
+        if let Some(reason) = &report.fallback_reason {
+            fallback_reasons.push(BuiltinBackendFallbackReason {
+                source: item
+                    .path
+                    .strip_prefix(model_root)
+                    .unwrap_or(&item.path)
+                    .to_path_buf(),
+                module: item.module.clone(),
+                backend: report.backend,
+                reason: reason.clone(),
+            });
+        }
         if progress {
+            let fallback = report
+                .fallback_reason
+                .as_ref()
+                .map(|reason| format!(", fallback: {reason}"))
+                .unwrap_or_default();
             eprintln!(
-                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:?}, transpile {:.2?}, total {:.2?})",
+                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:?}{fallback}, transpile {:.2?}, total {:.2?})",
                 item.path
                     .strip_prefix(model_root)
                     .unwrap_or(&item.path)
@@ -487,7 +525,7 @@ fn generate_devices(
             .cmp(&right.public_model_name)
             .then_with(|| left.folder_name.cmp(&right.folder_name))
     });
-    Ok((devices, backend_counts))
+    Ok((devices, backend_counts, fallback_reasons))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -552,7 +590,11 @@ fn generate_devices_with_stack(
     filter: Option<String>,
     progress: bool,
 ) -> Result<
-    (Vec<GeneratedRustDevice>, BuiltinBackendSelectionCounts),
+    (
+        Vec<GeneratedRustDevice>,
+        BuiltinBackendSelectionCounts,
+        Vec<BuiltinBackendFallbackReason>,
+    ),
     Box<dyn std::error::Error + Send + Sync>,
 > {
     std::thread::Builder::new()

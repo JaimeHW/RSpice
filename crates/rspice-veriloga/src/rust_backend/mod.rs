@@ -11,10 +11,11 @@ mod registry;
 mod scalar;
 
 pub use builtins::{
-    BuiltinBackendSelectionCounts, BuiltinGenerationReport, BuiltinSubsetGenerationReport,
-    GENERATED_BUILTIN_MANIFEST_FILE_NAME, REGENERATE_BUILTINS_COMMAND,
-    generate_generated_builtin_subset_with_progress, regenerate_generated_builtins,
-    regenerate_generated_builtins_with_progress, validate_generated_builtins,
+    BuiltinBackendFallbackReason, BuiltinBackendSelectionCounts, BuiltinGenerationReport,
+    BuiltinSubsetGenerationReport, GENERATED_BUILTIN_MANIFEST_FILE_NAME,
+    REGENERATE_BUILTINS_COMMAND, generate_generated_builtin_subset_with_progress,
+    regenerate_generated_builtins, regenerate_generated_builtins_with_progress,
+    validate_generated_builtins,
 };
 pub use device::render_runtime_support_module;
 pub use discover::{
@@ -58,6 +59,7 @@ pub enum RustBackendSelection {
 pub struct GeneratedRustDeviceReport {
     pub device: GeneratedRustDevice,
     pub backend: RustBackendSelection,
+    pub fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,18 +136,25 @@ impl RustTranspiler {
                 Ok(device) => Ok(GeneratedRustDeviceReport {
                     device,
                     backend: RustBackendSelection::ScalarOptIr,
+                    fallback_reason: None,
                 }),
                 Err(scalar_error) if scalar_error.is_unsupported() => {
                     match device::generate_hybrid_device(artifact, &self.options) {
                         Ok(device) => Ok(GeneratedRustDeviceReport {
                             device,
                             backend: RustBackendSelection::ScalarHybrid,
+                            fallback_reason: Some(unsupported_detail(&scalar_error).to_string()),
                         }),
                         Err(hybrid_error) if hybrid_error.is_unsupported() => {
                             match device::generate_device(artifact, &self.options) {
                                 Ok(device) => Ok(GeneratedRustDeviceReport {
                                     device,
                                     backend: RustBackendSelection::LegacyDevice,
+                                    fallback_reason: Some(format!(
+                                        "scalar path: {}; hybrid scalar path: {}",
+                                        unsupported_detail(&scalar_error),
+                                        unsupported_detail(&hybrid_error)
+                                    )),
                                 }),
                                 Err(legacy_error) if legacy_error.is_unsupported() => {
                                     Err(auto_backend_unsupported(
@@ -166,10 +175,12 @@ impl RustTranspiler {
             RustBackendKind::Legacy => Ok(GeneratedRustDeviceReport {
                 device: device::generate_device(artifact, &self.options)?,
                 backend: RustBackendSelection::LegacyDevice,
+                fallback_reason: None,
             }),
             RustBackendKind::ScalarOptIr => Ok(GeneratedRustDeviceReport {
                 device: scalar::generate_device(artifact, &self.options)?,
                 backend: RustBackendSelection::ScalarOptIr,
+                fallback_reason: None,
             }),
         }
     }
