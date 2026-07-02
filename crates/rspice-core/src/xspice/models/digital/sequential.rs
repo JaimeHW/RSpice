@@ -1,5 +1,5 @@
 use crate::Value;
-use crate::xspice::EvaluationPhase;
+use crate::xspice::{CmError, EvaluationPhase};
 
 use super::*;
 
@@ -11,8 +11,15 @@ const OFFICIAL_SEQUENTIAL_DELAY_MIN: Value = 1.0e-12;
 const OFFICIAL_IC_MIN: i64 = 0;
 const OFFICIAL_IC_MAX: i64 = 2;
 
-fn official_sequential_delay(ctx: &CmContext, name: &str) -> Value {
-    ctx.param(name).max(OFFICIAL_SEQUENTIAL_DELAY_MIN)
+fn official_sequential_delay(ctx: &CmContext, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("digital sequential delay must be finite, got {value}"),
+        });
+    }
+    Ok(value.max(OFFICIAL_SEQUENTIAL_DELAY_MIN))
 }
 
 fn sequential_set_int_state(ctx: &mut CmContext, index: usize, value: i64) {
@@ -77,15 +84,20 @@ fn sr_result(set_input: i64, reset_input: i64, old_output: i64) -> i64 {
     }
 }
 
-fn transition_delays(ctx: &CmContext, old: i64, new: i64, base_delay: Value) -> (Value, Value) {
-    let rise_delay = official_sequential_delay(ctx, "rise_delay");
-    let fall_delay = official_sequential_delay(ctx, "fall_delay");
-    match new {
+fn transition_delays(
+    ctx: &CmContext,
+    old: i64,
+    new: i64,
+    base_delay: Value,
+) -> CmResult<(Value, Value)> {
+    let rise_delay = official_sequential_delay(ctx, "rise_delay")?;
+    let fall_delay = official_sequential_delay(ctx, "fall_delay")?;
+    Ok(match new {
         0 => (base_delay + fall_delay, base_delay + rise_delay),
         1 => (base_delay + rise_delay, base_delay + fall_delay),
         _ if old == 0 => (base_delay + rise_delay, base_delay + fall_delay),
         _ => (base_delay + fall_delay, base_delay + rise_delay),
-    }
+    })
 }
 
 fn drive_outputs(ctx: &mut CmContext, output: i64, out_delay: Value, nout_delay: Value) {
@@ -177,18 +189,18 @@ fn evaluate_edge_model(
         let (next, base_delay) = if set != old_set {
             (
                 set_edge_output(old_output, set, reset),
-                Some(official_sequential_delay(ctx, "set_delay")),
+                Some(official_sequential_delay(ctx, "set_delay")?),
             )
         } else if reset != old_reset {
             (
                 reset_edge_output(old_output, set, reset),
-                Some(official_sequential_delay(ctx, "reset_delay")),
+                Some(official_sequential_delay(ctx, "reset_delay")?),
             )
         } else if clk != old_clk && reset != 1 && set != 1 {
             if clk == 1 {
                 (
                     next_on_rising_clock(ctx, old_output),
-                    Some(official_sequential_delay(ctx, "clk_delay")),
+                    Some(official_sequential_delay(ctx, "clk_delay")?),
                 )
             } else {
                 (old_output, None)
@@ -200,7 +212,7 @@ fn evaluate_edge_model(
         if next != old_output
             && let Some(base_delay) = base_delay
         {
-            let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay);
+            let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay)?;
             drive_outputs(ctx, next, out_delay, nout_delay);
         }
 
@@ -477,6 +489,38 @@ mod tests {
                 ("reset_load", ParamType::Real, 1.0e-12),
             ]
         );
+    }
+
+    fn assert_invalid_param(result: CmResult<()>, expected_name: &str) {
+        match result {
+            Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected_name),
+            other => panic!("expected InvalidParameter for {expected_name}, got {other:?}"),
+        }
+    }
+
+    fn initialized_dff_context() -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.set_input_digital("data", DigitalValue::zero());
+        ctx.set_input_digital("clk", DigitalValue::zero());
+        ctx.set_input_digital("set", DigitalValue::zero());
+        ctx.set_input_digital("reset", DigitalValue::zero());
+        DFlipFlop.init(&mut ctx).expect("d_dff init");
+        DFlipFlop.evaluate(&mut ctx).expect("d_dff initial");
+        ctx.time = 1.0e-9;
+        ctx.set_input_digital("data", DigitalValue::one());
+        ctx.set_input_digital("clk", DigitalValue::one());
+        ctx
+    }
+
+    #[test]
+    fn sequential_models_reject_nonfinite_delay_params() {
+        let mut clk_ctx = initialized_dff_context();
+        clk_ctx.set_param("clk_delay", f64::INFINITY);
+        assert_invalid_param(DFlipFlop.evaluate(&mut clk_ctx), "clk_delay");
+
+        let mut rise_ctx = initialized_dff_context();
+        rise_ctx.set_param("rise_delay", f64::NAN);
+        assert_invalid_param(DFlipFlop.evaluate(&mut rise_ctx), "rise_delay");
     }
 
     #[test]
@@ -861,10 +905,10 @@ impl CodeModel for DigitalFrequencyDivider {
             if count == div_factor + 1 || count == 1 {
                 count = 1;
                 next_output = 1;
-                delay = Some(official_sequential_delay(ctx, "rise_delay"));
+                delay = Some(official_sequential_delay(ctx, "rise_delay")?);
             } else if count == high_cycles + 1 {
                 next_output = 0;
-                delay = Some(official_sequential_delay(ctx, "fall_delay"));
+                delay = Some(official_sequential_delay(ctx, "fall_delay")?);
             }
         }
 
@@ -1051,22 +1095,22 @@ impl CodeModel for DLatch {
             let (next, base_delay) = if set != old_set {
                 (
                     dlatch_set_edge_output(old_output, data, enable, set, reset),
-                    Some(official_sequential_delay(ctx, "set_delay")),
+                    Some(official_sequential_delay(ctx, "set_delay")?),
                 )
             } else if reset != old_reset {
                 (
                     dlatch_reset_edge_output(old_output, data, enable, set, reset),
-                    Some(official_sequential_delay(ctx, "reset_delay")),
+                    Some(official_sequential_delay(ctx, "reset_delay")?),
                 )
             } else if enable != old_enable && reset != 1 && set != 1 {
                 if enable == 1 {
-                    (data, Some(official_sequential_delay(ctx, "enable_delay")))
+                    (data, Some(official_sequential_delay(ctx, "enable_delay")?))
                 } else {
                     (old_output, None)
                 }
             } else if data != old_data && reset != 1 && set != 1 {
                 if enable == 1 {
-                    (data, Some(official_sequential_delay(ctx, "data_delay")))
+                    (data, Some(official_sequential_delay(ctx, "data_delay")?))
                 } else {
                     (old_output, None)
                 }
@@ -1077,7 +1121,7 @@ impl CodeModel for DLatch {
             if next != old_output
                 && let Some(base_delay) = base_delay
             {
-                let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay);
+                let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay)?;
                 drive_outputs(ctx, next, out_delay, nout_delay);
             }
 
@@ -1224,18 +1268,18 @@ impl CodeModel for SrLatch {
             let (next, base_delay) = if set != old_set {
                 (
                     srlatch_set_edge_output(old_output, s, r, enable, set, reset),
-                    Some(official_sequential_delay(ctx, "set_delay")),
+                    Some(official_sequential_delay(ctx, "set_delay")?),
                 )
             } else if reset != old_reset {
                 (
                     srlatch_reset_edge_output(old_output, s, r, enable, set, reset),
-                    Some(official_sequential_delay(ctx, "reset_delay")),
+                    Some(official_sequential_delay(ctx, "reset_delay")?),
                 )
             } else if enable != old_enable && reset != 1 && set != 1 {
                 if enable == 1 {
                     (
                         sr_result(s, r, old_output),
-                        Some(official_sequential_delay(ctx, "enable_delay")),
+                        Some(official_sequential_delay(ctx, "enable_delay")?),
                     )
                 } else {
                     (old_output, None)
@@ -1244,7 +1288,7 @@ impl CodeModel for SrLatch {
                 if enable == 1 {
                     (
                         sr_result(s, r, old_output),
-                        Some(official_sequential_delay(ctx, "sr_delay")),
+                        Some(official_sequential_delay(ctx, "sr_delay")?),
                     )
                 } else {
                     (old_output, None)
@@ -1256,7 +1300,7 @@ impl CodeModel for SrLatch {
             if next != old_output
                 && let Some(base_delay) = base_delay
             {
-                let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay);
+                let (out_delay, nout_delay) = transition_delays(ctx, old_output, next, base_delay)?;
                 drive_outputs(ctx, next, out_delay, nout_delay);
             }
 
