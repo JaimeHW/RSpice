@@ -277,7 +277,14 @@ fn validate_table_optional_uncached(
         ));
     }
     if controls.len() != values.len() {
-        return Ok(None);
+        return Err(oscillator_error(
+            model,
+            format!(
+                "{control_name}/{value_name} require matching point counts, got {}/{}",
+                controls.len(),
+                values.len()
+            ),
+        ));
     }
 
     for (index, (&control, &value)) in controls.iter().zip(values).enumerate() {
@@ -294,7 +301,13 @@ fn validate_table_optional_uncached(
             ));
         }
         if index > 0 && control <= controls[index - 1] {
-            return Ok(None);
+            return Err(oscillator_error(
+                model,
+                format!(
+                    "{control_name} must increase monotonically; index {index} has {control} after {}",
+                    controls[index - 1]
+                ),
+            ));
         }
     }
 
@@ -923,18 +936,20 @@ mod tests {
     }
 
     #[test]
-    fn digital_oscillators_ignore_bad_control_tables_like_ngspice() {
+    fn digital_oscillators_reject_bad_control_tables() {
         let mut osc = CmContext::new();
         osc.analysis = AnalysisType::Transient;
         osc.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
         osc.set_real_vector_param("freq_array", vec![1.0e6, 2.0e6, 3.0e6]);
         osc.init_output("out", PortType::Digital);
-        DigitalOscillator
+        let osc_err = DigitalOscillator
             .init(&mut osc)
-            .expect("ngspice d_osc reports malformed control tables but does not fail init");
-        DigitalOscillator
-            .evaluate(&mut osc)
-            .expect("ngspice d_osc returns without fatal error when the table is unavailable");
+            .expect_err("d_osc must reject mismatched control table lengths");
+        let osc_message = osc_err.to_string();
+        assert!(
+            osc_message.contains("require matching point counts"),
+            "d_osc error should explain mismatched control table lengths, got {osc_message}"
+        );
 
         let mut pwm = CmContext::new();
         pwm.analysis = AnalysisType::Transient;
@@ -942,12 +957,14 @@ mod tests {
         pwm.set_real_vector_param("dc_array", vec![0.25, 0.75]);
         pwm.set_param("frequency", 1.0e6);
         pwm.init_output("out", PortType::Digital);
-        DigitalPwmOscillator
+        let pwm_err = DigitalPwmOscillator
             .init(&mut pwm)
-            .expect("ngspice d_pwm reports malformed control tables but does not fail init");
-        DigitalPwmOscillator
-            .evaluate(&mut pwm)
-            .expect("ngspice d_pwm returns without fatal error when the table is unavailable");
+            .expect_err("d_pwm must reject non-monotonic control points");
+        let pwm_message = pwm_err.to_string();
+        assert!(
+            pwm_message.contains("must increase monotonically"),
+            "d_pwm error should explain non-monotonic control points, got {pwm_message}"
+        );
     }
 
     #[test]
