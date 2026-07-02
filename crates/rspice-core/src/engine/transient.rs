@@ -730,6 +730,7 @@ impl Engine {
             source_step_hint,
             &mut breakpoints,
         );
+        Self::add_breakpoint_if_in_range(&mut breakpoints, tstop, tstop);
         let source_breakpoint_times = breakpoints.times().to_vec();
         Self::collect_transient_tline_breakpoints(
             &circuit,

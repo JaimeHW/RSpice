@@ -953,26 +953,30 @@ fn test_xyce_capacitor_multiplicity_step_transient_cases_run() {
 }
 
 #[test]
-fn test_xyce_linear_single_coupled_inductor_transient_case_runs() {
+fn test_xyce_linear_coupled_inductor_transient_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/MINDUCTORS/MINDUCTORS.cir";
 
-    let result = runner.run_test(root.join(relative));
+    for relative in [
+        "Netlists/MINDUCTORS/MINDUCTORS.cir",
+        "Netlists/MINDUCTORS/cpldLMIs.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
 
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native Xyce linear coupled-inductor transient comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
-    assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
-    );
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce linear coupled-inductor transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
 }
 
 #[test]
@@ -985,10 +989,6 @@ fn test_xyce_coupled_inductor_unvalidated_variants_stay_named_unsupported() {
         (
             "Netlists/MINDUCTORS/InductorICBug.cir",
             "initial condition on referenced inductor",
-        ),
-        (
-            "Netlists/MINDUCTORS/cpldLMIs.cir",
-            "exactly one linear coupling",
         ),
         (
             "Netlists/MINDUCTORS/mutIndPrint1.cir",

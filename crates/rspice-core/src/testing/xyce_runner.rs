@@ -4492,17 +4492,6 @@ impl XyceTestRunner {
                 element_name
             ));
         }
-        let coupling_count = netlist
-            .elements
-            .iter()
-            .filter(|element| matches!(element.kind, ElementKind::Coupling { .. }))
-            .count();
-        if coupling_count != 1 {
-            return Err(format!(
-                "native .PRINT TRAN comparison currently supports exactly one linear coupling per deck; coupling '{}' is in a deck with {} coupling elements",
-                element_name, coupling_count
-            ));
-        }
         if !coefficient.is_finite() || !(0.0..=1.0).contains(&coefficient) {
             return Err(format!(
                 "native .PRINT TRAN comparison does not support coupling '{}' with invalid coefficient {}",
