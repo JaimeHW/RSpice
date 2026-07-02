@@ -28,8 +28,15 @@ fn sequential_set_int_state(ctx: &mut CmContext, index: usize, value: i64) {
     }
 }
 
-fn official_min_integer_param(ctx: &CmContext, name: &str, min: i64) -> i64 {
-    (ctx.param(name).round() as i64).max(min)
+fn official_min_integer_param(ctx: &CmContext, name: &str, min: i64) -> CmResult<i64> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("digital sequential integer parameter must be finite, got {value}"),
+        });
+    }
+    Ok((value.round() as i64).max(min))
 }
 
 fn input_code(value: Option<DigitalValue>) -> i64 {
@@ -569,6 +576,31 @@ mod tests {
     }
 
     #[test]
+    fn d_fdiv_rejects_nonfinite_integer_params_before_casting() {
+        let model = DigitalFrequencyDivider;
+
+        let mut init_ctx = CmContext::new();
+        init_ctx.set_param("div_factor", f64::NAN);
+        assert_invalid_param(model.init(&mut init_ctx), "div_factor");
+
+        let mut high_ctx = CmContext::new();
+        high_ctx.set_param("div_factor", 2.0);
+        high_ctx.set_param("high_cycles", 1.0);
+        high_ctx.set_param("i_count", 0.0);
+        model.init(&mut high_ctx).expect("valid d_fdiv init");
+        high_ctx.set_param("high_cycles", f64::INFINITY);
+        assert_invalid_param(model.evaluate(&mut high_ctx), "high_cycles");
+
+        let mut count_ctx = CmContext::new();
+        count_ctx.set_param("div_factor", 2.0);
+        count_ctx.set_param("high_cycles", 1.0);
+        count_ctx.set_param("i_count", 0.0);
+        model.init(&mut count_ctx).expect("valid d_fdiv init");
+        count_ctx.set_param("i_count", f64::NEG_INFINITY);
+        assert_invalid_param(model.evaluate(&mut count_ctx), "i_count");
+    }
+
+    #[test]
     fn latch_metadata_matches_ngspice46_interfaces() {
         assert_scalar_digital_ports(
             &DLatch,
@@ -864,6 +896,9 @@ impl CodeModel for DigitalFrequencyDivider {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        official_min_integer_param(ctx, "div_factor", 1)?;
+        official_min_integer_param(ctx, "high_cycles", 1)?;
+        official_min_integer_param(ctx, "i_count", 0)?;
         ctx.allocate_int_states(3);
         ctx.set_int_state(FDIV_PREV_INPUT, 0);
         ctx.set_int_state(FDIV_COUNT, 0);
@@ -872,14 +907,14 @@ impl CodeModel for DigitalFrequencyDivider {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let div_factor = official_min_integer_param(ctx, "div_factor", 1);
-        let high_cycles = official_min_integer_param(ctx, "high_cycles", 1);
+        let div_factor = official_min_integer_param(ctx, "div_factor", 1)?;
+        let high_cycles = official_min_integer_param(ctx, "high_cycles", 1)?;
         let input = input_code(ctx.input_digital("freq_in"));
         let mut count = ctx.int_state(FDIV_COUNT);
         let mut output = ctx.int_state(FDIV_OUTPUT);
 
         if ctx.time == 0.0 || output == FDIV_INITIAL_OUTPUT {
-            count = official_min_integer_param(ctx, "i_count", 0);
+            count = official_min_integer_param(ctx, "i_count", 0)?;
             output = if count >= div_factor || count < 0 {
                 count = 0;
                 0
