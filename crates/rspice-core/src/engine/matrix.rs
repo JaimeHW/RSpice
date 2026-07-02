@@ -994,6 +994,75 @@ impl Engine {
                                 );
                             }
                         }
+                        crate::xspice::PortConnection::AnalogVector(nodes) => {
+                            for &node in nodes {
+                                if node > 0 {
+                                    inout_analog_nodes.push(node);
+                                }
+                                if reserve_control_columns {
+                                    push_current_output_controls(
+                                        &mut triplets,
+                                        circuit,
+                                        instance,
+                                        ports,
+                                        node,
+                                        0,
+                                    );
+                                }
+                            }
+                        }
+                        crate::xspice::PortConnection::TypedAnalogVector(elements) => {
+                            for element in elements {
+                                match element {
+                                    crate::xspice::AnalogInputConnection::Node(node) => {
+                                        if *node > 0 {
+                                            inout_analog_nodes.push(*node);
+                                        }
+                                        if reserve_control_columns {
+                                            push_current_output_controls(
+                                                &mut triplets,
+                                                circuit,
+                                                instance,
+                                                ports,
+                                                *node,
+                                                0,
+                                            );
+                                        }
+                                    }
+                                    crate::xspice::AnalogInputConnection::Differential(
+                                        pos,
+                                        neg,
+                                    )
+                                    | crate::xspice::AnalogInputConnection::CurrentOutput {
+                                        pos,
+                                        neg,
+                                    }
+                                    | crate::xspice::AnalogInputConnection::Hybrid {
+                                        pos,
+                                        neg,
+                                        ..
+                                    } => {
+                                        if *pos > 0 {
+                                            inout_analog_nodes.push(*pos);
+                                        }
+                                        if *neg > 0 {
+                                            inout_analog_nodes.push(*neg);
+                                        }
+                                        if reserve_control_columns {
+                                            push_current_output_controls(
+                                                &mut triplets,
+                                                circuit,
+                                                instance,
+                                                ports,
+                                                *pos,
+                                                *neg,
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
                         _ => {}
                     }
                     continue;
