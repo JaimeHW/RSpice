@@ -657,6 +657,8 @@ fn test_xyce_behavioral_source_transient_cases_run() {
 
     for relative in [
         "Netlists/ABM_ATAN_TAN/atan_tan.cir",
+        "Netlists/ABM_BREAK/fastRisePulse.cir",
+        "Netlists/ABM_BREAK/fastTable.cir",
         "Netlists/ABM_EXPLN/exp_ln.cir",
         "Netlists/ABM_FUNC/func.cir",
         "Netlists/ABM_LOG/log.cir",
