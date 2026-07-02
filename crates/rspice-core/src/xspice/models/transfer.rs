@@ -223,7 +223,17 @@ fn xfer_complex_value(a: Value, b: Value, ri: bool, db: bool, rad: bool) -> CmRe
 
     let magnitude = if db { 10.0_f64.powf(a / 20.0) } else { a };
     let phase = if rad { b } else { b * PI / 180.0 };
-    Ok(Complex64::from_polar(magnitude, phase))
+    if !magnitude.is_finite() || !phase.is_finite() {
+        return Err(xfer_error(
+            "table values must produce finite magnitude and phase",
+        ));
+    }
+
+    let gain = Complex64::from_polar(magnitude, phase);
+    if !gain.re.is_finite() || !gain.im.is_finite() {
+        return Err(xfer_error("table values must produce finite gain"));
+    }
+    Ok(gain)
 }
 
 fn xfer_bool_param(ctx: &CmContext, name: &str) -> CmResult<bool> {
@@ -2005,6 +2015,25 @@ mod tests {
         ctx.set_param("db", f64::NAN);
         Xfer.evaluate(&mut ctx)
             .expect_err("mutated nonfinite xfer format params must fail during evaluation");
+    }
+
+    #[test]
+    fn xfer_rejects_db_table_values_that_overflow_linear_gain() {
+        let mut ctx = xfer_table_context();
+        ctx.set_real_vector_param("table", vec![1.0, 7000.0, 0.0]);
+
+        let err = Xfer
+            .init(&mut ctx)
+            .expect_err("xfer must reject dB values that overflow during conversion");
+
+        assert!(
+            matches!(&err, CmError::InvalidParameter { .. }),
+            "xfer overflow produced {err:?}"
+        );
+        assert!(
+            err.to_string().contains("finite"),
+            "xfer overflow error should explain the finite-gain requirement: {err}"
+        );
     }
 
     #[test]
