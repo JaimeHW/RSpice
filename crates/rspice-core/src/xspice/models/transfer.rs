@@ -191,6 +191,13 @@ fn xfer_error(message: impl Into<String>) -> CmError {
     }
 }
 
+fn xfer_param_error(name: &str, message: impl Into<String>) -> CmError {
+    CmError::InvalidParameter {
+        name: name.to_string(),
+        message: message.into(),
+    }
+}
+
 fn s_xfer_error(message: impl Into<String>) -> CmError {
     CmError::InvalidParameter {
         name: "s_xfer".to_string(),
@@ -212,10 +219,39 @@ fn xfer_complex_value(a: Value, b: Value, ri: bool, db: bool, rad: bool) -> CmRe
     Ok(Complex64::from_polar(magnitude, phase))
 }
 
-fn xfer_effective_span_offset(ctx: &CmContext) -> (usize, usize) {
-    let span = ctx.param("span").round().max(3.0) as usize;
-    let offset = ctx.param("offset").round().max(1.0) as usize;
-    (span, offset)
+fn xfer_bool_param(ctx: &CmContext, name: &str) -> CmResult<bool> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(xfer_param_error(
+            name,
+            format!("value must be finite, got {value}"),
+        ));
+    }
+    Ok(value > 0.5)
+}
+
+fn xfer_int_param(ctx: &CmContext, name: &str, min: Value) -> CmResult<usize> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(xfer_param_error(
+            name,
+            format!("value must be finite, got {value}"),
+        ));
+    }
+    let rounded = value.round().max(min);
+    if rounded > usize::MAX as Value {
+        return Err(xfer_param_error(
+            name,
+            format!("value is too large to index a table row, got {value}"),
+        ));
+    }
+    Ok(rounded as usize)
+}
+
+fn xfer_effective_span_offset(ctx: &CmContext) -> CmResult<(usize, usize)> {
+    let span = xfer_int_param(ctx, "span", 3.0)?;
+    let offset = xfer_int_param(ctx, "offset", 1.0)?;
+    Ok((span, offset))
 }
 
 fn xfer_table_from_model(ctx: &CmContext) -> CmResult<Vec<XferPoint>> {
@@ -226,7 +262,7 @@ fn xfer_table_from_model(ctx: &CmContext) -> CmResult<Vec<XferPoint>> {
         ));
     }
 
-    let (span, offset) = xfer_effective_span_offset(ctx);
+    let (span, offset) = xfer_effective_span_offset(ctx)?;
     if offset < 1 || span < offset + 2 {
         return Err(xfer_error("impossible span/offset combination"));
     }
@@ -237,9 +273,9 @@ fn xfer_table_from_model(ctx: &CmContext) -> CmResult<Vec<XferPoint>> {
         )));
     }
 
-    let ri = ctx.param("r_i") > 0.5;
-    let db = ctx.param("db") > 0.5;
-    let rad = ctx.param("rad") > 0.5;
+    let ri = xfer_bool_param(ctx, "r_i")?;
+    let db = xfer_bool_param(ctx, "db")?;
+    let rad = xfer_bool_param(ctx, "rad")?;
     let row_count = table.len() / span;
     let mut points = Vec::with_capacity(row_count);
     let mut last_frequency = None;
@@ -366,7 +402,10 @@ fn xfer_table_from_touchstone(
     ctx: &CmContext,
     file: &str,
 ) -> (Option<data_file::DataFileStamp>, CmResult<Vec<XferPoint>>) {
-    let (span, offset) = xfer_effective_span_offset(ctx);
+    let (span, offset) = match xfer_effective_span_offset(ctx) {
+        Ok(values) => values,
+        Err(err) => return (None, Err(err)),
+    };
     if offset < 1 || span < offset + 2 {
         return (None, Err(xfer_error("impossible span/offset combination")));
     }
@@ -653,11 +692,12 @@ fn xfer_first_real_gain(ctx: &CmContext) -> Value {
         .unwrap_or(0.0)
 }
 
-fn xfer_first_real_gain_cached(ctx: &mut CmContext) -> Value {
-    cache_xfer_table(ctx)
-        .ok()
-        .and_then(|table| table.points.first().map(|point| point.gain.re))
-        .unwrap_or(0.0)
+fn xfer_first_real_gain_cached(ctx: &mut CmContext) -> CmResult<Value> {
+    Ok(cache_xfer_table(ctx)?
+        .points
+        .first()
+        .map(|point| point.gain.re)
+        .unwrap_or(0.0))
 }
 
 fn finite_coefficients(name: &str, values: &[Value]) -> CmResult<()> {
@@ -1184,7 +1224,7 @@ impl CodeModel for Xfer {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let _ = cache_xfer_table(ctx);
+        cache_xfer_table(ctx)?;
         Ok(())
     }
 
@@ -1193,7 +1233,7 @@ impl CodeModel for Xfer {
             return Ok(());
         }
 
-        let gain = xfer_first_real_gain_cached(ctx);
+        let gain = xfer_first_real_gain_cached(ctx)?;
         ctx.set_output_with_partial("out", gain * ctx.input("in"), gain);
         Ok(())
     }
@@ -1611,6 +1651,20 @@ mod tests {
         }
     }
 
+    fn xfer_table_context() -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_real_vector_param("table", vec![1.0, 20.0, 0.0]);
+        ctx.set_param("db", 1.0);
+        ctx.set_param("rad", 0.0);
+        ctx.set_param("r_i", 0.0);
+        ctx.set_param("span", 3.0);
+        ctx.set_param("offset", 1.0);
+        ctx.set_input_analog("in", 1.0);
+        ctx.init_output("out", PortType::Voltage);
+        ctx
+    }
+
     fn first_order_lowpass_context() -> CmContext {
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
@@ -1830,13 +1884,7 @@ mod tests {
 
     #[test]
     fn xfer_cached_table_reloads_when_format_param_changes() {
-        let mut ctx = CmContext::new();
-        ctx.set_real_vector_param("table", vec![1.0, 20.0, 0.0]);
-        ctx.set_param("db", 1.0);
-        ctx.set_param("rad", 0.0);
-        ctx.set_param("r_i", 0.0);
-        ctx.set_param("span", 3.0);
-        ctx.set_param("offset", 1.0);
+        let mut ctx = xfer_table_context();
 
         Xfer.init(&mut ctx).expect("xfer initializes");
         let first_table = xfer_table(&ctx).expect("cached xfer table");
@@ -1856,6 +1904,38 @@ mod tests {
 
         ctx.set_param("db", 0.0);
         assert_eq!(xfer_first_real_gain(&ctx), 20.0);
+    }
+
+    #[test]
+    fn xfer_rejects_nonfinite_table_format_params() {
+        for (param, value) in [
+            ("r_i", f64::NAN),
+            ("db", f64::INFINITY),
+            ("rad", f64::NEG_INFINITY),
+            ("span", f64::NAN),
+            ("offset", f64::INFINITY),
+        ] {
+            let mut ctx = xfer_table_context();
+            ctx.set_param(param, value);
+
+            let err = Xfer
+                .init(&mut ctx)
+                .expect_err("xfer must reject nonfinite table format parameters");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "xfer {param} produced {err:?}"
+            );
+            assert!(
+                err.to_string().contains(param),
+                "xfer error should name rejected parameter {param}: {err}"
+            );
+        }
+
+        let mut ctx = xfer_table_context();
+        Xfer.init(&mut ctx).expect("xfer initializes");
+        ctx.set_param("db", f64::NAN);
+        Xfer.evaluate(&mut ctx)
+            .expect_err("mutated nonfinite xfer format params must fail during evaluation");
     }
 
     #[test]
