@@ -205,6 +205,7 @@ struct BidiAnalogDrive {
     current: Value,
     partial: Value,
     svoc: Value,
+    completion_time: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -754,11 +755,36 @@ fn bidi_advance_current(
     range: Value,
     params: BidiParams,
 ) -> Value {
-    if !(interval.is_finite() && interval > 0.0 && range.is_finite() && range.abs() > 0.0) {
+    if !(interval.is_finite() && interval > 0.0) {
         return current;
     }
 
+    let Some(transition_time) = bidi_current_transition_time(current, target, range, params) else {
+        return current;
+    };
     let delta = target - current;
+    if transition_time > interval && transition_time.is_finite() {
+        current + delta * interval / transition_time
+    } else {
+        target
+    }
+}
+
+fn bidi_current_transition_time(
+    current: Value,
+    target: Value,
+    range: Value,
+    params: BidiParams,
+) -> Option<Value> {
+    if !(range.is_finite() && range.abs() > 0.0) {
+        return None;
+    }
+
+    let delta = target - current;
+    if delta.abs() <= 1.0e-18 {
+        return None;
+    }
+
     let transition_time = (delta
         * if delta > 0.0 {
             params.t_rise
@@ -767,11 +793,7 @@ fn bidi_advance_current(
         }
         / range)
         .abs();
-    if transition_time > interval && transition_time.is_finite() {
-        current + delta * interval / transition_time
-    } else {
-        target
-    }
+    (transition_time.is_finite() && transition_time > 0.0).then_some(transition_time)
 }
 
 fn bidi_drive_current(
@@ -789,6 +811,7 @@ fn bidi_drive_current(
             current,
             partial,
             svoc,
+            completion_time: None,
         };
     }
 
@@ -798,18 +821,26 @@ fn bidi_drive_current(
         current = 0.0;
     }
     let mut partial = 0.0;
+    let mut last_target = current;
+    let mut last_range = 0.0;
     for segment in bidi_analog_segments(ctx, index, drive, width) {
         svoc = bidi_advance_svoc(svoc, segment.drive, segment.interval, params);
         let (target, segment_partial, range) =
             bidi_current_target(voltage, segment.drive, svoc, params);
         partial = segment_partial;
+        last_target = target;
+        last_range = range;
         current = bidi_advance_current(current, target, segment.interval, range, params);
     }
+
+    let completion_time = bidi_current_transition_time(current, last_target, last_range, params)
+        .map(|dt| ctx.time + dt);
 
     BidiAnalogDrive {
         current,
         partial,
         svoc,
+        completion_time,
     }
 }
 
@@ -1246,6 +1277,12 @@ impl CodeModel for BidiBridge {
                 BidiDirection::Dac | BidiDirection::Bidirectional => digital_input,
             };
             let analog_drive = bidi_drive_current(ctx, index, voltage, drive, params, width);
+            if let Some(completion_time) = analog_drive.completion_time
+                && commit_outputs
+                && completion_time > ctx.time + 1.0e-18
+            {
+                ctx.request_breakpoint(completion_time);
+            }
             let pair = ctx.port_vector_node_pair("a", index).unwrap_or((0, 0));
             stamp_pair_conductance(ctx, pair, analog_drive.partial);
             if !ctx.is_ac() {
@@ -1685,18 +1722,18 @@ mod tests {
         let mut ctx = CmContext::new();
         set_bidi_default_params(&mut ctx, 0.0);
         ctx.set_param("direction", 0.0);
-        ctx.set_param("drive_low", 100.0);
-        ctx.set_param("drive_high", 100.0);
+        ctx.set_param("drive_low", 0.0);
+        ctx.set_param("drive_high", 0.2);
         ctx.set_port_width("a", 1);
         ctx.set_port_width("d", 1);
-        ctx.set_input("a", InputValue::AnalogVector(vec![AnalogValue::new(2.0)]));
+        ctx.set_input("a", InputValue::AnalogVector(vec![AnalogValue::new(0.475)]));
         ctx.set_input("d", InputValue::DigitalVector(vec![DigitalValue::one()]));
         ctx.analysis = AnalysisType::Transient;
         ctx.call_type = CallType::TransientAnalysis;
         ctx.time_prev = 0.0;
         ctx.time = 0.5e-9;
         ctx.timestep = 1.0e-9;
-        ctx.set_input_digital_vector_event_times("d", vec![Some(0.0)]);
+        ctx.set_input_digital_vector_event_times("d", vec![Some(0.25e-9)]);
 
         BidiBridge.init(&mut ctx).expect("bidi_bridge initializes");
 
@@ -1732,13 +1769,18 @@ mod tests {
             digital_strength_code(DigitalStrength::HighZ) as Value,
             "rollbackable bidi_bridge probe must not advance previous drive strength"
         );
+        assert!(
+            ctx.take_requested_breakpoints().is_empty(),
+            "rollbackable bidi_bridge probe must not schedule analog completion breakpoints"
+        );
 
         ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
         BidiBridge
             .evaluate(&mut ctx)
             .expect("commits DAC analog drive");
-        assert_eq!(ctx.state(BIDI_STATE_SVOC_BASE), 1.0);
-        assert!(ctx.state(current_base).is_finite());
+        assert!((ctx.state(BIDI_STATE_SVOC_BASE) - 0.75).abs() <= 1.0e-15);
+        assert!((ctx.state(current_base) + 0.05).abs() <= 1.0e-15);
+        assert_eq!(ctx.take_requested_breakpoints(), vec![0.75e-9]);
         assert_eq!(
             ctx.state(drive_state_base),
             digital_state_code(DigitalState::One) as Value
