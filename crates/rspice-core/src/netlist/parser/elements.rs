@@ -910,6 +910,14 @@ pub(super) fn parse_pspice_u_device(
             line_num,
             elements,
         ),
+        "PINDLY" => parse_pspice_u_pindly(
+            &name,
+            &fields,
+            pspice_u_count_triple(&fields[1]),
+            line,
+            line_num,
+            elements,
+        ),
         "OR3" => parse_pspice_u_tristate_vector_gate_array(
             &name,
             &fields,
@@ -970,7 +978,7 @@ pub(super) fn parse_pspice_u_device(
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, LOGICEXP, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, LOGICEXP, PINDLY, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
                 fields[1]
             ),
         }),
@@ -1791,6 +1799,419 @@ fn parse_pspice_u_tristate_vector_gate_array(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct PspicePindlyEntry {
+    input: String,
+    output: String,
+    enable: Option<XspicePort>,
+    delay: Option<Value>,
+}
+
+fn parse_pspice_u_pindly(
+    name: &str,
+    fields: &[String],
+    shape: Option<(usize, usize, usize)>,
+    line: &str,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let Some((io_count, enable_count, reference_count)) = shape else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice PINDLY U-device '{}' requires valid dimensions",
+                name
+            ),
+        });
+    };
+    if io_count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice PINDLY U-device '{}' requires at least one delayed output",
+                name
+            ),
+        });
+    }
+
+    let section_index = pspice_u_first_behavior_section_field(fields).unwrap_or(fields.len());
+    let pins = &fields[4..section_index];
+    let required = io_count
+        .checked_add(enable_count)
+        .and_then(|count| count.checked_add(reference_count))
+        .and_then(|count| count.checked_add(io_count))
+        .and_then(|count| count.checked_add(1))
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice PINDLY U-device '{}' is too large", name),
+        })?;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice PINDLY U-device '{}' requires {} input pin(s), {} enable pin(s), {} reference pin(s), {} output pin(s), and an I/O model",
+                name, io_count, enable_count, reference_count, io_count
+            ),
+        });
+    }
+
+    let input_offset = 0;
+    let enable_offset = input_offset + io_count;
+    let reference_offset = enable_offset + enable_count;
+    let output_offset = reference_offset + reference_count;
+    let mut entries = Vec::with_capacity(io_count);
+    for index in 0..io_count {
+        let input = pspice_u_required_digital_node(
+            &pins[input_offset + index],
+            "PINDLY input",
+            fields,
+            line_num,
+            elements,
+        )?;
+        let output = pspice_u_required_digital_node(
+            &pins[output_offset + index],
+            "PINDLY output",
+            fields,
+            line_num,
+            elements,
+        )?;
+        entries.push(PspicePindlyEntry {
+            input,
+            output,
+            enable: None,
+            delay: None,
+        });
+    }
+
+    for pin in &pins[enable_offset..reference_offset] {
+        pspice_u_required_digital_node(pin, "PINDLY enable", fields, line_num, elements)?;
+    }
+    for pin in &pins[reference_offset..output_offset] {
+        pspice_u_required_digital_node(pin, "PINDLY reference", fields, line_num, elements)?;
+    }
+
+    if let Some(section) = pspice_u_behavior_section(line, "PINDLY:") {
+        apply_pspice_u_pindly_delay_section(section, &mut entries, false);
+    }
+    if let Some(section) = pspice_u_behavior_section(line, "TRISTATE:") {
+        apply_pspice_u_pindly_tristate_section(section, &mut entries);
+    }
+
+    for (index, entry) in entries.into_iter().enumerate() {
+        let instance_name = pspice_u_lowered_instance_name(name, io_count, index);
+        let delay = entry.delay.unwrap_or(10.0e-9);
+        if let Some(enable) = entry.enable {
+            push_pspice_u_xspice_element_with_params(
+                elements,
+                instance_name,
+                "d_tristate",
+                vec![
+                    XspicePort::Digital(entry.input),
+                    enable,
+                    XspicePort::Digital(entry.output),
+                ],
+                pspice_u_pindly_tristate_delay_params(delay),
+                None,
+            );
+        } else {
+            push_pspice_u_xspice_element_with_params(
+                elements,
+                instance_name,
+                "d_buffer",
+                vec![
+                    XspicePort::Digital(entry.input),
+                    XspicePort::Digital(entry.output),
+                ],
+                pspice_u_pindly_buffer_delay_params(delay),
+                None,
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn pspice_u_first_behavior_section_field(fields: &[String]) -> Option<usize> {
+    fields.iter().position(|field| {
+        matches!(
+            field.to_ascii_uppercase().as_str(),
+            "BOOLEAN:" | "FREQ:" | "GENERAL:" | "PINDLY:" | "SETUP_HOLD:" | "TRISTATE:" | "WIDTH:"
+        )
+    })
+}
+
+fn pspice_u_behavior_section<'a>(line: &'a str, section: &str) -> Option<&'a str> {
+    const SECTION_MARKERS: [&str; 7] = [
+        "BOOLEAN:",
+        "FREQ:",
+        "GENERAL:",
+        "PINDLY:",
+        "SETUP_HOLD:",
+        "TRISTATE:",
+        "WIDTH:",
+    ];
+
+    let upper = line.to_ascii_uppercase();
+    let start = upper.find(section)?;
+    let body_start = start + section.len();
+    let rest = &line[body_start..];
+    let upper_rest = &upper[body_start..];
+    let end = SECTION_MARKERS
+        .iter()
+        .filter(|marker| !marker.eq_ignore_ascii_case(section))
+        .filter_map(|marker| upper_rest.find(marker))
+        .min()
+        .unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
+fn apply_pspice_u_pindly_delay_section(
+    section: &str,
+    entries: &mut [PspicePindlyEntry],
+    tristate: bool,
+) {
+    let mut parser = PspicePindlySectionParser::new(section);
+    while let Some((outputs, block)) = parser.next_assignment() {
+        let delay = pspice_u_pindly_delay_from_block(block).unwrap_or(10.0e-9);
+        for output in outputs {
+            if let Some(entry) = entries
+                .iter_mut()
+                .find(|entry| entry.output.eq_ignore_ascii_case(&output))
+            {
+                entry.delay = Some(delay);
+                if !tristate {
+                    entry.enable = None;
+                }
+            }
+        }
+    }
+}
+
+fn apply_pspice_u_pindly_tristate_section(section: &str, entries: &mut [PspicePindlyEntry]) {
+    let (body, enable) = pspice_u_pindly_tristate_enable(section);
+    let Some(enable) = enable else {
+        return;
+    };
+    let mut parser = PspicePindlySectionParser::new(body);
+    while let Some((outputs, block)) = parser.next_assignment() {
+        let delay = pspice_u_pindly_delay_from_block(block).unwrap_or(10.0e-9);
+        for output in outputs {
+            if let Some(entry) = entries
+                .iter_mut()
+                .find(|entry| entry.output.eq_ignore_ascii_case(&output))
+            {
+                entry.delay = Some(delay);
+                entry.enable = Some(enable.clone());
+            }
+        }
+    }
+}
+
+fn pspice_u_pindly_tristate_enable(section: &str) -> (&str, Option<XspicePort>) {
+    let upper = section.to_ascii_uppercase();
+    let Some(enable_start) = upper.find("ENABLE") else {
+        return (section, None);
+    };
+    let mut parser = PspicePindlySectionParser::new(&section[enable_start..]);
+    let Some(keyword) = parser.next_ident() else {
+        return (section, None);
+    };
+    if !keyword.eq_ignore_ascii_case("ENABLE") {
+        return (section, None);
+    }
+    let Some(polarity) = parser.next_ident() else {
+        return (section, None);
+    };
+    if !polarity.eq_ignore_ascii_case("HI") && !polarity.eq_ignore_ascii_case("LO") {
+        return (section, None);
+    }
+    parser.skip_ws();
+    parser.consume_char('=');
+    let Some(node) = parser.next_ident() else {
+        return (section, None);
+    };
+    let port = if polarity.eq_ignore_ascii_case("LO") {
+        XspicePort::DigitalInverted(normalize_pspice_u_node(&node))
+    } else {
+        XspicePort::Digital(normalize_pspice_u_node(&node))
+    };
+    (&section[enable_start + parser.pos..], Some(port))
+}
+
+struct PspicePindlySectionParser<'a> {
+    input: &'a str,
+    pos: usize,
+}
+
+impl<'a> PspicePindlySectionParser<'a> {
+    fn new(input: &'a str) -> Self {
+        Self { input, pos: 0 }
+    }
+
+    fn next_assignment(&mut self) -> Option<(Vec<String>, &'a str)> {
+        loop {
+            self.skip_ws();
+            if self.is_eof() {
+                return None;
+            }
+
+            let mut outputs = Vec::new();
+            while let Some(output) = self.next_ident() {
+                if output.eq_ignore_ascii_case("ENABLE") {
+                    outputs.clear();
+                    break;
+                }
+                outputs.push(normalize_pspice_u_node(&output));
+                self.skip_ws();
+                self.consume_char(',');
+                self.skip_ws();
+                if self.peek_char() == Some('=') {
+                    break;
+                }
+            }
+            self.skip_ws();
+            if outputs.is_empty() || !self.consume_char('=') {
+                self.advance_one_char();
+                continue;
+            }
+            self.skip_ws();
+            if !self.consume_char('{') {
+                continue;
+            }
+            let block_start = self.pos;
+            let mut depth = 1usize;
+            while let Some(ch) = self.peek_char() {
+                self.pos += ch.len_utf8();
+                match ch {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            let end = self.pos - ch.len_utf8();
+                            return Some((outputs, &self.input[block_start..end]));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return None;
+        }
+    }
+
+    fn next_ident(&mut self) -> Option<String> {
+        self.skip_ws();
+        let start = self.pos;
+        let ch = self.peek_char()?;
+        if !pspice_logicexp_ident_start(ch) {
+            return None;
+        }
+        self.pos += ch.len_utf8();
+        while let Some(ch) = self.peek_char() {
+            if !pspice_logicexp_ident_continue(ch) {
+                break;
+            }
+            self.pos += ch.len_utf8();
+        }
+        Some(self.input[start..self.pos].to_string())
+    }
+
+    fn consume_char(&mut self, expected: char) -> bool {
+        if self.peek_char() == Some(expected) {
+            self.pos += expected.len_utf8();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn skip_ws(&mut self) {
+        while let Some(ch) = self.peek_char() {
+            if !ch.is_whitespace() {
+                break;
+            }
+            self.pos += ch.len_utf8();
+        }
+    }
+
+    fn advance_one_char(&mut self) {
+        if let Some(ch) = self.peek_char() {
+            self.pos += ch.len_utf8();
+        }
+    }
+
+    fn peek_char(&self) -> Option<char> {
+        self.input[self.pos..].chars().next()
+    }
+
+    fn is_eof(&self) -> bool {
+        self.pos >= self.input.len()
+    }
+}
+
+fn pspice_u_pindly_delay_from_block(block: &str) -> Option<Value> {
+    let upper = block.to_ascii_uppercase();
+    let mut search_start = 0usize;
+    let mut selected = None;
+    while let Some(relative) = upper[search_start..].find("DELAY(") {
+        let args_start = search_start + relative + "DELAY(".len();
+        let rest = &block[args_start..];
+        let Some(args_end) = rest.find(')') else {
+            break;
+        };
+        if let Some(delay) = pspice_u_pindly_delay_args(&rest[..args_end])
+            && selected.is_none_or(|current| delay > current)
+        {
+            selected = Some(delay);
+        }
+        search_start = args_start + args_end + 1;
+    }
+    selected
+}
+
+fn pspice_u_pindly_delay_args(args: &str) -> Option<Value> {
+    let mut values = args
+        .split(',')
+        .take(3)
+        .map(|part| pspice_u_parse_delay_literal(part.trim()))
+        .collect::<Vec<_>>();
+    while values.len() < 3 {
+        values.push(None);
+    }
+
+    if let Some(typ) = values[1] {
+        return Some(typ);
+    }
+    match (values[0], values[2]) {
+        (Some(min), Some(max)) => Some((min + max) * 0.5),
+        (Some(min), None) => Some(min),
+        (None, Some(max)) => Some(max),
+        (None, None) => None,
+    }
+}
+
+fn pspice_u_parse_delay_literal(raw: &str) -> Option<Value> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.starts_with('-') {
+        return None;
+    }
+    crate::netlist::lexer::parse_spice_value(trimmed).ok()
+}
+
+fn pspice_u_pindly_buffer_delay_params(delay: Value) -> Vec<(String, Value)> {
+    vec![
+        ("inertial_delay".to_string(), 1.0),
+        ("rise_delay".to_string(), delay),
+        ("fall_delay".to_string(), delay),
+    ]
+}
+
+fn pspice_u_pindly_tristate_delay_params(delay: Value) -> Vec<(String, Value)> {
+    vec![
+        ("inertial_delay".to_string(), 1.0),
+        ("delay".to_string(), delay),
+    ]
+}
+
 fn parse_pspice_u_compound_gate(
     name: &str,
     fields: &[String],
@@ -2550,6 +2971,19 @@ fn pspice_u_count_pair(raw: &str) -> Option<(usize, usize)> {
         return None;
     }
     Some((first, second))
+}
+
+fn pspice_u_count_triple(raw: &str) -> Option<(usize, usize, usize)> {
+    let (_, tail) = raw.trim().split_once('(')?;
+    let counts = tail.strip_suffix(')')?;
+    let mut parts = counts.split(',');
+    let first = parts.next()?.trim().parse::<usize>().ok()?;
+    let second = parts.next()?.trim().parse::<usize>().ok()?;
+    let third = parts.next()?.trim().parse::<usize>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((first, second, third))
 }
 
 fn normalize_pspice_u_node(raw: &str) -> String {

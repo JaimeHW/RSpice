@@ -5965,13 +5965,91 @@ mod tests {
     }
 
     #[test]
-    fn pspice_u_unsupported_frontend_families_fail_closed() {
-        let err = Netlist::parse(
-            "pspice u pindly unsupported slice\n\
-             U1 PINDLY(1,0,1) $G_DPWR $G_DGND internal input output DLY\n\
+    fn pspice_u_pindly_lowers_outputs_to_delayed_buffers() {
+        let netlist = Netlist::parse(
+            "pspice u pindly buffers\n\
+             U20 PINDLY(2,0,1) $G_DPWR $G_DGND int1 int2 ref out1 out2 IO_STD\n\
+             + PINDLY:\n\
+             +   out1 out2 = {CASE(DELAY(2ns,-1,6ns))}\n\
              .end\n",
         )
-        .expect_err("PINDLY lowering is not implemented in this slice");
+        .expect("PSpice PINDLY should lower delayed outputs to d_buffer instances");
+
+        assert_eq!(netlist.elements.len(), 2);
+        assert_eq!(netlist.elements[0].name, "U20_0");
+        assert_eq!(netlist.elements[1].name, "U20_1");
+
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                params,
+                ..
+            } => {
+                assert_eq!(model, "d_buffer");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("INT2".to_string()),
+                        XspicePort::Digital("OUT2".to_string())
+                    ]
+                );
+                assert!(params.iter().any(|(name, value)| {
+                    name == "rise_delay" && (*value - 4.0e-9).abs() < 1.0e-21
+                }));
+                assert!(params.iter().any(|(name, value)| {
+                    name == "fall_delay" && (*value - 4.0e-9).abs() < 1.0e-21
+                }));
+            }
+            other => panic!("expected PINDLY buffer lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_pindly_tristate_lowers_active_low_enable() {
+        let netlist = Netlist::parse(
+            "pspice u pindly tristate\n\
+             U21 PINDLY(1,1,0) $G_DPWR $G_DGND internal oebar output IO_HCT\n\
+             + TRISTATE:\n\
+             +   ENABLE LO = oebar\n\
+             +   output = {CASE(TRN_Z$, DELAY(-1,15ns,25ns))}\n\
+             .end\n",
+        )
+        .expect("PSpice PINDLY TRISTATE should lower to d_tristate");
+
+        assert_eq!(netlist.elements.len(), 1);
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                params,
+                ..
+            } => {
+                assert_eq!(model, "d_tristate");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::Digital("INTERNAL".to_string()),
+                        XspicePort::DigitalInverted("OEBAR".to_string()),
+                        XspicePort::Digital("OUTPUT".to_string())
+                    ]
+                );
+                assert!(params.iter().any(|(name, value)| {
+                    name == "delay" && (*value - 15.0e-9).abs() < 1.0e-21
+                }));
+            }
+            other => panic!("expected PINDLY tristate lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_unsupported_frontend_families_fail_closed() {
+        let err = Netlist::parse(
+            "pspice u constraint unsupported slice\n\
+             U1 CONSTRAINT(1) $G_DPWR $G_DGND clk IO_STD\n\
+             .end\n",
+        )
+        .expect_err("CONSTRAINT lowering is not implemented in this slice");
 
         assert!(
             err.to_string().contains("Unsupported PSpice U-device type"),
