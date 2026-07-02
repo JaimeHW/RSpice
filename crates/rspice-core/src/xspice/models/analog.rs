@@ -2509,6 +2509,20 @@ fn oneshot_finite_param(ctx: &CmContext, name: &str) -> CmResult<Value> {
     Ok(value)
 }
 
+fn oneshot_control_input(ctx: &CmContext) -> CmResult<Value> {
+    if ctx.port_width("cntl_in") == 0 {
+        return Ok(0.0);
+    }
+
+    let control = ctx.input("cntl_in");
+    if !control.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "oneshot: cntl_in must be finite, got {control}"
+        )));
+    }
+    Ok(control)
+}
+
 fn reset_oneshot_state(ctx: &mut CmContext, output_low: Value) {
     ctx.set_state(ONESHOT_T1, -1.0);
     ctx.set_state(ONESHOT_T2, -1.0);
@@ -2648,11 +2662,7 @@ impl CodeModel for AnalogOneShot {
             state = false;
             locked = false;
         } else {
-            let control = if ctx.port_width("cntl_in") > 0 {
-                ctx.input("cntl_in")
-            } else {
-                0.0
-            };
+            let control = oneshot_control_input(ctx)?;
             let pulse_width = interpolate_oneshot_pulse_width(table.as_ref(), control);
             let positive_edge = ctx.param("pos_edge_trig") > 0.5;
             let retrigger = ctx.param("retrig") > 0.5;
@@ -3570,6 +3580,42 @@ mod tests {
             (interpolate_oneshot_pulse_width(&table, 0.5) - 1.5e-9).abs() < 1.0e-21,
             "descending oneshot controls should keep the original endpoint segment behavior"
         );
+    }
+
+    #[test]
+    fn oneshot_rejects_nonfinite_control_input_before_timing_changes() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = crate::xspice::AnalysisType::Transient;
+        ctx.time = 1.0e-9;
+        ctx.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("pw_array", vec![1.0e-9, 2.0e-9]);
+        ctx.set_param("clk_trig", 0.5);
+        ctx.set_param("pos_edge_trig", 1.0);
+        ctx.set_param("retrig", 0.0);
+        ctx.set_param("out_low", 0.0);
+        ctx.set_param("out_high", 5.0);
+        ctx.set_param("rise_delay", 0.2e-9);
+        ctx.set_param("rise_time", 0.2e-9);
+        ctx.set_param("fall_delay", 0.1e-9);
+        ctx.set_param("fall_time", 0.2e-9);
+        ctx.init_output("out", PortType::Voltage);
+
+        AnalogOneShot.init(&mut ctx).expect("oneshot init");
+        ctx.set_input_analog("clk", 1.0);
+        ctx.set_input_analog("cntl_in", f64::NAN);
+
+        let err = AnalogOneShot
+            .evaluate(&mut ctx)
+            .expect_err("oneshot must reject nonfinite control input");
+
+        assert!(
+            err.to_string().contains("cntl_in must be finite"),
+            "oneshot error should identify the nonfinite control input, got {err:?}"
+        );
+        assert_eq!(ctx.state(ONESHOT_T1), -1.0);
+        assert_eq!(ctx.state(ONESHOT_T2), -1.0);
+        assert_eq!(ctx.state(ONESHOT_CLOCK), 0.0);
+        assert!(ctx.take_requested_breakpoints().is_empty());
     }
 
     #[test]
