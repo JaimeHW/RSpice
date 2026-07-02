@@ -362,6 +362,36 @@ fn finite_ac_partials<const N: usize>(items: [(&str, Complex64); N]) -> Vec<(Str
         .collect()
 }
 
+fn finite_two_port_impedances(
+    model: &str,
+    impedances: TwoPortAcImpedances,
+) -> CmResult<TwoPortAcImpedances> {
+    if finite_complex(impedances.0) && finite_complex(impedances.1) {
+        Ok(impedances)
+    } else {
+        Err(CmError::EvaluationError(format!(
+            "{model} AC impedance is nonfinite"
+        )))
+    }
+}
+
+fn finite_four_port_impedances(
+    model: &str,
+    impedances: FourPortAcImpedances,
+) -> CmResult<FourPortAcImpedances> {
+    if finite_complex(impedances.0)
+        && finite_complex(impedances.1)
+        && finite_complex(impedances.2)
+        && finite_complex(impedances.3)
+    {
+        Ok(impedances)
+    } else {
+        Err(CmError::EvaluationError(format!(
+            "{model} AC impedance is nonfinite"
+        )))
+    }
+}
+
 fn microstrip_selector_params(ctx: &CmContext) -> CmResult<(i64, i64)> {
     Ok((
         finite_integer_param(ctx, "model", HAMMERSTAD)?,
@@ -1458,7 +1488,10 @@ fn tline_ac_impedances_uncached(
     let beta = std::f64::consts::TAU * frequency / C0;
     let gamma_l = Complex64::new(alpha, beta) * length;
     let z = Complex64::new(impedance, 0.0);
-    Ok((z * complex_coth(gamma_l), z * complex_csch(gamma_l)))
+    finite_two_port_impedances(
+        "tline",
+        (z * complex_coth(gamma_l), z * complex_csch(gamma_l)),
+    )
 }
 
 fn tline_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
@@ -1625,7 +1658,10 @@ fn mlin_ac_impedances_uncached(ctx: &CmContext, frequency: Value) -> CmResult<Tw
     let propagation = microstrip_propagation(ctx, frequency)?;
     let gamma_l = Complex64::new(propagation.alpha, propagation.beta) * length;
     let z = Complex64::new(propagation.zl, 0.0);
-    Ok((z * complex_coth(gamma_l), z * complex_csch(gamma_l)))
+    finite_two_port_impedances(
+        "mlin",
+        (z * complex_coth(gamma_l), z * complex_csch(gamma_l)),
+    )
 }
 
 fn mlin_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<TwoPortAcImpedances> {
@@ -1869,7 +1905,7 @@ fn cpline_ac_impedances_uncached(
     let z12 = zo_c * csch_o / 2.0 + ze_c * csch_e / 2.0;
     let z13 = ze_c * csch_e / 2.0 - zo_c * csch_o / 2.0;
     let z14 = ze_c * coth_e / 2.0 - zo_c * coth_o / 2.0;
-    Ok((z11, z12, z13, z14))
+    finite_four_port_impedances("cpline", (z11, z12, z13, z14))
 }
 
 fn cpline_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<FourPortAcImpedances> {
@@ -2038,7 +2074,7 @@ fn cpmlin_ac_impedances_uncached(
     let z12 = zo * csch_o / 2.0 + ze * csch_e / 2.0;
     let z13 = ze * csch_e / 2.0 - zo * csch_o / 2.0;
     let z14 = ze * coth_e / 2.0 - zo * coth_o / 2.0;
-    Ok((z11, z12, z13, z14))
+    finite_four_port_impedances("cpmlin", (z11, z12, z13, z14))
 }
 
 fn cpmlin_ac_impedances(ctx: &CmContext, frequency: Value) -> CmResult<FourPortAcImpedances> {
@@ -2937,6 +2973,21 @@ mod tests {
     }
 
     #[test]
+    fn transmission_line_ac_impedance_helpers_reject_singular_tuples() {
+        let tline = CmContext::new();
+        assert_evaluation_error(tline_ac_impedances_uncached(&tline, 0.0));
+
+        let mline = microstrip_cache_context();
+        assert_evaluation_error(mlin_ac_impedances_uncached(&mline, 0.0));
+
+        let cpline = CmContext::new();
+        assert_evaluation_error(cpline_ac_impedances_uncached(&cpline, 0.0));
+
+        let cpmlin = coupled_microstrip_cache_context();
+        assert_evaluation_error(cpmlin_ac_impedances_uncached(&cpmlin, 0.0));
+    }
+
+    #[test]
     fn tline_attenuation_conversion_stays_finite_for_large_db() {
         let frequency = 1.0e9;
 
@@ -3081,6 +3132,13 @@ mod tests {
         match result {
             Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected),
             other => panic!("expected InvalidParameter for {expected}, got {other:?}"),
+        }
+    }
+
+    fn assert_evaluation_error<T: std::fmt::Debug>(result: CmResult<T>) {
+        match result {
+            Err(CmError::EvaluationError(_)) => {}
+            other => panic!("expected EvaluationError, got {other:?}"),
         }
     }
 
