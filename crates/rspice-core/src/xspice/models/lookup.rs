@@ -142,8 +142,8 @@ fn lookup_eval_signature(ctx: &CmContext, x: Value) -> CmResult<LookupEvalSignat
         table: lookup_table_signature(ctx),
         x,
         input_domain: effective_input_domain(ctx.param("input_domain"))?,
-        fraction: ctx.param("fraction") > 0.5,
-        limit: ctx.param("limit") > 0.5,
+        fraction: lookup_bool_param(ctx, "fraction")?,
+        limit: lookup_bool_param(ctx, "limit")?,
     })
 }
 
@@ -264,6 +264,23 @@ fn effective_input_domain(input_domain: Value) -> CmResult<Value> {
     }
 
     Ok(input_domain.clamp(INPUT_DOMAIN_MIN, INPUT_DOMAIN_MAX))
+}
+
+fn lookup_bool_param(ctx: &CmContext, name: &str) -> CmResult<bool> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(invalid_param(
+            name,
+            format!("value must be finite, got {value}"),
+        ));
+    }
+    Ok(value > 0.5)
+}
+
+fn validate_lookup_params(ctx: &CmContext, table: &LookupTable) -> CmResult<()> {
+    let fraction = lookup_bool_param(ctx, "fraction")?;
+    lookup_bool_param(ctx, "limit")?;
+    validate_smoothing_domain(table, ctx.param("input_domain"), fraction)
 }
 
 fn validate_smoothing_domain(
@@ -557,11 +574,7 @@ impl CodeModel for PiecewiseLinear {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let points = cache_lookup_table(ctx)?;
-        validate_smoothing_domain(
-            &points,
-            ctx.param("input_domain"),
-            ctx.param("fraction") > 0.5,
-        )
+        validate_lookup_params(ctx, &points)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -613,11 +626,7 @@ impl CodeModel for PiecewiseLinearTimeSeries {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let points = cache_lookup_table(ctx)?;
-        validate_smoothing_domain(
-            &points,
-            ctx.param("input_domain"),
-            ctx.param("fraction") > 0.5,
-        )
+        validate_lookup_params(ctx, &points)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -638,7 +647,7 @@ impl CodeModel for PiecewiseLinearTimeSeries {
     fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
         let points = lookup_table(ctx)?;
         let input_domain = effective_input_domain(ctx.param("input_domain"))?;
-        let fraction = ctx.param("fraction") > 0.5;
+        let fraction = lookup_bool_param(ctx, "fraction")?;
         validate_smoothing_domain(&points, input_domain, fraction)?;
         Ok(lookup_breakpoint_times(&points, input_domain, fraction))
     }
@@ -654,6 +663,18 @@ mod tests {
             (actual - expected).abs() <= 1.0e-12,
             "expected {expected:e}, got {actual:e}"
         );
+    }
+
+    fn lookup_context() -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.set_real_vector_param("x_array", vec![0.0, 1.0]);
+        ctx.set_real_vector_param("y_array", vec![0.0, 10.0]);
+        ctx.set_param("input_domain", 0.01);
+        ctx.set_param("fraction", 1.0);
+        ctx.set_param("limit", 0.0);
+        ctx.set_input_analog("in", 0.5);
+        ctx.init_output("out", PortType::Voltage);
+        ctx
     }
 
     fn port_summary(
@@ -821,6 +842,39 @@ mod tests {
             param_summary(&PiecewiseLinearTimeSeries),
             lookup_param_summary()
         );
+    }
+
+    #[test]
+    fn lookup_models_reject_nonfinite_boolean_params() {
+        for (param, value) in [("fraction", f64::NAN), ("limit", f64::INFINITY)] {
+            let mut ctx = lookup_context();
+            ctx.set_param(param, value);
+
+            let err = PiecewiseLinear
+                .init(&mut ctx)
+                .expect_err("pwl must reject nonfinite boolean parameters during init");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "pwl {param} produced {err:?}"
+            );
+            assert!(
+                err.to_string().contains(param),
+                "pwl error should name rejected parameter {param}: {err}"
+            );
+        }
+
+        let mut ctx = lookup_context();
+        PiecewiseLinear.init(&mut ctx).expect("pwl initializes");
+        ctx.set_param("limit", f64::INFINITY);
+        PiecewiseLinear
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite limit must fail during evaluation");
+
+        let mut ctx = lookup_context();
+        ctx.set_param("fraction", f64::NAN);
+        PiecewiseLinearTimeSeries
+            .transient_breakpoints(&ctx)
+            .expect_err("pwlts breakpoints must reject nonfinite fraction");
     }
 
     fn evaluate_lookup_legacy_scan(
