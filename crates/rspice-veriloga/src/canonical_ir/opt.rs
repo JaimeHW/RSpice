@@ -22,6 +22,7 @@ const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES: usize = 8;
 const MAX_SELECTIVE_ASSIGNMENT_HISTORY_SNAPSHOT_EXPRESSIONS: usize = 100_000;
 const MAX_SELECTIVE_ASSIGNMENT_HISTORY_SNAPSHOT_STATEMENTS: usize = 7_000;
 const MAX_SELECTIVE_ASSIGNMENT_HISTORY_TARGETS: usize = 2_048;
+const MAX_SELECTIVE_ASSIGNMENT_ARITHMETIC_DEPENDENCY_DEPTH: usize = 2;
 const MAX_EXPANDED_ASSIGNMENT_HISTORY_SNAPSHOT_EXPRESSIONS: usize = 20_000;
 const MAX_EXPANDED_ASSIGNMENT_HISTORY_SNAPSHOT_STATEMENTS: usize = 5_000;
 const MAX_SCALAR_CONDITION_REASONING_DEPTH: usize = 128;
@@ -3239,6 +3240,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                 self.variable_assignment_history.contains_key(&variable.id);
             let has_complete_assignment_history =
                 self.track_assignment_history && has_assignment_history;
+            let has_bounded_assignment_history = has_assignment_history
+                && (self.track_assignment_history
+                    || self
+                        .selective_assignment_history_targets
+                        .contains(&variable.id));
             let has_guarded_path_assignment = self
                 .guarded_path_assignment_exprs
                 .contains_key(&variable.id);
@@ -3274,14 +3280,14 @@ impl<'a> ScalarGraphBuilder<'a> {
                 return Some(Some(guard_history));
             }
             if value.is_none()
-                && has_complete_assignment_history
+                && has_bounded_assignment_history
                 && let Some(history_value) =
                     self.lower_complementary_assignment_history_value(variable.id)
             {
                 return Some(Some(history_value));
             }
             if value.is_none()
-                && has_complete_assignment_history
+                && has_bounded_assignment_history
                 && let Some(history_value) = self.lower_assignment_history_value(variable.id)
             {
                 return Some(Some(history_value));
@@ -3611,20 +3617,21 @@ impl<'a> ScalarGraphBuilder<'a> {
                 HirExprKind::Number { .. } => {}
                 HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => {}
                 HirExprKind::Unary { op, operand }
-                    if simple_assignment_alias_snapshot_unary_op(
-                        op,
-                        self.expanded_assignment_history_snapshots,
-                    ) =>
+                    if simple_assignment_alias_snapshot_unary_op(op, true) =>
                 {
                     stack.push(*operand);
                 }
                 HirExprKind::Binary { op, left, right }
-                    if simple_assignment_alias_snapshot_binary_op(
-                        op,
-                        self.expanded_assignment_history_snapshots,
-                    ) =>
+                    if simple_assignment_alias_snapshot_binary_op(op, true) =>
                 {
                     stack.extend([*left, *right]);
+                }
+                HirExprKind::Conditional {
+                    condition,
+                    then_expr,
+                    else_expr,
+                } => {
+                    stack.extend([*condition, *then_expr, *else_expr]);
                 }
                 HirExprKind::Call { name, args }
                     if self.expanded_assignment_history_snapshots
@@ -5633,32 +5640,45 @@ fn selective_assignment_history_targets(
             .push(assignment);
     }
 
-    let mut pending: Vec<_> = direct_targets.iter().copied().collect();
-    pending.sort_by_key(|target| usize::from(*target));
-    let mut processed = HashSet::new();
-    while let Some(target) = pending.pop() {
-        if !processed.insert(target) {
+    let mut pending: Vec<_> = direct_targets
+        .iter()
+        .copied()
+        .map(|target| (target, MAX_SELECTIVE_ASSIGNMENT_ARITHMETIC_DEPENDENCY_DEPTH))
+        .collect();
+    pending.sort_by_key(|(target, depth)| (usize::from(*target), *depth));
+    let mut processed_depths = HashMap::new();
+    while let Some((target, arithmetic_depth)) = pending.pop() {
+        if processed_depths
+            .get(&target)
+            .is_some_and(|processed| *processed >= arithmetic_depth)
+        {
             continue;
         }
+        processed_depths.insert(target, arithmetic_depth);
         let Some(assignments) = assignments_by_target.get(&target) else {
             continue;
         };
         for assignment in assignments {
-            let mut dependencies = HashSet::new();
+            let mut dependencies = HashMap::new();
             collect_selective_assignment_dependencies(
                 mir,
                 &variables_by_name,
                 assignment,
+                arithmetic_depth,
                 &mut dependencies,
             );
             let mut dependencies: Vec<_> = dependencies.into_iter().collect();
-            dependencies.sort_by_key(|dependency| usize::from(*dependency));
-            for dependency in dependencies {
+            dependencies.sort_by_key(|(dependency, depth)| (usize::from(*dependency), *depth));
+            for (dependency, dependency_depth) in dependencies {
                 if targets.len() >= MAX_SELECTIVE_ASSIGNMENT_HISTORY_TARGETS {
                     return targets;
                 }
-                if targets.insert(dependency) {
-                    pending.push(dependency);
+                if targets.insert(dependency)
+                    || processed_depths
+                        .get(&dependency)
+                        .is_none_or(|processed| dependency_depth > *processed)
+                {
+                    pending.push((dependency, dependency_depth));
                 }
             }
         }
@@ -5670,7 +5690,8 @@ fn collect_selective_assignment_dependencies(
     mir: &MirModel,
     variables_by_name: &HashMap<&str, VariableId>,
     assignment: &HirAssignment,
-    variables: &mut HashSet<VariableId>,
+    arithmetic_depth: usize,
+    variables: &mut HashMap<VariableId, usize>,
 ) {
     if let Some(update) = conditional_self_update_expr(
         mir,
@@ -5678,31 +5699,138 @@ fn collect_selective_assignment_dependencies(
         assignment.target,
         assignment.expr.id,
     ) {
-        collect_expression_variables(mir, variables_by_name, update.condition, None, variables);
+        let mut condition_variables = HashSet::new();
+        collect_expression_variables(
+            mir,
+            variables_by_name,
+            update.condition,
+            None,
+            &mut condition_variables,
+        );
+        for variable in condition_variables {
+            insert_selective_assignment_dependency(variables, variable, arithmetic_depth);
+        }
         if let Some(variable) = variable_identifier_expr(mir, variables_by_name, update.value_expr)
             && variable != assignment.target
         {
-            variables.insert(variable);
+            insert_selective_assignment_dependency(variables, variable, arithmetic_depth);
+        } else if arithmetic_depth > 0
+            && let Some(dependencies) = collect_selective_assignment_replay_dependencies(
+                mir,
+                variables_by_name,
+                update.value_expr,
+                Some(assignment.target),
+            )
+        {
+            for variable in dependencies {
+                insert_selective_assignment_dependency(variables, variable, arithmetic_depth - 1);
+            }
         }
         return;
     }
 
     if assignment.target_name.starts_with("__guard") {
+        let mut guard_variables = HashSet::new();
         collect_expression_variables(
             mir,
             variables_by_name,
             assignment.expr.id,
             Some(assignment.target),
-            variables,
+            &mut guard_variables,
         );
+        for variable in guard_variables {
+            insert_selective_assignment_dependency(variables, variable, arithmetic_depth);
+        }
         return;
     }
 
     if let Some(variable) = variable_identifier_expr(mir, variables_by_name, assignment.expr.id)
         && variable != assignment.target
     {
-        variables.insert(variable);
+        insert_selective_assignment_dependency(variables, variable, arithmetic_depth);
+    } else if arithmetic_depth > 0
+        && let Some(dependencies) = collect_selective_assignment_replay_dependencies(
+            mir,
+            variables_by_name,
+            assignment.expr.id,
+            Some(assignment.target),
+        )
+    {
+        for variable in dependencies {
+            insert_selective_assignment_dependency(variables, variable, arithmetic_depth - 1);
+        }
     }
+}
+
+fn insert_selective_assignment_dependency(
+    variables: &mut HashMap<VariableId, usize>,
+    variable: VariableId,
+    arithmetic_depth: usize,
+) {
+    let entry = variables.entry(variable).or_insert(arithmetic_depth);
+    *entry = (*entry).max(arithmetic_depth);
+}
+
+fn collect_selective_assignment_replay_dependencies(
+    mir: &MirModel,
+    variables_by_name: &HashMap<&str, VariableId>,
+    expr: ExprId,
+    excluded: Option<VariableId>,
+) -> Option<HashSet<VariableId>> {
+    let mut variables = HashSet::new();
+    let mut visited = HashSet::new();
+    let mut stack = vec![expr];
+    let mut nodes = 0;
+    while let Some(expr) = stack.pop() {
+        if !visited.insert(expr) {
+            continue;
+        }
+        nodes += 1;
+        if nodes > MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_EXPR_NODES {
+            return None;
+        }
+        let expression = mir.expressions.get(usize::from(expr))?;
+        match &expression.kind {
+            HirExprKind::Identifier { name } => {
+                if let Some(variable) = variables_by_name.get(name.as_str()).copied()
+                    && Some(variable) != excluded
+                {
+                    variables.insert(variable);
+                    if variables.len() > MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES {
+                        return None;
+                    }
+                }
+            }
+            HirExprKind::Number { .. }
+            | HirExprKind::StringLiteral { .. }
+            | HirExprKind::BranchAccess { .. }
+            | HirExprKind::NamedBranchAccess { .. } => {}
+            HirExprKind::Unary { op, operand }
+                if simple_assignment_alias_snapshot_unary_op(op, true) =>
+            {
+                stack.push(*operand);
+            }
+            HirExprKind::Binary { op, left, right }
+                if simple_assignment_alias_snapshot_binary_op(op, true) =>
+            {
+                stack.extend([*left, *right]);
+            }
+            HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                stack.extend([*condition, *then_expr, *else_expr]);
+            }
+            HirExprKind::Call { name, args }
+                if simple_assignment_alias_snapshot_call(name, args.len()) =>
+            {
+                stack.extend(args.iter().copied());
+            }
+            _ => return None,
+        }
+    }
+    Some(variables)
 }
 
 fn conditional_self_update_expr(

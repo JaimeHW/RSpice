@@ -1493,6 +1493,58 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_snapshots_selective_conditional_alias_history() {
+        let mut source = String::from(
+            r#"
+module selective_conditional_alias_history(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real pad, left, right, alias, out;
+    analog begin
+        left = $simparam("unsupported_initial_left");
+        right = $simparam("unsupported_initial_right");
+        left = V(p, n);
+        right = 2.0 * V(p, n);
+        if (mode == 0) begin
+            left = $simparam("inactive_left");
+            right = $simparam("inactive_right");
+        end
+        alias = (mode == 1) ? left : right;
+        out = alias;
+"#,
+        );
+        for _ in 0..3500 {
+            source.push_str("        pad = (((pad + 1.0) + (2.0 * 3.0)) + (4.0 / 5.0));\n");
+        }
+        source.push_str(
+            r#"
+        I(p, n) <+ ((mode == 1) ? out : 0.0);
+    end
+endmodule
+"#,
+        );
+
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .expect("canonical IR");
+        assert!(
+            artifact.hir.expressions.len() > 20_000,
+            "fixture must exceed complete expanded-history expression threshold"
+        );
+        assert!(
+            artifact.hir.statements.len() <= 5_000,
+            "fixture must stay within selective history statement gate"
+        );
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("selective conditional aliases should snapshot replay operands");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+    }
+
+    #[test]
     fn scalar_backend_coerces_boolean_assignment_history_to_real() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
