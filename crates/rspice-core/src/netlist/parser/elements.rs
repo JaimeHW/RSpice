@@ -758,6 +758,14 @@ pub(super) fn parse_pspice_u_device(
             parse_pspice_u_tristate(&name, &fields, count.unwrap_or(1), true, line_num, elements)
         }
         "JKFF" => parse_pspice_u_jkff(&name, &fields, count.unwrap_or(1), line_num, elements),
+        "LOGICEXP" => parse_pspice_u_logicexp(
+            &name,
+            &fields,
+            pspice_u_count_pair(&fields[1]),
+            line,
+            line_num,
+            elements,
+        ),
         "ANDA" => parse_pspice_u_vector_gate_array(
             &name,
             &fields,
@@ -962,7 +970,7 @@ pub(super) fn parse_pspice_u_device(
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: format!(
-                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
+                "Unsupported PSpice U-device type '{}'; supported frontend lowerings are simple gates, DFF, DLTCH, DLYLINE, JKFF, LOGICEXP, PULLUP, PULLDN, SRFF, BUFA, INVA, ANDA, NANDA, ORA, NORA, XORA, NXORA, BUF3, INV3, AND3, NAND3, OR3, NOR3, XOR3, NXOR3, BUF3A, INV3A, AND3A, NAND3A, OR3A, NOR3A, XOR3A, NXOR3A, AO, AOI, OA, and OAI",
                 fields[1]
             ),
         }),
@@ -1245,6 +1253,453 @@ fn parse_pspice_u_unary_gate_array(
     }
 
     Ok(())
+}
+
+fn parse_pspice_u_logicexp(
+    name: &str,
+    fields: &[String],
+    shape: Option<(usize, usize)>,
+    line: &str,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+) -> Result<(), ParseError> {
+    let Some((input_count, output_count)) = shape else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice LOGICEXP U-device '{}' requires valid dimensions",
+                name
+            ),
+        });
+    };
+    if output_count == 0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice LOGICEXP U-device '{}' requires at least one output",
+                name
+            ),
+        });
+    }
+
+    let Some(logic_index) = fields
+        .iter()
+        .position(|field| field.eq_ignore_ascii_case("LOGIC:"))
+    else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice LOGICEXP U-device '{}' requires a LOGIC: section",
+                name
+            ),
+        });
+    };
+
+    let pins = &fields[4..logic_index];
+    let required = input_count
+        .checked_add(output_count)
+        .and_then(|count| count.checked_add(1))
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("PSpice LOGICEXP U-device '{}' is too large", name),
+        })?;
+    if pins.len() < required {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice LOGICEXP U-device '{}' requires {} input pin(s), {} output pin(s), and a timing model",
+                name, input_count, output_count
+            ),
+        });
+    }
+
+    for pin in &pins[..input_count] {
+        pspice_u_required_digital_node(pin, "LOGICEXP input", fields, line_num, elements)?;
+    }
+    for pin in &pins[input_count..input_count + output_count] {
+        pspice_u_required_digital_port(pin, "LOGICEXP output", fields, line_num, elements)?;
+    }
+
+    let logic_section = pspice_u_logicexp_section(line).ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "PSpice LOGICEXP U-device '{}' requires a LOGIC: section",
+            name
+        ),
+    })?;
+    let statements = PspiceLogicexpParser::new(logic_section, line_num).parse_statements()?;
+    if statements.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "PSpice LOGICEXP U-device '{}' requires at least one assignment",
+                name
+            ),
+        });
+    }
+
+    let mut lowerer = PspiceLogicexpLowerer::new(name, elements);
+    for statement in statements {
+        let target = normalize_pspice_u_node(&statement.output);
+        lowerer.lower_to_target(&statement.expr, target);
+    }
+
+    Ok(())
+}
+
+fn pspice_u_logicexp_section(line: &str) -> Option<&str> {
+    let upper = line.to_ascii_uppercase();
+    let index = upper.find("LOGIC:")?;
+    Some(&line[index + "LOGIC:".len()..])
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PspiceLogicexpStatement {
+    output: String,
+    expr: PspiceLogicexpExpr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PspiceLogicexpExpr {
+    Ident(String),
+    Not(Box<PspiceLogicexpExpr>),
+    Binary {
+        op: PspiceLogicexpOp,
+        left: Box<PspiceLogicexpExpr>,
+        right: Box<PspiceLogicexpExpr>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PspiceLogicexpOp {
+    And,
+    Xor,
+    Or,
+}
+
+struct PspiceLogicexpParser<'a> {
+    input: &'a str,
+    pos: usize,
+    line_num: usize,
+}
+
+impl<'a> PspiceLogicexpParser<'a> {
+    fn new(input: &'a str, line_num: usize) -> Self {
+        Self {
+            input,
+            pos: 0,
+            line_num,
+        }
+    }
+
+    fn parse_statements(mut self) -> Result<Vec<PspiceLogicexpStatement>, ParseError> {
+        let mut statements = Vec::new();
+        loop {
+            self.skip_ws();
+            if self.is_eof() {
+                break;
+            }
+            let output = self.parse_ident("LOGICEXP assignment output")?;
+            self.skip_ws();
+            self.expect_char('=')?;
+            self.skip_ws();
+            self.expect_char('{')?;
+            let expr = self.parse_expr()?;
+            self.skip_ws();
+            self.expect_char('}')?;
+            statements.push(PspiceLogicexpStatement { output, expr });
+        }
+        Ok(statements)
+    }
+
+    fn parse_expr(&mut self) -> Result<PspiceLogicexpExpr, ParseError> {
+        self.parse_or()
+    }
+
+    fn parse_or(&mut self) -> Result<PspiceLogicexpExpr, ParseError> {
+        let mut expr = self.parse_xor()?;
+        loop {
+            self.skip_ws();
+            if !self.consume_char('|') {
+                break;
+            }
+            let right = self.parse_xor()?;
+            expr = PspiceLogicexpExpr::Binary {
+                op: PspiceLogicexpOp::Or,
+                left: Box::new(expr),
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_xor(&mut self) -> Result<PspiceLogicexpExpr, ParseError> {
+        let mut expr = self.parse_and()?;
+        loop {
+            self.skip_ws();
+            if !self.consume_char('^') {
+                break;
+            }
+            let right = self.parse_and()?;
+            expr = PspiceLogicexpExpr::Binary {
+                op: PspiceLogicexpOp::Xor,
+                left: Box::new(expr),
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_and(&mut self) -> Result<PspiceLogicexpExpr, ParseError> {
+        let mut expr = self.parse_unary()?;
+        loop {
+            self.skip_ws();
+            if !self.consume_char('&') {
+                break;
+            }
+            let right = self.parse_unary()?;
+            expr = PspiceLogicexpExpr::Binary {
+                op: PspiceLogicexpOp::And,
+                left: Box::new(expr),
+                right: Box::new(right),
+            };
+        }
+        Ok(expr)
+    }
+
+    fn parse_unary(&mut self) -> Result<PspiceLogicexpExpr, ParseError> {
+        self.skip_ws();
+        if self.consume_char('~') {
+            let expr = self.parse_unary()?;
+            return Ok(PspiceLogicexpExpr::Not(Box::new(expr)));
+        }
+        self.parse_primary()
+    }
+
+    fn parse_primary(&mut self) -> Result<PspiceLogicexpExpr, ParseError> {
+        self.skip_ws();
+        if self.consume_char('(') {
+            let expr = self.parse_expr()?;
+            self.skip_ws();
+            self.expect_char(')')?;
+            return Ok(expr);
+        }
+        Ok(PspiceLogicexpExpr::Ident(
+            self.parse_ident("LOGICEXP expression input")?,
+        ))
+    }
+
+    fn parse_ident(&mut self, role: &str) -> Result<String, ParseError> {
+        self.skip_ws();
+        let start = self.pos;
+        let Some(ch) = self.peek_char() else {
+            return self.error(format!("expected {role}"));
+        };
+        if !pspice_logicexp_ident_start(ch) {
+            return self.error(format!("expected {role}"));
+        }
+        self.pos += ch.len_utf8();
+        while let Some(ch) = self.peek_char() {
+            if !pspice_logicexp_ident_continue(ch) {
+                break;
+            }
+            self.pos += ch.len_utf8();
+        }
+        Ok(self.input[start..self.pos].to_string())
+    }
+
+    fn expect_char(&mut self, expected: char) -> Result<(), ParseError> {
+        self.skip_ws();
+        if self.consume_char(expected) {
+            Ok(())
+        } else {
+            self.error(format!("expected '{expected}' in LOGICEXP section"))
+        }
+    }
+
+    fn consume_char(&mut self, expected: char) -> bool {
+        if self.peek_char() == Some(expected) {
+            self.pos += expected.len_utf8();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn skip_ws(&mut self) {
+        while let Some(ch) = self.peek_char() {
+            if !ch.is_whitespace() {
+                break;
+            }
+            self.pos += ch.len_utf8();
+        }
+    }
+
+    fn peek_char(&self) -> Option<char> {
+        self.input[self.pos..].chars().next()
+    }
+
+    fn is_eof(&self) -> bool {
+        self.pos >= self.input.len()
+    }
+
+    fn error<T>(&self, message: String) -> Result<T, ParseError> {
+        Err(ParseError::Syntax {
+            line: self.line_num,
+            message,
+        })
+    }
+}
+
+fn pspice_logicexp_ident_start(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '/' | '-' | '$')
+}
+
+fn pspice_logicexp_ident_continue(ch: char) -> bool {
+    pspice_logicexp_ident_start(ch) || ch == '+'
+}
+
+struct PspiceLogicexpLowerer<'a> {
+    owner: &'a str,
+    elements: &'a mut Vec<Element>,
+    next_gate: usize,
+}
+
+impl<'a> PspiceLogicexpLowerer<'a> {
+    fn new(owner: &'a str, elements: &'a mut Vec<Element>) -> Self {
+        Self {
+            owner,
+            elements,
+            next_gate: 0,
+        }
+    }
+
+    fn lower_to_target(&mut self, expr: &PspiceLogicexpExpr, target: String) -> String {
+        self.lower_expr(expr, Some(target))
+    }
+
+    fn lower_expr(&mut self, expr: &PspiceLogicexpExpr, target: Option<String>) -> String {
+        match expr {
+            PspiceLogicexpExpr::Ident(raw) => {
+                let node = normalize_pspice_u_node(raw);
+                ensure_pspice_u_constant_driver(raw, self.elements);
+                if let Some(target) = target {
+                    if node.eq_ignore_ascii_case(&target) {
+                        node
+                    } else {
+                        self.push_scalar_gate("d_buffer", node, target)
+                    }
+                } else {
+                    node
+                }
+            }
+            PspiceLogicexpExpr::Not(inner) => {
+                if let PspiceLogicexpExpr::Not(double_inner) = inner.as_ref() {
+                    return self.lower_expr(double_inner, target);
+                }
+                if let PspiceLogicexpExpr::Binary { op, .. } = inner.as_ref() {
+                    return self.lower_binary(inner, *op, true, target);
+                }
+                let input = self.lower_expr(inner, None);
+                let output = target.unwrap_or_else(|| self.next_connector("LOGIC"));
+                self.push_scalar_gate("d_inverter", input, output)
+            }
+            PspiceLogicexpExpr::Binary { op, .. } => self.lower_binary(expr, *op, false, target),
+        }
+    }
+
+    fn lower_binary(
+        &mut self,
+        expr: &PspiceLogicexpExpr,
+        op: PspiceLogicexpOp,
+        inverted: bool,
+        target: Option<String>,
+    ) -> String {
+        let mut operands = Vec::new();
+        collect_pspice_logicexp_operands(expr, op, &mut operands);
+        let inputs = operands
+            .into_iter()
+            .map(|operand| self.lower_expr(operand, None))
+            .collect::<Vec<_>>();
+        let output = target.unwrap_or_else(|| self.next_connector("LOGIC"));
+        let model = pspice_logicexp_gate_model(op, inverted);
+        self.push_vector_gate(model, inputs, output)
+    }
+
+    fn push_scalar_gate(&mut self, model: &str, input: String, output: String) -> String {
+        let name = self.next_gate_name();
+        push_pspice_u_xspice_element_with_params(
+            self.elements,
+            name,
+            model,
+            vec![
+                XspicePort::Digital(input),
+                XspicePort::Digital(output.clone()),
+            ],
+            pspice_u_zero_gate_delay_params(),
+            None,
+        );
+        output
+    }
+
+    fn push_vector_gate(&mut self, model: &str, inputs: Vec<String>, output: String) -> String {
+        let name = self.next_gate_name();
+        push_pspice_u_xspice_element_with_params(
+            self.elements,
+            name,
+            model,
+            vec![
+                XspicePort::DigitalVector(inputs),
+                XspicePort::Digital(output.clone()),
+            ],
+            pspice_u_zero_gate_delay_params(),
+            None,
+        );
+        output
+    }
+
+    fn next_gate_name(&mut self) -> String {
+        let name = format!("{}__LOGIC_{}", self.owner, self.next_gate);
+        self.next_gate += 1;
+        name
+    }
+
+    fn next_connector(&mut self, suffix: &str) -> String {
+        pspice_u_internal_connector_name_with_suffix(
+            &format!("{}_{}", self.owner, self.next_gate),
+            suffix,
+        )
+    }
+}
+
+fn collect_pspice_logicexp_operands<'a>(
+    expr: &'a PspiceLogicexpExpr,
+    op: PspiceLogicexpOp,
+    operands: &mut Vec<&'a PspiceLogicexpExpr>,
+) {
+    if let PspiceLogicexpExpr::Binary {
+        op: expr_op,
+        left,
+        right,
+    } = expr
+        && *expr_op == op
+    {
+        collect_pspice_logicexp_operands(left, op, operands);
+        collect_pspice_logicexp_operands(right, op, operands);
+        return;
+    }
+    operands.push(expr);
+}
+
+fn pspice_logicexp_gate_model(op: PspiceLogicexpOp, inverted: bool) -> &'static str {
+    match (op, inverted) {
+        (PspiceLogicexpOp::And, false) => "d_and",
+        (PspiceLogicexpOp::And, true) => "d_nand",
+        (PspiceLogicexpOp::Or, false) => "d_or",
+        (PspiceLogicexpOp::Or, true) => "d_nor",
+        (PspiceLogicexpOp::Xor, false) => "d_xor",
+        (PspiceLogicexpOp::Xor, true) => "d_xnor",
+    }
 }
 
 fn parse_pspice_u_tristate_vector_gate_array(

@@ -5885,13 +5885,93 @@ mod tests {
     }
 
     #[test]
-    fn pspice_u_unsupported_frontend_families_fail_closed() {
-        let err = Netlist::parse(
-            "pspice u logicexp unsupported slice\n\
-             U1 LOGICEXP(4,10) $G_DPWR $G_DGND a b c d y1 y2\n\
+    fn pspice_u_logicexp_lowers_boolean_assignments_to_zero_delay_gates() {
+        let netlist = Netlist::parse(
+            "pspice u logicexp\n\
+             U19 LOGICEXP(3,2) $G_DPWR $G_DGND a b c y sum D0_GATE IO_LEVEL=0\n\
+             + LOGIC:\n\
+             +   y = {~(a & b) | c}\n\
+             +   sum = {a ^ b ^ c}\n\
              .end\n",
         )
-        .expect_err("LOGICEXP lowering is not implemented in this slice");
+        .expect("PSpice LOGICEXP should lower boolean assignments to XSPICE gates");
+
+        assert_eq!(netlist.elements.len(), 3);
+        assert_eq!(netlist.elements[0].name, "U19__LOGIC_0");
+        assert_eq!(netlist.elements[1].name, "U19__LOGIC_1");
+        assert_eq!(netlist.elements[2].name, "U19__LOGIC_2");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice {
+                model,
+                ports,
+                params,
+                pspice_u_timing,
+                ..
+            } => {
+                assert_eq!(model, "d_nand");
+                assert!(pspice_u_timing.is_none());
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec!["A".to_string(), "B".to_string()]),
+                        XspicePort::Digital("__PSPICE_U19_0_LOGIC".to_string())
+                    ]
+                );
+                assert!(params.iter().any(|(name, value)| {
+                    name == "rise_delay" && (*value - 1.0e-12).abs() < f64::EPSILON
+                }));
+                assert!(params.iter().any(|(name, value)| {
+                    name == "fall_delay" && (*value - 1.0e-12).abs() < f64::EPSILON
+                }));
+            }
+            other => panic!("expected first LOGICEXP gate, got {other:?}"),
+        }
+
+        match &netlist.elements[1].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_or");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec![
+                            "__PSPICE_U19_0_LOGIC".to_string(),
+                            "C".to_string()
+                        ]),
+                        XspicePort::Digital("Y".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected final LOGICEXP OR gate, got {other:?}"),
+        }
+
+        match &netlist.elements[2].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "d_xor");
+                assert_eq!(
+                    ports,
+                    &[
+                        XspicePort::DigitalVector(vec![
+                            "A".to_string(),
+                            "B".to_string(),
+                            "C".to_string()
+                        ]),
+                        XspicePort::Digital("SUM".to_string())
+                    ]
+                );
+            }
+            other => panic!("expected LOGICEXP XOR gate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_unsupported_frontend_families_fail_closed() {
+        let err = Netlist::parse(
+            "pspice u pindly unsupported slice\n\
+             U1 PINDLY(1,0,1) $G_DPWR $G_DGND internal input output DLY\n\
+             .end\n",
+        )
+        .expect_err("PINDLY lowering is not implemented in this slice");
 
         assert!(
             err.to_string().contains("Unsupported PSpice U-device type"),
