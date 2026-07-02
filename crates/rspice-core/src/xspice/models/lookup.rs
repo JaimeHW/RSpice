@@ -138,6 +138,12 @@ fn lookup_table_signature_matches(ctx: &CmContext, signature: &LookupTableSignat
 }
 
 fn lookup_eval_signature(ctx: &CmContext, x: Value) -> CmResult<LookupEvalSignature> {
+    if !x.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "lookup input must be finite, got {x}"
+        )));
+    }
+
     Ok(LookupEvalSignature {
         table: lookup_table_signature(ctx),
         x,
@@ -875,6 +881,28 @@ mod tests {
         PiecewiseLinearTimeSeries
             .transient_breakpoints(&ctx)
             .expect_err("pwlts breakpoints must reject nonfinite fraction");
+    }
+
+    #[test]
+    fn pwl_rejects_nonfinite_runtime_input_before_output_or_cache_update() {
+        let mut ctx = lookup_context();
+        PiecewiseLinear.init(&mut ctx).expect("pwl initializes");
+        ctx.set_input_analog("in", f64::NAN);
+
+        let err = PiecewiseLinear
+            .evaluate(&mut ctx)
+            .expect_err("pwl must reject nonfinite runtime input");
+
+        assert!(
+            err.to_string().contains("lookup input must be finite"),
+            "pwl error should identify the nonfinite input, got {err:?}"
+        );
+        assert_eq!(ctx.output("out"), 0.0);
+        assert!(
+            ctx.resource::<LookupEvalResource>(LOOKUP_EVAL_RESOURCE)
+                .is_none(),
+            "pwl must not cache a failed nonfinite input evaluation"
+        );
     }
 
     fn evaluate_lookup_legacy_scan(
