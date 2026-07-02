@@ -887,7 +887,7 @@ fn microstrip_propagation_uncached(
     let er = dielectric_param(ctx, "er", 9.8)?;
     let tan_delta = nonnegative_param(ctx, "tand", 2.0e-4)?;
     let rho = nonnegative_param(ctx, "rho", 0.022e-6)?;
-    let roughness = finite_param(ctx, "d", 0.15e-6)?;
+    let roughness = nonnegative_param(ctx, "d", 0.15e-6)?;
     let (substrate_model, dispersion_model) = microstrip_selector_params(ctx)?;
 
     let quasi = msline_analyse_quasi_static(w, h, t, er, substrate_model);
@@ -1239,7 +1239,7 @@ fn coupled_microstrip_propagation_uncached(
     let er = dielectric_param(ctx, "er", 9.8)?;
     let tan_delta = nonnegative_param(ctx, "tand", 2.0e-4)?;
     let rho = nonnegative_param(ctx, "rho", 0.022e-6)?;
-    let roughness = finite_param(ctx, "d", 0.15e-6)?;
+    let roughness = nonnegative_param(ctx, "d", 0.15e-6)?;
     let (substrate_model, dispersion_model) = coupled_microstrip_selector_params(ctx)?;
 
     let quasi = cpmsline_analyse_quasi_static(w, h, s, t, er, substrate_model);
@@ -3024,6 +3024,17 @@ mod tests {
             coupled_microstrip_propagation_uncached(&cpmlin, 1.0e9),
             "tand",
         );
+    }
+
+    #[test]
+    fn microstrip_models_reject_negative_roughness() {
+        let mut mline = microstrip_cache_context();
+        mline.set_param("d", -0.1e-6);
+        assert_invalid_param(microstrip_propagation_uncached(&mline, 1.0e9), "d");
+
+        let mut cpmlin = coupled_microstrip_cache_context();
+        cpmlin.set_param("d", -0.1e-6);
+        assert_invalid_param(coupled_microstrip_propagation_uncached(&cpmlin, 1.0e9), "d");
     }
 
     #[test]
