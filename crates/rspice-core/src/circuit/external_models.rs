@@ -1693,7 +1693,7 @@ mod tests {
             let inputs = ctx.input_vector("in");
             let in0 = inputs.first().copied().unwrap_or(0.0);
             let in1 = inputs.get(1).copied().unwrap_or(0.0);
-            ctx.set_output_vector("out", vec![2.0 * in0 + 1.0, 3.0 * in1 + 1.0]);
+            ctx.set_output_vector("out", vec![2.0 * in0 + 1.0, 3.0 * in1 + 1.0])?;
             Ok(())
         }
 
