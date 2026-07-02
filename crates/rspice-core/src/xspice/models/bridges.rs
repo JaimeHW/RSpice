@@ -29,6 +29,24 @@ fn official_bridge_control(value: Value) -> i64 {
     }
 }
 
+fn adc_bridge_state(input: Value, previous: i64, in_low: Value, in_high: Value) -> i64 {
+    if in_high < in_low {
+        if input > in_low {
+            1
+        } else if input < in_high {
+            0
+        } else {
+            previous
+        }
+    } else if input <= in_low {
+        0
+    } else if input >= in_high {
+        1
+    } else {
+        -1
+    }
+}
+
 /// Analog to digital converter bridge
 #[derive(Debug, Default)]
 pub struct AdcBridge;
@@ -105,14 +123,7 @@ impl CodeModel for AdcBridge {
         for index in 0..width {
             let v_in = analog_vector_input_value(ctx, "in", index);
             let prev = ctx.int_state(index);
-
-            let new_state = if v_in <= in_low {
-                0
-            } else if v_in >= in_high {
-                1
-            } else {
-                -1
-            };
+            let new_state = adc_bridge_state(v_in, prev, in_low, in_high);
 
             if commit_outputs && new_state != prev {
                 let val = match new_state {
@@ -1457,6 +1468,15 @@ mod tests {
         assert_eq!(events[0].start_index, 0);
         assert_eq!(events[0].values[0].state, DigitalState::One);
         assert_eq!(ctx.int_state(0), 1);
+    }
+
+    #[test]
+    fn adc_bridge_inverted_thresholds_hold_previous_state_in_hysteresis_band() {
+        assert_eq!(adc_bridge_state(1.2, -1, 0.9, 0.1), 1);
+        assert_eq!(adc_bridge_state(-0.2, -1, 0.9, 0.1), 0);
+        assert_eq!(adc_bridge_state(0.5, 1, 0.9, 0.1), 1);
+        assert_eq!(adc_bridge_state(0.5, 0, 0.9, 0.1), 0);
+        assert_eq!(adc_bridge_state(0.5, -1, 0.9, 0.1), -1);
     }
 
     #[test]
