@@ -59,6 +59,10 @@ pub struct SimulationConfig {
     pub temperature: Value,
     /// Transient source/code-model ramping time in seconds. A value <= 0 disables it.
     pub ramptime: Value,
+    /// Ngspice XSPICE digital delay policy:
+    /// 0 = default transport, 1 = default inertial,
+    /// 2 = force transport, 3 = force inertial.
+    pub digital_delay_type: Option<i64>,
     /// Integration method for transient analysis
     pub integration_method: crate::analysis::IntegrationMethod,
     /// Broad SPICE compatibility policy used by config resolution.
@@ -308,6 +312,7 @@ impl Default for SimulationConfig {
             max_timestep: crate::constants::MAX_TIMESTEP,
             temperature: crate::constants::TEMP_REFERENCE,
             ramptime: 0.0,
+            digital_delay_type: None,
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
             spice_dialect: SpiceDialect::BestAvailable,
             jfet_level2_model: JfetLevel2Model::DialectDefault,

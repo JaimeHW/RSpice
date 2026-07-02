@@ -8,6 +8,10 @@ use crate::xspice::{CmError, EvaluationPhase};
 
 const INITIAL_GATE_STATE: i64 = i64::MIN;
 const OFFICIAL_DIGITAL_DELAY_MIN: Value = 1.0e-12;
+const DEFAULT_TRANSPORT_DELAY: i64 = 0;
+const DEFAULT_INERTIAL_DELAY: i64 = 1;
+const OVERRIDE_TRANSPORT_DELAY: i64 = 2;
+const OVERRIDE_INERTIAL_DELAY: i64 = 3;
 
 fn gate_delay(ctx: &CmContext, new_state: i64, prev_state: i64, rise: Value, fall: Value) -> Value {
     if ctx.time == 0.0 || prev_state == INITIAL_GATE_STATE {
@@ -43,6 +47,25 @@ fn gate_boolean_param(ctx: &CmContext, name: &str) -> CmResult<bool> {
         });
     }
     Ok(value > 0.5)
+}
+
+fn gate_inertial_delay_enabled(ctx: &CmContext) -> CmResult<bool> {
+    let param_enabled = gate_boolean_param(ctx, "inertial_delay")?;
+    Ok(match ctx.digital_delay_type() {
+        Some(OVERRIDE_TRANSPORT_DELAY) => false,
+        Some(OVERRIDE_INERTIAL_DELAY) => true,
+        Some(DEFAULT_TRANSPORT_DELAY) => ctx.param_was_provided("inertial_delay") && param_enabled,
+        Some(DEFAULT_INERTIAL_DELAY) => !ctx.param_was_provided("inertial_delay") || param_enabled,
+        Some(value) => {
+            return Err(CmError::InvalidParameter {
+                name: "digital_delay_type".to_string(),
+                message: format!(
+                    "digital_delay_type must be 0, 1, 2, or 3 for XSPICE gates, got {value}"
+                ),
+            });
+        }
+        None => param_enabled,
+    })
 }
 
 fn gate_commits_state(ctx: &CmContext) -> bool {
@@ -172,7 +195,7 @@ fn set_gate_output_with_unknown_delays(
     delay: Value,
     unknown_transition_delays: Option<(Value, Value)>,
 ) -> CmResult<()> {
-    if gate_boolean_param(ctx, "inertial_delay")? {
+    if gate_inertial_delay_enabled(ctx)? {
         ctx.set_output_digital_inertial(name, value, delay, previous, unknown_transition_delays);
     } else {
         ctx.set_output_digital(name, value, delay);
@@ -298,7 +321,7 @@ fn set_tristate_output(
         return Ok(());
     }
 
-    if !gate_boolean_param(ctx, "inertial_delay")? || !ctx.is_transient() {
+    if !gate_inertial_delay_enabled(ctx)? || !ctx.is_transient() {
         ctx.set_output_digital("out", value, delay);
         gate_set_int_state(ctx, 0, state);
         gate_set_int_state(ctx, 1, strength);
@@ -1554,6 +1577,36 @@ mod tests {
             ctx.set_param("inertial_delay", f64::NAN);
             assert_invalid_param(model.init(&mut ctx), "inertial_delay");
         }
+    }
+
+    #[test]
+    fn digital_delay_type_controls_gate_inertial_policy() {
+        let ctx = CmContext::new();
+        assert!(!gate_inertial_delay_enabled(&ctx).expect("default transport"));
+
+        let mut default_inertial = CmContext::new();
+        default_inertial.set_digital_delay_type(Some(DEFAULT_INERTIAL_DELAY));
+        assert!(gate_inertial_delay_enabled(&default_inertial).expect("global default inertial"));
+
+        default_inertial.set_param("inertial_delay", 0.0);
+        default_inertial.mark_param_provided("inertial_delay");
+        assert!(
+            !gate_inertial_delay_enabled(&default_inertial).expect("explicit param wins default")
+        );
+
+        let mut override_transport = CmContext::new();
+        override_transport.set_digital_delay_type(Some(OVERRIDE_TRANSPORT_DELAY));
+        override_transport.set_param("inertial_delay", 1.0);
+        override_transport.mark_param_provided("inertial_delay");
+        assert!(
+            !gate_inertial_delay_enabled(&override_transport).expect("override transport wins")
+        );
+
+        let mut override_inertial = CmContext::new();
+        override_inertial.set_digital_delay_type(Some(OVERRIDE_INERTIAL_DELAY));
+        override_inertial.set_param("inertial_delay", 0.0);
+        override_inertial.mark_param_provided("inertial_delay");
+        assert!(gate_inertial_delay_enabled(&override_inertial).expect("override inertial wins"));
     }
 
     #[test]

@@ -2147,6 +2147,11 @@ impl XspiceInstance {
         self.context.set_ramptime(ramptime);
     }
 
+    /// Set ngspice-compatible XSPICE digital delay policy.
+    pub fn set_digital_delay_type(&mut self, digital_delay_type: Option<i64>) {
+        self.context.set_digital_delay_type(digital_delay_type);
+    }
+
     //=========================================================================
     // Circuit Integration Methods
     //=========================================================================

@@ -639,6 +639,12 @@ pub(super) fn parse_options_command(
                 options.ramptime =
                     Some(parse_non_negative_real_option("RAMPTIME", value, line_num)?);
             }
+            (Some("XSPICE"), "DIGITAL_DELAY_TYPE" | "DIGITALDELAYTYPE" | "DIGITAL_DELAY")
+            | (None, "DIGITAL_DELAY_TYPE" | "DIGITALDELAYTYPE" | "XSPICE_DIGITAL_DELAY_TYPE") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.digital_delay_type =
+                    Some(parse_digital_delay_type_option(value, line_num)?);
+            }
             (_, "CHGTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.chgtol = Some(parse_positive_real_option("CHGTOL", value, line_num)?);
@@ -977,6 +983,25 @@ pub(super) fn parse_usize_option(
     }
 
     Ok(rounded as usize)
+}
+
+fn parse_digital_delay_type_option(value: Value, line_num: usize) -> Result<i64, ParseError> {
+    if !value.is_finite() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("DIGITAL_DELAY_TYPE must be an integer from 0 to 3, found {value}"),
+        });
+    }
+
+    let rounded = value.round();
+    if (value - rounded).abs() > 1e-9 || !(0.0..=3.0).contains(&rounded) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("DIGITAL_DELAY_TYPE must be an integer from 0 to 3, found {value}"),
+        });
+    }
+
+    Ok(rounded as i64)
 }
 
 pub(super) fn parse_meas_signal(
@@ -2145,6 +2170,20 @@ mod tests {
         let netlist = Netlist::parse(&deck_with_options(".options ramptime=10n"))
             .expect("ramptime option parses");
         assert_eq!(netlist.options.ramptime, Some(10.0e-9));
+    }
+
+    #[test]
+    fn options_parse_xspice_digital_delay_type() {
+        let netlist = Netlist::parse(&deck_with_options(".options digital_delay_type=3"))
+            .expect("digital_delay_type option parses");
+        assert_eq!(netlist.options.digital_delay_type, Some(3));
+
+        let err = Netlist::parse(&deck_with_options(".options digital_delay_type=4"))
+            .expect_err("invalid digital_delay_type must fail parsing");
+        assert!(
+            err.to_string().contains("DIGITAL_DELAY_TYPE"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

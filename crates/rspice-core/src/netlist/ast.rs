@@ -1727,6 +1727,10 @@ pub struct SimulationOptions {
     pub trtol: Option<Value>,
     /// Transient source/code-model ramping time in seconds (default: disabled)
     pub ramptime: Option<Value>,
+    /// Ngspice XSPICE digital delay policy:
+    /// 0 = default transport, 1 = default inertial,
+    /// 2 = force transport, 3 = force inertial.
+    pub digital_delay_type: Option<i64>,
     /// Maximum Newton-Raphson iterations (default: 150)
     pub itl1: Option<usize>,
     /// DC transfer curve iterations (default: 50)
@@ -1805,6 +1809,9 @@ impl SimulationOptions {
         }
         if other.ramptime.is_some() {
             self.ramptime = other.ramptime;
+        }
+        if other.digital_delay_type.is_some() {
+            self.digital_delay_type = other.digital_delay_type;
         }
         if other.itl1.is_some() {
             self.itl1 = other.itl1;

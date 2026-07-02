@@ -815,6 +815,7 @@ fn add_planned_xspice_auto_bridges(
     vcc: crate::Value,
     temperature: crate::Value,
     ramptime: crate::Value,
+    digital_delay_type: Option<i64>,
     show_generated: bool,
 ) -> Result<(), SimulationError> {
     let node_names = show_generated.then(|| circuit.node_names_sorted());
@@ -825,6 +826,7 @@ fn add_planned_xspice_auto_bridges(
             vcc,
             temperature,
             ramptime,
+            digital_delay_type,
             node_names.as_deref(),
         )?;
     }
@@ -837,6 +839,7 @@ fn add_planned_xspice_auto_bridge(
     vcc: crate::Value,
     temperature: crate::Value,
     ramptime: crate::Value,
+    digital_delay_type: Option<i64>,
     node_names: Option<&[String]>,
 ) -> Result<(), SimulationError> {
     use crate::xspice::PortConnection;
@@ -923,6 +926,7 @@ fn add_planned_xspice_auto_bridge(
 
     instance.set_temperature(temperature);
     instance.set_ramptime(ramptime);
+    instance.set_digital_delay_type(digital_delay_type);
 
     if let Some(output_branch) = output_branch {
         match output_branch {
@@ -3615,6 +3619,7 @@ impl Engine {
 
                     instance.set_temperature(self.config.temperature);
                     instance.set_ramptime(self.config.ramptime);
+                    instance.set_digital_delay_type(self.config.digital_delay_type);
 
                     // Allocate MNA branch variables for voltage-driven XSPICE outputs.
                     // This allows stamping exact branch equations (like independent/controlled V sources)
@@ -3734,6 +3739,7 @@ impl Engine {
                     xspice_auto_bridge_vcc(netlist),
                     self.config.temperature,
                     self.config.ramptime,
+                    self.config.digital_delay_type,
                     netlist.options.auto_bridge_show_generated.unwrap_or(false),
                 )?;
             } else {

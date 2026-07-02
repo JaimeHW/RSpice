@@ -395,6 +395,8 @@ pub struct CmContext {
     pub temperature: Value,
     /// ngspice-compatible transient ramp time for analog code models.
     ramptime: Value,
+    /// ngspice XSPICE digital delay policy.
+    digital_delay_type: Option<i64>,
     /// Type of analysis being performed
     pub analysis: AnalysisType,
     /// Reason for this evaluation call
@@ -524,6 +526,7 @@ impl CmContext {
             transient_stop_time: None,
             temperature: 300.15, // 27°C
             ramptime: 0.0,
+            digital_delay_type: None,
             analysis: AnalysisType::DcOp,
             call_type: CallType::Init,
             evaluation_phase: EvaluationPhase::DirectEvaluation,
@@ -594,6 +597,16 @@ impl CmContext {
     /// Transient ramp time in seconds.
     pub fn ramptime(&self) -> Value {
         self.ramptime
+    }
+
+    /// Set ngspice-compatible XSPICE digital delay policy.
+    pub fn set_digital_delay_type(&mut self, digital_delay_type: Option<i64>) {
+        self.digital_delay_type = digital_delay_type;
+    }
+
+    /// XSPICE digital delay policy, when configured.
+    pub fn digital_delay_type(&self) -> Option<i64> {
+        self.digital_delay_type
     }
 
     /// ngspice `cm_analog_ramp_factor()` semantics for XSPICE analog models.

@@ -52,6 +52,7 @@ pub struct SimulationConfigOverrides {
     pub integration_method: Option<IntegrationMethod>,
     pub transient_trtol: Option<Value>,
     pub ramptime: Option<Value>,
+    pub digital_delay_type: Option<i64>,
     pub convergence_preset: Option<ConvergencePreset>,
     /// Legacy RELTOL knob: updates both `SimulationConfig::tolerance` and
     /// `ConvergenceConfig::voltage_reltol`.
@@ -85,6 +86,7 @@ pub fn resolve_simulation_config(
     let mut integration_method = base.integration_method;
     let mut transient_trtol = base.transient_trtol;
     let mut ramptime = base.ramptime;
+    let mut digital_delay_type = base.digital_delay_type;
     let mut tolerance = base.tolerance;
     let mut voltage_reltol = base.convergence_config.voltage_reltol;
     let mut voltage_abstol = base.convergence_config.voltage_abstol;
@@ -118,6 +120,9 @@ pub fn resolve_simulation_config(
         }
         if let Some(value) = opts.ramptime {
             ramptime = value;
+        }
+        if let Some(value) = opts.digital_delay_type {
+            digital_delay_type = Some(value);
         }
         if let Some(reltol) = opts.reltol {
             tolerance = reltol;
@@ -171,6 +176,9 @@ pub fn resolve_simulation_config(
     if let Some(value) = overrides.ramptime {
         ramptime = value;
     }
+    if let Some(value) = overrides.digital_delay_type {
+        digital_delay_type = Some(value);
+    }
     if let Some(reltol) = overrides.reltol {
         tolerance = reltol;
         voltage_reltol = reltol;
@@ -213,6 +221,7 @@ pub fn resolve_simulation_config(
     resolved.integration_method = integration_method;
     resolved.transient_trtol = transient_trtol;
     resolved.ramptime = ramptime;
+    resolved.digital_delay_type = digital_delay_type;
     resolved.tolerance = tolerance;
     resolved.convergence_config.voltage_reltol = voltage_reltol;
     resolved.convergence_config.voltage_abstol = voltage_abstol;
@@ -313,6 +322,20 @@ mod tests {
             resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
 
         assert_eq!(resolved.transient_trtol, 2.25);
+    }
+
+    #[test]
+    fn deck_digital_delay_type_updates_xspice_policy() {
+        let base = SimulationConfig::default();
+        let options = NetlistSimulationOptions {
+            digital_delay_type: Some(1),
+            ..Default::default()
+        };
+
+        let resolved =
+            resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
+
+        assert_eq!(resolved.digital_delay_type, Some(1));
     }
 
     #[test]
