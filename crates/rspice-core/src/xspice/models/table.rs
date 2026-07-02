@@ -643,6 +643,7 @@ fn parse_table3d_cursor(
     let y = parse_axis(cursor, file, model, "y", y_len)?;
     let z = parse_axis(cursor, file, model, "z", z_len)?;
     let values = parse_table3d_values(cursor, file, model, x_len, y_len, z_len)?;
+    cursor.reject_extra_tokens(file, model)?;
     Ok(Table3DData { x, y, z, values })
 }
 
@@ -1916,6 +1917,33 @@ mod tests {
         assert!(
             message.contains("missing table 1 row 1; table file ended early"),
             "missing table3d row error should include z/y coordinates, got {message}"
+        );
+    }
+
+    #[test]
+    fn table3d_rejects_trailing_tokens_after_declared_grid() {
+        let err = parse_table3d_contents(
+            "inline-table3d",
+            "\
+2
+2
+2
+0 1
+0 1
+0 1
+10 11
+12 13
+20 21
+22 23
+999
+",
+        )
+        .expect_err("table3d must reject trailing tokens after declared data grid");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("unexpected extra token '999'"),
+            "extra table3d data should be reported, got {message}"
         );
     }
 
