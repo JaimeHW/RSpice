@@ -2345,6 +2345,17 @@ fn oneshot_invalid_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
+fn reserve_oneshot_points(point_count: usize) -> CmResult<Vec<OneShotPoint>> {
+    let mut table = Vec::new();
+    table.try_reserve_exact(point_count).map_err(|err| {
+        oneshot_invalid_param(
+            "cntl_array/pw_array",
+            format!("unable to reserve {point_count} one-shot point(s): {err}"),
+        )
+    })?;
+    Ok(table)
+}
+
 fn oneshot_table_signature(ctx: &CmContext) -> OneShotTableSignature {
     OneShotTableSignature {
         controls_revision: ctx.real_vector_param_revision("cntl_array"),
@@ -2384,7 +2395,7 @@ fn oneshot_table_optional_uncached(ctx: &CmContext) -> CmResult<Option<Vec<OneSh
         ));
     }
 
-    let mut table: Vec<OneShotPoint> = Vec::with_capacity(controls.len());
+    let mut table = reserve_oneshot_points(controls.len())?;
     for (idx, (&control, &pulse_width)) in controls.iter().zip(widths).enumerate() {
         if !control.is_finite() {
             return Err(oneshot_invalid_param(
