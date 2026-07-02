@@ -1,12 +1,13 @@
 use rspice_core::{
     Complex64, Value, analysis::AcResult, engine::TransientResult, netlist::SaveSet,
-    netlist::SaveSignal, solver::SimulationResult,
+    netlist::SaveSignal, solver::SimulationResult, xspice::DigitalValue,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SignalKind {
     Voltage,
     Current,
+    Digital,
 }
 
 impl SignalKind {
@@ -14,6 +15,7 @@ impl SignalKind {
         match self {
             Self::Voltage => "voltage",
             Self::Current => "current",
+            Self::Digital => "digital",
         }
     }
 }
@@ -121,6 +123,23 @@ fn current_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {
         raw_name,
         kind: SignalKind::Current,
         values,
+    }
+}
+
+fn digital_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {
+    ScalarSignal {
+        display_name: format!("D({raw_name})"),
+        raw_name,
+        kind: SignalKind::Digital,
+        values,
+    }
+}
+
+fn digital_value_numeric(value: DigitalValue) -> Value {
+    match value.to_bool() {
+        Some(false) => 0.0,
+        Some(true) => 1.0,
+        None => 0.5,
     }
 }
 
@@ -307,9 +326,36 @@ pub(crate) fn transient_current_signals(result: &TransientResult) -> Vec<ScalarS
         .collect()
 }
 
+pub(crate) fn transient_digital_signals(result: &TransientResult) -> Vec<ScalarSignal> {
+    const TIME_EPSILON: Value = 1.0e-18;
+
+    result
+        .digital_traces
+        .iter()
+        .map(|trace| {
+            let mut values = Vec::with_capacity(result.time.len());
+            let mut point_index = 0;
+            let mut current = DigitalValue::default();
+            for &time in &result.time {
+                while let Some(point) = trace.points.get(point_index) {
+                    if point.time <= time + TIME_EPSILON {
+                        current = point.value;
+                        point_index += 1;
+                    } else {
+                        break;
+                    }
+                }
+                values.push(digital_value_numeric(current));
+            }
+            digital_signal(trace.node_name.clone(), values)
+        })
+        .collect()
+}
+
 pub(crate) fn transient_signals(result: &TransientResult) -> Vec<ScalarSignal> {
     let mut signals = transient_voltage_signals(result);
     signals.extend(transient_current_signals(result));
+    signals.extend(transient_digital_signals(result));
     signals
 }
 

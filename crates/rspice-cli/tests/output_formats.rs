@@ -54,6 +54,17 @@ c1 out 0 1u
 .end
 ";
 
+const XSPICE_DIGITAL_TRAN_DECK: &str = "* xspice digital export test
+v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
+abridge1 [in] [d] adc
+adac [d] [out] dac
+rout out 0 1k
+.model adc adc_bridge(in_low=1 in_high=4)
+.model dac dac_bridge(out_low=0 out_high=5 out_undef=2.5)
+.tran 1n 20n
+.end
+";
+
 const AC_DECK: &str = "* ac export test
 v1 in 0 dc 0 ac 1
 r1 in out 1k
@@ -297,5 +308,36 @@ fn transient_print_exports_branch_current() {
         }),
         "tran branch current column should contain non-zero source current: {text}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn transient_export_includes_xspice_digital_traces() {
+    let dir = test_dir("tran_xspice_digital");
+    let path = run_export(&dir, "tran_xspice_digital", XSPICE_DIGITAL_TRAN_DECK, "csv");
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let header = text.lines().next().expect("csv header");
+    let digital_column = current_column_index(header, "D(d)");
+    let values: Vec<f64> = text
+        .lines()
+        .skip(1)
+        .map(|line| {
+            line.split(',')
+                .nth(digital_column)
+                .expect("digital field")
+                .parse::<f64>()
+                .expect("numeric digital field")
+        })
+        .collect();
+
+    assert!(
+        values.iter().any(|value| (*value - 0.0).abs() < 1e-12),
+        "digital export should include low samples: {text}"
+    );
+    assert!(
+        values.iter().any(|value| (*value - 1.0).abs() < 1e-12),
+        "digital export should include high samples: {text}"
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }
