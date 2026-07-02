@@ -1,12 +1,12 @@
-use crate::Value;
 use crate::xspice::external::{
-    DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimSpec, DigitalCosimStep,
-    start_digital_cosim_runtime,
+    start_digital_cosim_runtime, DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimSpec,
+    DigitalCosimStep,
 };
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, DigitalState, DigitalStrength, DigitalValue,
     EvaluationPhase, ParamSpec, PortDirection, PortSpec, PortType,
 };
+use crate::Value;
 use std::sync::{Arc, Mutex};
 
 /// External irreversible digital co-simulation code model.
@@ -398,6 +398,13 @@ impl CodeModel for DigitalCosim {
             queue_size,
             irreversible: official_cosim_integer(ctx, "irreversible", 1.0)?,
         };
+        if spec.irreversible <= 0 {
+            return Err(CmError::InvalidParameter {
+                name: "irreversible".to_string(),
+                message: "reversible d_cosim rollback is not implemented; use irreversible > 0"
+                    .to_string(),
+            });
+        }
         if spec.queue_size == 0 {
             return Err(CmError::InvalidParameter {
                 name: "queue_size".to_string(),
@@ -492,8 +499,8 @@ impl CodeModel for DigitalCosim {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::xspice::ParamType;
     use crate::xspice::context::InputValue;
+    use crate::xspice::ParamType;
 
     #[test]
     fn d_cosim_metadata_matches_ngspice46_interface() {
