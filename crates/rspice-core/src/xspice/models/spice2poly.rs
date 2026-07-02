@@ -360,6 +360,23 @@ fn poly_eval_resource_matches(
         && poly_eval_inputs_match(&resource.signature.inputs, inputs)
 }
 
+fn evaluate_poly_partial_slow(
+    inputs: &[Value],
+    term: &PolyTerm,
+    input_index: usize,
+    exponent: usize,
+) -> Value {
+    let mut partial_product = exponent as Value;
+    for &(term_index, term_exponent) in &term.active_exponents {
+        partial_product *= if term_index == input_index {
+            evterm(inputs[term_index], term_exponent - 1)
+        } else {
+            evterm(inputs[term_index], term_exponent)
+        };
+    }
+    partial_product
+}
+
 fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEval {
     let mut value = plan.constant;
     let mut partials = vec![0.0; inputs.len()];
@@ -372,14 +389,12 @@ fn evaluate_poly(inputs: &[Value], plan: &PolyPlan, multiplier: Value) -> PolyEv
         value += term.coefficient * product;
 
         for &(input_index, exponent) in &term.active_exponents {
-            let mut partial_product = exponent as Value;
-            for &(term_index, term_exponent) in &term.active_exponents {
-                partial_product *= if term_index == input_index {
-                    evterm(inputs[term_index], term_exponent - 1)
-                } else {
-                    evterm(inputs[term_index], term_exponent)
-                };
-            }
+            let input = inputs[input_index];
+            let partial_product = if product.is_finite() && input.is_finite() && input != 0.0 {
+                product * exponent as Value / input
+            } else {
+                evaluate_poly_partial_slow(inputs, term, input_index, exponent)
+            };
             partials[input_index] += term.coefficient * partial_product;
         }
     }
