@@ -1068,6 +1068,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperDefault);
         }
 
+        if Self::is_native_semiconductor_resistor_step_wrapper_candidate(relative_path, source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperDefault);
+        }
+
         if Self::is_native_step_data_wrapper_candidate(source) {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperDefault);
@@ -1151,6 +1156,43 @@ impl XyceTestRunner {
             }
         }
         has_step_temp && has_tce
+    }
+
+    fn is_native_semiconductor_resistor_step_wrapper_candidate(
+        relative_path: &str,
+        source: &str,
+    ) -> bool {
+        let relative_path = Self::normalize_manifest_key(relative_path);
+        if relative_path != "netlists/semic_resistor/semic_resistor_step.cir" {
+            return false;
+        }
+
+        let mut has_resistor_geometry_step = false;
+        let mut has_resistor_default_step = false;
+        let mut has_resistor_model = false;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line)
+                .trim()
+                .to_ascii_lowercase();
+            if trimmed.starts_with(".step ") {
+                has_resistor_geometry_step |=
+                    trimmed.contains("r1:l") || trimmed.contains("r2:l");
+                has_resistor_default_step |= trimmed
+                    .split_whitespace()
+                    .nth(1)
+                    .is_some_and(|target| target.eq_ignore_ascii_case("r3"));
+            }
+            if trimmed.starts_with(".model ")
+                && trimmed
+                    .split_whitespace()
+                    .nth(2)
+                    .is_some_and(|model_type| model_type.eq_ignore_ascii_case("r"))
+            {
+                has_resistor_model = true;
+            }
+        }
+
+        has_resistor_geometry_step && has_resistor_default_step && has_resistor_model
     }
 
     fn is_native_step_data_wrapper_candidate(source: &str) -> bool {
