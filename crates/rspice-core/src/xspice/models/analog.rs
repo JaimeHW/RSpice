@@ -1424,7 +1424,12 @@ fn hyst_params(ctx: &CmContext) -> CmResult<HystParams> {
             "in_high must differ from in_low, got in_low={in_low}, in_high={in_high}"
         )));
     }
-    let hyst = raw_hyst.max(0.0);
+    if raw_hyst < 0.0 {
+        return Err(hyst_error(format!(
+            "hyst must be nonnegative, got {raw_hyst}"
+        )));
+    }
+    let hyst = raw_hyst;
 
     if ctx.param("fraction") > 0.5 {
         input_domain *= in_high - in_low;
@@ -1550,8 +1555,7 @@ impl CodeModel for HysteresisBlock {
             vec![
                 ParamSpec::real("in_low", 0.0).with_description("Input low value"),
                 ParamSpec::real("in_high", 1.0).with_description("Input high value"),
-                ParamSpec::real("hyst", 0.1)
-                    .with_description("Hysteresis width, clamped to nonnegative"),
+                ParamSpec::real("hyst", 0.1).with_description("Nonnegative hysteresis width"),
                 ParamSpec::real("out_lower_limit", 0.0).with_description("Output lower limit"),
                 ParamSpec::real("out_upper_limit", 1.0).with_description("Output upper limit"),
                 ParamSpec::real("input_domain", 0.01).with_description("Input smoothing domain"),
@@ -3949,6 +3953,38 @@ mod tests {
         ControlledLimiter
             .evaluate(&mut ctx)
             .expect_err("mutated nonfinite climit params must fail at evaluation time");
+    }
+
+    #[test]
+    fn hyst_rejects_negative_hysteresis_width() {
+        let mut ctx = CmContext::new();
+        ctx.set_param("in_high", 1.0);
+        ctx.set_param("hyst", -0.1);
+
+        let err = HysteresisBlock
+            .init(&mut ctx)
+            .expect_err("negative hyst violates ngspice ifspec lower limit");
+
+        assert!(
+            err.to_string().contains("hyst must be nonnegative"),
+            "hyst error should explain the nonnegative lower limit, got {err:?}"
+        );
+
+        let mut ctx = CmContext::new();
+        ctx.set_param("in_high", 1.0);
+        HysteresisBlock
+            .init(&mut ctx)
+            .expect("default hyst params are valid");
+        ctx.set_param("hyst", -0.1);
+
+        let err = HysteresisBlock
+            .evaluate(&mut ctx)
+            .expect_err("mutated negative hyst must fail evaluation");
+
+        assert!(
+            err.to_string().contains("hyst must be nonnegative"),
+            "hyst evaluation error should explain the nonnegative lower limit, got {err:?}"
+        );
     }
 
     #[test]
