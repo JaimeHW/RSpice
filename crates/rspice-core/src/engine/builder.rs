@@ -3432,15 +3432,17 @@ impl Engine {
             }
         }
 
-        let auto_bridges = plan_xspice_auto_bridges(&circuit, &flat_elements);
-        if !auto_bridges.is_empty() {
-            add_planned_xspice_auto_bridges(
-                &mut circuit,
-                &auto_bridges,
-                xspice_auto_bridge_vcc(netlist),
-                self.config.temperature,
-                self.config.ramptime,
-            )?;
+        if netlist.options.auto_bridge.unwrap_or(true) {
+            let auto_bridges = plan_xspice_auto_bridges(&circuit, &flat_elements);
+            if !auto_bridges.is_empty() {
+                add_planned_xspice_auto_bridges(
+                    &mut circuit,
+                    &auto_bridges,
+                    xspice_auto_bridge_vcc(netlist),
+                    self.config.temperature,
+                    self.config.ramptime,
+                )?;
+            }
         }
 
         // Ensure ground reference exists

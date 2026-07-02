@@ -547,7 +547,7 @@ pub(super) fn parse_options_command(
         let key_upper = key.to_uppercase();
         let has_equals = stream.consume(&TokenKind::Equals);
 
-        if !has_equals && matches!(key_upper.as_str(), "TOPOLOGY" | "DEVICE") {
+        if !has_equals && matches!(key_upper.as_str(), "TOPOLOGY" | "DEVICE" | "XSPICE") {
             option_package = Some(key_upper);
             continue;
         }
@@ -593,6 +593,11 @@ pub(super) fn parse_options_command(
             }
             (None, "B3SOIGMINSCALING" | "B3SOI_GMIN_SCALING" | "DEVICE_B3SOIGMINSCALING") => {
                 options.b3soi_gmin_scaling =
+                    Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+            }
+            (Some("XSPICE"), "AUTO_BRIDGE" | "AUTOBRIDGE")
+            | (None, "AUTO_BRIDGE" | "AUTOBRIDGE" | "XSPICE_AUTO_BRIDGE") => {
+                options.auto_bridge =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
             }
             (_, "RELTOL") => {

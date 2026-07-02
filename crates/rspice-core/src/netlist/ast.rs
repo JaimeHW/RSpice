@@ -1722,6 +1722,9 @@ pub struct SimulationOptions {
     /// approximation ignores nearly the entire BSIM parameter set, so this
     /// is opt-in; results will not match the named model.
     pub allow_simplified_mos: Option<bool>,
+    /// Ngspice-compatible XSPICE automatic analog/digital bridge insertion.
+    /// Enabled by default; set `.options auto_bridge=0` to disable.
+    pub auto_bridge: Option<bool>,
     /// Xyce `.options topology supernode=...`: collapse nodes connected by
     /// explicit zero/near-zero resistors before device construction.
     pub topology_supernode: Option<bool>,
@@ -1798,6 +1801,9 @@ impl SimulationOptions {
         }
         if other.allow_simplified_mos.is_some() {
             self.allow_simplified_mos = other.allow_simplified_mos;
+        }
+        if other.auto_bridge.is_some() {
+            self.auto_bridge = other.auto_bridge;
         }
         if other.topology_supernode.is_some() {
             self.topology_supernode = other.topology_supernode;
