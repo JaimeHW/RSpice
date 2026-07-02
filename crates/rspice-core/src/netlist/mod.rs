@@ -327,7 +327,7 @@ impl Netlist {
     }
 
     fn promote_control_analysis_commands(input: &str) -> String {
-        let promoted = Self::collect_control_analysis_commands(input);
+        let promoted = Self::collect_control_promoted_commands(input);
         if promoted.is_empty() {
             return input.to_string();
         }
@@ -374,7 +374,7 @@ impl Netlist {
         result
     }
 
-    fn collect_control_analysis_commands(input: &str) -> Vec<String> {
+    fn collect_control_promoted_commands(input: &str) -> Vec<String> {
         let mut promoted = Vec::new();
         let mut in_control = false;
 
@@ -395,6 +395,9 @@ impl Netlist {
             }
 
             if let Some(command) = Self::promote_control_tran_command(line) {
+                promoted.push(command);
+            }
+            if let Some(command) = Self::promote_control_set_command(line) {
                 promoted.push(command);
             }
         }
@@ -423,6 +426,23 @@ impl Netlist {
         Some(promoted)
     }
 
+    fn promote_control_set_command(line: &str) -> Option<String> {
+        let body = strip_control_inline_comment(line).trim();
+        if body.is_empty() || body.starts_with('*') {
+            return None;
+        }
+
+        let body = body.strip_prefix('.').unwrap_or(body);
+        let mut parts = body.splitn(2, char::is_whitespace);
+        let command = parts.next()?;
+        if !command.eq_ignore_ascii_case("set") {
+            return None;
+        }
+
+        let value = control_set_value(parts.next().unwrap_or(""), "digital_delay_type")?;
+        Some(format!(".options digital_delay_type={value}"))
+    }
+
     fn strip_control_blocks_with_diagnostics(
         input: &str,
     ) -> Result<(String, Vec<ParseDiagnostic>), ParseError> {
@@ -442,7 +462,7 @@ impl Netlist {
                 diagnostics.push(ParseDiagnostic::warning(
                     line_num,
                     "control-block-ignored",
-                    ".control scripting ignored; simple analysis commands are promoted into the parsed deck",
+                    ".control scripting ignored; simple analysis commands and supported settings are promoted into the parsed deck",
                 ));
                 result.push_str("* ");
                 result.push_str(line);
@@ -597,6 +617,22 @@ fn split_process_file_suffix<'a>(name: &str, value: &'a str) -> (&'a str, &'a st
 
 fn strip_control_inline_comment(line: &str) -> &str {
     line.split_once(';').map_or(line, |(body, _)| body)
+}
+
+fn control_set_value(assignments: &str, name: &str) -> Option<String> {
+    let normalized = assignments.replace('=', " = ");
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < tokens.len() {
+        if tokens[index].eq_ignore_ascii_case(name)
+            && tokens.get(index + 1).is_some_and(|token| *token == "=")
+            && let Some(value) = tokens.get(index + 2)
+        {
+            return Some((*value).to_string());
+        }
+        index += 1;
+    }
+    None
 }
 
 fn normalize_control_analysis_token(token: &str) -> String {
@@ -890,6 +926,41 @@ mod tests {
         assert_eq!(tran.2, None);
         assert_eq!(tran.3, None);
         assert!(tran.4);
+    }
+
+    #[test]
+    fn control_block_digital_delay_type_set_promotes_option() {
+        let netlist = Netlist::parse(
+            "control xspice digital delay policy\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             set noaskquit digital_delay_type = 3\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control set digital_delay_type promotes to .options");
+
+        assert_eq!(netlist.options.digital_delay_type, Some(3));
+    }
+
+    #[test]
+    fn control_block_invalid_digital_delay_type_fails_closed() {
+        let err = Netlist::parse(
+            "invalid control xspice digital delay policy\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             set digital_delay_type=4\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect_err("invalid promoted digital_delay_type must fail parsing");
+
+        assert!(
+            err.to_string().contains("DIGITAL_DELAY_TYPE"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
