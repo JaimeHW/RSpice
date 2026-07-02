@@ -29,8 +29,8 @@ mod xspice_parser;
 pub use ast::*;
 pub use expr::{ExpressionDialect, ParamContext, RandomState, StatisticalParamMode};
 pub use flattener::{
-    FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, flatten_netlist,
-    flatten_netlist_with_models,
+    FlattenedNetlist, Flattener, FlattenerConfig, InstanceMetadata, XspiceAutoBridgeNodeHint,
+    flatten_netlist, flatten_netlist_with_models,
 };
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::{IncludeProcessor, parse_include_directive, parse_lib_directive};

@@ -8,8 +8,8 @@ use super::{Engine, JfetLevel2Model, SimulationError, SpiceDialect, extract_dc_v
 use crate::device::{JfetChannelModel, MosBodyJunctionModel};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
-    Element, ElementKind, SourceSpec, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, XspicePort,
-    flatten_netlist_with_models, reduce_supernode_topology,
+    Element, ElementKind, SourceSpec, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, XspiceAutoBridgeNodeHint,
+    XspicePort, flatten_netlist_with_models, reduce_supernode_topology,
 };
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
@@ -441,6 +441,7 @@ enum XspiceAutoBridgeKind {
 struct PlannedXspiceAutoBridge {
     node: usize,
     kind: XspiceAutoBridgeKind,
+    vcc: crate::Value,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -736,6 +737,8 @@ fn explicit_digital_bridge_kind_for_port(
 fn plan_xspice_auto_bridges(
     circuit: &CircuitData,
     flat_elements: &[Element],
+    bridge_vccs: &BTreeMap<usize, crate::Value>,
+    default_vcc: crate::Value,
 ) -> Vec<PlannedXspiceAutoBridge> {
     let mut analog_nodes = BTreeSet::new();
     let mut digital_nodes = BTreeMap::new();
@@ -795,7 +798,11 @@ fn plan_xspice_auto_bridges(
                 .unwrap_or_default();
             usage
                 .bridge_kind(coverage)
-                .map(|kind| PlannedXspiceAutoBridge { node, kind })
+                .map(|kind| PlannedXspiceAutoBridge {
+                    node,
+                    kind,
+                    vcc: bridge_vccs.get(&node).copied().unwrap_or(default_vcc),
+                })
         })
         .collect();
 
@@ -808,6 +815,7 @@ fn plan_xspice_auto_bridges(
             .map(|node| PlannedXspiceAutoBridge {
                 node,
                 kind: XspiceAutoBridgeKind::RealToV,
+                vcc: 0.0,
             }),
     );
 
@@ -820,6 +828,35 @@ fn xspice_auto_bridge_vcc(netlist: &Netlist) -> crate::Value {
         .get("vcc")
         .filter(|value| value.is_finite())
         .unwrap_or(3.3)
+}
+
+fn xspice_auto_bridge_scoped_vccs(
+    circuit: &CircuitData,
+    hints: &[XspiceAutoBridgeNodeHint],
+) -> BTreeMap<usize, crate::Value> {
+    let mut best_by_node: BTreeMap<usize, (usize, crate::Value)> = BTreeMap::new();
+    for hint in hints {
+        let Some(node) = circuit.get_node_by_name(&hint.node) else {
+            continue;
+        };
+        if node == 0 || !hint.vcc.is_finite() {
+            continue;
+        }
+        match best_by_node.get_mut(&node) {
+            Some((depth, vcc)) if hint.depth > *depth => {
+                *depth = hint.depth;
+                *vcc = hint.vcc;
+            }
+            Some(_) => {}
+            None => {
+                best_by_node.insert(node, (hint.depth, hint.vcc));
+            }
+        }
+    }
+    best_by_node
+        .into_iter()
+        .map(|(node, (_, vcc))| (node, vcc))
+        .collect()
 }
 
 fn xspice_auto_bridge_node_label(node_names: Option<&[String]>, node: usize) -> String {
@@ -846,8 +883,8 @@ fn xspice_auto_bridge_generated_card(
     bridge: PlannedXspiceAutoBridge,
     instance_name: &str,
     node_label: &str,
-    vcc: crate::Value,
 ) -> String {
+    let vcc = bridge.vcc;
     let half_vcc = vcc / 2.0;
     match bridge.kind {
         XspiceAutoBridgeKind::Adc => format!(
@@ -884,7 +921,6 @@ fn reject_disabled_xspice_auto_bridge(
 fn add_planned_xspice_auto_bridges(
     circuit: &mut CircuitData,
     bridges: &[PlannedXspiceAutoBridge],
-    vcc: crate::Value,
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
@@ -895,7 +931,6 @@ fn add_planned_xspice_auto_bridges(
         add_planned_xspice_auto_bridge(
             circuit,
             *bridge,
-            vcc,
             temperature,
             ramptime,
             digital_delay_type,
@@ -908,7 +943,6 @@ fn add_planned_xspice_auto_bridges(
 fn add_planned_xspice_auto_bridge(
     circuit: &mut CircuitData,
     bridge: PlannedXspiceAutoBridge,
-    vcc: crate::Value,
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
@@ -916,6 +950,7 @@ fn add_planned_xspice_auto_bridge(
 ) -> Result<(), SimulationError> {
     use crate::xspice::PortConnection;
 
+    let vcc = bridge.vcc;
     let half_vcc = vcc / 2.0;
     let (model_name, instance_name, connections, numeric_params, output_branch) = match bridge.kind
     {
@@ -1048,7 +1083,7 @@ fn add_planned_xspice_auto_bridge(
         let node_label = xspice_auto_bridge_node_label(node_names, bridge.node);
         log::info!(
             "Generated XSPICE auto-bridge card: {}",
-            xspice_auto_bridge_generated_card(bridge, &instance_name, &node_label, vcc)
+            xspice_auto_bridge_generated_card(bridge, &instance_name, &node_label)
         );
     }
     circuit.add_xspice_instance(instance);
@@ -1065,6 +1100,21 @@ mod tests {
             .iter()
             .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name))
             .count()
+    }
+
+    fn single_xspice_param(circuit: &CircuitData, model_name: &str, param: &str) -> crate::Value {
+        let mut matches = circuit
+            .xspice_instances
+            .iter()
+            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name));
+        let instance = matches
+            .next()
+            .unwrap_or_else(|| panic!("expected one {model_name} instance"));
+        assert!(
+            matches.next().is_none(),
+            "expected exactly one {model_name} instance"
+        );
+        instance.param(param)
     }
 
     #[test]
@@ -1093,6 +1143,36 @@ rload mix 0 1k
             xspice_model_count(&circuit, "dac_bridge"),
             1,
             "explicit adc_bridge only covers analog-to-digital; mixed node 'mix' still needs a generated dac_bridge"
+        );
+    }
+
+    #[test]
+    fn auto_bridge_uses_deepest_xspice_subckt_vcc() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge uses scoped subckt vcc
+.param vcc=3.3
+rload mix 0 1k
+xcell mix dcell vcc=5
+.model pull d_pullup
+.subckt dcell y vcc=5
+apull [y] pull
+.ends
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_high"),
+            5.0,
+            "generated dac_bridge should use the deepest connected XSPICE subckt vcc, not the top-level vcc"
         );
     }
 }
@@ -3844,13 +3924,20 @@ impl Engine {
             }
         }
 
-        let auto_bridges = plan_xspice_auto_bridges(&circuit, &flat_elements);
+        let default_auto_bridge_vcc = xspice_auto_bridge_vcc(netlist);
+        let scoped_auto_bridge_vccs =
+            xspice_auto_bridge_scoped_vccs(&circuit, &flattened.xspice_auto_bridge_node_hints);
+        let auto_bridges = plan_xspice_auto_bridges(
+            &circuit,
+            &flat_elements,
+            &scoped_auto_bridge_vccs,
+            default_auto_bridge_vcc,
+        );
         if !auto_bridges.is_empty() {
             if netlist.options.auto_bridge.unwrap_or(true) {
                 add_planned_xspice_auto_bridges(
                     &mut circuit,
                     &auto_bridges,
-                    xspice_auto_bridge_vcc(netlist),
                     self.config.temperature,
                     self.config.ramptime,
                     self.config.digital_delay_type,

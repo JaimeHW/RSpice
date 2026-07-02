@@ -122,6 +122,15 @@ pub struct FlattenedNetlist {
     pub scoped_models: Vec<ModelDef>,
     pub scoped_initial_conditions: Vec<InitialCondition>,
     pub scoped_node_sets: Vec<NodeSet>,
+    pub xspice_auto_bridge_node_hints: Vec<XspiceAutoBridgeNodeHint>,
+}
+
+/// Scope-derived parameter hint for one flattened XSPICE digital node.
+#[derive(Debug, Clone)]
+pub struct XspiceAutoBridgeNodeHint {
+    pub node: String,
+    pub depth: usize,
+    pub vcc: Value,
 }
 
 //=============================================================================
@@ -164,6 +173,8 @@ pub struct Flattener<'a> {
     /// Startup directives scoped while flattening subcircuit instances.
     scoped_initial_conditions: Vec<InitialCondition>,
     scoped_node_sets: Vec<NodeSet>,
+    /// Digital XSPICE nodes with the effective scope-local VCC value.
+    xspice_auto_bridge_node_hints: Vec<XspiceAutoBridgeNodeHint>,
     /// Directory of the parsed deck, used to resolve scoped XSPICE file params.
     source_base_dir: Option<PathBuf>,
 }
@@ -209,6 +220,7 @@ impl<'a> Flattener<'a> {
             scoped_models: Vec::new(),
             scoped_initial_conditions: Vec::new(),
             scoped_node_sets: Vec::new(),
+            xspice_auto_bridge_node_hints: Vec::new(),
             source_base_dir: None,
         }
     }
@@ -232,6 +244,7 @@ impl<'a> Flattener<'a> {
         self.scoped_models.clear();
         self.scoped_initial_conditions.clear();
         self.scoped_node_sets.clear();
+        self.xspice_auto_bridge_node_hints.clear();
         self.source_base_dir = netlist
             .source_path
             .as_ref()
@@ -315,11 +328,56 @@ impl<'a> Flattener<'a> {
             _ => {
                 // Regular element - remap nodes and add to output
                 let new_element = self.remap_element(element, prefix, node_map);
+                self.record_xspice_auto_bridge_node_hints(&new_element, scope, depth);
                 output.push(new_element);
             }
         }
 
         Ok(())
+    }
+
+    fn record_xspice_auto_bridge_node_hints(
+        &mut self,
+        element: &Element,
+        scope: &ParamContext,
+        depth: usize,
+    ) {
+        let ElementKind::Xspice { ports, .. } = &element.kind else {
+            return;
+        };
+        let Some(vcc) = scope.get("vcc").filter(|value| value.is_finite()) else {
+            return;
+        };
+
+        let mut push_node = |node: &str| {
+            if !is_ground_node_name(node) {
+                self.xspice_auto_bridge_node_hints
+                    .push(XspiceAutoBridgeNodeHint {
+                        node: node.to_string(),
+                        depth,
+                        vcc,
+                    });
+            }
+        };
+
+        for port in ports {
+            match port {
+                super::XspicePort::Digital(node)
+                | super::XspicePort::ExplicitDigital(node)
+                | super::XspicePort::DigitalInverted(node) => push_node(node),
+                super::XspicePort::DigitalVector(nodes) => {
+                    for node in nodes {
+                        push_node(node);
+                    }
+                }
+                super::XspicePort::DigitalVectorMixed(nodes) => {
+                    for node in nodes {
+                        push_node(&node.name);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     fn collect_external_subckts(netlist: &Netlist) -> HashSet<String> {
@@ -2458,7 +2516,12 @@ pub fn flatten_netlist_with_models(netlist: &Netlist) -> Result<FlattenedNetlist
         scoped_models: flattener.scoped_models,
         scoped_initial_conditions: flattener.scoped_initial_conditions,
         scoped_node_sets: flattener.scoped_node_sets,
+        xspice_auto_bridge_node_hints: flattener.xspice_auto_bridge_node_hints,
     })
+}
+
+fn is_ground_node_name(node: &str) -> bool {
+    node == "0" || node.eq_ignore_ascii_case("gnd")
 }
 
 fn is_ident_start(c: char) -> bool {
