@@ -424,20 +424,50 @@ fn d_genlut_strength_delay(
     }
 }
 
-fn d_genlut_previous_input_start(_input_width: usize, _output_width: usize) -> usize {
-    0
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DGenlutStateLayout {
+    input_start: usize,
+    state_start: usize,
+    strength_start: usize,
+    total_count: usize,
 }
 
-fn d_genlut_previous_state_start(input_width: usize, _output_width: usize) -> usize {
-    input_width
+fn d_genlut_state_layout_error(input_width: usize, output_width: usize) -> CmError {
+    d_genlut_error(format!(
+        "state layout {input_width} inputs x {output_width} outputs is too large"
+    ))
 }
 
-fn d_genlut_previous_strength_start(input_width: usize, output_width: usize) -> usize {
-    input_width + output_width
+fn d_genlut_state_layout(input_width: usize, output_width: usize) -> CmResult<DGenlutStateLayout> {
+    let input_start = 0;
+    let state_start = input_width;
+    let strength_start = state_start
+        .checked_add(output_width)
+        .ok_or_else(|| d_genlut_state_layout_error(input_width, output_width))?;
+    let total_count = strength_start
+        .checked_add(output_width)
+        .ok_or_else(|| d_genlut_state_layout_error(input_width, output_width))?;
+
+    Ok(DGenlutStateLayout {
+        input_start,
+        state_start,
+        strength_start,
+        total_count,
+    })
 }
 
-fn d_genlut_total_state_count(input_width: usize, output_width: usize) -> usize {
-    input_width + 2 * output_width
+#[cfg(test)]
+fn d_genlut_previous_input_start(input_width: usize, output_width: usize) -> usize {
+    d_genlut_state_layout(input_width, output_width)
+        .expect("valid d_genlut state layout")
+        .input_start
+}
+
+#[cfg(test)]
+fn d_genlut_previous_state_start(input_width: usize, output_width: usize) -> usize {
+    d_genlut_state_layout(input_width, output_width)
+        .expect("valid d_genlut state layout")
+        .state_start
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -672,17 +702,15 @@ impl CodeModel for DigitalGenericLookupTable {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let (input_width, output_width) = d_genlut_shape(ctx)?;
-        ctx.allocate_int_states(d_genlut_total_state_count(input_width, output_width));
-        let input_start = d_genlut_previous_input_start(input_width, output_width);
-        let state_start = d_genlut_previous_state_start(input_width, output_width);
-        let strength_start = d_genlut_previous_strength_start(input_width, output_width);
+        let layout = d_genlut_state_layout(input_width, output_width)?;
+        ctx.allocate_int_states(layout.total_count);
 
         for bit in 0..input_width {
-            ctx.set_int_state(input_start + bit, D_LUT_INITIAL_STATE);
+            ctx.set_int_state(layout.input_start + bit, D_LUT_INITIAL_STATE);
         }
         for bit in 0..output_width {
-            ctx.set_int_state(state_start + bit, D_LUT_INITIAL_STATE);
-            ctx.set_int_state(strength_start + bit, D_LUT_INITIAL_STATE);
+            ctx.set_int_state(layout.state_start + bit, D_LUT_INITIAL_STATE);
+            ctx.set_int_state(layout.strength_start + bit, D_LUT_INITIAL_STATE);
         }
         Ok(())
     }
@@ -691,9 +719,7 @@ impl CodeModel for DigitalGenericLookupTable {
         let (input_width, output_width) = d_genlut_shape(ctx)?;
         let table = d_genlut_table_values(ctx, input_width, output_width)?;
         let delay_plan = d_genlut_delay_plan(ctx, input_width, output_width)?;
-        let input_start = d_genlut_previous_input_start(input_width, output_width);
-        let state_start = d_genlut_previous_state_start(input_width, output_width);
-        let strength_start = d_genlut_previous_strength_start(input_width, output_width);
+        let layout = d_genlut_state_layout(input_width, output_width)?;
 
         let scan = {
             let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
@@ -701,11 +727,11 @@ impl CodeModel for DigitalGenericLookupTable {
                 ctx,
                 inputs,
                 input_width,
-                input_start,
+                layout.input_start,
                 &delay_plan.input_delays,
             )
         };
-        d_genlut_commit_input_scan(ctx, input_width, input_start, scan);
+        d_genlut_commit_input_scan(ctx, input_width, layout.input_start, scan);
 
         let entry_len = 1usize << input_width;
         for output_index in 0..output_width {
@@ -714,8 +740,8 @@ impl CodeModel for DigitalGenericLookupTable {
                 None => d_genlut_unknown_value(),
             };
             let (state_code, strength_code) = d_genlut_value_code(value);
-            let previous_state = ctx.int_state(state_start + output_index);
-            let previous_strength = ctx.int_state(strength_start + output_index);
+            let previous_state = ctx.int_state(layout.state_start + output_index);
+            let previous_strength = ctx.int_state(layout.strength_start + output_index);
 
             if state_code != previous_state {
                 ctx.set_output_digital_vector_element(
@@ -746,8 +772,8 @@ impl CodeModel for DigitalGenericLookupTable {
                 );
             }
 
-            d_lookup_set_int_state(ctx, state_start + output_index, state_code);
-            d_lookup_set_int_state(ctx, strength_start + output_index, strength_code);
+            d_lookup_set_int_state(ctx, layout.state_start + output_index, state_code);
+            d_lookup_set_int_state(ctx, layout.strength_start + output_index, strength_code);
         }
 
         Ok(())
