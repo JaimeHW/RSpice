@@ -12,9 +12,9 @@ const REAL_GAIN_STARTUP_STATE: usize = 0;
 const REAL_GAIN_STARTUP_HOLDING: i64 = 1;
 const REAL_GAIN_STARTUP_ACTIVE: i64 = 2;
 
-fn digital_to_real_value(ctx: &CmContext) -> Value {
-    let zero = ctx.param_or("zero", 0.0);
-    let one = ctx.param_or("one", 1.0);
+fn digital_to_real_value(ctx: &CmContext) -> CmResult<Value> {
+    let zero = finite_event_param(ctx, "d_to_real", "zero", 0.0)?;
+    let one = finite_event_param(ctx, "d_to_real", "one", 1.0)?;
     let midpoint = 0.5 * (zero + one);
     let input = ctx.input_digital("in").unwrap_or_default();
     let enabled = ctx
@@ -22,7 +22,7 @@ fn digital_to_real_value(ctx: &CmContext) -> Value {
         .map(|value| value.state.is_high())
         .unwrap_or(true);
 
-    if !enabled {
+    Ok(if !enabled {
         0.0
     } else if input.state.is_low() {
         zero
@@ -30,7 +30,7 @@ fn digital_to_real_value(ctx: &CmContext) -> Value {
         one
     } else {
         midpoint
-    }
+    })
 }
 
 fn transition_value(
@@ -51,29 +51,27 @@ fn transition_value(
     start_value + (target - start_value) * fraction
 }
 
+fn finite_event_param(ctx: &CmContext, model: &str, name: &str, default: Value) -> CmResult<Value> {
+    let value = ctx.param_or(name, default);
+    if !value.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "{model}: {name} must be finite, got {value}"
+        )));
+    }
+    Ok(value)
+}
+
 fn limited_event_delay(
     ctx: &CmContext,
     model: &str,
     name: &str,
     default: Value,
 ) -> CmResult<Value> {
-    let delay = ctx.param_or(name, default);
-    if !delay.is_finite() {
-        return Err(CmError::EvaluationError(format!(
-            "{model}: {name} must be finite, got {delay}"
-        )));
-    }
-    Ok(delay.max(MIN_EVENT_DELAY))
+    Ok(finite_event_param(ctx, model, name, default)?.max(MIN_EVENT_DELAY))
 }
 
 fn finite_event_delay(ctx: &CmContext, model: &str, name: &str, default: Value) -> CmResult<Value> {
-    let delay = ctx.param_or(name, default);
-    if !delay.is_finite() {
-        return Err(CmError::EvaluationError(format!(
-            "{model}: {name} must be finite, got {delay}"
-        )));
-    }
-    Ok(delay)
+    finite_event_param(ctx, model, name, default)
 }
 
 fn commit_event_outputs(ctx: &CmContext) -> bool {
@@ -213,7 +211,7 @@ impl CodeModel for DigitalToReal {
         } else {
             0.0
         };
-        set_real_output_when_changed(ctx, "out", digital_to_real_value(ctx), delay);
+        set_real_output_when_changed(ctx, "out", digital_to_real_value(ctx)?, delay);
         Ok(())
     }
 }
@@ -263,8 +261,9 @@ impl CodeModel for RealGain {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let ic = finite_event_param(ctx, "real_gain", "ic", 0.0)?;
         if ctx.is_dc() {
-            set_real_output_when_changed(ctx, "out", ctx.param_or("ic", 0.0), 0.0);
+            set_real_output_when_changed(ctx, "out", ic, 0.0);
             return Ok(());
         }
 
@@ -272,7 +271,7 @@ impl CodeModel for RealGain {
         let startup_state = ctx.int_state(REAL_GAIN_STARTUP_STATE);
         if ctx.is_transient() && startup_state != REAL_GAIN_STARTUP_ACTIVE {
             if startup_state == 0 {
-                set_real_output_when_changed(ctx, "out", ctx.param_or("ic", 0.0), 0.0);
+                set_real_output_when_changed(ctx, "out", ic, 0.0);
                 if delay > 0.0 && delay.is_finite() {
                     let startup_time = ctx.time + delay;
                     if commit_event_outputs(ctx) {
@@ -299,9 +298,10 @@ impl CodeModel for RealGain {
             }
         }
 
-        let value = ctx.param_or("gain", 1.0)
-            * (ctx.input_real("in").unwrap_or(0.0) + ctx.param_or("in_offset", 0.0))
-            + ctx.param_or("out_offset", 0.0);
+        let gain = finite_event_param(ctx, "real_gain", "gain", 1.0)?;
+        let in_offset = finite_event_param(ctx, "real_gain", "in_offset", 0.0)?;
+        let out_offset = finite_event_param(ctx, "real_gain", "out_offset", 0.0)?;
+        let value = gain * (ctx.input_real("in").unwrap_or(0.0) + in_offset) + out_offset;
         set_real_output_when_changed(ctx, "out", value, delay);
         Ok(())
     }
@@ -415,7 +415,7 @@ impl CodeModel for RealToVoltage {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let gain = ctx.param_or("gain", 1.0);
+        let gain = finite_event_param(ctx, "real_to_v", "gain", 1.0)?;
         let target = ctx.input_real("in").unwrap_or(0.0);
         let target_output = target * gain;
 
@@ -721,6 +721,60 @@ mod tests {
             None,
             "real_gain must not queue outputs after rejecting delay"
         );
+    }
+
+    #[test]
+    fn xtraevt_scalar_params_reject_nonfinite_values() {
+        for name in ["zero", "one"] {
+            let mut ctx = CmContext::new();
+            ctx.set_param(name, f64::INFINITY);
+            ctx.set_input_digital("in", DigitalValue::one());
+
+            let err = DigitalToReal
+                .evaluate(&mut ctx)
+                .expect_err("d_to_real must reject nonfinite scalar params");
+
+            assert!(
+                err.to_string().contains(name),
+                "d_to_real error should identify {name}, got {err:?}"
+            );
+            assert_eq!(ctx.output_real("out"), None);
+        }
+
+        for name in ["ic", "gain", "in_offset", "out_offset"] {
+            let mut ctx = CmContext::new();
+            ctx.analysis = AnalysisType::Transient;
+            ctx.set_input_real("in", 3.0);
+            RealGain.init(&mut ctx).expect("real_gain initializes");
+            ctx.set_int_state(REAL_GAIN_STARTUP_STATE, REAL_GAIN_STARTUP_ACTIVE);
+            ctx.set_param(name, f64::NAN);
+
+            let err = RealGain
+                .evaluate(&mut ctx)
+                .expect_err("real_gain must reject nonfinite scalar params");
+
+            assert!(
+                err.to_string().contains(name),
+                "real_gain error should identify {name}, got {err:?}"
+            );
+            assert_eq!(ctx.output_real("out"), None);
+        }
+
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_param("gain", f64::INFINITY);
+        ctx.set_input_real("in", 1.0);
+        RealToVoltage.init(&mut ctx).expect("real_to_v initializes");
+
+        let err = RealToVoltage
+            .evaluate(&mut ctx)
+            .expect_err("real_to_v must reject nonfinite gain");
+
+        assert!(
+            err.to_string().contains("gain"),
+            "real_to_v error should identify gain, got {err:?}"
+        );
+        assert_eq!(ctx.output("out"), 0.0);
     }
 
     #[test]
