@@ -177,3 +177,68 @@ fn sparam_matches_series_resistor_analytics() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn native_sp_card_matches_series_resistor_analytics() {
+    let dir = test_dir("native_sp");
+    let deck = dir.join("twoport_native_sp.cir");
+    std::fs::write(
+        &deck,
+        "* native .sp two-port\n\
+         V1 p1 0 dc 0 ac 1 portnum 1 z0 50\n\
+         R1 p1 p2 50\n\
+         V2 p2 0 dc 0 ac 0 portnum 2 z0 50\n\
+         .sp lin 3 1k 100k\n\
+         .end\n",
+    )
+    .expect("write deck");
+
+    let csv = dir.join("out.csv");
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        csv.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let text = std::fs::read_to_string(&csv).expect("csv output");
+    let mut lines = text.lines();
+    let header: Vec<&str> = lines.next().expect("header").split(',').collect();
+    let idx = |name: &str| {
+        header
+            .iter()
+            .position(|column| *column == name)
+            .unwrap_or_else(|| panic!("missing {name} in header {header:?}"))
+    };
+    let s11_re = idx("Re(S_1_1)");
+    let s21_re = idx("Re(S_2_1)");
+    let s12_re = idx("Re(S_1_2)");
+    let s22_re = idx("Re(S_2_2)");
+
+    for line in lines {
+        let fields: Vec<f64> = line
+            .split(',')
+            .map(|field| field.parse().expect("numeric csv field"))
+            .collect();
+        assert!((fields[s11_re] - 1.0 / 3.0).abs() < 1e-9, "S11: {line}");
+        assert!((fields[s21_re] - 2.0 / 3.0).abs() < 1e-9, "S21: {line}");
+        assert!(
+            (fields[s12_re] - fields[s21_re]).abs() < 1e-12,
+            "reciprocity: {line}"
+        );
+        assert!(
+            (fields[s22_re] - fields[s11_re]).abs() < 1e-12,
+            "symmetry: {line}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

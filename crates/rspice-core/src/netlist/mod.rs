@@ -434,6 +434,7 @@ impl Netlist {
             "op" => ".op",
             "dc" => ".dc",
             "ac" => ".ac",
+            "sp" => ".sp",
             "tran" => ".tran",
             "save" => ".save",
             "meas" => return Self::promote_control_measure_command(".meas", &args),
@@ -1362,13 +1363,19 @@ mod tests {
              op\n\
              dc v1 0 $&stopv 0.5\n\
              ac dec 3 1 1k\n\
+             sp lin 4 10meg 20meg 1\n\
              meas ac gainmax max v(out) from=1 to=1k\n\
              .endc\n\
              .end\n",
         )
         .expect("control-block core analyses and measurement parse");
 
-        assert!(netlist.analyses.iter().any(|analysis| matches!(analysis, AnalysisCommand::Op)));
+        assert!(
+            netlist
+                .analyses
+                .iter()
+                .any(|analysis| matches!(analysis, AnalysisCommand::Op))
+        );
         assert!(netlist.analyses.iter().any(|analysis| {
             matches!(
                 analysis,
@@ -1395,6 +1402,21 @@ mod tests {
                 } if *points == 3
                     && (*start_freq - 1.0).abs() <= 1.0e-12
                     && (*stop_freq - 1.0e3).abs() <= 1.0e-9
+            )
+        }));
+        assert!(netlist.analyses.iter().any(|analysis| {
+            matches!(
+                analysis,
+                AnalysisCommand::Sp {
+                    points,
+                    start_freq,
+                    stop_freq,
+                    do_noise,
+                    ..
+                } if *points == 4
+                    && (*start_freq - 10.0e6).abs() <= 1.0e-6
+                    && (*stop_freq - 20.0e6).abs() <= 1.0e-6
+                    && *do_noise
             )
         }));
         assert_eq!(netlist.measurements.len(), 1);

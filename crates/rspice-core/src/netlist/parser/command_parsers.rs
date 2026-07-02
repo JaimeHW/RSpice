@@ -226,6 +226,44 @@ pub(super) fn parse_four_command(
     Ok((fundamental, outputs))
 }
 
+/// Parse .SP command: .SP DEC|LIN|OCT np fstart fstop [donoise]
+pub(super) fn parse_sp_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<AnalysisCommand, ParseError> {
+    let var_str = expect_ident(stream, line_num)?;
+    let variation = match var_str.to_uppercase().as_str() {
+        "LIN" => FreqVariation::Lin,
+        "OCT" => FreqVariation::Oct,
+        "DEC" => FreqVariation::Dec,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unknown .SP frequency variation: {}", var_str),
+            });
+        }
+    };
+
+    let points = expect_value(stream, line_num, params)? as usize;
+    let start_freq = expect_value(stream, line_num, params)?;
+    let stop_freq = expect_value(stream, line_num, params)?;
+    let do_noise = if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        false
+    } else {
+        let raw = expect_value(stream, line_num, params)?;
+        raw != 0.0
+    };
+
+    Ok(AnalysisCommand::Sp {
+        variation,
+        points,
+        start_freq,
+        stop_freq,
+        do_noise,
+    })
+}
+
 /// Parse .DISTO command: .DISTO DEC|LIN|OCT np fstart fstop [f2overf1]
 pub(super) fn parse_disto_command(
     stream: &mut TokenStream,

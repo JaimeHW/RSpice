@@ -1449,6 +1449,18 @@ pub enum AnalysisCommand {
         stop_freq: Value,
     },
 
+    /// S-parameter analysis: .SP DEC|LIN|OCT np fstart fstop [donoise]
+    Sp {
+        variation: FreqVariation,
+        points: usize,
+        start_freq: Value,
+        stop_freq: Value,
+        /// Ngspice RFSPICE accepts an optional integer noise flag. RSpice
+        /// parses and carries it so decks round-trip even though the CLI
+        /// currently exports the S-matrix only.
+        do_noise: bool,
+    },
+
     /// Loop-stability analysis: .STB DEC|LIN|OCT np fstart fstop PROBE=vname
     ///
     /// Tian double-injection loop gain at a designated 0 V voltage source

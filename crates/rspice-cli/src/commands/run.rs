@@ -228,6 +228,20 @@ impl<'a> RunContext<'a> {
                 start_freq,
                 stop_freq,
             } => frequency::run_ac(self, *variation, *points, *start_freq, *stop_freq)?,
+            AnalysisCommand::Sp {
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+                do_noise,
+            } => advanced::run_sparam_from_command(
+                self,
+                *variation,
+                *points,
+                *start_freq,
+                *stop_freq,
+                *do_noise,
+            )?,
             AnalysisCommand::Stb {
                 variation,
                 points,

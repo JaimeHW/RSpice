@@ -84,6 +84,10 @@ pub(super) fn parse_command(
                 stop_freq,
             });
         }
+        ".SP" => {
+            let sp = parse_sp_command(stream, line_num, params)?;
+            analyses.push(sp);
+        }
         ".STB" => {
             let var_str = expect_ident(stream, line_num)?;
             let variation = match var_str.as_str() {
