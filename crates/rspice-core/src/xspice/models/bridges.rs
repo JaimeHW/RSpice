@@ -36,6 +36,10 @@ fn official_bridge_resistance(value: Value) -> Value {
     value.max(OFFICIAL_BRIDGE_RESISTANCE_MIN)
 }
 
+fn bridge_resistance_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResult<Value> {
+    finite_bridge_param(ctx, model_name, name).map(official_bridge_resistance)
+}
+
 fn official_bridge_control(value: Value) -> i64 {
     let value = value.round();
     if value.is_finite() {
@@ -43,6 +47,10 @@ fn official_bridge_control(value: Value) -> i64 {
     } else {
         OFFICIAL_BRIDGE_CONTROL_MIN
     }
+}
+
+fn bridge_control_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResult<i64> {
+    finite_bridge_param(ctx, model_name, name).map(official_bridge_control)
 }
 
 fn adc_bridge_state(input: Value, _previous: i64, in_low: Value, in_high: Value) -> i64 {
@@ -411,27 +419,27 @@ fn bidi_parameters() -> &'static [ParamSpec] {
     })
 }
 
-fn bidi_params(ctx: &CmContext) -> BidiParams {
-    BidiParams {
-        direction: official_bridge_control(ctx.param("direction")),
-        input_load: ctx.param("input_load"),
-        strength: official_bridge_control(ctx.param("strength")),
-        smooth: official_bridge_control(ctx.param("smooth")),
-        in_low: ctx.param("in_low"),
-        in_high: ctx.param("in_high"),
-        out_low: ctx.param("out_low"),
-        out_high: ctx.param("out_high"),
-        drive_low: ctx.param("drive_low"),
-        drive_high: ctx.param("drive_high"),
-        r_stl: official_bridge_resistance(ctx.param("r_stl")),
-        r_sth: official_bridge_resistance(ctx.param("r_sth")),
-        r_low: official_bridge_resistance(ctx.param("r_low")),
-        r_high: official_bridge_resistance(ctx.param("r_high")),
-        t_rise: official_bridge_timing(ctx.param("t_rise")),
-        t_fall: official_bridge_timing(ctx.param("t_fall")),
-        rise_delay: official_bridge_timing(ctx.param("rise_delay")),
-        fall_delay: official_bridge_timing(ctx.param("fall_delay")),
-    }
+fn bidi_params(ctx: &CmContext) -> CmResult<BidiParams> {
+    Ok(BidiParams {
+        direction: bridge_control_param(ctx, "bidi_bridge", "direction")?,
+        input_load: finite_bridge_param(ctx, "bidi_bridge", "input_load")?,
+        strength: bridge_control_param(ctx, "bidi_bridge", "strength")?,
+        smooth: bridge_control_param(ctx, "bidi_bridge", "smooth")?,
+        in_low: finite_bridge_param(ctx, "bidi_bridge", "in_low")?,
+        in_high: finite_bridge_param(ctx, "bidi_bridge", "in_high")?,
+        out_low: finite_bridge_param(ctx, "bidi_bridge", "out_low")?,
+        out_high: finite_bridge_param(ctx, "bidi_bridge", "out_high")?,
+        drive_low: finite_bridge_param(ctx, "bidi_bridge", "drive_low")?,
+        drive_high: finite_bridge_param(ctx, "bidi_bridge", "drive_high")?,
+        r_stl: bridge_resistance_param(ctx, "bidi_bridge", "r_stl")?,
+        r_sth: bridge_resistance_param(ctx, "bidi_bridge", "r_sth")?,
+        r_low: bridge_resistance_param(ctx, "bidi_bridge", "r_low")?,
+        r_high: bridge_resistance_param(ctx, "bidi_bridge", "r_high")?,
+        t_rise: bridge_timing_param(ctx, "bidi_bridge", "t_rise")?,
+        t_fall: bridge_timing_param(ctx, "bidi_bridge", "t_fall")?,
+        rise_delay: bridge_timing_param(ctx, "bidi_bridge", "rise_delay")?,
+        fall_delay: bridge_timing_param(ctx, "bidi_bridge", "fall_delay")?,
+    })
 }
 
 fn bidi_state_base(width: usize) -> usize {
@@ -1169,7 +1177,7 @@ impl CodeModel for BidiBridge {
             )));
         }
 
-        let params = bidi_params(ctx);
+        let params = bidi_params(ctx)?;
         let _input_load = params.input_load;
 
         ctx.allocate_states(width * 4);
@@ -1211,7 +1219,7 @@ impl CodeModel for BidiBridge {
             )));
         }
 
-        let params = bidi_params(ctx);
+        let params = bidi_params(ctx)?;
         let output_strength = digital_strength_from_param(params.strength);
         let current_base = bidi_state_base(width);
         let drive_state_base = bidi_drive_state_base(width);
@@ -1877,15 +1885,43 @@ mod tests {
 
         ctx.set_param("drive_high", 0.04);
         ctx.set_param("drive_low", 0.02);
-        assert_eq!(bidi_target_svoc(drive, bidi_params(&ctx)), 1.0);
+        assert_eq!(
+            bidi_target_svoc(drive, bidi_params(&ctx).expect("bidi params")),
+            1.0
+        );
 
         ctx.set_param("drive_high", 0.02);
         ctx.set_param("drive_low", 0.04);
-        assert_eq!(bidi_target_svoc(drive, bidi_params(&ctx)), 0.0);
+        assert_eq!(
+            bidi_target_svoc(drive, bidi_params(&ctx).expect("bidi params")),
+            0.0
+        );
 
         ctx.set_param("drive_high", 0.03);
         ctx.set_param("drive_low", 0.03);
-        assert_eq!(bidi_target_svoc(drive, bidi_params(&ctx)), 0.5);
+        assert_eq!(
+            bidi_target_svoc(drive, bidi_params(&ctx).expect("bidi params")),
+            0.5
+        );
+    }
+
+    #[test]
+    fn bidi_bridge_rejects_nonfinite_drive_parameters() {
+        let mut ctx = CmContext::new();
+        set_bidi_default_params(&mut ctx, 0.0);
+        ctx.set_param("drive_low", f64::NAN);
+        ctx.set_port_width("a", 1);
+        ctx.set_port_width("d", 1);
+
+        let err = BidiBridge
+            .init(&mut ctx)
+            .expect_err("bidi_bridge must reject nonfinite drive parameters");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("bidi_bridge parameter must be finite"),
+            "bidi_bridge error should explain nonfinite drive parameter, got {message}"
+        );
     }
 
     #[test]
@@ -1896,7 +1932,7 @@ mod tests {
         ctx.set_param("out_high", 0.0);
         ctx.set_param("r_low", 10_000.0);
         ctx.set_param("r_high", 20_000.0);
-        let params = bidi_params(&ctx);
+        let params = bidi_params(&ctx).expect("bidi params");
         let drive = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Resistive);
 
         let (below_current, below_partial, _) = bidi_current_target(-1.0, drive, 0.5, params);
@@ -1920,7 +1956,7 @@ mod tests {
         ctx.set_param("out_high", 5.0);
         ctx.set_param("r_low", 10_000.0);
         ctx.set_param("r_high", 10_000.0);
-        let params = bidi_params(&ctx);
+        let params = bidi_params(&ctx).expect("bidi params");
         let drive = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Resistive);
 
         let (_, _, range) = bidi_current_target(0.0, drive, 0.5, params);
