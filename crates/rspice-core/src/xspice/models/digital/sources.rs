@@ -112,6 +112,56 @@ fn d_source_file_error(input_file: &str, message: impl Into<String>) -> CmError 
     ))
 }
 
+fn d_source_width_error(input_file: &str, width: usize, message: impl Into<String>) -> CmError {
+    d_source_file_error(
+        input_file,
+        format!(
+            "output vector width {width} is too large: {}",
+            message.into()
+        ),
+    )
+}
+
+fn d_source_expected_tokens(input_file: &str, width: usize) -> CmResult<usize> {
+    width
+        .checked_add(1)
+        .ok_or_else(|| d_source_width_error(input_file, width, "token count overflows usize"))
+}
+
+fn reserve_d_source_tokens(
+    input_file: &str,
+    width: usize,
+    tokens: &mut Vec<&str>,
+) -> CmResult<usize> {
+    let expected = d_source_expected_tokens(input_file, width)?;
+    tokens.try_reserve_exact(expected).map_err(|err| {
+        d_source_width_error(
+            input_file,
+            width,
+            format!("unable to reserve {expected} row tokens: {err}"),
+        )
+    })?;
+    Ok(expected)
+}
+
+fn reserve_d_source_row(
+    input_file: &str,
+    line: usize,
+    width: usize,
+    rows: &mut Vec<DSourceRow>,
+    values: &mut Vec<DigitalValue>,
+) -> CmResult<()> {
+    rows.try_reserve_exact(1)
+        .map_err(|err| d_source_error(input_file, line, format!("unable to reserve row: {err}")))?;
+    values.try_reserve_exact(width).map_err(|err| {
+        d_source_error(
+            input_file,
+            line,
+            format!("unable to reserve {width} row values: {err}"),
+        )
+    })
+}
+
 fn d_source_cache_key(
     input_file: &str,
     width: usize,
@@ -242,7 +292,8 @@ fn parse_d_source_contents(
     let mut rows = Vec::new();
     let mut values = Vec::new();
     let mut previous_time = None;
-    let mut tokens = Vec::with_capacity(width.saturating_add(1));
+    let mut tokens = Vec::new();
+    let expected = reserve_d_source_tokens(input_file, width, &mut tokens)?;
 
     for (line_idx, line) in contents.lines().enumerate() {
         let line_no = line_idx + 1;
@@ -251,7 +302,6 @@ fn parse_d_source_contents(
         }
 
         tokenize_digital_table_line(line, &mut tokens);
-        let expected = width + 1;
         if tokens.len() != expected {
             return Err(d_source_error(
                 input_file,
@@ -284,6 +334,7 @@ fn parse_d_source_contents(
         }
         previous_time = Some(time);
 
+        reserve_d_source_row(input_file, line_no, width, &mut rows, &mut values)?;
         for token in &tokens[1..] {
             values.push(parse_d_source_token(input_file, line_no, token)?);
         }
