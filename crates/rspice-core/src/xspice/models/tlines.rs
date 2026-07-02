@@ -436,7 +436,13 @@ fn delay_boundary_breakpoints(ctx: &CmContext, delay: Value) -> CmResult<Vec<Val
         return Ok(vec![delay]);
     }
 
-    let mut points = Vec::with_capacity((estimated as usize).min(max_points));
+    let point_capacity = (estimated as usize).min(max_points);
+    let mut points = Vec::new();
+    points.try_reserve_exact(point_capacity).map_err(|err| {
+        CmError::EvaluationError(format!(
+            "unable to reserve {point_capacity} transmission-line breakpoint(s): {err}"
+        ))
+    })?;
     let mut time = delay;
     while time <= tstop && points.len() < max_points {
         points.push(time);
