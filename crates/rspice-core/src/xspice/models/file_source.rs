@@ -181,6 +181,58 @@ fn invalid_filesource_param(name: &str, message: impl Into<String>) -> CmError {
     }
 }
 
+fn filesource_width_error(file: &str, width: usize, message: impl Into<String>) -> CmError {
+    filesource_error(
+        file,
+        format!(
+            "output vector width {width} is too large: {}",
+            message.into()
+        ),
+    )
+}
+
+fn filesource_expected_columns(file: &str, width: usize) -> CmResult<usize> {
+    width
+        .checked_add(1)
+        .ok_or_else(|| filesource_width_error(file, width, "column count overflows usize"))
+}
+
+fn filesource_value_capacity(file: &str, row_count: usize, width: usize) -> CmResult<usize> {
+    row_count.checked_mul(width).ok_or_else(|| {
+        filesource_width_error(
+            file,
+            width,
+            format!("{row_count} row(s) exceed addressable value storage"),
+        )
+    })
+}
+
+fn reserve_filesource_rows(
+    file: &str,
+    row_capacity: usize,
+    rows: &mut Vec<FileSourceRow>,
+) -> CmResult<()> {
+    rows.try_reserve_exact(row_capacity).map_err(|err| {
+        filesource_error(
+            file,
+            format!("unable to reserve {row_capacity} rows: {err}"),
+        )
+    })
+}
+
+fn reserve_filesource_values(
+    file: &str,
+    value_capacity: usize,
+    values: &mut Vec<Value>,
+) -> CmResult<()> {
+    values.try_reserve_exact(value_capacity).map_err(|err| {
+        filesource_error(
+            file,
+            format!("unable to reserve {value_capacity} values: {err}"),
+        )
+    })
+}
+
 fn cache_key(file: &str, width: usize, stamp: data_file::DataFileStamp) -> FileSourceCacheKey {
     FileSourceCacheKey {
         file: file.to_string(),
@@ -249,7 +301,7 @@ fn parse_filesource_contents(
         ));
     }
 
-    let expected_columns = width + 1;
+    let expected_columns = filesource_expected_columns(file, width)?;
     let mut fields = Vec::new();
 
     for (line_index, line) in contents.lines().enumerate() {
@@ -520,10 +572,14 @@ fn transform_rows(
     let amplscale = vector_transform_param(ctx, "amplscale")?;
     let amploffset = vector_transform_param(ctx, "amploffset")?;
 
-    let expected_columns = width + 1;
+    let file = ctx.string_param("file").unwrap_or("filesource.txt");
+    let expected_columns = filesource_expected_columns(file, width)?;
     let row_capacity = raw_fields.len() / expected_columns;
-    let mut rows = Vec::with_capacity(row_capacity);
-    let mut values = Vec::with_capacity(row_capacity.saturating_mul(width));
+    let value_capacity = filesource_value_capacity(file, row_capacity, width)?;
+    let mut rows = Vec::new();
+    let mut values = Vec::new();
+    reserve_filesource_rows(file, row_capacity, &mut rows)?;
+    reserve_filesource_values(file, value_capacity, &mut values)?;
     let mut row_time = 0.0;
     let mut row_column = 0;
     let mut previous_time = timeoffset;
@@ -539,7 +595,7 @@ fn transform_rows(
                 };
                 if !time.is_finite() {
                     return Err(filesource_line_error(
-                        ctx.string_param("file").unwrap_or("filesource.txt"),
+                        file,
                         raw.line,
                         format!("transformed time must be finite, got {time}"),
                     ));
@@ -564,7 +620,8 @@ fn transform_rows(
             row_column = 0;
         }
     }
-    values.truncate(rows.len().saturating_mul(width));
+    let retained_values = filesource_value_capacity(file, rows.len(), width)?;
+    values.truncate(retained_values);
 
     if rows.is_empty() {
         return Err(filesource_error(
