@@ -263,20 +263,22 @@ pub(in crate::engine::builder) fn coerce_xspice_connections(
         }
 
         if port_spec.is_vector && !parsed_ports[cursor].is_vector_connection() {
-            let remaining_ports = parsed_ports.len() - cursor;
-            let remaining_specs = port_specs.len() - spec_idx - 1;
-            let required_remaining_specs = port_specs[spec_idx + 1..]
-                .iter()
-                .filter(|spec| !spec.null_allowed)
-                .count();
-            if remaining_ports == 0 || remaining_ports - 1 < required_remaining_specs {
+            let Some(take) = choose_unpacked_vector_take(
+                port_spec,
+                &port_specs[spec_idx + 1..],
+                &parsed_ports[cursor..],
+            ) else {
+                return Err(SimulationError::Circuit(format!(
+                    "XSPICE element '{}' vector port '{}' cannot be assigned connections compatible with model '{}'",
+                    element_name, port_spec.name, model_name
+                )));
+            };
+            if take == 0 {
                 return Err(SimulationError::Circuit(format!(
                     "XSPICE element '{}' vector port '{}' has no connections",
                     element_name, port_spec.name
                 )));
             }
-            let reserved_for_later = (remaining_ports - 1).min(remaining_specs);
-            let take = remaining_ports - reserved_for_later;
             connections.push(coerce_xspice_vector_connection(
                 circuit,
                 port_spec,
@@ -323,6 +325,118 @@ pub(in crate::engine::builder) fn coerce_xspice_connections(
     }
 
     Ok(connections)
+}
+
+fn choose_unpacked_vector_take(
+    port_spec: &crate::xspice::PortSpec,
+    remaining_specs: &[crate::xspice::PortSpec],
+    parsed_ports: &[crate::netlist::XspicePort],
+) -> Option<usize> {
+    let scalar_run = parsed_ports
+        .iter()
+        .take_while(|port| unpacked_vector_port_can_group(port))
+        .count();
+    if scalar_run == 0 {
+        return None;
+    }
+
+    let min_take = port_spec.vector_min_len.unwrap_or(1).max(1);
+    if min_take > scalar_run {
+        return None;
+    }
+
+    let max_take = port_spec
+        .vector_max_len
+        .unwrap_or(scalar_run)
+        .min(scalar_run);
+    if min_take > max_take {
+        return None;
+    }
+
+    (min_take..=max_take)
+        .find(|take| xspice_connection_shapes_feasible(remaining_specs, &parsed_ports[*take..]))
+}
+
+fn xspice_connection_shapes_feasible(
+    port_specs: &[crate::xspice::PortSpec],
+    parsed_ports: &[crate::netlist::XspicePort],
+) -> bool {
+    if port_specs.is_empty() {
+        return parsed_ports.is_empty();
+    }
+
+    let port_spec = &port_specs[0];
+    if parsed_ports.is_empty() {
+        return port_specs.iter().all(|spec| spec.null_allowed);
+    }
+
+    if port_spec.null_allowed && matches!(parsed_ports[0], crate::netlist::XspicePort::Null) {
+        return xspice_connection_shapes_feasible(&port_specs[1..], &parsed_ports[1..]);
+    }
+
+    if port_spec.is_vector {
+        if parsed_ports[0].is_vector_connection() {
+            let len = parsed_vector_connection_len(&parsed_ports[0]).unwrap_or(1);
+            return vector_connection_len_allowed(port_spec, len)
+                && xspice_connection_shapes_feasible(&port_specs[1..], &parsed_ports[1..]);
+        }
+
+        let scalar_run = parsed_ports
+            .iter()
+            .take_while(|port| unpacked_vector_port_can_group(port))
+            .count();
+        let min_take = port_spec.vector_min_len.unwrap_or(1).max(1);
+        let max_take = port_spec
+            .vector_max_len
+            .unwrap_or(scalar_run)
+            .min(scalar_run);
+        if min_take > max_take {
+            return false;
+        }
+
+        return (min_take..=max_take).any(|take| {
+            xspice_connection_shapes_feasible(&port_specs[1..], &parsed_ports[take..])
+        });
+    }
+
+    if matches!(parsed_ports[0], crate::netlist::XspicePort::Null) {
+        return false;
+    }
+
+    if try_pack_default_differential_port(port_spec, parsed_ports).is_some()
+        && xspice_connection_shapes_feasible(&port_specs[1..], &parsed_ports[2..])
+    {
+        return true;
+    }
+
+    xspice_connection_shapes_feasible(&port_specs[1..], &parsed_ports[1..])
+}
+
+fn unpacked_vector_port_can_group(port: &crate::netlist::XspicePort) -> bool {
+    !port.is_vector_connection() && !matches!(port, crate::netlist::XspicePort::Null)
+}
+
+fn parsed_vector_connection_len(port: &crate::netlist::XspicePort) -> Option<usize> {
+    match port {
+        crate::netlist::XspicePort::AnalogVector(nodes)
+        | crate::netlist::XspicePort::DigitalVector(nodes) => Some(nodes.len()),
+        crate::netlist::XspicePort::DigitalVectorMixed(nodes) => Some(nodes.len()),
+        _ => None,
+    }
+}
+
+fn vector_connection_len_allowed(port_spec: &crate::xspice::PortSpec, len: usize) -> bool {
+    if let Some(min_len) = port_spec.vector_min_len
+        && len < min_len
+    {
+        return false;
+    }
+    if let Some(max_len) = port_spec.vector_max_len
+        && len > max_len
+    {
+        return false;
+    }
+    true
 }
 
 fn explicit_xspice_port_type(
@@ -869,6 +983,60 @@ mod tests {
             other => panic!("expected one digital output bit, got {other:?}"),
         }
         assert!(matches!(single_bit_connections[2], PortConnection::Null));
+    }
+
+    #[test]
+    fn required_vector_port_keeps_minimum_before_nullable_tail() {
+        let mut circuit = CircuitData::new();
+        let ports = vec![
+            PortSpec::vector_input("in", PortType::Digital).with_vector_min_len(2),
+            PortSpec::output("out", PortType::Digital).nullable(),
+            PortSpec::output("nout", PortType::Digital).nullable(),
+        ];
+        let parsed_ports = vec![
+            XspicePort::Digital("A".to_string()),
+            XspicePort::Digital("B".to_string()),
+            XspicePort::Digital("Y".to_string()),
+        ];
+
+        let connections =
+            coerce_xspice_connections(&mut circuit, &ports, &parsed_ports, "A1", "d_and")
+                .expect("vector input should consume its required width before optional outputs");
+
+        assert_eq!(connections.len(), 3);
+        match &connections[0] {
+            PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 2),
+            other => panic!("expected two digital input bits, got {other:?}"),
+        }
+        assert!(matches!(connections[1], PortConnection::Digital(_)));
+        assert!(matches!(connections[2], PortConnection::Null));
+    }
+
+    #[test]
+    fn required_unpacked_vector_ports_split_by_declared_minimums() {
+        let mut circuit = CircuitData::new();
+        let ports = vec![
+            PortSpec::vector_input("data_in", PortType::Digital).with_vector_min_len(2),
+            PortSpec::vector_input("addr", PortType::Digital).with_vector_min_len(2),
+        ];
+        let parsed_ports = vec![
+            XspicePort::Digital("D0".to_string()),
+            XspicePort::Digital("D1".to_string()),
+            XspicePort::Digital("A0".to_string()),
+            XspicePort::Digital("A1".to_string()),
+        ];
+
+        let connections =
+            coerce_xspice_connections(&mut circuit, &ports, &parsed_ports, "A1", "ram")
+                .expect("required vector ports should split unbracketed scalar tokens");
+
+        assert_eq!(connections.len(), 2);
+        for (index, connection) in connections.iter().enumerate() {
+            match connection {
+                PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 2),
+                other => panic!("expected two-bit digital vector {index}, got {other:?}"),
+            }
+        }
     }
 
     #[test]
