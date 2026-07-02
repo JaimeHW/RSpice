@@ -326,19 +326,20 @@ fn effective_output_delay(ctx: &CmContext, vtime: Value) -> CmResult<Value> {
     }
 }
 
-fn set_initial_outputs(ctx: &mut CmContext, delay: Value) {
+fn set_initial_outputs(ctx: &mut CmContext, delay: Value) -> CmResult<()> {
     let output_width = ctx.port_width("d_out");
     let inout_width = ctx.port_width("d_inout");
     if output_width > 0 {
         ctx.set_output_digital_vector_from_context_fn("d_out", output_width, delay, |_, _| {
             DigitalValue::zero()
-        });
+        })?;
     }
     if inout_width > 0 {
         ctx.set_output_digital_vector_from_context_fn("d_inout", inout_width, delay, |_, _| {
             DigitalValue::zero()
-        });
+        })?;
     }
+    Ok(())
 }
 
 fn schedule_normalized_runtime_outputs(
@@ -525,7 +526,7 @@ impl CodeModel for DigitalCosim {
                 output_count.max(inout_count),
             )?),
         );
-        set_initial_outputs(ctx, official_cosim_delay(ctx)?);
+        set_initial_outputs(ctx, official_cosim_delay(ctx)?)?;
         Ok(())
     }
 
@@ -729,7 +730,7 @@ mod tests {
         ctx.set_port_width("d_out", 2);
         ctx.set_port_width("d_inout", 1);
 
-        set_initial_outputs(&mut ctx, 3.0e-9);
+        set_initial_outputs(&mut ctx, 3.0e-9).expect("set initial outputs");
 
         let events = ctx.take_pending_events();
         assert_eq!(events.len(), 2);
@@ -791,7 +792,7 @@ mod tests {
         let mut ctx = CmContext::new();
         ctx.set_port_width("d_out", 3);
         ctx.set_port_width("d_inout", 2);
-        set_initial_outputs(&mut ctx, 0.0);
+        set_initial_outputs(&mut ctx, 0.0).expect("set initial outputs");
         ctx.take_pending_events();
 
         ctx.time = 1.0e-9;

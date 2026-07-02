@@ -422,7 +422,7 @@ fn d_ram_set_outputs(
     address_index: Option<usize>,
     strength: DigitalStrength,
     delay: Value,
-) {
+) -> CmResult<()> {
     ctx.set_output_digital_vector_from_context_fn(
         "data_out",
         shape.word_width,
@@ -435,7 +435,7 @@ fn d_ram_set_outputs(
                 .unwrap_or(2);
             d_ram_value_from_code(code, strength)
         },
-    );
+    )
 }
 
 fn d_ram_set_uniform_outputs(
@@ -444,11 +444,9 @@ fn d_ram_set_uniform_outputs(
     code: i64,
     strength: DigitalStrength,
     delay: Value,
-) {
+) -> CmResult<()> {
     let value = d_ram_value_from_code(code, strength);
-    ctx.set_output_digital_vector_from_context_fn("data_out", shape.word_width, delay, |_, _| {
-        value
-    });
+    ctx.set_output_digital_vector_from_context_fn("data_out", shape.word_width, delay, |_, _| value)
 }
 
 fn d_ram_set_input_data_outputs(
@@ -458,7 +456,7 @@ fn d_ram_set_input_data_outputs(
     data_codes: &[i64],
     strength: DigitalStrength,
     delay: Value,
-) {
+) -> CmResult<()> {
     ctx.set_output_digital_vector_from_context_fn("data_out", shape.word_width, delay, |_, bit| {
         let code = if address_index.is_some() {
             data_codes[bit]
@@ -466,7 +464,7 @@ fn d_ram_set_input_data_outputs(
             2
         };
         d_ram_value_from_code(code, strength)
-    });
+    })
 }
 
 fn d_ram_store_previous(
@@ -524,9 +522,9 @@ fn d_ram_evaluate_with_state(
         d_ram_fill_memory_state(ctx, &mut scratch_state, shape, ic);
 
         if select == 1 && write_en == 0 {
-            d_ram_set_uniform_outputs(ctx, shape, ic, DigitalStrength::Strong, 0.0);
+            d_ram_set_uniform_outputs(ctx, shape, ic, DigitalStrength::Strong, 0.0)?;
         } else {
-            d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, 0.0);
+            d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, 0.0)?;
         }
 
         d_ram_set_state(ctx, &mut scratch_state, D_RAM_INITIALIZED, 1);
@@ -547,7 +545,7 @@ fn d_ram_evaluate_with_state(
                     address_index,
                     DigitalStrength::Strong,
                     read_delay,
-                );
+                )?;
             } else {
                 d_ram_write_word(ctx, &mut scratch_state, shape, address_index, &inputs.data);
                 d_ram_set_input_data_outputs(
@@ -557,10 +555,10 @@ fn d_ram_evaluate_with_state(
                     &inputs.data,
                     DigitalStrength::HighZ,
                     read_delay,
-                );
+                )?;
             }
         } else if write_en == 0 {
-            d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, read_delay);
+            d_ram_set_uniform_outputs(ctx, shape, 2, DigitalStrength::HighZ, read_delay)?;
         }
     } else if write_changed
         || d_ram_previous_address_changed(ctx, scratch_state.as_deref(), shape, &inputs.address)
@@ -576,7 +574,7 @@ fn d_ram_evaluate_with_state(
                     &inputs.data,
                     DigitalStrength::HighZ,
                     read_delay,
-                );
+                )?;
             }
         } else if select == 1 {
             d_ram_set_outputs(
@@ -586,7 +584,7 @@ fn d_ram_evaluate_with_state(
                 address_index,
                 DigitalStrength::Strong,
                 read_delay,
-            );
+            )?;
         }
     }
 

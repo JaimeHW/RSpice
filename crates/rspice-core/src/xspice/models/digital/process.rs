@@ -102,10 +102,8 @@ fn unknown_high_z() -> DigitalValue {
     DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ)
 }
 
-fn set_unknown_outputs(ctx: &mut CmContext, output_width: usize) {
-    ctx.set_output_digital_vector_from_context_fn("out", output_width, 0.0, |_, _| {
-        unknown_high_z()
-    });
+fn set_unknown_outputs(ctx: &mut CmContext, output_width: usize) -> CmResult<()> {
+    ctx.set_output_digital_vector_from_context_fn("out", output_width, 0.0, |_, _| unknown_high_z())
 }
 
 fn validate_shape(input_width: usize, output_width: usize) -> CmResult<()> {
@@ -271,7 +269,7 @@ impl CodeModel for DigitalProcess {
             RESOURCE_IO_SCRATCH,
             Arc::new(DigitalProcessIoScratch::default()),
         );
-        set_unknown_outputs(ctx, output_width);
+        set_unknown_outputs(ctx, output_width)?;
         Ok(())
     }
 
@@ -288,7 +286,7 @@ impl CodeModel for DigitalProcess {
             for index in 0..output_width {
                 ctx.set_int_state(STATE_DOUT_START + index, STATE_UNKNOWN);
             }
-            set_unknown_outputs(ctx, output_width);
+            set_unknown_outputs(ctx, output_width)?;
             return Ok(());
         }
 

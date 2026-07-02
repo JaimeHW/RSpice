@@ -1437,24 +1437,35 @@ impl CmContext {
         value_count: usize,
         delay: Value,
         mut value_at: F,
-    ) where
+    ) -> CmResult<()>
+    where
         F: FnMut(&CmContext, usize) -> DigitalValue,
     {
-        let mut event_values = Vec::with_capacity(value_count);
-        for index in 0..value_count {
-            event_values.push(value_at(self, index));
-        }
+        let mut event_values = vec_from_fn("digital vector output events", value_count, |index| {
+            value_at(self, index)
+        })?;
+        let mut output_values = Vec::new();
+        output_values
+            .try_reserve_exact(value_count)
+            .map_err(|err| {
+                context_allocation_error("digital vector output values", value_count, err)
+            })?;
+        output_values.extend_from_slice(&event_values);
 
         match self.outputs.get_mut(name) {
             Some(OutputValue::DigitalVector(existing)) => {
+                if existing.capacity() < value_count {
+                    let additional = value_count - existing.capacity();
+                    existing.try_reserve_exact(additional).map_err(|err| {
+                        context_allocation_error("digital vector output values", value_count, err)
+                    })?;
+                }
                 existing.clear();
-                existing.extend_from_slice(&event_values);
+                existing.extend_from_slice(&output_values);
             }
             _ => {
-                self.outputs.insert(
-                    name.to_string(),
-                    OutputValue::DigitalVector(event_values.clone()),
-                );
+                self.outputs
+                    .insert(name.to_string(), OutputValue::DigitalVector(output_values));
             }
         }
         self.pending_events.push(PendingDigitalEvent {
@@ -1463,6 +1474,7 @@ impl CmContext {
             values: event_values,
             delay,
         });
+        Ok(())
     }
 
     /// Set digital vector output from borrowed values.
@@ -2337,7 +2349,8 @@ mod tests {
             ctx.input_digital_vector_values("in")
                 .and_then(|values| values.get(index).copied())
                 .unwrap_or_default()
-        });
+        })
+        .expect("set digital vector output from context");
 
         let values = vec![DigitalValue::zero(), DigitalValue::one()];
         assert_eq!(ctx.output_digital_vector("out"), values);

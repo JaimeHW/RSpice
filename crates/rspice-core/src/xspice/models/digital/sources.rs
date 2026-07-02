@@ -472,9 +472,9 @@ fn d_source_set_row_state(ctx: &mut CmContext, index: usize, value: i64) {
     }
 }
 
-fn d_source_set_unknown_output(ctx: &mut CmContext, width: usize) {
+fn d_source_set_unknown_output(ctx: &mut CmContext, width: usize) -> CmResult<()> {
     let value = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined);
-    ctx.set_output_digital_vector_from_context_fn("out", width, 0.0, |_, _| value);
+    ctx.set_output_digital_vector_from_context_fn("out", width, 0.0, |_, _| value)
 }
 
 fn d_source_input_file(ctx: &CmContext) -> &str {
@@ -540,7 +540,7 @@ impl CodeModel for DigitalSource {
         let rows = load_d_source_rows_for_context(ctx, &input_file, width)?;
         if rows.first().is_some_and(|row| row.time < 0.0) {
             if ctx.int_state(D_SOURCE_EMITTED_ROW) != D_SOURCE_BEFORE_FIRST_ROW {
-                d_source_set_unknown_output(ctx, width);
+                d_source_set_unknown_output(ctx, width)?;
                 d_source_set_row_state(ctx, D_SOURCE_EMITTED_ROW, D_SOURCE_BEFORE_FIRST_ROW);
             }
             d_source_set_row_state(ctx, D_SOURCE_SCHEDULED_ROW, D_SOURCE_NO_ROW);
@@ -557,7 +557,7 @@ impl CodeModel for DigitalSource {
                 d_source_set_row_state(ctx, D_SOURCE_EMITTED_ROW, idx as i64);
             }
         } else if emitted_row != D_SOURCE_BEFORE_FIRST_ROW {
-            d_source_set_unknown_output(ctx, width);
+            d_source_set_unknown_output(ctx, width)?;
             d_source_set_row_state(ctx, D_SOURCE_EMITTED_ROW, D_SOURCE_BEFORE_FIRST_ROW);
         }
 
