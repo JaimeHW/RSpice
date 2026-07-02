@@ -173,7 +173,7 @@ fn d_genlut_table_value_from_byte(byte: Option<u8>) -> DigitalValue {
     match byte {
         Some(b'0') => DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
         Some(b'1') => DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
-        Some(b'z') => DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ),
+        Some(b'z' | b'Z') => DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ),
         _ => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined),
     }
 }
@@ -977,10 +977,10 @@ mod tests {
 
     #[test]
     fn d_genlut_z_table_entries_are_high_impedance_unknowns() {
-        assert_eq!(
-            d_genlut_lookup_value(b"z", 0),
-            DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ)
-        );
+        let high_z = DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ);
+
+        assert_eq!(d_genlut_lookup_value(b"z", 0), high_z);
+        assert_eq!(d_genlut_lookup_value(b"Z", 0), high_z);
     }
 
     #[test]
