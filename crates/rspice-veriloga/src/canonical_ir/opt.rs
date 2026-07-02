@@ -483,11 +483,13 @@ struct ScalarGraphBuilder<'a> {
     guarded_path_assignment_exprs: HashMap<VariableId, GuardedPathAssignmentExpr>,
     assignment_history_prefix_cache: HashMap<AssignmentHistoryPrefixCacheKey, ValueId>,
     current_path_history_cache: HashMap<CurrentPathHistoryCacheKey, ValueId>,
+    recent_assignment_history_cache: HashMap<RecentAssignmentHistoryCacheKey, ValueId>,
     variable_lowering_stack: HashSet<VariableId>,
     guard_history_lowering_stack: HashSet<(VariableId, usize)>,
     expression_lowering_stack: HashSet<ExprId>,
     expression_lowering_depth: usize,
     assignment_history_reference_stack: Vec<(VariableId, usize)>,
+    assignment_history_previous_value_stack: Vec<(VariableId, ValueId)>,
     history_reconstruction_steps: usize,
     guard_alias_lowering_depth: usize,
     branch_current_values: HashMap<String, ValueId>,
@@ -539,6 +541,16 @@ struct CurrentPathHistoryCacheKey {
     guard_alias_lowering_depth: usize,
     path: Vec<ConditionalPathPredicate>,
     references: Vec<(VariableId, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct RecentAssignmentHistoryCacheKey {
+    variable: VariableId,
+    branch_flow_context: Option<BranchUnknownId>,
+    guard_alias_lowering_depth: usize,
+    path: Vec<ConditionalPathPredicate>,
+    references: Vec<(VariableId, usize)>,
+    previous_values: Vec<(VariableId, ValueId)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -713,11 +725,13 @@ impl<'a> ScalarGraphBuilder<'a> {
             guarded_path_assignment_exprs: HashMap::new(),
             assignment_history_prefix_cache: HashMap::new(),
             current_path_history_cache: HashMap::new(),
+            recent_assignment_history_cache: HashMap::new(),
             variable_lowering_stack: HashSet::new(),
             guard_history_lowering_stack: HashSet::new(),
             expression_lowering_stack: HashSet::new(),
             expression_lowering_depth: 0,
             assignment_history_reference_stack: Vec::new(),
+            assignment_history_previous_value_stack: Vec::new(),
             history_reconstruction_steps: 0,
             guard_alias_lowering_depth: 0,
             branch_current_values: HashMap::new(),
@@ -1040,7 +1054,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         let original_assignment_history_prefix_cache =
             self.assignment_history_prefix_cache.clone();
         let original_current_path_history_cache = self.current_path_history_cache.clone();
+        let original_recent_assignment_history_cache = self.recent_assignment_history_cache.clone();
         let original_conditional_path_stack = self.conditional_path_stack.clone();
+        let original_history_reconstruction_steps = self.history_reconstruction_steps;
 
         let matched = self.try_lower_bounded_guarded_loop(loop_statement);
         if matched {
@@ -1056,7 +1072,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.guarded_path_assignment_exprs = original_guarded_path_assignment_exprs;
             self.assignment_history_prefix_cache = original_assignment_history_prefix_cache;
             self.current_path_history_cache = original_current_path_history_cache;
+            self.recent_assignment_history_cache = original_recent_assignment_history_cache;
             self.conditional_path_stack = original_conditional_path_stack;
+            self.history_reconstruction_steps = original_history_reconstruction_steps;
             false
         }
     }
@@ -1072,9 +1090,11 @@ impl<'a> ScalarGraphBuilder<'a> {
         let original_assignment_history_prefix_cache =
             self.assignment_history_prefix_cache.clone();
         let original_current_path_history_cache = self.current_path_history_cache.clone();
+        let original_recent_assignment_history_cache = self.recent_assignment_history_cache.clone();
         let original_conditional_path_stack = self.conditional_path_stack.clone();
         let original_runtime_loops = self.runtime_loops.clone();
         let original_next_loop_id = self.next_loop_id;
+        let original_history_reconstruction_steps = self.history_reconstruction_steps;
 
         let matched = self.try_lower_runtime_bounded_guarded_loop(loop_statement);
         if matched {
@@ -1090,9 +1110,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.guarded_path_assignment_exprs = original_guarded_path_assignment_exprs;
             self.assignment_history_prefix_cache = original_assignment_history_prefix_cache;
             self.current_path_history_cache = original_current_path_history_cache;
+            self.recent_assignment_history_cache = original_recent_assignment_history_cache;
             self.conditional_path_stack = original_conditional_path_stack;
             self.runtime_loops = original_runtime_loops;
             self.next_loop_id = original_next_loop_id;
+            self.history_reconstruction_steps = original_history_reconstruction_steps;
             false
         }
     }
@@ -1434,7 +1456,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         let original_assignment_history_prefix_cache =
             self.assignment_history_prefix_cache.clone();
         let original_current_path_history_cache = self.current_path_history_cache.clone();
+        let original_recent_assignment_history_cache = self.recent_assignment_history_cache.clone();
         let original_next_loop_id = self.next_loop_id;
+        let original_history_reconstruction_steps = self.history_reconstruction_steps;
 
         let matched = self.try_lower_counted_accumulator_loop(loop_statement);
         if matched {
@@ -1450,7 +1474,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.guarded_path_assignment_exprs = original_guarded_path_assignment_exprs;
             self.assignment_history_prefix_cache = original_assignment_history_prefix_cache;
             self.current_path_history_cache = original_current_path_history_cache;
+            self.recent_assignment_history_cache = original_recent_assignment_history_cache;
             self.next_loop_id = original_next_loop_id;
+            self.history_reconstruction_steps = original_history_reconstruction_steps;
             false
         }
     }
@@ -1911,7 +1937,8 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn lower_expression(&mut self, expr_id: ExprId) -> Option<ValueId> {
         let use_cache = self.conditional_path_stack.is_empty()
-            && self.assignment_history_reference_stack.is_empty();
+            && self.assignment_history_reference_stack.is_empty()
+            && self.assignment_history_previous_value_stack.is_empty();
         if use_cache && let Some(value) = self.expression_values.get(&expr_id) {
             return *value;
         }
@@ -2968,6 +2995,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             .variables
             .iter()
             .find(|variable| variable.name == *name)?;
+        if let Some(previous_value) = self.assignment_history_previous_value(variable.id) {
+            return Some(Some(previous_value));
+        }
         if let Some(limit) = self.assignment_history_reference_limit(variable.id) {
             return Some(self.lower_assignment_history_prefix(variable.id, limit));
         }
@@ -2977,6 +3007,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                     self.lower_conditional_path_variable_identifier(variable.id)
             {
                 return Some(Some(contextual));
+            }
+            if value.is_none()
+                && let Some(history_value) = self.lower_recent_assignment_history_value(variable.id)
+            {
+                return Some(Some(history_value));
             }
             if value.is_none()
                 && let Some(contextual) = self.lower_contextual_variable_identifier(variable.id)
@@ -2998,11 +3033,6 @@ impl<'a> ScalarGraphBuilder<'a> {
             if value.is_none()
                 && let Some(history_value) =
                     self.lower_complementary_assignment_history_value(variable.id)
-            {
-                return Some(Some(history_value));
-            }
-            if value.is_none()
-                && let Some(history_value) = self.lower_recent_assignment_history_value(variable.id)
             {
                 return Some(Some(history_value));
             }
@@ -3067,8 +3097,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             lowered
         };
         if let Some(value) = lowered {
-            self.assignment_history_prefix_cache
-                .insert(cache_key, value);
+            self.assignment_history_prefix_cache.insert(cache_key, value);
         }
         lowered
     }
@@ -3145,6 +3174,26 @@ impl<'a> ScalarGraphBuilder<'a> {
         let lowered = self.lower_expression(expr);
         self.assignment_history_reference_stack.pop();
         lowered
+    }
+
+    fn lower_expression_with_assignment_previous_value(
+        &mut self,
+        variable: VariableId,
+        previous_value: ValueId,
+        expr: ExprId,
+    ) -> Option<ValueId> {
+        self.assignment_history_previous_value_stack
+            .push((variable, previous_value));
+        let lowered = self.lower_expression(expr);
+        self.assignment_history_previous_value_stack.pop();
+        lowered
+    }
+
+    fn assignment_history_previous_value(&self, variable: VariableId) -> Option<ValueId> {
+        self.assignment_history_previous_value_stack
+            .iter()
+            .rev()
+            .find_map(|(candidate, value)| (*candidate == variable).then_some(*value))
     }
 
     fn assignment_history_reference_limit(&self, variable: VariableId) -> Option<usize> {
@@ -3248,8 +3297,23 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_recent_assignment_history_value(&mut self, variable: VariableId) -> Option<ValueId> {
-        self.consume_history_reconstruction_step()?;
+        let cache_key = self.recent_assignment_history_cache_key(variable);
+        if let Some(value) = self.recent_assignment_history_cache.get(&cache_key).copied() {
+            return Some(value);
+        }
+        let lowered = self.lower_recent_assignment_history_value_uncached(variable);
+        if let Some(value) = lowered {
+            self.recent_assignment_history_cache.insert(cache_key, value);
+        }
+        lowered
+    }
+
+    fn lower_recent_assignment_history_value_uncached(
+        &mut self,
+        variable: VariableId,
+    ) -> Option<ValueId> {
         let history = self.variable_assignment_history.get(&variable)?.clone();
+        self.consume_history_reconstruction_step()?;
         let scan_start = history
             .len()
             .saturating_sub(MAX_SCALAR_RECENT_HISTORY_RECONSTRUCTION_ENTRIES);
@@ -3258,9 +3322,16 @@ impl<'a> ScalarGraphBuilder<'a> {
             if self.expr_references_variable(base_expr, variable) {
                 continue;
             }
-            let mut value = self.lower_expression(base_expr)?;
+            let Some(mut value) = self.lower_expression(base_expr) else {
+                continue;
+            };
             for expr in history.iter().copied().skip(base_index + 1) {
-                value = self.lower_assignment_history_expr_from_previous(variable, expr, value)?;
+                let Some(next) =
+                    self.lower_assignment_history_expr_from_previous(variable, expr, value)
+                else {
+                    return None;
+                };
+                value = next;
             }
             return Some(value);
         }
@@ -3281,28 +3352,35 @@ impl<'a> ScalarGraphBuilder<'a> {
             else_expr,
         } = &expression.kind
         else {
-            if self.expr_references_variable(expr, variable) {
-                return None;
-            }
-            return self.lower_expression(expr);
+            return self.lower_expression_with_assignment_previous_value(
+                variable,
+                previous_value,
+                expr,
+            );
         };
 
-        let condition = self.lower_expression(*condition)?;
+        let condition = self.lower_expression_with_assignment_previous_value(
+            variable,
+            previous_value,
+            *condition,
+        )?;
         let then_value = if self.variable_identifier(*then_expr) == Some(variable) {
             previous_value
         } else {
-            if self.expr_references_variable(*then_expr, variable) {
-                return None;
-            }
-            self.lower_expression(*then_expr)?
+            self.lower_expression_with_assignment_previous_value(
+                variable,
+                previous_value,
+                *then_expr,
+            )?
         };
         let else_value = if self.variable_identifier(*else_expr) == Some(variable) {
             previous_value
         } else {
-            if self.expr_references_variable(*else_expr, variable) {
-                return None;
-            }
-            self.lower_expression(*else_expr)?
+            self.lower_expression_with_assignment_previous_value(
+                variable,
+                previous_value,
+                *else_expr,
+            )?
         };
         let value_type = self.variable_opt_value_type(variable)?;
         Some(self.push_value(
@@ -3410,9 +3488,24 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
     }
 
+    fn recent_assignment_history_cache_key(
+        &self,
+        variable: VariableId,
+    ) -> RecentAssignmentHistoryCacheKey {
+        RecentAssignmentHistoryCacheKey {
+            variable,
+            branch_flow_context: self.branch_flow_context,
+            guard_alias_lowering_depth: self.guard_alias_lowering_depth,
+            path: self.conditional_path_stack.clone(),
+            references: self.assignment_history_reference_stack.clone(),
+            previous_values: self.assignment_history_previous_value_stack.clone(),
+        }
+    }
+
     fn clear_assignment_replay_caches(&mut self) {
         self.assignment_history_prefix_cache.clear();
         self.current_path_history_cache.clear();
+        self.recent_assignment_history_cache.clear();
     }
 
     fn lower_guarded_path_assignment_for_current_path(

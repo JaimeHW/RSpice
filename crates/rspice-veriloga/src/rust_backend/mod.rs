@@ -710,6 +710,61 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_replays_additive_assignment_history() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module additive_assignment_history(p, n);
+    inout p, n;
+    electrical p, n;
+    real acc;
+    analog begin
+        acc = 0.0;
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        acc = acc + V(p, n);
+        I(p, n) <+ acc;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("additive assignment history should replay with previous-value substitution");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_reconstructs_current_path_complementary_overwrites() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
