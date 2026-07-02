@@ -176,6 +176,8 @@ pub struct Flattener<'a> {
     scoped_node_sets: Vec<NodeSet>,
     /// Digital XSPICE nodes with the effective scope-local VCC value.
     xspice_auto_bridge_node_hints: Vec<XspiceAutoBridgeNodeHint>,
+    /// Scope parameter used for digital auto-bridge voltage levels.
+    xspice_auto_bridge_digital_param_name: String,
     /// Directory of the parsed deck, used to resolve scoped XSPICE file params.
     source_base_dir: Option<PathBuf>,
 }
@@ -222,6 +224,7 @@ impl<'a> Flattener<'a> {
             scoped_initial_conditions: Vec::new(),
             scoped_node_sets: Vec::new(),
             xspice_auto_bridge_node_hints: Vec::new(),
+            xspice_auto_bridge_digital_param_name: "vcc".to_string(),
             source_base_dir: None,
         }
     }
@@ -246,6 +249,11 @@ impl<'a> Flattener<'a> {
         self.scoped_initial_conditions.clear();
         self.scoped_node_sets.clear();
         self.xspice_auto_bridge_node_hints.clear();
+        self.xspice_auto_bridge_digital_param_name = netlist
+            .options
+            .auto_bridge_param_name("d")
+            .unwrap_or("vcc")
+            .to_string();
         self.source_base_dir = netlist
             .source_path
             .as_ref()
@@ -351,7 +359,9 @@ impl<'a> Flattener<'a> {
         else {
             return;
         };
-        let vcc = scope.get("vcc").filter(|value| value.is_finite());
+        let vcc = scope
+            .get(&self.xspice_auto_bridge_digital_param_name)
+            .filter(|value| value.is_finite());
         let family = xspice_auto_bridge_family(string_params, scope);
         if vcc.is_none() && family.is_none() {
             return;

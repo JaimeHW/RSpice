@@ -403,6 +403,9 @@ impl Netlist {
             if let Some(command) = Self::promote_control_auto_bridge_set_command(line) {
                 promoted.push(command);
             }
+            if let Some(command) = Self::promote_control_auto_bridge_param_set_command(line) {
+                promoted.push(command);
+            }
         }
 
         promoted
@@ -468,6 +471,28 @@ impl Netlist {
             control_hex_encode(&setup_card),
             control_hex_encode(&device_card),
             max_nodes
+        ))
+    }
+
+    fn promote_control_auto_bridge_param_set_command(line: &str) -> Option<String> {
+        let body = strip_control_inline_comment(line).trim();
+        if body.is_empty() || body.starts_with('*') {
+            return None;
+        }
+
+        let body = body.strip_prefix('.').unwrap_or(body);
+        let mut parts = body.splitn(2, char::is_whitespace);
+        let command = parts.next()?;
+        if !command.eq_ignore_ascii_case("set") {
+            return None;
+        }
+
+        let (node_type, param_name) =
+            control_auto_bridge_param_assignment(parts.next().unwrap_or(""))?;
+        Some(format!(
+            ".RSPICE_AUTO_BRIDGE_PARAM {} {}",
+            control_hex_encode(&node_type),
+            control_hex_encode(&param_name)
         ))
     }
 
@@ -713,6 +738,58 @@ fn control_auto_bridge_template_assignment(
 fn control_auto_bridge_template_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     lower.starts_with("auto_bridge_") && !lower.starts_with("auto_bridge_parm_")
+}
+
+fn control_auto_bridge_param_assignment(assignments: &str) -> Option<(String, String)> {
+    let bytes = assignments.as_bytes();
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        skip_control_ws(bytes, &mut index);
+        let key_start = index;
+        while bytes
+            .get(index)
+            .is_some_and(|byte| control_variable_name_byte(*byte))
+        {
+            index += 1;
+        }
+        if key_start == index {
+            index += 1;
+            continue;
+        }
+
+        let key = &assignments[key_start..index];
+        skip_control_ws(bytes, &mut index);
+        if bytes.get(index) != Some(&b'=') {
+            continue;
+        }
+        index += 1;
+        skip_control_ws(bytes, &mut index);
+
+        const PREFIX: &str = "auto_bridge_parm_";
+        let lower_key = key.to_ascii_lowercase();
+        if !lower_key.starts_with(PREFIX) {
+            index = skip_control_assignment_value(assignments, index);
+            continue;
+        }
+        let node_type = &key[PREFIX.len()..];
+        if node_type.is_empty() {
+            return None;
+        }
+
+        let param_name = if bytes.get(index) == Some(&b'"') {
+            parse_control_quoted_string(assignments, &mut index)?
+        } else {
+            parse_control_unquoted_list_value(assignments, &mut index)?
+        };
+        let param_name = param_name.trim();
+        if param_name.is_empty() {
+            return None;
+        }
+        return Some((node_type.to_string(), param_name.to_string()));
+    }
+
+    None
 }
 
 fn control_variable_name_byte(byte: u8) -> bool {
@@ -1173,6 +1250,22 @@ mod tests {
         );
         assert_eq!(template.device_card, "auto_dac%d [ %s ] [ %s ] auto_dac");
         assert_eq!(template.max_nodes, Some(1));
+    }
+
+    #[test]
+    fn control_block_auto_bridge_param_set_promotes_option() {
+        let netlist = Netlist::parse(
+            "control xspice auto bridge parameter selector\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             set auto_bridge_parm_d = vdd\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control set auto_bridge_parm_d promotes to a structured selector");
+
+        assert_eq!(netlist.options.auto_bridge_param_name("d"), Some("vdd"));
     }
 
     #[test]

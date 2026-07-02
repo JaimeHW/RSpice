@@ -905,9 +905,10 @@ fn plan_xspice_auto_bridges(
 }
 
 fn xspice_auto_bridge_vcc(netlist: &Netlist) -> crate::Value {
+    let param_name = netlist.options.auto_bridge_param_name("d").unwrap_or("vcc");
     netlist
         .params
-        .get("vcc")
+        .get(param_name)
         .filter(|value| value.is_finite())
         .unwrap_or(3.3)
 }
@@ -1684,6 +1685,36 @@ set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_
         assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -2.0);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
+    }
+
+    #[test]
+    fn auto_bridge_uses_custom_digital_param_name() {
+        let netlist = Netlist::parse(
+            "\
+* auto bridge uses auto_bridge_parm_d
+.param vcc=5 vdd=1.8
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.control
+set auto_bridge_parm_d = vdd
+.endc
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_high"),
+            1.8,
+            "auto_bridge_parm_d should select vdd instead of the default vcc parameter"
+        );
     }
 }
 

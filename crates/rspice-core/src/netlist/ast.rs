@@ -1712,6 +1712,14 @@ pub struct XspiceAutoBridgeTemplate {
     pub max_nodes: Option<usize>,
 }
 
+/// Ngspice-style XSPICE auto-bridge parameter selector from
+/// `set auto_bridge_parm_* = <param>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XspiceAutoBridgeParamName {
+    pub node_type: String,
+    pub param_name: String,
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -1775,6 +1783,9 @@ pub struct SimulationOptions {
     /// Ngspice-compatible XSPICE custom automatic bridge templates promoted
     /// from `.control` `set auto_bridge_* = (...)` variables.
     pub auto_bridge_templates: Vec<XspiceAutoBridgeTemplate>,
+    /// Ngspice-compatible custom parameter names used to derive generated
+    /// auto-bridge threshold/output levels, keyed by XSPICE node type.
+    pub auto_bridge_param_names: Vec<XspiceAutoBridgeParamName>,
     /// Xyce `.options topology supernode=...`: collapse nodes connected by
     /// explicit zero/near-zero resistors before device construction.
     pub topology_supernode: Option<bool>,
@@ -1864,6 +1875,9 @@ impl SimulationOptions {
         for template in &other.auto_bridge_templates {
             self.set_auto_bridge_template(template.clone());
         }
+        for param_name in &other.auto_bridge_param_names {
+            self.set_auto_bridge_param_name(param_name.clone());
+        }
         if other.topology_supernode.is_some() {
             self.topology_supernode = other.topology_supernode;
         }
@@ -1879,6 +1893,23 @@ impl SimulationOptions {
         self.auto_bridge_templates
             .retain(|existing| !existing.key.eq_ignore_ascii_case(&template.key));
         self.auto_bridge_templates.push(template);
+    }
+
+    pub fn set_auto_bridge_param_name(&mut self, param_name: XspiceAutoBridgeParamName) {
+        self.auto_bridge_param_names.retain(|existing| {
+            !existing
+                .node_type
+                .eq_ignore_ascii_case(&param_name.node_type)
+        });
+        self.auto_bridge_param_names.push(param_name);
+    }
+
+    pub fn auto_bridge_param_name(&self, node_type: &str) -> Option<&str> {
+        self.auto_bridge_param_names
+            .iter()
+            .rev()
+            .find(|param_name| param_name.node_type.eq_ignore_ascii_case(node_type))
+            .map(|param_name| param_name.param_name.as_str())
     }
 }
 

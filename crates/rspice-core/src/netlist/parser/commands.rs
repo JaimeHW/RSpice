@@ -1,6 +1,6 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
-use crate::netlist::XspiceAutoBridgeTemplate;
+use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
 
 use super::*;
 
@@ -146,6 +146,9 @@ pub(super) fn parse_command(
         }
         ".RSPICE_AUTO_BRIDGE_TEMPLATE" => {
             parse_rspice_auto_bridge_template_command(stream, line_num, params, options)?;
+        }
+        ".RSPICE_AUTO_BRIDGE_PARAM" => {
+            parse_rspice_auto_bridge_param_command(stream, line_num, options)?;
         }
         ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
             parse_param_statement(stream, line_num, params, deferred_body_params)?;
@@ -317,6 +320,26 @@ fn parse_rspice_auto_bridge_template_command(
         setup_card,
         device_card,
         max_nodes: (max_value as usize > 0).then_some(max_value as usize),
+    });
+    Ok(())
+}
+
+fn parse_rspice_auto_bridge_param_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    options: &mut SimulationOptions,
+) -> Result<(), ParseError> {
+    let node_type = expect_auto_bridge_template_field(stream, line_num, "node type")?;
+    let param_name = expect_auto_bridge_template_field(stream, line_num, "parameter name")?;
+    if node_type.trim().is_empty() || param_name.trim().is_empty() {
+        return Err(ParseError::InvalidValue(format!(
+            "line {line_num}: RSpice auto-bridge parameter selector requires non-empty node type and parameter name"
+        )));
+    }
+
+    options.set_auto_bridge_param_name(XspiceAutoBridgeParamName {
+        node_type,
+        param_name,
     });
     Ok(())
 }
