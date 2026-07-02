@@ -72,6 +72,28 @@ fn scalar_analog_output_port(name: &str, description: &str) -> PortSpec {
     )
 }
 
+fn finite_analog_scalar_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResult<Value> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("{model_name} parameter must be finite, got {value}"),
+        });
+    }
+    Ok(value)
+}
+
+fn validate_analog_scalar_params(
+    ctx: &CmContext,
+    model_name: &str,
+    names: &[&str],
+) -> CmResult<()> {
+    for name in names {
+        finite_analog_scalar_param(ctx, model_name, name)?;
+    }
+    Ok(())
+}
+
 //=============================================================================
 // Gain Block
 //=============================================================================
@@ -152,14 +174,14 @@ impl CodeModel for Gain {
         })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(ctx, "gain", &["in_offset", "gain", "out_offset"])
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let gain = ctx.param("gain");
-        let in_offset = ctx.param("in_offset");
-        let out_offset = ctx.param("out_offset");
+        let gain = finite_analog_scalar_param(ctx, "gain", "gain")?;
+        let in_offset = finite_analog_scalar_param(ctx, "gain", "in_offset")?;
+        let out_offset = finite_analog_scalar_param(ctx, "gain", "out_offset")?;
 
         let v_in = ctx.input("in");
         let v_out = gain * (v_in + in_offset) + out_offset;
@@ -272,12 +294,13 @@ impl CodeModel for Summer {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(ctx, "summer", &["out_gain", "out_offset"])?;
         validate_analog_vector_params(ctx, "summer")
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let out_gain = ctx.param("out_gain");
-        let out_offset = ctx.param("out_offset");
+        let out_gain = finite_analog_scalar_param(ctx, "summer", "out_gain")?;
+        let out_offset = finite_analog_scalar_param(ctx, "summer", "out_offset")?;
 
         let inputs = ctx.input_analog_vector_values("in").unwrap_or(&[]);
         let in_gain = analog_vector_param_values(ctx, "in_gain", inputs.len(), "summer")?;
@@ -310,7 +333,9 @@ impl CodeModel for Summer {
         let Ok(in_gain) = analog_vector_param_values(ctx, "in_gain", inputs.len(), "summer") else {
             return Vec::new();
         };
-        let out_gain = ctx.param("out_gain");
+        let Ok(out_gain) = finite_analog_scalar_param(ctx, "summer", "out_gain") else {
+            return Vec::new();
+        };
         (0..inputs.len())
             .map(|index| {
                 (
@@ -466,6 +491,7 @@ impl CodeModel for Multiplier {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(ctx, "mult", &["out_gain", "out_offset"])?;
         validate_analog_vector_params(ctx, "mult")
     }
 
@@ -589,8 +615,8 @@ fn mult_transfer_from_context_with_signature(
 
     let in_gain = analog_vector_param_values(ctx, "in_gain", inputs.len(), "mult")?;
     let in_offset = analog_vector_param_values(ctx, "in_offset", inputs.len(), "mult")?;
-    let out_gain = ctx.param("out_gain");
-    let out_offset = ctx.param("out_offset");
+    let out_gain = finite_analog_scalar_param(ctx, "mult", "out_gain")?;
+    let out_offset = finite_analog_scalar_param(ctx, "mult", "out_offset")?;
 
     let mut accumulate_gain = 1.0;
     let mut accumulate_in = 1.0;
@@ -2872,6 +2898,37 @@ mod tests {
                     ("out_offset", ParamType::Real, 0.0, false),
                 ],
                 "{}",
+                model.name()
+            );
+        }
+    }
+
+    #[test]
+    fn arithmetic_models_reject_nonfinite_scalar_params() {
+        for (model, param, value) in [
+            (&Gain as &dyn CodeModel, "gain", f64::NAN),
+            (&Summer as &dyn CodeModel, "out_gain", f64::INFINITY),
+            (
+                &Multiplier as &dyn CodeModel,
+                "out_offset",
+                f64::NEG_INFINITY,
+            ),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_param(param, value);
+
+            let err = model
+                .init(&mut ctx)
+                .expect_err("nonfinite scalar arithmetic parameter must be rejected");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "{} {} produced {err:?}",
+                model.name(),
+                param
+            );
+            assert!(
+                err.to_string().contains(param),
+                "{} error should name rejected parameter {param}: {err}",
                 model.name()
             );
         }
