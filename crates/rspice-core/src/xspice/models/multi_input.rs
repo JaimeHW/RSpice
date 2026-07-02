@@ -183,7 +183,13 @@ fn table_uncached(ctx: &CmContext) -> CmResult<TableData> {
         ));
     }
 
-    let mut points = Vec::with_capacity(x.len());
+    let mut points = Vec::new();
+    points.try_reserve_exact(x.len()).map_err(|err| {
+        invalid_param(
+            "x/y",
+            format!("unable to reserve {} table point(s): {err}", x.len()),
+        )
+    })?;
     for (idx, (&x_value, &y_value)) in x.iter().zip(y).enumerate() {
         if !x_value.is_finite() {
             return Err(invalid_param(
