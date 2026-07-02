@@ -4856,9 +4856,11 @@ impl XyceTestRunner {
                 }
                 ElementKind::Mosfet { .. }
                     if Self::netlist_device_is_native_b3soi_mosfet(netlist, &element.name) => {}
+                ElementKind::Jfet { .. }
+                    if Self::netlist_device_is_native_classic_jfet(netlist, &element.name) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, and native B3SOI transient decks; element '{}' requires a broader transient oracle contract",
+                        "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                         element.name
                     ));
                 }
@@ -7552,6 +7554,56 @@ impl XyceTestRunner {
                 instance_name,
             )
         })
+    }
+
+    fn netlist_device_is_native_classic_jfet(netlist: &Netlist, instance_name: &str) -> bool {
+        if Self::elements_device_is_native_classic_jfet(
+            &netlist.elements,
+            &netlist.models,
+            &[],
+            instance_name,
+        ) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_device_is_native_classic_jfet(
+                &flattened.elements,
+                &netlist.models,
+                &flattened.scoped_models,
+                instance_name,
+            )
+        })
+    }
+
+    fn elements_device_is_native_classic_jfet(
+        elements: &[crate::netlist::Element],
+        models: &[crate::netlist::ModelDef],
+        scoped_models: &[crate::netlist::ModelDef],
+        instance_name: &str,
+    ) -> bool {
+        elements.iter().any(|element| {
+            if !Self::device_instance_names_match(&element.name, instance_name) {
+                return false;
+            }
+            let ElementKind::Jfet { model, .. } = &element.kind else {
+                return false;
+            };
+            Self::find_model(scoped_models, model)
+                .or_else(|| Self::find_model(models, model))
+                .is_some_and(Self::model_is_native_classic_jfet)
+        })
+    }
+
+    fn model_is_native_classic_jfet(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NJF" | "PJF"
+        ) {
+            return false;
+        }
+        Self::numeric_param_value(&model.params, "LEVEL")
+            .is_none_or(|level| level.is_finite() && (level - 1.0).abs() <= 1.0e-9)
     }
 
     fn elements_device_is_native_b3soi_mosfet(
