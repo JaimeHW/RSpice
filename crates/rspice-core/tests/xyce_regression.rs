@@ -1825,32 +1825,29 @@ fn test_xyce_generic_switch_hysteresis_transient_branch_current_case_runs() {
 }
 
 #[test]
-fn test_xyce_current_and_voltage_switch_hysteresis_variants_stay_named_unsupported() {
+fn test_xyce_switch_on_off_family_transient_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for (relative, reason) in [
-        (
-            "Netlists/ISWITCH/iswitchHyst1.cir",
-            "generic ISWITCH hysteresis",
-        ),
-        (
-            "Netlists/VSWITCH/VswitchHyst1.cir",
-            "VSWITCH ON/OFF hysteresis",
-        ),
+    for relative in [
+        "Netlists/ISWITCH/iswitchHyst1.cir",
+        "Netlists/VSWITCH/Vswitch_A1.cir",
+        "Netlists/VSWITCH/Vswitch_B1.cir",
+        "Netlists/VSWITCH/VswitchHyst1.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
-            result.passed && result.expected_unsupported,
-            "{relative} should stay named unsupported until its Xyce switch hysteresis model is production-validated, got {result:?}"
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce ON/OFF-family switch transient comparison, got {result:?}"
         );
         assert!(
-            result
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains(reason)),
-            "unsupported reason for {relative} should name '{reason}', got {result:?}"
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
         );
     }
 }

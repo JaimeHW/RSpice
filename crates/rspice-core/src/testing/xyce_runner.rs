@@ -4663,33 +4663,10 @@ impl XyceTestRunner {
                         *coefficient,
                     )?;
                 }
-                ElementKind::VSwitch { model, .. } => {
-                    if Self::netlist_model_has_any_param(
-                        netlist,
-                        model,
-                        &["VON", "VOFF", "VHON", "VHOFF", "ON", "OFF", "ONH", "OFFH"],
-                    ) {
-                        return Err(format!(
-                            "native static .PRINT TRAN comparison does not yet support Xyce VSWITCH ON/OFF hysteresis model '{}' on element '{}'",
-                            model, element.name
-                        ));
-                    }
-                }
+                ElementKind::VSwitch { .. } => {}
                 ElementKind::ISwitch {
-                    control_element,
-                    model,
-                    ..
+                    control_element, ..
                 } => {
-                    if Self::netlist_model_has_any_param(
-                        netlist,
-                        model,
-                        &["IHON", "IHOFF", "ONH", "OFFH"],
-                    ) {
-                        return Err(format!(
-                            "native static .PRINT TRAN comparison does not yet support Xyce ISWITCH hysteresis model '{}' on element '{}'",
-                            model, element.name
-                        ));
-                    }
                     Self::validate_current_controlled_source_probe(
                         elements,
                         "ISWITCH",
@@ -4703,16 +4680,6 @@ impl XyceTestRunner {
                     ..
                 } => {
                     if Self::netlist_model_is_current_switch(netlist, model) {
-                        if Self::netlist_model_has_any_param(
-                            netlist,
-                            model,
-                            &["IHON", "IHOFF", "ONH", "OFFH"],
-                        ) {
-                            return Err(format!(
-                                "native static .PRINT TRAN comparison does not yet support Xyce generic ISWITCH hysteresis model '{}' on element '{}'",
-                                model, element.name
-                            ));
-                        }
                         let control_element =
                             Self::direct_branch_current_control(control_expression).ok_or_else(
                                 || {
@@ -4768,20 +4735,6 @@ impl XyceTestRunner {
                 model.model_type.to_ascii_uppercase().as_str(),
                 "ISWITCH" | "ISW" | "CSW"
             )
-        })
-    }
-
-    fn netlist_model_has_any_param(netlist: &Netlist, model_name: &str, names: &[&str]) -> bool {
-        Self::find_model(&netlist.models, model_name).is_some_and(|model| {
-            model.params.iter().any(|(name, _)| {
-                names
-                    .iter()
-                    .any(|candidate| name.eq_ignore_ascii_case(candidate))
-            }) || model.expr_params.iter().any(|(name, _)| {
-                names
-                    .iter()
-                    .any(|candidate| name.eq_ignore_ascii_case(candidate))
-            })
         })
     }
 

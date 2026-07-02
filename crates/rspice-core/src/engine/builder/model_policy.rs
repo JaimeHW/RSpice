@@ -607,9 +607,11 @@ pub(super) fn validate_diode_model_level(
     Ok(())
 }
 
-pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &["VT", "VH", "RON", "ROFF", "SMOOTH"];
+pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &[
+    "VT", "VH", "VON", "VOFF", "VHON", "VHOFF", "ON", "OFF", "ONH", "OFFH", "RON", "ROFF", "SMOOTH",
+];
 pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &[
-    "IT", "IH", "ION", "IOFF", "ON", "OFF", "RON", "ROFF", "SMOOTH",
+    "IT", "IH", "ION", "IOFF", "IHON", "IHOFF", "ON", "OFF", "ONH", "OFFH", "RON", "ROFF", "SMOOTH",
 ];
 pub(super) const GENERIC_SWITCH_MODEL_PARAMS: &[&str] =
     &["ON", "OFF", "ONH", "OFFH", "RON", "ROFF"];

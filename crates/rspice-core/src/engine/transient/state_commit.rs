@@ -76,6 +76,7 @@ impl Engine {
         circuit.update_coupled_inductor_pair_state(accepted_solution);
         circuit.update_multi_winding_transformer_state(accepted_solution);
         circuit.refresh_jiles_atherton_inductances(accepted_solution);
+        circuit.commit_accepted_nonlinear_state();
 
         // Update transmission-line delayed-wave history from the accepted state.
         for (idx, tl) in circuit.tlines.iter_mut().enumerate() {

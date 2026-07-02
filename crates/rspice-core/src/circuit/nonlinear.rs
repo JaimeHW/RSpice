@@ -424,6 +424,17 @@ impl CircuitData {
         }
     }
 
+    /// Commit nonlinear hysteresis state that must advance only after a
+    /// transient timestep has been accepted.
+    pub(crate) fn commit_accepted_nonlinear_state(&mut self) {
+        for vswitch in &mut self.vswitches {
+            vswitch.commit_transient_hysteresis();
+        }
+        for iswitch in &mut self.iswitches {
+            iswitch.commit_transient_hysteresis();
+        }
+    }
+
     /// Re-linearize JFET/MESFET devices directly at a static probe solution.
     ///
     /// Normal nonlinear updates intentionally apply ngspice-style branch

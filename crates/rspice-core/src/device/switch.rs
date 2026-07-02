@@ -54,9 +54,253 @@ pub enum SwitchState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GenericSwitchHysteresisSide {
+enum XyceSwitchHysteresisSide {
     Off,
     On,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XyceSwitchCurve {
+    on: Value,
+    off: Value,
+    onh: Value,
+    offh: Value,
+    hysteresis_enabled: bool,
+    sticky_off_transition: bool,
+    last_state: Value,
+    transition_hold: Option<XyceSwitchHysteresisSide>,
+    pending_side: Option<XyceSwitchHysteresisSide>,
+    departing_on: bool,
+    off_departure_bridge_count: u8,
+    pending_departing_on: bool,
+    pending_off_departure_bridge_count: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XyceSwitchEvaluation {
+    conductance: Value,
+    dconductance_dcontrol: Value,
+    state: SwitchState,
+}
+
+impl XyceSwitchCurve {
+    fn new(
+        on: Value,
+        off: Value,
+        onh: Value,
+        offh: Value,
+        hysteresis_enabled: bool,
+        sticky_off_transition: bool,
+    ) -> Self {
+        Self {
+            on,
+            off,
+            onh,
+            offh,
+            hysteresis_enabled,
+            sticky_off_transition,
+            last_state: 0.0,
+            transition_hold: Some(XyceSwitchHysteresisSide::Off),
+            pending_side: Some(XyceSwitchHysteresisSide::Off),
+            departing_on: false,
+            off_departure_bridge_count: 0,
+            pending_departing_on: false,
+            pending_off_departure_bridge_count: 0,
+        }
+    }
+
+    fn set_initial_state(&mut self, state: SwitchState) {
+        match state {
+            SwitchState::On => {
+                self.last_state = 1.0;
+                self.transition_hold = Some(XyceSwitchHysteresisSide::On);
+                self.pending_side = Some(XyceSwitchHysteresisSide::On);
+                self.departing_on = false;
+                self.off_departure_bridge_count = 0;
+                self.pending_departing_on = false;
+                self.pending_off_departure_bridge_count = 0;
+            }
+            SwitchState::Off | SwitchState::Transitioning => {
+                self.last_state = 0.0;
+                self.transition_hold = Some(XyceSwitchHysteresisSide::Off);
+                self.pending_side = Some(XyceSwitchHysteresisSide::Off);
+                self.departing_on = false;
+                self.off_departure_bridge_count = 0;
+                self.pending_departing_on = false;
+                self.pending_off_departure_bridge_count = 0;
+            }
+        }
+    }
+
+    fn commit_pending_side(&mut self) {
+        if let Some(side) = self.pending_side {
+            self.transition_hold = Some(side);
+        }
+        self.departing_on = self.pending_departing_on;
+        self.off_departure_bridge_count = self.pending_off_departure_bridge_count;
+    }
+
+    #[inline]
+    fn safe_delta(delta: Value) -> Value {
+        if delta.abs() >= 1.0e-12 {
+            delta
+        } else if delta.is_sign_negative() {
+            -1.0e-12
+        } else {
+            1.0e-12
+        }
+    }
+
+    fn interpolated_sensitivity(
+        ron: Value,
+        roff: Value,
+        normalized_state: Value,
+        dstate_dcontrol: Value,
+    ) -> (Value, Value) {
+        let state = normalized_state.clamp(0.0, 1.0);
+        if state >= 1.0 {
+            return (1.0 / ron, 0.0);
+        }
+        if state <= 0.0 {
+            return (1.0 / roff, 0.0);
+        }
+
+        let lm = (ron * roff).sqrt().ln();
+        let lr = (ron / roff).ln();
+        let x = 2.0 * state - 1.0;
+        let conductance = (-lm - 0.75 * lr * x + 0.25 * lr * x * x * x).exp();
+        let dconductance_dstate = conductance * 1.5 * lr * (x * x - 1.0);
+        (conductance, dconductance_dstate * dstate_dcontrol)
+    }
+
+    fn evaluate(&mut self, control: Value, ron: Value, roff: Value) -> XyceSwitchEvaluation {
+        let dstate_dcontrol = 1.0 / Self::safe_delta(self.on - self.off);
+        let base_state = (control - self.off) * dstate_dcontrol;
+
+        if !self.hysteresis_enabled {
+            self.last_state = base_state;
+            self.transition_hold = None;
+            let (conductance, dconductance_dcontrol) =
+                Self::interpolated_sensitivity(ron, roff, base_state, dstate_dcontrol);
+            return XyceSwitchEvaluation {
+                conductance,
+                dconductance_dcontrol,
+                state: switch_state_for_normalized_control(base_state),
+            };
+        }
+
+        let previous_state = self.last_state;
+        let hys_on_state = (control - self.off) / Self::safe_delta(self.onh - self.off);
+        let hys_off_state = (control - self.offh) / Self::safe_delta(self.on - self.offh);
+
+        match self.transition_hold.unwrap_or(if previous_state >= 1.0 {
+            XyceSwitchHysteresisSide::On
+        } else {
+            XyceSwitchHysteresisSide::Off
+        }) {
+            XyceSwitchHysteresisSide::Off => {
+                if base_state >= 1.0 || hys_off_state >= 1.0 {
+                    self.last_state = hys_off_state;
+                    self.pending_side = Some(XyceSwitchHysteresisSide::On);
+                    self.pending_departing_on = false;
+                    self.pending_off_departure_bridge_count = 0;
+                    return XyceSwitchEvaluation {
+                        conductance: 1.0 / ron,
+                        dconductance_dcontrol: 0.0,
+                        state: SwitchState::On,
+                    };
+                }
+                let short_bridge_complete =
+                    !self.sticky_off_transition && self.off_departure_bridge_count >= 2;
+                if base_state <= 0.0 || (!short_bridge_complete && hys_off_state <= 0.0) {
+                    self.last_state = hys_off_state;
+                    self.pending_side = Some(XyceSwitchHysteresisSide::Off);
+                    self.pending_departing_on = false;
+                    self.pending_off_departure_bridge_count = 0;
+                    return XyceSwitchEvaluation {
+                        conductance: 1.0 / roff,
+                        dconductance_dcontrol: 0.0,
+                        state: SwitchState::Off,
+                    };
+                }
+
+                let use_hysteresis_bridge = self.sticky_off_transition || !short_bridge_complete;
+                let interpolation_state = if use_hysteresis_bridge {
+                    hys_off_state
+                } else {
+                    base_state
+                };
+                self.last_state = interpolation_state;
+                self.pending_side = Some(XyceSwitchHysteresisSide::Off);
+                self.pending_departing_on = false;
+                self.pending_off_departure_bridge_count = if self.sticky_off_transition {
+                    0
+                } else {
+                    self.off_departure_bridge_count.saturating_add(1).min(2)
+                };
+                let (conductance, dconductance_dcontrol) =
+                    Self::interpolated_sensitivity(ron, roff, interpolation_state, dstate_dcontrol);
+                XyceSwitchEvaluation {
+                    conductance,
+                    dconductance_dcontrol,
+                    state: SwitchState::Transitioning,
+                }
+            }
+            XyceSwitchHysteresisSide::On => {
+                if base_state >= 1.0 || hys_on_state >= 1.0 {
+                    self.last_state = hys_on_state;
+                    self.pending_side = Some(XyceSwitchHysteresisSide::On);
+                    self.pending_departing_on = false;
+                    self.pending_off_departure_bridge_count = 0;
+                    return XyceSwitchEvaluation {
+                        conductance: 1.0 / ron,
+                        dconductance_dcontrol: 0.0,
+                        state: SwitchState::On,
+                    };
+                }
+                if base_state <= 0.0 || hys_on_state <= 0.0 {
+                    self.last_state = hys_on_state;
+                    self.pending_side = Some(XyceSwitchHysteresisSide::Off);
+                    self.pending_departing_on = false;
+                    self.pending_off_departure_bridge_count = 0;
+                    return XyceSwitchEvaluation {
+                        conductance: 1.0 / roff,
+                        dconductance_dcontrol: 0.0,
+                        state: SwitchState::Off,
+                    };
+                }
+
+                self.last_state = hys_on_state;
+                if self.departing_on {
+                    self.pending_side = Some(XyceSwitchHysteresisSide::Off);
+                    self.pending_departing_on = false;
+                    self.pending_off_departure_bridge_count = 2;
+                } else {
+                    self.pending_side = Some(XyceSwitchHysteresisSide::On);
+                    self.pending_departing_on = true;
+                    self.pending_off_departure_bridge_count = 0;
+                }
+                let (conductance, dconductance_dcontrol) =
+                    Self::interpolated_sensitivity(ron, roff, hys_on_state, dstate_dcontrol);
+                XyceSwitchEvaluation {
+                    conductance,
+                    dconductance_dcontrol,
+                    state: SwitchState::Transitioning,
+                }
+            }
+        }
+    }
+}
+
+#[inline]
+fn switch_state_for_normalized_control(state: Value) -> SwitchState {
+    if state >= 1.0 {
+        SwitchState::On
+    } else if state <= 0.0 {
+        SwitchState::Off
+    } else {
+        SwitchState::Transitioning
+    }
 }
 
 //=============================================================================
@@ -88,6 +332,7 @@ pub struct VoltageSwitch {
     pub roff: Value,
     /// Smoothness factor (controls transition steepness)
     pub smooth: Value,
+    xyce_curve: Option<XyceSwitchCurve>,
 
     // State
     state: SwitchState,
@@ -95,6 +340,7 @@ pub struct VoltageSwitch {
     in_hysteresis_band: bool,
     current_resistance: Value,
     prev_resistance: Value,
+    current_dg_dcontrol: Value,
 }
 
 impl VoltageSwitch {
@@ -117,11 +363,13 @@ impl VoltageSwitch {
             ron: 1.0,
             roff: 1e6,
             smooth: 0.1,
+            xyce_curve: None,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
             in_hysteresis_band: false,
             current_resistance: 1e6,
             prev_resistance: 1e6,
+            current_dg_dcontrol: 0.0,
         }
     }
 
@@ -142,11 +390,54 @@ impl VoltageSwitch {
         if let Some(&v) = params.get("SMOOTH") {
             self.smooth = v.max(1e-6);
         }
+        if params.contains_key("VON")
+            || params.contains_key("VOFF")
+            || params.contains_key("VHON")
+            || params.contains_key("VHOFF")
+            || params.contains_key("ON")
+            || params.contains_key("OFF")
+            || params.contains_key("ONH")
+            || params.contains_key("OFFH")
+        {
+            let on = params
+                .get("ON")
+                .or_else(|| params.get("VON"))
+                .copied()
+                .unwrap_or(1.0);
+            let off = params
+                .get("OFF")
+                .or_else(|| params.get("VOFF"))
+                .copied()
+                .unwrap_or(0.0);
+            let onh = params
+                .get("ONH")
+                .or_else(|| params.get("VHON"))
+                .copied()
+                .unwrap_or(on);
+            let offh = params
+                .get("OFFH")
+                .or_else(|| params.get("VHOFF"))
+                .copied()
+                .unwrap_or(off);
+            let hysteresis_enabled = params.contains_key("ONH")
+                || params.contains_key("OFFH")
+                || params.contains_key("VHON")
+                || params.contains_key("VHOFF");
+            self.xyce_curve = Some(XyceSwitchCurve::new(
+                on,
+                off,
+                onh,
+                offh,
+                hysteresis_enabled,
+                false,
+            ));
+        }
         self.current_resistance = match self.state {
             SwitchState::On => self.ron,
             SwitchState::Off => self.roff,
             SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
         };
+        self.current_dg_dcontrol = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
         self
@@ -168,6 +459,7 @@ impl VoltageSwitch {
             SwitchState::Off => self.roff,
             SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
         };
+        self.current_dg_dcontrol = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
         self
@@ -182,6 +474,10 @@ impl VoltageSwitch {
             SwitchState::Off => self.roff,
             SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
         };
+        if let Some(curve) = &mut self.xyce_curve {
+            curve.set_initial_state(state);
+        }
+        self.current_dg_dcontrol = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
         self
@@ -195,6 +491,13 @@ impl VoltageSwitch {
     /// Get current resistance
     pub fn resistance(&self) -> Value {
         self.current_resistance
+    }
+
+    /// Commit hysteresis-side state after an accepted transient timestep.
+    pub fn commit_transient_hysteresis(&mut self) {
+        if let Some(curve) = &mut self.xyce_curve {
+            curve.commit_pending_side();
+        }
     }
 
     /// Calculate resistance based on control voltage using smooth transition
@@ -224,6 +527,13 @@ impl VoltageSwitch {
     ///
     /// Returns `(g, dg/dvctrl)` for the current hysteresis state.
     fn control_sensitivity(&self, vctrl: Value) -> (Value, Value) {
+        if self.xyce_curve.is_some() {
+            return (
+                1.0 / self.current_resistance.max(1.0e-30),
+                self.current_dg_dcontrol,
+            );
+        }
+
         let vt_eff = self.effective_threshold();
         let smooth = self.smooth.max(1e-6);
         let x = (vctrl - vt_eff) / smooth;
@@ -307,8 +617,17 @@ impl NonlinearDevice for VoltageSwitch {
 
         self.prev_state = self.state;
         self.prev_resistance = self.current_resistance;
-        self.update_state(vctrl);
-        self.current_resistance = self.calculate_resistance(vctrl);
+        if let Some(curve) = &mut self.xyce_curve {
+            let evaluation = curve.evaluate(vctrl, self.ron, self.roff);
+            self.state = evaluation.state;
+            self.in_hysteresis_band = false;
+            self.current_resistance = 1.0 / evaluation.conductance.max(1.0e-30);
+            self.current_dg_dcontrol = evaluation.dconductance_dcontrol;
+        } else {
+            self.update_state(vctrl);
+            self.current_resistance = self.calculate_resistance(vctrl);
+            self.current_dg_dcontrol = 0.0;
+        }
     }
 
     fn stamp_nonlinear(
@@ -413,6 +732,7 @@ pub struct CurrentSwitch {
     pub on_current: Option<Value>,
     /// Xyce-style full-off current control value from IOFF/OFF.
     pub off_current: Option<Value>,
+    xyce_curve: Option<XyceSwitchCurve>,
 
     // State
     state: SwitchState,
@@ -420,6 +740,7 @@ pub struct CurrentSwitch {
     in_hysteresis_band: bool,
     current_resistance: Value,
     prev_resistance: Value,
+    current_dg_dictrl: Value,
 }
 
 impl CurrentSwitch {
@@ -438,11 +759,13 @@ impl CurrentSwitch {
             smooth: 0.001, // 1mA smooth region
             on_current: None,
             off_current: None,
+            xyce_curve: None,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
             in_hysteresis_band: false,
             current_resistance: 1e6,
             prev_resistance: 1e6,
+            current_dg_dictrl: 0.0,
         }
     }
 
@@ -470,29 +793,54 @@ impl CurrentSwitch {
         }
         if params.contains_key("ION")
             || params.contains_key("IOFF")
+            || params.contains_key("IHON")
+            || params.contains_key("IHOFF")
             || params.contains_key("ON")
             || params.contains_key("OFF")
+            || params.contains_key("ONH")
+            || params.contains_key("OFFH")
         {
-            self.on_current = Some(
-                params
-                    .get("ON")
-                    .or_else(|| params.get("ION"))
-                    .copied()
-                    .unwrap_or(1.0e-3),
-            );
-            self.off_current = Some(
-                params
-                    .get("OFF")
-                    .or_else(|| params.get("IOFF"))
-                    .copied()
-                    .unwrap_or(0.0),
-            );
+            let on = params
+                .get("ON")
+                .or_else(|| params.get("ION"))
+                .copied()
+                .unwrap_or(1.0e-3);
+            let off = params
+                .get("OFF")
+                .or_else(|| params.get("IOFF"))
+                .copied()
+                .unwrap_or(0.0);
+            let onh = params
+                .get("ONH")
+                .or_else(|| params.get("IHON"))
+                .copied()
+                .unwrap_or(on);
+            let offh = params
+                .get("OFFH")
+                .or_else(|| params.get("IHOFF"))
+                .copied()
+                .unwrap_or(off);
+            let hysteresis_enabled = params.contains_key("ONH")
+                || params.contains_key("OFFH")
+                || params.contains_key("IHON")
+                || params.contains_key("IHOFF");
+            self.on_current = Some(on);
+            self.off_current = Some(off);
+            self.xyce_curve = Some(XyceSwitchCurve::new(
+                on,
+                off,
+                onh,
+                offh,
+                hysteresis_enabled,
+                true,
+            ));
         }
         self.current_resistance = match self.state {
             SwitchState::On => self.ron,
             SwitchState::Off => self.roff,
             SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
         };
+        self.current_dg_dictrl = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
         self
@@ -514,6 +862,7 @@ impl CurrentSwitch {
             SwitchState::Off => self.roff,
             SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
         };
+        self.current_dg_dictrl = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
         self
@@ -528,6 +877,10 @@ impl CurrentSwitch {
             SwitchState::Off => self.roff,
             SwitchState::Transitioning => (self.ron * self.roff).sqrt(),
         };
+        if let Some(curve) = &mut self.xyce_curve {
+            curve.set_initial_state(state);
+        }
+        self.current_dg_dictrl = 0.0;
         self.prev_resistance = self.current_resistance;
         self.prev_state = self.state;
         self
@@ -543,21 +896,17 @@ impl CurrentSwitch {
         self.current_resistance
     }
 
+    /// Commit hysteresis-side state after an accepted transient timestep.
+    pub fn commit_transient_hysteresis(&mut self) {
+        if let Some(curve) = &mut self.xyce_curve {
+            curve.commit_pending_side();
+        }
+    }
+
     /// Calculate resistance based on control current
     fn calculate_resistance(&self, ictrl: Value) -> Value {
         let (g, _) = self.control_sensitivity(ictrl);
         1.0 / g.max(1e-30)
-    }
-
-    #[inline]
-    fn safe_delta(delta: Value) -> Value {
-        if delta.abs() >= 1.0e-12 {
-            delta
-        } else if delta.is_sign_negative() {
-            -1.0e-12
-        } else {
-            1.0e-12
-        }
     }
 
     #[inline]
@@ -581,8 +930,11 @@ impl CurrentSwitch {
     ///
     /// Returns `(g, dg/dictrl)` for the current hysteresis state.
     fn control_sensitivity(&self, ictrl: Value) -> (Value, Value) {
-        if let (Some(on), Some(off)) = (self.on_current, self.off_current) {
-            return self.on_off_current_sensitivity(ictrl, on, off);
+        if self.xyce_curve.is_some() {
+            return (
+                1.0 / self.current_resistance.max(1.0e-30),
+                self.current_dg_dictrl,
+            );
         }
 
         let it_eff = self.effective_threshold();
@@ -605,40 +957,8 @@ impl CurrentSwitch {
         (g, dg_dictrl)
     }
 
-    fn on_off_current_sensitivity(&self, ictrl: Value, on: Value, off: Value) -> (Value, Value) {
-        let delta = Self::safe_delta(on - off);
-        let state = (ictrl - off) / delta;
-
-        if state <= 0.0 {
-            return (1.0 / self.roff, 0.0);
-        }
-        if state >= 1.0 {
-            return (1.0 / self.ron, 0.0);
-        }
-
-        let x = 2.0 * state - 1.0;
-        let lm = (self.ron * self.roff).sqrt().ln();
-        let lr = (self.ron / self.roff).ln();
-        let g = (-lm - 0.75 * lr * x + 0.25 * lr * x * x * x).exp();
-        let dg_dstate = g * 1.5 * lr * (x * x - 1.0);
-        (g, dg_dstate / delta)
-    }
-
     /// Update state with hysteresis
     fn update_state(&mut self, ictrl: Value) {
-        if let (Some(on), Some(off)) = (self.on_current, self.off_current) {
-            let state = (ictrl - off) / Self::safe_delta(on - off);
-            self.in_hysteresis_band = false;
-            self.state = if state >= 1.0 {
-                SwitchState::On
-            } else if state <= 0.0 {
-                SwitchState::Off
-            } else {
-                SwitchState::Transitioning
-            };
-            return;
-        }
-
         if self.ih < 0.0 {
             let lower = self.it + self.ih;
             let upper = self.it - self.ih;
@@ -696,8 +1016,17 @@ impl NonlinearDevice for CurrentSwitch {
 
         self.prev_state = self.state;
         self.prev_resistance = self.current_resistance;
-        self.update_state(ictrl);
-        self.current_resistance = self.calculate_resistance(ictrl);
+        if let Some(curve) = &mut self.xyce_curve {
+            let evaluation = curve.evaluate(ictrl, self.ron, self.roff);
+            self.state = evaluation.state;
+            self.in_hysteresis_band = false;
+            self.current_resistance = 1.0 / evaluation.conductance.max(1.0e-30);
+            self.current_dg_dictrl = evaluation.dconductance_dcontrol;
+        } else {
+            self.update_state(ictrl);
+            self.current_resistance = self.calculate_resistance(ictrl);
+            self.current_dg_dictrl = 0.0;
+        }
     }
 
     fn stamp_nonlinear(
@@ -804,7 +1133,7 @@ pub struct GenericSwitch {
     /// Xyce-compatible stored normalized control state from the previous
     /// accepted evaluation.
     last_state: Value,
-    transition_hold: Option<GenericSwitchHysteresisSide>,
+    transition_hold: Option<XyceSwitchHysteresisSide>,
     current_conductance: Value,
 }
 
@@ -1225,19 +1554,19 @@ impl GenericSwitch {
 
         let mut interpolation_state = base_state;
         match self.transition_hold.take() {
-            Some(GenericSwitchHysteresisSide::Off) => {
+            Some(XyceSwitchHysteresisSide::Off) => {
                 interpolation_state = hys_off_state;
             }
-            Some(GenericSwitchHysteresisSide::On) => {
+            Some(XyceSwitchHysteresisSide::On) => {
                 interpolation_state = hys_on_state;
             }
             None if previous_state <= 0.0 => {
                 interpolation_state = hys_off_state;
-                self.transition_hold = Some(GenericSwitchHysteresisSide::Off);
+                self.transition_hold = Some(XyceSwitchHysteresisSide::Off);
             }
             None if previous_state >= 1.0 => {
                 interpolation_state = hys_on_state;
-                self.transition_hold = Some(GenericSwitchHysteresisSide::On);
+                self.transition_hold = Some(XyceSwitchHysteresisSide::On);
             }
             None => {}
         }
