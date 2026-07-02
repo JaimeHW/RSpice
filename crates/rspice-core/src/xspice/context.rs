@@ -1085,10 +1085,32 @@ impl CmContext {
 
     /// Set analog vector output values with zero direct partials.
     pub fn set_output_vector(&mut self, name: &str, values: Vec<Value>) {
-        let value_count = values.len();
-        self.set_output_vector_from_fn(name, value_count, |index| {
-            values.get(index).copied().unwrap_or(0.0)
-        });
+        self.set_output_vector_from_slice(name, &values);
+    }
+
+    /// Set analog vector output values from borrowed values with zero direct partials.
+    pub fn set_output_vector_from_slice(&mut self, name: &str, values: &[Value]) {
+        let width = self.port_width(name).max(values.len());
+        let out = self
+            .outputs
+            .entry(name.to_string())
+            .or_insert_with(|| OutputValue::analog_vector(width));
+        match out {
+            OutputValue::AnalogVector(existing) => {
+                existing.resize(width, AnalogValue::default());
+                for (index, analog) in existing.iter_mut().enumerate() {
+                    analog.prev_value = analog.value;
+                    analog.value = values.get(index).copied().unwrap_or(0.0);
+                    analog.partial = 0.0;
+                }
+            }
+            OutputValue::Analog(existing) if width == 1 => {
+                existing.prev_value = existing.value;
+                existing.value = values.first().copied().unwrap_or(0.0);
+                existing.partial = 0.0;
+            }
+            _ => {}
+        }
     }
 
     /// Set analog vector output values from a callback with zero direct partials.

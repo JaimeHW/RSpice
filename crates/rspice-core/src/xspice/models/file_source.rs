@@ -644,9 +644,7 @@ fn locate_filesource_interval(ctx: &mut CmContext, data: &FileSourceRowsData) ->
 
 fn set_filesource_output_from_row(ctx: &mut CmContext, data: &FileSourceRowsData, row: usize) {
     let values = data.row_values(row);
-    ctx.set_output_vector_from_fn("out", values.len(), |index| {
-        values.get(index).copied().unwrap_or(0.0)
-    });
+    ctx.set_output_vector_from_slice("out", values);
 }
 
 fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
