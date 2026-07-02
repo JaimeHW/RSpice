@@ -339,6 +339,10 @@ impl CodeModel for RealDelay {
 #[derive(Debug, Default)]
 pub struct RealToVoltage;
 
+/// Ngspice-compatible alias used by real-valued auto-bridge decks.
+#[derive(Debug, Default)]
+pub struct RealToVoltageAlias;
+
 impl CodeModel for RealToVoltage {
     fn name(&self) -> &str {
         "real_to_v"
@@ -434,6 +438,32 @@ impl CodeModel for RealToVoltage {
             },
         );
         Ok(())
+    }
+}
+
+impl CodeModel for RealToVoltageAlias {
+    fn name(&self) -> &str {
+        "r_to_v"
+    }
+
+    fn description(&self) -> &str {
+        RealToVoltage.description()
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        RealToVoltage.ports()
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        RealToVoltage.parameters()
+    }
+
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        RealToVoltage.init(ctx)
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        RealToVoltage.evaluate(ctx)
     }
 }
 

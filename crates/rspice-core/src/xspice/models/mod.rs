@@ -173,6 +173,6 @@ pub use xtradev::{
     SeeGeneratorAlias, Sidiode, Zener,
 };
 
-pub use xtraevt::{DigitalToReal, RealDelay, RealGain, RealToVoltage};
+pub use xtraevt::{DigitalToReal, RealDelay, RealGain, RealToVoltage, RealToVoltageAlias};
 
 pub use debug::PrintParamTypes;

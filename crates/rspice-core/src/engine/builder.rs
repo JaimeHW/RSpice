@@ -651,7 +651,7 @@ fn is_xspice_digital_bridge_model(model_name: &str) -> bool {
 }
 
 fn is_xspice_real_bridge_model(model_name: &str) -> bool {
-    model_name.eq_ignore_ascii_case("real_to_v")
+    model_name.eq_ignore_ascii_case("real_to_v") || model_name.eq_ignore_ascii_case("r_to_v")
 }
 
 fn plan_xspice_auto_bridges(

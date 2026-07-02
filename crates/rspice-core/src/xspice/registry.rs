@@ -109,6 +109,7 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "pswitch",
     "pwl",
     "pwlts",
+    "r_to_v",
     "real_delay",
     "real_gain",
     "real_to_v",
@@ -260,6 +261,7 @@ impl CodeModelRegistry {
         self.register(Arc::new(super::models::RealGain));
         self.register(Arc::new(super::models::RealDelay));
         self.register(Arc::new(super::models::RealToVoltage));
+        self.register(Arc::new(super::models::RealToVoltageAlias));
 
         // Digital sources
         self.register(Arc::new(super::models::DigitalSource));
