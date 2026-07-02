@@ -34,6 +34,8 @@ const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
 const XYCE_DEFAULT_PRN_FRACTION_DIGITS: f64 = 8.0;
 const PRN_TIME_NEIGHBOR_HALF_ULPS: f64 = 4.0;
+const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
+    "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
 /// Configuration for the Xyce corpus runner.
 #[derive(Debug, Clone)]
@@ -200,6 +202,7 @@ struct XyceStaticTranPlan {
 enum XyceStaticTranContract {
     PlainStatic,
     WrapperStatic,
+    WrapperStaticExpectedError,
 }
 
 impl XyceStaticTranContract {
@@ -209,6 +212,10 @@ impl XyceStaticTranContract {
             (Self::PlainStatic, true) => "static_prn_step_tran",
             (Self::WrapperStatic, false) => "wrapper_static_prn_tran",
             (Self::WrapperStatic, true) => "wrapper_static_prn_step_tran",
+            (Self::WrapperStaticExpectedError, false) => "wrapper_static_prn_tran_expected_error",
+            (Self::WrapperStaticExpectedError, true) => {
+                "wrapper_static_prn_step_tran_expected_error"
+            }
         }
     }
 }
@@ -741,6 +748,18 @@ impl XyceTestRunner {
             );
         }
 
+        if let Some(result) = self.run_expected_error_contract(deck, start) {
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.baseline_family_contract(deck) {
             let result = self.run_baseline_family_contract(deck, contract, start);
             if self.config.verbose {
@@ -836,6 +855,27 @@ impl XyceTestRunner {
         }
     }
 
+    fn run_expected_error_contract(
+        &self,
+        deck: &XyceDeck,
+        start: Instant,
+    ) -> Option<XyceTestResult> {
+        let reference_path = self.static_prn_reference_path(&deck.path)?;
+        if reference_path.is_file() {
+            return None;
+        }
+
+        let source = fs::read_to_string(&deck.path).ok()?;
+        if !Self::source_may_have_pwl_repeat_option(&source) {
+            return None;
+        }
+
+        let contract = "expected_error_pwl_repeat_value";
+        Self::validate_expected_pwl_repeat_value_error_source(&source, &deck.path)
+            .ok()
+            .map(|()| self.passed_result(deck, start, contract))
+    }
+
     fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
 
@@ -929,9 +969,12 @@ impl XyceTestRunner {
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let tran = Self::single_tran_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
-        let native_static_prn_wrapper =
-            Self::is_native_static_prn_tran_wrapper_candidate(&deck.relative_path, &source);
-        if steps.is_empty() && requires_wrapper && !native_static_prn_wrapper {
+        let native_static_prn_wrapper = if requires_wrapper {
+            Self::native_static_prn_tran_wrapper_contract(&deck.path, &deck.relative_path, &source)
+        } else {
+            None
+        };
+        if steps.is_empty() && requires_wrapper && native_static_prn_wrapper.is_none() {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
         if !steps.is_empty() {
@@ -951,7 +994,7 @@ impl XyceTestRunner {
             steps,
             wrapper_tolerance: Self::native_default_prn_tran_wrapper_tolerance(&deck.relative_path),
             contract: if requires_wrapper {
-                XyceStaticTranContract::WrapperStatic
+                native_static_prn_wrapper.unwrap_or(XyceStaticTranContract::WrapperStatic)
             } else {
                 XyceStaticTranContract::PlainStatic
             },
@@ -1527,9 +1570,22 @@ impl XyceTestRunner {
         }
     }
 
-    fn is_native_static_prn_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
-        Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
+    fn native_static_prn_tran_wrapper_contract(
+        deck_path: &Path,
+        relative_path: &str,
+        source: &str,
+    ) -> Option<XyceStaticTranContract> {
+        if Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
             || Self::is_native_output_initial_interval_tran_wrapper_candidate(source)
+        {
+            return Some(XyceStaticTranContract::WrapperStatic);
+        }
+
+        if Self::validate_native_pwl_repeat_error_tran_wrapper_contract(deck_path, source).is_ok() {
+            return Some(XyceStaticTranContract::WrapperStaticExpectedError);
+        }
+
+        None
     }
 
     fn is_native_default_prn_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
@@ -1601,6 +1657,73 @@ impl XyceTestRunner {
                 "wrapper-origin initial-interval transient .prn contract requires one .OPTIONS OUTPUT INITIAL_INTERVAL directive, found {initial_interval_options}"
             )),
         }
+    }
+
+    fn validate_native_pwl_repeat_error_tran_wrapper_contract(
+        deck_path: &Path,
+        source: &str,
+    ) -> Result<(), String> {
+        Self::validate_native_static_prn_tran_wrapper_contract(source)?;
+        if !Self::source_may_have_pwl_repeat_option(source) {
+            return Err(
+                "wrapper-origin PWL repeat error contract requires a primary PWL repeat deck"
+                    .to_string(),
+            );
+        }
+
+        let stem = deck_path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| {
+                "wrapper-origin PWL repeat error contract requires a .cir filename".to_string()
+            })?;
+        let sibling_path = deck_path.with_file_name(format!("{stem}RepeatFail.cir"));
+        let sibling_source = fs::read_to_string(&sibling_path).map_err(|err| {
+            format!(
+                "wrapper-origin PWL repeat error contract requires sibling expected-error deck '{}': {err}",
+                sibling_path.display()
+            )
+        })?;
+
+        Self::validate_expected_pwl_repeat_value_error_source(&sibling_source, &sibling_path)
+    }
+
+    fn validate_expected_pwl_repeat_value_error_source(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<(), String> {
+        if !Self::source_may_have_pwl_repeat_option(source) {
+            return Err(
+                "expected PWL repeat-value error deck has no PWL repeat option".to_string(),
+            );
+        }
+
+        match Self::parse_xyce_netlist(source, deck_path) {
+            Ok(_) => Err(format!(
+                "expected {XYCE_PWL_REPEAT_VALUE_ERROR}, but deck parsed successfully"
+            )),
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains(XYCE_PWL_REPEAT_VALUE_ERROR) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "expected {XYCE_PWL_REPEAT_VALUE_ERROR}, got {message}"
+                    ))
+                }
+            }
+        }
+    }
+
+    fn source_may_have_pwl_repeat_option(source: &str) -> bool {
+        Self::logical_netlist_lines(source).iter().any(|line| {
+            let compact = Self::strip_netlist_comment(line)
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            compact.contains("pwl") && (compact.contains("r=") || compact.contains("repeat="))
+        })
     }
 
     fn native_default_prn_tran_wrapper_tolerance(
@@ -3785,6 +3908,9 @@ impl XyceTestRunner {
         tran: &XyceTranAnalysis,
     ) -> Option<Value> {
         match spec {
+            crate::netlist::SourceSpec::RfPort { inner, .. } => {
+                Self::source_spec_transient_max_step(inner, tran)
+            }
             crate::netlist::SourceSpec::Dc(_)
             | crate::netlist::SourceSpec::Ac { .. }
             | crate::netlist::SourceSpec::DcAc { .. }

@@ -5,6 +5,9 @@ use super::*;
 // Source Specification Parsing
 //=============================================================================
 
+const PWL_REPEAT_VALUE_ERROR: &str =
+    "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
+
 /// Parse source specification (DC, AC, PULSE, SIN, PWL, PAT, EXP, SFFM, AM,
 /// TRNOISE)
 ///
@@ -1076,7 +1079,7 @@ fn validate_pwl_repeat_from(line_num: usize, repeat_from: Option<Value>) -> Resu
     {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "PWL R must be finite and non-negative".to_string(),
+            message: PWL_REPEAT_VALUE_ERROR.to_string(),
         });
     }
     Ok(())
@@ -1103,7 +1106,7 @@ fn validate_pwl_repeat_before_last(
     if repeat_from >= last_time {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: "PWL R must be less than the final PWL time".to_string(),
+            message: PWL_REPEAT_VALUE_ERROR.to_string(),
         });
     }
     Ok(())

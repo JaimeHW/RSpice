@@ -500,6 +500,43 @@ fn test_xyce_vpwl_step_delay_repeat_case_runs() {
 }
 
 #[test]
+fn test_xyce_vpwl_repeat_error_wrapper_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let primary = "Netlists/Certification_Tests/BUG_630_SON/vpwl.cir";
+    assert!(
+        runner.requires_upstream_wrapper(primary),
+        "{primary} should retain its removed upstream VPWL error-wrapper provenance"
+    );
+    let primary_result = runner.run_test(root.join(primary));
+    assert!(
+        primary_result.passed && !primary_result.expected_unsupported,
+        "{primary} should run as a native VPWL transient comparison with sibling expected-error validation, got {primary_result:?}"
+    );
+    assert!(
+        primary_result.mismatches.is_empty(),
+        "{primary} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        primary_result.contract, "wrapper_static_prn_tran_expected_error",
+        "{primary} should report the native wrapper-origin expected-error contract"
+    );
+
+    let repeat_fail = "Netlists/Certification_Tests/BUG_630_SON/vpwlRepeatFail.cir";
+    let repeat_fail_result = runner.run_test(root.join(repeat_fail));
+    assert!(
+        repeat_fail_result.passed && !repeat_fail_result.expected_unsupported,
+        "{repeat_fail} should run as a native Xyce expected-error PWL repeat validation, got {repeat_fail_result:?}"
+    );
+    assert_eq!(
+        repeat_fail_result.contract, "expected_error_pwl_repeat_value",
+        "{repeat_fail} should report the native expected-error contract"
+    );
+}
+
+#[test]
 fn test_xyce_pat_pattern_source_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
