@@ -479,7 +479,14 @@ fn parse_axis(
         ));
     }
 
-    let mut axis = Vec::with_capacity(len);
+    let mut axis = Vec::new();
+    axis.try_reserve_exact(len).map_err(|err| {
+        table_file_error(
+            model,
+            file,
+            format!("unable to reserve {len} {role} axis value(s): {err}"),
+        )
+    })?;
     for (index, token) in row.tokens.iter().copied().enumerate() {
         let value = parse_table_spice_value(token);
         if !value.is_finite() {
