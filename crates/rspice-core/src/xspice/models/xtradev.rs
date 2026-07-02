@@ -2420,8 +2420,9 @@ impl CodeModel for CapacitorIc {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         finite_reactive_param(ctx, "c", "capacitoric")?;
+        let ic = finite_reactive_param(ctx, "ic", "capacitoric")?;
         ctx.allocate_states(1);
-        ctx.set_initial_state(0, ctx.param_or("ic", 0.0));
+        ctx.set_initial_state(0, ic);
         Ok(())
     }
 
@@ -2436,14 +2437,15 @@ impl CodeModel for CapacitorIc {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let capacitance = finite_reactive_param(ctx, "c", "capacitoric")?;
+        let ic = finite_reactive_param(ctx, "ic", "capacitoric")?;
         if ctx.is_dc() {
-            ctx.set_output_with_partial("cap", ctx.param_or("ic", 0.0), 0.0);
+            ctx.set_output_with_partial("cap", ic, 0.0);
             return Ok(());
         }
 
         let ramp_factor = ctx.analog_ramp_factor();
         if ctx.is_transient() && ramp_factor < 1.0 {
-            let output = ctx.param_or("ic", 0.0) * ramp_factor;
+            let output = ic * ramp_factor;
             xtradev_set_state(ctx, 0, output);
             ctx.set_output_with_partial("cap", output, 0.0);
             return Ok(());
@@ -2517,8 +2519,9 @@ impl CodeModel for InductorIc {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         finite_reactive_param(ctx, "l", "inductoric")?;
+        let ic = finite_reactive_param(ctx, "ic", "inductoric")?;
         ctx.allocate_states(1);
-        ctx.set_initial_state(0, ctx.param_or("ic", 0.0));
+        ctx.set_initial_state(0, ic);
         Ok(())
     }
 
@@ -2533,12 +2536,13 @@ impl CodeModel for InductorIc {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let inductance = finite_reactive_param(ctx, "l", "inductoric")?;
+        let ic = finite_reactive_param(ctx, "ic", "inductoric")?;
         let pair = ctx.port_node_pair("ind").unwrap_or((0, 0));
 
         let (current, partial) = if ctx.is_dc() {
-            (ctx.param_or("ic", 0.0), 0.0)
+            (ic, 0.0)
         } else if ctx.is_transient() && ctx.analog_ramp_factor() < 1.0 {
-            let current = ctx.param_or("ic", 0.0) * ctx.analog_ramp_factor();
+            let current = ic * ctx.analog_ramp_factor();
             xtradev_set_state(ctx, 0, current);
             (current, 0.0)
         } else {
@@ -3037,12 +3041,13 @@ impl CodeModel for LcCouple {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        finite_param(ctx, "num_turns", 1.0)?;
         ctx.allocate_states(1);
         Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let num_turns = ctx.param_or("num_turns", 1.0);
+        let num_turns = finite_param(ctx, "num_turns", 1.0)?;
         let input_current = ctx.input("l");
         let in_flux = -ctx.input("mmf_out");
 
@@ -3066,7 +3071,9 @@ impl CodeModel for LcCouple {
     }
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
-        let num_turns = ctx.param_or("num_turns", 1.0);
+        let Ok(num_turns) = finite_param(ctx, "num_turns", 1.0) else {
+            return Vec::new();
+        };
         match xtradev_port_key(output_port) {
             XtradevPortKey::MmfOut => vec![("l".to_string(), num_turns)],
             XtradevPortKey::L if ctx.time != 0.0 && ctx.is_transient() => {
@@ -3087,7 +3094,9 @@ impl CodeModel for LcCouple {
         output_port: &str,
         frequency: Value,
     ) -> Vec<(String, crate::Complex64)> {
-        let num_turns = ctx.param_or("num_turns", 1.0);
+        let Ok(num_turns) = finite_param(ctx, "num_turns", 1.0) else {
+            return Vec::new();
+        };
         match xtradev_port_key(output_port) {
             XtradevPortKey::L => vec![(
                 "mmf_out".to_string(),
@@ -3888,6 +3897,32 @@ mod tests {
             InductorIc.transient_breakpoints(&ctx).expect("breakpoints"),
             vec![2.0]
         );
+    }
+
+    #[test]
+    fn reactive_initial_conditions_and_lcouple_turns_reject_nonfinite_params() {
+        let mut cap_ctx = CmContext::new();
+        cap_ctx.set_param("c", 1.0);
+        cap_ctx.set_param("ic", f64::NAN);
+        assert!(matches!(
+            CapacitorIc.init(&mut cap_ctx),
+            Err(CmError::InvalidParameter { .. })
+        ));
+
+        let mut ind_ctx = CmContext::new();
+        ind_ctx.set_param("l", 1.0);
+        ind_ctx.set_param("ic", f64::INFINITY);
+        assert!(matches!(
+            InductorIc.init(&mut ind_ctx),
+            Err(CmError::InvalidParameter { .. })
+        ));
+
+        let mut coupling_ctx = CmContext::new();
+        coupling_ctx.set_param("num_turns", f64::NAN);
+        assert!(matches!(
+            LcCouple.init(&mut coupling_ctx),
+            Err(CmError::InvalidParameter { .. })
+        ));
     }
 
     #[test]
