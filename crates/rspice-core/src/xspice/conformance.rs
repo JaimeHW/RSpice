@@ -708,6 +708,10 @@ pub fn materialize_ngspice_xspice_parity_suite(
     {
         let destination_deck = destination_root.join(&deck.relative_path);
         let source = read_to_string(&destination_deck)?;
+        if xspice_parity_exclusion_reason(&deck.relative_path, &source).is_some() {
+            skipped_relative_decks.push(deck.relative_path.clone());
+            continue;
+        }
         let Some(instrumented) = instrument_xspice_parity_deck(&source) else {
             skipped_relative_decks.push(deck.relative_path.clone());
             continue;
@@ -919,6 +923,30 @@ fn xspice_source_has_line(source: &str, target: &str) -> bool {
     })
 }
 
+fn xspice_parity_exclusion_reason(relative_path: &Path, source: &str) -> Option<String> {
+    let normalized = normalized_example_path(relative_path);
+    if normalized == "original-examples/initial_conditions.deck" {
+        return Some(
+            "local ngspice-46 does not emit a raw reference for this legacy capacitor/inductor initial-condition deck"
+                .to_string(),
+        );
+    }
+    if !has_xspice_instance(source) {
+        return Some("does not instantiate an XSPICE A-device".to_string());
+    }
+    None
+}
+
+fn has_xspice_instance(source: &str) -> bool {
+    source.lines().skip(1).any(|line| {
+        let trimmed = strip_inline_comment(line).trim_start();
+        let Some(first) = trimmed.as_bytes().first().copied() else {
+            return false;
+        };
+        first == b'a' || first == b'A'
+    })
+}
+
 fn is_example_deck(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -979,11 +1007,7 @@ fn third_party_example_reason(relative_path: &Path, source: &str) -> Option<Stri
 }
 
 fn expected_invalid_example_reason(relative_path: &Path) -> Option<String> {
-    let normalized = relative_path
-        .iter()
-        .map(|part| part.to_string_lossy().to_ascii_lowercase())
-        .collect::<Vec<_>>()
-        .join("/");
+    let normalized = normalized_example_path(relative_path);
     match normalized.as_str() {
         "original-examples/bad_io.deck" => {
             Some("intentionally exercises an instance/model port-count mismatch".to_string())
@@ -994,11 +1018,22 @@ fn expected_invalid_example_reason(relative_path: &Path) -> Option<String> {
         "original-examples/bad_name.deck" => {
             Some("intentionally references an unknown XSPICE model".to_string())
         }
+        "original-examples/bad_param_type.deck" => {
+            Some("intentionally supplies a boolean token to a numeric gain parameter".to_string())
+        }
         "original-examples/mixed_io_size.deck" => {
             Some("intentionally supplies a vector parameter with the wrong input width".to_string())
         }
         _ => None,
     }
+}
+
+fn normalized_example_path(relative_path: &Path) -> String {
+    relative_path
+        .iter()
+        .map(|part| part.to_string_lossy().to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn has_control_block(source: &str) -> bool {

@@ -125,6 +125,16 @@ impl TestRunner {
         if self.suppresses_historical_reference_output_for(cir_path) {
             return Ok(None);
         }
+        let prefer_live_raw = axis_candidates
+            .iter()
+            .any(|axis| Self::normalize_variable_name(axis) == "time");
+        if prefer_live_raw
+            && self.live_reference_config()?.is_some()
+            && let Some(table) =
+                self.load_live_raw_reference_table_for_axis(cir_path, axis_candidates)?
+        {
+            return Ok(Some(table));
+        }
         let Some(reference_output) = self.load_reference_output(cir_path)? else {
             return Ok(None);
         };

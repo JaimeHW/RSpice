@@ -382,6 +382,20 @@ impl TestRunner {
         actual: f64,
         absolute_tolerance: f64,
     ) -> Option<f64> {
+        if expected.is_nan() || actual.is_nan() {
+            return if expected.is_nan() && actual.is_nan() {
+                None
+            } else {
+                Some(f64::INFINITY)
+            };
+        }
+        if expected == actual {
+            return None;
+        }
+        if !expected.is_finite() || !actual.is_finite() {
+            return Some(f64::INFINITY);
+        }
+
         let abs_diff = (expected - actual).abs();
 
         if abs_diff < absolute_tolerance {

@@ -167,7 +167,9 @@ impl TestRunner {
         }))
     }
 
-    fn live_reference_config(&self) -> Result<Option<&LiveNgspiceReferenceConfig>, String> {
+    pub(in crate::testing::ngspice_runner) fn live_reference_config(
+        &self,
+    ) -> Result<Option<&LiveNgspiceReferenceConfig>, String> {
         match &self.live_reference_config {
             Ok(Some(config)) => Ok(Some(config)),
             Ok(None) => Ok(None),
@@ -354,7 +356,9 @@ impl LiveNgspiceReferenceConfig {
                 .env("SPICE_SCRIPTS", self.source_root.join("tests").join("bin"))
                 .env("ngspice_vpath", source_parent);
         } else {
-            command.env_remove("SPICE_SCRIPTS").env_remove("ngspice_vpath");
+            command
+                .env_remove("SPICE_SCRIPTS")
+                .env_remove("ngspice_vpath");
         }
         let mut child = command.spawn().map_err(|err| {
             format!(
@@ -370,8 +374,8 @@ impl LiveNgspiceReferenceConfig {
                 Ok(None) if start.elapsed() >= timeout => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
-                    let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+                    let stdout = read_text_lossy_or_default(&stdout_path);
+                    let stderr = read_text_lossy_or_default(&stderr_path);
                     let _ = fs::remove_file(&stdout_path);
                     let _ = fs::remove_file(&stderr_path);
                     return Err(format!(
@@ -393,13 +397,13 @@ impl LiveNgspiceReferenceConfig {
             }
         };
 
-        let stdout = fs::read_to_string(&stdout_path).map_err(|err| {
+        let stdout = read_text_lossy(&stdout_path).map_err(|err| {
             format!(
                 "failed to read temporary stdout file '{}': {err}",
                 stdout_path.display()
             )
         })?;
-        let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+        let stderr = read_text_lossy_or_default(&stderr_path);
         let _ = fs::remove_file(&stdout_path);
         let _ = fs::remove_file(&stderr_path);
 
@@ -471,7 +475,9 @@ impl LiveNgspiceReferenceConfig {
                 .env("SPICE_SCRIPTS", self.source_root.join("tests").join("bin"))
                 .env("ngspice_vpath", source_parent);
         } else {
-            command.env_remove("SPICE_SCRIPTS").env_remove("ngspice_vpath");
+            command
+                .env_remove("SPICE_SCRIPTS")
+                .env_remove("ngspice_vpath");
         }
         let mut child = command.spawn().map_err(|err| {
             format!(
@@ -487,8 +493,8 @@ impl LiveNgspiceReferenceConfig {
                 Ok(None) if start.elapsed() >= timeout => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
-                    let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+                    let stdout = read_text_lossy_or_default(&stdout_path);
+                    let stderr = read_text_lossy_or_default(&stderr_path);
                     let _ = fs::remove_file(&raw_path);
                     let _ = fs::remove_file(&stdout_path);
                     let _ = fs::remove_file(&stderr_path);
@@ -514,8 +520,8 @@ impl LiveNgspiceReferenceConfig {
             }
         };
 
-        let stdout = fs::read_to_string(&stdout_path).unwrap_or_default();
-        let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+        let stdout = read_text_lossy_or_default(&stdout_path);
+        let stderr = read_text_lossy_or_default(&stderr_path);
         let raw = fs::read(&raw_path).map_err(|err| {
             let _ = fs::remove_file(&raw_path);
             let _ = fs::remove_file(&stdout_path);
@@ -1090,6 +1096,14 @@ fn tail(content: &str) -> String {
         .collect::<Vec<_>>()
         .join(" | ");
     truncate(lines.trim(), 240)
+}
+
+fn read_text_lossy(path: &Path) -> std::io::Result<String> {
+    fs::read(path).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn read_text_lossy_or_default(path: &Path) -> String {
+    read_text_lossy(path).unwrap_or_default()
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {
