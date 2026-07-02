@@ -197,22 +197,47 @@ pub enum IntegrationOrder {
     Second,
 }
 
+fn compiler_phase_trace_enabled() -> bool {
+    std::env::var_os("RSPICE_VERILOGA_PHASE_TRACE").is_some()
+        || std::env::var_os("RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE").is_some()
+}
+
+fn trace_compiler_phase(
+    enabled: bool,
+    target: &str,
+    phase: &str,
+    elapsed: Option<std::time::Duration>,
+    detail: Option<String>,
+) {
+    if !enabled {
+        return;
+    }
+    match (elapsed, detail) {
+        (Some(elapsed), Some(detail)) => {
+            eprintln!("{target}: finished {phase} in {elapsed:.2?} ({detail})");
+        }
+        (Some(elapsed), None) => {
+            eprintln!("{target}: finished {phase} in {elapsed:.2?}");
+        }
+        (None, Some(detail)) => {
+            eprintln!("{target}: starting {phase} ({detail})");
+        }
+        (None, None) => {
+            eprintln!("{target}: starting {phase}");
+        }
+    }
+    use std::io::Write as _;
+    let _ = std::io::stderr().flush();
+}
+
 fn trace_canonical_ir_phase(
     enabled: bool,
     module_name: &str,
     phase: &str,
     elapsed: Option<std::time::Duration>,
 ) {
-    if !enabled {
-        return;
-    }
-    if let Some(elapsed) = elapsed {
-        eprintln!("canonical IR {module_name}: finished {phase} in {elapsed:.2?}");
-    } else {
-        eprintln!("canonical IR {module_name}: starting {phase}");
-    }
-    use std::io::Write as _;
-    let _ = std::io::stderr().flush();
+    let target = format!("canonical IR {module_name}");
+    trace_compiler_phase(enabled, &target, phase, elapsed, None);
 }
 
 impl VerilogACompiler {
@@ -317,16 +342,53 @@ impl VerilogACompiler {
         source_package: &str,
         source: &str,
     ) -> CompileResult<semantic::AnalyzedFile> {
+        let trace = compiler_phase_trace_enabled();
+        let target = format!("Verilog-A compiler {source_package}");
+
         // Phase 1: Lexical analysis
+        trace_compiler_phase(
+            trace,
+            &target,
+            "lex",
+            None,
+            Some(format!("{} bytes", source.len())),
+        );
+        let phase_started = std::time::Instant::now();
         let source_map = SourceMap::new();
         let source_id = source_map.add_source(source_package, source);
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
+        trace_compiler_phase(
+            trace,
+            &target,
+            "lex",
+            Some(phase_started.elapsed()),
+            Some(format!("{} tokens", tokens.len())),
+        );
 
         // Phase 2: Parsing
+        trace_compiler_phase(trace, &target, "parse", None, None);
+        let phase_started = std::time::Instant::now();
         let source_file = Parser::new(&tokens).parse()?;
+        trace_compiler_phase(
+            trace,
+            &target,
+            "parse",
+            Some(phase_started.elapsed()),
+            Some(format!("{} top-level items", source_file.items.len())),
+        );
 
         // Phase 3: Semantic analysis
-        SemanticAnalyzer::new().analyze(&source_file)
+        trace_compiler_phase(trace, &target, "semantic", None, None);
+        let phase_started = std::time::Instant::now();
+        let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
+        trace_compiler_phase(
+            trace,
+            &target,
+            "semantic",
+            Some(phase_started.elapsed()),
+            Some(format!("{} modules", analyzed.modules.len())),
+        );
+        Ok(analyzed)
     }
 
     /// Compile already-preprocessed Verilog-A source to canonical IR.
@@ -358,7 +420,7 @@ impl VerilogACompiler {
         module_name: Option<&str>,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
         let module = self.select_analyzed_module(analyzed, module_name)?;
-        let trace = std::env::var_os("RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE").is_some();
+        let trace = compiler_phase_trace_enabled();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
         trace_canonical_ir_phase(trace, &module.name, "hir", None);
         let phase_started = std::time::Instant::now();
@@ -492,12 +554,27 @@ impl VerilogACompiler {
         path: &std::path::Path,
         module_name: Option<&str>,
     ) -> CompileResult<CanonicalIrFile> {
+        let trace = compiler_phase_trace_enabled();
+        let trace_target = format!("Verilog-A compiler {}", path.display());
         let mut pp = self.configured_preprocessor();
 
+        trace_compiler_phase(trace, &trace_target, "preprocess", None, None);
+        let phase_started = std::time::Instant::now();
         let preprocessed = pp
             .preprocess_file(path)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
         let dependencies = pp.take_dependencies();
+        trace_compiler_phase(
+            trace,
+            &trace_target,
+            "preprocess",
+            Some(phase_started.elapsed()),
+            Some(format!(
+                "{} bytes, {} dependencies",
+                preprocessed.len(),
+                dependencies.len()
+            )),
+        );
         let source_package_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
         if std::env::var("RSPICE_DEBUG_PP").is_ok() {
