@@ -697,6 +697,10 @@ pub enum XspicePort {
     /// Syntax: `[nodename]`
     Digital(String),
 
+    /// Explicitly typed single digital node.
+    /// Syntax: `%d nodename`
+    ExplicitDigital(String),
+
     /// Single inverted digital node
     /// Syntax: `[~nodename]`
     DigitalInverted(String),
@@ -765,6 +769,11 @@ impl XspicePort {
         XspicePort::Digital(node.into())
     }
 
+    /// Create an explicitly typed single digital port
+    pub fn explicit_digital(node: impl Into<String>) -> Self {
+        XspicePort::ExplicitDigital(node.into())
+    }
+
     /// Create a single inverted digital port
     pub fn digital_inverted(node: impl Into<String>) -> Self {
         XspicePort::DigitalInverted(node.into())
@@ -810,6 +819,7 @@ impl XspicePort {
         matches!(
             self,
             XspicePort::Digital(_)
+                | XspicePort::ExplicitDigital(_)
                 | XspicePort::DigitalInverted(_)
                 | XspicePort::DigitalVector(_)
                 | XspicePort::DigitalVectorMixed(_)
@@ -826,6 +836,7 @@ impl XspicePort {
         match self {
             XspicePort::Analog(n)
             | XspicePort::Digital(n)
+            | XspicePort::ExplicitDigital(n)
             | XspicePort::DigitalInverted(n)
             | XspicePort::Conductance(n)
             | XspicePort::Current(n)

@@ -1858,6 +1858,32 @@ mod tests {
     }
 
     #[test]
+    fn xspice_explicit_digital_typed_ports_parse_like_ngspice_mif_ports() {
+        let netlist = Netlist::parse(
+            "xspice explicit digital typed ports\n\
+             A1 %d in %d([bus0 bus1]) out model\n\
+             .end\n",
+        )
+        .expect("ngspice %d typed XSPICE ports should parse");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, ports, .. } => {
+                assert_eq!(model, "MODEL");
+                assert_eq!(
+                    ports,
+                    &vec![
+                        XspicePort::ExplicitDigital("IN".to_string()),
+                        XspicePort::ExplicitDigital("BUS0".to_string()),
+                        XspicePort::ExplicitDigital("BUS1".to_string()),
+                        XspicePort::Analog("OUT".to_string()),
+                    ]
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn xspice_quoted_null_mif_token_parses_as_null_connection() {
         let netlist = Netlist::parse(
             "xspice quoted null token\n\

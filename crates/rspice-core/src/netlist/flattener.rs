@@ -747,6 +747,7 @@ impl<'a> Flattener<'a> {
         match port {
             XspicePort::Analog(name) => XspicePort::Analog(remap(name)),
             XspicePort::Digital(name) => XspicePort::Digital(remap(name)),
+            XspicePort::ExplicitDigital(name) => XspicePort::ExplicitDigital(remap(name)),
             XspicePort::DigitalInverted(name) => XspicePort::DigitalInverted(remap(name)),
             XspicePort::AnalogVector(names) => {
                 XspicePort::AnalogVector(names.iter().map(|name| remap(name)).collect())

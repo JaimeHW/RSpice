@@ -10,6 +10,7 @@
 //! - `node` - Analog node (voltage/current port)
 //! - `[node]` - Digital node (12-state logic)
 //! - `[n1 n2 n3]` - Digital vector (multiple digital nodes)
+//! - `%d node` - Explicit single-ended digital port
 //! - `%v node` - Explicit single-ended voltage input/output
 //! - `%v([n1 n2])` - Compact vector of single-ended voltage ports
 //! - `%i vsrc` - Named voltage-source branch-current input
@@ -381,6 +382,7 @@ fn parse_typed_ports(
     let prefix = parse_typed_port_prefix(stream, line_num)?;
 
     let prefix_lower = prefix.to_lowercase();
+    let is_single_digital = prefix_lower == "%d";
     let is_single_voltage = prefix_lower == "%v";
     let is_single_current = prefix_lower == "%i";
     let is_single_conductance = prefix_lower == "%g";
@@ -391,7 +393,8 @@ fn parse_typed_ports(
     let is_conductance = prefix_lower == "%gd";
     let is_hybrid = prefix_lower == "%hd";
 
-    if !is_single_voltage
+    if !is_single_digital
+        && !is_single_voltage
         && !is_single_current
         && !is_single_conductance
         && !is_single_hybrid
@@ -413,6 +416,7 @@ fn parse_typed_ports(
             line_num,
             &prefix,
             TypedPortKind {
+                is_single_digital,
                 is_single_voltage,
                 is_single_current,
                 is_single_conductance,
@@ -429,6 +433,11 @@ fn parse_typed_ports(
         return Ok(vec![XspicePort::Null]);
     }
 
+    if is_single_digital {
+        return parse_single_typed_node(stream, line_num, &prefix)
+            .map(XspicePort::ExplicitDigital)
+            .map(|port| vec![port]);
+    }
     if is_single_voltage {
         return parse_single_typed_node(stream, line_num, &prefix)
             .map(XspicePort::Analog)
@@ -590,6 +599,7 @@ fn parse_typed_port_prefix(
 
 #[derive(Clone, Copy)]
 struct TypedPortKind {
+    is_single_digital: bool,
     is_single_voltage: bool,
     is_single_current: bool,
     is_single_conductance: bool,
@@ -685,6 +695,9 @@ fn nodes_to_typed_ports(
     prefix: &str,
     kind: TypedPortKind,
 ) -> Result<Vec<XspicePort>, ParseError> {
+    if kind.is_single_digital {
+        return Ok(nodes.into_iter().map(XspicePort::ExplicitDigital).collect());
+    }
     if kind.is_single_voltage {
         return Ok(nodes.into_iter().map(XspicePort::Analog).collect());
     }

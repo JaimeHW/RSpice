@@ -165,9 +165,10 @@ fn coerce_xspice_connection_named(
             port_spec.name, name
         ))),
         XspicePort::DigitalInverted(name) => convert_digital_inverted(circuit, name),
-        XspicePort::Analog(name) | XspicePort::Digital(name) | XspicePort::Conductance(name) => {
-            Ok(convert_scalar(circuit, name))
-        }
+        XspicePort::Analog(name)
+        | XspicePort::Digital(name)
+        | XspicePort::ExplicitDigital(name)
+        | XspicePort::Conductance(name) => Ok(convert_scalar(circuit, name)),
         XspicePort::Current(name) => {
             if port_spec.direction == crate::xspice::PortDirection::Out {
                 Ok(PortConnection::CurrentOutput {
@@ -320,6 +321,7 @@ fn explicit_xspice_port_type(
 
     match parsed_port {
         XspicePort::Conductance(_) => Some(PortType::Conductance),
+        XspicePort::ExplicitDigital(_) => Some(PortType::Digital),
         XspicePort::Current(_) => Some(PortType::Current),
         XspicePort::VoltageName(_) => Some(PortType::VoltageName),
         XspicePort::DifferentialVoltage { .. } => Some(PortType::DifferentialVoltage),
@@ -352,6 +354,7 @@ fn pack_scalar_vector_port(
         match port {
             XspicePort::Analog(name)
             | XspicePort::Digital(name)
+            | XspicePort::ExplicitDigital(name)
             | XspicePort::Conductance(name)
             | XspicePort::Hybrid(name) => {
                 nodes.push(crate::netlist::XspiceDigitalNode::new(name.clone(), false))
@@ -449,6 +452,7 @@ fn coerce_xspice_vector_connection(
             }
             XspicePort::Analog(name)
             | XspicePort::Digital(name)
+            | XspicePort::ExplicitDigital(name)
             | XspicePort::Conductance(name) => {
                 let node = resolve_xspice_node(circuit, name);
                 simple_nodes.push(node);
@@ -669,6 +673,21 @@ mod tests {
 
         assert!(
             err.to_string().contains("does not allow explicit"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn explicit_digital_connection_must_be_allowed_by_port_spec() {
+        let mut circuit = CircuitData::new();
+        let port = PortSpec::input("in", PortType::Voltage);
+        let parsed = XspicePort::ExplicitDigital("IN".to_string());
+
+        let err = coerce_xspice_connection(&mut circuit, &port, &parsed)
+            .expect_err("explicit %d must not satisfy a voltage-only port");
+
+        assert!(
+            err.to_string().contains("does not allow explicit Digital"),
             "unexpected error: {err}"
         );
     }

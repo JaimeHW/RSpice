@@ -107,6 +107,7 @@ impl NodeUnion {
         match port {
             XspicePort::Analog(name)
             | XspicePort::Digital(name)
+            | XspicePort::ExplicitDigital(name)
             | XspicePort::DigitalInverted(name)
             | XspicePort::Conductance(name)
             | XspicePort::Current(name)
@@ -335,6 +336,9 @@ impl NodeUnion {
         match port {
             XspicePort::Analog(name) => XspicePort::Analog(self.remap_node(&name)),
             XspicePort::Digital(name) => XspicePort::Digital(self.remap_node(&name)),
+            XspicePort::ExplicitDigital(name) => {
+                XspicePort::ExplicitDigital(self.remap_node(&name))
+            }
             XspicePort::DigitalInverted(name) => {
                 XspicePort::DigitalInverted(self.remap_node(&name))
             }
