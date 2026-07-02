@@ -588,6 +588,17 @@ fn d_state_delay(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value>
     Ok(value)
 }
 
+fn d_state_integer_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<i64> {
+    let value = ctx.param_or(name, default);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("integer value must be finite, got {value}"),
+        });
+    }
+    Ok(value as i64)
+}
+
 fn d_state_cache_key(
     state_file: &str,
     input_width: usize,
@@ -1129,7 +1140,7 @@ impl CodeModel for DigitalStateMachine {
         else {
             return Ok(());
         };
-        let reset_state = ctx.param_or("reset_state", 0.0) as i64;
+        let reset_state = d_state_integer_param(ctx, "reset_state", 0.0)?;
         let clk_delay = d_state_delay(ctx, "clk_delay", 1.0e-9)?;
         let reset_delay = d_state_delay(ctx, "reset_delay", 1.0e-9)?;
 
@@ -1342,6 +1353,39 @@ mod tests {
                 "d_state must not queue outputs after rejecting {name}"
             );
         }
+
+        unregister_test_data_file(state_file);
+    }
+
+    #[test]
+    fn d_state_rejects_nonfinite_reset_state_before_casting() {
+        let _guard = data_file_test_guard();
+        let state_file = "virtual://d_state/nonfinite-reset-state";
+        unregister_test_data_file(state_file);
+        data_file::register_data_file(state_file, "0 0s 0 -> 0\n")
+            .expect("register virtual d_state table");
+
+        let model = DigitalStateMachine;
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 1);
+        ctx.set_port_width("out", 1);
+        ctx.set_string_param("state_file", state_file);
+        ctx.set_param("reset_state", f64::NAN);
+        model.init(&mut ctx).expect("d_state init");
+
+        let err = model
+            .evaluate(&mut ctx)
+            .expect_err("nonfinite d_state reset_state must fail evaluation");
+        let message = err.to_string();
+
+        assert!(
+            message.contains("reset_state"),
+            "error should identify reset_state, got {message}"
+        );
+        assert!(
+            ctx.take_pending_events().is_empty(),
+            "d_state must not queue outputs after rejecting reset_state"
+        );
 
         unregister_test_data_file(state_file);
     }
