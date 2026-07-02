@@ -89,6 +89,17 @@ fn official_cosim_queue_size(ctx: &CmContext) -> CmResult<usize> {
     Ok((queue_size as i64).max(COSIM_QUEUE_SIZE_MIN) as usize)
 }
 
+fn official_cosim_integer(ctx: &CmContext, name: &str, default: Value) -> CmResult<i64> {
+    let value = ctx.param_or(name, default).round();
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("integer value must be finite, got {value}"),
+        });
+    }
+    Ok(value as i64)
+}
+
 fn d_cosim_inout_port() -> PortSpec {
     PortSpec {
         name: "d_inout".to_string(),
@@ -385,7 +396,7 @@ impl CodeModel for DigitalCosim {
             output_count,
             inout_count,
             queue_size,
-            irreversible: ctx.param_or("irreversible", 1.0) as i64,
+            irreversible: official_cosim_integer(ctx, "irreversible", 1.0)?,
         };
         if spec.queue_size == 0 {
             return Err(CmError::InvalidParameter {
@@ -544,8 +555,13 @@ mod tests {
 
         ctx.set_param("delay", Value::NAN);
         ctx.set_param("queue_size", Value::NAN);
+        ctx.set_param("irreversible", Value::NAN);
         assert_invalid_param(official_cosim_delay(&ctx), "delay");
         assert_invalid_param(official_cosim_queue_size(&ctx), "queue_size");
+        assert_invalid_param(
+            official_cosim_integer(&ctx, "irreversible", 1.0),
+            "irreversible",
+        );
     }
 
     fn assert_invalid_param<T: std::fmt::Debug>(result: CmResult<T>, expected_name: &str) {
