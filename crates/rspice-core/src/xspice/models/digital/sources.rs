@@ -577,6 +577,17 @@ fn d_state_error(state_file: &str, line: usize, message: impl Into<String>) -> C
     ))
 }
 
+fn d_state_delay(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value> {
+    let value = ctx.param_or(name, default);
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("value must be finite, got {value}"),
+        });
+    }
+    Ok(value)
+}
+
 fn d_state_cache_key(
     state_file: &str,
     input_width: usize,
@@ -1119,8 +1130,8 @@ impl CodeModel for DigitalStateMachine {
             return Ok(());
         };
         let reset_state = ctx.param_or("reset_state", 0.0) as i64;
-        let clk_delay = ctx.param_or("clk_delay", 1.0e-9);
-        let reset_delay = ctx.param_or("reset_delay", 1.0e-9);
+        let clk_delay = d_state_delay(ctx, "clk_delay", 1.0e-9)?;
+        let reset_delay = d_state_delay(ctx, "reset_delay", 1.0e-9)?;
 
         if ctx.time == 0.0 || ctx.int_state(0) == 0 {
             d_state_set_int_state(ctx, 0, 1);
@@ -1298,6 +1309,41 @@ mod tests {
                 ("reset_load", &ParamType::Real, 1.0e-12, None),
             ]
         );
+    }
+
+    #[test]
+    fn d_state_rejects_nonfinite_event_delays() {
+        let _guard = data_file_test_guard();
+        let state_file = "virtual://d_state/nonfinite-event-delays";
+        unregister_test_data_file(state_file);
+        data_file::register_data_file(state_file, "0 0s 0 -> 0\n")
+            .expect("register virtual d_state table");
+
+        for name in ["clk_delay", "reset_delay"] {
+            let model = DigitalStateMachine;
+            let mut ctx = CmContext::new();
+            ctx.set_port_width("in", 1);
+            ctx.set_port_width("out", 1);
+            ctx.set_string_param("state_file", state_file);
+            ctx.set_param(name, f64::INFINITY);
+            model.init(&mut ctx).expect("d_state init");
+
+            let err = model
+                .evaluate(&mut ctx)
+                .expect_err("nonfinite d_state delay must fail evaluation");
+            let message = err.to_string();
+
+            assert!(
+                message.contains(name),
+                "error should identify {name}, got {message}"
+            );
+            assert!(
+                ctx.take_pending_events().is_empty(),
+                "d_state must not queue outputs after rejecting {name}"
+            );
+        }
+
+        unregister_test_data_file(state_file);
     }
 
     #[test]
