@@ -1823,8 +1823,8 @@ impl Instance {
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v1=0.0;
         let v2=1.0;
-        let v70=nv7;
-        let v74=(if (self.scalar_static_f64[37]!=0.0){(self.scalar_static_f64[55]*(nv1-nv5))}else{v1});
+        let v72=nv7;
+        let v76=(if (self.scalar_static_f64[37]!=0.0){(self.scalar_static_f64[57]*(nv1-nv5))}else{v1});
 
         stamper.stamp_potential_branch_local(
             Some(12),
@@ -1854,7 +1854,7 @@ impl Instance {
         stamper.stamp_current_node1_local(
             Some(7),
             None,
-            multiplicity * (v70),
+            multiplicity * (v72),
             7,
             multiplicity * (v2),
         );
@@ -1896,11 +1896,11 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(1),
             Some(5),
-            multiplicity * (v74),
+            multiplicity * (v76),
             1,
-            multiplicity * (self.scalar_static_f64[57]),
+            multiplicity * (self.scalar_static_f64[59]),
             5,
-            multiplicity * (self.scalar_static_f64[58]),
+            multiplicity * (self.scalar_static_f64[60]),
         );
         stamper.stamp_potential_branch_local(
             Some(1),

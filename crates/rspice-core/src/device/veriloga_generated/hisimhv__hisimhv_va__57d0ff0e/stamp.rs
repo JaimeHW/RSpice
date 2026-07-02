@@ -4321,16 +4321,16 @@ impl Instance {
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v0=1.0;
         let v2=0.0;
-        let v1348=nv9;
-        let v1365=nv5;
-        let v1687=nv15;
-        let v1691=(if self.scalar_static_bool[31]{(self.scalar_static_f64[88]*(nv1-nv7))}else{v2});
-        let v1694=(if (self.scalar_static_f64[89]!=0.0){(self.scalar_static_f64[107]*(nv11-v1348))}else{v2});
-        let v1697=(if (self.scalar_static_f64[89]!=0.0){(self.scalar_static_f64[108]*(nv10-v1348))}else{v2});
-        let v1701=(if (self.scalar_static_f64[89]!=0.0){(self.scalar_static_f64[106]*(nv3-v1348))}else{v2});
-        let v1703=(if self.scalar_static_bool[25]{(v1365*self.scalar_static_f64[174])}else{v2});
-        let v1705=(if self.scalar_static_bool[29]{(10000.0*v1365)}else{v2});
-        let v1706=(v1365*self.scalar_static_f64[128]);
+        let v1388=nv9;
+        let v1406=nv5;
+        let v1748=nv15;
+        let v1752=(if (self.scalar_static_f64[137]!=0.0){(self.scalar_static_f64[90]*(nv1-nv7))}else{v2});
+        let v1755=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[113]*(nv11-v1388))}else{v2});
+        let v1758=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[114]*(nv10-v1388))}else{v2});
+        let v1762=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[112]*(nv3-v1388))}else{v2});
+        let v1764=(if (self.scalar_static_f64[136]!=0.0){(v1406*self.scalar_static_f64[187])}else{v2});
+        let v1766=(if self.scalar_static_bool[29]{(10000.0*v1406)}else{v2});
+        let v1767=(v1406*self.scalar_static_f64[138]);
 
         stamper.stamp_potential_branch_local(
             Some(4),
@@ -4400,7 +4400,7 @@ impl Instance {
         stamper.stamp_current_node1_local(
             Some(15),
             None,
-            multiplicity * (v1687),
+            multiplicity * (v1748),
             15,
             multiplicity * (v0),
         );
@@ -4442,11 +4442,11 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(1),
             Some(7),
-            multiplicity * (v1691),
+            multiplicity * (v1752),
             1,
-            multiplicity * (self.scalar_static_f64[130]),
+            multiplicity * (self.scalar_static_f64[140]),
             7,
-            multiplicity * (self.scalar_static_f64[131]),
+            multiplicity * (self.scalar_static_f64[141]),
         );
         stamper.stamp_potential_branch_local(
             Some(1),
@@ -4461,29 +4461,29 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(11),
             Some(9),
-            multiplicity * (v1694),
+            multiplicity * (v1755),
             9,
-            multiplicity * (self.scalar_static_f64[133]),
+            multiplicity * (self.scalar_static_f64[143]),
             11,
-            multiplicity * (self.scalar_static_f64[134]),
+            multiplicity * (self.scalar_static_f64[144]),
         );
         stamper.stamp_current_node2_local(
             Some(10),
             Some(9),
-            multiplicity * (v1697),
+            multiplicity * (v1758),
             9,
-            multiplicity * (self.scalar_static_f64[136]),
+            multiplicity * (self.scalar_static_f64[146]),
             10,
-            multiplicity * (self.scalar_static_f64[137]),
+            multiplicity * (self.scalar_static_f64[147]),
         );
         stamper.stamp_current_node2_local(
             Some(3),
             Some(9),
-            multiplicity * (v1701),
+            multiplicity * (v1762),
             3,
-            multiplicity * (self.scalar_static_f64[139]),
+            multiplicity * (self.scalar_static_f64[149]),
             9,
-            multiplicity * (self.scalar_static_f64[140]),
+            multiplicity * (self.scalar_static_f64[150]),
         );
         stamper.stamp_potential_branch_local(
             Some(3),
@@ -4518,16 +4518,16 @@ impl Instance {
         stamper.stamp_current_node1_local(
             Some(5),
             None,
-            multiplicity * (v1703),
+            multiplicity * (v1764),
             5,
-            multiplicity * (self.scalar_static_f64[175]),
+            multiplicity * (self.scalar_static_f64[188]),
         );
         stamper.stamp_current_node1_local(
             Some(5),
             None,
-            multiplicity * (v1705),
+            multiplicity * (v1766),
             5,
-            multiplicity * (self.scalar_static_f64[141]),
+            multiplicity * (self.scalar_static_f64[151]),
         );
         stamper.stamp_potential_branch_local(
             Some(12),
@@ -4559,13 +4559,13 @@ impl Instance {
             12,
             v2,
         );
-        let v1706_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 17, v1706);
+        let v1767_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 17, v1767);
         stamper.stamp_current_node1_local(
             Some(5),
             None,
-            multiplicity * (v1706_ddt),
+            multiplicity * (v1767_ddt),
             5,
-            multiplicity * (((self.scalar_static_f64[128]) * ddt_scale)),
+            multiplicity * (((self.scalar_static_f64[138]) * ddt_scale)),
         );
         let mut locals = StampLocals::default();
 
@@ -4718,13 +4718,13 @@ impl Instance {
         let nv5 = ctx.node_voltage(nodes[5]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
-        let v1706=(nv5*self.scalar_static_f64[128]);
+        let v1767=(nv5*self.scalar_static_f64[138]);
 
         stamper.stamp_current_reactive_node1(
             Some(nodes[5]),
             None,
             nodes[5],
-            multiplicity * (self.scalar_static_f64[128]),
+            multiplicity * (self.scalar_static_f64[138]),
         );
         let mut locals = StampLocals::default();
 
