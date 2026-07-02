@@ -182,10 +182,6 @@ impl CodeModel for Gain {
         validate_analog_scalar_params(ctx, "gain", &["in_offset", "gain", "out_offset"])
     }
 
-    fn has_memoryless_linear_transient_stamp(&self) -> bool {
-        true
-    }
-
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let gain = finite_analog_scalar_param(ctx, "gain", "gain")?;
         let in_offset = finite_analog_scalar_param(ctx, "gain", "in_offset")?;
@@ -336,10 +332,6 @@ impl CodeModel for Summer {
 
         ctx.set_output("out", v_out);
         Ok(())
-    }
-
-    fn has_memoryless_linear_transient_stamp(&self) -> bool {
-        true
     }
 
     fn output_input_vector_partials(

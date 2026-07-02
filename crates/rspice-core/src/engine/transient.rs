@@ -698,8 +698,8 @@ impl Engine {
         );
         let enforce_force_candidate_safety =
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
-        let is_strictly_linear_transient = !circuit.has_nonlinear_devices()
-            || circuit.has_only_memoryless_linear_xspice_nonlinearity();
+        let is_strictly_linear_transient =
+            !circuit.has_nonlinear_devices() && !circuit.has_xspice_devices();
         // ngspice's flat transient Newton: when junction devices replace
         // their own iterate voltages (legacy GP pnjlim in update), the full
         // node step is the algorithm; per-iteration node-delta clamps walk
@@ -889,9 +889,6 @@ impl Engine {
             if let Some(slot) = solution_lte_excluded.get_mut(idx) {
                 *slot = true;
             }
-        }
-        for node in circuit.xspice_ideal_voltage_constraint_nodes() {
-            mark_voltage_lte_excluded(&mut solution_lte_excluded, node);
         }
         for idx in 0..circuit.voltage_sources.len() {
             mark_voltage_lte_excluded(
@@ -1531,7 +1528,7 @@ impl Engine {
                 // are unreachable by timestep reduction alone (the cycle is
                 // driven by the static nonlinearity, not by stiffness).
                 let merit_phase_start = crate::time_compat::Instant::now();
-                if circuit.has_nonlinear_devices() && !is_strictly_linear_transient {
+                if circuit.has_nonlinear_devices() {
                     let current_merit = self
                         .residual_inf_norm(&circuit, &mut matrix, &new_solution, &rhs)
                         .unwrap_or(Value::INFINITY);

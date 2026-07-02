@@ -138,18 +138,6 @@ impl CircuitData {
         self.has_non_xspice_nonlinear_devices() || self.has_xspice_devices()
     }
 
-    /// Whether all nonlinear-looking transient participants are XSPICE models
-    /// whose stamps are affine in the current solution and stateless across
-    /// trial iterations.
-    pub(crate) fn has_only_memoryless_linear_xspice_nonlinearity(&self) -> bool {
-        !self.xspice_instances.is_empty()
-            && !self.has_non_xspice_nonlinear_devices()
-            && self
-                .xspice_instances
-                .iter()
-                .all(XspiceInstance::has_memoryless_linear_transient_stamp)
-    }
-
     /// Check if circuit has any BSIM3SOI device (DD, FD, or PD variant).
     ///
     /// The three variants share one transient charge-history pipeline

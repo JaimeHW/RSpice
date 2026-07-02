@@ -77,9 +77,6 @@ impl CircuitData {
         for source in &self.behavioral_sources.voltage_sources {
             Self::add_force_accept_topology_edge(&mut graph, source.node_pos, source.node_neg);
         }
-        self.for_each_xspice_ideal_voltage_constraint(|node_pos, node_neg| {
-            Self::add_force_accept_topology_edge(&mut graph, node_pos, node_neg);
-        });
 
         // Physical devices and transient companions anchor node common mode when
         // they provide a path into the grounded circuit.
@@ -248,9 +245,6 @@ impl CircuitData {
         for source in &self.behavioral_sources.voltage_sources {
             push_pair(source.node_pos, source.node_neg);
         }
-        self.for_each_xspice_ideal_voltage_constraint(|node_pos, node_neg| {
-            push_pair(node_pos, node_neg);
-        });
         for instance in &self.xspice_instances {
             for (port_idx, port) in instance.ports().iter().enumerate() {
                 let is_voltage_output = matches!(port.direction, crate::xspice::PortDirection::Out)
@@ -337,10 +331,6 @@ impl CircuitData {
             Self::mark_force_accept_protected_node(&mut mask, source.node_pos);
             Self::mark_force_accept_protected_node(&mut mask, source.node_neg);
         }
-        self.for_each_xspice_ideal_voltage_constraint(|node_pos, node_neg| {
-            Self::mark_force_accept_protected_node(&mut mask, node_pos);
-            Self::mark_force_accept_protected_node(&mut mask, node_neg);
-        });
         for instance in &self.xspice_instances {
             for (port_idx, port) in instance.ports().iter().enumerate() {
                 let is_voltage_output = matches!(port.direction, crate::xspice::PortDirection::Out)
@@ -362,10 +352,6 @@ impl CircuitData {
                         }
                     }
                     Some(crate::xspice::PortConnection::Differential(pos, neg)) => {
-                        Self::mark_force_accept_protected_node(&mut mask, *pos);
-                        Self::mark_force_accept_protected_node(&mut mask, *neg);
-                    }
-                    Some(crate::xspice::PortConnection::CurrentOutput { pos, neg }) => {
                         Self::mark_force_accept_protected_node(&mut mask, *pos);
                         Self::mark_force_accept_protected_node(&mut mask, *neg);
                     }
@@ -412,50 +398,6 @@ impl CircuitData {
         }
 
         mask
-    }
-
-    pub(crate) fn xspice_ideal_voltage_constraint_nodes(&self) -> Vec<NodeId> {
-        let mut nodes = Vec::new();
-        self.for_each_xspice_ideal_voltage_constraint(|node_pos, node_neg| {
-            if node_pos > 0 {
-                nodes.push(node_pos);
-            }
-            if node_neg > 0 {
-                nodes.push(node_neg);
-            }
-        });
-        nodes.sort_unstable();
-        nodes.dedup();
-        nodes
-    }
-
-    fn for_each_xspice_ideal_voltage_constraint(&self, mut visit: impl FnMut(NodeId, NodeId)) {
-        for instance in &self.xspice_instances {
-            for connection in instance.connections() {
-                match connection {
-                    crate::xspice::PortConnection::CurrentProbe { pos, neg, .. }
-                    | crate::xspice::PortConnection::Hybrid { pos, neg, .. } => {
-                        visit(*pos, *neg);
-                    }
-                    crate::xspice::PortConnection::TypedAnalogVector(elements) => {
-                        for element in elements {
-                            match element {
-                                crate::xspice::AnalogInputConnection::CurrentProbe {
-                                    pos,
-                                    neg,
-                                    ..
-                                }
-                                | crate::xspice::AnalogInputConnection::Hybrid {
-                                    pos, neg, ..
-                                } => visit(*pos, *neg),
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
     }
 
     /// Re-project all ideal voltage-output equations after a force-accepted
@@ -513,8 +455,6 @@ impl CircuitData {
 mod tests {
     use super::*;
     use crate::device::{BehavioralVoltageSource, Vdmos};
-    use crate::xspice::{PortConnection, XspiceInstance, models::Gain};
-    use std::sync::Arc;
 
     #[test]
     fn vdmos_drain_drift_participates_in_force_accept_topology() {
@@ -544,65 +484,6 @@ mod tests {
         let source =
             BehavioralVoltageSource::new("b1".to_string(), out, 0, 1, "1.0").expect("b source");
         circuit.behavioral_sources.add_voltage(source);
-
-        let protected = circuit.force_accept_protected_nodes();
-
-        assert!(protected[out - 1]);
-    }
-
-    #[test]
-    fn xspice_current_probe_is_force_accept_protected_like_zero_volt_source() {
-        let mut circuit = CircuitData::new();
-        let sense = circuit.get_or_create_node("sense");
-        let out = circuit.get_or_create_node("out");
-        let branch = circuit.allocate_branch_named("a1#in#sense");
-        let instance = XspiceInstance::new(
-            "a1",
-            Arc::new(Gain),
-            vec![
-                PortConnection::CurrentProbe {
-                    pos: sense,
-                    neg: 0,
-                    branch_ordinal: branch,
-                },
-                PortConnection::Analog(out),
-            ],
-            &[],
-            &[],
-            &[],
-            &[],
-        )
-        .expect("gain instance with current probe constructs");
-        circuit.add_xspice_instance(instance);
-
-        let reachable = circuit.force_accept_ground_reachable_nodes();
-        let protected = circuit.force_accept_protected_nodes();
-        let lte_excluded_nodes = circuit.xspice_ideal_voltage_constraint_nodes();
-
-        assert!(reachable[sense]);
-        assert!(protected[sense - 1]);
-        assert!(lte_excluded_nodes.contains(&sense));
-    }
-
-    #[test]
-    fn xspice_current_output_is_force_accept_protected() {
-        let mut circuit = CircuitData::new();
-        let input = circuit.get_or_create_node("in");
-        let out = circuit.get_or_create_node("out");
-        let instance = XspiceInstance::new(
-            "a1",
-            Arc::new(Gain),
-            vec![
-                PortConnection::Analog(input),
-                PortConnection::CurrentOutput { pos: out, neg: 0 },
-            ],
-            &[],
-            &[],
-            &[],
-            &[],
-        )
-        .expect("gain instance with current output constructs");
-        circuit.add_xspice_instance(instance);
 
         let protected = circuit.force_accept_protected_nodes();
 
