@@ -433,13 +433,22 @@ fn xfer_table_from_touchstone(
     let (mut ri, mut db) = parse_touchstone_options(option_line.trim_start());
     let mut rad = false;
     if ctx.param_was_provided("r_i") {
-        ri = ctx.param("r_i") > 0.5;
+        ri = match xfer_bool_param(ctx, "r_i") {
+            Ok(value) => value,
+            Err(err) => return (file_virtual_stamp, Err(err)),
+        };
     }
     if ctx.param_was_provided("db") {
-        db = ctx.param("db") > 0.5;
+        db = match xfer_bool_param(ctx, "db") {
+            Ok(value) => value,
+            Err(err) => return (file_virtual_stamp, Err(err)),
+        };
     }
     if ctx.param_was_provided("rad") {
-        rad = ctx.param("rad") > 0.5;
+        rad = match xfer_bool_param(ctx, "rad") {
+            Ok(value) => value,
+            Err(err) => return (file_virtual_stamp, Err(err)),
+        };
     }
     let rows = parse_touchstone_rows(&contents, span, offset);
     let mut points = Vec::with_capacity(rows.len());
@@ -1953,6 +1962,39 @@ mod tests {
         data_file::register_data_file(file, "# Hz S RI R 50\n1 5 0\n")
             .expect("replace virtual xfer data");
         assert_eq!(xfer_first_real_gain(&ctx), 5.0);
+
+        let _ = data_file::unregister_data_file(file);
+    }
+
+    #[test]
+    fn xfer_rejects_nonfinite_touchstone_format_overrides() {
+        let file = "virtual://xfer/nonfinite-touchstone-format-overrides";
+        let _ = data_file::unregister_data_file(file);
+        data_file::register_data_file(file, "# Hz S RI R 50\n1 1 0\n")
+            .expect("register virtual xfer data");
+
+        for (param, value) in [
+            ("r_i", f64::NAN),
+            ("db", f64::INFINITY),
+            ("rad", f64::NEG_INFINITY),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_string_param("file", file);
+            ctx.set_param(param, value);
+            ctx.mark_param_provided(param);
+
+            let err = Xfer
+                .init(&mut ctx)
+                .expect_err("file-backed xfer must reject nonfinite format overrides");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "xfer {param} produced {err:?}"
+            );
+            assert!(
+                err.to_string().contains(param),
+                "xfer error should name rejected parameter {param}: {err}"
+            );
+        }
 
         let _ = data_file::unregister_data_file(file);
     }
