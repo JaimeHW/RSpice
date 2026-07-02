@@ -309,6 +309,10 @@ impl CodeModel for RealDelay {
         Ok(())
     }
 
+    fn can_skip_unchanged_event_inputs(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         if !ctx.is_transient() {
             return Ok(());
