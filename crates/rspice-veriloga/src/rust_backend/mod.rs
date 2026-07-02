@@ -365,6 +365,33 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_lowers_constant_mod_assignment_chain() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module static_mod_chain(p, n);
+    inout p, n;
+    electrical p, n;
+    integer subversion;
+    real gain;
+    analog begin
+        subversion = (15 * 10) % 10;
+        gain = (subversion < 1) ? 0.0 : 2.0;
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("constant modulo assignment chain should lower to scalar OptIR");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+    }
+
+    #[test]
     fn scalar_backend_lowers_nested_ddt_conditionals() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
