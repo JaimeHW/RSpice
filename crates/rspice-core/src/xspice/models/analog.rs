@@ -632,10 +632,25 @@ fn mult_transfer_from_context_with_signature(
     let out_gain = finite_analog_scalar_param(ctx, "mult", "out_gain")?;
     let out_offset = finite_analog_scalar_param(ctx, "mult", "out_offset")?;
 
+    let input_count = inputs.len();
     let mut accumulate_gain = 1.0;
     let mut accumulate_in = 1.0;
-    let mut signature_inputs = Vec::with_capacity(inputs.len());
-    let mut shifted_inputs = Vec::with_capacity(inputs.len());
+    let mut signature_inputs = Vec::new();
+    signature_inputs
+        .try_reserve_exact(input_count)
+        .map_err(|err| {
+            CmError::EvaluationError(format!(
+                "mult unable to reserve {input_count} input signature value(s): {err}"
+            ))
+        })?;
+    let mut shifted_inputs = Vec::new();
+    shifted_inputs
+        .try_reserve_exact(input_count)
+        .map_err(|err| {
+            CmError::EvaluationError(format!(
+                "mult unable to reserve {input_count} shifted input value(s): {err}"
+            ))
+        })?;
     for (index, input) in inputs.iter().enumerate() {
         let gain = analog_vector_param_at(in_gain, index, 1.0);
         let offset = analog_vector_param_at(in_offset, index, 0.0);

@@ -254,19 +254,43 @@ fn poly_plan_signature_matches(
 fn build_poly_plan(input_count: usize, coef: &[Value]) -> CmResult<Arc<PolyPlan>> {
     validate_coef(coef)?;
 
-    let mut exponents = vec![0usize; input_count];
-    let mut terms = Vec::with_capacity(coef.iter().skip(1).filter(|&&c| c != 0.0).count());
+    let mut exponents = Vec::new();
+    exponents.try_reserve_exact(input_count).map_err(|err| {
+        invalid_param(
+            "coef",
+            format!("unable to reserve {input_count} polynomial exponent slot(s): {err}"),
+        )
+    })?;
+    exponents.resize(input_count, 0);
+
+    let term_count = coef.iter().skip(1).filter(|&&c| c != 0.0).count();
+    let mut terms = Vec::new();
+    terms.try_reserve_exact(term_count).map_err(|err| {
+        invalid_param(
+            "coef",
+            format!("unable to reserve {term_count} polynomial term(s): {err}"),
+        )
+    })?;
     for coefficient in coef.iter().skip(1).copied() {
         nxtpwr(&mut exponents);
         if coefficient == 0.0 {
             continue;
         }
-        let active_exponents = exponents
-            .iter()
-            .copied()
-            .enumerate()
-            .filter(|(_, exponent)| *exponent != 0)
-            .collect();
+        let active_count = exponents.iter().filter(|&&exponent| exponent != 0).count();
+        let mut active_exponents = Vec::new();
+        active_exponents
+            .try_reserve_exact(active_count)
+            .map_err(|err| {
+                invalid_param(
+                    "coef",
+                    format!("unable to reserve {active_count} active exponent(s): {err}"),
+                )
+            })?;
+        for (input_index, exponent) in exponents.iter().copied().enumerate() {
+            if exponent != 0 {
+                active_exponents.push((input_index, exponent));
+            }
+        }
         terms.push(PolyTerm {
             coefficient,
             active_exponents,
