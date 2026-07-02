@@ -2072,6 +2072,14 @@ impl CodeModel for AnalogDelayLine {
 pub struct AnalogStateReturn;
 
 const ASTATE_HISTORY_DEPTH: usize = 3;
+const ASTATE_STATE1: usize = 0;
+const ASTATE_STATE2: usize = 1;
+const ASTATE_STATE3: usize = 2;
+const ASTATE_OUTVAL: usize = 3;
+const ASTATE_XVAL1: usize = 4;
+const ASTATE_XVAL2: usize = 5;
+const ASTATE_XVAL3: usize = 6;
+const ASTATE_STATE_COUNT: usize = 7;
 
 fn astate_number(ctx: &CmContext) -> CmResult<usize> {
     let value = ctx.param("astate_no");
@@ -2083,12 +2091,6 @@ fn astate_number(ctx: &CmContext) -> CmResult<usize> {
 
     let number = value.round().clamp(0.0, ASTATE_HISTORY_DEPTH as Value);
     Ok(number as usize)
-}
-
-fn update_astate_history(ctx: &mut CmContext, input: Value) {
-    ctx.set_state(2, ctx.state_prev(1));
-    ctx.set_state(1, ctx.state_prev(0));
-    ctx.set_state(0, input);
 }
 
 impl CodeModel for AnalogStateReturn {
@@ -2136,7 +2138,7 @@ impl CodeModel for AnalogStateReturn {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_states(ASTATE_HISTORY_DEPTH);
+        ctx.allocate_states(ASTATE_STATE_COUNT);
         Ok(())
     }
 
@@ -2149,11 +2151,48 @@ impl CodeModel for AnalogStateReturn {
             return Ok(());
         }
 
-        let output = ctx.state_prev(state_number - 1);
-        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
-            update_astate_history(ctx, input);
+        let mut state1 = ctx.state(ASTATE_STATE1);
+        let mut state2 = ctx.state(ASTATE_STATE2);
+        let mut state3 = ctx.state(ASTATE_STATE3);
+        let mut outval = ctx.state(ASTATE_OUTVAL);
+        let mut xval1 = ctx.state(ASTATE_XVAL1);
+        let mut xval2 = ctx.state(ASTATE_XVAL2);
+        let mut xval3 = ctx.state(ASTATE_XVAL3);
+
+        if ctx.time == xval1 {
+            outval = match state_number {
+                1 => state1,
+                2 => state2,
+                3 => state3,
+                _ => input,
+            };
+        } else if ctx.time > xval1 {
+            state3 = state2;
+            state2 = state1;
+            state1 = input;
+
+            xval3 = xval2;
+            xval2 = xval1;
+            xval1 = ctx.time;
+        } else if ctx.time == 0.0 {
+            state1 = input;
+            outval = input;
+            xval1 = 0.0;
+        } else if ctx.time < xval1 {
+            state1 = input;
+            xval1 = ctx.time;
         }
-        ctx.set_output_with_partial("out", output, 0.0);
+
+        if ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe {
+            ctx.set_state(ASTATE_STATE1, state1);
+            ctx.set_state(ASTATE_STATE2, state2);
+            ctx.set_state(ASTATE_STATE3, state3);
+            ctx.set_state(ASTATE_OUTVAL, outval);
+            ctx.set_state(ASTATE_XVAL1, xval1);
+            ctx.set_state(ASTATE_XVAL2, xval2);
+            ctx.set_state(ASTATE_XVAL3, xval3);
+        }
+        ctx.set_output_with_partial("out", outval, 0.0);
         Ok(())
     }
 
@@ -4568,9 +4607,12 @@ mod tests {
         ctx.init_output("out", PortType::Voltage);
 
         AnalogStateReturn.init(&mut ctx).expect("astate init");
-        ctx.set_initial_state(0, 1.0);
-        ctx.set_initial_state(1, 0.5);
-        ctx.set_initial_state(2, 0.25);
+        ctx.set_initial_state(ASTATE_STATE1, 1.0);
+        ctx.set_initial_state(ASTATE_STATE2, 0.5);
+        ctx.set_initial_state(ASTATE_STATE3, 0.25);
+        ctx.set_initial_state(ASTATE_OUTVAL, 1.0);
+        ctx.set_initial_state(ASTATE_XVAL1, 0.0);
+        ctx.time = 1.0e-9;
 
         ctx.set_input_analog("in", 2.0);
         ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
@@ -4580,17 +4622,31 @@ mod tests {
 
         assert_eq!(ctx.output("out"), 1.0);
         assert_eq!(
-            (ctx.state(0), ctx.state(1), ctx.state(2)),
+            (
+                ctx.state(ASTATE_STATE1),
+                ctx.state(ASTATE_STATE2),
+                ctx.state(ASTATE_STATE3)
+            ),
             (1.0, 0.5, 0.25),
             "rollbackable astate probe must not shift remembered samples"
         );
+        assert_eq!(ctx.state(ASTATE_XVAL1), 0.0);
 
         ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
         AnalogStateReturn
             .evaluate(&mut ctx)
             .expect("accepted astate history update");
 
-        assert_eq!((ctx.state(0), ctx.state(1), ctx.state(2)), (2.0, 1.0, 0.5));
+        assert_eq!(
+            (
+                ctx.state(ASTATE_STATE1),
+                ctx.state(ASTATE_STATE2),
+                ctx.state(ASTATE_STATE3)
+            ),
+            (2.0, 1.0, 0.5)
+        );
+        assert_eq!(ctx.state(ASTATE_OUTVAL), 1.0);
+        assert_eq!(ctx.state(ASTATE_XVAL1), 1.0e-9);
     }
 
     #[test]
