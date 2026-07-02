@@ -528,7 +528,13 @@ impl CodeModel for Multiplier {
         let Ok(transfer) = mult_transfer_for_context(ctx) else {
             return Vec::new();
         };
-        mult_partials_from_transfer(transfer.as_ref())
+        match mult_partials_from_transfer(transfer.as_ref()) {
+            Ok(partials) => partials,
+            Err(err) => {
+                log::warn!("mult failed to build input partials for '{output_port}': {err}");
+                Vec::new()
+            }
+        }
     }
 
     fn excludes_output_from_transient_voltage_lte(&self, output_port: &str) -> bool {
@@ -725,8 +731,14 @@ fn mult_output_from_context(ctx: &CmContext) -> CmResult<Value> {
     Ok(mult_output_from_transfer(transfer.as_ref()))
 }
 
-fn mult_partials_from_transfer(transfer: &MultTransfer) -> Vec<(String, usize, Value)> {
-    let mut partials = Vec::with_capacity(transfer.shifted_inputs.len());
+fn mult_partials_from_transfer(transfer: &MultTransfer) -> CmResult<Vec<(String, usize, Value)>> {
+    let input_count = transfer.shifted_inputs.len();
+    let mut partials = Vec::new();
+    partials.try_reserve_exact(input_count).map_err(|err| {
+        CmError::EvaluationError(format!(
+            "mult unable to reserve {input_count} input partial(s): {err}"
+        ))
+    })?;
     let mut zero_count = 0usize;
     let mut nonzero_product = 1.0;
     for shifted in transfer.shifted_inputs.iter().copied() {
@@ -753,12 +765,12 @@ fn mult_partials_from_transfer(transfer: &MultTransfer) -> Vec<(String, usize, V
         };
         partials.push(("in".to_string(), index, partial));
     }
-    partials
+    Ok(partials)
 }
 
 fn mult_partials_from_context(ctx: &CmContext) -> CmResult<Vec<(String, usize, Value)>> {
     let transfer = mult_transfer_for_context(ctx)?;
-    Ok(mult_partials_from_transfer(transfer.as_ref()))
+    mult_partials_from_transfer(transfer.as_ref())
 }
 
 //=============================================================================
