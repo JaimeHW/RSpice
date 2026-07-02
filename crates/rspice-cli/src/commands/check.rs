@@ -1,7 +1,7 @@
 //! Check Command - Validate netlist syntax
 
 use crate::cli::{CheckArgs, CliError};
-use rspice_core::Netlist;
+use rspice_core::{Engine, Netlist};
 use std::collections::{HashMap, HashSet};
 
 /// Validation result
@@ -69,6 +69,7 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
     // Always-on topology checks: these decks produce singular systems, so
     // catching them statically beats a NaN at runtime.
     check_topology(&netlist, &mut result);
+    check_xspice_build(&netlist, &mut result);
 
     if args.connectivity {
         check_connectivity(&netlist, &mut result);
@@ -99,6 +100,38 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
             result.errors.len()
         )))
     }
+}
+
+fn check_xspice_build(netlist: &Netlist, result: &mut ValidationResult) {
+    if !netlist_contains_xspice(netlist) {
+        return;
+    }
+
+    if let Err(error) = Engine::default().build_circuit(netlist) {
+        result.errors.push(ValidationIssue {
+            message: format!("XSPICE build validation failed: {error}"),
+            element: None,
+            line: None,
+            code: None,
+        });
+    }
+}
+
+fn netlist_contains_xspice(netlist: &Netlist) -> bool {
+    fn elements_contain_xspice(elements: &[rspice_core::netlist::Element]) -> bool {
+        elements.iter().any(|element| {
+            matches!(
+                element.kind,
+                rspice_core::netlist::ElementKind::Xspice { .. }
+            )
+        })
+    }
+
+    elements_contain_xspice(&netlist.elements)
+        || netlist
+            .subcircuits
+            .iter()
+            .any(|subckt| elements_contain_xspice(&subckt.elements))
 }
 
 /// Detect circuit topologies that make the MNA matrix singular:

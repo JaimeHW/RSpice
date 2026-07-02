@@ -250,6 +250,37 @@ fn check_flags_voltage_source_loops() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn check_rejects_xspice_port_type_mismatch() {
+    let dir = test_dir("xspice_bad_io");
+    let deck = dir.join("xspice_bad_io.sp");
+    std::fs::write(
+        &deck,
+        "* invalid XSPICE typed port\n\
+         V1 1 0 0\n\
+         A1 1 %d 2 gain_block\n\
+         .model gain_block gain (gain=10)\n\
+         R2 2 0 1k\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice(&["check", deck.to_str().unwrap()]);
+    assert!(
+        !output.status.success(),
+        "XSPICE port mismatch must fail check"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("XSPICE build validation failed")
+            && stdout.contains("does not allow explicit Digital"),
+        "check should report the XSPICE port-type problem: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A config value explicitly set to the built-in default must still
 /// override a lower layer (the old merge compared against defaults and
 /// could not).
