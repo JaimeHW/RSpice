@@ -607,6 +607,24 @@ impl SaveSet {
         }
         false
     }
+
+    /// Whether a bare/raw output vector name is selected by a raw save entry.
+    ///
+    /// This intentionally ignores typed probes such as `v(out)` and `i(v1)`.
+    /// It is useful for non-voltage/non-current vectors that have their own
+    /// type, such as XSPICE digital traces.
+    pub fn selects_raw_name(&self, variable: &str) -> bool {
+        if self.keeps_everything() {
+            return true;
+        }
+
+        let var = variable.trim().to_ascii_lowercase();
+        self.signals.iter().any(|signal| match signal {
+            SaveSignal::All => true,
+            SaveSignal::Raw(name) => pattern_selects(&name.to_ascii_lowercase(), &var),
+            _ => false,
+        })
+    }
 }
 
 /// Match a save selection against a vector name, honoring `*` wildcards.

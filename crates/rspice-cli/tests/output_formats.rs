@@ -77,6 +77,18 @@ rout out 0 1k
 .end
 ";
 
+const XSPICE_DIGITAL_VOLTAGE_SAVE_TRAN_DECK: &str = "* xspice digital voltage save export test
+v1 in 0 pulse(0 5 0 1n 1n 5n 10n)
+abridge1 [in] [d] adc
+adac [d] [out] dac
+rout out 0 1k
+.model adc adc_bridge(in_low=1 in_high=4)
+.model dac dac_bridge(out_low=0 out_high=5 out_undef=2.5)
+.tran 1n 20n
+.save v(d)
+.end
+";
+
 const AC_DECK: &str = "* ac export test
 v1 in 0 dc 0 ac 1
 r1 in out 1k
@@ -377,6 +389,28 @@ fn transient_save_selects_xspice_digital_trace_by_raw_node() {
             .split(',')
             .any(|column| column.eq_ignore_ascii_case("V(in)")),
         ".save d should still filter unrelated analog voltages: {header:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn transient_voltage_save_does_not_select_xspice_digital_trace() {
+    let dir = test_dir("tran_xspice_digital_voltage_save");
+    let path = run_export(
+        &dir,
+        "tran_xspice_digital_voltage_save",
+        XSPICE_DIGITAL_VOLTAGE_SAVE_TRAN_DECK,
+        "csv",
+    );
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let header = text.lines().next().expect("csv header");
+
+    assert!(
+        !header
+            .split(',')
+            .any(|column| column.eq_ignore_ascii_case("D(d)")),
+        "typed voltage save v(d) must not export digital trace D(d): {header:?}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

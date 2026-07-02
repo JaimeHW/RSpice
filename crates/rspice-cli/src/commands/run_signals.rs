@@ -96,7 +96,7 @@ pub(crate) fn apply_save_set(signals: Vec<ScalarSignal>, saves: &SaveSet) -> Vec
 
 fn signal_is_selected(signal: &ScalarSignal, saves: &SaveSet) -> bool {
     saves.selects(&signal.display_name)
-        || (signal.kind == SignalKind::Digital && saves.selects(&signal.raw_name))
+        || (signal.kind == SignalKind::Digital && saves.selects_raw_name(&signal.raw_name))
 }
 
 /// Restrict complex (AC) signals to a netlist's output selection.
