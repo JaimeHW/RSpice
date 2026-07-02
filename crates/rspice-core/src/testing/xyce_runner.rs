@@ -1159,12 +1159,13 @@ impl XyceTestRunner {
             if trimmed.is_empty() {
                 continue;
             }
-            let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
-            let Some(command) = tokens.first().copied() else {
+            let Some(command) = trimmed.split_whitespace().next() else {
                 continue;
             };
             if command.eq_ignore_ascii_case(".print") {
-                if !Self::validate_default_prn_print_tokens(&tokens)? {
+                let tokens = Self::split_print_fields(&trimmed)?;
+                let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+                if !Self::validate_default_prn_print_tokens(&token_refs)? {
                     primary_print_count += 1;
                 }
                 continue;
@@ -6700,14 +6701,15 @@ impl XyceTestRunner {
             if trimmed.is_empty() {
                 continue;
             }
-            let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
-            let Some(command) = tokens.first().copied() else {
+            let Some(command) = trimmed.split_whitespace().next() else {
                 continue;
             };
             if !command.eq_ignore_ascii_case(".print") {
                 continue;
             }
-            let Some(analysis) = tokens.get(1).copied() else {
+            let tokens = Self::split_print_fields(&trimmed)?;
+            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            let Some(analysis) = token_refs.get(1).copied() else {
                 return Err(".PRINT statement has no analysis type".to_string());
             };
             if !analysis.eq_ignore_ascii_case(expected_analysis) {
@@ -6720,7 +6722,7 @@ impl XyceTestRunner {
             let mut index = 2usize;
             while index < tokens.len() {
                 if let Some((raw_key, raw_value, consumed)) =
-                    Self::print_option_assignment(&tokens, index)
+                    Self::print_option_assignment(&token_refs, index)
                 {
                     let key = raw_key.trim().to_ascii_lowercase();
                     let value = raw_value.trim().trim_matches(['"', '\'']).to_string();
@@ -6733,7 +6735,7 @@ impl XyceTestRunner {
                     continue;
                 }
 
-                let normalized = tokens[index].to_ascii_lowercase();
+                let normalized = token_refs[index].to_ascii_lowercase();
                 if Self::is_print_option_token(&normalized) {
                     index += 1;
                     continue;
@@ -6756,6 +6758,100 @@ impl XyceTestRunner {
         }
 
         Ok(requests)
+    }
+
+    fn split_print_fields(line: &str) -> Result<Vec<String>, String> {
+        Self::split_grouped_whitespace_fields(line, ".PRINT statement")
+    }
+
+    fn split_prn_header_fields(line: &str) -> Result<Vec<String>, String> {
+        Self::split_grouped_whitespace_fields(line, "Xyce .prn header")
+    }
+
+    fn split_grouped_whitespace_fields(
+        line: &str,
+        source_label: &str,
+    ) -> Result<Vec<String>, String> {
+        let mut fields = Vec::new();
+        let mut current = String::new();
+        let mut single_quote = false;
+        let mut double_quote = false;
+        let mut escaped = false;
+        let mut brace_depth = 0usize;
+        let mut paren_depth = 0usize;
+
+        for ch in line.chars() {
+            if escaped {
+                current.push(ch);
+                escaped = false;
+                continue;
+            }
+
+            match ch {
+                '\\' if single_quote || double_quote => {
+                    current.push(ch);
+                    escaped = true;
+                }
+                '\'' if !double_quote => {
+                    single_quote = !single_quote;
+                    current.push(ch);
+                }
+                '"' if !single_quote => {
+                    double_quote = !double_quote;
+                    current.push(ch);
+                }
+                '{' if !single_quote && !double_quote => {
+                    brace_depth += 1;
+                    current.push(ch);
+                }
+                '}' if !single_quote && !double_quote => {
+                    brace_depth = brace_depth.checked_sub(1).ok_or_else(|| {
+                        format!("unmatched closing brace in {source_label}: {line}")
+                    })?;
+                    current.push(ch);
+                }
+                '(' if !single_quote && !double_quote => {
+                    paren_depth += 1;
+                    current.push(ch);
+                }
+                ')' if !single_quote && !double_quote => {
+                    paren_depth = paren_depth.checked_sub(1).ok_or_else(|| {
+                        format!("unmatched closing parenthesis in {source_label}: {line}")
+                    })?;
+                    current.push(ch);
+                }
+                ch if ch.is_whitespace()
+                    && !single_quote
+                    && !double_quote
+                    && brace_depth == 0
+                    && paren_depth == 0 =>
+                {
+                    if !current.is_empty() {
+                        fields.push(std::mem::take(&mut current));
+                    }
+                }
+                _ => current.push(ch),
+            }
+        }
+
+        if single_quote || double_quote {
+            return Err(format!("unterminated quote in {source_label}: {line}"));
+        }
+        if brace_depth != 0 {
+            return Err(format!(
+                "unterminated brace expression in {source_label}: {line}"
+            ));
+        }
+        if paren_depth != 0 {
+            return Err(format!(
+                "unterminated parenthesized probe in {source_label}: {line}"
+            ));
+        }
+        if !current.is_empty() {
+            fields.push(current);
+        }
+
+        Ok(fields)
     }
 
     fn gnuplot_splot_print_pair(
@@ -6851,7 +6947,7 @@ impl XyceTestRunner {
         };
         let delimiter = Self::prn_header_delimiter(header)
             .ok_or_else(|| format!("invalid Xyce .prn header '{}'", header))?;
-        let columns = Self::parse_prn_columns(header, delimiter);
+        let columns = Self::parse_prn_columns(header, delimiter)?;
         if columns.is_empty() {
             return Err("Xyce .prn header has no columns".to_string());
         }
@@ -6870,7 +6966,7 @@ impl XyceTestRunner {
             if Self::is_prn_header_line(line) {
                 let repeated_delimiter = Self::prn_header_delimiter(line)
                     .ok_or_else(|| format!("invalid repeated Xyce .prn header '{}'", line))?;
-                let repeated_columns = Self::parse_prn_columns(line, repeated_delimiter);
+                let repeated_columns = Self::parse_prn_columns(line, repeated_delimiter)?;
                 if Self::same_prn_columns(&columns, &repeated_columns) {
                     continue;
                 }
@@ -6907,10 +7003,13 @@ impl XyceTestRunner {
         Ok(XycePrnTable { columns, rows })
     }
 
-    fn parse_prn_columns(line: &str, delimiter: XycePrnDelimiter) -> Vec<String> {
-        Self::split_prn_fields(line, delimiter)
-            .map(str::to_string)
-            .collect()
+    fn parse_prn_columns(line: &str, delimiter: XycePrnDelimiter) -> Result<Vec<String>, String> {
+        match delimiter {
+            XycePrnDelimiter::Whitespace => Self::split_prn_header_fields(line),
+            XycePrnDelimiter::Comma => {
+                Ok(line.split(',').map(str::trim).map(str::to_string).collect())
+            }
+        }
     }
 
     fn is_prn_header_line(line: &str) -> bool {
@@ -6925,10 +7024,10 @@ impl XyceTestRunner {
         {
             return Some(XycePrnDelimiter::Comma);
         }
-        if line
-            .split_whitespace()
-            .next()
-            .is_some_and(Self::is_prn_metadata_header_token)
+        let whitespace_fields = Self::split_prn_header_fields(line).ok()?;
+        if whitespace_fields
+            .first()
+            .is_some_and(|token| Self::is_prn_metadata_header_token(token))
         {
             return Some(XycePrnDelimiter::Whitespace);
         }
@@ -6940,7 +7039,6 @@ impl XyceTestRunner {
         {
             return Some(XycePrnDelimiter::Comma);
         }
-        let whitespace_fields = line.split_whitespace().collect::<Vec<_>>();
         if whitespace_fields.len() > 1
             && whitespace_fields
                 .first()
@@ -7503,6 +7601,67 @@ End of Xyce(TM) Simulation
         );
         assert_eq!(table.rows.len(), 2);
         assert_eq!(table.rows[1], vec![1.0, 0.05, 0.0, -3.05537186e-9]);
+    }
+
+    #[test]
+    fn prn_parser_preserves_braced_expression_headers() {
+        let table = XyceTestRunner::parse_prn_table(
+            r#"Index        TIME        {20.0 + V(30)}
+0       0.00000000e+00   2.00000000e+01
+1       5.00000000e-06   2.30901699e+01
+End of Xyce(TM) Simulation
+"#,
+        )
+        .expect("parser accepts whitespace-delimited braced expression headers");
+
+        assert_eq!(
+            table.columns,
+            ["Index", "TIME", "{20.0 + V(30)}"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(table.rows.len(), 2);
+        assert_eq!(table.rows[1], vec![1.0, 5.0e-6, 23.0901699]);
+    }
+
+    #[test]
+    fn print_output_requests_preserve_grouped_probe_fields() {
+        let requests = XyceTestRunner::print_output_requests(
+            r#".PRINT TRAN V( 1 , 0 ) {20.0 + V(30)} I(VSENSE)"#,
+            "TRAN",
+        )
+        .expect("grouped transient .PRINT probes parse");
+
+        assert_eq!(
+            requests,
+            vec![XycePrintOutputRequest {
+                format: None,
+                file: None,
+                probes: ["V( 1 , 0 )", "{20.0 + V(30)}", "I(VSENSE)"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }]
+        );
+
+        let requests = XyceTestRunner::print_output_requests(
+            r#".PRINT DC FORMAT = STD FILE = "out data.prn" V(1) {V(2) + 1.0}"#,
+            "DC",
+        )
+        .expect("spaced .PRINT options and braced DC probes parse");
+
+        assert_eq!(
+            requests,
+            vec![XycePrintOutputRequest {
+                format: Some("STD".to_string()),
+                file: Some("out data.prn".to_string()),
+                probes: ["V(1)", "{V(2) + 1.0}"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }]
+        );
     }
 
     #[test]
