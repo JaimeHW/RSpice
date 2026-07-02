@@ -1,5 +1,5 @@
 use crate::xspice::external::{
-    DigitalProcessRuntime, DigitalProcessSpec, start_digital_process_runtime,
+    start_digital_process_runtime, DigitalProcessRuntime, DigitalProcessSpec,
 };
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, DigitalState, DigitalStrength, DigitalValue,
@@ -271,7 +271,7 @@ impl CodeModel for DigitalProcess {
                 ctx.time
             };
 
-            {
+            let exchange_ok = {
                 let runtime = ctx
                     .resource::<DigitalProcessRuntimeResource>(RESOURCE_RUNTIME)
                     .ok_or_else(|| d_process_error("runtime is not initialized"))?;
@@ -282,11 +282,21 @@ impl CodeModel for DigitalProcess {
                     input_bytes,
                     output_bytes,
                 } = &mut *scratch;
-                if let Err(err) = runtime.exchange(signed_time, input_bytes, output_bytes) {
-                    log::warn!(
-                        "d_process external exchange failed at {signed_time:.16e}; continuing with current output packet like ngspice: {err}"
-                    );
+                match runtime.exchange(signed_time, input_bytes, output_bytes) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        log::warn!(
+                            "d_process external exchange failed at {signed_time:.16e}; preserving current outputs like ngspice: {err}"
+                        );
+                        false
+                    }
                 }
+            };
+
+            if !exchange_ok {
+                ctx.set_int_state(STATE_PREV_CLK, clk_code);
+                ctx.set_int_state(STATE_PREV_RESET, reset_code);
+                return Ok(());
             }
 
             let clk_delay = ctx.param_or("clk_delay", 1.0e-9);
@@ -313,8 +323,8 @@ impl CodeModel for DigitalProcess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::xspice::AnalysisType;
     use crate::xspice::context::InputValue;
+    use crate::xspice::AnalysisType;
     use crate::xspice::{ParamType, PortDirection};
 
     #[test]
