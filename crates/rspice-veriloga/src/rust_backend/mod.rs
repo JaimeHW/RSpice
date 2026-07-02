@@ -141,9 +141,23 @@ impl RustTranspiler {
                             device,
                             backend: RustBackendSelection::ScalarHybrid,
                         }),
-                        Err(hybrid_error) if hybrid_error.is_unsupported() => Err(
-                            auto_backend_unsupported(artifact, &scalar_error, &hybrid_error),
-                        ),
+                        Err(hybrid_error) if hybrid_error.is_unsupported() => {
+                            match device::generate_device(artifact, &self.options) {
+                                Ok(device) => Ok(GeneratedRustDeviceReport {
+                                    device,
+                                    backend: RustBackendSelection::LegacyDevice,
+                                }),
+                                Err(legacy_error) if legacy_error.is_unsupported() => {
+                                    Err(auto_backend_unsupported(
+                                        artifact,
+                                        &scalar_error,
+                                        &hybrid_error,
+                                        &legacy_error,
+                                    ))
+                                }
+                                Err(error) => Err(error),
+                            }
+                        }
                         Err(error) => Err(error),
                     }
                 }
@@ -165,14 +179,16 @@ fn auto_backend_unsupported(
     artifact: &CanonicalIrArtifact,
     scalar_error: &RustBackendError,
     hybrid_error: &RustBackendError,
+    legacy_error: &RustBackendError,
 ) -> RustBackendError {
     RustBackendError::unsupported(
         artifact.metadata.source_package.as_str(),
         artifact.mir.module_name.as_str(),
         format!(
-            "model cannot be lowered by scalar Rust backends; scalar path: {}; hybrid scalar path: {}",
+            "model cannot be lowered by generated Rust backends; scalar path: {}; hybrid scalar path: {}; legacy path: {}",
             unsupported_detail(scalar_error),
-            unsupported_detail(hybrid_error)
+            unsupported_detail(hybrid_error),
+            unsupported_detail(legacy_error)
         ),
     )
 }
@@ -1012,6 +1028,188 @@ endmodule
         let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
             .transpile_with_report(&artifact)
             .expect("history replay should resolve indirect references to the previous value");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_replays_guarded_alias_self_history_with_branch_path() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_alias_self_history_branch_path(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    real state, alias;
+    analog begin
+        state = 0.0;
+        alias = $simparam("unsupported_scalar_probe");
+
+        if (enable == 1) begin
+            alias = V(p, n);
+            state = alias;
+        end
+
+        I(p, n) <+ state;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("history replay should lower guarded aliases under the selected branch path");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_snapshots_intrinsic_call_operands_for_history_replay() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module intrinsic_call_operand_history_snapshot(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    real state, factor, beta;
+    analog begin
+        state = 0.0;
+        factor = 0.0;
+        beta = V(p, n);
+
+        if (enable == 1) begin
+            factor = exp(beta);
+        end
+
+        beta = $simparam("unused_later_beta");
+
+        if (enable == 1) begin
+            state = factor;
+        end
+
+        I(p, n) <+ state;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("history replay should snapshot operands inside pure intrinsic calls");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_replays_multiple_history_backed_intrinsic_operands() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module multiple_history_backed_intrinsic_operands(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    real state, factor, a, b;
+    analog begin
+        state = 0.0;
+        factor = 0.0;
+        a = $simparam("unsupported_initial_a");
+        b = $simparam("unsupported_initial_b");
+
+        if (enable == 1) begin
+            a = V(p, n);
+            b = 2.0 * V(p, n);
+            factor = exp(a + b);
+            state = factor;
+        end
+
+        I(p, n) <+ state;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("history replay should snapshot multiple replayable intrinsic operands");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_snapshots_guard_condition_operands_for_history_replay() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guard_condition_operand_history_snapshot(p, n);
+    inout p, n;
+    electrical p, n;
+    real state, limit;
+    analog begin
+        state = 0.0;
+        limit = V(p, n);
+
+        if (limit > 0.0) begin
+            state = exp(V(p, n));
+        end
+
+        limit = $simparam("unused_later_limit");
+
+        I(p, n) <+ state;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("history replay should snapshot operands used by guarded conditions");
 
         let stamp = report
             .device

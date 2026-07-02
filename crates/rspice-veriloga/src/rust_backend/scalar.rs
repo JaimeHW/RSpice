@@ -14,6 +14,8 @@ use super::{RustTranspileOptions, device};
 
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 240_000;
+const MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
+const MAX_SCALAR_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_INLINE_EXPR_COST: usize = 128;
 const MIN_SHARED_STAMP_LIVE_VALUES: usize = 1024;
 
@@ -4025,28 +4027,24 @@ fn scalar_equation_roots(
 ) -> Result<HashMap<EquationId, ValueId>, RustBackendError> {
     let roots = available_scalar_equation_roots(artifact);
     for equation in &artifact.mir.equations {
-        let root = roots.get(&equation.id).copied().ok_or_else(|| {
+        roots.get(&equation.id).copied().ok_or_else(|| {
             unsupported(
                 artifact,
                 format!("missing scalar root for equation {}", equation.id),
             )
         })?;
-        validate_scalar_equation(artifact, equation, root)?;
+        match equation.kind {
+            MirEquationKind::Current => {}
+            MirEquationKind::Potential => {
+                potential_branch_slot(artifact, equation)?;
+            }
+            MirEquationKind::Indirect => {
+                return Err(unsupported(artifact, "indirect contributions"));
+            }
+        }
     }
 
     Ok(roots)
-}
-
-fn validate_scalar_equation(
-    artifact: &CanonicalIrArtifact,
-    equation: &MirEquation,
-    root: ValueId,
-) -> Result<(), RustBackendError> {
-    match equation.kind {
-        MirEquationKind::Current => validate_scalar_current_equation(artifact, equation, root),
-        MirEquationKind::Potential => validate_scalar_potential_equation(artifact, equation, root),
-        MirEquationKind::Indirect => Err(unsupported(artifact, "indirect contributions")),
-    }
 }
 
 fn available_scalar_equation_roots(artifact: &CanonicalIrArtifact) -> HashMap<EquationId, ValueId> {
@@ -4724,6 +4722,36 @@ fn derivative_value_for_lane(
 }
 
 fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(), RustBackendError> {
+    let runtime_loop_assignments: usize = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .map(|runtime_loop| runtime_loop.assignments.len())
+        .sum();
+    if runtime_loop_assignments > MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS {
+        return Err(unsupported(
+            artifact,
+            format!(
+                "scalar OptIR runtime loops have {runtime_loop_assignments} assignments; current scalar emitter budget is {MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS}"
+            ),
+        ));
+    }
+
+    let runtime_loop_variables: usize = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .map(|runtime_loop| runtime_loop.variables.len())
+        .sum();
+    if runtime_loop_variables > MAX_SCALAR_RUNTIME_LOOP_VARIABLES {
+        return Err(unsupported(
+            artifact,
+            format!(
+                "scalar OptIR runtime loops have {runtime_loop_variables} variables; current scalar emitter budget is {MAX_SCALAR_RUNTIME_LOOP_VARIABLES}"
+            ),
+        ));
+    }
+
     for variable in &artifact.hir.variables {
         if variable.is_state {
             return Err(unsupported(

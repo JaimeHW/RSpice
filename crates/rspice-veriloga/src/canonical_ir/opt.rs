@@ -19,6 +19,8 @@ const MAX_SCALAR_HISTORY_RECONSTRUCTION_STEPS: usize = 64_000;
 const MAX_SCALAR_EXPRESSION_LOWERING_DEPTH: usize = 2048;
 const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_EXPR_NODES: usize = 12;
 const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES: usize = 4;
+const MAX_EXPANDED_ASSIGNMENT_HISTORY_SNAPSHOT_EXPRESSIONS: usize = 20_000;
+const MAX_EXPANDED_ASSIGNMENT_HISTORY_SNAPSHOT_STATEMENTS: usize = 5_000;
 const MAX_SCALAR_CONDITION_REASONING_DEPTH: usize = 128;
 const MAX_SCALAR_STRUCTURAL_EQUALITY_DEPTH: usize = 192;
 pub(crate) const LIMEXP_MAX: f64 = 5.54062238439351e34;
@@ -500,6 +502,8 @@ struct ScalarGraphBuilder<'a> {
     branch_current_values: HashMap<String, ValueId>,
     branch_flow_context: Option<BranchUnknownId>,
     conditional_path_stack: Vec<ConditionalPathPredicate>,
+    track_assignment_history: bool,
+    expanded_assignment_history_snapshots: bool,
     runtime_loops: Vec<OptRuntimeLoop>,
     next_loop_id: u32,
 }
@@ -724,6 +728,9 @@ impl OptValueKey {
 
 impl<'a> ScalarGraphBuilder<'a> {
     fn new(hir: Option<&'a HirModel>, mir: &'a MirModel) -> Self {
+        let expanded_assignment_history_snapshots =
+            expanded_assignment_history_snapshots_enabled(hir, mir);
+        let track_assignment_history = expanded_assignment_history_snapshots;
         Self {
             hir,
             mir,
@@ -750,6 +757,8 @@ impl<'a> ScalarGraphBuilder<'a> {
             branch_current_values: HashMap::new(),
             branch_flow_context: None,
             conditional_path_stack: Vec::new(),
+            track_assignment_history,
+            expanded_assignment_history_snapshots,
             runtime_loops: Vec::new(),
             next_loop_id: 0,
         }
@@ -994,7 +1003,10 @@ impl<'a> ScalarGraphBuilder<'a> {
         self.clear_assignment_replay_caches();
         self.guarded_path_assignment_exprs
             .remove(&assignment.target);
-        if assignment.index.is_none() && supported_assignment_value_type(assignment.expr_type) {
+        if self.track_assignment_history
+            && assignment.index.is_none()
+            && supported_assignment_value_type(assignment.expr_type)
+        {
             let entry = self.assignment_history_entry(assignment.target, assignment.expr.id);
             self.variable_assignment_exprs
                 .insert(assignment.target, assignment.expr.id);
@@ -1206,13 +1218,15 @@ impl<'a> ScalarGraphBuilder<'a> {
             let Some(slot) = slot_by_variable.get(&assignment.target).copied() else {
                 return false;
             };
-            let entry = self.assignment_history_entry(assignment.target, assignment.expr.id);
-            self.variable_assignment_exprs
-                .insert(assignment.target, assignment.expr.id);
-            self.variable_assignment_history
-                .entry(assignment.target)
-                .or_default()
-                .push(entry);
+            if self.track_assignment_history {
+                let entry = self.assignment_history_entry(assignment.target, assignment.expr.id);
+                self.variable_assignment_exprs
+                    .insert(assignment.target, assignment.expr.id);
+                self.variable_assignment_history
+                    .entry(assignment.target)
+                    .or_default()
+                    .push(entry);
+            }
             self.expression_values.clear();
             let Some(value) = self.lower_expression(assignment.expr.id) else {
                 return false;
@@ -1361,24 +1375,31 @@ impl<'a> ScalarGraphBuilder<'a> {
 
         let previous = self.current_variable_value(assignment.target);
         self.clear_assignment_replay_caches();
-        let entry = self.assignment_history_entry(assignment.target, assignment.expr.id);
-        self.guarded_path_assignment_exprs.insert(
-            assignment.target,
-            GuardedPathAssignmentExpr {
-                condition: self
-                    .conditional_path_stack
-                    .last()
-                    .expect("guarded assignment must have an active path")
-                    .condition,
-                value: entry.clone(),
-            },
-        );
-        self.variable_assignment_exprs
-            .insert(assignment.target, assignment.expr.id);
-        self.variable_assignment_history
-            .entry(assignment.target)
-            .or_default()
-            .push(entry);
+        if self.track_assignment_history {
+            let entry = self.assignment_history_entry(assignment.target, assignment.expr.id);
+            self.guarded_path_assignment_exprs.insert(
+                assignment.target,
+                GuardedPathAssignmentExpr {
+                    condition: self
+                        .conditional_path_stack
+                        .last()
+                        .expect("guarded assignment must have an active path")
+                        .condition,
+                    value: entry.clone(),
+                },
+            );
+            self.variable_assignment_exprs
+                .insert(assignment.target, assignment.expr.id);
+            self.variable_assignment_history
+                .entry(assignment.target)
+                .or_default()
+                .push(entry);
+        } else {
+            self.guarded_path_assignment_exprs
+                .remove(&assignment.target);
+            self.variable_assignment_exprs.remove(&assignment.target);
+            self.variable_assignment_history.remove(&assignment.target);
+        }
         self.expression_values.clear();
         let Some(next) = self.lower_expression(assignment.expr.id) else {
             self.variable_values.insert(assignment.target, None);
@@ -3329,6 +3350,27 @@ impl<'a> ScalarGraphBuilder<'a> {
         lowered
     }
 
+    fn lower_expression_with_assignment_previous_value_snapshot_and_path(
+        &mut self,
+        variable: VariableId,
+        previous_value: ValueId,
+        entry: &AssignmentHistoryEntry,
+        condition: ExprId,
+        truth: bool,
+        expr: ExprId,
+    ) -> Option<ValueId> {
+        self.conditional_path_stack
+            .push(ConditionalPathPredicate { condition, truth });
+        let lowered = self.lower_expression_with_assignment_previous_value_and_snapshot(
+            variable,
+            previous_value,
+            entry,
+            expr,
+        );
+        self.conditional_path_stack.pop();
+        lowered
+    }
+
     fn assignment_history_entry(&self, target: VariableId, expr: ExprId) -> AssignmentHistoryEntry {
         let variables = self.assignment_history_snapshot_variables(target, expr);
         let mut value_snapshots = Vec::new();
@@ -3356,9 +3398,17 @@ impl<'a> ScalarGraphBuilder<'a> {
     ) -> BTreeSet<VariableId> {
         if let Some(update) = self.conditional_self_update(target, expr)
             && !self.expr_references_variable(update.value_expr, target)
-            && let Some(variables) = self.simple_assignment_alias_variables(update.value_expr)
+            && let Some(mut variables) = self.simple_assignment_alias_variables(update.value_expr)
         {
-            return variables;
+            if self.expanded_assignment_history_snapshots
+                && let Some(condition_variables) =
+                    self.simple_assignment_alias_variables(update.condition)
+            {
+                variables.extend(condition_variables);
+            }
+            return self
+                .simple_assignment_alias_snapshot_variables_from_set(variables)
+                .unwrap_or_default();
         }
         if let Some(variable) = self.variable_identifier(expr) {
             return (variable != target)
@@ -3396,6 +3446,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         &self,
         variables: BTreeSet<VariableId>,
     ) -> Option<BTreeSet<VariableId>> {
+        if variables.len() > MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES {
+            return None;
+        }
         let history_backed_unresolved = variables
             .iter()
             .filter(|variable| {
@@ -3408,7 +3461,12 @@ impl<'a> ScalarGraphBuilder<'a> {
                         .is_none()
             })
             .count();
-        (history_backed_unresolved <= 1).then_some(variables)
+        let max_history_backed_unresolved = if self.expanded_assignment_history_snapshots {
+            MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES
+        } else {
+            1
+        };
+        (history_backed_unresolved <= max_history_backed_unresolved).then_some(variables)
     }
 
     fn simple_assignment_alias_variables(&self, expr: ExprId) -> Option<BTreeSet<VariableId>> {
@@ -3435,15 +3493,28 @@ impl<'a> ScalarGraphBuilder<'a> {
                     }
                 }
                 HirExprKind::Number { .. } => {}
+                HirExprKind::BranchAccess { .. } | HirExprKind::NamedBranchAccess { .. } => {}
                 HirExprKind::Unary { op, operand }
-                    if simple_assignment_alias_snapshot_unary_op(op) =>
+                    if simple_assignment_alias_snapshot_unary_op(
+                        op,
+                        self.expanded_assignment_history_snapshots,
+                    ) =>
                 {
                     stack.push(*operand);
                 }
                 HirExprKind::Binary { op, left, right }
-                    if simple_assignment_alias_snapshot_binary_op(op) =>
+                    if simple_assignment_alias_snapshot_binary_op(
+                        op,
+                        self.expanded_assignment_history_snapshots,
+                    ) =>
                 {
                     stack.extend([*left, *right]);
+                }
+                HirExprKind::Call { name, args }
+                    if self.expanded_assignment_history_snapshots
+                        && simple_assignment_alias_snapshot_call(name, args.len()) =>
+                {
+                    stack.extend(args.iter().copied());
                 }
                 _ => return None,
             }
@@ -3624,26 +3695,34 @@ impl<'a> ScalarGraphBuilder<'a> {
             );
         };
 
-        let then_value = if self.variable_identifier(*then_expr) == Some(variable) {
-            previous_value
+        let then_lowered = if self.variable_identifier(*then_expr) == Some(variable) {
+            Some(previous_value)
         } else {
-            self.lower_expression_with_assignment_previous_value_and_snapshot(
+            self.lower_expression_with_assignment_previous_value_snapshot_and_path(
                 variable,
                 previous_value,
                 entry,
+                *condition,
+                true,
                 *then_expr,
-            )?
+            )
         };
-        let else_value = if self.variable_identifier(*else_expr) == Some(variable) {
-            previous_value
+        let then_value = then_lowered?;
+
+        let else_lowered = if self.variable_identifier(*else_expr) == Some(variable) {
+            Some(previous_value)
         } else {
-            self.lower_expression_with_assignment_previous_value_and_snapshot(
+            self.lower_expression_with_assignment_previous_value_snapshot_and_path(
                 variable,
                 previous_value,
                 entry,
+                *condition,
+                false,
                 *else_expr,
-            )?
+            )
         };
+        let else_value = else_lowered?;
+
         if then_value == else_value {
             return Some(then_value);
         }
@@ -5217,6 +5296,15 @@ fn normalize_analysis_query(name: &str) -> Option<&'static str> {
     }
 }
 
+fn expanded_assignment_history_snapshots_enabled(hir: Option<&HirModel>, mir: &MirModel) -> bool {
+    let expression_count = hir
+        .map(|hir| hir.expressions.len())
+        .unwrap_or(mir.expressions.len());
+    let statement_count = hir.map(|hir| hir.statements.len()).unwrap_or(0);
+    expression_count <= MAX_EXPANDED_ASSIGNMENT_HISTORY_SNAPSHOT_EXPRESSIONS
+        && statement_count <= MAX_EXPANDED_ASSIGNMENT_HISTORY_SNAPSHOT_STATEMENTS
+}
+
 fn binary_op(op: &str) -> Option<OptBinaryOp> {
     match op {
         "Add" => Some(OptBinaryOp::Add),
@@ -5236,8 +5324,9 @@ fn binary_op(op: &str) -> Option<OptBinaryOp> {
     }
 }
 
-fn simple_assignment_alias_snapshot_binary_op(op: &str) -> bool {
+fn simple_assignment_alias_snapshot_binary_op(op: &str, expanded: bool) -> bool {
     matches!(op, "Add" | "Sub" | "Mul" | "Div" | "Pow")
+        || (expanded && matches!(op, "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge" | "And" | "Or"))
 }
 
 fn unary_op(op: &str) -> Option<OptUnaryOp> {
@@ -5249,8 +5338,37 @@ fn unary_op(op: &str) -> Option<OptUnaryOp> {
     }
 }
 
-fn simple_assignment_alias_snapshot_unary_op(op: &str) -> bool {
-    matches!(op, "Pos" | "Neg")
+fn simple_assignment_alias_snapshot_unary_op(op: &str, expanded: bool) -> bool {
+    matches!(op, "Pos" | "Neg") || (expanded && op == "Not")
+}
+
+fn simple_assignment_alias_snapshot_call(name: &str, arity: usize) -> bool {
+    match arity {
+        1 => matches!(
+            name,
+            "exp"
+                | "expm1"
+                | "limexp"
+                | "__rspice_limited_exp"
+                | "ln"
+                | "log"
+                | "log1p"
+                | "sqrt"
+                | "abs"
+                | "sin"
+                | "cos"
+                | "tan"
+                | "sinh"
+                | "cosh"
+                | "tanh"
+                | "atan"
+                | "asinh"
+                | "floor"
+                | "ceil"
+        ),
+        2 => matches!(name, "fpow" | "min" | "max" | "pow"),
+        _ => false,
+    }
 }
 
 fn is_flow_access_name(access: &str) -> bool {
