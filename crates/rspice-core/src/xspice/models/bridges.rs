@@ -526,9 +526,8 @@ fn bidi_unknown_target_svoc(drive: DigitalValue, params: BidiParams) -> Value {
         DigitalStrength::Strong => {
             if params.drive_high > params.drive_low {
                 1.0
-            } else if params.drive_low > params.drive_high {
-                0.0
             } else {
+                // ngspice falls through to mid-rail when drive_low >= drive_high.
                 0.5
             }
         }
