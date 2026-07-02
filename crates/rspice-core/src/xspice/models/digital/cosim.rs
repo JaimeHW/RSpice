@@ -1,12 +1,12 @@
+use crate::Value;
 use crate::xspice::external::{
-    start_digital_cosim_runtime, DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimSpec,
-    DigitalCosimStep,
+    DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimSpec, DigitalCosimStep,
+    start_digital_cosim_runtime,
 };
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, DigitalState, DigitalStrength, DigitalValue,
     EvaluationPhase, ParamSpec, PortDirection, PortSpec, PortType,
 };
-use crate::Value;
 use std::sync::{Arc, Mutex};
 
 /// External irreversible digital co-simulation code model.
@@ -38,6 +38,23 @@ struct DigitalCosimInputScratch {
     input_events: Vec<DigitalCosimInputEvent>,
     results: Vec<DigitalCosimStep>,
     output_changes: Vec<(usize, DigitalValue)>,
+}
+
+impl DigitalCosimInputScratch {
+    fn with_capacities(
+        input_count: usize,
+        inout_count: usize,
+        queue_size: usize,
+        output_change_count: usize,
+    ) -> Self {
+        Self {
+            inputs: Vec::with_capacity(input_count),
+            inouts: Vec::with_capacity(inout_count),
+            input_events: Vec::with_capacity(queue_size),
+            results: Vec::with_capacity(2),
+            output_changes: Vec::with_capacity(output_change_count),
+        }
+    }
 }
 
 fn with_input_scratch<R>(
@@ -417,7 +434,12 @@ impl CodeModel for DigitalCosim {
         ctx.set_resource(RESOURCE_RUNTIME, runtime);
         ctx.set_resource(
             RESOURCE_INPUT_SCRATCH,
-            Arc::new(DigitalCosimInputScratch::default()),
+            Arc::new(DigitalCosimInputScratch::with_capacities(
+                input_count,
+                inout_count,
+                spec.queue_size,
+                output_count.max(inout_count),
+            )),
         );
         set_initial_outputs(ctx, official_cosim_delay(ctx)?);
         Ok(())
@@ -499,8 +521,8 @@ impl CodeModel for DigitalCosim {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::xspice::context::InputValue;
     use crate::xspice::ParamType;
+    use crate::xspice::context::InputValue;
 
     #[test]
     fn d_cosim_metadata_matches_ngspice46_interface() {
