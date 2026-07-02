@@ -105,6 +105,16 @@ fn d_lut_table_state_from_byte(byte: Option<u8>) -> DigitalState {
     }
 }
 
+fn reserve_d_lut_states(table_len: usize) -> CmResult<Vec<DigitalState>> {
+    let mut states = Vec::new();
+    states.try_reserve_exact(table_len).map_err(|err| {
+        d_lut_error(format!(
+            "unable to reserve storage for {table_len} lookup states: {err}"
+        ))
+    })?;
+    Ok(states)
+}
+
 fn d_lut_table_states(ctx: &mut CmContext, input_width: usize) -> CmResult<Arc<[DigitalState]>> {
     let table = ctx
         .string_param("table_values")
@@ -118,10 +128,11 @@ fn d_lut_table_states(ctx: &mut CmContext, input_width: usize) -> CmResult<Arc<[
 
     let table_len = d_lut_table_len(input_width)?;
     let bytes = table.as_bytes();
-    let states: Arc<[DigitalState]> = (0..table_len)
-        .map(|index| d_lut_table_state_from_byte(bytes.get(index).copied()))
-        .collect::<Vec<_>>()
-        .into();
+    let mut states = reserve_d_lut_states(table_len)?;
+    for index in 0..table_len {
+        states.push(d_lut_table_state_from_byte(bytes.get(index).copied()));
+    }
+    let states: Arc<[DigitalState]> = states.into();
     ctx.set_resource(
         D_LUT_TABLE_RESOURCE,
         Arc::new(DLutTableStates {
@@ -167,6 +178,16 @@ fn d_genlut_table_value_from_byte(byte: Option<u8>) -> DigitalValue {
     }
 }
 
+fn reserve_d_genlut_values(table_len: usize) -> CmResult<Vec<DigitalValue>> {
+    let mut values = Vec::new();
+    values.try_reserve_exact(table_len).map_err(|err| {
+        d_genlut_error(format!(
+            "unable to reserve storage for {table_len} lookup values: {err}"
+        ))
+    })?;
+    Ok(values)
+}
+
 fn d_genlut_table_values(
     ctx: &mut CmContext,
     input_width: usize,
@@ -184,10 +205,11 @@ fn d_genlut_table_values(
 
     let table_len = d_genlut_table_len(input_width, output_width)?;
     let bytes = table.as_bytes();
-    let values: Arc<[DigitalValue]> = (0..table_len)
-        .map(|index| d_genlut_table_value_from_byte(bytes.get(index).copied()))
-        .collect::<Vec<_>>()
-        .into();
+    let mut values = reserve_d_genlut_values(table_len)?;
+    for index in 0..table_len {
+        values.push(d_genlut_table_value_from_byte(bytes.get(index).copied()));
+    }
+    let values: Arc<[DigitalValue]> = values.into();
     ctx.set_resource(
         D_GENLUT_TABLE_RESOURCE,
         Arc::new(DGenlutTableValues {
