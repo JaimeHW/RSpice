@@ -3379,7 +3379,8 @@ mod tests {
 
         instance
             .context
-            .set_output_vector_with_partials("out", vec![1.5, 2.5], vec![0.25, 0.5]);
+            .set_output_vector_with_partials("out", vec![1.5, 2.5], vec![0.25, 0.5])
+            .expect("set vector output partials");
 
         assert!(instance.has_analog_vector_contributions(0));
         assert_eq!(instance.analog_vector_contribution_at(0, 0), (0.25, 1.5));
@@ -3474,13 +3475,20 @@ mod tests {
         )
         .expect("analog vector output should construct");
 
-        instance.context.set_output_vector("out", vec![1.0, 2.0]);
         instance
             .context
-            .set_output_vector("out", vec![1.0 + 1.0e-13, 2.0 - 1.0e-13]);
+            .set_output_vector("out", vec![1.0, 2.0])
+            .expect("set vector output");
+        instance
+            .context
+            .set_output_vector("out", vec![1.0 + 1.0e-13, 2.0 - 1.0e-13])
+            .expect("set vector output");
         assert!(instance.is_converged(1.0e-12));
 
-        instance.context.set_output_vector("out", vec![1.1, 2.0]);
+        instance
+            .context
+            .set_output_vector("out", vec![1.1, 2.0])
+            .expect("set vector output");
         assert!(!instance.is_converged(1.0e-12));
     }
 

@@ -339,6 +339,30 @@ where
     Ok(values)
 }
 
+fn analog_vector_values(context: &str, width: usize) -> CmResult<Vec<AnalogValue>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(width)
+        .map_err(|err| context_allocation_error(context, width, err))?;
+    values.resize(width, AnalogValue::default());
+    Ok(values)
+}
+
+fn resize_analog_vector_values(
+    context: &str,
+    values: &mut Vec<AnalogValue>,
+    width: usize,
+) -> CmResult<()> {
+    if values.capacity() < width {
+        let additional = width - values.capacity();
+        values
+            .try_reserve_exact(additional)
+            .map_err(|err| context_allocation_error(context, width, err))?;
+    }
+    values.resize(width, AnalogValue::default());
+    Ok(())
+}
+
 impl OutputValue {
     /// Create analog output initialized to zero
     pub fn analog() -> Self {
@@ -845,7 +869,7 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        mut value_at: F,
+        value_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> Value,
@@ -868,7 +892,7 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        mut value_at: F,
+        value_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> AnalogValue,
@@ -895,7 +919,7 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        mut value_at: F,
+        value_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> DigitalValue,
@@ -922,7 +946,7 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        mut value_at: F,
+        value_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> Value,
@@ -973,7 +997,7 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        mut time_at: F,
+        time_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> Option<Value>,
@@ -1182,61 +1206,72 @@ impl CmContext {
     }
 
     /// Set analog vector output values with zero direct partials.
-    pub fn set_output_vector(&mut self, name: &str, values: Vec<Value>) {
-        self.set_output_vector_from_slice(name, &values);
+    pub fn set_output_vector(&mut self, name: &str, values: Vec<Value>) -> CmResult<()> {
+        self.set_output_vector_from_slice(name, &values)
     }
 
     /// Set analog vector output values from borrowed values with zero direct partials.
-    pub fn set_output_vector_from_slice(&mut self, name: &str, values: &[Value]) {
+    pub fn set_output_vector_from_slice(&mut self, name: &str, values: &[Value]) -> CmResult<()> {
         let width = self.port_width(name).max(values.len());
-        let out = self
-            .outputs
-            .entry(name.to_string())
-            .or_insert_with(|| OutputValue::analog_vector(width));
-        match out {
-            OutputValue::AnalogVector(existing) => {
-                existing.resize(width, AnalogValue::default());
+        if !self.outputs.contains_key(name) {
+            self.outputs.insert(
+                name.to_string(),
+                OutputValue::AnalogVector(analog_vector_values("analog vector output", width)?),
+            );
+        }
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::AnalogVector(existing)) => {
+                resize_analog_vector_values("analog vector output", existing, width)?;
                 for (index, analog) in existing.iter_mut().enumerate() {
                     analog.prev_value = analog.value;
                     analog.value = values.get(index).copied().unwrap_or(0.0);
                     analog.partial = 0.0;
                 }
             }
-            OutputValue::Analog(existing) if width == 1 => {
+            Some(OutputValue::Analog(existing)) if width == 1 => {
                 existing.prev_value = existing.value;
                 existing.value = values.first().copied().unwrap_or(0.0);
                 existing.partial = 0.0;
             }
             _ => {}
         }
+        Ok(())
     }
 
     /// Set analog vector output values from a callback with zero direct partials.
-    pub fn set_output_vector_from_fn<F>(&mut self, name: &str, value_count: usize, mut value_at: F)
+    pub fn set_output_vector_from_fn<F>(
+        &mut self,
+        name: &str,
+        value_count: usize,
+        mut value_at: F,
+    ) -> CmResult<()>
     where
         F: FnMut(usize) -> Value,
     {
         let width = self.port_width(name).max(value_count);
-        let out = self
-            .outputs
-            .entry(name.to_string())
-            .or_insert_with(|| OutputValue::analog_vector(width));
-        match out {
-            OutputValue::AnalogVector(existing) => {
-                existing.resize(width, AnalogValue::default());
+        if !self.outputs.contains_key(name) {
+            self.outputs.insert(
+                name.to_string(),
+                OutputValue::AnalogVector(analog_vector_values("analog vector output", width)?),
+            );
+        }
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::AnalogVector(existing)) => {
+                resize_analog_vector_values("analog vector output", existing, width)?;
                 for (index, analog) in existing.iter_mut().enumerate() {
                     analog.prev_value = analog.value;
                     analog.value = value_at(index);
                     analog.partial = 0.0;
                 }
             }
-            OutputValue::Analog(existing) if width == 1 => {
+            Some(OutputValue::Analog(existing)) if width == 1 => {
                 existing.prev_value = existing.value;
                 existing.value = value_at(0);
                 existing.partial = 0.0;
             }
             _ => {}
         }
+        Ok(())
     }
 
     /// Set analog vector output values and per-element direct partials.
@@ -1245,33 +1280,41 @@ impl CmContext {
         name: &str,
         values: Vec<Value>,
         partials: Vec<Value>,
-    ) {
+    ) -> CmResult<()> {
         let width = self.port_width(name).max(values.len()).max(partials.len());
-        let out = self
-            .outputs
-            .entry(name.to_string())
-            .or_insert_with(|| OutputValue::analog_vector(width));
-        match out {
-            OutputValue::AnalogVector(existing) => {
-                existing.resize(width, AnalogValue::default());
+        if !self.outputs.contains_key(name) {
+            self.outputs.insert(
+                name.to_string(),
+                OutputValue::AnalogVector(analog_vector_values("analog vector output", width)?),
+            );
+        }
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::AnalogVector(existing)) => {
+                resize_analog_vector_values("analog vector output", existing, width)?;
                 for (index, analog) in existing.iter_mut().enumerate() {
                     analog.prev_value = analog.value;
                     analog.value = values.get(index).copied().unwrap_or(0.0);
                     analog.partial = partials.get(index).copied().unwrap_or(0.0);
                 }
             }
-            OutputValue::Analog(existing) if width == 1 => {
+            Some(OutputValue::Analog(existing)) if width == 1 => {
                 existing.prev_value = existing.value;
                 existing.value = values.first().copied().unwrap_or(0.0);
                 existing.partial = partials.first().copied().unwrap_or(0.0);
             }
             _ => {}
         }
+        Ok(())
     }
 
     /// Set one analog vector output element with zero direct partial.
-    pub fn set_output_vector_element(&mut self, name: &str, index: usize, value: Value) {
-        self.set_output_vector_element_with_partial(name, index, value, 0.0);
+    pub fn set_output_vector_element(
+        &mut self,
+        name: &str,
+        index: usize,
+        value: Value,
+    ) -> CmResult<()> {
+        self.set_output_vector_element_with_partial(name, index, value, 0.0)
     }
 
     /// Set one analog vector output element and direct partial in place.
@@ -1281,28 +1324,31 @@ impl CmContext {
         index: usize,
         value: Value,
         partial: Value,
-    ) {
+    ) -> CmResult<()> {
         let width = self.port_width(name).max(index + 1);
-        let out = self
-            .outputs
-            .entry(name.to_string())
-            .or_insert_with(|| OutputValue::analog_vector(width));
-        match out {
-            OutputValue::AnalogVector(existing) => {
-                existing.resize(width, AnalogValue::default());
+        if !self.outputs.contains_key(name) {
+            self.outputs.insert(
+                name.to_string(),
+                OutputValue::AnalogVector(analog_vector_values("analog vector output", width)?),
+            );
+        }
+        match self.outputs.get_mut(name) {
+            Some(OutputValue::AnalogVector(existing)) => {
+                resize_analog_vector_values("analog vector output", existing, width)?;
                 if let Some(analog) = existing.get_mut(index) {
                     analog.prev_value = analog.value;
                     analog.value = value;
                     analog.partial = partial;
                 }
             }
-            OutputValue::Analog(existing) if index == 0 && width == 1 => {
+            Some(OutputValue::Analog(existing)) if index == 0 && width == 1 => {
                 existing.prev_value = existing.value;
                 existing.value = value;
                 existing.partial = partial;
             }
             _ => {}
         }
+        Ok(())
     }
 
     /// Set digital output value (schedules event)
@@ -1441,7 +1487,7 @@ impl CmContext {
     where
         F: FnMut(&CmContext, usize) -> DigitalValue,
     {
-        let mut event_values = vec_from_fn("digital vector output events", value_count, |index| {
+        let event_values = vec_from_fn("digital vector output events", value_count, |index| {
             value_at(self, index)
         })?;
         let mut output_values = Vec::new();
@@ -2178,10 +2224,13 @@ mod tests {
     fn analog_vector_element_setter_updates_in_place() {
         let mut ctx = CmContext::new();
         ctx.set_port_width("out", 2);
-        ctx.set_output_vector("out", vec![1.0, 2.0]);
+        ctx.set_output_vector("out", vec![1.0, 2.0])
+            .expect("set output vector");
 
-        ctx.set_output_vector_element("out", 0, 1.5);
-        ctx.set_output_vector_element_with_partial("out", 1, 3.0, 4.0);
+        ctx.set_output_vector_element("out", 0, 1.5)
+            .expect("set output vector element");
+        ctx.set_output_vector_element_with_partial("out", 1, 3.0, 4.0)
+            .expect("set output vector element partial");
 
         assert_eq!(ctx.output_vector("out"), vec![1.5, 3.0]);
         assert_eq!(ctx.output_vector_prev("out"), vec![1.0, 2.0]);
@@ -2192,14 +2241,17 @@ mod tests {
     fn analog_vector_function_setter_preserves_prev_values_once() {
         let mut ctx = CmContext::new();
         ctx.set_port_width("out", 3);
-        ctx.set_output_vector("out", vec![1.0, 2.0, 3.0]);
-        ctx.set_output_vector_with_partials("out", vec![4.0, 5.0], vec![0.25, 0.5]);
+        ctx.set_output_vector("out", vec![1.0, 2.0, 3.0])
+            .expect("set output vector");
+        ctx.set_output_vector_with_partials("out", vec![4.0, 5.0], vec![0.25, 0.5])
+            .expect("set output vector partials");
 
         let mut calls = 0;
         ctx.set_output_vector_from_fn("out", 3, |index| {
             calls += 1;
             if index == 1 { 9.0 } else { 0.0 }
-        });
+        })
+        .expect("set output vector from function");
 
         assert_eq!(calls, 3);
         assert_eq!(ctx.output_vector("out"), vec![0.0, 9.0, 0.0]);
@@ -2498,8 +2550,10 @@ mod tests {
     fn analog_vector_scalar_output_accessors_avoid_full_clones() {
         let mut ctx = CmContext::new();
         ctx.set_port_width("out", 2);
-        ctx.set_output_vector("out", vec![1.0, 2.0]);
-        ctx.set_output_vector_with_partials("out", vec![1.5, 2.5], vec![0.25, 0.5]);
+        ctx.set_output_vector("out", vec![1.0, 2.0])
+            .expect("set output vector");
+        ctx.set_output_vector_with_partials("out", vec![1.5, 2.5], vec![0.25, 0.5])
+            .expect("set output vector partials");
         ctx.set_output_with_partial("scalar", 2.5, 0.25);
         ctx.set_output_with_partial("scalar", 3.5, 0.75);
 

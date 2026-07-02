@@ -1165,7 +1165,7 @@ impl CodeModel for DacBridge {
                 ctx.set_state(base + 1, v_target);
                 ctx.set_state(base + 2, ctx.time);
                 ctx.set_state(base + 3, v_target);
-                ctx.set_output_vector_element("out", index, v_target);
+                ctx.set_output_vector_element("out", index, v_target)?;
                 continue;
             }
 
@@ -1235,7 +1235,7 @@ impl CodeModel for DacBridge {
                 ctx.set_state(base + 2, transition_start_time);
                 ctx.set_state(base + 3, transition_start_value);
             }
-            ctx.set_output_vector_element("out", index, v_out);
+            ctx.set_output_vector_element("out", index, v_out)?;
         }
 
         Ok(())
@@ -1416,7 +1416,7 @@ impl CodeModel for BidiBridge {
                 index,
                 analog_drive.current,
                 analog_drive.partial,
-            );
+            )?;
         }
 
         Ok(())
