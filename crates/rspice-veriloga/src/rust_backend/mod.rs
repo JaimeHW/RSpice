@@ -754,6 +754,54 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_replays_guarded_loop_self_update_on_current_path() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_loop_self_update_current_path(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    integer iter;
+    real tmp;
+    analog begin
+        iter = 0;
+        tmp = $simparam("unsupported_scalar_probe");
+
+        while ((iter < 1) && (enable == 1)) begin
+            if (enable == 1) begin
+                tmp = V(p, n);
+            end
+            iter = iter + 1;
+        end
+
+        if (enable == 1) begin
+            I(p, n) <+ tmp;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("guarded loop self-update should replay active current-path branch");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_reconstructs_indirect_previous_value_alias_history() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(

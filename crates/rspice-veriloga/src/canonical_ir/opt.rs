@@ -3284,7 +3284,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
         let guarded_expr = self.guarded_path_assignment_exprs.get(&variable).copied();
         let lowered = guarded_expr
-            .and_then(|expr| self.lower_guarded_path_assignment_for_current_path(expr))
+            .and_then(|expr| self.lower_guarded_path_assignment_for_current_path(variable, expr))
             .or_else(|| self.lower_assignment_history_for_current_path(variable));
         self.variable_lowering_stack.remove(&variable);
         lowered
@@ -3317,12 +3317,13 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn lower_guarded_path_assignment_for_current_path(
         &mut self,
+        variable: VariableId,
         assignment: GuardedPathAssignmentExpr,
     ) -> Option<ValueId> {
         self.condition_truth_in_current_path(assignment.condition)
             .is_some_and(|truth| truth)
             .then_some(())?;
-        self.lower_expression(assignment.value_expr)
+        self.lower_assignment_expr_for_current_path(variable, assignment.value_expr)
     }
 
     fn lower_assignment_expr_for_current_path(
