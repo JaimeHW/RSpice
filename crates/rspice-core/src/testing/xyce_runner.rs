@@ -929,9 +929,9 @@ impl XyceTestRunner {
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let tran = Self::single_tran_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
-        let native_default_prn_wrapper =
-            Self::is_native_default_prn_tran_wrapper_candidate(&deck.relative_path, &source);
-        if steps.is_empty() && requires_wrapper && !native_default_prn_wrapper {
+        let native_static_prn_wrapper =
+            Self::is_native_static_prn_tran_wrapper_candidate(&deck.relative_path, &source);
+        if steps.is_empty() && requires_wrapper && !native_static_prn_wrapper {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
         if !steps.is_empty() {
@@ -1527,11 +1527,80 @@ impl XyceTestRunner {
         }
     }
 
+    fn is_native_static_prn_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
+            || Self::is_native_output_initial_interval_tran_wrapper_candidate(source)
+    }
+
     fn is_native_default_prn_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
         matches!(
             Self::normalize_manifest_key(relative_path).as_str(),
             "netlists/output/tran/tran-prn-noindex.cir"
         ) && Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
+    }
+
+    fn is_native_output_initial_interval_tran_wrapper_candidate(source: &str) -> bool {
+        Self::validate_native_output_initial_interval_tran_wrapper_contract(source).is_ok()
+    }
+
+    fn validate_native_output_initial_interval_tran_wrapper_contract(
+        source: &str,
+    ) -> Result<(), String> {
+        Self::validate_native_static_prn_tran_wrapper_contract(source)?;
+
+        let tran_prints = Self::print_output_requests(source, "TRAN")?;
+        if tran_prints.iter().any(|request| request.file.is_some()) {
+            return Err(
+                "wrapper-origin initial-interval transient .prn contract does not cover FILE= side outputs"
+                    .to_string(),
+            );
+        }
+        let Some(primary_print) = tran_prints.iter().find(|request| request.file.is_none()) else {
+            return Err(
+                "wrapper-origin initial-interval transient .prn contract requires one primary .PRINT TRAN statement"
+                    .to_string(),
+            );
+        };
+        if primary_print.probes.len() != 1 {
+            return Err(format!(
+                "wrapper-origin initial-interval transient .prn contract currently covers one primary probe, found {}",
+                primary_print.probes.len()
+            ));
+        }
+
+        let mut initial_interval_options = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let normalized = Self::strip_netlist_comment(&line)
+                .trim()
+                .to_ascii_lowercase();
+            if normalized.is_empty() {
+                continue;
+            }
+            let Some(command) = normalized.split_whitespace().next() else {
+                continue;
+            };
+            if !command.eq_ignore_ascii_case(".options") {
+                continue;
+            }
+            if normalized.contains("output") && normalized.contains("initial_interval") {
+                initial_interval_options += 1;
+            } else {
+                return Err(format!(
+                    "wrapper-origin initial-interval transient .prn contract does not cover {command} directives without OUTPUT INITIAL_INTERVAL"
+                ));
+            }
+        }
+
+        match initial_interval_options {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin initial-interval transient .prn contract requires .OPTIONS OUTPUT INITIAL_INTERVAL"
+                    .to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin initial-interval transient .prn contract requires one .OPTIONS OUTPUT INITIAL_INTERVAL directive, found {initial_interval_options}"
+            )),
+        }
     }
 
     fn native_default_prn_tran_wrapper_tolerance(
