@@ -743,25 +743,27 @@ fn table3d_resource(ctx: &CmContext, file: &str) -> Option<Arc<Table3DData>> {
 
 fn ensure_table_eval_scratch(ctx: &mut CmContext) {
     if ctx
-        .resource::<Mutex<TableEvalScratch>>(TABLE_EVAL_SCRATCH_RESOURCE)
+        .resource::<TableEvalScratch>(TABLE_EVAL_SCRATCH_RESOURCE)
         .is_none()
     {
         ctx.set_resource(
             TABLE_EVAL_SCRATCH_RESOURCE,
-            Arc::new(Mutex::new(TableEvalScratch::default())),
+            Arc::new(TableEvalScratch::default()),
         );
     }
 }
 
-fn with_table_eval_scratch<R>(
-    ctx: &CmContext,
+fn with_table_eval_scratch_mut<R>(
+    ctx: &mut CmContext,
     evaluate: impl FnOnce(&mut TableEvalScratch) -> R,
-) -> Option<R> {
-    let scratch = ctx.resource::<Mutex<TableEvalScratch>>(TABLE_EVAL_SCRATCH_RESOURCE)?;
-    let mut scratch = scratch
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Some(evaluate(&mut scratch))
+) -> R {
+    ensure_table_eval_scratch(ctx);
+    if let Some(scratch) = ctx.resource_mut::<TableEvalScratch>(TABLE_EVAL_SCRATCH_RESOURCE) {
+        return evaluate(scratch);
+    }
+
+    let mut scratch = TableEvalScratch::default();
+    evaluate(&mut scratch)
 }
 
 fn load_table2d_for_context(ctx: &mut CmContext, file: &str) -> CmResult<Arc<Table2DData>> {
@@ -1382,6 +1384,27 @@ fn table3d_eval_signature(
     }
 }
 
+fn scale_table2d_eval(raw: TableEval2D, offset: Value, gain: Value) -> TableEval2D {
+    TableEval2D {
+        value: offset + gain * raw.value,
+        dx: gain * raw.dx,
+        dy: gain * raw.dy,
+    }
+}
+
+fn scaled_table2d_eval_from_parts_with_scratch(
+    table: &Table2DData,
+    order: usize,
+    inx: Value,
+    iny: Value,
+    offset: Value,
+    gain: Value,
+    scratch: &mut TableEvalScratch,
+) -> TableEval2D {
+    let raw = evaluate_table2d_data_with_scratch(table, order, inx, iny, scratch);
+    scale_table2d_eval(raw, offset, gain)
+}
+
 fn scaled_table2d_eval_from_parts(
     ctx: &CmContext,
     table: &Table2DData,
@@ -1389,16 +1412,8 @@ fn scaled_table2d_eval_from_parts(
     inx: Value,
     iny: Value,
 ) -> TableEval2D {
-    let raw = with_table_eval_scratch(ctx, |scratch| {
-        evaluate_table2d_data_with_scratch(table, order, inx, iny, scratch)
-    })
-    .unwrap_or_else(|| evaluate_table2d_data(table, order, inx, iny));
-    let gain = ctx.param("gain");
-    TableEval2D {
-        value: ctx.param("offset") + gain * raw.value,
-        dx: gain * raw.dx,
-        dy: gain * raw.dy,
-    }
+    let raw = evaluate_table2d_data(table, order, inx, iny);
+    scale_table2d_eval(raw, ctx.param("offset"), ctx.param("gain"))
 }
 
 fn scaled_table2d_eval(ctx: &CmContext) -> CmResult<TableEval2D> {
@@ -1436,12 +1451,47 @@ fn scaled_table2d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval2D> {
     {
         return Ok(resource.result);
     }
-    let result = scaled_table2d_eval_from_parts(ctx, table.as_ref(), order, inx, iny);
+    let offset = ctx.param("offset");
+    let gain = ctx.param("gain");
+    let result = with_table_eval_scratch_mut(ctx, |scratch| {
+        scaled_table2d_eval_from_parts_with_scratch(
+            table.as_ref(),
+            order,
+            inx,
+            iny,
+            offset,
+            gain,
+            scratch,
+        )
+    });
     ctx.set_resource(
         TABLE2D_EVAL_RESOURCE,
         Arc::new(Table2DEvalResource { signature, result }),
     );
     Ok(result)
+}
+
+fn scale_table3d_eval(raw: TableEval3D, offset: Value, gain: Value) -> TableEval3D {
+    TableEval3D {
+        value: offset + gain * raw.value,
+        dx: gain * raw.dx,
+        dy: gain * raw.dy,
+        dz: gain * raw.dz,
+    }
+}
+
+fn scaled_table3d_eval_from_parts_with_scratch(
+    table: &Table3DData,
+    order: usize,
+    inx: Value,
+    iny: Value,
+    inz: Value,
+    offset: Value,
+    gain: Value,
+    scratch: &mut TableEvalScratch,
+) -> TableEval3D {
+    let raw = evaluate_table3d_data_with_scratch(table, order, inx, iny, inz, scratch);
+    scale_table3d_eval(raw, offset, gain)
 }
 
 fn scaled_table3d_eval_from_parts(
@@ -1452,17 +1502,8 @@ fn scaled_table3d_eval_from_parts(
     iny: Value,
     inz: Value,
 ) -> TableEval3D {
-    let raw = with_table_eval_scratch(ctx, |scratch| {
-        evaluate_table3d_data_with_scratch(table, order, inx, iny, inz, scratch)
-    })
-    .unwrap_or_else(|| evaluate_table3d_data(table, order, inx, iny, inz));
-    let gain = ctx.param("gain");
-    TableEval3D {
-        value: ctx.param("offset") + gain * raw.value,
-        dx: gain * raw.dx,
-        dy: gain * raw.dy,
-        dz: gain * raw.dz,
-    }
+    let raw = evaluate_table3d_data(table, order, inx, iny, inz);
+    scale_table3d_eval(raw, ctx.param("offset"), ctx.param("gain"))
 }
 
 fn scaled_table3d_eval(ctx: &CmContext) -> CmResult<TableEval3D> {
@@ -1503,7 +1544,20 @@ fn scaled_table3d_eval_cached(ctx: &mut CmContext) -> CmResult<TableEval3D> {
     {
         return Ok(resource.result);
     }
-    let result = scaled_table3d_eval_from_parts(ctx, table.as_ref(), order, inx, iny, inz);
+    let offset = ctx.param("offset");
+    let gain = ctx.param("gain");
+    let result = with_table_eval_scratch_mut(ctx, |scratch| {
+        scaled_table3d_eval_from_parts_with_scratch(
+            table.as_ref(),
+            order,
+            inx,
+            iny,
+            inz,
+            offset,
+            gain,
+            scratch,
+        )
+    });
     ctx.set_resource(
         TABLE3D_EVAL_RESOURCE,
         Arc::new(Table3DEvalResource { signature, result }),

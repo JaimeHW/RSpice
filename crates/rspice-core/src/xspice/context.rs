@@ -1733,6 +1733,18 @@ impl CmContext {
             .and_then(|resource| Arc::clone(resource).downcast::<T>().ok())
     }
 
+    /// Fetch a uniquely-owned typed host resource mutably.
+    pub fn resource_mut<T>(&mut self, key: &str) -> Option<&mut T>
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        self.resources
+            .values
+            .get_mut(key)
+            .and_then(Arc::get_mut)
+            .and_then(|resource| resource.downcast_mut::<T>())
+    }
+
     //-------------------------------------------------------------------------
     // State Variable Access
     //-------------------------------------------------------------------------
