@@ -558,7 +558,7 @@ fn parse_pwl_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    // PWL FILE="path" [TSCALE=..] [VSCALE=..] [TOFFSET=..] [VOFFSET=..]
+    // PWL FILE="path" [TD=..] [R=..] [TSCALE=..] [VSCALE=..] [TOFFSET=..] [VOFFSET=..]
     if let TokenKind::Ident(s) = &stream.peek().kind
         && s.eq_ignore_ascii_case("FILE")
     {
@@ -588,6 +588,8 @@ fn parse_pwl_spec(
         let mut value_scale = 1.0;
         let mut time_offset = 0.0;
         let mut value_offset = 0.0;
+        let mut delay = 0.0;
+        let mut repeat_from = None;
 
         loop {
             skip_commas(stream);
@@ -608,8 +610,27 @@ fn parse_pwl_spec(
             let target = match key_upper.as_str() {
                 "TSCALE" | "TIMESCALE" => &mut time_scale,
                 "VSCALE" | "VALUESCALE" | "SCALE" => &mut value_scale,
-                "TOFFSET" | "TIMEOFFSET" | "TD" => &mut time_offset,
+                "TOFFSET" | "TIMEOFFSET" => &mut time_offset,
                 "VOFFSET" | "VALUEOFFSET" | "DC" => &mut value_offset,
+                "TD" | "DELAY" => &mut delay,
+                "R" | "REPEAT" => {
+                    if !stream.consume(&TokenKind::Equals) {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!("PWL FILE option '{key}' requires '='"),
+                        });
+                    }
+                    repeat_from = Some(
+                        source_optional_value(
+                            stream, line_num, params, "PWL FILE", &key_upper, has_paren,
+                        )?
+                        .ok_or_else(|| ParseError::Syntax {
+                            line: line_num,
+                            message: format!("PWL FILE option '{key}' requires a value"),
+                        })?,
+                    );
+                    continue;
+                }
                 _ => {
                     return Err(ParseError::Syntax {
                         line: line_num,
@@ -635,6 +656,8 @@ fn parse_pwl_spec(
 
         close_source_args(stream, line_num, "PWL FILE", has_paren)?;
         validate_pwl_file_scaling(line_num, time_scale, value_scale, time_offset, value_offset)?;
+        validate_pwl_delay(line_num, delay, "PWL FILE")?;
+        validate_pwl_repeat_from(line_num, repeat_from)?;
 
         return Ok(SourceSpec::PwlFile {
             path,
@@ -642,6 +665,8 @@ fn parse_pwl_spec(
             value_scale,
             time_offset,
             value_offset,
+            delay,
+            repeat_from,
         });
     }
 
@@ -657,6 +682,9 @@ fn parse_pwl_spec(
         }
 
         let grouped_pair = stream.consume(&TokenKind::LParen);
+        if !grouped_pair && pwl_timing_option_ahead(stream) {
+            break;
+        }
         if let Some(time) =
             source_optional_value(stream, line_num, params, "PWL", "time", has_paren)?
         {
@@ -687,12 +715,19 @@ fn parse_pwl_spec(
     }
 
     close_source_args(stream, line_num, "PWL", has_paren)?;
+    let (delay, repeat_from) = parse_pwl_timing_options(stream, line_num, params)?;
 
     if points.is_empty() {
         points.push((0.0, 0.0));
     }
+    validate_pwl_repeat_from(line_num, repeat_from)?;
+    validate_pwl_repeat_before_last(line_num, repeat_from, points.last().map(|(time, _)| *time))?;
 
-    Ok(SourceSpec::Pwl { points })
+    Ok(SourceSpec::Pwl {
+        points,
+        delay,
+        repeat_from,
+    })
 }
 
 fn source_value_or_default(
@@ -795,6 +830,106 @@ fn validate_pwl_file_scaling(
                 message: format!("PWL FILE {name} must be finite"),
             });
         }
+    }
+    Ok(())
+}
+
+fn parse_pwl_timing_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<(Value, Option<Value>), ParseError> {
+    let mut delay = 0.0;
+    let mut repeat_from = None;
+    loop {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unsupported PWL option token '{}'", stream.peek().kind),
+            });
+        };
+        let key = key.clone();
+        let key_upper = key.to_uppercase();
+        stream.advance();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("PWL option '{key}' requires '='"),
+            });
+        }
+        let value = source_optional_value(stream, line_num, params, "PWL", &key_upper, false)?
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: format!("PWL option '{key}' requires a value"),
+            })?;
+        match key_upper.as_str() {
+            "TD" | "DELAY" => delay = value,
+            "R" | "REPEAT" => repeat_from = Some(value),
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Unsupported PWL option '{key}'"),
+                });
+            }
+        }
+    }
+    validate_pwl_delay(line_num, delay, "PWL")?;
+    Ok((delay, repeat_from))
+}
+
+fn validate_pwl_delay(
+    line_num: usize,
+    delay: Value,
+    source_name: &'static str,
+) -> Result<(), ParseError> {
+    if !delay.is_finite() || delay < 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{source_name} TD must be finite and non-negative"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_pwl_repeat_from(line_num: usize, repeat_from: Option<Value>) -> Result<(), ParseError> {
+    if let Some(value) = repeat_from
+        && (!value.is_finite() || value < 0.0)
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "PWL R must be finite and non-negative".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn pwl_timing_option_ahead(stream: &TokenStream) -> bool {
+    let TokenKind::Ident(key) = &stream.peek().kind else {
+        return false;
+    };
+    matches!(
+        key.to_ascii_uppercase().as_str(),
+        "TD" | "DELAY" | "R" | "REPEAT"
+    ) && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+}
+
+fn validate_pwl_repeat_before_last(
+    line_num: usize,
+    repeat_from: Option<Value>,
+    last_time: Option<Value>,
+) -> Result<(), ParseError> {
+    let (Some(repeat_from), Some(last_time)) = (repeat_from, last_time) else {
+        return Ok(());
+    };
+    if repeat_from >= last_time {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "PWL R must be less than the final PWL time".to_string(),
+        });
     }
     Ok(())
 }

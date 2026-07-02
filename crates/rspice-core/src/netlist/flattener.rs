@@ -2136,7 +2136,7 @@ fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
             *offset *= m;
             *amplitude *= m;
         }
-        SourceSpec::Pwl { points } => {
+        SourceSpec::Pwl { points, .. } => {
             for (_, value) in points {
                 *value *= m;
             }

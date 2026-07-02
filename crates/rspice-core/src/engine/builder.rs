@@ -75,6 +75,8 @@ fn validate_source_file_inputs(
             value_scale,
             time_offset,
             value_offset,
+            repeat_from,
+            ..
         } => crate::circuit::VoltageSources::load_pwl_waveform_cached(
             path,
             *time_scale,
@@ -82,7 +84,14 @@ fn validate_source_file_inputs(
             *time_offset,
             *value_offset,
         )
-        .map(|_| ())
+        .and_then(|waveform| {
+            if let Some(repeat_from) = repeat_from
+                && *repeat_from >= waveform.last_source_time()
+            {
+                return Err("PWL R must be less than the final PWL time".to_string());
+            }
+            Ok(())
+        })
         .map_err(|error| SimulationError::Circuit(format!("source '{source_name}': {error}"))),
         SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
             validate_source_file_inputs(source_name, transient)

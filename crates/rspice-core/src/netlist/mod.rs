@@ -207,6 +207,7 @@ impl Netlist {
         let processed = Self::preprocess_includes(input, file_path)?;
         let mut netlist = Self::parse_with_options(&processed, options)?;
         Self::normalize_model_string_paths(&mut netlist, file_path);
+        Self::normalize_source_file_paths(&mut netlist, file_path);
         Self::apply_spef_includes(&mut netlist, file_path)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = Some(file_path.to_path_buf());
@@ -294,6 +295,7 @@ impl Netlist {
         let processed = processor.expand_content(input, path)?;
         let mut netlist = Self::parse(&processed)?;
         Self::normalize_model_string_paths(&mut netlist, path);
+        Self::normalize_source_file_paths(&mut netlist, path);
         Self::apply_spef_includes(&mut netlist, path)?;
         netlist.source_text = Some(input.to_string());
         netlist.source_path = Some(path.to_path_buf());
@@ -487,6 +489,21 @@ impl Netlist {
         }
     }
 
+    fn normalize_source_file_paths(&mut self, file_path: &std::path::Path) {
+        let Some(base_dir) = file_path.parent() else {
+            return;
+        };
+
+        for element in &mut self.elements {
+            match &mut element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    normalize_source_spec_file_paths(spec, base_dir);
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Add a global node
     pub fn add_global(&mut self, node: &str) {
         self.global_nodes.insert(node.to_uppercase());
@@ -495,6 +512,24 @@ impl Netlist {
     /// Check if a node is global
     pub fn is_global(&self, node: &str) -> bool {
         self.global_nodes.contains(&node.to_uppercase())
+    }
+}
+
+fn normalize_source_spec_file_paths(spec: &mut SourceSpec, source_base_dir: &Path) {
+    match spec {
+        SourceSpec::PwlFile { path, .. } => {
+            let candidate = Path::new(path);
+            if !candidate.is_absolute() {
+                *path = source_base_dir
+                    .join(candidate)
+                    .to_string_lossy()
+                    .into_owned();
+            }
+        }
+        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+            normalize_source_spec_file_paths(transient, source_base_dir);
+        }
+        _ => {}
     }
 }
 
@@ -7090,13 +7125,44 @@ mod tests {
             } => {
                 assert_eq!(*dc_value, 0.0);
                 match transient.as_ref() {
-                    SourceSpec::Pwl { points } => {
+                    SourceSpec::Pwl {
+                        points,
+                        delay,
+                        repeat_from,
+                    } => {
                         assert_eq!(points, &[(0.0, 0.0), (1e-3, 1.0)]);
+                        assert_eq!(*delay, 0.0);
+                        assert_eq!(*repeat_from, None);
                     }
                     other => panic!("expected PWL transient, got {other:?}"),
                 }
             }
             other => panic!("expected DC transient source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pwl_sources_accept_xyce_delay_and_repeat_options() {
+        let netlist = Netlist::parse(
+            "xyce pwl timing options\n\
+             V1 out 0 PWL 0 0 1 2 2 0 R=1 TD=3\n\
+             R1 out 0 1k\n\
+             .tran 1n 10n\n\
+             .end\n",
+        )
+        .expect("Xyce PWL TD/R options parse");
+
+        match first_source_spec(&netlist) {
+            SourceSpec::Pwl {
+                points,
+                delay,
+                repeat_from,
+            } => {
+                assert_eq!(points, &[(0.0, 0.0), (1.0, 2.0), (2.0, 0.0)]);
+                assert_eq!(*delay, 3.0);
+                assert_eq!(*repeat_from, Some(1.0));
+            }
+            other => panic!("expected PWL source, got {other:?}"),
         }
     }
 
@@ -7172,12 +7238,16 @@ mod tests {
                 value_scale,
                 time_offset,
                 value_offset,
+                delay,
+                repeat_from,
             } => {
                 assert_eq!(path, "stim.csv");
                 assert!((*time_scale - 1e-3).abs() < 1e-15);
                 assert!((*value_scale - 2.0).abs() < f64::EPSILON);
                 assert!((*time_offset - 3e-9).abs() < 1e-18);
                 assert!((*value_offset + 1.0).abs() < f64::EPSILON);
+                assert_eq!(*delay, 0.0);
+                assert_eq!(*repeat_from, None);
             }
             other => panic!("expected PWL FILE source, got {other:?}"),
         }
@@ -7195,6 +7265,59 @@ mod tests {
             message.contains("pwl file") && message.contains("tscale"),
             "unexpected error: {message}"
         );
+    }
+
+    #[test]
+    fn pwl_file_options_accept_xyce_delay_and_repeat() {
+        let netlist = Netlist::parse(
+            "pwl file xyce timing options\n\
+             V1 out 0 PWL FILE \"stim.csv\" TD=3 R=1 TOFFSET=2\n\
+             R1 out 0 1k\n\
+             .tran 1n 10n\n\
+             .end\n",
+        )
+        .expect("PWL FILE TD/R options parse");
+
+        match first_source_spec(&netlist) {
+            SourceSpec::PwlFile {
+                path,
+                time_offset,
+                delay,
+                repeat_from,
+                ..
+            } => {
+                assert_eq!(path, "stim.csv");
+                assert_eq!(*time_offset, 2.0);
+                assert_eq!(*delay, 3.0);
+                assert_eq!(*repeat_from, Some(1.0));
+            }
+            other => panic!("expected PWL FILE source, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pwl_file_paths_resolve_relative_to_deck_path() {
+        let deck_path = std::env::temp_dir()
+            .join("rspice-pwl-file-path")
+            .join("deck.cir");
+        let deck_dir = deck_path.parent().expect("temp deck has parent");
+        std::fs::create_dir_all(deck_dir).expect("create temp deck dir");
+        let netlist = Netlist::parse_with_path(
+            "pwl file relative path\n\
+             V1 out 0 PWL FILE \"stim.csv\"\n\
+             R1 out 0 1k\n\
+             .tran 1n 10n\n\
+             .end\n",
+            &deck_path,
+        )
+        .expect("PWL FILE deck parses with path");
+
+        match first_source_spec(&netlist) {
+            SourceSpec::PwlFile { path, .. } => {
+                assert_eq!(std::path::Path::new(path), deck_dir.join("stim.csv"));
+            }
+            other => panic!("expected PWL FILE source, got {other:?}"),
+        }
     }
 
     #[test]

@@ -2851,6 +2851,7 @@ impl XyceTestRunner {
             crate::netlist::SourceSpec::Dc(_)
             | crate::netlist::SourceSpec::Ac { .. }
             | crate::netlist::SourceSpec::DcAc { .. }
+            | crate::netlist::SourceSpec::Pwl { .. }
             | crate::netlist::SourceSpec::PwlFile { .. }
             | crate::netlist::SourceSpec::TrNoise { .. } => None,
             crate::netlist::SourceSpec::DcTransient { transient, .. }
@@ -2903,14 +2904,6 @@ impl XyceTestRunner {
                 .flatten()
                 .reduce(Value::min)
             }
-            crate::netlist::SourceSpec::Pwl { points } => points
-                .windows(2)
-                .filter_map(|window| {
-                    let (t0, _v0) = window[0];
-                    let (t1, _v1) = window[1];
-                    Self::positive_duration_step(t1 - t0, TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION)
-                })
-                .reduce(Value::min),
             crate::netlist::SourceSpec::Exp {
                 tau1,
                 tau2,

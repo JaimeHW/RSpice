@@ -593,32 +593,19 @@ impl VoltageSources {
                             * (2.0 * PI * frequency * t + phase).sin()
                 }
             }
-            SourceSpec::Pwl { points } => {
-                if points.is_empty() {
-                    return 0.0;
-                }
-                if time <= points[0].0 {
-                    return points[0].1;
-                }
-                if time >= points[points.len() - 1].0 {
-                    return points[points.len() - 1].1;
-                }
-                // Linear interpolation
-                for j in 0..points.len() - 1 {
-                    if time >= points[j].0 && time < points[j + 1].0 {
-                        let (t1, v1) = points[j];
-                        let (t2, v2) = points[j + 1];
-                        return v1 + (v2 - v1) * (time - t1) / (t2 - t1);
-                    }
-                }
-                0.0
-            }
+            SourceSpec::Pwl {
+                points,
+                delay,
+                repeat_from,
+            } => Self::evaluate_pwl_points(points, time, *delay, *repeat_from),
             SourceSpec::PwlFile {
                 path,
                 time_scale,
                 value_scale,
                 time_offset,
                 value_offset,
+                delay,
+                repeat_from,
             } => {
                 let key =
                     PwlCacheKey::new(path, *time_scale, *value_scale, *time_offset, *value_offset);
@@ -629,7 +616,13 @@ impl VoltageSources {
                     *time_offset,
                     *value_offset,
                 ) {
-                    Ok(waveform) => waveform.value_at(time),
+                    Ok(waveform) => {
+                        if time < *delay {
+                            0.0
+                        } else {
+                            waveform.value_at_repeating(time - *delay, *repeat_from)
+                        }
+                    }
                     Err(err) => {
                         Self::log_pwl_error_once(key, &err);
                         *value_offset
@@ -753,6 +746,74 @@ impl VoltageSources {
             changed |= project_two_terminal_voltage(solution, np, nn, v_source);
         }
         changed
+    }
+
+    fn evaluate_pwl_points(
+        points: &[(Value, Value)],
+        time: Value,
+        delay: Value,
+        repeat_from: Option<Value>,
+    ) -> Value {
+        if points.is_empty() {
+            return 0.0;
+        }
+        if time < delay {
+            return 0.0;
+        }
+        let shifted_time = time - delay;
+        if shifted_time <= points[0].0 {
+            return points[0].1;
+        }
+        let time = Self::repeat_pwl_time(points, shifted_time, repeat_from);
+        if time >= points[points.len() - 1].0 {
+            return points[points.len() - 1].1;
+        }
+        for window in points.windows(2) {
+            let (t1, v1) = window[0];
+            let (t2, v2) = window[1];
+            if time >= t1 && time < t2 {
+                let dt = t2 - t1;
+                if !dt.is_finite() || dt.abs() <= Value::EPSILON {
+                    return v1;
+                }
+                return v1 + (v2 - v1) * (time - t1) / dt;
+            }
+        }
+        points.last().map(|(_, value)| *value).unwrap_or(0.0)
+    }
+
+    fn repeat_pwl_time(
+        points: &[(Value, Value)],
+        time: Value,
+        repeat_from: Option<Value>,
+    ) -> Value {
+        let Some(repeat_from) = repeat_from else {
+            return time;
+        };
+        let Some(&(first, _)) = points.first() else {
+            return time;
+        };
+        let Some(&(last, _)) = points.last() else {
+            return time;
+        };
+        if !time.is_finite() || !repeat_from.is_finite() || time <= last {
+            return time;
+        }
+        let repeat_start = repeat_from.max(first);
+        if repeat_start >= last {
+            return time;
+        }
+        let period = last - repeat_start;
+        if !period.is_finite() || period <= Value::EPSILON {
+            return time;
+        }
+        let elapsed = time - repeat_start;
+        let remainder = elapsed.rem_euclid(period);
+        let boundary_tolerance = Value::EPSILON * elapsed.abs().max(period).max(1.0);
+        if remainder <= boundary_tolerance {
+            return last;
+        }
+        repeat_start + remainder
     }
 }
 
@@ -1164,6 +1225,36 @@ mod tests {
     }
 
     #[test]
+    fn pwl_delay_and_repeat_match_xyce_source_time_semantics() {
+        let spec = SourceSpec::Pwl {
+            points: vec![(0.0, 2.0), (2.0, 4.0), (4.0, 0.0)],
+            delay: 1.0,
+            repeat_from: Some(2.0),
+        };
+
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.5, None),
+            0.0,
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0, None),
+            2.0,
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 3.5, None),
+            3.0,
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 5.5, None),
+            3.0,
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 7.0, None),
+            0.0,
+        );
+    }
+
+    #[test]
     fn current_source_pwl_without_dc_uses_zero_transient_baseline() {
         let mut sources = CurrentSources::new();
         sources.add_with_ac_and_spec(
@@ -1175,6 +1266,8 @@ mod tests {
             0.0,
             Some(SourceSpec::Pwl {
                 points: vec![(0.0, 0.0), (1.0e-6, 1.0e-3)],
+                delay: 0.0,
+                repeat_from: None,
             }),
         );
 

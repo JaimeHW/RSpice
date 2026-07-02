@@ -1164,8 +1164,15 @@ pub enum SourceSpec {
         phase: Value,
     },
 
-    /// Piecewise linear source: PWL(t1 v1 t2 v2 ...)
-    Pwl { points: Vec<(Value, Value)> },
+    /// Piecewise linear source: PWL(t1 v1 t2 v2 ...) [TD=delay] [R=repeat_time]
+    Pwl {
+        points: Vec<(Value, Value)>,
+        /// Delay before the waveform starts. Before this time the source is zero.
+        delay: Value,
+        /// Optional source-time knot where repetition starts after the last
+        /// point. `R=0` repeats the whole waveform.
+        repeat_from: Option<Value>,
+    },
 
     /// Piecewise linear source from external file: PWL FILE="filename"
     /// Supports CSV (time,value columns) and WAV audio files
@@ -1180,6 +1187,11 @@ pub enum SourceSpec {
         time_offset: Value,
         /// Value offset (default 0.0)
         value_offset: Value,
+        /// Delay before the waveform starts. Before this time the source is zero.
+        delay: Value,
+        /// Optional source-time knot where repetition starts after the last
+        /// point. `R=0` repeats the whole waveform.
+        repeat_from: Option<Value>,
     },
 
     /// Exponential source: EXP(v1 v2 td1 tau1 td2 tau2)

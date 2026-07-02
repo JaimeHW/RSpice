@@ -156,10 +156,19 @@ impl Engine {
             SourceSpec::Sin { delay, .. } => {
                 Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
             }
-            SourceSpec::Pwl { points } => {
-                for (time, _) in points {
-                    Self::add_breakpoint_if_in_range(breakpoints, *time, tstop);
-                }
+            SourceSpec::Pwl {
+                points,
+                delay,
+                repeat_from,
+            } => {
+                let times = points.iter().map(|(time, _)| *time + *delay);
+                Self::add_repeating_pwl_breakpoints(
+                    breakpoints,
+                    times,
+                    *repeat_from,
+                    *delay,
+                    tstop,
+                );
             }
             SourceSpec::PwlFile {
                 path,
@@ -167,13 +176,19 @@ impl Engine {
                 value_scale,
                 time_offset,
                 value_offset,
+                delay,
+                repeat_from,
             } => match crate::device::pwl_file::load_pwl_file(path) {
                 Ok(wf) => {
                     let wf =
                         wf.with_scaling(*time_scale, *value_scale, *time_offset, *value_offset);
-                    for time in wf.scaled_knot_times() {
-                        Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
-                    }
+                    Self::add_repeating_pwl_breakpoints(
+                        breakpoints,
+                        wf.scaled_knot_times().map(|time| time + *delay),
+                        repeat_from.map(|value| value * *time_scale),
+                        *delay + *time_offset,
+                        tstop,
+                    );
                 }
                 Err(err) => {
                     log::warn!(
@@ -205,6 +220,72 @@ impl Engine {
             // a timestep boundary.
             SourceSpec::Sffm { delay, .. } | SourceSpec::Am { delay, .. } => {
                 Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+            }
+        }
+    }
+
+    fn add_repeating_pwl_breakpoints<I>(
+        breakpoints: &mut BreakpointManager,
+        times: I,
+        repeat_from: Option<Value>,
+        time_offset: Value,
+        tstop: Value,
+    ) where
+        I: IntoIterator<Item = Value>,
+    {
+        let times = times
+            .into_iter()
+            .filter(|time| time.is_finite())
+            .collect::<Vec<_>>();
+        if times.is_empty() {
+            return;
+        }
+        for &time in &times {
+            Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+        }
+
+        let Some(repeat_from) = repeat_from else {
+            return;
+        };
+        let Some(&last) = times.last() else {
+            return;
+        };
+        let first = times[0];
+        let repeat_start = (time_offset + repeat_from).max(first);
+        if !repeat_start.is_finite() || repeat_start >= last {
+            return;
+        }
+        let period = last - repeat_start;
+        if !period.is_finite() || period <= Value::EPSILON {
+            return;
+        }
+
+        let repeating_knots = times
+            .iter()
+            .copied()
+            .filter(|time| *time >= repeat_start)
+            .collect::<Vec<_>>();
+        if repeating_knots.is_empty() {
+            return;
+        }
+        let mut cycle = 1.0;
+        loop {
+            let cycle_offset = period * cycle;
+            let mut added = false;
+            for &time in &repeating_knots {
+                let repeated = time + cycle_offset;
+                if repeated > tstop {
+                    continue;
+                }
+                Self::add_breakpoint_if_in_range(breakpoints, repeated, tstop);
+                added = true;
+            }
+            if !added || repeat_start + cycle_offset > tstop {
+                break;
+            }
+            cycle += 1.0;
+            if cycle > 1.0e6 {
+                break;
             }
         }
     }

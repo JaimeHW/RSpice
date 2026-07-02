@@ -131,6 +131,53 @@ impl PwlWaveform {
     ///
     /// Uses binary search for O(log n) performance on large waveforms.
     pub fn value_at(&self, time: Value) -> Value {
+        self.value_at_raw_time(time)
+    }
+
+    /// Get value at specified time, repeating from `repeat_from` after the
+    /// final source-time knot when requested.
+    pub fn value_at_repeating(&self, time: Value, repeat_from: Option<Value>) -> Value {
+        let time = self.repeated_time(time, repeat_from);
+        self.value_at_raw_time(time)
+    }
+
+    fn repeated_time(&self, time: Value, repeat_from: Option<Value>) -> Value {
+        let Some(repeat_from) = repeat_from else {
+            return time;
+        };
+        if !repeat_from.is_finite()
+            || !self.time_scale.is_finite()
+            || self.time_scale.abs() <= Value::EPSILON
+        {
+            return time;
+        }
+        let Some(&last) = self.times.last() else {
+            return time;
+        };
+        let t = (time - self.time_offset) / self.time_scale;
+        if !t.is_finite() || t <= last {
+            return time;
+        }
+        let first = self.times[0];
+        let repeat_start = repeat_from.max(first);
+        if repeat_start >= last {
+            return time;
+        }
+        let period = last - repeat_start;
+        if !period.is_finite() || period <= Value::EPSILON {
+            return time;
+        }
+        let elapsed = t - repeat_start;
+        let remainder = elapsed.rem_euclid(period);
+        let boundary_tolerance = Value::EPSILON * elapsed.abs().max(period).max(1.0);
+        if remainder <= boundary_tolerance {
+            return self.time_offset + last * self.time_scale;
+        }
+        let repeated = repeat_start + remainder;
+        self.time_offset + repeated * self.time_scale
+    }
+
+    fn value_at_raw_time(&self, time: Value) -> Value {
         let scaled_start = self.values[0] * self.value_scale + self.value_offset;
         let scaled_end = self.values.last().copied().unwrap_or(self.values[0]) * self.value_scale
             + self.value_offset;
@@ -194,6 +241,11 @@ impl PwlWaveform {
     /// Get number of data points
     pub fn len(&self) -> usize {
         self.times.len()
+    }
+
+    /// Last source-time knot before scaling and offset.
+    pub fn last_source_time(&self) -> Value {
+        self.times.last().copied().unwrap_or(0.0)
     }
 
     /// Check if waveform is empty
@@ -625,6 +677,16 @@ mod tests {
             }
             other => panic!("expected WAV metadata error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pwl_waveform_repeats_from_requested_source_time() {
+        let waveform = PwlWaveform::new(vec![(0.0, 1.0), (2.0, 5.0), (4.0, 3.0)]).unwrap();
+
+        assert!((waveform.value_at_repeating(5.0, Some(0.0)) - 3.0).abs() < 1e-15);
+        assert!((waveform.value_at_repeating(4.5, Some(2.0)) - 4.5).abs() < 1e-15);
+        assert_eq!(waveform.value_at_repeating(8.0, Some(0.0)), 3.0);
+        assert_eq!(waveform.value_at_repeating(4.5, None), 3.0);
     }
 
     #[test]

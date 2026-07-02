@@ -241,7 +241,7 @@ impl Engine {
             Some(SourceSpec::Exp { v1, v2, .. }) if (v2 - v1).abs() <= HB_ZERO_SENSE_TOL => {
                 Some(*v1)
             }
-            Some(SourceSpec::Pwl { points }) => {
+            Some(SourceSpec::Pwl { points, .. }) => {
                 let first = points.first().map(|(_, value)| *value)?;
                 if points
                     .iter()

@@ -94,7 +94,11 @@ fn replace_trnoise(
             namp,
         } => {
             let points = generate_noise_points(*na, *nt, *nalpha, *namp, tstop, seed, name)?;
-            *spec = SourceSpec::Pwl { points };
+            *spec = SourceSpec::Pwl {
+                points,
+                delay: 0.0,
+                repeat_from: None,
+            };
             Ok(())
         }
         SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
