@@ -1417,6 +1417,25 @@ fn test_xyce_ekv3_150nm_static_terminal_currents_run() {
 }
 
 #[test]
+fn test_xyce_mesfet_model_parameter_step_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_647_SON/mesfet.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a numeric Xyce MESFET model-parameter .STEP comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
 fn test_xyce_complex_param_re_img_print_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -1451,8 +1470,9 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
         result
             .error
             .as_deref()
-            .is_some_and(|error| error.contains("netlist parser")),
-        "unsupported reason should name the parser capability boundary, got {result:?}"
+            .is_some_and(|error| error.contains("B4SOI 4.7")
+                && error.contains("generated Verilog-A builtin")),
+        "unsupported reason should name the B4SOI generated-model capability boundary, got {result:?}"
     );
 
     for relative in [

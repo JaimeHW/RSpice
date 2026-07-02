@@ -1,5 +1,11 @@
 use super::*;
-use crate::netlist::StepSweep;
+use crate::netlist::{ModelDef, StepSweep};
+
+#[derive(Clone, Copy)]
+enum DeviceStepResolution {
+    Device(usize),
+    Model(usize),
+}
 
 impl Engine {
     /// Run .STEP parametric sweep
@@ -170,24 +176,34 @@ impl Engine {
             StepTarget::Param => Self::create_perturbed_netlist(netlist, &step_cmd.name, value),
             StepTarget::Device => {
                 let mut stepped = netlist.clone();
-                let device_idx = stepped
-                    .elements
-                    .iter()
-                    .position(|e| e.name.eq_ignore_ascii_case(&step_cmd.name))
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            ".STEP DEVICE target '{}' not found in netlist",
-                            step_cmd.name
-                        ))
-                    })?;
-                let element = stepped.elements.get_mut(device_idx).ok_or_else(|| {
-                    SimulationError::Circuit("Internal step device index error".to_string())
-                })?;
-                Self::apply_device_step_value(
-                    &mut element.kind,
+                match Self::resolve_device_or_model_step_target(
+                    &stepped,
+                    &step_cmd.name,
                     step_cmd.param_name.as_deref(),
-                    value,
-                )?;
+                )? {
+                    DeviceStepResolution::Device(device_idx) => {
+                        let element = stepped.elements.get_mut(device_idx).ok_or_else(|| {
+                            SimulationError::Circuit("Internal step device index error".to_string())
+                        })?;
+                        Self::apply_device_step_value(
+                            &mut element.kind,
+                            step_cmd.param_name.as_deref(),
+                            value,
+                        )?;
+                    }
+                    DeviceStepResolution::Model(model_idx) => {
+                        let param_name = step_cmd.param_name.as_deref().ok_or_else(|| {
+                            SimulationError::Circuit(format!(
+                                ".STEP MODEL {} requires an explicit parameter name",
+                                step_cmd.name
+                            ))
+                        })?;
+                        let model = stepped.models.get_mut(model_idx).ok_or_else(|| {
+                            SimulationError::Circuit("Internal step model index error".to_string())
+                        })?;
+                        Self::apply_model_step_value(model, param_name, value);
+                    }
+                }
                 Self::mark_ast_stepped_netlist(&mut stepped);
                 Ok((stepped, 1))
             }
@@ -200,30 +216,8 @@ impl Engine {
                 })?;
 
                 let mut stepped = netlist.clone();
-                let model_idx = stepped
-                    .models
-                    .iter()
-                    .position(|m| m.name.eq_ignore_ascii_case(&step_cmd.name))
-                    .ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            ".STEP MODEL target '{}' not found in netlist",
-                            step_cmd.name
-                        ))
-                    })?;
-                let model = stepped.models.get_mut(model_idx).ok_or_else(|| {
-                    SimulationError::Circuit("Internal step model index error".to_string())
-                })?;
-
-                let param_upper = param_name.to_ascii_uppercase();
-                if let Some((_, v)) = model
-                    .params
-                    .iter_mut()
-                    .find(|(name, _)| name.eq_ignore_ascii_case(&param_upper))
-                {
-                    *v = value;
-                } else {
-                    model.params.push((param_upper, value));
-                }
+                let model = Self::find_step_model_mut(&mut stepped, &step_cmd.name)?;
+                Self::apply_model_step_value(model, param_name, value);
                 Self::mark_ast_stepped_netlist(&mut stepped);
                 Ok((stepped, 1))
             }
@@ -279,30 +273,36 @@ impl Engine {
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         validate_step_values(values)?;
 
-        let device_idx = netlist
-            .elements
-            .iter()
-            .position(|e| e.name.eq_ignore_ascii_case(device_name))
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    ".STEP DEVICE target '{}' not found in netlist",
-                    device_name
-                ))
-            })?;
+        let resolved = Self::resolve_device_or_model_step_target(netlist, device_name, param_name)?;
 
         let mut results = Vec::with_capacity(values.len());
         for &value in values {
             let mut stepped = netlist.clone();
-            let element = stepped.elements.get_mut(device_idx).ok_or_else(|| {
-                SimulationError::Circuit("Internal step device index error".to_string())
-            })?;
             let target = format!(
                 "{}{}",
                 device_name,
                 param_name.map(|p| format!(".{}", p)).unwrap_or_default()
             );
-            Self::apply_device_step_value(&mut element.kind, param_name, value)
-                .map_err(|e| step_point_error("DEVICE", &target, value, e))?;
+            match resolved {
+                DeviceStepResolution::Device(device_idx) => {
+                    let element = stepped.elements.get_mut(device_idx).ok_or_else(|| {
+                        SimulationError::Circuit("Internal step device index error".to_string())
+                    })?;
+                    Self::apply_device_step_value(&mut element.kind, param_name, value)
+                        .map_err(|e| step_point_error("DEVICE", &target, value, e))?;
+                }
+                DeviceStepResolution::Model(model_idx) => {
+                    let param_name = param_name.ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            ".STEP MODEL {device_name} requires an explicit parameter name"
+                        ))
+                    })?;
+                    let model = stepped.models.get_mut(model_idx).ok_or_else(|| {
+                        SimulationError::Circuit("Internal step model index error".to_string())
+                    })?;
+                    Self::apply_model_step_value(model, param_name, value);
+                }
+            }
             Self::mark_ast_stepped_netlist(&mut stepped);
 
             match self.run_dc_op(&stepped) {
@@ -332,46 +332,80 @@ impl Engine {
             ))
         })?;
 
-        let model_idx = netlist
-            .models
-            .iter()
-            .position(|m| m.name.eq_ignore_ascii_case(model_name))
-            .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    ".STEP MODEL target '{}' not found in netlist",
-                    model_name
-                ))
-            })?;
-
-        let param_upper = param_name.to_ascii_uppercase();
         let mut results = Vec::with_capacity(values.len());
         for &value in values {
             let mut stepped = netlist.clone();
-            let model = stepped.models.get_mut(model_idx).ok_or_else(|| {
-                SimulationError::Circuit("Internal step model index error".to_string())
-            })?;
-
-            if let Some((_, v)) = model
-                .params
-                .iter_mut()
-                .find(|(name, _)| name.eq_ignore_ascii_case(&param_upper))
-            {
-                *v = value;
-            } else {
-                model.params.push((param_upper.clone(), value));
-            }
+            let model = Self::find_step_model_mut(&mut stepped, model_name)?;
+            Self::apply_model_step_value(model, param_name, value);
             Self::mark_ast_stepped_netlist(&mut stepped);
 
             match self.run_dc_op(&stepped) {
                 Ok(result) => results.push((value, result)),
                 Err(e) => {
-                    let target = format!("{}.{}", model_name, param_upper);
+                    let target = format!("{}.{}", model_name, param_name.to_ascii_uppercase());
                     return Err(step_point_error("MODEL", &target, value, e));
                 }
             }
         }
 
         Ok(results)
+    }
+
+    fn resolve_device_or_model_step_target(
+        netlist: &Netlist,
+        target_name: &str,
+        param_name: Option<&str>,
+    ) -> Result<DeviceStepResolution, SimulationError> {
+        if let Some(device_idx) = netlist
+            .elements
+            .iter()
+            .position(|e| e.name.eq_ignore_ascii_case(target_name))
+        {
+            return Ok(DeviceStepResolution::Device(device_idx));
+        }
+
+        if param_name.is_some()
+            && let Some(model_idx) = netlist
+                .models
+                .iter()
+                .position(|m| m.name.eq_ignore_ascii_case(target_name))
+        {
+            return Ok(DeviceStepResolution::Model(model_idx));
+        }
+
+        Err(SimulationError::Circuit(format!(
+            ".STEP DEVICE target '{}' not found in netlist",
+            target_name
+        )))
+    }
+
+    fn find_step_model_mut<'a>(
+        netlist: &'a mut Netlist,
+        model_name: &str,
+    ) -> Result<&'a mut ModelDef, SimulationError> {
+        netlist
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case(model_name))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    ".STEP MODEL target '{}' not found in netlist",
+                    model_name
+                ))
+            })
+    }
+
+    fn apply_model_step_value(model: &mut ModelDef, param_name: &str, value: Value) {
+        let param_upper = param_name.to_ascii_uppercase();
+        if let Some((_, existing)) = model
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&param_upper))
+        {
+            *existing = value;
+        } else {
+            model.params.push((param_upper, value));
+        }
     }
 
     fn mark_ast_stepped_netlist(netlist: &mut Netlist) {

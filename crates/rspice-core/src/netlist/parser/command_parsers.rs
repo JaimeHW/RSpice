@@ -30,12 +30,17 @@ pub(super) fn parse_step_command(
         "DEC" | "OCT" | "LIN" => {
             let target = expect_ident(stream, line_num)?;
             let target_upper = target.to_uppercase();
-            let name = if target_upper == "TEMP" {
-                "TEMP".to_string()
-            } else {
-                expect_ident(stream, line_num)?
-            };
-            (Some(first_upper), target_upper, name)
+            match target_upper.as_str() {
+                "PARAM" | "MODEL" => {
+                    let name = expect_ident(stream, line_num)?;
+                    (Some(first_upper), target_upper, name)
+                }
+                "TEMP" => (Some(first_upper), target_upper, "TEMP".to_string()),
+                _ if params.get(&target).is_some() => {
+                    (Some(first_upper), "PARAM".to_string(), target)
+                }
+                _ => (Some(first_upper), "DEVICE".to_string(), target),
+            }
         }
         "PARAM" | "MODEL" => {
             let name = expect_ident(stream, line_num)?;

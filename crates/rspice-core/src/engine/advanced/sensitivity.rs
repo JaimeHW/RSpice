@@ -813,6 +813,25 @@ R2 2 0 1k
     }
 
     #[test]
+    fn colon_qualified_device_step_target_resolves_to_model_when_no_device_matches() {
+        let netlist = Netlist::parse(MODEL_STEP_DECK).expect("deck parses");
+        let command = StepCommand {
+            target: StepTarget::Device,
+            name: "RMOD".to_string(),
+            param_name: Some("RSH".to_string()),
+            sweep: StepSweep::List(vec![100.0, 200.0]),
+        };
+
+        let results = Engine::default()
+            .run_step_command(&netlist, &command, &[100.0, 200.0])
+            .expect("device-style model:param step target should resolve to the model");
+
+        assert_eq!(results.len(), 2);
+        assert!((results[0].1.voltage(2) - 5.0).abs() < 1e-9);
+        assert!((results[1].1.voltage(2) - (10.0 / 3.0)).abs() < 1e-9);
+    }
+
+    #[test]
     fn step_sweeps_a_genuinely_bound_parameter() {
         let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
         let results = Engine::default()

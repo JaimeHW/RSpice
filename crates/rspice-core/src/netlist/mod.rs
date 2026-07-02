@@ -3727,6 +3727,70 @@ mod tests {
     }
 
     #[test]
+    fn step_linear_source_target_without_type_keyword_parses() {
+        let netlist = Netlist::parse(
+            "xyce source step\n\
+             vd drain 0 dc 0\n\
+             vg gate 0 dc 1\n\
+             .dc vd 0 1.2 0.01\n\
+             .step lin vg 0.2 1.2 0.1\n\
+             .end\n",
+        )
+        .expect("Xyce-style .STEP LIN source target should parse");
+
+        let step = netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Step(step) => Some(step),
+                _ => None,
+            })
+            .expect(".STEP retained");
+
+        assert_eq!(step.target, StepTarget::Device);
+        assert!(step.name.eq_ignore_ascii_case("vg"));
+        assert!(step.param_name.is_none());
+        match step.sweep {
+            StepSweep::Linear { start, stop, step } => {
+                assert_eq!((start, stop, step), (0.2, 1.2, 0.1));
+            }
+            ref other => panic!("expected linear source sweep, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_linear_known_param_without_type_keyword_parses_as_param() {
+        let netlist = Netlist::parse(
+            "xyce parameter step\n\
+             .param rval=1k\n\
+             v1 out 0 dc 1\n\
+             r1 out 0 {rval}\n\
+             .dc v1 0 1 1\n\
+             .step lin rval 1k 2k 500\n\
+             .end\n",
+        )
+        .expect("Xyce-style .STEP LIN parameter target should parse");
+
+        let step = netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Step(step) => Some(step),
+                _ => None,
+            })
+            .expect(".STEP retained");
+
+        assert_eq!(step.target, StepTarget::Param);
+        assert!(step.name.eq_ignore_ascii_case("rval"));
+        match step.sweep {
+            StepSweep::Linear { start, stop, step } => {
+                assert_eq!((start, stop, step), (1000.0, 2000.0, 500.0));
+            }
+            ref other => panic!("expected linear parameter sweep, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn unterminated_control_block_is_rejected() {
         let err = Netlist::parse(
             "unterminated control block\n\
