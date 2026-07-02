@@ -504,6 +504,39 @@ fn parse_axis(
     Ok(TableAxis::new(axis))
 }
 
+fn checked_table_value_count(model: &str, file: &str, dimensions: &[usize]) -> CmResult<usize> {
+    dimensions
+        .iter()
+        .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
+        .ok_or_else(|| {
+            let shape = dimensions
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(" x ");
+            table_file_error(
+                model,
+                file,
+                format!("table dimensions {shape} exceed addressable memory"),
+            )
+        })
+}
+
+fn reserve_table_values(
+    values: &mut Vec<Value>,
+    model: &str,
+    file: &str,
+    additional: usize,
+) -> CmResult<()> {
+    values.try_reserve_exact(additional).map_err(|err| {
+        table_file_error(
+            model,
+            file,
+            format!("unable to reserve table storage for {additional} values: {err}"),
+        )
+    })
+}
+
 fn parse_table2d_values(
     cursor: &mut TokenCursor<'_>,
     file: &str,
@@ -511,10 +544,17 @@ fn parse_table2d_values(
     x_len: usize,
     y_len: usize,
 ) -> CmResult<Vec<Value>> {
-    let mut values = Vec::with_capacity(x_len * y_len);
+    let table_len = checked_table_value_count(model, file, &[x_len, y_len])?;
+    let mut values = Vec::new();
+    reserve_table_values(&mut values, model, file, table_len)?;
     for row in 0..y_len {
         let Some(table_row) = cursor.next_data_line_optional() else {
-            values.resize(values.len() + x_len * (y_len - row), 0.0);
+            let missing = checked_table_value_count(model, file, &[x_len, y_len - row])?;
+            reserve_table_values(&mut values, model, file, missing)?;
+            let new_len = values.len().checked_add(missing).ok_or_else(|| {
+                table_file_error(model, file, "table dimensions exceed addressable memory")
+            })?;
+            values.resize(new_len, 0.0);
             break;
         };
         if table_row.tokens.len() > x_len {
@@ -560,7 +600,9 @@ fn parse_table3d_values(
     y_len: usize,
     z_len: usize,
 ) -> CmResult<Vec<Value>> {
-    let mut values = Vec::with_capacity(x_len * y_len * z_len);
+    let table_len = checked_table_value_count(model, file, &[x_len, y_len, z_len])?;
+    let mut values = Vec::new();
+    reserve_table_values(&mut values, model, file, table_len)?;
     for z in 0..z_len {
         for y in 0..y_len {
             let table_row = cursor.next_data_line_optional().ok_or_else(|| {
