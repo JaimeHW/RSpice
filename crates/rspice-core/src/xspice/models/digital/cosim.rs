@@ -208,13 +208,22 @@ fn fill_sized_digital_vector(
     name: &str,
     width: usize,
     output: &mut Vec<DigitalValue>,
-) {
+) -> CmResult<()> {
+    if output.capacity() < width {
+        let additional = width - output.capacity();
+        output.try_reserve_exact(additional).map_err(|err| {
+            d_cosim_error(format!(
+                "unable to reserve {width} {name} vector value(s): {err}"
+            ))
+        })?;
+    }
+
     let values = ctx.input_digital_vector_values(name).unwrap_or(&[]);
     output.clear();
-    output.reserve(width);
     for index in 0..width {
         output.push(values.get(index).copied().unwrap_or_default());
     }
+    Ok(())
 }
 
 fn event_is_new(event_time: Value, previous_time: Value) -> bool {
@@ -536,8 +545,8 @@ impl CodeModel for DigitalCosim {
                 results,
                 output_changes,
             } = input_scratch;
-            fill_sized_digital_vector(ctx, "d_in", input_width, inputs);
-            fill_sized_digital_vector(ctx, "d_inout", inout_width, inouts);
+            fill_sized_digital_vector(ctx, "d_in", input_width, inputs)?;
+            fill_sized_digital_vector(ctx, "d_inout", inout_width, inouts)?;
 
             let runtime = ctx
                 .resource::<DigitalCosimRuntimeResource>(RESOURCE_RUNTIME)
@@ -695,7 +704,7 @@ mod tests {
         );
         let mut values = Vec::new();
 
-        fill_sized_digital_vector(&ctx, "d_in", 2, &mut values);
+        fill_sized_digital_vector(&ctx, "d_in", 2, &mut values).expect("fill d_in vector");
         assert_eq!(values, vec![DigitalValue::one(), DigitalValue::zero()]);
         let first_ptr = values.as_ptr();
         let first_capacity = values.capacity();
@@ -704,7 +713,7 @@ mod tests {
             "d_in",
             InputValue::DigitalVector(vec![DigitalValue::unknown()]),
         );
-        fill_sized_digital_vector(&ctx, "d_in", 2, &mut values);
+        fill_sized_digital_vector(&ctx, "d_in", 2, &mut values).expect("fill d_in vector");
 
         assert_eq!(
             values,
