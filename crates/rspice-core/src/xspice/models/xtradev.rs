@@ -1688,17 +1688,11 @@ fn core_pwl_eval_for_context(ctx: &CmContext) -> CmResult<CoreEval> {
 fn core_hysteresis_params(ctx: &CmContext) -> CmResult<CoreHysteresisParams> {
     let in_low = finite_param(ctx, "in_low", 0.0)?;
     let in_high = finite_param(ctx, "in_high", 1.0)?;
-    let hyst = finite_param(ctx, "hyst", 0.1)?;
+    let hyst = finite_param(ctx, "hyst", 0.1)?.max(0.0);
     if in_high == in_low {
         return Err(invalid_param(
             "in_high",
             format!("in_high must differ from in_low, got in_low={in_low}, in_high={in_high}"),
-        ));
-    }
-    if hyst < 0.0 {
-        return Err(invalid_param(
-            "hyst",
-            format!("hyst must be nonnegative, got {hyst}"),
         ));
     }
 
@@ -4293,8 +4287,9 @@ mod tests {
     }
 
     #[test]
-    fn core_hysteresis_rejects_negative_hysteresis_width() {
+    fn core_hysteresis_clamps_negative_hysteresis_width() {
         let mut ctx = CmContext::new();
+        ctx.set_input_analog("mc", 0.5);
         ctx.set_real_vector_param("h_array", vec![0.0, 1.0]);
         ctx.set_real_vector_param("b_array", vec![0.0, 1.0]);
         ctx.set_param("area", 1.0);
@@ -4304,24 +4299,20 @@ mod tests {
         ctx.set_param("in_high", 1.0);
         ctx.set_param("hyst", -0.1);
 
-        let err = Core
-            .init(&mut ctx)
-            .expect_err("negative core hyst violates ngspice ifspec lower limit");
-        assert!(
-            err.to_string().contains("hyst must be nonnegative"),
-            "core hyst error should explain the nonnegative lower limit, got {err:?}"
-        );
+        Core.init(&mut ctx)
+            .expect("negative core hyst clamps to the official lower limit");
 
         ctx.set_param("hyst", 0.1);
         Core.init(&mut ctx)
             .expect("nonnegative core hyst initializes");
         ctx.set_param("hyst", -0.1);
-        let err = Core
-            .evaluate(&mut ctx)
-            .expect_err("mutated negative core hyst must fail evaluation");
+        Core.evaluate(&mut ctx)
+            .expect("mutated negative core hyst clamps during evaluation");
+
+        let out = ctx.output("mc");
         assert!(
-            err.to_string().contains("hyst must be nonnegative"),
-            "core hyst evaluation error should explain the nonnegative lower limit, got {err:?}"
+            (out - 0.5).abs() < 1.0e-12,
+            "core hyst=-0.1 should behave like hyst=0 after clamping, got {out}"
         );
     }
 
