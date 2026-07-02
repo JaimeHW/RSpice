@@ -259,6 +259,7 @@ enum XyceStaticDcContract {
     WrapperDefault,
     WrapperGnuplotSplot,
     WrapperHspiceMath,
+    WrapperRaw,
     WrapperResistorDefault,
     WrapperVoltageAccessor,
 }
@@ -274,6 +275,8 @@ impl XyceStaticDcContract {
             (Self::WrapperGnuplotSplot, true) => "wrapper_gnuplot_splot_prn_step_dc",
             (Self::WrapperHspiceMath, false) => "wrapper_hspice_math_prn_dc",
             (Self::WrapperHspiceMath, true) => "wrapper_hspice_math_prn_step_dc",
+            (Self::WrapperRaw, false) => "wrapper_raw_dc",
+            (Self::WrapperRaw, true) => "wrapper_raw_step_dc",
             (Self::WrapperResistorDefault, false) => "wrapper_resistor_default_prn_dc",
             (Self::WrapperResistorDefault, true) => "wrapper_resistor_default_prn_step_dc",
             (Self::WrapperVoltageAccessor, false) => "wrapper_voltage_accessor_prn_dc",
@@ -282,7 +285,7 @@ impl XyceStaticDcContract {
     }
 
     fn compares_step_res_reference(self) -> bool {
-        matches!(self, Self::WrapperDefault)
+        matches!(self, Self::WrapperDefault | Self::WrapperRaw)
     }
 }
 
@@ -834,16 +837,6 @@ impl XyceTestRunner {
     fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
 
-        let reference_path = self
-            .static_prn_reference_path(&deck.path)
-            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-        if !reference_path.is_file() {
-            return Err(format!(
-                "no checked-in static .prn oracle at {}",
-                self.display_path(&reference_path)
-            ));
-        }
-
         let wrapper_contract = if requires_wrapper {
             let source = fs::read_to_string(&deck.path)
                 .map_err(|err| format!("failed to read deck: {err}"))?;
@@ -855,6 +848,25 @@ impl XyceTestRunner {
         } else {
             None
         };
+        let reference_path = match wrapper_contract {
+            Some(XyceStaticDcContract::WrapperRaw) => self
+                .static_raw_reference_path(&deck.path)
+                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?,
+            _ => self
+                .static_prn_reference_path(&deck.path)
+                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?,
+        };
+        if !reference_path.is_file() {
+            let extension = if matches!(wrapper_contract, Some(XyceStaticDcContract::WrapperRaw)) {
+                "raw"
+            } else {
+                "prn"
+            };
+            return Err(format!(
+                "no checked-in static .{extension} oracle at {}",
+                self.display_path(&reference_path)
+            ));
+        }
 
         let expression_dialect = if matches!(
             wrapper_contract,
@@ -1024,6 +1036,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperGnuplotSplot);
         }
 
+        if Self::is_native_raw_wrapper_candidate_path(relative_path) {
+            Self::validate_raw_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperRaw);
+        }
+
         if Self::is_native_default_prn_wrapper_candidate_path(relative_path)
             || Self::is_native_multiplicity_static_prn_wrapper_candidate_path(relative_path)
         {
@@ -1066,6 +1083,15 @@ impl XyceTestRunner {
 
     fn is_native_default_prn_wrapper_candidate_path(relative_path: &str) -> bool {
         Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dc/")
+    }
+
+    fn is_native_raw_wrapper_candidate_path(relative_path: &str) -> bool {
+        let relative_path = Self::normalize_manifest_key(relative_path);
+        relative_path.starts_with("netlists/output/dc/")
+            && relative_path
+                .rsplit('/')
+                .next()
+                .is_some_and(|file_name| file_name.contains("-raw"))
     }
 
     fn is_native_multiplicity_static_prn_wrapper_candidate_path(relative_path: &str) -> bool {
@@ -1269,6 +1295,34 @@ impl XyceTestRunner {
         Ok(has_file_output)
     }
 
+    fn validate_raw_wrapper_source(source: &str) -> Result<(), String> {
+        let mut primary_print_count = 0usize;
+        for request in Self::dc_print_output_requests(source)? {
+            let format = request.format.as_deref().unwrap_or("STD");
+            if request.file.is_some() {
+                return Err(format!(
+                    "wrapper-origin RAW contract does not cover FILE= side output with FORMAT={format}"
+                ));
+            }
+            if !format.eq_ignore_ascii_case("RAW") && !format.eq_ignore_ascii_case("STD") {
+                return Err(format!(
+                    "wrapper-origin RAW contract does not cover primary .PRINT DC FORMAT={format}"
+                ));
+            }
+            primary_print_count += 1;
+        }
+
+        match primary_print_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin RAW contract requires one primary .PRINT DC statement".to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin RAW contract requires one primary .PRINT DC statement, found {primary_print_count}"
+            )),
+        }
+    }
+
     fn validate_native_static_prn_tran_wrapper_contract(source: &str) -> Result<(), String> {
         let mut primary_tran_print_count = 0usize;
         for line in Self::logical_netlist_lines(source) {
@@ -1446,7 +1500,7 @@ impl XyceTestRunner {
             }
         };
 
-        let reference = match Self::parse_prn_file(&plan.reference_path) {
+        let reference = match Self::parse_dc_reference_file(plan.contract, &plan.reference_path) {
             Ok(reference) => reference,
             Err(err) if Self::is_parameter_sweep_summary_reference(&plan.reference_path) => {
                 return self.expected_unsupported_result(
@@ -1463,7 +1517,7 @@ impl XyceTestRunner {
                     deck,
                     start,
                     contract,
-                    format!("failed to parse Xyce .prn oracle: {err}"),
+                    format!("failed to parse Xyce reference oracle: {err}"),
                     Vec::new(),
                 );
             }
@@ -4060,7 +4114,7 @@ impl XyceTestRunner {
     }
 
     fn is_primary_dc_sweep_reference_column(column: &str) -> bool {
-        Self::normalize_probe(column) == "v-sweep"
+        matches!(Self::normalize_probe(column).as_str(), "v-sweep" | "sweep")
     }
 
     fn reference_column_matches_probe(column: &str, probe: &str) -> bool {
@@ -8691,6 +8745,381 @@ impl XyceTestRunner {
         Self::parse_prn_table(&content)
     }
 
+    fn parse_dc_reference_file(
+        contract: XyceStaticDcContract,
+        path: &Path,
+    ) -> Result<XycePrnTable, String> {
+        if matches!(contract, XyceStaticDcContract::WrapperRaw) {
+            Self::parse_raw_file(path)
+        } else {
+            Self::parse_prn_file(path)
+        }
+    }
+
+    fn parse_raw_file(path: &Path) -> Result<XycePrnTable, String> {
+        let bytes = fs::read(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_raw_table(&bytes)
+    }
+
+    fn parse_raw_table(bytes: &[u8]) -> Result<XycePrnTable, String> {
+        let mut offset = 0usize;
+        let mut columns: Option<Vec<String>> = None;
+        let mut rows = Vec::new();
+        let mut plot_index = 0usize;
+
+        while offset < bytes.len() {
+            Self::skip_raw_blank_lines(bytes, &mut offset);
+            if offset >= bytes.len() {
+                break;
+            }
+
+            let (plot_columns, plot_rows) = Self::parse_raw_plot(bytes, &mut offset, plot_index)?;
+            if let Some(columns) = &columns {
+                if !Self::same_prn_columns(columns, &plot_columns) {
+                    return Err(format!(
+                        "Xyce RAW plot {} changes variables from {:?} to {:?}",
+                        plot_index + 1,
+                        columns,
+                        plot_columns
+                    ));
+                }
+            } else {
+                columns = Some(plot_columns);
+            }
+            rows.extend(plot_rows);
+            plot_index += 1;
+        }
+
+        let columns = columns.ok_or_else(|| "empty Xyce RAW table".to_string())?;
+        if rows.is_empty() {
+            return Err("Xyce RAW table has no data rows".to_string());
+        }
+
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn parse_raw_plot(
+        bytes: &[u8],
+        offset: &mut usize,
+        plot_index: usize,
+    ) -> Result<(Vec<String>, Vec<Vec<f64>>), String> {
+        let mut flags = None;
+        let mut variable_count = None;
+        let mut point_count = None;
+
+        loop {
+            let line = Self::read_raw_line(bytes, offset).ok_or_else(|| {
+                format!(
+                    "Xyce RAW plot {} ended before Variables header",
+                    plot_index + 1
+                )
+            })?;
+            let trimmed = line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with("Title:")
+                || trimmed.starts_with("Date:")
+                || trimmed.starts_with("Version:")
+            {
+                continue;
+            }
+            if trimmed.starts_with("Plotname:") {
+                continue;
+            }
+            if let Some(value) = trimmed.strip_prefix("Flags:") {
+                flags = Some(value.trim().to_string());
+                continue;
+            }
+            if let Some(value) = trimmed.strip_prefix("No. Variables:") {
+                variable_count = Some(value.trim().parse::<usize>().map_err(|err| {
+                    format!(
+                        "invalid RAW variable count '{}' in plot {}: {err}",
+                        value.trim(),
+                        plot_index + 1
+                    )
+                })?);
+                continue;
+            }
+            if let Some(value) = trimmed.strip_prefix("No. Points:") {
+                point_count = Some(value.trim().parse::<usize>().map_err(|err| {
+                    format!(
+                        "invalid RAW point count '{}' in plot {}: {err}",
+                        value.trim(),
+                        plot_index + 1
+                    )
+                })?);
+                continue;
+            }
+            if trimmed.eq_ignore_ascii_case("Variables:") {
+                break;
+            }
+            return Err(format!(
+                "unexpected RAW header line in plot {}: '{}'",
+                plot_index + 1,
+                trimmed
+            ));
+        }
+
+        let flags =
+            flags.ok_or_else(|| format!("RAW plot {} has no Flags line", plot_index + 1))?;
+        if !flags
+            .split_whitespace()
+            .any(|flag| flag.eq_ignore_ascii_case("real"))
+        {
+            return Err(format!(
+                "RAW plot {} uses unsupported Flags: {flags}; only real-valued RAW is supported",
+                plot_index + 1
+            ));
+        }
+        if flags
+            .split_whitespace()
+            .any(|flag| flag.eq_ignore_ascii_case("complex"))
+        {
+            return Err(format!(
+                "RAW plot {} is complex-valued; DC RAW comparison currently supports real data",
+                plot_index + 1
+            ));
+        }
+        let variable_count = variable_count
+            .ok_or_else(|| format!("RAW plot {} has no variable count", plot_index + 1))?;
+        let point_count =
+            point_count.ok_or_else(|| format!("RAW plot {} has no point count", plot_index + 1))?;
+        if variable_count == 0 {
+            return Err(format!("RAW plot {} has no variables", plot_index + 1));
+        }
+
+        let mut columns = Vec::with_capacity(variable_count);
+        for variable_index in 0..variable_count {
+            let line = Self::read_raw_line(bytes, offset).ok_or_else(|| {
+                format!(
+                    "RAW plot {} ended while reading variable {}",
+                    plot_index + 1,
+                    variable_index
+                )
+            })?;
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            if fields.len() < 3 {
+                return Err(format!(
+                    "invalid RAW variable line in plot {}: '{}'",
+                    plot_index + 1,
+                    line.trim()
+                ));
+            }
+            let parsed_index = fields[0].parse::<usize>().map_err(|err| {
+                format!(
+                    "invalid RAW variable index '{}' in plot {}: {err}",
+                    fields[0],
+                    plot_index + 1
+                )
+            })?;
+            if parsed_index != variable_index {
+                return Err(format!(
+                    "RAW variable index {} appears where {} was expected in plot {}",
+                    parsed_index,
+                    variable_index,
+                    plot_index + 1
+                ));
+            }
+            columns.push(fields[1].to_string());
+        }
+
+        let data_marker = loop {
+            let line = Self::read_raw_line(bytes, offset).ok_or_else(|| {
+                format!(
+                    "RAW plot {} ended before Values/Binary marker",
+                    plot_index + 1
+                )
+            })?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            break trimmed.to_ascii_lowercase();
+        };
+
+        let rows = match data_marker.as_str() {
+            "values:" => {
+                Self::parse_ascii_raw_rows(bytes, offset, plot_index, point_count, variable_count)?
+            }
+            "binary:" => {
+                Self::parse_binary_raw_rows(bytes, offset, plot_index, point_count, variable_count)?
+            }
+            other => {
+                return Err(format!(
+                    "RAW plot {} expected Values: or Binary:, got '{}'",
+                    plot_index + 1,
+                    other
+                ));
+            }
+        };
+
+        Ok((columns, rows))
+    }
+
+    fn parse_ascii_raw_rows(
+        bytes: &[u8],
+        offset: &mut usize,
+        plot_index: usize,
+        point_count: usize,
+        variable_count: usize,
+    ) -> Result<Vec<Vec<f64>>, String> {
+        let mut rows = Vec::with_capacity(point_count);
+        for point_index in 0..point_count {
+            let first_line = Self::read_next_nonempty_raw_line(bytes, offset).ok_or_else(|| {
+                format!(
+                    "RAW plot {} ended while reading point {}",
+                    plot_index + 1,
+                    point_index
+                )
+            })?;
+            let first_fields = first_line.split_whitespace().collect::<Vec<_>>();
+            if first_fields.is_empty() {
+                return Err(format!(
+                    "RAW plot {} has empty point line for point {}",
+                    plot_index + 1,
+                    point_index
+                ));
+            }
+            let parsed_index = first_fields[0].parse::<usize>().map_err(|err| {
+                format!(
+                    "invalid RAW point index '{}' in plot {}: {err}",
+                    first_fields[0],
+                    plot_index + 1
+                )
+            })?;
+            if parsed_index != point_index {
+                return Err(format!(
+                    "RAW point index {} appears where {} was expected in plot {}",
+                    parsed_index,
+                    point_index,
+                    plot_index + 1
+                ));
+            }
+
+            let mut row = first_fields
+                .iter()
+                .skip(1)
+                .map(|token| {
+                    Self::parse_xyce_numeric_token(token).map_err(|err| {
+                        format!(
+                            "invalid RAW numeric token '{}' at plot {}, point {}: {err}",
+                            token,
+                            plot_index + 1,
+                            point_index
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            while row.len() < variable_count {
+                let line = Self::read_next_nonempty_raw_line(bytes, offset).ok_or_else(|| {
+                    format!(
+                        "RAW plot {} ended while reading values for point {}",
+                        plot_index + 1,
+                        point_index
+                    )
+                })?;
+                for token in line.split_whitespace() {
+                    row.push(Self::parse_xyce_numeric_token(token).map_err(|err| {
+                        format!(
+                            "invalid RAW numeric token '{}' at plot {}, point {}: {err}",
+                            token,
+                            plot_index + 1,
+                            point_index
+                        )
+                    })?);
+                }
+            }
+            if row.len() != variable_count {
+                return Err(format!(
+                    "RAW plot {} point {} has {} values, expected {}",
+                    plot_index + 1,
+                    point_index,
+                    row.len(),
+                    variable_count
+                ));
+            }
+            rows.push(row);
+        }
+        Ok(rows)
+    }
+
+    fn parse_binary_raw_rows(
+        bytes: &[u8],
+        offset: &mut usize,
+        plot_index: usize,
+        point_count: usize,
+        variable_count: usize,
+    ) -> Result<Vec<Vec<f64>>, String> {
+        let value_count = point_count
+            .checked_mul(variable_count)
+            .ok_or_else(|| format!("RAW plot {} point/variable count overflows", plot_index + 1))?;
+        let byte_count = value_count
+            .checked_mul(std::mem::size_of::<f64>())
+            .ok_or_else(|| format!("RAW plot {} binary byte count overflows", plot_index + 1))?;
+        if bytes.len().saturating_sub(*offset) < byte_count {
+            return Err(format!(
+                "RAW plot {} binary payload has {} byte(s), expected {}",
+                plot_index + 1,
+                bytes.len().saturating_sub(*offset),
+                byte_count
+            ));
+        }
+
+        let mut rows = Vec::with_capacity(point_count);
+        for point_index in 0..point_count {
+            let mut row = Vec::with_capacity(variable_count);
+            for variable_index in 0..variable_count {
+                let start = *offset
+                    + (point_index * variable_count + variable_index) * std::mem::size_of::<f64>();
+                let bytes: [u8; 8] = bytes[start..start + 8]
+                    .try_into()
+                    .expect("slice length checked");
+                row.push(f64::from_le_bytes(bytes));
+            }
+            rows.push(row);
+        }
+        *offset += byte_count;
+        Ok(rows)
+    }
+
+    fn read_next_nonempty_raw_line(bytes: &[u8], offset: &mut usize) -> Option<String> {
+        loop {
+            let line = Self::read_raw_line(bytes, offset)?;
+            if !line.trim().is_empty() {
+                return Some(line);
+            }
+        }
+    }
+
+    fn skip_raw_blank_lines(bytes: &[u8], offset: &mut usize) {
+        while *offset < bytes.len() {
+            let mut cursor = *offset;
+            let Some(line) = Self::read_raw_line(bytes, &mut cursor) else {
+                return;
+            };
+            if !line.trim().is_empty() {
+                return;
+            }
+            *offset = cursor;
+        }
+    }
+
+    fn read_raw_line(bytes: &[u8], offset: &mut usize) -> Option<String> {
+        if *offset >= bytes.len() {
+            return None;
+        }
+        let start = *offset;
+        let mut end = start;
+        while end < bytes.len() && bytes[end] != b'\n' {
+            end += 1;
+        }
+        *offset = end.saturating_add(usize::from(end < bytes.len()));
+        let mut line = &bytes[start..end];
+        if line.ends_with(b"\r") {
+            line = &line[..line.len().saturating_sub(1)];
+        }
+        Some(String::from_utf8_lossy(line).into_owned())
+    }
+
     fn is_parameter_sweep_summary_reference(path: &Path) -> bool {
         let Ok(content) = fs::read_to_string(path) else {
             return false;
@@ -8847,6 +9276,7 @@ impl XyceTestRunner {
             || normalized == "time"
             || normalized == "freq"
             || normalized == "frequency"
+            || normalized == "sweep"
             || normalized.starts_with("v(")
             || normalized.starts_with("i(")
             || normalized.starts_with("n(")
@@ -8885,6 +9315,14 @@ impl XyceTestRunner {
     }
 
     fn static_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
+        self.static_output_reference_path(deck_path, "prn")
+    }
+
+    fn static_raw_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
+        self.static_output_reference_path(deck_path, "raw")
+    }
+
+    fn static_output_reference_path(&self, deck_path: &Path, extension: &str) -> Option<PathBuf> {
         let netlists_root = self.root.join("Netlists");
         let canonical = deck_path
             .canonicalize()
@@ -8899,7 +9337,7 @@ impl XyceTestRunner {
             self.root
                 .join("OutputData")
                 .join(parent)
-                .join(format!("{file_name}.prn")),
+                .join(format!("{file_name}.{extension}")),
         )
     }
 
@@ -9404,6 +9842,79 @@ End of Xyce(TM) Simulation
         );
         assert_eq!(table.rows.len(), 2);
         assert_eq!(table.rows[1], vec![1.0, 5.0e-6, 23.0901699]);
+    }
+
+    #[test]
+    fn raw_parser_accepts_ascii_repeated_plots() {
+        let table = XyceTestRunner::parse_raw_table(
+            br#"Title: RAW ASCII
+Date: today
+Plotname: Step 1
+Flags: real
+No. Variables: 3
+No. Points: 2
+Variables:
+    0   sweep   voltage
+    1   V(1)    voltage
+    2   V1#branch current
+Values:
+0   0.00000000e+00
+    0.00000000e+00
+    0.00000000e+00
+
+1   1.00000000e-01
+    1.00000000e-01
+    -1.00000000e-02
+
+Plotname: Step 2
+Flags: real
+No. Variables: 3
+No. Points: 2
+Variables:
+    0   sweep   voltage
+    1   V(1)    voltage
+    2   V1#branch current
+Values:
+0   0.00000000e+00
+    0.00000000e+00
+    0.00000000e+00
+
+1   1.00000000e-01
+    1.00000000e-01
+    -1.00000000e-02
+"#,
+        )
+        .expect("RAW ASCII parser accepts repeated plots");
+
+        assert_eq!(
+            table.columns,
+            ["sweep", "V(1)", "V1#branch"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(table.rows.len(), 4);
+        assert_eq!(table.rows[3], vec![0.1, 0.1, -0.01]);
+    }
+
+    #[test]
+    fn raw_parser_accepts_binary_real_payload() {
+        let mut raw = b"Title: RAW binary\nVersion: test\nPlotname: DC\nFlags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n\t0\tsweep\tvoltage\n\t1\tV(1)\tvoltage\nBinary:\n".to_vec();
+        for value in [0.0_f64, 0.0, 0.1, 0.1] {
+            raw.extend_from_slice(&value.to_le_bytes());
+        }
+
+        let table =
+            XyceTestRunner::parse_raw_table(&raw).expect("RAW parser accepts binary payload");
+
+        assert_eq!(
+            table.columns,
+            ["sweep", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(table.rows, vec![vec![0.0, 0.0], vec![0.1, 0.1]]);
     }
 
     #[test]

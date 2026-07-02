@@ -1563,13 +1563,54 @@ fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
             "{relative} should report the native wrapper-origin .prn contract"
         );
     }
+}
 
-    let relative = "Netlists/Output/DC/dc-raw-override.cir";
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && result.expected_unsupported,
-        "{relative} should stay named unsupported until its removed wrapper's full output contract is implemented, got {result:?}"
-    );
+#[test]
+fn test_xyce_output_dc_raw_wrapper_cases_run_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        ("Netlists/Output/DC/dc-raw.cir", "wrapper_raw_dc"),
+        ("Netlists/Output/DC/dc-raw-ascii.cir", "wrapper_raw_dc"),
+        ("Netlists/Output/DC/dc-raw-override.cir", "wrapper_raw_dc"),
+        (
+            "Netlists/Output/DC/dc-raw-override-ascii.cir",
+            "wrapper_raw_dc",
+        ),
+        (
+            "Netlists/Output/DC/dc-step-raw-override.cir",
+            "wrapper_raw_step_dc",
+        ),
+        (
+            "Netlists/Output/DC/dc-step-raw-override-ascii.cir",
+            "wrapper_raw_step_dc",
+        ),
+        ("Netlists/Output/DC/op-raw-override.cir", "wrapper_raw_dc"),
+        (
+            "Netlists/Output/DC/op-raw-override-ascii.cir",
+            "wrapper_raw_dc",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream RAW wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native wrapper-origin RAW comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .raw oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the native RAW wrapper contract"
+        );
+    }
 }
 
 #[test]
