@@ -953,6 +953,30 @@ enum XspiceParamValue {
     RealVectorDeferred(Vec<String>),
 }
 
+enum XspiceComplexComponent {
+    Resolved(Value),
+    Deferred(String),
+}
+
+enum XspiceComplexLiteral {
+    Resolved(String),
+    Deferred { real: String, imag: String },
+}
+
+enum XspiceStringVectorEntry {
+    Resolved(String),
+    DeferredComplex { real: String, imag: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DeferredXspiceStringVectorEntry {
+    Resolved(String),
+    Complex { real: String, imag: String },
+}
+
+const DEFERRED_XSPICE_COMPLEX_PREFIX: &str = "__rspice_xspice_complex__:";
+const DEFERRED_XSPICE_COMPLEX_VECTOR_PREFIX: &str = "__rspice_xspice_complex_vector__:";
+
 /// Parse a scalar XSPICE instance parameter value.
 fn parse_param_value(
     stream: &mut TokenStream,
@@ -1112,9 +1136,18 @@ fn parse_scalar_param_token_value(
             Ok(parsed)
         }
         TokenKind::Other('<') => {
-            let value =
-                parse_xspice_complex_literal_string(stream, line_num, param_name, netlist_params)?;
-            Ok(XspiceParamValue::String(value))
+            match parse_xspice_complex_literal(
+                stream,
+                line_num,
+                param_name,
+                netlist_params,
+                defer_simple_param_refs,
+            )? {
+                XspiceComplexLiteral::Resolved(value) => Ok(XspiceParamValue::String(value)),
+                XspiceComplexLiteral::Deferred { real, imag } => Ok(
+                    XspiceParamValue::StringDeferred(encode_deferred_xspice_complex(&real, &imag)),
+                ),
+            }
         }
         TokenKind::LBracket => parse_vector_param_value(
             stream,
@@ -1344,8 +1377,13 @@ fn parse_vector_param_value(
         netlist_params,
         defer_simple_param_refs,
     ) {
-        parse_string_vector_param(stream, line_num, param_name, netlist_params)
-            .map(XspiceParamValue::StringVector)
+        parse_string_vector_param(
+            stream,
+            line_num,
+            param_name,
+            netlist_params,
+            defer_simple_param_refs,
+        )
     } else {
         parse_real_vector_param(stream, line_num, netlist_params, defer_simple_param_refs)
     }
@@ -1417,8 +1455,25 @@ pub(crate) fn parse_xspice_string_vector_literal(
         message: format!("Invalid XSPICE string-vector parameter literal: {err}"),
     })?;
     let mut stream = TokenStream::new(tokens);
-    let values =
-        parse_string_vector_param(&mut stream, line_num, param_name, &ParamContext::new())?;
+    let values = match parse_string_vector_param(
+        &mut stream,
+        line_num,
+        param_name,
+        &ParamContext::new(),
+        false,
+    )? {
+        XspiceParamValue::StringVector(values) => values,
+        XspiceParamValue::StringVectorDeferred(_) => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected deferred XSPICE string-vector parameter '{}'",
+                    param_name
+                ),
+            });
+        }
+        _ => unreachable!("string-vector parser only returns string-vector values"),
+    };
     while stream.consume(&TokenKind::Newline) {}
     if !stream.is_eof() {
         return Err(ParseError::Syntax {
@@ -1546,7 +1601,8 @@ fn parse_string_vector_param(
     line_num: usize,
     param_name: &str,
     netlist_params: &ParamContext,
-) -> Result<Vec<String>, ParseError> {
+    defer_simple_param_refs: bool,
+) -> Result<XspiceParamValue, ParseError> {
     if !stream.consume(&TokenKind::LBracket) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -1554,33 +1610,56 @@ fn parse_string_vector_param(
         });
     }
 
-    let mut values = Vec::new();
+    let mut entries = Vec::new();
     loop {
         skip_vector_commas(stream);
 
         match &stream.peek().kind {
             TokenKind::RBracket => {
                 stream.advance();
-                return Ok(values);
+                if entries
+                    .iter()
+                    .any(|entry| matches!(entry, XspiceStringVectorEntry::DeferredComplex { .. }))
+                {
+                    return Ok(XspiceParamValue::StringVectorDeferred(
+                        encode_deferred_xspice_complex_vector(&entries),
+                    ));
+                }
+
+                let values = entries
+                    .into_iter()
+                    .map(|entry| match entry {
+                        XspiceStringVectorEntry::Resolved(value) => value,
+                        XspiceStringVectorEntry::DeferredComplex { .. } => unreachable!(),
+                    })
+                    .collect();
+                return Ok(XspiceParamValue::StringVector(values));
             }
             TokenKind::StringLit(value) => {
                 let value = value.clone();
                 stream.advance();
-                values.push(value);
+                entries.push(XspiceStringVectorEntry::Resolved(value));
             }
             TokenKind::Other('<') => {
                 let mut probe = stream.clone();
-                match parse_xspice_complex_literal_string(
+                match parse_xspice_complex_literal(
                     &mut probe,
                     line_num,
                     param_name,
                     netlist_params,
+                    defer_simple_param_refs,
                 ) {
-                    Ok(value) => {
+                    Ok(XspiceComplexLiteral::Resolved(value)) => {
                         *stream = probe;
-                        values.push(value);
+                        entries.push(XspiceStringVectorEntry::Resolved(value));
                     }
-                    Err(_) => values.push(parse_string_vector_bare_value(stream, line_num)?),
+                    Ok(XspiceComplexLiteral::Deferred { real, imag }) => {
+                        *stream = probe;
+                        entries.push(XspiceStringVectorEntry::DeferredComplex { real, imag });
+                    }
+                    Err(_) => entries.push(XspiceStringVectorEntry::Resolved(
+                        parse_string_vector_bare_value(stream, line_num)?,
+                    )),
                 }
             }
             TokenKind::Newline | TokenKind::Eof => {
@@ -1589,7 +1668,9 @@ fn parse_string_vector_param(
                     message: "Unclosed XSPICE string-vector parameter".to_string(),
                 });
             }
-            _ => values.push(parse_string_vector_bare_value(stream, line_num)?),
+            _ => entries.push(XspiceStringVectorEntry::Resolved(
+                parse_string_vector_bare_value(stream, line_num)?,
+            )),
         }
     }
 }
@@ -1635,12 +1716,13 @@ fn parse_string_vector_bare_value(
     Ok(value)
 }
 
-fn parse_xspice_complex_literal_string(
+fn parse_xspice_complex_literal(
     stream: &mut TokenStream,
     line_num: usize,
     param_name: &str,
     netlist_params: &ParamContext,
-) -> Result<String, ParseError> {
+    defer_simple_param_refs: bool,
+) -> Result<XspiceComplexLiteral, ParseError> {
     if !stream.consume(&TokenKind::Other('<')) {
         return Err(ParseError::Syntax {
             line: line_num,
@@ -1652,10 +1734,22 @@ fn parse_xspice_complex_literal_string(
         });
     }
 
-    let real =
-        parse_xspice_complex_component(stream, line_num, param_name, netlist_params, "real")?;
-    let imag =
-        parse_xspice_complex_component(stream, line_num, param_name, netlist_params, "imaginary")?;
+    let real = parse_xspice_complex_component(
+        stream,
+        line_num,
+        param_name,
+        netlist_params,
+        "real",
+        defer_simple_param_refs,
+    )?;
+    let imag = parse_xspice_complex_component(
+        stream,
+        line_num,
+        param_name,
+        netlist_params,
+        "imaginary",
+        defer_simple_param_refs,
+    )?;
 
     skip_vector_commas(stream);
     if !stream.consume(&TokenKind::Other('>')) {
@@ -1669,11 +1763,19 @@ fn parse_xspice_complex_literal_string(
         });
     }
 
-    Ok(format!(
-        "<{} {}>",
-        format_xspice_complex_component(real),
-        format_xspice_complex_component(imag)
-    ))
+    match (real, imag) {
+        (XspiceComplexComponent::Resolved(real), XspiceComplexComponent::Resolved(imag)) => {
+            Ok(XspiceComplexLiteral::Resolved(format!(
+                "<{} {}>",
+                format_xspice_complex_component(real),
+                format_xspice_complex_component(imag)
+            )))
+        }
+        (real, imag) => Ok(XspiceComplexLiteral::Deferred {
+            real: xspice_complex_component_expr(real),
+            imag: xspice_complex_component_expr(imag),
+        }),
+    }
 }
 
 fn parse_xspice_complex_component(
@@ -1682,7 +1784,8 @@ fn parse_xspice_complex_component(
     param_name: &str,
     netlist_params: &ParamContext,
     component: &str,
-) -> Result<Value, ParseError> {
+    defer_simple_param_refs: bool,
+) -> Result<XspiceComplexComponent, ParseError> {
     skip_vector_commas(stream);
 
     let sign = match &stream.peek().kind {
@@ -1697,52 +1800,39 @@ fn parse_xspice_complex_component(
         _ => 1.0,
     };
 
-    let token = stream.peek().clone();
-    let value = match token.kind {
-        TokenKind::Number(value) => {
-            stream.advance();
-            value
-        }
-        TokenKind::Expression(expr_text) => {
-            stream.advance();
-            expr::eval_expression(&expr_text, netlist_params).map_err(|err| ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    "Could not resolve {component} part of complex XSPICE parameter '{}': {}",
-                    param_name, err
-                ),
-            })?
-        }
-        TokenKind::Ident(raw) => {
-            stream.advance();
-            if let Some(value) = netlist_params.get(&raw) {
-                value
-            } else if let Some(value) = parse_boolean_literal(&raw) {
-                value
-            } else if let Ok(value) = parse_spice_value(&raw) {
-                value
-            } else {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: format!(
-                        "Expected {component} part of complex XSPICE parameter '{}', found '{}'",
-                        param_name, raw
-                    ),
-                });
-            }
-        }
-        _ => {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    "Expected {component} part of complex XSPICE parameter '{}', found '{}'",
-                    param_name, token.kind
-                ),
-            });
-        }
-    };
+    let expr_text =
+        collect_xspice_complex_component_expression(stream).ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected {component} part of complex XSPICE parameter '{}', found '{}'",
+                param_name,
+                stream.peek().kind
+            ),
+        })?;
 
-    Ok(sign * value)
+    if let Ok(value) = parse_spice_value(&expr_text) {
+        return Ok(XspiceComplexComponent::Resolved(sign * value));
+    }
+    if let Some(value) = parse_boolean_literal(&expr_text) {
+        return Ok(XspiceComplexComponent::Resolved(sign * value));
+    }
+    if !defer_simple_param_refs && let Ok(value) = expr::eval_expression(&expr_text, netlist_params)
+    {
+        return Ok(XspiceComplexComponent::Resolved(sign * value));
+    }
+    if defer_simple_param_refs {
+        return Ok(XspiceComplexComponent::Deferred(signed_xspice_expr(
+            sign, expr_text,
+        )));
+    }
+
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "Could not resolve {component} part of complex XSPICE parameter '{}': {}",
+            param_name, expr_text
+        ),
+    })
 }
 
 fn format_xspice_complex_component(value: Value) -> String {
@@ -1751,6 +1841,158 @@ fn format_xspice_complex_component(value: Value) -> String {
         .strip_suffix(".0")
         .unwrap_or(formatted.as_str())
         .to_string()
+}
+
+fn xspice_complex_component_expr(component: XspiceComplexComponent) -> String {
+    match component {
+        XspiceComplexComponent::Resolved(value) => format_xspice_complex_component(value),
+        XspiceComplexComponent::Deferred(expr) => expr,
+    }
+}
+
+fn signed_xspice_expr(sign: Value, expr: String) -> String {
+    if sign < 0.0 {
+        format!("-({expr})")
+    } else {
+        expr
+    }
+}
+
+fn collect_xspice_complex_component_expression(stream: &mut TokenStream) -> Option<String> {
+    let mut pieces = Vec::new();
+    let mut previous_end = None;
+    let mut paren_depth = 0usize;
+    let mut offset = 0usize;
+
+    loop {
+        let token = stream.peek_n(offset);
+        if let Some(end) = previous_end
+            && token.span.start != end
+        {
+            break;
+        }
+
+        let piece = match &token.kind {
+            TokenKind::Comma | TokenKind::Newline | TokenKind::Eof if paren_depth == 0 => break,
+            TokenKind::Other('>') if paren_depth == 0 => break,
+            TokenKind::Ident(_)
+            | TokenKind::Number(_)
+            | TokenKind::Expression(_)
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::Other(_) => xspice_complex_component_piece(token),
+            TokenKind::LParen => {
+                paren_depth += 1;
+                xspice_complex_component_piece(token)
+            }
+            TokenKind::RParen if paren_depth > 0 => {
+                paren_depth -= 1;
+                xspice_complex_component_piece(token)
+            }
+            _ => break,
+        };
+
+        if piece.is_empty() {
+            break;
+        }
+        previous_end = Some(token.span.end);
+        pieces.push(piece);
+        offset += 1;
+    }
+
+    if pieces.is_empty() || paren_depth != 0 {
+        return None;
+    }
+
+    for _ in 0..offset {
+        stream.advance();
+    }
+    Some(pieces.join(""))
+}
+
+fn xspice_complex_component_piece(token: &Token) -> String {
+    match &token.kind {
+        TokenKind::Expression(expr) => format!("({expr})"),
+        TokenKind::Number(value) if token.lexeme.is_empty() => value.to_string(),
+        _ if !token.lexeme.is_empty() => token.lexeme.clone(),
+        _ => token.kind.to_string(),
+    }
+}
+
+fn encode_deferred_xspice_complex(real: &str, imag: &str) -> String {
+    let mut encoded = String::from(DEFERRED_XSPICE_COMPLEX_PREFIX);
+    push_len_segment(&mut encoded, real);
+    push_len_segment(&mut encoded, imag);
+    encoded
+}
+
+pub(crate) fn parse_deferred_xspice_complex(value: &str) -> Option<(String, String)> {
+    let mut tail = value.strip_prefix(DEFERRED_XSPICE_COMPLEX_PREFIX)?;
+    let real = decode_len_segment(&mut tail)?;
+    let imag = decode_len_segment(&mut tail)?;
+    if tail.is_empty() {
+        Some((real, imag))
+    } else {
+        None
+    }
+}
+
+fn encode_deferred_xspice_complex_vector(entries: &[XspiceStringVectorEntry]) -> String {
+    let mut encoded = String::from(DEFERRED_XSPICE_COMPLEX_VECTOR_PREFIX);
+    for entry in entries {
+        match entry {
+            XspiceStringVectorEntry::Resolved(value) => {
+                encoded.push('s');
+                push_len_segment(&mut encoded, value);
+            }
+            XspiceStringVectorEntry::DeferredComplex { real, imag } => {
+                encoded.push('c');
+                push_len_segment(&mut encoded, real);
+                push_len_segment(&mut encoded, imag);
+            }
+        }
+    }
+    encoded
+}
+
+pub(crate) fn parse_deferred_xspice_complex_vector(
+    value: &str,
+) -> Option<Vec<DeferredXspiceStringVectorEntry>> {
+    let mut tail = value.strip_prefix(DEFERRED_XSPICE_COMPLEX_VECTOR_PREFIX)?;
+    let mut entries = Vec::new();
+    while !tail.is_empty() {
+        let (tag, rest) = tail.split_at(1);
+        tail = rest;
+        match tag {
+            "s" => entries.push(DeferredXspiceStringVectorEntry::Resolved(
+                decode_len_segment(&mut tail)?,
+            )),
+            "c" => {
+                let real = decode_len_segment(&mut tail)?;
+                let imag = decode_len_segment(&mut tail)?;
+                entries.push(DeferredXspiceStringVectorEntry::Complex { real, imag });
+            }
+            _ => return None,
+        }
+    }
+    Some(entries)
+}
+
+fn push_len_segment(output: &mut String, value: &str) {
+    output.push_str(&value.len().to_string());
+    output.push(':');
+    output.push_str(value);
+}
+
+fn decode_len_segment(input: &mut &str) -> Option<String> {
+    let colon = input.find(':')?;
+    let len = input[..colon].parse::<usize>().ok()?;
+    let rest = &input[colon + 1..];
+    let value = rest.get(..len)?.to_string();
+    *input = rest.get(len..)?;
+    Some(value)
 }
 
 fn string_vector_piece_from_token(token: &Token) -> Option<String> {

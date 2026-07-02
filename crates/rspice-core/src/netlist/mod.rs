@@ -41,8 +41,10 @@ pub use topology::{
     TopologyReduction, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, reduce_supernode_topology,
 };
 pub(crate) use xspice_parser::{
-    parse_xspice_string_vector_literal, xspice_model_param_accepts_bare_string,
-    xspice_param_prefers_string_vector, xspice_param_preserves_numeric_string,
+    DeferredXspiceStringVectorEntry, parse_deferred_xspice_complex,
+    parse_deferred_xspice_complex_vector, parse_xspice_string_vector_literal,
+    xspice_model_param_accepts_bare_string, xspice_param_prefers_string_vector,
+    xspice_param_preserves_numeric_string,
 };
 
 use thiserror::Error;
@@ -2837,6 +2839,55 @@ mod tests {
                         .find(|(name, _)| name.eq_ignore_ascii_case("table"))
                         .map(|(_, values)| values.as_slice()),
                     Some(&[4.0, 9.0][..])
+                );
+            }
+            other => panic!("expected XSPICE element, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn xspice_subckt_instance_complex_params_resolve_during_flattening() {
+        let netlist = Netlist::parse(
+            "xspice subckt instance complex params\n\
+             .subckt xcmp in out r=2 i=3 ar=4 ai=5\n\
+             A1 in out print_param_types complex=<r i> complex_array=[<ar ai> <r*2 {i+1}>]\n\
+             .ends xcmp\n\
+             XU a b xcmp r=6 i=7 ar=8 ai=9\n\
+             .end\n",
+        )
+        .expect("XSPICE subcircuit complex-param deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("XSPICE subcircuit complex-param deck flattens");
+        let element = flattened
+            .elements
+            .iter()
+            .find(|element| element.name == "XU.A1")
+            .expect("flattened XSPICE element exists");
+
+        match &element.kind {
+            ElementKind::Xspice {
+                string_params,
+                string_expr_params,
+                string_vector_params,
+                string_vector_expr_params,
+                ..
+            } => {
+                assert!(string_expr_params.is_empty());
+                assert!(string_vector_expr_params.is_empty());
+                assert_eq!(
+                    string_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("complex"))
+                        .map(|(_, value)| value.as_str()),
+                    Some("<6 7>")
+                );
+                assert_eq!(
+                    string_vector_params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case("complex_array"))
+                        .map(|(_, values)| values.as_slice()),
+                    Some(&["<8 9>".to_string(), "<12 8>".to_string()][..])
                 );
             }
             other => panic!("expected XSPICE element, got {other:?}"),

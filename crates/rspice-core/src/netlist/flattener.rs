@@ -27,6 +27,14 @@ use crate::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+fn format_xspice_complex_component(value: Value) -> String {
+    let formatted = value.to_string();
+    formatted
+        .strip_suffix(".0")
+        .unwrap_or(formatted.as_str())
+        .to_string()
+}
+
 //=============================================================================
 // Flattener Configuration
 //=============================================================================
@@ -1388,20 +1396,32 @@ impl<'a> Flattener<'a> {
         }
 
         for (name, expr) in deferred_params {
-            let raw_value = scope
-                .get_string(expr)
-                .map(ToString::to_string)
-                .ok_or_else(|| {
-                    ParseError::InvalidValue(format!(
-                        "XSPICE instance string parameter '{}' for element '{}' could not resolve string parameter '{}'",
-                        name, element_path, expr
-                    ))
-                })?;
-            let value = super::normalize_model_string_path_value(
-                name,
-                &raw_value,
-                self.source_base_dir.as_deref(),
-            );
+            let value = if let Some((real_expr, imag_expr)) =
+                super::parse_deferred_xspice_complex(expr)
+            {
+                self.resolve_deferred_xspice_complex_string(
+                    name,
+                    &real_expr,
+                    &imag_expr,
+                    scope,
+                    element_path,
+                )?
+            } else {
+                let raw_value = scope
+                    .get_string(expr)
+                    .map(ToString::to_string)
+                    .ok_or_else(|| {
+                        ParseError::InvalidValue(format!(
+                            "XSPICE instance string parameter '{}' for element '{}' could not resolve string parameter '{}'",
+                            name, element_path, expr
+                        ))
+                    })?;
+                super::normalize_model_string_path_value(
+                    name,
+                    &raw_value,
+                    self.source_base_dir.as_deref(),
+                )
+            };
             match merged
                 .iter_mut()
                 .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
@@ -1459,22 +1479,25 @@ impl<'a> Flattener<'a> {
 
         let mut merged = instance_params.to_vec();
         for (name, expr) in deferred_params {
-            let value = scope
-                .get_string(expr)
-                .map(ToString::to_string)
-                .ok_or_else(|| {
-                    ParseError::InvalidValue(format!(
-                        "XSPICE instance string-vector parameter '{}' for element '{}' could not resolve string parameter '{}'",
-                        name, element_path, expr
-                    ))
-                })?;
-            let values =
+            let values = if let Some(entries) = super::parse_deferred_xspice_complex_vector(expr) {
+                self.resolve_deferred_xspice_complex_vector(name, entries, scope, element_path)?
+            } else {
+                let value = scope
+                        .get_string(expr)
+                        .map(ToString::to_string)
+                        .ok_or_else(|| {
+                            ParseError::InvalidValue(format!(
+                                "XSPICE instance string-vector parameter '{}' for element '{}' could not resolve string parameter '{}'",
+                                name, element_path, expr
+                            ))
+                        })?;
                 super::parse_xspice_string_vector_literal(&value, 1, name).map_err(|err| {
-                    ParseError::InvalidValue(format!(
-                        "XSPICE instance string-vector parameter '{}' for element '{}' could not parse string parameter '{}': {}",
-                        name, element_path, expr, err
-                    ))
-                })?;
+                        ParseError::InvalidValue(format!(
+                            "XSPICE instance string-vector parameter '{}' for element '{}' could not parse string parameter '{}': {}",
+                            name, element_path, expr, err
+                        ))
+                    })?
+            };
             match merged
                 .iter_mut()
                 .find(|(existing, _)| existing.eq_ignore_ascii_case(name))
@@ -1484,6 +1507,80 @@ impl<'a> Flattener<'a> {
             }
         }
         Ok(merged)
+    }
+
+    fn resolve_deferred_xspice_complex_vector(
+        &self,
+        param_name: &str,
+        entries: Vec<super::DeferredXspiceStringVectorEntry>,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<Vec<String>, ParseError> {
+        entries
+            .into_iter()
+            .map(|entry| match entry {
+                super::DeferredXspiceStringVectorEntry::Resolved(value) => Ok(value),
+                super::DeferredXspiceStringVectorEntry::Complex { real, imag } => self
+                    .resolve_deferred_xspice_complex_string(
+                        param_name,
+                        &real,
+                        &imag,
+                        scope,
+                        element_path,
+                    ),
+            })
+            .collect()
+    }
+
+    fn resolve_deferred_xspice_complex_string(
+        &self,
+        param_name: &str,
+        real_expr: &str,
+        imag_expr: &str,
+        scope: &ParamContext,
+        element_path: &str,
+    ) -> Result<String, ParseError> {
+        let real = self.resolve_deferred_xspice_complex_component(
+            param_name,
+            real_expr,
+            scope,
+            element_path,
+            "real",
+        )?;
+        let imag = self.resolve_deferred_xspice_complex_component(
+            param_name,
+            imag_expr,
+            scope,
+            element_path,
+            "imaginary",
+        )?;
+
+        Ok(format!(
+            "<{} {}>",
+            format_xspice_complex_component(real),
+            format_xspice_complex_component(imag)
+        ))
+    }
+
+    fn resolve_deferred_xspice_complex_component(
+        &self,
+        param_name: &str,
+        expr: &str,
+        scope: &ParamContext,
+        element_path: &str,
+        component: &str,
+    ) -> Result<Value, ParseError> {
+        resolve_parametric_value(
+            &ParametricValue::Expression(expr.to_string()),
+            scope,
+            &self.random,
+        )
+        .map_err(|err| {
+            ParseError::InvalidValue(format!(
+                "XSPICE instance complex parameter '{}' for element '{}' could not resolve {} expression '{}': {}",
+                param_name, element_path, component, expr, err
+            ))
+        })
     }
 
     fn resolve_external_subcircuit_params(
