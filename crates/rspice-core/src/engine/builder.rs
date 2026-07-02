@@ -19,8 +19,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Read;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 use std::io::Write;
+use std::path::Path;
 #[cfg(feature = "veriloga")]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 #[cfg(feature = "veriloga")]
 use std::sync::RwLock;
@@ -1197,10 +1198,25 @@ fn assign_xspice_output_branches(
     Ok(())
 }
 
+fn parse_generated_xspice_auto_bridge_deck(
+    generated_deck: &str,
+    source_path: Option<&Path>,
+    resolve_includes: bool,
+) -> Result<Netlist, crate::netlist::ParseError> {
+    if !resolve_includes {
+        return Netlist::parse(generated_deck);
+    }
+
+    let synthetic_path =
+        source_path.unwrap_or_else(|| Path::new("rspice_generated_auto_bridge.cir"));
+    Netlist::parse_with_path(generated_deck, synthetic_path)
+}
+
 fn add_template_xspice_auto_bridge(
     circuit: &mut CircuitData,
     bridges: &[&PlannedXspiceAutoBridge],
     template: &XspiceAutoBridgeTemplate,
+    source_path: Option<&Path>,
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
@@ -1247,21 +1263,16 @@ fn add_template_xspice_auto_bridge(
     )?;
 
     let setup_trimmed = setup_card.trim_start();
-    if setup_trimmed
+    let setup_is_include = setup_trimmed
         .get(..4)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".inc"))
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".inc"));
+    if !setup_is_include
+        && !setup_trimmed
+            .get(..6)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".model"))
     {
         return Err(SimulationError::Circuit(format!(
-            "XSPICE auto-bridge template '{}' uses .include/subcircuit setup; RSpice supports .model/A-device auto-bridge templates in this path",
-            template.key
-        )));
-    }
-    if !setup_trimmed
-        .get(..6)
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(".model"))
-    {
-        return Err(SimulationError::Circuit(format!(
-            "XSPICE auto-bridge template '{}' setup card must be a .model card",
+            "XSPICE auto-bridge template '{}' setup card must be a .model or .include card",
             template.key
         )));
     }
@@ -1290,12 +1301,14 @@ fn add_template_xspice_auto_bridge(
 
     let generated_deck =
         format!("RSpice generated XSPICE auto bridge\n{setup_card}\n{device_card}\n.end\n");
-    let generated = Netlist::parse(&generated_deck).map_err(|err| {
-        SimulationError::Circuit(format!(
-            "Failed to parse generated XSPICE auto-bridge template '{}': {}",
-            template.key, err
-        ))
-    })?;
+    let generated =
+        parse_generated_xspice_auto_bridge_deck(&generated_deck, source_path, setup_is_include)
+            .map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "Failed to parse generated XSPICE auto-bridge template '{}': {}",
+                    template.key, err
+                ))
+            })?;
     if generated.elements.len() != 1 {
         return Err(SimulationError::Circuit(format!(
             "XSPICE auto-bridge template '{}' must generate exactly one XSPICE A-device card",
@@ -1398,6 +1411,7 @@ fn add_planned_xspice_auto_bridges(
     circuit: &mut CircuitData,
     bridges: &[PlannedXspiceAutoBridge],
     templates: &[XspiceAutoBridgeTemplate],
+    source_path: Option<&Path>,
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
@@ -1418,6 +1432,7 @@ fn add_planned_xspice_auto_bridges(
                 circuit,
                 bridge,
                 &[],
+                source_path,
                 temperature,
                 ramptime,
                 digital_delay_type,
@@ -1450,6 +1465,7 @@ fn add_planned_xspice_auto_bridges(
             circuit,
             &group,
             template,
+            source_path,
             temperature,
             ramptime,
             digital_delay_type,
@@ -1478,6 +1494,7 @@ fn add_planned_xspice_auto_bridge(
     circuit: &mut CircuitData,
     bridge: &PlannedXspiceAutoBridge,
     templates: &[XspiceAutoBridgeTemplate],
+    source_path: Option<&Path>,
     temperature: crate::Value,
     ramptime: crate::Value,
     digital_delay_type: Option<i64>,
@@ -1491,6 +1508,7 @@ fn add_planned_xspice_auto_bridge(
             circuit,
             &bridges,
             template,
+            source_path,
             temperature,
             ramptime,
             digital_delay_type,
@@ -1816,6 +1834,51 @@ set auto_bridge_d_out = ( \".model grouped_dac dac_bridge(out_low = -0.25 out_hi
             ),
             "grouped template should generate a two-node analog output vector"
         );
+    }
+
+    #[test]
+    fn auto_bridge_template_include_setup_resolves_model_card() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rspice-auto-bridge-include-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        std::fs::write(
+            temp_dir.join("bridge_models.cir"),
+            ".model included_dac dac_bridge(out_low = -0.5 out_high = 4.4)\n",
+        )
+        .expect("write include file");
+
+        let deck_path = temp_dir.join("main.cir");
+        let netlist = Netlist::parse_with_path(
+            "\
+* auto bridge template include setup
+rload mix 0 1k
+.model pull d_pullup
+apull [mix] pull
+.control
+set auto_bridge_d_out = ( \".include bridge_models.cir\" \"ainc%d [ %s ] [ %s ] included_dac\" 1 )
+.endc
+.end
+",
+            &deck_path,
+        )
+        .expect("deck parses with source path");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -0.5);
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
+
+        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
     }
 
     #[test]
@@ -4611,6 +4674,7 @@ impl Engine {
                     &mut circuit,
                     &auto_bridges,
                     &netlist.options.auto_bridge_templates,
+                    netlist.source_path.as_deref(),
                     self.config.temperature,
                     self.config.ramptime,
                     self.config.digital_delay_type,
