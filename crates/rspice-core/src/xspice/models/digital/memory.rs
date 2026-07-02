@@ -23,6 +23,7 @@ const D_RAM_READ_DELAY_MIN: Value = 1.0e-12;
 const D_RAM_BITS_PER_PACKED_STATE: usize = 31;
 const D_RAM_CODE_MASK: u64 = 0b11;
 const D_RAM_SCRATCH_STATE_RESOURCE: &str = "d_ram.scratch_state";
+const D_RAM_INPUT_CODES_RESOURCE: &str = "d_ram.input_codes";
 const D_RAM_SHAPE_RESOURCE: &str = "d_ram.shape";
 
 type DRamScratchStateResource = Vec<i64>;
@@ -51,7 +52,7 @@ struct DMemoryShapeResource {
     shape: DMemoryShape,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct DMemoryInputCodes {
     address: Vec<i64>,
     data: Vec<i64>,
@@ -180,9 +181,13 @@ fn d_ram_value_from_code(code: i64, strength: DigitalStrength) -> DigitalValue {
     DigitalValue::new(state, strength)
 }
 
-fn d_ram_vector_state_codes(ctx: &CmContext, name: &str, width: usize) -> Vec<i64> {
+fn d_ram_fill_vector_state_codes(ctx: &CmContext, name: &str, width: usize, codes: &mut Vec<i64>) {
     let values = ctx.input_digital_vector_values(name).unwrap_or(&[]);
-    let mut codes = Vec::with_capacity(width);
+    codes.clear();
+    if codes.capacity() < width {
+        codes.reserve(width - codes.capacity());
+    }
+
     for index in 0..width {
         codes.push(
             values
@@ -192,14 +197,25 @@ fn d_ram_vector_state_codes(ctx: &CmContext, name: &str, width: usize) -> Vec<i6
                 .unwrap_or_else(|| d_ram_state_code(DigitalValue::default())),
         );
     }
-    codes
 }
 
-fn d_ram_input_codes(ctx: &CmContext, shape: DMemoryShape) -> DMemoryInputCodes {
-    DMemoryInputCodes {
-        address: d_ram_vector_state_codes(ctx, "address", shape.address_width),
-        data: d_ram_vector_state_codes(ctx, "data_in", shape.word_width),
-        select: d_ram_vector_state_codes(ctx, "select", shape.select_width),
+fn d_ram_fill_input_codes(ctx: &CmContext, shape: DMemoryShape, codes: &mut DMemoryInputCodes) {
+    d_ram_fill_vector_state_codes(ctx, "address", shape.address_width, &mut codes.address);
+    d_ram_fill_vector_state_codes(ctx, "data_in", shape.word_width, &mut codes.data);
+    d_ram_fill_vector_state_codes(ctx, "select", shape.select_width, &mut codes.select);
+}
+
+fn d_ram_take_input_codes(ctx: &mut CmContext) -> DMemoryInputCodes {
+    ctx.resource_mut::<DMemoryInputCodes>(D_RAM_INPUT_CODES_RESOURCE)
+        .map(std::mem::take)
+        .unwrap_or_default()
+}
+
+fn d_ram_restore_input_codes(ctx: &mut CmContext, codes: DMemoryInputCodes) {
+    if let Some(resource) = ctx.resource_mut::<DMemoryInputCodes>(D_RAM_INPUT_CODES_RESOURCE) {
+        *resource = codes;
+    } else {
+        ctx.set_resource(D_RAM_INPUT_CODES_RESOURCE, Arc::new(codes));
     }
 }
 
@@ -581,26 +597,50 @@ impl CodeModel for DigitalRam {
         ctx.allocate_int_states(d_ram_state_len(shape));
         ctx.set_int_state(D_RAM_INITIALIZED, 0);
         ctx.set_resource(D_RAM_SCRATCH_STATE_RESOURCE, Arc::new(Vec::<i64>::new()));
+        ctx.set_resource(
+            D_RAM_INPUT_CODES_RESOURCE,
+            Arc::new(DMemoryInputCodes::default()),
+        );
         Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let shape = d_ram_cached_shape(ctx)?;
-        let inputs = d_ram_input_codes(ctx, shape);
+        let mut inputs = d_ram_take_input_codes(ctx);
+        d_ram_fill_input_codes(ctx, shape, &mut inputs);
         let write_en = d_ram_state_code(ctx.input_digital("write_en").unwrap_or_default());
         let select = d_ram_select_code(ctx, shape, &inputs.select);
         let address_index = d_ram_address_index(&inputs.address);
         let ic = d_ram_integer_param(ctx, "ic", 2.0, D_RAM_IC_MIN, D_RAM_IC_MAX);
         let read_delay = d_ram_read_delay(ctx);
 
-        if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
-            let mut scratch = {
-                let scratch = ctx
+        let result = if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
+            (|| {
+                let mut scratch = {
+                    let scratch = ctx
+                        .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+                        .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
+                    std::mem::take(scratch)
+                };
+                d_ram_fill_state_snapshot(ctx, shape, &mut scratch);
+                let result = d_ram_evaluate_with_state(
+                    ctx,
+                    shape,
+                    write_en,
+                    select,
+                    address_index,
+                    &inputs,
+                    ic,
+                    read_delay,
+                    Some(scratch.as_mut_slice()),
+                );
+                let scratch_slot = ctx
                     .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
                     .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
-                std::mem::take(scratch)
-            };
-            d_ram_fill_state_snapshot(ctx, shape, &mut scratch);
-            let result = d_ram_evaluate_with_state(
+                *scratch_slot = scratch;
+                result
+            })()
+        } else {
+            d_ram_evaluate_with_state(
                 ctx,
                 shape,
                 write_en,
@@ -609,26 +649,11 @@ impl CodeModel for DigitalRam {
                 &inputs,
                 ic,
                 read_delay,
-                Some(scratch.as_mut_slice()),
-            );
-            let scratch_slot = ctx
-                .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
-                .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
-            *scratch_slot = scratch;
-            return result;
-        }
-
-        d_ram_evaluate_with_state(
-            ctx,
-            shape,
-            write_en,
-            select,
-            address_index,
-            &inputs,
-            ic,
-            read_delay,
-            None,
-        )
+                None,
+            )
+        };
+        d_ram_restore_input_codes(ctx, inputs);
+        result
     }
 }
 
