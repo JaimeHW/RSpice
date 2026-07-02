@@ -846,12 +846,25 @@ impl CodeModel for Divider {
         })
     }
 
-    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
-        Ok(())
+    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(
+            ctx,
+            "divide",
+            &[
+                "num_offset",
+                "num_gain",
+                "den_offset",
+                "den_gain",
+                "den_lower_limit",
+                "den_domain",
+                "out_gain",
+                "out_offset",
+            ],
+        )
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let transfer = cache_divide_transfer(ctx);
+        let transfer = cache_divide_transfer(ctx)?;
         ctx.set_output("out", transfer.output);
         Ok(())
     }
@@ -861,7 +874,9 @@ impl CodeModel for Divider {
             return Vec::new();
         }
 
-        let transfer = divide_transfer_for_context(ctx);
+        let Ok(transfer) = divide_transfer_for_context(ctx) else {
+            return Vec::new();
+        };
         if !transfer.num_partial.is_finite() || !transfer.den_partial.is_finite() {
             return Vec::new();
         }
@@ -905,20 +920,20 @@ struct DivideTransferResource {
     transfer: DivideTransfer,
 }
 
-fn divide_transfer_signature(ctx: &CmContext) -> DivideTransferSignature {
-    DivideTransferSignature {
+fn divide_transfer_signature(ctx: &CmContext) -> CmResult<DivideTransferSignature> {
+    Ok(DivideTransferSignature {
         num: ctx.input("num"),
         den: ctx.input("den"),
-        num_offset: ctx.param("num_offset"),
-        num_gain: ctx.param("num_gain"),
-        den_offset: ctx.param("den_offset"),
-        den_gain: ctx.param("den_gain"),
-        den_lower_limit: ctx.param("den_lower_limit"),
-        den_domain: ctx.param("den_domain"),
+        num_offset: finite_analog_scalar_param(ctx, "divide", "num_offset")?,
+        num_gain: finite_analog_scalar_param(ctx, "divide", "num_gain")?,
+        den_offset: finite_analog_scalar_param(ctx, "divide", "den_offset")?,
+        den_gain: finite_analog_scalar_param(ctx, "divide", "den_gain")?,
+        den_lower_limit: finite_analog_scalar_param(ctx, "divide", "den_lower_limit")?,
+        den_domain: finite_analog_scalar_param(ctx, "divide", "den_domain")?,
         fraction: ctx.param("fraction") > 0.5,
-        out_gain: ctx.param("out_gain"),
-        out_offset: ctx.param("out_offset"),
-    }
+        out_gain: finite_analog_scalar_param(ctx, "divide", "out_gain")?,
+        out_offset: finite_analog_scalar_param(ctx, "divide", "out_offset")?,
+    })
 }
 
 fn divide_transfer_from_signature(signature: DivideTransferSignature) -> DivideTransfer {
@@ -945,23 +960,23 @@ fn divide_transfer_from_signature(signature: DivideTransferSignature) -> DivideT
     }
 }
 
-fn divide_transfer_for_context(ctx: &CmContext) -> DivideTransfer {
-    let signature = divide_transfer_signature(ctx);
+fn divide_transfer_for_context(ctx: &CmContext) -> CmResult<DivideTransfer> {
+    let signature = divide_transfer_signature(ctx)?;
     if let Some(resource) = ctx.resource::<DivideTransferResource>(DIVIDE_TRANSFER_RESOURCE)
         && resource.signature == signature
     {
-        return resource.transfer;
+        return Ok(resource.transfer);
     }
 
-    divide_transfer_from_signature(signature)
+    Ok(divide_transfer_from_signature(signature))
 }
 
-fn cache_divide_transfer(ctx: &mut CmContext) -> DivideTransfer {
-    let signature = divide_transfer_signature(ctx);
+fn cache_divide_transfer(ctx: &mut CmContext) -> CmResult<DivideTransfer> {
+    let signature = divide_transfer_signature(ctx)?;
     if let Some(resource) = ctx.resource::<DivideTransferResource>(DIVIDE_TRANSFER_RESOURCE)
         && resource.signature == signature
     {
-        return resource.transfer;
+        return Ok(resource.transfer);
     }
 
     let transfer = divide_transfer_from_signature(signature);
@@ -972,7 +987,7 @@ fn cache_divide_transfer(ctx: &mut CmContext) -> DivideTransfer {
             transfer,
         }),
     );
-    transfer
+    Ok(transfer)
 }
 
 fn divide_limited_denominator(
@@ -2935,6 +2950,44 @@ mod tests {
     }
 
     #[test]
+    fn divide_rejects_nonfinite_scalar_params() {
+        for (param, value) in [
+            ("num_offset", f64::NAN),
+            ("num_gain", f64::INFINITY),
+            ("den_offset", f64::NEG_INFINITY),
+            ("den_gain", f64::NAN),
+            ("den_lower_limit", f64::INFINITY),
+            ("den_domain", f64::NEG_INFINITY),
+            ("out_gain", f64::NAN),
+            ("out_offset", f64::INFINITY),
+        ] {
+            let mut ctx = CmContext::new();
+            ctx.set_param(param, value);
+
+            let err = Divider
+                .init(&mut ctx)
+                .expect_err("divide must reject nonfinite scalar parameters");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "divide {param} produced {err:?}"
+            );
+            assert!(
+                err.to_string().contains(param),
+                "divide error should name rejected parameter {param}: {err}"
+            );
+        }
+
+        let mut ctx = CmContext::new();
+        Divider
+            .init(&mut ctx)
+            .expect("default divide params are valid");
+        ctx.set_param("out_gain", f64::NAN);
+        Divider
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite divide params must fail at evaluation time");
+    }
+
+    #[test]
     fn divide_metadata_matches_ngspice46_interface() {
         assert_eq!(DivideAlias.name(), "divide");
         assert_analog_ports(
@@ -3821,17 +3874,20 @@ mod tests {
         ctx.set_param("out_gain", 3.0);
         ctx.set_param("out_offset", 5.0);
 
-        let first = cache_divide_transfer(&mut ctx);
-        assert_eq!(divide_transfer_for_context(&ctx), first);
+        let first = cache_divide_transfer(&mut ctx).expect("first divide transfer caches");
+        assert_eq!(
+            divide_transfer_for_context(&ctx).expect("cached divide transfer returns"),
+            first
+        );
 
         ctx.set_param("unrelated", 42.0);
         assert_eq!(
-            divide_transfer_for_context(&ctx),
+            divide_transfer_for_context(&ctx).expect("unchanged divide transfer returns"),
             first,
             "unrelated context changes should not invalidate the divide transfer cache"
         );
 
-        let signature = divide_transfer_signature(&ctx);
+        let signature = divide_transfer_signature(&ctx).expect("valid divide signature");
         let sentinel = DivideTransfer {
             output: -123.0,
             num_partial: -456.0,
@@ -3845,25 +3901,27 @@ mod tests {
             }),
         );
         assert_eq!(
-            divide_transfer_for_context(&ctx),
+            divide_transfer_for_context(&ctx).expect("sentinel divide transfer returns"),
             sentinel,
             "matching signatures should reuse the cached divide transfer"
         );
         assert_eq!(
-            cache_divide_transfer(&mut ctx),
+            cache_divide_transfer(&mut ctx).expect("sentinel divide transfer caches"),
             sentinel,
             "matching signatures should reuse the cached divide transfer in the mutable path"
         );
 
         ctx.set_input_analog("den", 2.0);
-        let updated = cache_divide_transfer(&mut ctx);
+        let updated = cache_divide_transfer(&mut ctx).expect("updated divide transfer caches");
         assert_ne!(
             updated, sentinel,
             "changed divide inputs must invalidate the cached transfer"
         );
         assert_eq!(
             updated,
-            divide_transfer_from_signature(divide_transfer_signature(&ctx))
+            divide_transfer_from_signature(
+                divide_transfer_signature(&ctx).expect("updated divide signature")
+            )
         );
     }
 
