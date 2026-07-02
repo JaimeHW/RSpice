@@ -456,6 +456,36 @@ struct XspiceAutoBridgeUsage {
     digital_inout: bool,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct XspiceExplicitDigitalBridgeCoverage {
+    adc: bool,
+    dac: bool,
+    bidi: bool,
+}
+
+impl XspiceExplicitDigitalBridgeCoverage {
+    fn register(&mut self, kind: XspiceAutoBridgeKind) {
+        match kind {
+            XspiceAutoBridgeKind::Adc => self.adc = true,
+            XspiceAutoBridgeKind::Dac => self.dac = true,
+            XspiceAutoBridgeKind::Bidi => self.bidi = true,
+            XspiceAutoBridgeKind::RealToV => {}
+        }
+    }
+
+    fn covers_adc(self) -> bool {
+        self.adc || self.bidi
+    }
+
+    fn covers_dac(self) -> bool {
+        self.dac || self.bidi
+    }
+
+    fn covers_bidi(self) -> bool {
+        self.bidi || (self.adc && self.dac)
+    }
+}
+
 impl XspiceAutoBridgeUsage {
     fn register(&mut self, direction: crate::xspice::PortDirection) {
         match direction {
@@ -465,12 +495,26 @@ impl XspiceAutoBridgeUsage {
         }
     }
 
-    fn bridge_kind(self) -> Option<XspiceAutoBridgeKind> {
-        if self.digital_inout || (self.digital_input && self.digital_output) {
-            Some(XspiceAutoBridgeKind::Bidi)
-        } else if self.digital_input {
+    fn bridge_kind(
+        self,
+        coverage: XspiceExplicitDigitalBridgeCoverage,
+    ) -> Option<XspiceAutoBridgeKind> {
+        if self.digital_inout {
+            if coverage.covers_bidi() {
+                None
+            } else {
+                Some(XspiceAutoBridgeKind::Bidi)
+            }
+        } else if self.digital_input && self.digital_output {
+            match (coverage.covers_adc(), coverage.covers_dac()) {
+                (true, true) => None,
+                (true, false) => Some(XspiceAutoBridgeKind::Dac),
+                (false, true) => Some(XspiceAutoBridgeKind::Adc),
+                (false, false) => Some(XspiceAutoBridgeKind::Bidi),
+            }
+        } else if self.digital_input && !coverage.covers_adc() {
             Some(XspiceAutoBridgeKind::Adc)
-        } else if self.digital_output {
+        } else if self.digital_output && !coverage.covers_dac() {
             Some(XspiceAutoBridgeKind::Dac)
         } else {
             None
@@ -508,57 +552,20 @@ fn collect_flat_analog_nodes(
     }
 }
 
-fn collect_connection_nodes(
+fn collect_real_connection_nodes(
     nodes: &mut BTreeSet<usize>,
     connection: &crate::xspice::PortConnection,
 ) {
-    use crate::xspice::{AnalogInputConnection, PortConnection};
+    use crate::xspice::PortConnection;
 
     match connection {
-        PortConnection::Analog(node)
-        | PortConnection::Digital(node)
-        | PortConnection::DigitalInverted(node)
-        | PortConnection::Real(node) => insert_non_ground_node(nodes, *node),
-        PortConnection::Differential(pos, neg)
-        | PortConnection::CurrentProbe { pos, neg, .. }
-        | PortConnection::CurrentOutput { pos, neg }
-        | PortConnection::Hybrid { pos, neg, .. } => {
-            insert_non_ground_node(nodes, *pos);
-            insert_non_ground_node(nodes, *neg);
-        }
-        PortConnection::AnalogVector(vector)
-        | PortConnection::DigitalVector(vector)
-        | PortConnection::RealVector(vector) => {
+        PortConnection::Real(node) => insert_non_ground_node(nodes, *node),
+        PortConnection::RealVector(vector) => {
             for node in vector {
                 insert_non_ground_node(nodes, *node);
             }
         }
-        PortConnection::DigitalVectorMapped(vector) => {
-            for connection in vector {
-                insert_non_ground_node(nodes, connection.node);
-            }
-        }
-        PortConnection::TypedAnalogVector(vector) => {
-            for connection in vector {
-                match connection {
-                    AnalogInputConnection::Node(node) => insert_non_ground_node(nodes, *node),
-                    AnalogInputConnection::Differential(pos, neg)
-                    | AnalogInputConnection::CurrentProbe { pos, neg, .. }
-                    | AnalogInputConnection::CurrentOutput { pos, neg }
-                    | AnalogInputConnection::Hybrid { pos, neg, .. } => {
-                        insert_non_ground_node(nodes, *pos);
-                        insert_non_ground_node(nodes, *neg);
-                    }
-                    AnalogInputConnection::BranchCurrent { .. }
-                    | AnalogInputConnection::NamedBranchCurrent { .. }
-                    | AnalogInputConnection::NamedCurrentSource { .. } => {}
-                }
-            }
-        }
-        PortConnection::BranchCurrent { .. }
-        | PortConnection::NamedBranchCurrent { .. }
-        | PortConnection::NamedCurrentSource { .. }
-        | PortConnection::Null => {}
+        _ => {}
     }
 }
 
@@ -609,6 +616,35 @@ fn collect_analog_connection_nodes(
         | PortConnection::NamedBranchCurrent { .. }
         | PortConnection::NamedCurrentSource { .. }
         | PortConnection::Null => {}
+    }
+}
+
+fn register_explicit_digital_bridge_coverage(
+    nodes: &mut BTreeMap<usize, XspiceExplicitDigitalBridgeCoverage>,
+    connection: &crate::xspice::PortConnection,
+    kind: XspiceAutoBridgeKind,
+) {
+    use crate::xspice::PortConnection;
+
+    let mut register = |node: usize| {
+        if node > 0 {
+            nodes.entry(node).or_default().register(kind);
+        }
+    };
+
+    match connection {
+        PortConnection::Digital(node) | PortConnection::DigitalInverted(node) => register(*node),
+        PortConnection::DigitalVector(vector) => {
+            for node in vector {
+                register(*node);
+            }
+        }
+        PortConnection::DigitalVectorMapped(vector) => {
+            for connection in vector {
+                register(connection.node);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -673,6 +709,31 @@ fn is_xspice_real_bridge_model(model_name: &str) -> bool {
     model_name.eq_ignore_ascii_case("real_to_v") || model_name.eq_ignore_ascii_case("r_to_v")
 }
 
+fn explicit_digital_bridge_kind_for_port(
+    model_name: &str,
+    port: &crate::xspice::PortSpec,
+) -> Option<XspiceAutoBridgeKind> {
+    use crate::xspice::{PortDirection, PortType};
+
+    if port.default_type != PortType::Digital {
+        return None;
+    }
+
+    if model_name.eq_ignore_ascii_case("adc_bridge") && port.direction == PortDirection::Out {
+        Some(XspiceAutoBridgeKind::Adc)
+    } else if model_name.eq_ignore_ascii_case("dac_bridge") && port.direction == PortDirection::In
+    {
+        Some(XspiceAutoBridgeKind::Dac)
+    } else if model_name.eq_ignore_ascii_case("bidi_bridge")
+        && port.direction == PortDirection::InOut
+        && port.name.eq_ignore_ascii_case("d")
+    {
+        Some(XspiceAutoBridgeKind::Bidi)
+    } else {
+        None
+    }
+}
+
 fn plan_xspice_auto_bridges(
     circuit: &CircuitData,
     flat_elements: &[Element],
@@ -680,7 +741,7 @@ fn plan_xspice_auto_bridges(
     let mut analog_nodes = BTreeSet::new();
     let mut digital_nodes = BTreeMap::new();
     let mut real_output_nodes = BTreeSet::new();
-    let mut explicit_digital_bridge_nodes = BTreeSet::new();
+    let mut explicit_digital_bridge_coverage = BTreeMap::new();
     let mut explicit_real_bridge_nodes = BTreeSet::new();
 
     collect_flat_analog_nodes(&mut analog_nodes, circuit, flat_elements);
@@ -694,11 +755,19 @@ fn plan_xspice_auto_bridges(
             };
 
             if explicit_digital_bridge {
-                collect_connection_nodes(&mut explicit_digital_bridge_nodes, connection);
+                if let Some(kind) =
+                    explicit_digital_bridge_kind_for_port(instance.model_name(), port)
+                {
+                    register_explicit_digital_bridge_coverage(
+                        &mut explicit_digital_bridge_coverage,
+                        connection,
+                        kind,
+                    );
+                }
                 continue;
             }
             if explicit_real_bridge {
-                collect_connection_nodes(&mut explicit_real_bridge_nodes, connection);
+                collect_real_connection_nodes(&mut explicit_real_bridge_nodes, connection);
                 continue;
             }
 
@@ -717,12 +786,16 @@ fn plan_xspice_auto_bridges(
 
     let mut planned: Vec<PlannedXspiceAutoBridge> = digital_nodes
         .into_iter()
-        .filter(|(node, _)| {
-            analog_nodes.contains(node) && !explicit_digital_bridge_nodes.contains(node)
-        })
         .filter_map(|(node, usage)| {
+            if !analog_nodes.contains(&node) {
+                return None;
+            }
+            let coverage = explicit_digital_bridge_coverage
+                .get(&node)
+                .copied()
+                .unwrap_or_default();
             usage
-                .bridge_kind()
+                .bridge_kind(coverage)
                 .map(|kind| PlannedXspiceAutoBridge { node, kind })
         })
         .collect();
@@ -981,6 +1054,48 @@ fn add_planned_xspice_auto_bridge(
     }
     circuit.add_xspice_instance(instance);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn xspice_model_count(circuit: &CircuitData, model_name: &str) -> usize {
+        circuit
+            .xspice_instances
+            .iter()
+            .filter(|instance| instance.model_name().eq_ignore_ascii_case(model_name))
+            .count()
+    }
+
+    #[test]
+    fn explicit_adc_does_not_suppress_needed_auto_dac_on_same_node() {
+        let netlist = Netlist::parse(
+            "\
+* explicit adc plus mixed digital-output node
+vctrl ain 0 dc 1
+aadc [ain] [mix] adc
+apull [mix] pullup
+rload mix 0 1k
+.model adc adc_bridge
+.model pullup d_pullup
+.end
+",
+        )
+        .expect("deck parses");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "adc_bridge"), 1);
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(
+            xspice_model_count(&circuit, "dac_bridge"),
+            1,
+            "explicit adc_bridge only covers analog-to-digital; mixed node 'mix' still needs a generated dac_bridge"
+        );
+    }
 }
 
 impl Engine {
