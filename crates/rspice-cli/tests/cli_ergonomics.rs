@@ -287,9 +287,11 @@ fn check_validates_xspice_without_launching_external_runtimes() {
     let deck = dir.join("xspice_external_check.sp");
     std::fs::write(
         &deck,
-        "* d_cosim static check\n\
+        "* external XSPICE static check\n\
          A1 [din] [dout] co\n\
          .model co d_cosim simulation=\"./missing_cosim_runtime\"\n\
+         A2 [din] clk null [pout] proc\n\
+         .model proc d_process process_file=\"\"\n\
          .op\n\
          .end\n",
     )

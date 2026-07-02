@@ -240,10 +240,9 @@ impl CodeModel for DigitalProcess {
 
         let process_file = ctx
             .string_param("process_file")
-            .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| CmError::InvalidParameter {
                 name: "process_file".to_string(),
-                message: "must not be empty".to_string(),
+                message: "must be set".to_string(),
             })?
             .to_string();
         let process_params = ctx
