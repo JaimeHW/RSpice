@@ -360,6 +360,12 @@ fn d_source_set_unknown_output(ctx: &mut CmContext, width: usize) {
     ctx.set_output_digital_vector_from_context_fn("out", width, 0.0, |_, _| value);
 }
 
+fn d_source_input_file(ctx: &CmContext) -> &str {
+    ctx.string_param("input_file")
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or("source.txt")
+}
+
 impl CodeModel for DigitalSource {
     fn name(&self) -> &str {
         "d_source"
@@ -392,11 +398,7 @@ impl CodeModel for DigitalSource {
         Ok(())
     }
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let input_file = ctx
-            .string_param("input_file")
-            .filter(|path| !path.trim().is_empty())
-            .unwrap_or("source.txt")
-            .to_string();
+        let input_file = d_source_input_file(ctx).to_string();
         let width = ctx.port_width("out");
         let rows = load_d_source_rows_for_context(ctx, &input_file, width)?;
         if rows.first().is_some_and(|row| row.time < 0.0) {
@@ -433,6 +435,12 @@ impl CodeModel for DigitalSource {
         }
 
         Ok(())
+    }
+
+    fn transient_breakpoints(&self, ctx: &CmContext) -> CmResult<Vec<Value>> {
+        let width = ctx.port_width("out");
+        let (_, rows) = load_d_source_rows(d_source_input_file(ctx), width);
+        rows.map(|rows| rows.rows.iter().map(|row| row.time).collect())
     }
 }
 
