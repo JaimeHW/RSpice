@@ -850,6 +850,12 @@ fn finite_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value> 
     Ok(value)
 }
 
+fn meter_output(ctx: &CmContext) -> CmResult<Value> {
+    let gain = finite_param(ctx, "gain", 1.0)?;
+    let measured = finite_param(ctx, XTRADEV_METER_MEASURED_VALUE_PARAM, 0.0)?;
+    Ok(gain * measured)
+}
+
 fn positive_param(ctx: &CmContext, name: &str, default: Value) -> CmResult<Value> {
     let value = finite_param(ctx, name, default)?;
     if value <= 0.0 {
@@ -2990,8 +2996,7 @@ impl CodeModel for CapacitanceMeter {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let output =
-            ctx.param_or("gain", 1.0) * ctx.param_or(XTRADEV_METER_MEASURED_VALUE_PARAM, 0.0);
+        let output = meter_output(ctx)?;
         ctx.set_output("out", output);
         Ok(())
     }
@@ -3023,8 +3028,7 @@ impl CodeModel for InductanceMeter {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let output =
-            ctx.param_or("gain", 1.0) * ctx.param_or(XTRADEV_METER_MEASURED_VALUE_PARAM, 0.0);
+        let output = meter_output(ctx)?;
         ctx.set_output("out", output);
         Ok(())
     }
@@ -3934,6 +3938,30 @@ mod tests {
             LcCouple.init(&mut coupling_ctx),
             Err(CmError::InvalidParameter { .. })
         ));
+    }
+
+    #[test]
+    fn meters_reject_nonfinite_output_params() {
+        let mut cap_ctx = CmContext::new();
+        cap_ctx.set_param("gain", f64::NAN);
+        cap_ctx.set_param(XTRADEV_METER_MEASURED_VALUE_PARAM, 1.0);
+        assert_invalid_param_name(CapacitanceMeter.evaluate(&mut cap_ctx), "gain");
+
+        let mut ind_ctx = CmContext::new();
+        ind_ctx.set_param("gain", 1.0);
+        ind_ctx.set_param(XTRADEV_METER_MEASURED_VALUE_PARAM, f64::INFINITY);
+        assert_invalid_param_name(
+            InductanceMeter.evaluate(&mut ind_ctx),
+            XTRADEV_METER_MEASURED_VALUE_PARAM,
+        );
+
+        let mut ok_ctx = CmContext::new();
+        ok_ctx.set_param("gain", 2.0);
+        ok_ctx.set_param(XTRADEV_METER_MEASURED_VALUE_PARAM, 3.0);
+        CapacitanceMeter
+            .evaluate(&mut ok_ctx)
+            .expect("finite meter params evaluate");
+        assert_eq!(ok_ctx.output("out"), 6.0);
     }
 
     #[test]
