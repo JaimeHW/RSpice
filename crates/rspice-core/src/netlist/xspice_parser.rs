@@ -1017,6 +1017,46 @@ fn parse_unsigned_param_value(
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
     match &stream.peek().kind {
+        kind if !xspice_param_prefers_bare_string(param_name)
+            && scalar_expression_token_can_start(kind) =>
+        {
+            if let Some(value) =
+                try_scalar_expression_param(stream, netlist_params, defer_simple_param_refs)
+            {
+                Ok(value)
+            } else {
+                parse_scalar_param_token_value(
+                    stream,
+                    line_num,
+                    param_name,
+                    netlist_params,
+                    defer_simple_param_refs,
+                )
+            }
+        }
+        kind if xspice_param_prefers_bare_string(param_name)
+            && scalar_string_param_token_can_start(kind) =>
+        {
+            parse_bare_string_param_value(stream, line_num, param_name)
+        }
+        _ => parse_scalar_param_token_value(
+            stream,
+            line_num,
+            param_name,
+            netlist_params,
+            defer_simple_param_refs,
+        ),
+    }
+}
+
+fn parse_scalar_param_token_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    param_name: &str,
+    netlist_params: &ParamContext,
+    defer_simple_param_refs: bool,
+) -> Result<XspiceParamValue, ParseError> {
+    match &stream.peek().kind {
         TokenKind::Number(_)
             if xspice_param_prefers_bare_string(param_name)
                 && !param_name.eq_ignore_ascii_case("model") =>
@@ -1119,15 +1159,65 @@ fn parse_unsigned_param_value(
                 }
             }
         }
-        kind if xspice_param_prefers_bare_string(param_name)
-            && scalar_string_param_token_can_start(kind) =>
-        {
-            parse_bare_string_param_value(stream, line_num, param_name)
-        }
         _ => Err(ParseError::Syntax {
             line: line_num,
             message: "Expected parameter value".to_string(),
         }),
+    }
+}
+
+fn try_scalar_expression_param(
+    stream: &mut TokenStream,
+    netlist_params: &ParamContext,
+    defer_simple_param_refs: bool,
+) -> Option<XspiceParamValue> {
+    let first = stream.peek().clone();
+    let mut probe = stream.clone();
+    let expr = collect_contiguous_expression(&mut probe)?;
+    if !scalar_expression_is_compound(&first, &expr) {
+        return None;
+    }
+
+    let expr = collect_contiguous_expression(stream)?;
+    if let Ok(value) = parse_spice_value(&expr) {
+        return Some(XspiceParamValue::Resolved(value));
+    }
+    if let Some(value) = parse_boolean_literal(&expr) {
+        return Some(XspiceParamValue::Resolved(value));
+    }
+    if !defer_simple_param_refs && let Ok(value) = expr::eval_expression(&expr, netlist_params) {
+        return Some(XspiceParamValue::Resolved(value));
+    }
+    Some(XspiceParamValue::Deferred(expr))
+}
+
+fn scalar_expression_token_can_start(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Ident(_)
+            | TokenKind::Number(_)
+            | TokenKind::Expression(_)
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::LParen
+    )
+}
+
+fn scalar_expression_is_compound(first: &Token, expr: &str) -> bool {
+    scalar_expression_first_piece(first)
+        .map(|piece| piece != expr)
+        .unwrap_or(false)
+}
+
+fn scalar_expression_first_piece(token: &Token) -> Option<String> {
+    match &token.kind {
+        TokenKind::Ident(value) => Some(value.clone()),
+        TokenKind::Expression(expr) => Some(format!("({expr})")),
+        TokenKind::Number(value) if token.lexeme.is_empty() => Some(value.to_string()),
+        TokenKind::Number(_) | TokenKind::Plus | TokenKind::Minus | TokenKind::LParen => {
+            Some(token.lexeme.clone())
+        }
+        _ => None,
     }
 }
 

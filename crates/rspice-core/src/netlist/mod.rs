@@ -2542,10 +2542,10 @@ mod tests {
     fn xspice_subckt_instance_params_resolve_brace_expressions_during_flattening() {
         let netlist = Netlist::parse(
             "xspice subckt instance expression params\n\
-             .subckt xgain in out g=2\n\
-             A1 in out gain gain={g} offset=-{g}\n\
+             .subckt xgain in out g=2 scale=3\n\
+             A1 in out gain gain=g*scale offset=-{g}*scale\n\
              .ends xgain\n\
-             XU a b xgain g=5\n\
+             XU a b xgain g=5 scale=4\n\
              .end\n",
         )
         .expect("XSPICE subcircuit expression-param deck parses");
@@ -2571,14 +2571,14 @@ mod tests {
                         .iter()
                         .find(|(name, _)| name.eq_ignore_ascii_case("gain"))
                         .map(|(_, value)| *value),
-                    Some(5.0)
+                    Some(20.0)
                 );
                 assert_eq!(
                     params
                         .iter()
                         .find(|(name, _)| name.eq_ignore_ascii_case("offset"))
                         .map(|(_, value)| *value),
-                    Some(-5.0)
+                    Some(-20.0)
                 );
             }
             other => panic!("expected XSPICE element, got {other:?}"),
