@@ -37,7 +37,9 @@
 //! A3 analog_in [digital_out] adc_bridge in_low=0.5 in_high=2.5
 //! ```
 
-use super::lexer::{Token, TokenKind, TokenStream, parse_spice_value, tokenize};
+use super::lexer::{
+    Token, TokenKind, TokenStream, collect_contiguous_expression, parse_spice_value, tokenize,
+};
 use super::{Element, ElementKind, ParamContext, ParseError, XspiceDigitalNode, XspicePort, expr};
 use crate::Value;
 
@@ -1420,41 +1422,25 @@ fn parse_real_vector_entry(
         }
     };
 
-    match &stream.peek().kind {
-        TokenKind::Number(value) => {
-            let value = sign * *value;
-            stream.advance();
-            Ok(XspiceVectorEntry::Resolved(value))
-        }
-        TokenKind::Expression(expr_text) => {
-            let expr_text = expr_text.clone();
-            stream.advance();
-            if !defer_simple_param_refs
-                && let Ok(value) = expr::eval_expression(&expr_text, netlist_params)
-            {
-                Ok(XspiceVectorEntry::Resolved(sign * value))
-            } else {
-                Ok(XspiceVectorEntry::Deferred(signed_expr(expr_text)))
-            }
-        }
-        TokenKind::Ident(raw) => {
-            let raw = raw.clone();
-            stream.advance();
-            if let Ok(value) = parse_spice_value(&raw) {
-                Ok(XspiceVectorEntry::Resolved(sign * value))
-            } else if let Some(value) = parse_boolean_literal(&raw) {
-                Ok(XspiceVectorEntry::Resolved(sign * value))
-            } else if !defer_simple_param_refs && let Some(value) = netlist_params.get(&raw) {
-                Ok(XspiceVectorEntry::Resolved(sign * value))
-            } else {
-                Ok(XspiceVectorEntry::Deferred(signed_expr(raw)))
-            }
-        }
-        other => Err(ParseError::Syntax {
-            line: line_num,
-            message: format!("Expected XSPICE vector parameter value, found '{}'", other),
-        }),
+    let expr_text = collect_contiguous_expression(stream).ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "Expected XSPICE vector parameter value, found '{}'",
+            stream.peek().kind
+        ),
+    })?;
+
+    if let Ok(value) = parse_spice_value(&expr_text) {
+        return Ok(XspiceVectorEntry::Resolved(sign * value));
     }
+    if let Some(value) = parse_boolean_literal(&expr_text) {
+        return Ok(XspiceVectorEntry::Resolved(sign * value));
+    }
+    if !defer_simple_param_refs && let Ok(value) = expr::eval_expression(&expr_text, netlist_params)
+    {
+        return Ok(XspiceVectorEntry::Resolved(sign * value));
+    }
+    Ok(XspiceVectorEntry::Deferred(signed_expr(expr_text)))
 }
 
 fn parse_string_vector_param(

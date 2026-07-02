@@ -2768,7 +2768,7 @@ mod tests {
         let netlist = Netlist::parse(
             "xspice subckt instance vector leading bare params\n\
              .subckt xvec in out start=2 step=3\n\
-             A1 in out vector_probe table=[start {start+step}]\n\
+             A1 in out vector_probe table=[start start+step]\n\
              .ends xvec\n\
              XU a b xvec start=4 step=5\n\
              .end\n",

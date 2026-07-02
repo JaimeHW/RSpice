@@ -1551,7 +1551,7 @@ impl<'a> Flattener<'a> {
             return Ok(model_name.to_string());
         };
 
-        if model_def.expr_params.is_empty() {
+        if model_def.expr_params.is_empty() && model_def.real_vector_expr_params.is_empty() {
             return Ok(model_name.to_string());
         }
 

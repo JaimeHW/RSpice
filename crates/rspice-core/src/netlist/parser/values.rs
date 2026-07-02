@@ -1,7 +1,7 @@
 //! Token, value, expression, and model-parameter helpers.
 
 use super::*;
-use crate::netlist::lexer::Token;
+use crate::netlist::lexer::{Token, collect_contiguous_expression};
 
 pub(super) fn split_spice_fields(line: &str) -> Vec<String> {
     let mut fields = Vec::new();
@@ -1014,57 +1014,29 @@ fn parse_model_real_vector_entry(
         }
     };
 
-    let entry = match &stream.peek().kind {
-        TokenKind::Number(value) => {
-            let value = sign * *value;
-            stream.advance();
-            ParsedModelRealVectorEntry::Resolved(value)
-        }
-        TokenKind::Expression(expr) => {
-            let expr = expr.clone();
-            stream.advance();
-            if defer_expression_params {
-                ParsedModelRealVectorEntry::Deferred(signed_expr(expr))
-            } else {
-                let value = eval_expression(&expr, params).map_err(|err| {
-                    ParseError::InvalidValue(format!(
-                        "line {}: model parameter vector '{}' expression '{}' could not be resolved: {}",
-                        line_num, name, expr, err
-                    ))
-                })?;
-                ParsedModelRealVectorEntry::Resolved(sign * value)
-            }
-        }
-        TokenKind::Ident(raw) => {
-            let raw = raw.clone();
-            stream.advance();
-            if let Ok(value) = crate::netlist::lexer::parse_spice_value(&raw) {
-                ParsedModelRealVectorEntry::Resolved(sign * value)
-            } else if let Some(value) = parse_boolean_literal(&raw) {
-                ParsedModelRealVectorEntry::Resolved(sign * value)
-            } else if defer_expression_params {
-                ParsedModelRealVectorEntry::Deferred(signed_expr(raw))
-            } else if let Some(value) = params.get(&raw) {
-                ParsedModelRealVectorEntry::Resolved(sign * value)
-            } else {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: format!(
-                        "Expected numeric value in model parameter vector '{}', found identifier '{}'",
-                        name, raw
-                    ),
-                });
-            }
-        }
-        other => {
-            return Err(ParseError::Syntax {
-                line: line_num,
-                message: format!(
-                    "Expected numeric value in model parameter vector '{}', found {}",
-                    name, other
-                ),
-            });
-        }
+    let expr = collect_contiguous_expression(stream).ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "Expected numeric value in model parameter vector '{}', found {}",
+            name,
+            stream.peek().kind
+        ),
+    })?;
+
+    let entry = if let Ok(value) = crate::netlist::lexer::parse_spice_value(&expr) {
+        ParsedModelRealVectorEntry::Resolved(sign * value)
+    } else if let Some(value) = parse_boolean_literal(&expr) {
+        ParsedModelRealVectorEntry::Resolved(sign * value)
+    } else if defer_expression_params {
+        ParsedModelRealVectorEntry::Deferred(signed_expr(expr))
+    } else {
+        let value = eval_expression(&expr, params).map_err(|err| {
+            ParseError::InvalidValue(format!(
+                "line {}: model parameter vector '{}' expression '{}' could not be resolved: {}",
+                line_num, name, expr, err
+            ))
+        })?;
+        ParsedModelRealVectorEntry::Resolved(sign * value)
     };
 
     if let ParsedModelRealVectorEntry::Resolved(value) = &entry

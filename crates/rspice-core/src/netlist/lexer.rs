@@ -839,6 +839,72 @@ impl TokenStream {
     }
 }
 
+/// Collect a single expression made from source-contiguous value tokens.
+///
+/// SPICE vector lists use whitespace to separate entries, so this keeps
+/// adjacent operators and operands together while stopping at token gaps.
+pub(crate) fn collect_contiguous_expression(stream: &mut TokenStream) -> Option<String> {
+    let mut pieces = Vec::new();
+    let mut previous_end = None;
+    let mut paren_depth = 0usize;
+    let mut offset = 0usize;
+
+    loop {
+        let token = stream.peek_n(offset);
+        if let Some(end) = previous_end
+            && token.span.start != end
+        {
+            break;
+        }
+
+        let piece = match &token.kind {
+            TokenKind::Comma if paren_depth > 0 => token.lexeme.clone(),
+            TokenKind::Ident(_)
+            | TokenKind::Number(_)
+            | TokenKind::Expression(_)
+            | TokenKind::Plus
+            | TokenKind::Minus
+            | TokenKind::Star
+            | TokenKind::Slash
+            | TokenKind::Other(_) => contiguous_expression_piece(token),
+            TokenKind::LParen => {
+                paren_depth += 1;
+                contiguous_expression_piece(token)
+            }
+            TokenKind::RParen if paren_depth > 0 => {
+                paren_depth -= 1;
+                contiguous_expression_piece(token)
+            }
+            _ => break,
+        };
+
+        if piece.is_empty() {
+            break;
+        }
+        previous_end = Some(token.span.end);
+        pieces.push(piece);
+        offset += 1;
+    }
+
+    if pieces.is_empty() || paren_depth != 0 {
+        return None;
+    }
+
+    for _ in 0..offset {
+        stream.advance();
+    }
+    Some(pieces.join(""))
+}
+
+fn contiguous_expression_piece(token: &Token) -> String {
+    match &token.kind {
+        TokenKind::Expression(expr) => format!("({expr})"),
+        TokenKind::Number(value) if token.lexeme.is_empty() => value.to_string(),
+        _ if !token.lexeme.is_empty() => token.lexeme.clone(),
+        _ => token.kind.to_string(),
+    }
+}
+
 //=============================================================================
 // Tests
 //=============================================================================
