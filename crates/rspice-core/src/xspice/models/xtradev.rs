@@ -2510,10 +2510,16 @@ impl CodeModel for CapacitorIc {
         if !omega.is_finite() || omega == 0.0 {
             return Vec::new();
         }
-        vec![(
-            "cap".to_string(),
-            Complex64::new(0.0, -1.0 / (omega * capacitance)),
-        )]
+        let denominator = omega * capacitance;
+        if !denominator.is_finite() || denominator == 0.0 {
+            return Vec::new();
+        }
+        let partial = Complex64::new(0.0, -1.0 / denominator);
+        if partial.im.is_finite() {
+            vec![("cap".to_string(), partial)]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -2599,7 +2605,12 @@ impl CodeModel for InductorIc {
         if !omega.is_finite() || omega == 0.0 {
             return Vec::new();
         }
-        vec![("ind".to_string(), Complex64::new(0.0, omega * inductance))]
+        let partial = omega * inductance;
+        if partial.is_finite() {
+            vec![("ind".to_string(), Complex64::new(0.0, partial))]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -3938,6 +3949,35 @@ mod tests {
             LcCouple.init(&mut coupling_ctx),
             Err(CmError::InvalidParameter { .. })
         ));
+    }
+
+    #[test]
+    fn reactive_ac_partials_suppress_nonfinite_values() {
+        let mut cap_ctx = CmContext::new();
+        cap_ctx.set_param("c", 0.0);
+        assert!(
+            CapacitorIc
+                .output_input_ac_partials(&cap_ctx, "cap", 1.0)
+                .is_empty(),
+            "zero capacitance must not produce an infinite AC partial"
+        );
+
+        cap_ctx.set_param("c", 1.0);
+        assert!(
+            !CapacitorIc
+                .output_input_ac_partials(&cap_ctx, "cap", 1.0)
+                .is_empty(),
+            "finite capacitance should still produce an AC partial"
+        );
+
+        let mut ind_ctx = CmContext::new();
+        ind_ctx.set_param("l", f64::MAX);
+        assert!(
+            InductorIc
+                .output_input_ac_partials(&ind_ctx, "ind", f64::MAX)
+                .is_empty(),
+            "overflowing inductor reactance must not produce an infinite AC partial"
+        );
     }
 
     #[test]
