@@ -157,6 +157,17 @@ fn oscillator_error(model: &str, message: impl Into<String>) -> CmError {
     CmError::EvaluationError(format!("{model}: {}", message.into()))
 }
 
+fn finite_control_input(ctx: &CmContext, model: &str) -> CmResult<Value> {
+    let control = ctx.input("cntl_in");
+    if !control.is_finite() {
+        return Err(oscillator_error(
+            model,
+            format!("cntl_in must be finite, got {control}"),
+        ));
+    }
+    Ok(control)
+}
+
 fn sanitize_d_osc_frequency(frequency: Value) -> Value {
     if frequency <= 0.0 {
         MIN_FREQUENCY
@@ -423,7 +434,10 @@ fn d_osc_period(ctx: &mut CmContext) -> CmResult<Value> {
         "freq_array",
         sanitize_d_osc_frequency,
     )?;
-    Ok(d_osc_period_from_table(&table, ctx.input("cntl_in")))
+    Ok(d_osc_period_from_table(
+        &table,
+        finite_control_input(ctx, "d_osc")?,
+    ))
 }
 
 fn d_pwm_duty_cycle_from_table(table: &ControlTableData, control: Value) -> Value {
@@ -439,7 +453,10 @@ fn d_pwm_duty_cycle(ctx: &mut CmContext) -> CmResult<Value> {
         "dc_array",
         sanitize_d_pwm_duty_cycle,
     )?;
-    Ok(d_pwm_duty_cycle_from_table(&table, ctx.input("cntl_in")))
+    Ok(d_pwm_duty_cycle_from_table(
+        &table,
+        finite_control_input(ctx, "d_pwm")?,
+    ))
 }
 
 fn d_osc_duty_cycle(ctx: &CmContext) -> CmResult<Value> {
@@ -783,7 +800,7 @@ impl CodeModel for DigitalOscillator {
         else {
             return Ok(());
         };
-        let period = d_osc_period_from_table(&table, ctx.input("cntl_in"));
+        let period = d_osc_period_from_table(&table, finite_control_input(ctx, "d_osc")?);
         let duty_cycle = d_osc_duty_cycle(ctx)?;
         evaluate_digital_oscillator(ctx, "d_osc", period, duty_cycle)
     }
@@ -841,7 +858,7 @@ impl CodeModel for DigitalPwmOscillator {
             return Ok(());
         };
         let frequency = d_pwm_frequency(ctx)?;
-        let duty_cycle = d_pwm_duty_cycle_from_table(&table, ctx.input("cntl_in"));
+        let duty_cycle = d_pwm_duty_cycle_from_table(&table, finite_control_input(ctx, "d_pwm")?);
         evaluate_digital_oscillator(ctx, "d_pwm", 1.0 / frequency, duty_cycle)
     }
 }
@@ -982,6 +999,63 @@ mod tests {
             pwm_message.contains("must increase monotonically"),
             "d_pwm error should explain non-monotonic control points, got {pwm_message}"
         );
+    }
+
+    #[test]
+    fn digital_oscillators_reject_nonfinite_control_input_before_events() {
+        let mut osc = CmContext::new();
+        osc.analysis = AnalysisType::Transient;
+        osc.set_real_vector_param("cntl_array", vec![0.0, 1.0]);
+        osc.set_real_vector_param("freq_array", vec![1.0e6, 2.0e6]);
+        osc.set_param("duty_cycle", 0.5);
+        osc.set_param("init_phase", 0.0);
+        osc.set_param("rise_delay", 1.0e-9);
+        osc.set_param("fall_delay", 1.0e-9);
+        osc.set_input_analog("cntl_in", f64::NAN);
+        osc.init_output("out", PortType::Digital);
+        DigitalOscillator.init(&mut osc).expect("d_osc initializes");
+
+        let err = DigitalOscillator
+            .evaluate(&mut osc)
+            .expect_err("d_osc must reject nonfinite control input");
+
+        assert!(
+            err.to_string().contains("cntl_in must be finite"),
+            "d_osc error should identify the nonfinite control input, got {err:?}"
+        );
+        assert_eq!(osc.state(OSC_LAST_TIME), 0.0);
+        assert_eq!(osc.int_state(OSC_LAST_STATE), 0);
+        assert_eq!(osc.int_state(OSC_INITIALIZED), 0);
+        assert!(osc.take_pending_events().is_empty());
+        assert!(osc.take_requested_breakpoints().is_empty());
+
+        let mut pwm = CmContext::new();
+        pwm.analysis = AnalysisType::Transient;
+        pwm.set_real_vector_param("cntl_array", vec![-1.0, 1.0]);
+        pwm.set_real_vector_param("dc_array", vec![0.25, 0.75]);
+        pwm.set_param("frequency", 1.0e6);
+        pwm.set_param("init_phase", 0.0);
+        pwm.set_param("rise_delay", 1.0e-9);
+        pwm.set_param("fall_delay", 1.0e-9);
+        pwm.set_input_analog("cntl_in", f64::INFINITY);
+        pwm.init_output("out", PortType::Digital);
+        DigitalPwmOscillator
+            .init(&mut pwm)
+            .expect("d_pwm initializes");
+
+        let err = DigitalPwmOscillator
+            .evaluate(&mut pwm)
+            .expect_err("d_pwm must reject nonfinite control input");
+
+        assert!(
+            err.to_string().contains("cntl_in must be finite"),
+            "d_pwm error should identify the nonfinite control input, got {err:?}"
+        );
+        assert_eq!(pwm.state(OSC_LAST_TIME), 0.0);
+        assert_eq!(pwm.int_state(OSC_LAST_STATE), 0);
+        assert_eq!(pwm.int_state(OSC_INITIALIZED), 0);
+        assert!(pwm.take_pending_events().is_empty());
+        assert!(pwm.take_requested_breakpoints().is_empty());
     }
 
     #[test]

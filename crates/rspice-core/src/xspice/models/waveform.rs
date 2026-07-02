@@ -395,6 +395,16 @@ fn output_levels(ctx: &CmContext) -> CmResult<(Value, Value)> {
     Ok((low, high))
 }
 
+fn finite_control_input(ctx: &CmContext, model: &str) -> CmResult<Value> {
+    let control = ctx.input("cntl_in");
+    if !control.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "{model}: cntl_in must be finite, got {control}"
+        )));
+    }
+    Ok(control)
+}
+
 fn duty_cycle(ctx: &CmContext) -> CmResult<Value> {
     let duty = ctx.param("duty_cycle");
     if !duty.is_finite() {
@@ -427,12 +437,16 @@ fn waveform_set_state(ctx: &mut CmContext, index: usize, value: Value) {
     }
 }
 
-fn transient_phase(ctx: &mut CmContext, table: &FrequencyTableData) -> Value {
-    let frequency = interpolate_frequency(table, ctx.input("cntl_in"));
+fn transient_phase(
+    ctx: &mut CmContext,
+    model: &str,
+    table: &FrequencyTableData,
+) -> CmResult<Value> {
+    let frequency = interpolate_frequency(table, finite_control_input(ctx, model)?);
     let dt = (ctx.time - ctx.time_prev).max(0.0);
     let phase = ctx.state_prev(PHASE_STATE) + frequency * dt;
     waveform_set_state(ctx, PHASE_STATE, phase);
-    phase
+    Ok(phase)
 }
 
 fn phase_fraction(phase: Value) -> Value {
@@ -537,7 +551,7 @@ impl CodeModel for SineOscillator {
             return Ok(());
         }
 
-        let phase = transient_phase(ctx, &table);
+        let phase = transient_phase(ctx, "sine", &table)?;
         let peak = 0.5 * (high - low);
         let output = center + peak * (std::f64::consts::TAU * phase).sin();
         ctx.set_output_with_partial("out", output, 0.0);
@@ -593,7 +607,7 @@ impl CodeModel for SquareOscillator {
             return Ok(());
         }
 
-        let frequency = interpolate_frequency(&table, ctx.input("cntl_in"));
+        let frequency = interpolate_frequency(&table, finite_control_input(ctx, "square")?);
         let dt = (ctx.time - ctx.time_prev).max(0.0);
         let phase = ctx.state_prev(PHASE_STATE) + frequency * dt;
         waveform_set_state(ctx, PHASE_STATE, phase);
@@ -740,7 +754,7 @@ impl CodeModel for TriangleOscillator {
             return Ok(());
         }
 
-        let frequency = interpolate_frequency(&table, ctx.input("cntl_in"));
+        let frequency = interpolate_frequency(&table, finite_control_input(ctx, "triangle")?);
         let dt = (ctx.time - ctx.time_prev).max(0.0);
         let phase_prev = ctx.state_prev(PHASE_STATE);
         let phase = phase_prev + frequency * dt;
@@ -1153,6 +1167,64 @@ mod tests {
         assert_eq!(breakpoints.len(), 2);
         assert!((breakpoints[0] - 0.5e-9).abs() <= 1.0e-21);
         assert!((breakpoints[1] - 0.6e-9).abs() <= 1.0e-21);
+    }
+
+    #[test]
+    fn waveform_oscillators_reject_nonfinite_control_input_before_state_changes() {
+        let mut sine = oscillator_context();
+        SineOscillator.init(&mut sine).expect("sine initializes");
+        sine.set_input_analog("cntl_in", f64::NAN);
+
+        let err = SineOscillator
+            .evaluate(&mut sine)
+            .expect_err("sine must reject nonfinite control input");
+
+        assert!(
+            err.to_string().contains("cntl_in must be finite"),
+            "sine error should identify the nonfinite control input, got {err:?}"
+        );
+        assert_eq!(sine.state(PHASE_STATE), 0.0);
+        assert_eq!(sine.output("out"), 0.0);
+
+        let mut square = oscillator_context();
+        square.set_param("duty_cycle", 0.5);
+        square.set_param("rise_time", 0.1e-9);
+        square.set_param("fall_time", 0.1e-9);
+        SquareOscillator
+            .init(&mut square)
+            .expect("square initializes");
+        square.set_input_analog("cntl_in", f64::INFINITY);
+
+        let err = SquareOscillator
+            .evaluate(&mut square)
+            .expect_err("square must reject nonfinite control input");
+
+        assert!(
+            err.to_string().contains("cntl_in must be finite"),
+            "square error should identify the nonfinite control input, got {err:?}"
+        );
+        assert_eq!(square.state(PHASE_STATE), 0.0);
+        assert_eq!(square.state(SQUARE_TIME1_STATE), -1.0);
+        assert!(square.take_requested_breakpoints().is_empty());
+
+        let mut triangle = oscillator_context();
+        triangle.set_param("duty_cycle", 0.5);
+        TriangleOscillator
+            .init(&mut triangle)
+            .expect("triangle initializes");
+        triangle.set_input_analog("cntl_in", f64::NEG_INFINITY);
+
+        let err = TriangleOscillator
+            .evaluate(&mut triangle)
+            .expect_err("triangle must reject nonfinite control input");
+
+        assert!(
+            err.to_string().contains("cntl_in must be finite"),
+            "triangle error should identify the nonfinite control input, got {err:?}"
+        );
+        assert_eq!(triangle.state(PHASE_STATE), 0.0);
+        assert_eq!(triangle.state(TRIANGLE_TIME1_STATE), -1.0);
+        assert!(triangle.take_requested_breakpoints().is_empty());
     }
 
     #[test]
