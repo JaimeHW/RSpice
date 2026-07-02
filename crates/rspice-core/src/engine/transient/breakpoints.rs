@@ -409,44 +409,6 @@ impl Engine {
                     );
                 }
             }
-
-            if instance.model_name().eq_ignore_ascii_case("d_source") {
-                let input_file = instance
-                    .string_param("input_file")
-                    .filter(|path| !path.trim().is_empty())
-                    .unwrap_or("source.txt");
-                match crate::xspice::read_data_file_to_string(input_file) {
-                    Ok(contents) => {
-                        for (line_idx, line) in contents.lines().enumerate() {
-                            let trimmed = line.trim();
-                            if trimmed.is_empty() || trimmed.starts_with('*') {
-                                continue;
-                            }
-                            let Some(time_token) = trimmed.split_whitespace().next() else {
-                                continue;
-                            };
-                            let time = crate::xspice::parse_data_file_spice_value(time_token);
-                            if time.is_finite() {
-                                Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
-                            } else {
-                                log::warn!(
-                                    "Failed to parse d_source breakpoint time '{}' in '{}' line {}",
-                                    time_token,
-                                    input_file,
-                                    line_idx + 1
-                                );
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        log::warn!(
-                            "Failed to load d_source input_file '{}' for breakpoint extraction: {}",
-                            input_file,
-                            err
-                        );
-                    }
-                }
-            }
         }
     }
 
