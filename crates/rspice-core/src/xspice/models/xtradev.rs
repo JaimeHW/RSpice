@@ -1106,6 +1106,12 @@ fn pswitch_eval(ctx: &CmContext) -> CmResult<PswitchEval> {
 
     let output_conductance = 1.0 / resistance;
     let control_conductance = 1.0 / r_cntl_in;
+    if !control_conductance.is_finite() {
+        return Err(invalid_param(
+            "r_cntl_in",
+            format!("control conductance must be finite, got {control_conductance}"),
+        ));
+    }
     Ok(PswitchEval {
         resistance,
         output_conductance,
@@ -3693,6 +3699,19 @@ mod tests {
         let eval = pswitch_eval(&ctx).expect("log pswitch eval");
 
         assert!((eval.resistance - 3000.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn pswitch_rejects_nonfinite_control_conductance() {
+        let mut ctx = CmContext::new();
+        ctx.set_param("r_cntl_in", f64::MIN_POSITIVE / 4.0);
+
+        let err = pswitch_eval(&ctx).expect_err("pswitch must reject conductance overflow");
+
+        match err {
+            CmError::InvalidParameter { name, .. } => assert_eq!(name, "r_cntl_in"),
+            other => panic!("expected InvalidParameter for r_cntl_in, got {other:?}"),
+        }
     }
 
     #[test]
