@@ -3235,27 +3235,6 @@ impl Instance {
             [],
             1.0,
         );
-        let eq17_e427: f64 = (locals.var_ci * (nv7 - 0.0));
-        let eq17_e427_d_n0: f64 = (locals.var_ci_dn0 * (nv7 - 0.0));
-        let eq17_e427_d_n2: f64 = (locals.var_ci_dn2 * (nv7 - 0.0));
-        let eq17_e427_d_n4: f64 = (locals.var_ci_dn4 * (nv7 - 0.0));
-        let eq17_e427_d_n5: f64 = (locals.var_ci_dn5 * (nv7 - 0.0));
-        let eq17_e427_d_n6: f64 = (locals.var_ci_dn6 * (nv7 - 0.0));
-        let eq17_e427_d_n8: f64 = (locals.var_ci_dn8 * (nv7 - 0.0));
-        let eq17_e427_d_n10: f64 = (locals.var_ci_dn10 * (nv7 - 0.0));
-        let eq17_e427_d_n11: f64 = (locals.var_ci_dn11 * (nv7 - 0.0));
-        let eq17_e427_d_n12: f64 = (locals.var_ci_dn12 * (nv7 - 0.0));
-        let eq17_value: f64 = eq17_e427;
-        stamper.stamp_current_sparse_local::<10, 0>(
-            Some(11),
-            Some(12),
-            multiplicity * (eq17_value),
-            [0, 2, 4, 5, 6, 7, 8, 10, 11, 12],
-            [multiplicity * (eq17_e427_d_n0), multiplicity * (eq17_e427_d_n2), multiplicity * (eq17_e427_d_n4), multiplicity * (eq17_e427_d_n5), multiplicity * (eq17_e427_d_n6), multiplicity * (locals.var_ci), multiplicity * (eq17_e427_d_n8), multiplicity * (eq17_e427_d_n10), multiplicity * (eq17_e427_d_n11), multiplicity * (eq17_e427_d_n12)],
-            [],
-            [],
-            1.0,
-        );
         let eq18_e430: f64 = ((nv7 - 0.0) * locals.var_sigrat_s);
         let eq18_e430_d_n0: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn0);
         let eq18_e430_d_n2: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn2);
