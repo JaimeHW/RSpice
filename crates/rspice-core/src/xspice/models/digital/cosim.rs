@@ -46,15 +46,87 @@ impl DigitalCosimInputScratch {
         inout_count: usize,
         queue_size: usize,
         output_change_count: usize,
-    ) -> Self {
-        Self {
-            inputs: Vec::with_capacity(input_count),
-            inouts: Vec::with_capacity(inout_count),
-            input_events: Vec::with_capacity(queue_size),
-            results: Vec::with_capacity(2),
-            output_changes: Vec::with_capacity(output_change_count),
-        }
+    ) -> CmResult<Self> {
+        let mut scratch = Self::default();
+        scratch
+            .inputs
+            .try_reserve_exact(input_count)
+            .map_err(|err| {
+                d_cosim_error(format!(
+                    "unable to reserve {input_count} input values: {err}"
+                ))
+            })?;
+        scratch
+            .inouts
+            .try_reserve_exact(inout_count)
+            .map_err(|err| {
+                d_cosim_error(format!(
+                    "unable to reserve {inout_count} inout values: {err}"
+                ))
+            })?;
+        scratch
+            .input_events
+            .try_reserve_exact(queue_size)
+            .map_err(|err| {
+                d_cosim_error(format!(
+                    "unable to reserve {queue_size} input events: {err}"
+                ))
+            })?;
+        scratch
+            .results
+            .try_reserve_exact(2)
+            .map_err(|err| d_cosim_error(format!("unable to reserve step results: {err}")))?;
+        scratch
+            .output_changes
+            .try_reserve_exact(output_change_count)
+            .map_err(|err| {
+                d_cosim_error(format!(
+                    "unable to reserve {output_change_count} output changes: {err}"
+                ))
+            })?;
+        Ok(scratch)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DigitalCosimInputLayout {
+    connected_input_count: usize,
+    previous_input_start: usize,
+    previous_inout_start: usize,
+    int_state_count: usize,
+}
+
+fn digital_cosim_input_layout(
+    input_count: usize,
+    inout_count: usize,
+) -> CmResult<DigitalCosimInputLayout> {
+    let connected_input_count = input_count.checked_add(inout_count).ok_or_else(|| {
+        d_cosim_error(format!(
+            "input layout {input_count} inputs + {inout_count} inouts is too large"
+        ))
+    })?;
+    let previous_input_start = STATE_PREV_INPUT_START;
+    let previous_inout_start = previous_input_start
+        .checked_add(input_count)
+        .ok_or_else(|| {
+            d_cosim_error(format!(
+                "input layout {input_count} inputs + {inout_count} inouts is too large"
+            ))
+        })?;
+    let int_state_count = previous_input_start
+        .checked_add(connected_input_count)
+        .ok_or_else(|| {
+            d_cosim_error(format!(
+                "input layout {input_count} inputs + {inout_count} inouts is too large"
+            ))
+        })?;
+
+    Ok(DigitalCosimInputLayout {
+        connected_input_count,
+        previous_input_start,
+        previous_inout_start,
+        int_state_count,
+    })
 }
 
 fn with_input_scratch<R>(
@@ -186,6 +258,7 @@ fn collect_input_events(
     inputs: &[DigitalValue],
     inouts: &[DigitalValue],
     input_event_limit: Option<usize>,
+    layout: DigitalCosimInputLayout,
     events: &mut Vec<DigitalCosimInputEvent>,
 ) {
     events.clear();
@@ -199,7 +272,7 @@ fn collect_input_events(
         let state_index = index;
         if time <= ctx.time + EVENT_TIME_EPSILON
             && event_is_new(time, ctx.state(state_index))
-            && digital_value_code(value) != ctx.int_state(STATE_PREV_INPUT_START + state_index)
+            && digital_value_code(value) != ctx.int_state(layout.previous_input_start + state_index)
         {
             events.push(DigitalCosimInputEvent { time, index, value });
         }
@@ -217,7 +290,7 @@ fn collect_input_events(
         let state_index = unified_index;
         if time <= ctx.time + EVENT_TIME_EPSILON
             && event_is_new(time, ctx.state(state_index))
-            && digital_value_code(value) != ctx.int_state(STATE_PREV_INPUT_START + state_index)
+            && digital_value_code(value) != ctx.int_state(layout.previous_input_start + state_index)
         {
             events.push(DigitalCosimInputEvent {
                 time,
@@ -375,11 +448,14 @@ impl CodeModel for DigitalCosim {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let input_state_count = ctx.port_width("d_in") + ctx.port_width("d_inout");
-        ctx.allocate_int_states(STATE_PREV_INPUT_START + input_state_count);
+        let input_count = ctx.port_width("d_in");
+        let output_count = ctx.port_width("d_out");
+        let inout_count = ctx.port_width("d_inout");
+        let input_layout = digital_cosim_input_layout(input_count, inout_count)?;
+        ctx.allocate_int_states(input_layout.int_state_count);
         ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_NOT_INITIALIZED);
-        ctx.allocate_states(input_state_count);
-        for index in 0..input_state_count {
+        ctx.allocate_states(input_layout.connected_input_count);
+        for index in 0..input_layout.connected_input_count {
             ctx.set_initial_state(index, -1.0);
         }
 
@@ -391,13 +467,12 @@ impl CodeModel for DigitalCosim {
                 message: "must not be empty".to_string(),
             })?
             .to_string();
-        let input_count = ctx.port_width("d_in");
-        let output_count = ctx.port_width("d_out");
-        let inout_count = ctx.port_width("d_inout");
-        let connected_input_count = input_count + inout_count;
         let mut queue_size = official_cosim_queue_size(ctx)?;
-        if connected_input_count > queue_size {
-            queue_size = connected_input_count + 16;
+        if input_layout.connected_input_count > queue_size {
+            queue_size = input_layout
+                .connected_input_count
+                .checked_add(16)
+                .ok_or_else(|| d_cosim_error("input queue size is too large"))?;
         }
         let spec = DigitalCosimSpec {
             simulation,
@@ -439,7 +514,7 @@ impl CodeModel for DigitalCosim {
                 inout_count,
                 spec.queue_size,
                 output_count.max(inout_count),
-            )),
+            )?),
         );
         set_initial_outputs(ctx, official_cosim_delay(ctx)?);
         Ok(())
@@ -452,6 +527,7 @@ impl CodeModel for DigitalCosim {
 
         let input_width = ctx.port_width("d_in");
         let inout_width = ctx.port_width("d_inout");
+        let input_layout = digital_cosim_input_layout(input_width, inout_width)?;
         with_input_scratch(ctx, |ctx, input_scratch| {
             let DigitalCosimInputScratch {
                 inputs,
@@ -472,7 +548,14 @@ impl CodeModel for DigitalCosim {
                     .map_err(|_| d_cosim_error("runtime lock is poisoned"))?;
                 runtime.input_event_limit()
             };
-            collect_input_events(ctx, inputs, inouts, input_event_limit, input_events);
+            collect_input_events(
+                ctx,
+                inputs,
+                inouts,
+                input_event_limit,
+                input_layout,
+                input_events,
+            );
 
             let mut runtime = runtime
                 .lock()
@@ -484,15 +567,18 @@ impl CodeModel for DigitalCosim {
                     return Ok(());
                 }
                 ctx.set_int_state(STATE_TIME_ZERO_INITIALIZED, COSIM_INPUTS_INITIALIZED);
-                for index in 0..(input_width + inout_width) {
+                for index in 0..input_layout.connected_input_count {
                     ctx.set_state(index, 0.0);
                 }
                 for (index, value) in inputs.iter().copied().enumerate() {
-                    ctx.set_int_state(STATE_PREV_INPUT_START + index, digital_value_code(value));
+                    ctx.set_int_state(
+                        input_layout.previous_input_start + index,
+                        digital_value_code(value),
+                    );
                 }
                 for (index, value) in inouts.iter().copied().enumerate() {
                     ctx.set_int_state(
-                        STATE_PREV_INPUT_START + input_width + index,
+                        input_layout.previous_inout_start + index,
                         digital_value_code(value),
                     );
                 }
@@ -508,7 +594,7 @@ impl CodeModel for DigitalCosim {
             for event in input_events.iter() {
                 ctx.set_state(event.index, event.time);
                 ctx.set_int_state(
-                    STATE_PREV_INPUT_START + event.index,
+                    input_layout.previous_input_start + event.index,
                     digital_value_code(event.value),
                 );
             }
