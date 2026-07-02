@@ -130,7 +130,8 @@ pub struct FlattenedNetlist {
 pub struct XspiceAutoBridgeNodeHint {
     pub node: String,
     pub depth: usize,
-    pub vcc: Value,
+    pub vcc: Option<Value>,
+    pub family: Option<String>,
 }
 
 //=============================================================================
@@ -342,12 +343,19 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
         depth: usize,
     ) {
-        let ElementKind::Xspice { ports, .. } = &element.kind else {
+        let ElementKind::Xspice {
+            ports,
+            string_params,
+            ..
+        } = &element.kind
+        else {
             return;
         };
-        let Some(vcc) = scope.get("vcc").filter(|value| value.is_finite()) else {
+        let vcc = scope.get("vcc").filter(|value| value.is_finite());
+        let family = xspice_auto_bridge_family(string_params, scope);
+        if vcc.is_none() && family.is_none() {
             return;
-        };
+        }
 
         let mut push_node = |node: &str| {
             if !is_ground_node_name(node) {
@@ -356,6 +364,7 @@ impl<'a> Flattener<'a> {
                         node: node.to_string(),
                         depth,
                         vcc,
+                        family: family.clone(),
                     });
             }
         };
@@ -2522,6 +2531,25 @@ pub fn flatten_netlist_with_models(netlist: &Netlist) -> Result<FlattenedNetlist
 
 fn is_ground_node_name(node: &str) -> bool {
     node == "0" || node.eq_ignore_ascii_case("gnd")
+}
+
+fn xspice_auto_bridge_family(
+    string_params: &[(String, String)],
+    scope: &ParamContext,
+) -> Option<String> {
+    string_params
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("family"))
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            scope
+                .get_string("family")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
 }
 
 fn is_ident_start(c: char) -> bool {
