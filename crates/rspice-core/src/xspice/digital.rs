@@ -228,6 +228,67 @@ pub struct DigitalValue {
     pub strength: DigitalStrength,
 }
 
+/// ngspice's XSPICE digital user-defined-node resolver table.
+///
+/// Table indexes are strength-major: strong, resistive, high-Z, undetermined;
+/// each strength group stores zero, one, unknown.
+const NGSPICE_DIGITAL_RESOLVE_MAP: [[usize; 12]; 12] = [
+    [0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 2, 2],
+    [2, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 2],
+    [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+    [0, 1, 2, 3, 5, 5, 3, 3, 3, 9, 11, 11],
+    [0, 1, 2, 5, 4, 5, 4, 4, 4, 11, 10, 11],
+    [0, 1, 2, 5, 5, 5, 5, 5, 5, 11, 11, 11],
+    [0, 1, 2, 3, 4, 5, 6, 8, 8, 9, 11, 11],
+    [0, 1, 2, 3, 4, 5, 8, 7, 8, 11, 10, 11],
+    [0, 1, 2, 3, 4, 5, 8, 8, 8, 11, 11, 11],
+    [0, 2, 2, 9, 11, 11, 9, 11, 11, 9, 11, 11],
+    [2, 1, 2, 11, 10, 11, 11, 10, 11, 11, 10, 11],
+    [2, 2, 2, 11, 11, 11, 11, 11, 11, 11, 11, 11],
+];
+
+fn ngspice_state_index(state: DigitalState) -> usize {
+    match state {
+        DigitalState::Zero | DigitalState::ZeroR | DigitalState::ZeroZ => 0,
+        DigitalState::One | DigitalState::OneR | DigitalState::OneZ => 1,
+        DigitalState::Unknown
+        | DigitalState::UnknownR
+        | DigitalState::UnknownZ
+        | DigitalState::HighZ => 2,
+    }
+}
+
+fn ngspice_strength_index(strength: DigitalStrength) -> usize {
+    match strength {
+        DigitalStrength::Strong => 0,
+        DigitalStrength::Resistive => 1,
+        DigitalStrength::HighZ => 2,
+        DigitalStrength::Undetermined => 3,
+    }
+}
+
+fn ngspice_resolve_index(value: DigitalValue) -> usize {
+    ngspice_strength_index(value.strength) * 3 + ngspice_state_index(value.state)
+}
+
+fn digital_value_from_ngspice_resolve_index(index: usize) -> DigitalValue {
+    match index {
+        0 => DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
+        1 => DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
+        2 => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Strong),
+        3 => DigitalValue::new(DigitalState::ZeroR, DigitalStrength::Resistive),
+        4 => DigitalValue::new(DigitalState::OneR, DigitalStrength::Resistive),
+        5 => DigitalValue::new(DigitalState::UnknownR, DigitalStrength::Resistive),
+        6 => DigitalValue::new(DigitalState::ZeroZ, DigitalStrength::HighZ),
+        7 => DigitalValue::new(DigitalState::OneZ, DigitalStrength::HighZ),
+        8 => DigitalValue::new(DigitalState::UnknownZ, DigitalStrength::HighZ),
+        9 => DigitalValue::new(DigitalState::Zero, DigitalStrength::Undetermined),
+        10 => DigitalValue::new(DigitalState::One, DigitalStrength::Undetermined),
+        11 => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined),
+        _ => unreachable!("ngspice digital resolver index is out of range"),
+    }
+}
+
 impl Default for DigitalValue {
     fn default() -> Self {
         // ngspice's `digital` user-defined-node initializer sets event nodes
@@ -279,22 +340,12 @@ impl DigitalValue {
 
     /// Resolve bus contention between two values
     ///
-    /// When multiple drivers are connected, the stronger one wins.
-    /// If strengths are equal, unknown results.
+    /// ngspice uses a fixed 12-state user-defined-node resolver table rather
+    /// than simple strength ordering.
     pub fn resolve(&self, other: &DigitalValue) -> DigitalValue {
-        match self.strength.cmp(&other.strength) {
-            std::cmp::Ordering::Greater => *self,
-            std::cmp::Ordering::Less => *other,
-            std::cmp::Ordering::Equal => {
-                // Same strength - check for contention
-                if self.state == other.state {
-                    *self
-                } else {
-                    // Contention - unknown
-                    DigitalValue::new(DigitalState::Unknown, self.strength)
-                }
-            }
-        }
+        let lhs = ngspice_resolve_index(*self);
+        let rhs = ngspice_resolve_index(*other);
+        digital_value_from_ngspice_resolve_index(NGSPICE_DIGITAL_RESOLVE_MAP[lhs][rhs])
     }
 
     /// Format using ngspice's XSPICE digital `eprint` token spelling.
@@ -330,3 +381,52 @@ impl From<bool> for DigitalValue {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn digital_resolution_matches_ngspice_undetermined_contention() {
+        let strong_zero = DigitalValue::zero();
+        let undetermined_one = DigitalValue::new(DigitalState::One, DigitalStrength::Undetermined);
+
+        assert_eq!(
+            strong_zero.resolve(&undetermined_one),
+            DigitalValue::unknown()
+        );
+        assert_eq!(
+            undetermined_one.resolve(&strong_zero),
+            DigitalValue::unknown()
+        );
+    }
+
+    #[test]
+    fn digital_resolution_preserves_ngspice_resolved_strength_variants() {
+        let zero_r = DigitalValue::new(DigitalState::ZeroR, DigitalStrength::Resistive);
+        let one_r = DigitalValue::new(DigitalState::OneR, DigitalStrength::Resistive);
+        assert_eq!(
+            zero_r.resolve(&one_r),
+            DigitalValue::new(DigitalState::UnknownR, DigitalStrength::Resistive)
+        );
+
+        let zero_z = DigitalValue::new(DigitalState::ZeroZ, DigitalStrength::HighZ);
+        let one_z = DigitalValue::new(DigitalState::OneZ, DigitalStrength::HighZ);
+        assert_eq!(
+            zero_z.resolve(&one_z),
+            DigitalValue::new(DigitalState::UnknownZ, DigitalStrength::HighZ)
+        );
+    }
+
+    #[test]
+    fn digital_resolution_normalizes_rspice_high_z_state_to_ngspice_unknown_z() {
+        assert_eq!(
+            DigitalValue::high_z().resolve(&DigitalValue::high_z()),
+            DigitalValue::new(DigitalState::UnknownZ, DigitalStrength::HighZ)
+        );
+        assert_eq!(
+            DigitalValue::high_z().resolve(&DigitalValue::one()),
+            DigitalValue::one()
+        );
+    }
+}
