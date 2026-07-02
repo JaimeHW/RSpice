@@ -1444,12 +1444,7 @@ fn hyst_params(ctx: &CmContext) -> CmResult<HystParams> {
             "in_high must differ from in_low, got in_low={in_low}, in_high={in_high}"
         )));
     }
-    if raw_hyst < 0.0 {
-        return Err(hyst_error(format!(
-            "hyst must be nonnegative, got {raw_hyst}"
-        )));
-    }
-    let hyst = raw_hyst;
+    let hyst = raw_hyst.max(0.0);
 
     if analog_boolean_param(ctx, "hyst", "fraction")? {
         input_domain *= in_high - in_low;
@@ -4041,34 +4036,35 @@ mod tests {
     }
 
     #[test]
-    fn hyst_rejects_negative_hysteresis_width() {
+    fn hyst_clamps_negative_hysteresis_width() {
         let mut ctx = CmContext::new();
         ctx.set_param("in_high", 1.0);
         ctx.set_param("hyst", -0.1);
 
-        let err = HysteresisBlock
+        HysteresisBlock
             .init(&mut ctx)
-            .expect_err("negative hyst violates ngspice ifspec lower limit");
-
-        assert!(
-            err.to_string().contains("hyst must be nonnegative"),
-            "hyst error should explain the nonnegative lower limit, got {err:?}"
-        );
+            .expect("negative hyst clamps to the official lower limit");
 
         let mut ctx = CmContext::new();
+        ctx.set_input_analog("in", 0.5);
         ctx.set_param("in_high", 1.0);
+        ctx.set_param("out_lower_limit", 0.0);
+        ctx.set_param("out_upper_limit", 10.0);
+        ctx.set_param("input_domain", 0.01);
+        ctx.set_param("fraction", 0.0);
         HysteresisBlock
             .init(&mut ctx)
             .expect("default hyst params are valid");
         ctx.set_param("hyst", -0.1);
 
-        let err = HysteresisBlock
+        HysteresisBlock
             .evaluate(&mut ctx)
-            .expect_err("mutated negative hyst must fail evaluation");
+            .expect("mutated negative hyst clamps during evaluation");
 
         assert!(
-            err.to_string().contains("hyst must be nonnegative"),
-            "hyst evaluation error should explain the nonnegative lower limit, got {err:?}"
+            (ctx.output("out") - 5.0).abs() < 1.0e-12,
+            "hyst=-0.1 should behave like hyst=0 after clamping, got {}",
+            ctx.output("out")
         );
     }
 
