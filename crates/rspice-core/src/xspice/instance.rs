@@ -8,7 +8,7 @@ use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
     EventQueue, ParamSpec, ParamType, PortSpec, PortType,
 };
-use crate::Value;
+use crate::{Complex64, Value};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -93,6 +93,70 @@ fn invalid_param_channel_type(spec: &ParamSpec, actual: &str) -> CmError {
             spec.param_type, actual
         ),
     }
+}
+
+fn validate_complex_param(spec: &ParamSpec, value: Complex64) -> CmResult<()> {
+    if value.re.is_finite() && value.im.is_finite() {
+        Ok(())
+    } else {
+        Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!(
+                "complex value must be finite, got <{} {}>",
+                value.re, value.im
+            ),
+        })
+    }
+}
+
+fn parse_complex_param(spec: &ParamSpec, value: &str) -> CmResult<Complex64> {
+    let trimmed = value.trim();
+    let Some(inner) = trimmed
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+    else {
+        return Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("expected complex literal '<real imag>', got '{value}'"),
+        });
+    };
+
+    let normalized = inner.replace(',', " ");
+    let mut parts = normalized.split_whitespace();
+    let Some(real_token) = parts.next() else {
+        return Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("expected complex literal '<real imag>', got '{value}'"),
+        });
+    };
+    let Some(imag_token) = parts.next() else {
+        return Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("expected complex literal '<real imag>', got '{value}'"),
+        });
+    };
+    if parts.next().is_some() {
+        return Err(CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("expected exactly two complex components, got '{value}'"),
+        });
+    }
+
+    let real = crate::netlist::lexer::parse_spice_value(real_token).map_err(|err| {
+        CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("invalid complex real component '{real_token}': {err}"),
+        }
+    })?;
+    let imag = crate::netlist::lexer::parse_spice_value(imag_token).map_err(|err| {
+        CmError::InvalidParameter {
+            name: spec.name.clone(),
+            message: format!("invalid complex imaginary component '{imag_token}': {err}"),
+        }
+    })?;
+    let value = Complex64::new(real, imag);
+    validate_complex_param(spec, value)?;
+    Ok(value)
 }
 
 fn push_non_ground_node_index(nodes: &mut Vec<usize>, node: usize) {
@@ -714,9 +778,24 @@ impl XspiceInstance {
             }
 
             match param_spec.param_type {
+                super::ParamType::Complex => {
+                    if let Some(default) = param_spec.complex_default {
+                        validate_complex_param(param_spec, default)?;
+                        context.set_complex_param(&param_spec.name, default);
+                    }
+                }
                 super::ParamType::String => {
                     if let Some(default) = &param_spec.string_default {
                         context.set_string_param(&param_spec.name, default);
+                    }
+                }
+                super::ParamType::ComplexVector => {
+                    if let Some(default) = &param_spec.complex_vector_default {
+                        validate_vector_default_len(param_spec, default.len())?;
+                        for value in default {
+                            validate_complex_param(param_spec, *value)?;
+                        }
+                        context.set_complex_vector_param(&param_spec.name, default.clone());
                     }
                 }
                 super::ParamType::StringVector => {
@@ -787,8 +866,13 @@ impl XspiceInstance {
                     ParamType::Real | ParamType::Integer | ParamType::Boolean => {
                         validate_numeric_param(spec, *value)?;
                     }
-                    ParamType::String => return Err(invalid_param_channel_type(spec, "scalar")),
-                    ParamType::StringVector | ParamType::RealVector | ParamType::IntegerVector => {
+                    ParamType::Complex | ParamType::String => {
+                        return Err(invalid_param_channel_type(spec, "scalar"));
+                    }
+                    ParamType::StringVector
+                    | ParamType::RealVector
+                    | ParamType::IntegerVector
+                    | ParamType::ComplexVector => {
                         return Err(CmError::InvalidParameter {
                             name: spec.name.clone(),
                             message: "expected vector parameter, got scalar parameter".to_string(),
@@ -810,7 +894,15 @@ impl XspiceInstance {
             if let Some(spec) = param_specs.get(&canonical_param_key(name)) {
                 match spec.param_type {
                     ParamType::String => {}
-                    ParamType::StringVector | ParamType::RealVector | ParamType::IntegerVector => {
+                    ParamType::Complex => {
+                        let value = parse_complex_param(spec, value)?;
+                        context.set_complex_param(name, value);
+                        continue;
+                    }
+                    ParamType::StringVector
+                    | ParamType::RealVector
+                    | ParamType::IntegerVector
+                    | ParamType::ComplexVector => {
                         return Err(CmError::InvalidParameter {
                             name: spec.name.clone(),
                             message: "expected vector parameter, got string parameter".to_string(),
@@ -828,6 +920,15 @@ impl XspiceInstance {
                 match spec.param_type {
                     ParamType::StringVector => {
                         validate_vector_param_len(spec, values.len())?;
+                    }
+                    ParamType::ComplexVector => {
+                        validate_vector_param_len(spec, values.len())?;
+                        let mut complex_values = Vec::with_capacity(values.len());
+                        for value in values {
+                            complex_values.push(parse_complex_param(spec, value)?);
+                        }
+                        context.set_complex_vector_param(name, complex_values);
+                        continue;
                     }
                     _ => return Err(invalid_param_channel_type(spec, "string-vector")),
                 }
@@ -856,6 +957,9 @@ impl XspiceInstance {
                     ParamType::StringVector => {
                         return Err(invalid_param_channel_type(spec, "real-vector"));
                     }
+                    ParamType::ComplexVector => {
+                        return Err(invalid_param_channel_type(spec, "real-vector"));
+                    }
                     _ => return Err(invalid_param_channel_type(spec, "real-vector")),
                 }
             }
@@ -881,6 +985,9 @@ impl XspiceInstance {
                         continue;
                     }
                     ParamType::StringVector => {
+                        return Err(invalid_param_channel_type(spec, "integer-vector"));
+                    }
+                    ParamType::ComplexVector => {
                         return Err(invalid_param_channel_type(spec, "integer-vector"));
                     }
                     _ => return Err(invalid_param_channel_type(spec, "integer-vector")),
@@ -2623,6 +2730,36 @@ mod tests {
         let mut model = PanicModel::new();
         model.ports = ports;
         model
+    }
+
+    #[test]
+    fn instance_converts_string_channels_to_complex_parameters() {
+        let instance = XspiceInstance::new_with_string_vectors(
+            "Acomplex",
+            Arc::new(model_with_params(vec![
+                ParamSpec::complex("pole", Complex64::new(0.0, 0.0)),
+                ParamSpec::complex_vector("zeros", Vec::new()),
+            ])),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[("pole".to_string(), "<1k -2meg>".to_string())],
+            &[(
+                "zeros".to_string(),
+                vec!["<3 4>".to_string(), "<5, -6>".to_string()],
+            )],
+            &[],
+            &[],
+        )
+        .expect("complex parameters should be parsed from string channels");
+
+        assert_eq!(
+            instance.context.complex_param("POLE"),
+            Some(Complex64::new(1.0e3, -2.0e6))
+        );
+        assert_eq!(
+            instance.context.complex_vector_param("zeros"),
+            Some([Complex64::new(3.0, 4.0), Complex64::new(5.0, -6.0)].as_slice())
+        );
     }
 
     #[test]

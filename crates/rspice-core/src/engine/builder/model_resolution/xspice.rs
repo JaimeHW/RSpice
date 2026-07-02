@@ -91,6 +91,7 @@ fn reject_param_names_for_vector_specs<'a>(
                 crate::xspice::ParamType::StringVector
                     | crate::xspice::ParamType::RealVector
                     | crate::xspice::ParamType::IntegerVector
+                    | crate::xspice::ParamType::ComplexVector
             )
         {
             return Err(SimulationError::Circuit(format!(
@@ -135,6 +136,13 @@ fn resolve_scalar_expression_params(
                 crate::xspice::ParamType::Real
                 | crate::xspice::ParamType::Integer
                 | crate::xspice::ParamType::Boolean => {}
+                crate::xspice::ParamType::Complex => {
+                    return Err(SimulationError::Circuit(format!(
+                        "XSPICE model '{}' parameter '{}' expects Complex, got expression value",
+                        code_model.name(),
+                        name
+                    )));
+                }
                 crate::xspice::ParamType::String => {
                     return Err(SimulationError::Circuit(format!(
                         "XSPICE model '{}' parameter '{}' expects String, got expression value",
@@ -144,7 +152,8 @@ fn resolve_scalar_expression_params(
                 }
                 crate::xspice::ParamType::StringVector
                 | crate::xspice::ParamType::RealVector
-                | crate::xspice::ParamType::IntegerVector => {
+                | crate::xspice::ParamType::IntegerVector
+                | crate::xspice::ParamType::ComplexVector => {
                     return Err(SimulationError::Circuit(format!(
                         "XSPICE model '{}' vector parameter '{}' was given an expression value",
                         code_model.name(),
@@ -212,6 +221,13 @@ fn validate_xspice_expression_param_type(
             crate::xspice::ParamType::Real
             | crate::xspice::ParamType::Integer
             | crate::xspice::ParamType::Boolean => {}
+            crate::xspice::ParamType::Complex => {
+                return Err(SimulationError::Circuit(format!(
+                    "XSPICE model '{}' parameter '{}' expects Complex, got expression value",
+                    code_model.name(),
+                    name
+                )));
+            }
             crate::xspice::ParamType::String => {
                 return Err(SimulationError::Circuit(format!(
                     "XSPICE model '{}' parameter '{}' expects String, got expression value",
@@ -221,7 +237,8 @@ fn validate_xspice_expression_param_type(
             }
             crate::xspice::ParamType::StringVector
             | crate::xspice::ParamType::RealVector
-            | crate::xspice::ParamType::IntegerVector => {
+            | crate::xspice::ParamType::IntegerVector
+            | crate::xspice::ParamType::ComplexVector => {
                 return Err(SimulationError::Circuit(format!(
                     "XSPICE model '{}' vector parameter '{}' was given an expression value",
                     code_model.name(),
@@ -481,7 +498,9 @@ fn resolve_string_vector_params(
             .find(|spec| spec.name.eq_ignore_ascii_case(name))
             .map(|spec| spec.param_type)
         {
-            Some(crate::xspice::ParamType::StringVector) | None => {
+            Some(crate::xspice::ParamType::StringVector)
+            | Some(crate::xspice::ParamType::ComplexVector)
+            | None => {
                 string_vectors.push((name.clone(), values.clone()));
             }
             Some(other) => {

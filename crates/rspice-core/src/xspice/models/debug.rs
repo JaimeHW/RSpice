@@ -1,7 +1,7 @@
 //! XSPICE debug and example code models.
 
-use crate::Value;
 use crate::xspice::{CmContext, CmResult, CodeModel, ParamSpec, PortDirection, PortSpec, PortType};
+use crate::{Complex64, Value};
 
 #[derive(Debug, Default)]
 pub struct PrintParamTypes;
@@ -46,13 +46,14 @@ impl CodeModel for PrintParamTypes {
             vec![
                 ParamSpec::integer("integer", 1).with_description("Integer parameter"),
                 ParamSpec::real("real", 1.0).with_description("Real parameter"),
-                ParamSpec::string("complex", "<1 1>").with_description("Complex parameter"),
+                ParamSpec::complex("complex", Complex64::new(1.0, 1.0))
+                    .with_description("Complex parameter"),
                 ParamSpec::string("string", "one").with_description("String parameter"),
                 ParamSpec::integer_vector("integer_array", vec![1])
                     .with_description("Integer array parameter"),
                 ParamSpec::real_vector("real_array", vec![1.0 as Value])
                     .with_description("Real array parameter"),
-                ParamSpec::string_vector("complex_array", vec!["<1 1>".to_string()])
+                ParamSpec::complex_vector("complex_array", vec![Complex64::new(1.0, 1.0)])
                     .with_description("Complex array parameter"),
                 ParamSpec::string_vector("string_array", vec!["one".to_string()])
                     .with_description("String array parameter"),

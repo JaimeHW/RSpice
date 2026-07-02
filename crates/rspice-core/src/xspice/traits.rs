@@ -280,6 +280,8 @@ pub enum ParamType {
     Integer,
     /// Boolean
     Boolean,
+    /// Complex number
+    Complex,
     /// String (path, identifier, etc.)
     String,
     /// Vector of strings
@@ -288,6 +290,8 @@ pub enum ParamType {
     RealVector,
     /// Vector of integers
     IntegerVector,
+    /// Vector of complex numbers
+    ComplexVector,
 }
 
 /// Parameter specification for a code model
@@ -301,8 +305,12 @@ pub struct ParamSpec {
     pub default: Value,
     /// Default string value for string-typed parameters
     pub string_default: Option<String>,
+    /// Default complex value for complex-typed parameters
+    pub complex_default: Option<Complex64>,
     /// Default string-vector value for string-vector parameters
     pub string_vector_default: Option<Vec<String>>,
+    /// Default complex-vector value for complex-vector parameters
+    pub complex_vector_default: Option<Vec<Complex64>>,
     /// Default real-vector value for vector-typed parameters
     pub real_vector_default: Option<Vec<Value>>,
     /// Default integer-vector value for vector-typed parameters
@@ -329,7 +337,9 @@ impl ParamSpec {
             param_type: ParamType::Real,
             default,
             string_default: None,
+            complex_default: None,
             string_vector_default: None,
+            complex_vector_default: None,
             real_vector_default: None,
             integer_vector_default: None,
             min: None,
@@ -348,7 +358,9 @@ impl ParamSpec {
             param_type: ParamType::Integer,
             default: default as f64,
             string_default: None,
+            complex_default: None,
             string_vector_default: None,
+            complex_vector_default: None,
             real_vector_default: None,
             integer_vector_default: None,
             min: None,
@@ -367,7 +379,9 @@ impl ParamSpec {
             param_type: ParamType::Boolean,
             default: if default { 1.0 } else { 0.0 },
             string_default: None,
+            complex_default: None,
             string_vector_default: None,
+            complex_vector_default: None,
             real_vector_default: None,
             integer_vector_default: None,
             min: None,
@@ -386,7 +400,30 @@ impl ParamSpec {
             param_type: ParamType::String,
             default: 0.0,
             string_default: Some(default.into()),
+            complex_default: None,
             string_vector_default: None,
+            complex_vector_default: None,
+            real_vector_default: None,
+            integer_vector_default: None,
+            min: None,
+            max: None,
+            vector_min_len: None,
+            vector_max_len: None,
+            required: false,
+            description: String::new(),
+        }
+    }
+
+    /// Create a complex parameter with default
+    pub fn complex(name: impl Into<String>, default: Complex64) -> Self {
+        Self {
+            name: name.into(),
+            param_type: ParamType::Complex,
+            default: 0.0,
+            string_default: None,
+            complex_default: Some(default),
+            string_vector_default: None,
+            complex_vector_default: None,
             real_vector_default: None,
             integer_vector_default: None,
             min: None,
@@ -405,7 +442,9 @@ impl ParamSpec {
             param_type: ParamType::RealVector,
             default: 0.0,
             string_default: None,
+            complex_default: None,
             string_vector_default: None,
+            complex_vector_default: None,
             real_vector_default: Some(default),
             integer_vector_default: None,
             min: None,
@@ -424,7 +463,9 @@ impl ParamSpec {
             param_type: ParamType::IntegerVector,
             default: 0.0,
             string_default: None,
+            complex_default: None,
             string_vector_default: None,
+            complex_vector_default: None,
             real_vector_default: None,
             integer_vector_default: Some(default),
             min: None,
@@ -443,7 +484,30 @@ impl ParamSpec {
             param_type: ParamType::StringVector,
             default: 0.0,
             string_default: None,
+            complex_default: None,
             string_vector_default: Some(default),
+            complex_vector_default: None,
+            real_vector_default: None,
+            integer_vector_default: None,
+            min: None,
+            max: None,
+            vector_min_len: None,
+            vector_max_len: None,
+            required: false,
+            description: String::new(),
+        }
+    }
+
+    /// Create a complex-vector parameter with default
+    pub fn complex_vector(name: impl Into<String>, default: Vec<Complex64>) -> Self {
+        Self {
+            name: name.into(),
+            param_type: ParamType::ComplexVector,
+            default: 0.0,
+            string_default: None,
+            complex_default: None,
+            string_vector_default: None,
+            complex_vector_default: Some(default),
             real_vector_default: None,
             integer_vector_default: None,
             min: None,

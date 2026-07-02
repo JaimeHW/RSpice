@@ -4,7 +4,7 @@
 //! Handles port value access, parameter lookup, and state management.
 
 use super::{DigitalValue, PortType};
-use crate::Value;
+use crate::{Complex64, Value};
 use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -431,6 +431,8 @@ pub struct CmContext {
     //-------------------------------------------------------------------------
     /// Instance parameters by name
     params: HashMap<String, Value>,
+    /// Complex parameters by name
+    complex_params: HashMap<String, Complex64>,
     /// String parameters (paths, etc.)
     string_params: HashMap<String, String>,
     /// Monotonic revisions for string parameters by canonical name.
@@ -439,6 +441,8 @@ pub struct CmContext {
     next_string_param_revision: u64,
     /// String-vector parameters by name
     string_vector_params: HashMap<String, Vec<String>>,
+    /// Complex-vector parameters by name
+    complex_vector_params: HashMap<String, Vec<Complex64>>,
     /// Real-vector parameters by name
     real_vector_params: HashMap<String, Vec<Value>>,
     /// Monotonic revisions for real-vector parameters by canonical name.
@@ -530,10 +534,12 @@ impl CmContext {
             port_control_columns: HashMap::new(),
             port_widths: HashMap::new(),
             params: HashMap::new(),
+            complex_params: HashMap::new(),
             string_params: HashMap::new(),
             string_param_revisions: HashMap::new(),
             next_string_param_revision: 1,
             string_vector_params: HashMap::new(),
+            complex_vector_params: HashMap::new(),
             real_vector_params: HashMap::new(),
             real_vector_param_revisions: HashMap::new(),
             next_real_vector_param_revision: 1,
@@ -1616,6 +1622,21 @@ impl CmContext {
         self.params.get(key.as_ref()).copied().unwrap_or(default)
     }
 
+    /// Get complex parameter
+    pub fn complex_param(&self, name: &str) -> Option<Complex64> {
+        let key = Self::canonical_param_lookup_key(name);
+        self.complex_params.get(key.as_ref()).copied()
+    }
+
+    /// Get complex parameter with default
+    pub fn complex_param_or(&self, name: &str, default: Complex64) -> Complex64 {
+        let key = Self::canonical_param_lookup_key(name);
+        self.complex_params
+            .get(key.as_ref())
+            .copied()
+            .unwrap_or(default)
+    }
+
     /// Get string parameter
     pub fn string_param(&self, name: &str) -> Option<&str> {
         let key = Self::canonical_param_lookup_key(name);
@@ -1632,6 +1653,14 @@ impl CmContext {
     pub fn string_vector_param(&self, name: &str) -> Option<&[String]> {
         let key = Self::canonical_param_lookup_key(name);
         self.string_vector_params
+            .get(key.as_ref())
+            .map(|values| values.as_slice())
+    }
+
+    /// Get complex-vector parameter
+    pub fn complex_vector_param(&self, name: &str) -> Option<&[Complex64]> {
+        let key = Self::canonical_param_lookup_key(name);
+        self.complex_vector_params
             .get(key.as_ref())
             .map(|values| values.as_slice())
     }
@@ -1674,6 +1703,12 @@ impl CmContext {
         self.params.insert(Self::canonical_param_key(name), value);
     }
 
+    /// Set complex parameter
+    pub fn set_complex_param(&mut self, name: &str, value: Complex64) {
+        self.complex_params
+            .insert(Self::canonical_param_key(name), value);
+    }
+
     /// Set string parameter
     pub fn set_string_param(&mut self, name: &str, value: &str) {
         let key = Self::canonical_param_key(name);
@@ -1689,6 +1724,12 @@ impl CmContext {
     /// Set string-vector parameter
     pub fn set_string_vector_param(&mut self, name: &str, value: Vec<String>) {
         self.string_vector_params
+            .insert(Self::canonical_param_key(name), value);
+    }
+
+    /// Set complex-vector parameter
+    pub fn set_complex_vector_param(&mut self, name: &str, value: Vec<Complex64>) {
+        self.complex_vector_params
             .insert(Self::canonical_param_key(name), value);
     }
 
@@ -2372,8 +2413,13 @@ mod tests {
     fn parameter_lookup_remains_case_insensitive_for_all_channels() {
         let mut ctx = CmContext::new();
         ctx.set_param("Gain", 2.5);
+        ctx.set_complex_param("Pole", Complex64::new(1.0, -2.0));
         ctx.set_string_param("File", "table.dat");
         ctx.set_string_vector_param("Labels", vec!["a".to_string(), "b".to_string()]);
+        ctx.set_complex_vector_param(
+            "Zeros",
+            vec![Complex64::new(3.0, 4.0), Complex64::new(5.0, -6.0)],
+        );
         ctx.set_real_vector_param("Points", vec![1.0, 2.0]);
         ctx.set_integer_vector_param("Bits", vec![1, 0]);
         ctx.mark_param_provided("Gain");
@@ -2381,6 +2427,11 @@ mod tests {
         assert_eq!(ctx.param("gain"), 2.5);
         assert_eq!(ctx.param("GAIN"), 2.5);
         assert_eq!(ctx.param_or("missing", 7.0), 7.0);
+        assert_eq!(ctx.complex_param("POLE"), Some(Complex64::new(1.0, -2.0)));
+        assert_eq!(
+            ctx.complex_param_or("missing_complex", Complex64::new(7.0, 8.0)),
+            Complex64::new(7.0, 8.0)
+        );
         assert_eq!(ctx.string_param("file"), Some("table.dat"));
         let file_revision = ctx
             .string_param_revision("FILE")
@@ -2394,6 +2445,10 @@ mod tests {
         assert_eq!(
             ctx.string_vector_param("LABELS"),
             Some(["a".to_string(), "b".to_string()].as_slice())
+        );
+        assert_eq!(
+            ctx.complex_vector_param("zeros"),
+            Some([Complex64::new(3.0, 4.0), Complex64::new(5.0, -6.0)].as_slice())
         );
         assert_eq!(ctx.real_vector_param("points"), Some([1.0, 2.0].as_slice()));
         let points_revision = ctx
