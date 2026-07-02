@@ -266,7 +266,7 @@ impl CircuitData {
             1
         };
 
-        for _pass in 0..max_event_passes {
+        for pass in 0..max_event_passes {
             let digital_values = &mut self.xspice_digital_values;
             let digital_drivers = &mut self.xspice_digital_drivers;
             let digital_event_times = &mut self.xspice_digital_event_times;
@@ -324,7 +324,17 @@ impl CircuitData {
             }
 
             if !changed {
-                break;
+                return Ok(());
+            }
+
+            if pass + 1 == max_event_passes {
+                let message = format!(
+                    "XSPICE event network did not settle at time {time:e} after {max_event_passes} passes"
+                );
+                if self.xspice_evaluation_error.is_none() {
+                    self.xspice_evaluation_error = Some(message.clone());
+                }
+                return Err(crate::xspice::CmError::EvaluationError(message));
             }
         }
         Ok(())
@@ -1702,6 +1712,8 @@ mod tests {
         params: Vec<ParamSpec>,
     }
 
+    struct OscillatingEventModel;
+
     struct PhaseProbeModel {
         seen_phases: Arc<Mutex<Vec<EvaluationPhase>>>,
     }
@@ -1786,6 +1798,39 @@ mod tests {
         }
     }
 
+    impl CodeModel for OscillatingEventModel {
+        fn name(&self) -> &str {
+            "oscillating_event_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            use std::sync::OnceLock;
+            static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+            PORTS.get_or_init(|| vec![PortSpec::output("out", PortType::Digital)])
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+            ctx.allocate_int_states(1);
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            let next = 1 - ctx.int_state(0);
+            ctx.set_int_state(0, next);
+            let value = if next == 0 {
+                DigitalValue::zero()
+            } else {
+                DigitalValue::one()
+            };
+            ctx.set_output_digital("out", value, 0.0);
+            Ok(())
+        }
+    }
+
     impl CodeModel for PhaseProbeModel {
         fn name(&self) -> &str {
             "phase_probe_model"
@@ -1854,6 +1899,19 @@ mod tests {
         .expect("breakpoint instance should construct")
     }
 
+    fn oscillating_event_instance() -> XspiceInstance {
+        XspiceInstance::new(
+            "Aosc",
+            Arc::new(OscillatingEventModel),
+            vec![PortConnection::Digital(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("oscillating event instance should construct")
+    }
+
     fn phase_probe_instance(seen_phases: Arc<Mutex<Vec<EvaluationPhase>>>) -> XspiceInstance {
         XspiceInstance::new(
             "Aphase",
@@ -1917,6 +1975,20 @@ mod tests {
 
         assert!(err.contains("Afail"));
         assert!(err.contains("intentional failure"));
+    }
+
+    #[test]
+    fn evaluate_xspice_reports_nonsettling_zero_delay_event_network() {
+        let mut circuit = CircuitData::new();
+        circuit.add_xspice_instance(oscillating_event_instance());
+
+        circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient);
+        let err = circuit
+            .take_xspice_evaluation_error()
+            .expect("non-settling XSPICE event networks must be reported");
+
+        assert!(err.contains("XSPICE event network did not settle"));
+        assert!(err.contains("2 passes"));
     }
 
     #[test]
