@@ -176,9 +176,12 @@ fn coerce_xspice_connection_named(
                     neg: 0,
                 })
             } else {
-                Ok(PortConnection::NamedBranchCurrent {
-                    source_name: name.clone(),
-                    branch_ordinal: None,
+                let pos = resolve_xspice_node(circuit, name);
+                let branch_ordinal = circuit.allocate_branch_named(branch_name);
+                Ok(PortConnection::CurrentProbe {
+                    pos,
+                    neg: 0,
+                    branch_ordinal,
                 })
             }
         }
@@ -466,9 +469,15 @@ fn coerce_xspice_vector_connection(
                         neg: 0,
                     }
                 } else {
-                    AnalogInputConnection::NamedBranchCurrent {
-                        source_name: name.clone(),
-                        branch_ordinal: None,
+                    let pos = resolve_xspice_node(circuit, name);
+                    let branch_ordinal = circuit.allocate_branch_named(&format!(
+                        "{element_name}#{}[{index}]#sense",
+                        port_spec.name
+                    ));
+                    AnalogInputConnection::CurrentProbe {
+                        pos,
+                        neg: 0,
+                        branch_ordinal,
                     }
                 }
             }
@@ -705,6 +714,25 @@ mod tests {
             err.to_string().contains("does not allow explicit"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn explicit_scalar_current_input_allocates_single_ended_probe() {
+        let mut circuit = CircuitData::new();
+        let port = PortSpec::input("in", PortType::Current);
+        let parsed = XspicePort::Current("sense".to_string());
+
+        let connection = coerce_xspice_connection(&mut circuit, &port, &parsed)
+            .expect("scalar %i input should allocate a current probe");
+
+        assert!(matches!(
+            connection,
+            PortConnection::CurrentProbe {
+                pos,
+                neg: 0,
+                branch_ordinal
+            } if pos > 0 && branch_ordinal > 0
+        ));
     }
 
     #[test]

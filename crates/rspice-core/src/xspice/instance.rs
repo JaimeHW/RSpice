@@ -1844,8 +1844,8 @@ impl XspiceInstance {
         }
     }
 
-    /// Resolve `%vnam` and `%i(name)` inputs after branch-bearing elements and
-    /// independent current sources have been allocated.
+    /// Resolve `%vnam` inputs after branch-bearing elements and independent
+    /// current sources have been allocated.
     pub fn resolve_branch_references(
         &mut self,
         mut branch_lookup: impl FnMut(&str) -> Option<usize>,
