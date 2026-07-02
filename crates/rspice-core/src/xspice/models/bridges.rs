@@ -526,8 +526,9 @@ fn bidi_unknown_target_svoc(drive: DigitalValue, params: BidiParams) -> Value {
         DigitalStrength::Strong => {
             if params.drive_high > params.drive_low {
                 1.0
+            } else if params.drive_low > params.drive_high {
+                0.0
             } else {
-                // ngspice falls through to mid-rail when drive_low >= drive_high.
                 0.5
             }
         }
@@ -1877,7 +1878,7 @@ mod tests {
     }
 
     #[test]
-    fn bidi_bridge_strong_unknown_drive_matches_ngspice_midrail_fallthrough() {
+    fn bidi_bridge_strong_unknown_drive_prefers_stronger_limit() {
         let mut ctx = CmContext::new();
         set_bidi_default_params(&mut ctx, 0.0);
         let drive = DigitalValue::new(DigitalState::Unknown, DigitalStrength::Strong);
@@ -1893,7 +1894,7 @@ mod tests {
         ctx.set_param("drive_low", 0.04);
         assert_eq!(
             bidi_target_svoc(drive, bidi_params(&ctx).expect("bidi params")),
-            0.5
+            0.0
         );
 
         ctx.set_param("drive_high", 0.03);
