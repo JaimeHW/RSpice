@@ -1681,13 +1681,19 @@ fn build_subcircuit_param_scope(
     instance_params: &[(String, ParametricValue)],
     random: &RandomState,
 ) -> Result<ParamContext, ParseError> {
+    let (instance_numeric, instance_strings) =
+        resolve_subcircuit_instance_params(subckt, caller_scope, instance_params, random)?;
+    let instance_names = instance_params
+        .iter()
+        .map(|(name, _)| name.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+
     let mut scope = caller_scope.clone();
     scope.adopt_random(random);
 
     for (name, value) in &subckt.params {
         scope.set(name, *value);
     }
-    resolve_deferred_param_expressions(&subckt.expr_params, &mut scope, random, &[])?;
     for (name, value) in &subckt.string_params {
         scope.set_string(name, value.clone());
     }
@@ -1701,19 +1707,13 @@ fn build_subcircuit_param_scope(
         scope.import_function(function.clone());
     }
 
-    let (instance_numeric, instance_strings) =
-        resolve_subcircuit_instance_params(subckt, &scope, instance_params, random)?;
-    let instance_names = instance_params
-        .iter()
-        .map(|(name, _)| name.to_ascii_uppercase())
-        .collect::<Vec<_>>();
-
     for (name, value) in instance_strings {
         scope.set_string(&name, value);
     }
     for (name, value) in instance_numeric {
         scope.set(&name, value);
     }
+    resolve_deferred_param_expressions(&subckt.expr_params, &mut scope, random, &instance_names)?;
     resolve_deferred_param_expressions(
         &subckt.body_expr_params,
         &mut scope,

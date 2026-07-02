@@ -6744,6 +6744,47 @@ mod tests {
     }
 
     #[test]
+    fn subckt_instance_param_expression_uses_caller_scope_before_callee_defaults() {
+        let netlist = Netlist::parse(
+            "subckt local model caller shadow scope\n\
+             .param is0=100f\n\
+             .func twice(x) {x*2}\n\
+             X1 1 0 DCell PARAMS: is0={is0}\n\
+             X2 2 0 DCell PARAMS: is0={twice(is0)}\n\
+             .subckt DCell a b PARAMS: is0=1\n\
+             .model DM D (IS={is0})\n\
+             D1 a b DM\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("same-name caller parameter deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("same-name caller parameter deck flattens");
+        let model_for = |element_name: &str| -> &str {
+            flattened
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::Diode { model, .. } if element.name == element_name => {
+                        Some(model.as_str())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("flattened diode {element_name} exists"))
+        };
+
+        assert_eq!(
+            scoped_model_param(&flattened.scoped_models, model_for("X1.D1"), "IS"),
+            Some(100e-15)
+        );
+        assert_eq!(
+            scoped_model_param(&flattened.scoped_models, model_for("X2.D1"), "IS"),
+            Some(200e-15)
+        );
+    }
+
+    #[test]
     fn subckt_source_value_resolves_against_instance_scope_when_flattened() {
         let netlist = Netlist::parse(
             "subckt source parameter scope\n\
