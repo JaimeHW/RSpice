@@ -1616,6 +1616,29 @@ fn test_xyce_multiplicity_factor_resistor_wrapper_cases_run_natively() {
 }
 
 #[test]
+fn test_xyce_multiplicity_factor_inductor_step_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MULTIPLICITY_FACTOR/inductor.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native stepped inductor multiplicity transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_step_tran",
+        "{relative} should report the native stepped transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_rf_port_static_dc_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

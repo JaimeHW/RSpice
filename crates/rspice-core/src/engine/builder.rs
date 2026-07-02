@@ -1018,6 +1018,52 @@ impl Engine {
         .map(Some)
     }
 
+    pub(crate) fn resolved_inductor_value(
+        &self,
+        netlist: &Netlist,
+        inductor_name: &str,
+    ) -> Result<Option<f64>, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        let flattened = flatten_netlist_with_models(netlist)
+            .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
+        let mut effective_netlist;
+        let netlist = if flattened.scoped_models.is_empty() {
+            netlist
+        } else {
+            effective_netlist = netlist.clone();
+            effective_netlist.models.extend(flattened.scoped_models);
+            &effective_netlist
+        };
+
+        let Some(element) = flattened
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(inductor_name))
+        else {
+            return Ok(None);
+        };
+
+        let ElementKind::Inductor {
+            value,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            return Ok(None);
+        };
+
+        resolve_inductor_instance_value(
+            netlist,
+            &element.name,
+            *value,
+            model.as_deref(),
+            instance_params,
+            engine.config.temperature,
+        )
+        .map(Some)
+    }
+
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
         let mut circuit = CircuitData::new();

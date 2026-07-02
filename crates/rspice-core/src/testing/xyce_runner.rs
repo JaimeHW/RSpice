@@ -43,6 +43,8 @@ pub struct XyceRunnerConfig {
     pub absolute_tolerance: f64,
     /// Absolute tolerance for voltage-like near-zero values.
     pub voltage_absolute_tolerance: f64,
+    /// Absolute tolerance for derived power near-zero values.
+    pub power_absolute_tolerance: f64,
     /// Maximum number of mismatches to retain in one result.
     pub max_mismatches: usize,
     /// Maximum wall-clock time allowed for a numerically executed deck.
@@ -57,6 +59,7 @@ impl Default for XyceRunnerConfig {
             relative_tolerance: 0.02,
             absolute_tolerance: 1.0e-12,
             voltage_absolute_tolerance: crate::constants::VNTOL,
+            power_absolute_tolerance: 1.0e-9,
             max_mismatches: 20,
             max_time_per_test_ms: 180_000,
             verbose: false,
@@ -1297,10 +1300,7 @@ impl XyceTestRunner {
                 }
                 if !has_file_output {
                     if primary_format.as_deref().is_some_and(|format| {
-                        matches!(
-                            format.to_ascii_lowercase().as_str(),
-                            "gnuplot" | "splot"
-                        )
+                        matches!(format.to_ascii_lowercase().as_str(), "gnuplot" | "splot")
                     }) {
                         return Err(format!(
                             "wrapper-origin transient .prn contract does not cover primary .PRINT TRAN FORMAT={}",
@@ -3824,6 +3824,9 @@ impl XyceTestRunner {
         if Self::probe_uses_voltage_tolerance(normalized_probe) {
             tolerance.absolute = self.config.voltage_absolute_tolerance;
         }
+        if Self::parse_power_probe(normalized_probe).is_some() {
+            tolerance.absolute = tolerance.absolute.max(self.config.power_absolute_tolerance);
+        }
         tolerance
     }
 
@@ -4005,7 +4008,7 @@ impl XyceTestRunner {
         for probe in &print.probes {
             Self::validate_tran_probe(probe, netlist)?;
         }
-        Self::validate_native_transient_contract(&netlist.elements, &netlist.params)?;
+        Self::validate_native_transient_contract(netlist)?;
 
         Ok(())
     }
@@ -4016,26 +4019,84 @@ impl XyceTestRunner {
                 ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
                     Self::validate_static_step_tran_source_spec(&element.name, spec)?;
                 }
-                ElementKind::Resistor { value_expr, .. } => {
-                    if value_expr
-                        .as_deref()
-                        .is_some_and(Self::expression_references_time_symbol)
-                    {
-                        return Err(format!(
-                            "native .STEP .PRINT TRAN comparison does not yet support time-dependent resistor value expressions; element '{}' references TIME",
-                            element.name
-                        ));
-                    }
+                ElementKind::Resistor { .. } => {
+                    Self::validate_static_step_resistor_contract(netlist, &element.name)?;
+                }
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    ..
+                } => {
+                    Self::validate_static_transient_passive_value(
+                        "capacitor",
+                        &element.name,
+                        *value,
+                        value_expr.as_deref(),
+                        model.as_deref(),
+                        instance_params,
+                        &netlist.params,
+                    )?;
+                }
+                ElementKind::Inductor { .. } => {
+                    Self::validate_static_step_inductor_contract(netlist, &element.name)?;
+                }
+                ElementKind::Coupling { .. } => {
+                    return Err(format!(
+                        "native .STEP .PRINT TRAN comparison does not yet support coupled-inductor transient decks; element '{}' requires production transient coupling validation",
+                        element.name
+                    ));
                 }
                 _ => {
                     return Err(format!(
-                        "native .STEP .PRINT TRAN comparison currently supports static resistors and independent DC/PULSE/SIN/PWL/PAT sources; element '{}' requires a broader stepped transient oracle contract",
+                        "native .STEP .PRINT TRAN comparison currently supports static R/L/C passives, coupled inductors, and independent DC/PULSE/SIN/PWL/PAT sources; element '{}' requires a broader stepped transient oracle contract",
                         element.name
                     ));
                 }
             }
         }
         Ok(())
+    }
+
+    fn validate_static_step_resistor_contract(
+        netlist: &Netlist,
+        element_name: &str,
+    ) -> Result<(), String> {
+        let resistance = Self::effective_resistor_value(netlist, element_name).ok_or_else(|| {
+            format!(
+                "native .STEP .PRINT TRAN comparison could not resolve resistor '{}' to a static resistance",
+                element_name
+            )
+        })?;
+        if resistance.is_finite() || (resistance.is_infinite() && resistance.is_sign_positive()) {
+            Ok(())
+        } else {
+            Err(format!(
+                "native .STEP .PRINT TRAN comparison does not support resistor '{}' with invalid resistance {}",
+                element_name, resistance
+            ))
+        }
+    }
+
+    fn validate_static_step_inductor_contract(
+        netlist: &Netlist,
+        element_name: &str,
+    ) -> Result<(), String> {
+        let inductance = Self::effective_inductor_value(netlist, element_name).ok_or_else(|| {
+            format!(
+                "native .STEP .PRINT TRAN comparison could not resolve inductor '{}' to a static inductance",
+                element_name
+            )
+        })?;
+        if inductance.is_finite() && inductance > 0.0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "native .STEP .PRINT TRAN comparison does not support inductor '{}' with invalid inductance {}",
+                element_name, inductance
+            ))
+        }
     }
 
     fn validate_static_step_tran_source_spec(
@@ -4061,10 +4122,9 @@ impl XyceTestRunner {
         }
     }
 
-    fn validate_native_transient_contract(
-        elements: &[crate::netlist::Element],
-        params: &crate::netlist::ParamContext,
-    ) -> Result<(), String> {
+    fn validate_native_transient_contract(netlist: &Netlist) -> Result<(), String> {
+        let elements = &netlist.elements;
+        let params = &netlist.params;
         for element in elements {
             match &element.kind {
                 ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_) => {}
@@ -4156,22 +4216,14 @@ impl XyceTestRunner {
                         params,
                     )?;
                 }
-                ElementKind::Inductor {
-                    value,
-                    value_expr,
-                    model,
-                    instance_params,
-                    ..
-                } => {
-                    Self::validate_static_transient_passive_value(
-                        "inductor",
-                        &element.name,
-                        *value,
-                        value_expr.as_deref(),
-                        model.as_deref(),
-                        instance_params,
-                        params,
-                    )?;
+                ElementKind::Inductor { .. } => {
+                    Self::validate_static_step_inductor_contract(netlist, &element.name)?;
+                }
+                ElementKind::Coupling { .. } => {
+                    return Err(format!(
+                        "native static .PRINT TRAN comparison does not yet support coupled-inductor transient decks; element '{}' requires production transient coupling validation",
+                        element.name
+                    ));
                 }
                 _ => {
                     return Err(format!(
@@ -4338,7 +4390,7 @@ impl XyceTestRunner {
                     netlist,
                 );
             }
-            if Self::print_expression_contains_probe_call(expression) {
+            if Self::print_expression_contains_probe_reference(expression) {
                 return Self::validate_tran_probe_expression(expression, netlist);
             }
             let context = Self::print_tran_eval_context(netlist, 0.0);
@@ -4376,6 +4428,17 @@ impl XyceTestRunner {
             }
             return Err(format!(
                 "transient branch-current probe '{}' targets an element without a recorded transient branch current",
+                original
+            ));
+        }
+        if let Some(element_name) = Self::parse_power_probe(normalized) {
+            if Self::find_inductor_element(netlist, &element_name).is_some()
+                && Self::netlist_has_recorded_branch_current(netlist, &element_name)
+            {
+                return Ok(());
+            }
+            return Err(format!(
+                "transient power probe '{}' targets an unsupported branch/device",
                 original
             ));
         }
@@ -4768,7 +4831,7 @@ impl XyceTestRunner {
             if Self::braced_expression_is_atomic_probe(&normalized_expression) {
                 return Self::validate_atomic_dc_probe(&normalized_expression, expression, netlist);
             }
-            if Self::print_expression_contains_probe_call(expression) {
+            if Self::print_expression_contains_probe_reference(expression) {
                 return Self::validate_dc_probe_expression(expression, netlist);
             }
             let context = Self::print_eval_context(netlist, None, None);
@@ -4970,7 +5033,7 @@ impl XyceTestRunner {
                     op_report,
                 );
             }
-            if Self::print_expression_contains_probe_call(expression) {
+            if Self::print_expression_contains_probe_reference(expression) {
                 return Self::evaluate_dc_probe_expression(
                     expression,
                     netlist,
@@ -5127,7 +5190,7 @@ impl XyceTestRunner {
                     time,
                 );
             }
-            if Self::print_expression_contains_probe_call(expression) {
+            if Self::print_expression_contains_probe_reference(expression) {
                 return Self::evaluate_tran_probe_expression(expression, netlist, result, time);
             }
             let context = Self::print_tran_eval_context(netlist, time);
@@ -5160,8 +5223,9 @@ impl XyceTestRunner {
         }
 
         if let Some(element_name) = Self::parse_current_probe(normalized) {
-            if let Some(waveform) = result.try_branch_current_waveform_named(&element_name) {
-                return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
+            if let Some(current) = Self::transient_branch_current_named(result, &element_name, time)
+            {
+                return Ok(current);
             }
             if let Some(value) = Self::evaluate_independent_current_source_probe(
                 netlist,
@@ -5173,6 +5237,21 @@ impl XyceTestRunner {
             }
             return Err(format!(
                 "branch current '{}' not found in transient result",
+                element_name
+            ));
+        }
+
+        if let Some(element_name) = Self::parse_power_probe(normalized) {
+            if Self::find_inductor_element(netlist, &element_name).is_some() {
+                return Self::evaluate_transient_inductor_power(
+                    netlist,
+                    result,
+                    time,
+                    &element_name,
+                );
+            }
+            return Err(format!(
+                "transient power probe '{}' targets an unsupported branch/device",
                 element_name
             ));
         }
@@ -5205,6 +5284,96 @@ impl XyceTestRunner {
             .map_err(|err| {
                 format!("failed to evaluate .PRINT TRAN expression '{{{expression}}}': {err}")
             })
+    }
+
+    fn transient_branch_current_named(
+        result: &TransientResult,
+        branch_name: &str,
+        time: Value,
+    ) -> Option<Value> {
+        Self::transient_branch_current_waveform_named(result, branch_name).and_then(|waveform| {
+            Self::interpolate_transient_waveform_at(&result.time, waveform, time).ok()
+        })
+    }
+
+    fn transient_branch_current_waveform_named<'a>(
+        result: &'a TransientResult,
+        branch_name: &str,
+    ) -> Option<&'a [Value]> {
+        result
+            .try_branch_current_waveform_named(branch_name)
+            .or_else(|| {
+                let normalized = Self::normalize_device_instance_name(branch_name);
+                (normalized != branch_name)
+                    .then(|| result.try_branch_current_waveform_named(&normalized))?
+            })
+    }
+
+    fn evaluate_transient_inductor_power(
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        inductor_name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_inductor_element(netlist, inductor_name)
+            .ok_or_else(|| format!("inductor '{}' not found", inductor_name))?;
+        let node_pos = element
+            .nodes
+            .first()
+            .ok_or_else(|| format!("inductor '{}' has no positive node", inductor_name))?;
+        let node_neg = element
+            .nodes
+            .get(1)
+            .ok_or_else(|| format!("inductor '{}' has no negative node", inductor_name))?;
+        let pos_index = result
+            .node_index_named(node_pos)
+            .ok_or_else(|| format!("node '{}' not found in transient result", node_pos))?;
+        let neg_index = result
+            .node_index_named(node_neg)
+            .ok_or_else(|| format!("node '{}' not found in transient result", node_neg))?;
+        let current = Self::transient_branch_current_waveform_named(result, inductor_name)
+            .ok_or_else(|| {
+                format!(
+                    "branch current '{}' not found in transient result",
+                    inductor_name
+                )
+            })?;
+
+        if current.len() != result.time.len() {
+            return Err(format!(
+                "branch current '{}' has {} sample(s) for {} time point(s)",
+                inductor_name,
+                current.len(),
+                result.time.len()
+            ));
+        }
+
+        let mut power = Vec::with_capacity(result.time.len());
+        for index in 0..result.time.len() {
+            let v_pos = if pos_index == 0 {
+                0.0
+            } else {
+                result.try_voltage_at(pos_index, index).ok_or_else(|| {
+                    format!(
+                        "node '{}' sample {} not found in transient result",
+                        node_pos, index
+                    )
+                })?
+            };
+            let v_neg = if neg_index == 0 {
+                0.0
+            } else {
+                result.try_voltage_at(neg_index, index).ok_or_else(|| {
+                    format!(
+                        "node '{}' sample {} not found in transient result",
+                        node_neg, index
+                    )
+                })?
+            };
+            power.push((v_pos - v_neg) * current[index]);
+        }
+
+        Self::interpolate_transient_waveform_at(&result.time, &power, time)
     }
 
     fn transient_voltage_named(
@@ -5323,6 +5492,10 @@ impl XyceTestRunner {
             Self::rewrite_print_ddx_calls(expression, context, call_value, override_probe)?;
         let (rewritten, context, _) =
             Self::rewrite_print_expression_calls_maybe(&rewritten, context, |call| {
+                Self::print_probe_value(call, call_value, override_probe)
+            })?;
+        let (rewritten, context, _) =
+            Self::rewrite_print_device_parameter_tokens_maybe(&rewritten, context, |call| {
                 Self::print_probe_value(call, call_value, override_probe)
             })?;
         crate::netlist::expr::eval_expression(&rewritten, &context).map_err(|err| err.to_string())
@@ -5588,6 +5761,42 @@ impl XyceTestRunner {
         Ok((rewritten, context, placeholder_index))
     }
 
+    fn rewrite_print_device_parameter_tokens_maybe<F>(
+        expression: &str,
+        mut context: crate::netlist::ParamContext,
+        mut call_value: F,
+    ) -> Result<(String, crate::netlist::ParamContext, usize), String>
+    where
+        F: FnMut(&str) -> Result<Value, String>,
+    {
+        let mut rewritten = String::with_capacity(expression.len());
+        let mut index = 0usize;
+        let mut placeholder_index = 0usize;
+
+        while index < expression.len() {
+            if let Some((end_index, token)) =
+                Self::print_device_parameter_token_at(expression, index)
+            {
+                let placeholder = format!("__rspice_param_{placeholder_index}");
+                let value = call_value(token)?;
+                context.set(&placeholder, value);
+                rewritten.push_str(&placeholder);
+                placeholder_index += 1;
+                index = end_index;
+                continue;
+            }
+
+            let ch = expression[index..]
+                .chars()
+                .next()
+                .expect("valid char boundary");
+            rewritten.push(ch);
+            index += ch.len_utf8();
+        }
+
+        Ok((rewritten, context, placeholder_index))
+    }
+
     fn print_expression_inner(probe: &str) -> Option<&str> {
         let trimmed = probe.trim();
         trimmed
@@ -5601,6 +5810,23 @@ impl XyceTestRunner {
         let mut index = 0usize;
         while index < expression.len() {
             if Self::print_probe_call_open_index(expression, index).is_some() {
+                return true;
+            }
+            let ch = expression[index..]
+                .chars()
+                .next()
+                .expect("valid char boundary");
+            index += ch.len_utf8();
+        }
+        false
+    }
+
+    fn print_expression_contains_probe_reference(expression: &str) -> bool {
+        let mut index = 0usize;
+        while index < expression.len() {
+            if Self::print_probe_call_open_index(expression, index).is_some()
+                || Self::print_device_parameter_token_at(expression, index).is_some()
+            {
                 return true;
             }
             let ch = expression[index..]
@@ -5682,6 +5908,42 @@ impl XyceTestRunner {
             return Some(next_index);
         }
         None
+    }
+
+    fn print_device_parameter_token_at(expression: &str, index: usize) -> Option<(usize, &str)> {
+        if index >= expression.len() || !expression.is_char_boundary(index) {
+            return None;
+        }
+        let previous = expression[..index].chars().next_back();
+        if previous.is_some_and(Self::print_device_parameter_token_char) {
+            return None;
+        }
+
+        let first = expression[index..].chars().next()?;
+        if !(first.is_ascii_alphabetic() || first == '_') {
+            return None;
+        }
+
+        let mut end_index = index;
+        let mut has_colon = false;
+        while end_index < expression.len() {
+            let ch = expression[end_index..].chars().next()?;
+            if !Self::print_device_parameter_token_char(ch) {
+                break;
+            }
+            has_colon |= ch == ':';
+            end_index += ch.len_utf8();
+        }
+        if !has_colon {
+            return None;
+        }
+
+        let token = &expression[index..end_index];
+        Self::parse_device_parameter_probe(token).map(|_| (end_index, token))
+    }
+
+    fn print_device_parameter_token_char(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$' | ':')
     }
 
     fn print_identifier_char(ch: char) -> bool {
@@ -6076,6 +6338,7 @@ impl XyceTestRunner {
         let ElementKind::Inductor {
             value,
             value_expr,
+            model,
             instance_params,
             ..
         } = &element.kind
@@ -6084,6 +6347,12 @@ impl XyceTestRunner {
                 "inductor parameter probe '{name}:L' targets a non-inductor element"
             ));
         };
+        if (model.is_some()
+            || Self::inductor_instance_params_affect_effective_value(instance_params))
+            && let Some(inductance) = Self::effective_inductor_value(netlist, name)
+        {
+            return Ok(inductance);
+        }
         Self::evaluate_static_passive_parameter_value(
             netlist,
             dc,
@@ -6271,6 +6540,7 @@ impl XyceTestRunner {
         let ElementKind::Inductor {
             value,
             value_expr,
+            model,
             instance_params,
             ..
         } = &element.kind
@@ -6279,6 +6549,12 @@ impl XyceTestRunner {
                 "inductor parameter probe '{name}:L' targets a non-inductor element"
             ));
         };
+        if (model.is_some()
+            || Self::inductor_instance_params_affect_effective_value(instance_params))
+            && let Some(inductance) = Self::effective_inductor_value(netlist, name)
+        {
+            return Ok(inductance);
+        }
         Self::evaluate_transient_static_passive_parameter_value(
             netlist,
             result,
@@ -7003,6 +7279,39 @@ impl XyceTestRunner {
         .resolved_resistor_value(netlist, name)
         .ok()
         .flatten()
+    }
+
+    fn effective_inductor_value(netlist: &Netlist, name: &str) -> Option<Value> {
+        Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        })
+        .resolved_inductor_value(netlist, name)
+        .ok()
+        .flatten()
+    }
+
+    fn inductor_instance_params_affect_effective_value(
+        instance_params: &[(String, Value)],
+    ) -> bool {
+        const EFFECTIVE_VALUE_PARAMS: &[&str] = &[
+            "L",
+            "IND",
+            "VALUE",
+            "INDUCTANCE",
+            "M",
+            "MULT",
+            "SCALE",
+            "TEMP",
+            "DTEMP",
+            "TC1",
+            "TC2",
+        ];
+        instance_params.iter().any(|(name, _)| {
+            EFFECTIVE_VALUE_PARAMS
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate))
+        })
     }
 
     fn resistor_parameter_r_value(netlist: &Netlist, name: &str) -> Option<Value> {
@@ -8740,16 +9049,24 @@ End of Xyce(TM) Simulation
         let magnitude_tolerance = runner.default_comparison_tolerance("vm(1)");
         let phase_tolerance = runner.default_comparison_tolerance("vp(1)");
         let current_tolerance = runner.default_comparison_tolerance("i(v1)");
+        let power_tolerance = runner.default_comparison_tolerance("p(l1)");
 
         assert_eq!(voltage_tolerance.absolute, crate::constants::VNTOL);
         assert_eq!(magnitude_tolerance.absolute, crate::constants::VNTOL);
         assert_eq!(phase_tolerance.absolute, 1.0e-12);
         assert_eq!(current_tolerance.absolute, 1.0e-12);
+        assert_eq!(power_tolerance.absolute, 1.0e-9);
         assert!(
             runner
                 .value_mismatch(3.98095099e-12, 0.0, voltage_tolerance)
                 .is_none(),
             "picovolt-scale voltage differences should be inside default VNTOL"
+        );
+        assert!(
+            runner
+                .value_mismatch(1.27073881e-10, 6.193804438227198e-12, power_tolerance)
+                .is_none(),
+            "sub-nanowatt derived power differences should stay inside default power tolerance"
         );
         assert!(
             runner
@@ -8805,6 +9122,23 @@ End of Xyce(TM) Simulation
             XyceTestRunner::parse_device_parameter_probe("{Xtest:Xtest2:Rinside:R}"),
             Some(("xtest:xtest2:rinside".to_string(), "r".to_string()))
         );
+    }
+
+    #[test]
+    fn print_expression_rewrites_bare_device_parameter_tokens() {
+        let mut call_value = |call: &str| match XyceTestRunner::normalize_probe(call).as_str() {
+            "r1:r" => Ok(2.0),
+            "l1:l" => Ok(3.0e-3),
+            other => Err(format!("unexpected probe {other}")),
+        };
+        let value = XyceTestRunner::evaluate_print_expression_with_probe_calls(
+            "{R1:R*L1:L}",
+            crate::netlist::ParamContext::default(),
+            &mut call_value,
+        )
+        .expect("device-parameter expression evaluates");
+
+        assert!((value - 6.0e-3).abs() < 1.0e-15, "value {value}");
     }
 
     #[test]

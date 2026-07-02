@@ -466,11 +466,41 @@ impl Engine {
                 *c = value;
                 Ok(())
             }
-            ElementKind::Inductor { value: l, .. }
-            | ElementKind::JilesAthertonInductor { value: l, .. } => {
+            ElementKind::Inductor {
+                value: l,
+                model,
+                instance_params,
+                ..
+            } => {
+                match param_upper.as_deref() {
+                    None | Some("L") | Some("IND") | Some("VALUE") | Some("INDUCTANCE") => {
+                        *l = value;
+                        if model.is_some() {
+                            set_instance_param(instance_params, "L", value);
+                        }
+                    }
+                    Some("M") | Some("MULT") | Some("SCALE") | Some("TEMP") | Some("DTEMP")
+                    | Some("TC1") | Some("TC2") => {
+                        set_instance_param(
+                            instance_params,
+                            param_upper.as_deref().expect("param is present"),
+                            value,
+                        );
+                    }
+                    Some(_) => {
+                        return Err(SimulationError::Circuit(
+                            "Unsupported inductor step parameter; use L, VALUE, M, MULT, SCALE, TEMP, DTEMP, TC1, or TC2"
+                                .to_string(),
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            ElementKind::JilesAthertonInductor { value: l, .. } => {
                 if !matches_param(&["L", "VALUE", "INDUCTANCE"]) {
                     return Err(SimulationError::Circuit(
-                        "Unsupported inductor step parameter; use L or VALUE".to_string(),
+                        "Unsupported Jiles-Atherton inductor step parameter; use L or VALUE"
+                            .to_string(),
                     ));
                 }
                 *l = value;
