@@ -37,6 +37,7 @@ fn validate_numeric_param(spec: &ParamSpec, value: Value) -> CmResult<()> {
 
     if let Some(min) = spec.min
         && checked_value < min
+        && !spec.min_is_soft
     {
         return Err(CmError::InvalidParameter {
             name: spec.name.clone(),
@@ -46,6 +47,7 @@ fn validate_numeric_param(spec: &ParamSpec, value: Value) -> CmResult<()> {
 
     if let Some(max) = spec.max
         && checked_value > max
+        && !spec.max_is_soft
     {
         return Err(CmError::InvalidParameter {
             name: spec.name.clone(),

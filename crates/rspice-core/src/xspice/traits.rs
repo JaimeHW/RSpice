@@ -319,6 +319,10 @@ pub struct ParamSpec {
     pub min: Option<Value>,
     /// Maximum value (for numeric types)
     pub max: Option<Value>,
+    /// Whether values below `min` are accepted for model-level clamping.
+    pub min_is_soft: bool,
+    /// Whether values above `max` are accepted for model-level clamping.
+    pub max_is_soft: bool,
     /// Minimum vector length (for vector types)
     pub vector_min_len: Option<usize>,
     /// Maximum vector length (for vector types)
@@ -344,6 +348,8 @@ impl ParamSpec {
             integer_vector_default: None,
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -365,6 +371,8 @@ impl ParamSpec {
             integer_vector_default: None,
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -386,6 +394,8 @@ impl ParamSpec {
             integer_vector_default: None,
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -407,6 +417,8 @@ impl ParamSpec {
             integer_vector_default: None,
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -428,6 +440,8 @@ impl ParamSpec {
             integer_vector_default: None,
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -449,6 +463,8 @@ impl ParamSpec {
             integer_vector_default: None,
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -470,6 +486,8 @@ impl ParamSpec {
             integer_vector_default: Some(default),
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -491,6 +509,8 @@ impl ParamSpec {
             integer_vector_default: None,
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -512,6 +532,8 @@ impl ParamSpec {
             integer_vector_default: None,
             min: None,
             max: None,
+            min_is_soft: false,
+            max_is_soft: false,
             vector_min_len: None,
             vector_max_len: None,
             required: false,
@@ -522,12 +544,14 @@ impl ParamSpec {
     /// Set minimum value
     pub fn with_min(mut self, min: Value) -> Self {
         self.min = Some(min);
+        self.min_is_soft = false;
         self
     }
 
     /// Set maximum value
     pub fn with_max(mut self, max: Value) -> Self {
         self.max = Some(max);
+        self.max_is_soft = false;
         self
     }
 
@@ -535,6 +559,31 @@ impl ParamSpec {
     pub fn with_range(mut self, min: Value, max: Value) -> Self {
         self.min = Some(min);
         self.max = Some(max);
+        self.min_is_soft = false;
+        self.max_is_soft = false;
+        self
+    }
+
+    /// Set a documented minimum that the model clamps at runtime.
+    pub fn with_soft_min(mut self, min: Value) -> Self {
+        self.min = Some(min);
+        self.min_is_soft = true;
+        self
+    }
+
+    /// Set a documented maximum that the model clamps at runtime.
+    pub fn with_soft_max(mut self, max: Value) -> Self {
+        self.max = Some(max);
+        self.max_is_soft = true;
+        self
+    }
+
+    /// Set a documented range that the model clamps at runtime.
+    pub fn with_soft_range(mut self, min: Value, max: Value) -> Self {
+        self.min = Some(min);
+        self.max = Some(max);
+        self.min_is_soft = true;
+        self.max_is_soft = true;
         self
     }
 
