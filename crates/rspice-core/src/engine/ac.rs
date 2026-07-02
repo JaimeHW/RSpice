@@ -2229,7 +2229,14 @@ impl Engine {
 
         // Get DC operating point
         let has_nonlinear = circuit.has_nonlinear_devices();
-        let dc_solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let dc_solution = if circuit.can_use_zero_bias_for_explicit_xspice_ac() {
+            log::debug!(
+                "using zero-bias small-signal state for explicit XSPICE transmission-line AC"
+            );
+            vec![0.0; circuit.matrix_size()]
+        } else {
+            engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?
+        };
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if has_nonlinear {
             // Align stateful nonlinear models (limited junction voltages, operating region)

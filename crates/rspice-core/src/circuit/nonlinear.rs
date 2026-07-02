@@ -83,8 +83,7 @@ mod tests {
 }
 
 impl CircuitData {
-    /// Check if circuit has any nonlinear devices requiring Newton-Raphson
-    pub fn has_nonlinear_devices(&self) -> bool {
+    fn has_non_xspice_nonlinear_devices(&self) -> bool {
         !self.diodes.is_empty()
             || !self.bjts.is_empty()
             || !self.mosfets.is_empty()
@@ -99,8 +98,8 @@ impl CircuitData {
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
+            || !self.generic_switches.is_empty()
             || self.behavioral_sources.has_solution_dependent_sources()
-            || self.has_xspice_devices()
             || {
                 #[cfg(feature = "veriloga-builtins")]
                 {
@@ -121,6 +120,22 @@ impl CircuitData {
                     false
                 }
             }
+    }
+
+    pub(crate) fn can_use_zero_bias_for_explicit_xspice_ac(&self) -> bool {
+        !self.xspice_instances.is_empty()
+            && !self.has_non_xspice_nonlinear_devices()
+            && self.xspice_instances.iter().all(|instance| {
+                matches!(
+                    instance.model_name(),
+                    "tline" | "mlin" | "cpline" | "cpmlin"
+                )
+            })
+    }
+
+    /// Check if circuit has any nonlinear devices requiring Newton-Raphson
+    pub fn has_nonlinear_devices(&self) -> bool {
+        self.has_non_xspice_nonlinear_devices() || self.has_xspice_devices()
     }
 
     /// Check if circuit has any BSIM3SOI device (DD, FD, or PD variant).
