@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 const D_LUT_INITIAL_STATE: i64 = i64::MIN;
 const D_LOOKUP_DELAY_MIN: Value = 1.0e-12;
-const D_LUT_TABLE_RESOURCE: &str = "xspice.d_lut.table_values";
+const D_LUT_TABLE_RESOURCE: &str = "xspice.d_lut.parsed_table_values";
 const D_GENLUT_TABLE_RESOURCE: &str = "xspice.d_genlut.parsed_table_values";
 const D_GENLUT_DELAY_PLAN_RESOURCE: &str = "xspice.d_genlut.delay_plan";
 
@@ -15,10 +15,16 @@ pub struct DigitalLookupTable;
 #[derive(Debug, Default)]
 pub struct DigitalGenericLookupTable;
 
-#[derive(Debug, Clone)]
-struct DLookupTableBytes {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DLutTableSignature {
     table_revision: u64,
-    bytes: Arc<[u8]>,
+    input_width: usize,
+}
+
+#[derive(Debug, Clone)]
+struct DLutTableStates {
+    signature: DLutTableSignature,
+    states: Arc<[DigitalState]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,26 +81,55 @@ fn d_lut_state_from_code(code: i64) -> DigitalState {
     }
 }
 
-fn d_lookup_table_bytes(ctx: &mut CmContext, resource_key: &str) -> CmResult<Arc<[u8]>> {
+fn d_lut_table_signature(ctx: &CmContext, input_width: usize) -> DLutTableSignature {
+    DLutTableSignature {
+        table_revision: ctx.string_param_revision("table_values").unwrap_or(0),
+        input_width,
+    }
+}
+
+fn d_lut_table_len(input_width: usize) -> CmResult<usize> {
+    if input_width >= usize::BITS as usize {
+        return Err(d_lut_error(format!(
+            "input vector width {input_width} is too large"
+        )));
+    }
+    Ok(1usize << input_width)
+}
+
+fn d_lut_table_state_from_byte(byte: Option<u8>) -> DigitalState {
+    match byte {
+        Some(b'0') => DigitalState::Zero,
+        Some(b'1') => DigitalState::One,
+        _ => DigitalState::Unknown,
+    }
+}
+
+fn d_lut_table_states(ctx: &mut CmContext, input_width: usize) -> CmResult<Arc<[DigitalState]>> {
     let table = ctx
         .string_param("table_values")
         .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
-    let table_revision = ctx.string_param_revision("table_values").unwrap_or(0);
-    if let Some(resource) = ctx.resource::<DLookupTableBytes>(resource_key)
-        && resource.table_revision == table_revision
+    let signature = d_lut_table_signature(ctx, input_width);
+    if let Some(resource) = ctx.resource::<DLutTableStates>(D_LUT_TABLE_RESOURCE)
+        && resource.signature == signature
     {
-        return Ok(Arc::clone(&resource.bytes));
+        return Ok(Arc::clone(&resource.states));
     }
 
-    let bytes: Arc<[u8]> = Arc::from(table.as_bytes());
+    let table_len = d_lut_table_len(input_width)?;
+    let bytes = table.as_bytes();
+    let states: Arc<[DigitalState]> = (0..table_len)
+        .map(|index| d_lut_table_state_from_byte(bytes.get(index).copied()))
+        .collect::<Vec<_>>()
+        .into();
     ctx.set_resource(
-        resource_key,
-        Arc::new(DLookupTableBytes {
-            table_revision,
-            bytes: Arc::clone(&bytes),
+        D_LUT_TABLE_RESOURCE,
+        Arc::new(DLutTableStates {
+            signature,
+            states: Arc::clone(&states),
         }),
     );
-    Ok(bytes)
+    Ok(states)
 }
 
 fn d_genlut_table_signature(
@@ -110,9 +145,12 @@ fn d_genlut_table_signature(
 }
 
 fn d_genlut_table_len(input_width: usize, output_width: usize) -> CmResult<usize> {
-    let entry_len = 1usize
-        .checked_shl(input_width as u32)
-        .ok_or_else(|| d_genlut_error(format!("input vector width {input_width} is too large")))?;
+    if input_width >= usize::BITS as usize {
+        return Err(d_genlut_error(format!(
+            "input vector width {input_width} is too large"
+        )));
+    }
+    let entry_len = 1usize << input_width;
     entry_len.checked_mul(output_width).ok_or_else(|| {
         d_genlut_error(format!(
             "lookup table shape {input_width} inputs x {output_width} outputs is too large"
@@ -219,11 +257,7 @@ fn d_genlut_delay_plan(
 }
 
 fn d_lut_table_state(table: &[u8], index: usize) -> DigitalState {
-    match table.get(index).copied() {
-        Some(b'0') => DigitalState::Zero,
-        Some(b'1') => DigitalState::One,
-        _ => DigitalState::Unknown,
-    }
+    d_lut_table_state_from_byte(table.get(index).copied())
 }
 
 fn d_genlut_value_code(value: DigitalValue) -> (i64, i64) {
@@ -516,11 +550,11 @@ impl CodeModel for DigitalLookupTable {
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let table = d_lookup_table_bytes(ctx, D_LUT_TABLE_RESOURCE)?;
         let input_width = ctx.port_width("in");
+        let table = d_lut_table_states(ctx, input_width)?;
         let inputs = ctx.input_digital_vector_values("in").unwrap_or(&[]);
         let output_state = match d_lut_index_for_width(inputs, input_width)? {
-            Some(index) => d_lut_table_state(table.as_ref(), index),
+            Some(index) => table[index],
             None => DigitalState::Unknown,
         };
         let output_code = d_lut_state_code(output_state);
@@ -858,28 +892,44 @@ mod tests {
     }
 
     #[test]
-    fn d_lookup_table_byte_cache_reloads_when_table_param_changes() {
+    fn d_lut_table_state_cache_reloads_when_table_param_or_width_changes() {
         let mut ctx = CmContext::new();
         ctx.set_string_param("table_values", "01");
 
-        let first =
-            d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE).expect("table bytes cache");
-        let reused =
-            d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE).expect("table bytes reuse");
+        let first = d_lut_table_states(&mut ctx, 1).expect("table state cache");
+        let reused = d_lut_table_states(&mut ctx, 1).expect("table state reuse");
         assert!(Arc::ptr_eq(&first, &reused));
-        assert_eq!(first.as_ref(), b"01");
+        assert_eq!(first.as_ref(), &[DigitalState::Zero, DigitalState::One]);
 
         ctx.set_string_param("other", "ignored");
-        let reused_after_unrelated_string_change =
-            d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE)
-                .expect("unrelated string params do not invalidate table bytes");
+        let reused_after_unrelated_string_change = d_lut_table_states(&mut ctx, 1)
+            .expect("unrelated string params do not invalidate table states");
         assert!(Arc::ptr_eq(&first, &reused_after_unrelated_string_change));
 
+        let wider = d_lut_table_states(&mut ctx, 2).expect("input width reloads table states");
+        assert!(!Arc::ptr_eq(&first, &wider));
+        assert_eq!(
+            wider.as_ref(),
+            &[
+                DigitalState::Zero,
+                DigitalState::One,
+                DigitalState::Unknown,
+                DigitalState::Unknown
+            ]
+        );
+
         ctx.set_string_param("table_values", "10");
-        let updated =
-            d_lookup_table_bytes(&mut ctx, D_LUT_TABLE_RESOURCE).expect("table bytes reload");
-        assert!(!Arc::ptr_eq(&first, &updated));
-        assert_eq!(updated.as_ref(), b"10");
+        let updated = d_lut_table_states(&mut ctx, 2).expect("table states reload");
+        assert!(!Arc::ptr_eq(&wider, &updated));
+        assert_eq!(
+            updated.as_ref(),
+            &[
+                DigitalState::One,
+                DigitalState::Zero,
+                DigitalState::Unknown,
+                DigitalState::Unknown
+            ]
+        );
     }
 
     #[test]
