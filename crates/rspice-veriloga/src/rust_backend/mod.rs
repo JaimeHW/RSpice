@@ -1441,6 +1441,58 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_replays_selective_mid_size_guarded_overwrites() {
+        let mut source = String::from(
+            r#"
+module selective_mid_size_guarded_overwrites(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real pad, state;
+    analog begin
+        state = $simparam("unsupported_initial_state");
+        if (mode == 1) begin
+            if (V(p, n) > 0.0) begin
+                state = sqrt(V(p, n));
+            end else begin
+                state = 0.0;
+            end
+        end
+"#,
+        );
+        for _ in 0..3500 {
+            source.push_str("        pad = (((pad + 1.0) + (2.0 * 3.0)) + (4.0 / 5.0));\n");
+        }
+        source.push_str(
+            r#"
+        if (mode == 1) begin
+            I(p, n) <+ state * V(p, n);
+        end
+    end
+endmodule
+"#,
+        );
+
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .expect("canonical IR");
+        assert!(
+            artifact.hir.expressions.len() > 20_000,
+            "fixture must exceed complete expanded-history expression threshold"
+        );
+        assert!(
+            artifact.hir.statements.len() <= 5_000,
+            "fixture must stay within selective history statement gate"
+        );
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("selective guarded overwrites should lower to scalar OptIR");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+    }
+
+    #[test]
     fn scalar_backend_coerces_boolean_assignment_history_to_real() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(

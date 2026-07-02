@@ -19,9 +19,9 @@ const MAX_SCALAR_HISTORY_RECONSTRUCTION_STEPS: usize = 64_000;
 const MAX_SCALAR_EXPRESSION_LOWERING_DEPTH: usize = 2048;
 const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_EXPR_NODES: usize = 12;
 const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES: usize = 8;
-const MAX_SELECTIVE_ASSIGNMENT_HISTORY_SNAPSHOT_EXPRESSIONS: usize = 60_000;
-const MAX_SELECTIVE_ASSIGNMENT_HISTORY_SNAPSHOT_STATEMENTS: usize = 5_000;
-const MAX_SELECTIVE_ASSIGNMENT_HISTORY_TARGETS: usize = 1024;
+const MAX_SELECTIVE_ASSIGNMENT_HISTORY_SNAPSHOT_EXPRESSIONS: usize = 100_000;
+const MAX_SELECTIVE_ASSIGNMENT_HISTORY_SNAPSHOT_STATEMENTS: usize = 7_000;
+const MAX_SELECTIVE_ASSIGNMENT_HISTORY_TARGETS: usize = 2_048;
 const MAX_EXPANDED_ASSIGNMENT_HISTORY_SNAPSHOT_EXPRESSIONS: usize = 20_000;
 const MAX_EXPANDED_ASSIGNMENT_HISTORY_SNAPSHOT_STATEMENTS: usize = 5_000;
 const MAX_SCALAR_CONDITION_REASONING_DEPTH: usize = 128;
@@ -1062,10 +1062,15 @@ impl<'a> ScalarGraphBuilder<'a> {
         {
             return false;
         }
-        self.conditional_self_update(assignment.target, assignment.expr.id)
+        if self
+            .conditional_self_update(assignment.target, assignment.expr.id)
             .is_some_and(|update| {
                 !self.expr_references_variable(update.value_expr, assignment.target)
             })
+        {
+            return true;
+        }
+        !self.expr_references_variable(assignment.expr.id, assignment.target)
     }
 
     fn lower_loop_statement(&mut self, loop_statement: &HirLoop) {
@@ -5617,25 +5622,131 @@ fn selective_assignment_history_targets(
             | HirExprKind::NamedBranchAccess { .. } => {}
         }
     }
-    let direct_targets = targets.clone();
     let mut assignments = Vec::new();
     collect_hir_assignments(&hir.statements, &mut assignments);
+    let direct_targets = targets.clone();
+    let mut assignments_by_target: HashMap<_, Vec<_>> = HashMap::new();
     for assignment in assignments {
-        if !direct_targets.contains(&assignment.target) {
+        assignments_by_target
+            .entry(assignment.target)
+            .or_default()
+            .push(assignment);
+    }
+
+    let mut pending: Vec<_> = direct_targets.iter().copied().collect();
+    pending.sort_by_key(|target| usize::from(*target));
+    let mut processed = HashSet::new();
+    while let Some(target) = pending.pop() {
+        if !processed.insert(target) {
             continue;
         }
-        collect_expression_variables(
-            mir,
-            &variables_by_name,
-            assignment.expr.id,
-            Some(assignment.target),
-            &mut targets,
-        );
-        if targets.len() > MAX_SELECTIVE_ASSIGNMENT_HISTORY_TARGETS {
-            return direct_targets;
+        let Some(assignments) = assignments_by_target.get(&target) else {
+            continue;
+        };
+        for assignment in assignments {
+            let mut dependencies = HashSet::new();
+            collect_selective_assignment_dependencies(
+                mir,
+                &variables_by_name,
+                assignment,
+                &mut dependencies,
+            );
+            let mut dependencies: Vec<_> = dependencies.into_iter().collect();
+            dependencies.sort_by_key(|dependency| usize::from(*dependency));
+            for dependency in dependencies {
+                if targets.len() >= MAX_SELECTIVE_ASSIGNMENT_HISTORY_TARGETS {
+                    return targets;
+                }
+                if targets.insert(dependency) {
+                    pending.push(dependency);
+                }
+            }
         }
     }
     targets
+}
+
+fn collect_selective_assignment_dependencies(
+    mir: &MirModel,
+    variables_by_name: &HashMap<&str, VariableId>,
+    assignment: &HirAssignment,
+    variables: &mut HashSet<VariableId>,
+) {
+    if let Some(update) = conditional_self_update_expr(
+        mir,
+        variables_by_name,
+        assignment.target,
+        assignment.expr.id,
+    ) {
+        collect_expression_variables(mir, variables_by_name, update.condition, None, variables);
+        if let Some(variable) = variable_identifier_expr(mir, variables_by_name, update.value_expr)
+            && variable != assignment.target
+        {
+            variables.insert(variable);
+        }
+        return;
+    }
+
+    if assignment.target_name.starts_with("__guard") {
+        collect_expression_variables(
+            mir,
+            variables_by_name,
+            assignment.expr.id,
+            Some(assignment.target),
+            variables,
+        );
+        return;
+    }
+
+    if let Some(variable) = variable_identifier_expr(mir, variables_by_name, assignment.expr.id)
+        && variable != assignment.target
+    {
+        variables.insert(variable);
+    }
+}
+
+fn conditional_self_update_expr(
+    mir: &MirModel,
+    variables_by_name: &HashMap<&str, VariableId>,
+    variable: VariableId,
+    expr: ExprId,
+) -> Option<ConditionalSelfUpdate> {
+    let expression = mir.expressions.get(usize::from(expr))?;
+    let HirExprKind::Conditional {
+        condition,
+        then_expr,
+        else_expr,
+    } = &expression.kind
+    else {
+        return None;
+    };
+    let then_self = variable_identifier_expr(mir, variables_by_name, *then_expr) == Some(variable);
+    let else_self = variable_identifier_expr(mir, variables_by_name, *else_expr) == Some(variable);
+    match (then_self, else_self) {
+        (false, true) => Some(ConditionalSelfUpdate {
+            condition: *condition,
+            active_truth: true,
+            value_expr: *then_expr,
+        }),
+        (true, false) => Some(ConditionalSelfUpdate {
+            condition: *condition,
+            active_truth: false,
+            value_expr: *else_expr,
+        }),
+        _ => None,
+    }
+}
+
+fn variable_identifier_expr(
+    mir: &MirModel,
+    variables_by_name: &HashMap<&str, VariableId>,
+    expr: ExprId,
+) -> Option<VariableId> {
+    let expression = mir.expressions.get(usize::from(expr))?;
+    let HirExprKind::Identifier { name } = &expression.kind else {
+        return None;
+    };
+    variables_by_name.get(name.as_str()).copied()
 }
 
 fn collect_hir_assignments<'a>(
