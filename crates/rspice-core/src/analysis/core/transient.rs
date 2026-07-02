@@ -196,22 +196,7 @@ impl BreakpointManager {
 
     /// Add a breakpoint time (deduplicates automatically)
     pub fn add(&mut self, time: Value) -> bool {
-        // Check for duplicates within tolerance
-        if self
-            .breakpoints
-            .iter()
-            .any(|&t| (t - time).abs() < self.tolerance)
-        {
-            return false;
-        }
-
-        // Insert in sorted order
-        let pos = self.breakpoints.iter().position(|&t| t > time);
-        match pos {
-            Some(i) => self.breakpoints.insert(i, time),
-            None => self.breakpoints.push(time),
-        }
-        true
+        Self::insert_sorted_unique(&mut self.breakpoints, time, self.tolerance)
     }
 
     /// Replace the dynamic runtime breakpoint schedule.
@@ -229,21 +214,56 @@ impl BreakpointManager {
             if !time.is_finite() || time < 0.0 {
                 continue;
             }
-            if self
-                .breakpoints
-                .iter()
-                .skip(self.current_index)
-                .chain(self.runtime_breakpoints.iter())
-                .any(|&existing| (existing - time).abs() < self.tolerance)
-            {
+            if Self::contains_sorted_within_tolerance(
+                &self.breakpoints[self.current_index..],
+                time,
+                self.tolerance,
+            ) {
                 continue;
             }
-            let pos = self.runtime_breakpoints.iter().position(|&t| t > time);
-            match pos {
-                Some(i) => self.runtime_breakpoints.insert(i, time),
-                None => self.runtime_breakpoints.push(time),
-            }
+            Self::insert_sorted_unique(&mut self.runtime_breakpoints, time, self.tolerance);
         }
+    }
+
+    fn insert_sorted_unique(values: &mut Vec<Value>, time: Value, tolerance: Value) -> bool {
+        if !time.is_finite() {
+            return false;
+        }
+        let pos = Self::sorted_insert_position(values, time);
+        if Self::neighbors_within_tolerance(values, pos, time, tolerance) {
+            return false;
+        }
+        values.insert(pos, time);
+        true
+    }
+
+    fn contains_sorted_within_tolerance(values: &[Value], time: Value, tolerance: Value) -> bool {
+        if values.is_empty() {
+            return false;
+        }
+        let pos = Self::sorted_insert_position(values, time);
+        Self::neighbors_within_tolerance(values, pos, time, tolerance)
+    }
+
+    fn sorted_insert_position(values: &[Value], time: Value) -> usize {
+        match values.binary_search_by(|existing| existing.total_cmp(&time)) {
+            Ok(pos) | Err(pos) => pos,
+        }
+    }
+
+    fn neighbors_within_tolerance(
+        values: &[Value],
+        pos: usize,
+        time: Value,
+        tolerance: Value,
+    ) -> bool {
+        values
+            .get(pos)
+            .is_some_and(|existing| (*existing - time).abs() < tolerance)
+            || pos
+                .checked_sub(1)
+                .and_then(|prev| values.get(prev))
+                .is_some_and(|existing| (*existing - time).abs() < tolerance)
     }
 
     /// Add breakpoints from a periodic source (pulse edges, clock, etc.)
@@ -466,6 +486,29 @@ mod breakpoint_manager_tests {
 
         assert!((dt - 5.0e-16).abs() <= 1.0e-25, "dt={dt:.17e}");
         assert!(lands_on_breakpoint);
+    }
+
+    #[test]
+    fn breakpoint_insertions_stay_sorted_and_tolerance_deduplicated() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-12);
+
+        assert!(breakpoints.add(3.0e-9));
+        assert!(breakpoints.add(1.0e-9));
+        assert!(breakpoints.add(2.0e-9));
+        assert!(!breakpoints.add(2.0e-9 + 0.5e-12));
+        assert!(!breakpoints.add(Value::INFINITY));
+        assert_eq!(breakpoints.times(), &[1.0e-9, 2.0e-9, 3.0e-9]);
+
+        breakpoints.replace_runtime_breakpoints([
+            5.0e-9,
+            4.0e-9,
+            4.0e-9 + 0.5e-12,
+            2.0e-9 + 0.5e-12,
+            Value::NAN,
+            -1.0,
+        ]);
+
+        assert_eq!(breakpoints.runtime_breakpoints, vec![4.0e-9, 5.0e-9]);
     }
 
     #[test]
