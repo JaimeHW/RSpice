@@ -114,6 +114,51 @@ impl Inductors {
         }
     }
 
+    /// Stamp inductors for the t=0 transient operating point.
+    ///
+    /// Xyce treats `IC=` on an inductor as a branch-current constraint during
+    /// the operating-point solve that seeds transient analysis: the specified
+    /// current participates in KCL, and the inductor voltage is left
+    /// unconstrained. Inductors without `IC=` retain ordinary DC-short
+    /// operating-point semantics.
+    #[inline]
+    pub fn stamp_transient_operating_point_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        num_nodes: usize,
+    ) {
+        for i in 0..self.names.len() {
+            let np = self.node_pos[i];
+            let nn = self.node_neg[i];
+            let br_ordinal = self.branch_indices[i];
+            let br = num_nodes + br_ordinal;
+
+            if let Some(current) = self.ic[i] {
+                if np > 0 {
+                    rhs[np - 1] -= current;
+                }
+                if nn > 0 {
+                    rhs[nn - 1] += current;
+                }
+                matrix.add(br - 1, br - 1, 1.0);
+                rhs[br - 1] = current;
+                continue;
+            }
+
+            if np > 0 {
+                matrix.add(br - 1, np - 1, 1.0);
+                matrix.add(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                matrix.add(br - 1, nn - 1, -1.0);
+                matrix.add(nn - 1, br - 1, -1.0);
+            }
+
+            rhs[br - 1] = 0.0;
+        }
+    }
+
     /// Stamp inductors for DC operating point (triplet path).
     #[inline]
     pub fn stamp_dc_short(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], num_nodes: usize) {

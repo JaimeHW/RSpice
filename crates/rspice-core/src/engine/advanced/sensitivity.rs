@@ -160,20 +160,32 @@ impl Engine {
         let mut ordered_overrides: Vec<(String, Value)> = override_map.into_iter().collect();
         ordered_overrides.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let mut perturbed = netlist.clone();
-        for (name, value) in &ordered_overrides {
-            perturbed.params.set(name, *value);
+        let mut param_overrides = Vec::new();
+        let mut device_overrides = Vec::new();
+        for (name, value) in ordered_overrides {
+            if let Some((device_name, param_name)) = Self::split_device_parameter_override(&name) {
+                device_overrides.push((device_name, param_name, value));
+            } else {
+                param_overrides.push((name, value));
+            }
         }
 
+        let mut perturbed = netlist.clone();
+        for (name, value) in &param_overrides {
+            perturbed.params.set(name, *value);
+        }
+        let applied_device_overrides =
+            Self::apply_device_parameter_overrides(&mut perturbed, &device_overrides)?;
+
         let Some(source) = &netlist.source_text else {
-            return Ok((perturbed, 0));
+            return Ok((perturbed, applied_device_overrides));
         };
 
-        let referenced = ordered_overrides
+        let referenced = param_overrides
             .iter()
             .filter(|(name, _)| Self::source_references_param(source, name))
             .count();
-        let overridden_source = Self::build_overridden_source_multi(source, &ordered_overrides);
+        let overridden_source = Self::build_overridden_source_multi(source, &param_overrides);
 
         let parse_options = crate::netlist::NetlistParseOptions {
             statistical_mode: netlist.params.statistical_mode(),
@@ -187,14 +199,50 @@ impl Engine {
         .map_err(|e| {
             SimulationError::Netlist(format!(
                 "Failed to reparse netlist for parameter override set {:?}: {}",
-                ordered_overrides, e
+                param_overrides, e
             ))
         })?;
-        for (name, value) in &ordered_overrides {
+        for (name, value) in &param_overrides {
             reparsed.params.set(name, *value);
         }
+        let applied_device_overrides =
+            Self::apply_device_parameter_overrides(&mut reparsed, &device_overrides)?;
 
-        Ok((reparsed, referenced))
+        Ok((reparsed, referenced + applied_device_overrides))
+    }
+
+    fn split_device_parameter_override(name: &str) -> Option<(String, String)> {
+        let (device_name, param_name) = name.split_once(':')?;
+        let device_name = device_name.trim();
+        let param_name = param_name.trim();
+        (!device_name.is_empty() && !param_name.is_empty())
+            .then(|| (device_name.to_string(), param_name.to_string()))
+    }
+
+    fn apply_device_parameter_overrides(
+        netlist: &mut Netlist,
+        overrides: &[(String, String, Value)],
+    ) -> Result<usize, SimulationError> {
+        let mut applied = 0;
+        for (device_name, param_name, value) in overrides {
+            let element = netlist
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case(device_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        ".STEP DATA target '{}:{}' not found in netlist",
+                        device_name, param_name
+                    ))
+                })?;
+            Self::apply_device_step_value(&mut element.kind, Some(param_name), *value)?;
+            applied += 1;
+        }
+        if applied > 0 {
+            netlist.source_text = None;
+            netlist.source_path = None;
+        }
+        Ok(applied)
     }
 
     pub(in crate::engine::advanced) fn logical_lines_after_title(source: &str) -> Vec<String> {

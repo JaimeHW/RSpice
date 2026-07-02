@@ -167,7 +167,9 @@ fn validate_data_table_params(
         let valid = chars
             .next()
             .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_' || ch == '$')
-            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '.');
+            && chars.all(|ch| {
+                ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '.' || ch == ':'
+            });
         if !valid {
             return Err(ParseError::Syntax {
                 line: line_num,

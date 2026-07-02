@@ -2149,6 +2149,10 @@ fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
             *value_scale *= m;
             *value_offset *= m;
         }
+        SourceSpec::Pat { vhi, vlo, .. } => {
+            *vhi *= m;
+            *vlo *= m;
+        }
         SourceSpec::Exp { v1, v2, .. } => {
             *v1 *= m;
             *v2 *= m;

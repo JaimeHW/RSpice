@@ -3234,6 +3234,16 @@ impl XyceTestRunner {
                 .flatten()
                 .reduce(Value::min)
             }
+            crate::netlist::SourceSpec::Pat {
+                rise, fall, sample, ..
+            } => [
+                Self::positive_duration_step(*rise, TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION),
+                Self::positive_duration_step(*fall, TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION),
+                Self::positive_duration_step(*sample, TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD),
+            ]
+            .into_iter()
+            .flatten()
+            .reduce(Value::min),
             crate::netlist::SourceSpec::Exp {
                 tau1,
                 tau2,
@@ -3994,7 +4004,7 @@ impl XyceTestRunner {
                 }
                 _ => {
                     return Err(format!(
-                        "native .STEP .PRINT TRAN comparison currently supports static resistors and independent DC/PWL sources; element '{}' requires a broader stepped transient oracle contract",
+                        "native .STEP .PRINT TRAN comparison currently supports static resistors and independent DC/PWL/PAT sources; element '{}' requires a broader stepped transient oracle contract",
                         element.name
                     ));
                 }
@@ -4012,13 +4022,14 @@ impl XyceTestRunner {
             | crate::netlist::SourceSpec::Ac { .. }
             | crate::netlist::SourceSpec::DcAc { .. }
             | crate::netlist::SourceSpec::Pwl { .. }
-            | crate::netlist::SourceSpec::PwlFile { .. } => Ok(()),
+            | crate::netlist::SourceSpec::PwlFile { .. }
+            | crate::netlist::SourceSpec::Pat { .. } => Ok(()),
             crate::netlist::SourceSpec::DcTransient { transient, .. }
             | crate::netlist::SourceSpec::DcAcTransient { transient, .. } => {
                 Self::validate_static_step_tran_source_spec(source_name, transient)
             }
             other => Err(format!(
-                "native .STEP .PRINT TRAN comparison currently supports independent DC/PWL sources; source '{source_name}' uses {other:?}"
+                "native .STEP .PRINT TRAN comparison currently supports independent DC/PWL/PAT sources; source '{source_name}' uses {other:?}"
             )),
         }
     }
@@ -4331,6 +4342,9 @@ impl XyceTestRunner {
         }
         if let Some(element_name) = Self::parse_current_probe(normalized) {
             if Self::netlist_has_recorded_branch_current(netlist, &element_name) {
+                return Ok(());
+            }
+            if Self::netlist_has_independent_current_source(netlist, &element_name) {
                 return Ok(());
             }
             return Err(format!(
@@ -5080,7 +5094,7 @@ impl XyceTestRunner {
 
     fn evaluate_atomic_tran_probe(
         normalized: &str,
-        _netlist: &Netlist,
+        netlist: &Netlist,
         result: &TransientResult,
         time: Value,
     ) -> Result<f64, String> {
@@ -5098,15 +5112,21 @@ impl XyceTestRunner {
         }
 
         if let Some(element_name) = Self::parse_current_probe(normalized) {
-            let waveform = result
-                .try_branch_current_waveform_named(&element_name)
-                .ok_or_else(|| {
-                    format!(
-                        "branch current '{}' not found in transient result",
-                        element_name
-                    )
-                })?;
-            return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
+            if let Some(waveform) = result.try_branch_current_waveform_named(&element_name) {
+                return Self::interpolate_transient_waveform_at(&result.time, waveform, time);
+            }
+            if let Some(value) = Self::evaluate_independent_current_source_probe(
+                netlist,
+                result,
+                &element_name,
+                time,
+            ) {
+                return Ok(value);
+            }
+            return Err(format!(
+                "branch current '{}' not found in transient result",
+                element_name
+            ));
         }
 
         Err(format!("unsupported TRAN probe '{}'", normalized))
@@ -6569,6 +6589,79 @@ impl XyceTestRunner {
                 | ElementKind::Ccvs { .. }
                 | ElementKind::BehavioralVoltage { .. }
         )
+    }
+
+    fn netlist_has_independent_current_source(netlist: &Netlist, source: &str) -> bool {
+        if Self::elements_have_independent_current_source(&netlist.elements, source) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_have_independent_current_source(&flattened.elements, source)
+        })
+    }
+
+    fn elements_have_independent_current_source(
+        elements: &[crate::netlist::Element],
+        source: &str,
+    ) -> bool {
+        elements.iter().any(|element| {
+            Self::device_instance_names_match(&element.name, source)
+                && matches!(&element.kind, ElementKind::CurrentSource(_))
+        })
+    }
+
+    fn evaluate_independent_current_source_probe(
+        netlist: &Netlist,
+        result: &TransientResult,
+        source: &str,
+        time: Value,
+    ) -> Option<Value> {
+        if let Some(value) = Self::evaluate_current_source_probe_from_elements(
+            &netlist.elements,
+            result,
+            source,
+            time,
+        ) {
+            return Some(value);
+        }
+
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist).ok()?;
+        Self::evaluate_current_source_probe_from_elements(&flattened.elements, result, source, time)
+    }
+
+    fn evaluate_current_source_probe_from_elements(
+        elements: &[crate::netlist::Element],
+        result: &TransientResult,
+        source: &str,
+        time: Value,
+    ) -> Option<Value> {
+        let spec = elements.iter().find_map(|element| {
+            if Self::device_instance_names_match(&element.name, source)
+                && let ElementKind::CurrentSource(spec) = &element.kind
+            {
+                return Some(spec);
+            }
+            None
+        })?;
+        let (tstep, tstop) = Self::transient_result_source_context(result);
+        Some(crate::circuit::VoltageSources::evaluate_source_spec_at_time(spec, time, tstep, tstop))
+    }
+
+    fn transient_result_source_context(result: &TransientResult) -> (Value, Value) {
+        let tstop = result.time.last().copied().unwrap_or(1e99).max(1e-18);
+        let mut previous: Option<Value> = None;
+        let mut min_step: Option<Value> = None;
+        for &sample in &result.time {
+            if let Some(previous_sample) = previous {
+                let step = sample - previous_sample;
+                if step.is_finite() && step > 0.0 {
+                    min_step = Some(min_step.map_or(step, |current| current.min(step)));
+                }
+            }
+            previous = Some(sample);
+        }
+        (min_step.unwrap_or(1e-12), tstop)
     }
 
     fn source_is_voltage_source(netlist: &Netlist, source: &str) -> bool {

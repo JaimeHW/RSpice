@@ -1351,6 +1351,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }
+                        | crate::netlist::SourceSpec::Pat { .. }
                         | crate::netlist::SourceSpec::DcTransient { .. }
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
@@ -1380,6 +1381,7 @@ impl Engine {
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }
+                        | crate::netlist::SourceSpec::Pat { .. }
                         | crate::netlist::SourceSpec::DcTransient { .. }
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
                         | crate::netlist::SourceSpec::Exp { .. }

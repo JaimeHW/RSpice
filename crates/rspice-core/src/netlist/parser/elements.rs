@@ -4301,7 +4301,7 @@ fn is_xyce_port_assignment(raw: &str) -> bool {
 fn is_xyce_port_source_keyword(raw: &str) -> bool {
     matches!(
         raw.to_ascii_uppercase().as_str(),
-        "DC" | "AC" | "PULSE" | "SIN" | "SINE" | "PWL" | "EXP" | "SFFM" | "AM" | "TRNOISE"
+        "DC" | "AC" | "PULSE" | "SIN" | "SINE" | "PWL" | "PAT" | "EXP" | "SFFM" | "AM" | "TRNOISE"
     )
 }
 

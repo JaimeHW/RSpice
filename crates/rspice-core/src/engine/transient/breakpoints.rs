@@ -198,6 +198,78 @@ impl Engine {
                     );
                 }
             },
+            SourceSpec::Pat {
+                vhi,
+                vlo,
+                delay,
+                rise,
+                fall,
+                sample,
+                data,
+                repeat_count,
+            } => {
+                if ![*vhi, *vlo, *delay, *rise, *fall, *sample]
+                    .into_iter()
+                    .all(Value::is_finite)
+                    || *rise <= 0.0
+                    || *fall <= 0.0
+                    || *sample <= 0.0
+                {
+                    return;
+                }
+
+                let mut source_times = Vec::new();
+                crate::circuit::VoltageSources::visit_pat_points(
+                    *vhi,
+                    *vlo,
+                    *rise,
+                    *fall,
+                    *sample,
+                    data,
+                    |source_time, _| source_times.push(source_time),
+                );
+                if source_times.is_empty() {
+                    return;
+                }
+
+                for &source_time in &source_times {
+                    Self::add_breakpoint_if_in_range(breakpoints, *delay + source_time, tstop);
+                }
+
+                if *repeat_count == 0 {
+                    return;
+                }
+                let Some(pattern_duration) =
+                    crate::circuit::VoltageSources::pat_pattern_duration(data, *sample)
+                else {
+                    return;
+                };
+                if !pattern_duration.is_finite() || pattern_duration <= 0.0 {
+                    return;
+                }
+
+                let max_cycles = if *repeat_count < 0 {
+                    (((tstop - *delay).max(0.0) / pattern_duration).ceil() as usize)
+                        .saturating_add(1)
+                } else {
+                    *repeat_count as usize
+                }
+                .min(1_000_000);
+
+                for cycle in 1..=max_cycles {
+                    let offset = cycle as Value * pattern_duration;
+                    if *delay + offset > tstop && source_times[0] >= 0.0 {
+                        break;
+                    }
+                    for &source_time in &source_times {
+                        Self::add_breakpoint_if_in_range(
+                            breakpoints,
+                            *delay + offset + source_time,
+                            tstop,
+                        );
+                    }
+                }
+            }
             SourceSpec::Exp { td1, td2, .. } => {
                 // Match the waveform runtime: omitted or zero delays
                 // resolve to tstep-based defaults (ngspice vsrcload.c).

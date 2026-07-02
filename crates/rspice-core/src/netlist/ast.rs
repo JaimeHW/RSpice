@@ -1194,6 +1194,26 @@ pub enum SourceSpec {
         repeat_from: Option<Value>,
     },
 
+    /// Xyce/HSPICE digital pattern source: PAT(VHI VLO TD TR TF TSAMPLE DATA [R=n]).
+    Pat {
+        /// High output level.
+        vhi: Value,
+        /// Low output level.
+        vlo: Value,
+        /// Time delay. Xyce permits negative values.
+        delay: Value,
+        /// Rising edge duration.
+        rise: Value,
+        /// Falling edge duration.
+        fall: Value,
+        /// Bit sample interval.
+        sample: Value,
+        /// Pattern bits including the leading B marker, e.g. B1010.
+        data: String,
+        /// Number of repeated cycles after the first pattern. -1 repeats forever.
+        repeat_count: i32,
+    },
+
     /// Exponential source: EXP(v1 v2 td1 tau1 td2 tau2)
     Exp {
         v1: Value,

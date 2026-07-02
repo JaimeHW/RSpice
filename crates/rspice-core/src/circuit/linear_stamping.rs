@@ -524,9 +524,11 @@ impl CircuitData {
     /// Time-varying independent sources are evaluated at the requested
     /// transient time, while transmission lines use their DC fallback
     /// conductance so their far ends start from the correct operating point
-    /// before delayed-wave companions take over for t > 0. Magnetics are DC
-    /// shorts here (operating-point semantics); for t > 0 their companion
-    /// stamps take over and these shorts must NOT be applied.
+    /// before delayed-wave companions take over for t > 0. Inductors without
+    /// `IC=` are DC shorts here, while `IC=` inductors are constrained to the
+    /// requested branch current using Xyce's transient-start operating-point
+    /// semantics. For t > 0, magnetic companion stamps take over and these
+    /// operating-point stamps must NOT be applied.
     pub fn stamp_transient_operating_point_direct(
         &self,
         matrix: &mut StaticMatrix,
@@ -534,7 +536,7 @@ impl CircuitData {
     ) {
         self.stamp_transient_linear_direct(matrix, rhs);
         self.inductors
-            .stamp_dc_short_direct(matrix, rhs, self.num_nodes);
+            .stamp_transient_operating_point_direct(matrix, rhs, self.num_nodes);
         self.stamp_coupled_inductors_dc_direct(matrix, rhs);
         self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.stamp_tlines_dc_direct(matrix);

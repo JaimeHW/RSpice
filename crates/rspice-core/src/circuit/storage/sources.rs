@@ -339,6 +339,32 @@ impl VoltageSources {
         log::warn!("{}", msg);
     }
 
+    pub(crate) fn evaluate_source_spec_at_time(
+        spec: &crate::netlist::SourceSpec,
+        time: Value,
+        tstep: Value,
+        tstop: Value,
+    ) -> Value {
+        let step = if tstep.is_finite() && tstep > 0.0 {
+            tstep
+        } else {
+            1e-12
+        };
+        let stop = if tstop.is_finite() && tstop > 0.0 {
+            tstop
+        } else {
+            1e99
+        };
+        Self::evaluate_source_at_time_with_context(
+            spec,
+            time,
+            Some(TransientSourceContext {
+                tstep: step,
+                tstop: stop,
+            }),
+        )
+    }
+
     #[inline]
     fn pulse_step_default(context: Option<TransientSourceContext>) -> Value {
         context.map(|ctx| ctx.tstep).unwrap_or(1e-12).max(1e-18)
@@ -629,6 +655,26 @@ impl VoltageSources {
                     }
                 }
             }
+            SourceSpec::Pat {
+                vhi,
+                vlo,
+                delay,
+                rise,
+                fall,
+                sample,
+                data,
+                repeat_count,
+            } => Self::evaluate_pat_source(
+                *vhi,
+                *vlo,
+                *delay,
+                *rise,
+                *fall,
+                *sample,
+                data,
+                *repeat_count,
+                time,
+            ),
             SourceSpec::Exp {
                 v1,
                 v2,
@@ -746,6 +792,211 @@ impl VoltageSources {
             changed |= project_two_terminal_voltage(solution, np, nn, v_source);
         }
         changed
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn evaluate_pat_source(
+        vhi: Value,
+        vlo: Value,
+        delay: Value,
+        rise: Value,
+        fall: Value,
+        sample: Value,
+        data: &str,
+        repeat_count: i32,
+        time: Value,
+    ) -> Value {
+        let Some((first_bit, last_bit, bit_count)) = Self::pat_data_shape(data) else {
+            return 0.0;
+        };
+        if ![vhi, vlo, delay, rise, fall, sample, time]
+            .into_iter()
+            .all(Value::is_finite)
+            || rise <= 0.0
+            || fall <= 0.0
+            || sample <= 0.0
+        {
+            return 0.0;
+        }
+
+        let first_value = if first_bit == b'1' { vhi } else { vlo };
+        let first_plateau_time = if first_bit == b'1' {
+            0.5 * rise
+        } else {
+            0.5 * fall
+        };
+        let pattern_duration = bit_count as Value * sample;
+        let second_last_time = pattern_duration
+            - if last_bit == b'1' {
+                0.5 * fall
+            } else {
+                0.5 * rise
+            };
+        let second_last_value = if last_bit == b'1' { vhi } else { vlo };
+        let last_value = if first_bit == last_bit {
+            second_last_value
+        } else {
+            0.5 * (vhi - vlo)
+        };
+
+        let mut source_time = time - delay;
+        if source_time <= first_plateau_time {
+            return first_value;
+        }
+
+        if repeat_count >= 0
+            && source_time >= repeat_count as Value * pattern_duration + second_last_time
+        {
+            return second_last_value;
+        }
+
+        if source_time > pattern_duration {
+            source_time -= pattern_duration;
+            source_time -= pattern_duration * (source_time / pattern_duration).floor();
+            if source_time == 0.0 {
+                return last_value;
+            }
+        } else if source_time == pattern_duration {
+            return last_value;
+        }
+
+        Self::interpolate_pat_points(vhi, vlo, rise, fall, sample, data, source_time, last_value)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn interpolate_pat_points(
+        vhi: Value,
+        vlo: Value,
+        rise: Value,
+        fall: Value,
+        sample: Value,
+        data: &str,
+        time: Value,
+        last_value: Value,
+    ) -> Value {
+        let mut previous: Option<(Value, Value)> = None;
+        let mut result = last_value;
+        let mut found = false;
+        Self::visit_pat_points(
+            vhi,
+            vlo,
+            rise,
+            fall,
+            sample,
+            data,
+            |point_time, point_value| {
+                if found {
+                    return;
+                }
+                if time < point_time {
+                    result = if let Some((time1, value1)) = previous {
+                        let dt = point_time - time1;
+                        if dt == 0.0 {
+                            point_value
+                        } else {
+                            (point_time - time) * value1 / dt + (time - time1) * point_value / dt
+                        }
+                    } else {
+                        point_value
+                    };
+                    found = true;
+                } else {
+                    previous = Some((point_time, point_value));
+                }
+            },
+        );
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn visit_pat_points<F>(
+        vhi: Value,
+        vlo: Value,
+        rise: Value,
+        fall: Value,
+        sample: Value,
+        data: &str,
+        mut visit: F,
+    ) where
+        F: FnMut(Value, Value),
+    {
+        let bytes = data.as_bytes();
+        let Some((first_bit, last_bit, bit_count)) = Self::pat_data_shape(data) else {
+            return;
+        };
+
+        if first_bit == b'1' {
+            let initial = if last_bit == b'0' {
+                0.5 * (vhi - vlo)
+            } else {
+                vhi
+            };
+            visit(0.0, initial);
+            visit(0.5 * rise, vhi);
+        } else {
+            let initial = if last_bit == b'0' {
+                vlo
+            } else {
+                0.5 * (vhi - vlo)
+            };
+            visit(0.0, initial);
+            visit(0.5 * fall, vlo);
+        }
+
+        for bit_index in 2..=bit_count {
+            let current = bytes[bit_index];
+            let previous = bytes[bit_index - 1];
+            if current == previous {
+                continue;
+            }
+            let boundary = (bit_index - 1) as Value * sample;
+            if current == b'0' {
+                visit(boundary - 0.5 * fall, vhi);
+                visit(boundary + 0.5 * fall, vlo);
+            } else {
+                visit(boundary - 0.5 * rise, vlo);
+                visit(boundary + 0.5 * rise, vhi);
+            }
+        }
+
+        let pattern_duration = bit_count as Value * sample;
+        if last_bit == b'1' {
+            visit(pattern_duration - 0.5 * fall, vhi);
+            visit(
+                pattern_duration,
+                if first_bit == last_bit {
+                    vhi
+                } else {
+                    0.5 * (vhi - vlo)
+                },
+            );
+        } else {
+            visit(pattern_duration - 0.5 * rise, vlo);
+            visit(
+                pattern_duration,
+                if first_bit == last_bit {
+                    vlo
+                } else {
+                    0.5 * (vhi - vlo)
+                },
+            );
+        }
+    }
+
+    pub(crate) fn pat_pattern_duration(data: &str, sample: Value) -> Option<Value> {
+        let (_, _, bit_count) = Self::pat_data_shape(data)?;
+        (sample.is_finite() && sample > 0.0).then_some(bit_count as Value * sample)
+    }
+
+    fn pat_data_shape(data: &str) -> Option<(u8, u8, usize)> {
+        let bytes = data.as_bytes();
+        if bytes.len() < 2 || !matches!(bytes[0], b'B' | b'b') {
+            return None;
+        }
+        if !bytes[1..].iter().all(|bit| matches!(bit, b'0' | b'1')) {
+            return None;
+        }
+        Some((bytes[1], *bytes.last()?, bytes.len() - 1))
     }
 
     fn evaluate_pwl_points(

@@ -5,7 +5,7 @@ use super::*;
 // Source Specification Parsing
 //=============================================================================
 
-/// Parse source specification (DC, AC, PULSE, SIN, PWL, EXP, SFFM, AM,
+/// Parse source specification (DC, AC, PULSE, SIN, PWL, PAT, EXP, SFFM, AM,
 /// TRNOISE)
 ///
 /// Like ngspice, the DC level, AC small-signal terms, and the transient
@@ -216,6 +216,7 @@ fn is_source_level_keyword(keyword: &str) -> bool {
             | "SIN"
             | "SINE"
             | "PWL"
+            | "PAT"
             | "EXP"
             | "SFFM"
             | "AM"
@@ -310,6 +311,10 @@ fn parse_transient_source_spec_keyword(
         "PWL" => {
             stream.advance();
             parse_pwl_spec(stream, line_num, params).map(Some)
+        }
+        "PAT" => {
+            stream.advance();
+            parse_pat_spec(stream, line_num, params).map(Some)
         }
         "EXP" => {
             stream.advance();
@@ -728,6 +733,176 @@ fn parse_pwl_spec(
         delay,
         repeat_from,
     })
+}
+
+fn parse_pat_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let has_paren = stream.consume(&TokenKind::LParen);
+
+    let vhi = source_value_or_default(stream, line_num, params, "PAT", "VHI", has_paren, 0.0)?;
+    let vlo = source_value_or_default(stream, line_num, params, "PAT", "VLO", has_paren, 0.0)?;
+    let delay = source_value_or_default(stream, line_num, params, "PAT", "TD", has_paren, 0.0)?;
+    let rise = source_value_or_default(stream, line_num, params, "PAT", "TR", has_paren, 0.0)?;
+    let fall = source_value_or_default(stream, line_num, params, "PAT", "TF", has_paren, 0.0)?;
+    let sample =
+        source_value_or_default(stream, line_num, params, "PAT", "TSAMPLE", has_paren, 0.0)?;
+    let data = parse_pat_data(stream, line_num)?;
+    let mut repeat_count = 0;
+
+    parse_pat_options(stream, line_num, params, has_paren, &mut repeat_count)?;
+    close_source_args(stream, line_num, "PAT", has_paren)?;
+    parse_pat_options(stream, line_num, params, false, &mut repeat_count)?;
+
+    validate_pat_spec(line_num, vhi, vlo, delay, rise, fall, sample, &data)?;
+
+    Ok(SourceSpec::Pat {
+        vhi,
+        vlo,
+        delay,
+        rise,
+        fall,
+        sample,
+        data,
+        repeat_count,
+    })
+}
+
+fn parse_pat_data(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
+    skip_commas(stream);
+    match &stream.peek().kind {
+        TokenKind::Ident(data) | TokenKind::StringLit(data) => {
+            let data = data.to_ascii_uppercase();
+            stream.advance();
+            Ok(data)
+        }
+        other => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("PAT DATA expected bit string, found {other}"),
+        }),
+    }
+}
+
+fn parse_pat_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    has_paren: bool,
+    repeat_count: &mut i32,
+) -> Result<(), ParseError> {
+    loop {
+        skip_commas(stream);
+        if source_args_end(stream, has_paren) {
+            break;
+        }
+
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unsupported PAT option token '{}'", stream.peek().kind),
+            });
+        };
+        let key = key.clone();
+        let key_upper = key.to_ascii_uppercase();
+        stream.advance();
+
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("PAT option '{key}' requires '='"),
+            });
+        }
+
+        let value = source_optional_value(stream, line_num, params, "PAT", &key_upper, has_paren)?
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: format!("PAT option '{key}' requires a value"),
+            })?;
+
+        match key_upper.as_str() {
+            "R" | "REPEAT" => *repeat_count = parse_pat_repeat_count(line_num, value)?,
+            "RB" => {
+                if value >= 1.0 && (value - 1.0).abs() > Value::EPSILON {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "Only PAT RB=1 is supported by Xyce".to_string(),
+                    });
+                }
+            }
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Unsupported PAT option '{key}'"),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_pat_repeat_count(line_num: usize, value: Value) -> Result<i32, ParseError> {
+    if !value.is_finite() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("PAT R must be finite, got {value}"),
+        });
+    }
+    let rounded = value.round();
+    let tolerance = Value::EPSILON * value.abs().max(1.0);
+    if (value - rounded).abs() > tolerance
+        || rounded < i32::MIN as Value
+        || rounded > i32::MAX as Value
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "PAT R must be an integer repeat count".to_string(),
+        });
+    }
+    let repeat_count = rounded as i32;
+    Ok(if repeat_count < -1 { 0 } else { repeat_count })
+}
+
+fn validate_pat_spec(
+    line_num: usize,
+    vhi: Value,
+    vlo: Value,
+    delay: Value,
+    rise: Value,
+    fall: Value,
+    sample: Value,
+    data: &str,
+) -> Result<(), ParseError> {
+    for (name, value) in [
+        ("VHI", vhi),
+        ("VLO", vlo),
+        ("TD", delay),
+        ("TR", rise),
+        ("TF", fall),
+        ("TSAMPLE", sample),
+    ] {
+        if !value.is_finite() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("PAT {name} must be finite, got {value}"),
+            });
+        }
+    }
+    if rise <= 0.0 || fall <= 0.0 || sample <= 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "PAT TR, TF, and TSAMPLE must be positive".to_string(),
+        });
+    }
+    let mut chars = data.chars();
+    if chars.next() != Some('B') || data.len() < 2 || !chars.all(|ch| matches!(ch, '0' | '1')) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "PAT DATA must be a B-prefixed bit string".to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn source_value_or_default(

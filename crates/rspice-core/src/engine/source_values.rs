@@ -19,6 +19,26 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
             ..
         } => offset + amplitude * phase.sin(),
         SourceSpec::Pwl { points, .. } => points.first().map(|(_, v)| *v).unwrap_or(0.0),
+        SourceSpec::Pat {
+            vhi,
+            vlo,
+            delay,
+            rise,
+            fall,
+            sample,
+            data,
+            repeat_count,
+        } => crate::circuit::VoltageSources::evaluate_pat_source(
+            *vhi,
+            *vlo,
+            *delay,
+            *rise,
+            *fall,
+            *sample,
+            data,
+            *repeat_count,
+            0.0,
+        ),
         // ngspice's TRANOP sees the waveform value at t=0, not just the
         // offset; otherwise the transient starts from a wrong bias and
         // glitches at the first step. Falls back to the offset when the

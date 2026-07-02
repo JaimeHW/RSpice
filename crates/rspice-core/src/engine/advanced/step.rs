@@ -477,12 +477,7 @@ impl Engine {
                 Ok(())
             }
             ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
-                if !matches_param(&["DC", "VALUE"]) {
-                    return Err(SimulationError::Circuit(
-                        "Unsupported source step parameter; use DC or VALUE".to_string(),
-                    ));
-                }
-                Self::set_source_dc_value(spec, value)
+                Self::set_source_step_value(spec, param_upper.as_deref(), value)
             }
             ElementKind::Vcvs { gain, .. } | ElementKind::Cccs { gain, .. } => {
                 if !matches_param(&["GAIN", "VALUE"]) {
@@ -545,6 +540,84 @@ impl Engine {
             _ => Err(SimulationError::Circuit(
                 "Unsupported .STEP DEVICE target for this element type".to_string(),
             )),
+        }
+    }
+
+    fn set_source_step_value(
+        spec: &mut SourceSpec,
+        param_name: Option<&str>,
+        value: Value,
+    ) -> Result<(), SimulationError> {
+        match param_name {
+            None | Some("DC") | Some("VALUE") => Self::set_source_dc_value(spec, value),
+            Some("VHI" | "VLO" | "TD" | "TR" | "TF" | "TSAMPLE") => {
+                Self::set_pat_source_parameter(spec, param_name.unwrap(), value)
+            }
+            Some(other) => Err(SimulationError::Circuit(format!(
+                "Unsupported source step parameter '{other}'; use DC, VALUE, or PAT parameters VHI, VLO, TD, TR, TF, TSAMPLE"
+            ))),
+        }
+    }
+
+    fn set_pat_source_parameter(
+        spec: &mut SourceSpec,
+        param_name: &str,
+        value: Value,
+    ) -> Result<(), SimulationError> {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "PAT source step parameter '{param_name}' must be finite, got {value}"
+            )));
+        }
+        match spec {
+            SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::DcAcTransient { transient, .. } => {
+                Self::set_pat_source_parameter(transient, param_name, value)
+            }
+            SourceSpec::Pat {
+                vhi,
+                vlo,
+                delay,
+                rise,
+                fall,
+                sample,
+                ..
+            } => {
+                match param_name {
+                    "VHI" => *vhi = value,
+                    "VLO" => *vlo = value,
+                    "TD" => *delay = value,
+                    "TR" => {
+                        if value <= 0.0 {
+                            return Err(SimulationError::Circuit(
+                                "PAT TR must be positive".to_string(),
+                            ));
+                        }
+                        *rise = value;
+                    }
+                    "TF" => {
+                        if value <= 0.0 {
+                            return Err(SimulationError::Circuit(
+                                "PAT TF must be positive".to_string(),
+                            ));
+                        }
+                        *fall = value;
+                    }
+                    "TSAMPLE" => {
+                        if value <= 0.0 {
+                            return Err(SimulationError::Circuit(
+                                "PAT TSAMPLE must be positive".to_string(),
+                            ));
+                        }
+                        *sample = value;
+                    }
+                    _ => unreachable!("validated PAT parameter"),
+                }
+                Ok(())
+            }
+            _ => Err(SimulationError::Circuit(format!(
+                "Source step parameter '{param_name}' requires a PAT source"
+            ))),
         }
     }
 
