@@ -35,6 +35,7 @@ pub enum Token {
     Number { value: f64, lexeme: String },
     InvalidNumber(String),
     Ident(String),
+    StringLiteral(String),
     // Operators
     Plus,
     Minus,
@@ -188,6 +189,24 @@ impl<'a> Lexer<'a> {
         s
     }
 
+    fn read_string(&mut self, quote: char) -> Token {
+        self.chars.next();
+        let mut value = String::new();
+        while let Some(c) = self.chars.next() {
+            if c == quote {
+                return Token::StringLiteral(value);
+            }
+            if c == '\\' {
+                if let Some(escaped) = self.chars.next() {
+                    value.push(escaped);
+                }
+            } else {
+                value.push(c);
+            }
+        }
+        Token::Invalid(quote)
+    }
+
     fn consume_spaced_equals(&mut self) -> bool {
         let mut probe = self.chars.clone();
         while matches!(probe.peek(), Some(c) if c.is_whitespace()) {
@@ -211,6 +230,7 @@ impl<'a> Lexer<'a> {
             Some(&c) => match c {
                 '0'..='9' | '.' => self.read_number(),
                 'a'..='z' | 'A'..='Z' | '_' => Token::Ident(self.read_ident()),
+                '"' | '\'' => self.read_string(c),
                 '+' => {
                     self.chars.next();
                     Token::Plus
@@ -574,6 +594,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Expr::Const(0.0)
             }
+            Token::StringLiteral(value) => {
+                self.advance();
+                Expr::StringLiteral(value)
+            }
             other => {
                 self.errors
                     .push(format!("Unexpected token {:?} in expression", other));
@@ -650,7 +674,7 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
 
             if self.current != Token::RParen {
-                args.push(self.parse_conditional());
+                args.push(self.parse_first_function_argument(&upper));
                 while self.current == Token::Comma {
                     self.advance();
                     args.push(self.parse_conditional());
@@ -699,6 +723,9 @@ impl<'a> Parser<'a> {
                 "GE0" => Some(Function::Ge0),
                 "LE0" => Some(Function::Le0),
                 "TABLE" => Some(Function::Table),
+                "TABLEFILE" => Some(Function::TableFile),
+                "FASTTABLE" => Some(Function::FastTable),
+                "FASTTABLEFILE" => Some(Function::FastTableFile),
                 "PWL" => Some(Function::Pwl),
                 "MOD" | "FMOD" => Some(Function::Mod),
                 "SPICE_PULSE" => Some(Function::SpicePulse),
@@ -720,6 +747,34 @@ impl<'a> Parser<'a> {
             .push(format!("Unknown identifier '{}' in expression", name));
         Expr::Const(0.0)
     }
+
+    fn parse_first_function_argument(&mut self, function_name: &str) -> Expr {
+        let file_capable_table = matches!(
+            function_name,
+            "TABLE" | "TABLEFILE" | "FASTTABLE" | "FASTTABLEFILE"
+        );
+        if file_capable_table {
+            match &self.current {
+                Token::StringLiteral(value) => {
+                    let value = value.clone();
+                    self.advance();
+                    return Expr::StringLiteral(value);
+                }
+                Token::Ident(value) if looks_like_file_table_path(value) => {
+                    let value = value.clone();
+                    self.advance();
+                    return Expr::StringLiteral(value);
+                }
+                _ => {}
+            }
+        }
+
+        self.parse_conditional()
+    }
+}
+
+fn looks_like_file_table_path(value: &str) -> bool {
+    value.contains('.') || value.contains('/') || value.contains('\\')
 }
 
 /// Parse an expression string into AST with strict error reporting.

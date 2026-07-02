@@ -3765,8 +3765,12 @@ impl XyceTestRunner {
 
     fn passive_value_expression_depends_on_runtime_quantity(expression: &Expr) -> bool {
         match expression {
-            Expr::Const(_) | Expr::Temperature => false,
-            Expr::NodeVoltage(_) | Expr::BranchCurrent(_) | Expr::Time | Expr::Frequency => true,
+            Expr::Const(_) | Expr::StringLiteral(_) | Expr::Temperature => false,
+            Expr::NodeVoltage(_)
+            | Expr::BranchCurrent(_)
+            | Expr::LookupTable(_)
+            | Expr::Time
+            | Expr::Frequency => true,
             Expr::Unary { operand, .. } => {
                 Self::passive_value_expression_depends_on_runtime_quantity(operand)
             }

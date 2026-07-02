@@ -2,6 +2,7 @@
 //!
 //! Fast execution of compiled expressions without parsing overhead.
 
+use super::ast::LookupTable;
 use crate::{Value, netlist::ExpressionDialect};
 use std::collections::HashMap;
 
@@ -89,6 +90,7 @@ pub enum Instruction {
     Le0,
     Table(usize),
     Pwl(usize),
+    LookupTable(usize),
     Mod,
     SpicePulse(usize),
 
@@ -105,6 +107,8 @@ pub struct CompiledExpr {
     pub node_map: HashMap<String, usize>,
     /// Branch name to index mapping
     pub branch_map: HashMap<String, usize>,
+    /// File-backed lookup tables resolved during circuit build.
+    pub lookup_tables: Vec<LookupTable>,
 }
 
 impl CompiledExpr {
@@ -133,6 +137,13 @@ impl CompiledExpr {
             self.branch_map.insert(name.to_string(), idx);
             idx
         }
+    }
+
+    /// Store a file-backed lookup table and return its bytecode index.
+    pub fn add_lookup_table(&mut self, table: LookupTable) -> usize {
+        let idx = self.lookup_tables.len();
+        self.lookup_tables.push(table);
+        idx
     }
 }
 
@@ -355,6 +366,14 @@ impl Vm {
                         self.stack.push(result);
                     }
                 }
+                Instruction::LookupTable(index) => {
+                    let result = program
+                        .lookup_tables
+                        .get(*index)
+                        .map(|table| lookup_table_interpolate(ctx.time, table.points.as_ref()))
+                        .unwrap_or(0.0);
+                    self.stack.push(result);
+                }
                 Instruction::SpicePulse(arg_count) => {
                     if *arg_count >= 6 && self.stack.len() >= *arg_count {
                         let start = self.stack.len() - *arg_count;
@@ -403,6 +422,47 @@ impl Vm {
     fn unary_op(&mut self, f: impl Fn(Value) -> Value) {
         if let Some(a) = self.stack.pop() {
             self.stack.push(f(a));
+        }
+    }
+}
+
+fn lookup_table_interpolate(x: Value, points: &[(Value, Value)]) -> Value {
+    match points {
+        [] => 0.0,
+        [(_, y)] => *y,
+        _ => {
+            if x <= points[0].0 {
+                return interpolate_segment(
+                    x,
+                    points[0].0,
+                    points[0].1,
+                    points[1].0,
+                    points[1].1,
+                    points[0].1,
+                );
+            }
+            let last = points.len() - 1;
+            if x >= points[last].0 {
+                return interpolate_segment(
+                    x,
+                    points[last - 1].0,
+                    points[last - 1].1,
+                    points[last].0,
+                    points[last].1,
+                    points[last].1,
+                );
+            }
+
+            let upper = points.partition_point(|(time, _)| *time < x);
+            let lower = upper.saturating_sub(1);
+            interpolate_segment(
+                x,
+                points[lower].0,
+                points[lower].1,
+                points[upper].0,
+                points[upper].1,
+                points[lower].1,
+            )
         }
     }
 }

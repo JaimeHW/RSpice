@@ -614,7 +614,7 @@ impl Engine {
                         if abort.is_aborted() {
                             return Err(SimulationError::Aborted);
                         }
-                        engine.solve_linear(&circuit, &mut matrix)?
+                        engine.solve_linear(&mut circuit, &mut matrix)?
                     };
                 if let Some(message) = circuit.take_xspice_evaluation_error() {
                     return Err(SimulationError::Circuit(format!(
@@ -741,6 +741,29 @@ mod tests {
             "unexpected error: {err}"
         );
         assert!(err.to_string().contains(&path));
+    }
+
+    #[test]
+    fn dc_op_stamps_solution_independent_behavioral_source_in_linear_solve() {
+        let deck = "\
+behavioral source linear dc
+B1 out 0 V={5}
+R1 out 0 1k
+.op
+.end
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("dc operating point should solve");
+
+        let actual = result
+            .try_voltage_named("out")
+            .expect("out node voltage is present");
+        assert!(
+            (actual - 5.0).abs() < 1.0e-12,
+            "expected behavioral source to drive V(out)=5, got {actual}"
+        );
     }
 
     #[test]

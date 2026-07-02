@@ -218,6 +218,8 @@ impl Engine {
                 time,
                 crate::xspice::AnalysisType::Transient,
             );
+        } else {
+            circuit.stamp_behavioral_sources(matrix, rhs, solution, time);
         }
 
         if circuit.has_xspice_devices() {

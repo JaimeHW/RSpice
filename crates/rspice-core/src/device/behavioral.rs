@@ -7,9 +7,11 @@
 use crate::Value;
 use crate::expr::{
     BinaryOp, CompiledExpr, Context, Expr, Function, UnaryOp, Vm, compile, parse_expression_strict,
+    resolve_file_lookup_functions,
 };
 use crate::netlist::ExpressionDialect;
 use crate::solver::StaticMatrix;
+use std::path::Path;
 
 const DERIVATIVE_REL_STEP: Value = 1e-6;
 const DERIVATIVE_ABS_STEP: Value = 1e-9;
@@ -60,10 +62,24 @@ impl BehavioralVoltageSource {
         branch_ordinal: usize,
         expression: &str,
     ) -> Result<Self, String> {
+        Self::new_with_source_path(name, node_pos, node_neg, branch_ordinal, expression, None)
+    }
+
+    /// Create a new behavioral voltage source with deck-relative file-function support.
+    pub fn new_with_source_path(
+        name: String,
+        node_pos: usize,
+        node_neg: usize,
+        branch_ordinal: usize,
+        expression: &str,
+        source_path: Option<&Path>,
+    ) -> Result<Self, String> {
         let ast = parse_expression_strict(expression)
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
+        let ast = resolve_file_lookup_functions(ast, source_path)
+            .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let transient_voltage_lte_excluded =
-            expression_has_discontinuous_output_for_voltage_lte(&ast);
+            expression_excludes_voltage_output_from_transient_lte(&ast);
         let program = compile(&ast);
 
         Ok(Self {
@@ -167,6 +183,10 @@ impl BehavioralVoltageSource {
 
     pub(crate) fn transient_breakpoints(&self, tstop: Value, _tstep_hint: Value) -> Vec<Value> {
         expression_transient_breakpoints(&self.ast, tstop)
+    }
+
+    pub(crate) fn is_solution_dependent(&self) -> bool {
+        !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()
     }
 
     #[inline]
@@ -347,17 +367,23 @@ impl BehavioralVoltageSource {
     }
 }
 
-fn expression_has_discontinuous_output_for_voltage_lte(expr: &Expr) -> bool {
+fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
+    // Ideal voltage-source outputs are algebraic constraints. For source-imposed
+    // time waveforms, breakpoint scheduling and connected dynamic states should
+    // control accuracy; generic node-voltage LTE can otherwise collapse dt at
+    // startup while chasing the source value itself.
     match expr {
         Expr::Const(_)
         | Expr::NodeVoltage(_)
         | Expr::BranchCurrent(_)
-        | Expr::Time
+        | Expr::StringLiteral(_)
         | Expr::Frequency
         | Expr::Temperature => false,
+        Expr::Time => true,
+        Expr::LookupTable(table) => table.transient_breakpoints,
         Expr::Unary { op, operand } => {
             matches!(op, UnaryOp::Not)
-                || expression_has_discontinuous_output_for_voltage_lte(operand)
+                || expression_excludes_voltage_output_from_transient_lte(operand)
         }
         Expr::Binary { op, left, right } => {
             matches!(
@@ -370,8 +396,8 @@ fn expression_has_discontinuous_output_for_voltage_lte(expr: &Expr) -> bool {
                     | BinaryOp::Ne
                     | BinaryOp::And
                     | BinaryOp::Or
-            ) || expression_has_discontinuous_output_for_voltage_lte(left)
-                || expression_has_discontinuous_output_for_voltage_lte(right)
+            ) || expression_excludes_voltage_output_from_transient_lte(left)
+                || expression_excludes_voltage_output_from_transient_lte(right)
         }
         Expr::Function { func, args } => {
             matches!(
@@ -390,7 +416,7 @@ fn expression_has_discontinuous_output_for_voltage_lte(expr: &Expr) -> bool {
                     | Function::If
             ) || args
                 .iter()
-                .any(expression_has_discontinuous_output_for_voltage_lte)
+                .any(expression_excludes_voltage_output_from_transient_lte)
         }
     }
 }
@@ -437,9 +463,15 @@ fn collect_expression_transient_breakpoints(
         Expr::Const(_)
         | Expr::NodeVoltage(_)
         | Expr::BranchCurrent(_)
+        | Expr::StringLiteral(_)
         | Expr::Time
         | Expr::Frequency
         | Expr::Temperature => {}
+        Expr::LookupTable(table) => {
+            if table.transient_breakpoints {
+                breakpoints.extend(table.points.iter().map(|(time, _)| *time));
+            }
+        }
     }
 }
 
@@ -520,9 +552,11 @@ fn expression_depends_on_runtime_quantity(expr: &Expr) -> bool {
         Expr::Const(_) => false,
         Expr::NodeVoltage(_)
         | Expr::BranchCurrent(_)
+        | Expr::StringLiteral(_)
         | Expr::Time
         | Expr::Frequency
         | Expr::Temperature => true,
+        Expr::LookupTable(_) => true,
         Expr::Unary { operand, .. } => expression_depends_on_runtime_quantity(operand),
         Expr::Binary { left, right, .. } => {
             expression_depends_on_runtime_quantity(left)
@@ -582,7 +616,20 @@ impl BehavioralCurrentSource {
         node_neg: usize,
         expression: &str,
     ) -> Result<Self, String> {
+        Self::new_with_source_path(name, node_pos, node_neg, expression, None)
+    }
+
+    /// Create a new behavioral current source with deck-relative file-function support.
+    pub fn new_with_source_path(
+        name: String,
+        node_pos: usize,
+        node_neg: usize,
+        expression: &str,
+        source_path: Option<&Path>,
+    ) -> Result<Self, String> {
         let ast = parse_expression_strict(expression)
+            .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
+        let ast = resolve_file_lookup_functions(ast, source_path)
             .map_err(|e| format!("Invalid behavioral expression '{}': {}", expression, e))?;
         let program = compile(&ast);
 
@@ -680,6 +727,10 @@ impl BehavioralCurrentSource {
 
     pub(crate) fn transient_breakpoints(&self, tstop: Value, _tstep_hint: Value) -> Vec<Value> {
         expression_transient_breakpoints(&self.ast, tstop)
+    }
+
+    pub(crate) fn is_solution_dependent(&self) -> bool {
+        !self.program.node_map.is_empty() || !self.program.branch_map.is_empty()
     }
 
     #[inline]
@@ -907,6 +958,16 @@ impl BehavioralSources {
         self.voltage_sources.is_empty() && self.current_sources.is_empty()
     }
 
+    pub(crate) fn has_solution_dependent_sources(&self) -> bool {
+        self.voltage_sources
+            .iter()
+            .any(BehavioralVoltageSource::is_solution_dependent)
+            || self
+                .current_sources
+                .iter()
+                .any(BehavioralCurrentSource::is_solution_dependent)
+    }
+
     pub(crate) fn transient_breakpoints(&self, tstop: Value, tstep_hint: Value) -> Vec<Value> {
         let mut breakpoints = Vec::new();
         for source in &self.voltage_sources {
@@ -938,5 +999,41 @@ impl BehavioralSources {
         for cs in &mut self.current_sources {
             cs.stamp(matrix, rhs, solution, time);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn file_table_voltage_source_excludes_output_from_generic_voltage_lte() {
+        let dir = unique_temp_dir("behavioral-file-table-lte");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        std::fs::write(dir.join("wave.dat"), "0 0\n1e-6 1\n").expect("write table data");
+        let deck_path = dir.join("deck.cir");
+
+        let source = BehavioralVoltageSource::new_with_source_path(
+            "B1".to_string(),
+            1,
+            0,
+            1,
+            "tablefile(\"wave.dat\")",
+            Some(&deck_path),
+        )
+        .expect("file table behavioral voltage source parses");
+
+        assert!(source.excludes_output_from_transient_voltage_lte());
+        assert!(!source.is_solution_dependent());
+    }
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("rspice-{label}-{unique}"))
     }
 }

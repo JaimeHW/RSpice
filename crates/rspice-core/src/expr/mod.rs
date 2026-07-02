@@ -9,10 +9,12 @@
 
 mod ast;
 mod compiler;
+mod file_table;
 mod parser;
 mod vm;
 
-pub use ast::{BinaryOp, Expr, Function, UnaryOp};
+pub use ast::{BinaryOp, Expr, Function, LookupTable, UnaryOp};
 pub use compiler::compile;
+pub use file_table::resolve_file_lookup_functions;
 pub use parser::{ParseError, parse_expression, parse_expression_strict};
 pub use vm::{CompiledExpr, Context, Instruction, Vm};

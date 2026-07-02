@@ -2121,12 +2121,13 @@ impl Engine {
                         ))
                     })?;
 
-                    let mut bvs = crate::device::BehavioralVoltageSource::new(
+                    let mut bvs = crate::device::BehavioralVoltageSource::new_with_source_path(
                         element.name.clone(),
                         np,
                         nn,
                         branch,
                         &prepared_expression,
+                        netlist.source_path.as_deref(),
                     )
                     .map_err(SimulationError::Circuit)?;
                     bvs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
@@ -2157,11 +2158,12 @@ impl Engine {
                         ))
                     })?;
 
-                    let mut bcs = crate::device::BehavioralCurrentSource::new(
+                    let mut bcs = crate::device::BehavioralCurrentSource::new_with_source_path(
                         element.name.clone(),
                         np,
                         nn,
                         &prepared_expression,
+                        netlist.source_path.as_deref(),
                     )
                     .map_err(SimulationError::Circuit)?;
                     bcs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(

@@ -15,8 +15,10 @@ impl Engine {
         source_activity_growth_cap_enabled: bool,
         accepted_scale: Option<Value>,
     ) {
+        // Strictly linear steps are solved directly, so they can recover from
+        // breakpoint restart steps faster than Newton-limited nonlinear decks.
         let scale = if is_strictly_linear_transient {
-            1.0
+            4.0
         } else if let Some(scale) = accepted_scale {
             scale
         } else {
@@ -24,7 +26,9 @@ impl Engine {
             lte_estimator.recommend_scale(lte)
         };
 
-        let growth_limit = if source_activity_growth_cap_enabled {
+        let growth_limit = if is_strictly_linear_transient {
+            4.0
+        } else if source_activity_growth_cap_enabled {
             1.5
         } else {
             2.0

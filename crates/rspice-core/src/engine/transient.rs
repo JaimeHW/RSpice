@@ -418,6 +418,11 @@ impl Engine {
             &mut breakpoints,
         );
         breakpoints.discard_through(resume_time);
+        let initial_remaining_breakpoints = breakpoints
+            .times()
+            .iter()
+            .filter(|&&time| time > resume_time)
+            .count();
         let initial_step = Self::ngspice_t0_breakpoint_limited_initial_timestep(
             Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
             breakpoints.next_after(resume_time),
@@ -741,8 +746,14 @@ impl Engine {
         // Keep cancellation responsiveness tight for large transient decks where a
         // single accepted step can still be expensive.
         const ABORT_CHECK_INTERVAL: usize = 16;
+        const MAX_ATTEMPTS_PER_SCHEDULED_BREAKPOINT: usize = 16;
         let estimated_steps = ((tstop / max_step).ceil().max(1.0) as usize).saturating_add(1);
-        let max_total_iterations = estimated_steps.saturating_mul(400).max(50_000);
+        let max_total_iterations = estimated_steps
+            .saturating_mul(400)
+            .saturating_add(
+                initial_remaining_breakpoints.saturating_mul(MAX_ATTEMPTS_PER_SCHEDULED_BREAKPOINT),
+            )
+            .max(50_000);
         let mut last_progress_log = crate::time_compat::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();

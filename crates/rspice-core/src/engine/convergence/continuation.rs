@@ -56,7 +56,7 @@ impl Engine {
     /// Try solving with a specific GMIN value
     pub(crate) fn try_solve_with_gmin(
         &self,
-        circuit: &CircuitData,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         gmin: Value,
     ) -> Result<Vec<Value>, SolverError> {
@@ -67,13 +67,19 @@ impl Engine {
         rhs.fill(0.0);
 
         self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin);
+        if !circuit.behavioral_sources.is_empty()
+            && !circuit.behavioral_sources.has_solution_dependent_sources()
+        {
+            let zero_solution = vec![0.0; size];
+            circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0);
+        }
         matrix.solve(&rhs)
     }
 
     /// GMIN stepping: try progressively smaller GMIN values
     pub(crate) fn gmin_stepping(
         &self,
-        circuit: &CircuitData,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SolverError> {
         let gmin_values = self.gmin_linear_schedule();
@@ -107,7 +113,7 @@ impl Engine {
     /// Source stepping: ramp sources from 0 to 100%
     pub(crate) fn source_stepping(
         &self,
-        circuit: &CircuitData,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SolverError> {
         // Source stepping sequence
@@ -124,6 +130,12 @@ impl Engine {
             rhs.fill(0.0);
 
             self.stamp_dc_scaled(circuit, matrix, &mut rhs, gmin_floor, scale);
+            if !circuit.behavioral_sources.is_empty()
+                && !circuit.behavioral_sources.has_solution_dependent_sources()
+            {
+                let zero_solution = vec![0.0; size];
+                circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0);
+            }
 
             match matrix.solve(&rhs) {
                 Ok(sol) => {

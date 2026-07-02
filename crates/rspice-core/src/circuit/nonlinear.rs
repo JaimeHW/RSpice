@@ -41,7 +41,7 @@ enum DiodeStampMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::EkvMosfet;
+    use crate::device::{BehavioralVoltageSource, EkvMosfet};
 
     #[test]
     fn ekv26_consumes_circuit_junction_gmin() {
@@ -57,6 +57,28 @@ mod tests {
         circuit.set_semiconductor_junction_gmin(-1.0);
 
         assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 0.0);
+    }
+
+    #[test]
+    fn time_only_behavioral_source_does_not_make_circuit_nonlinear() {
+        let mut circuit = CircuitData::new();
+        circuit.behavioral_sources.add_voltage(
+            BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "time")
+                .expect("time-only behavioral source parses"),
+        );
+
+        assert!(!circuit.has_nonlinear_devices());
+    }
+
+    #[test]
+    fn solution_dependent_behavioral_source_makes_circuit_nonlinear() {
+        let mut circuit = CircuitData::new();
+        circuit.behavioral_sources.add_voltage(
+            BehavioralVoltageSource::new("B1".to_string(), 1, 0, 1, "V(1)*V(1)")
+                .expect("solution-dependent behavioral source parses"),
+        );
+
+        assert!(circuit.has_nonlinear_devices());
     }
 }
 
@@ -77,7 +99,7 @@ impl CircuitData {
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
-            || !self.behavioral_sources.is_empty()
+            || self.behavioral_sources.has_solution_dependent_sources()
             || self.has_xspice_devices()
             || {
                 #[cfg(feature = "veriloga-builtins")]
@@ -567,6 +589,19 @@ impl CircuitData {
     }
 
     /// Stamp behavioral sources with the given analysis time.
+    pub fn stamp_behavioral_sources(
+        &mut self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+    ) {
+        self.behavioral_sources
+            .stamp_all(matrix, rhs, solution, self.num_nodes, time);
+    }
+
+    /// Stamp behavioral sources and generated Verilog-A builtins with the
+    /// given analysis time.
     pub fn stamp_behavioral(
         &mut self,
         matrix: &mut StaticMatrix,
@@ -575,8 +610,7 @@ impl CircuitData {
         time: Value,
         _analysis: crate::xspice::AnalysisType,
     ) {
-        self.behavioral_sources
-            .stamp_all(matrix, rhs, solution, self.num_nodes, time);
+        self.stamp_behavioral_sources(matrix, rhs, solution, time);
         #[cfg(feature = "veriloga-builtins")]
         {
             let generated_analysis = match _analysis {

@@ -682,6 +682,41 @@ fn test_xyce_behavioral_source_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_behavioral_file_table_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/ABM_SPLINES/fasttable.cir",
+        "Netlists/ABM_SPLINES/fasttable2.cir",
+        "Netlists/ABM_SPLINES/table.cir",
+        "Netlists/ABM_SPLINES/table2.cir",
+        "Netlists/ABM_SPLINES/table3.cir",
+        "Netlists/ABM_SPLINES/table4.cir",
+        "Netlists/ABM_SPLINES/table5.cir",
+        "Netlists/ABM_SPLINES/table6.cir",
+        "Netlists/ABM_SPLINES/table7.cir",
+        "Netlists/ABM_SPLINES/table8.cir",
+        "Netlists/ABM_SPLINES/tableOutOfOrder.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce behavioral file-table transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_static_capacitor_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

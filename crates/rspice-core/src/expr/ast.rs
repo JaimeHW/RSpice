@@ -4,6 +4,7 @@
 
 use crate::Value;
 use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::sync::Arc;
 
 /// Mathematical expression AST node
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,10 @@ pub enum Expr {
     Unary { op: UnaryOp, operand: Box<Expr> },
     /// Function call
     Function { func: Function, args: Vec<Expr> },
+    /// String literal used by build-time-resolved expression functions.
+    StringLiteral(String),
+    /// Build-time-resolved file-backed lookup table.
+    LookupTable(LookupTable),
     /// Time variable (for transient)
     Time,
     /// Frequency variable (for AC)
@@ -94,23 +99,35 @@ pub enum Function {
     Limit, // limit(x, lo, hi)
     Min,
     Max,
-    Sign,       // sign(x) = -1, 0, or 1
-    Uramp,      // uramp(x) = max(0, x) - positive ramp
-    Stp,        // stp(x) = 1 if x is positive outside expression-zero tolerance else 0
-    U2,         // u2(x) = clamp(x, 0, 1)
-    Eq0,        // eq0(x) = 1 if x == 0 else 0
-    Ne0,        // ne0(x) = 1 if x != 0 else 0
-    Gt0,        // gt0(x) = 1 if x > 0 else 0
-    Lt0,        // lt0(x) = 1 if x < 0 else 0
-    Ge0,        // ge0(x) = 1 if x >= 0 else 0
-    Le0,        // le0(x) = 1 if x <= 0 else 0
-    Pow,        // pow(x, y) = x^y
-    Table,      // table(x, x1,y1, x2,y2, ...)
-    Pwl,        // pwl(x, x1,y1, x2,y2, ...) alias for table
-    Mod,        // mod(x, y) = x % y - modulo
-    SpicePulse, // spice_pulse(v1, v2, td, tr, tf, pw[, per])
+    Sign,          // sign(x) = -1, 0, or 1
+    Uramp,         // uramp(x) = max(0, x) - positive ramp
+    Stp,           // stp(x) = 1 if x is positive outside expression-zero tolerance else 0
+    U2,            // u2(x) = clamp(x, 0, 1)
+    Eq0,           // eq0(x) = 1 if x == 0 else 0
+    Ne0,           // ne0(x) = 1 if x != 0 else 0
+    Gt0,           // gt0(x) = 1 if x > 0 else 0
+    Lt0,           // lt0(x) = 1 if x < 0 else 0
+    Ge0,           // ge0(x) = 1 if x >= 0 else 0
+    Le0,           // le0(x) = 1 if x <= 0 else 0
+    Pow,           // pow(x, y) = x^y
+    Table,         // table(x, x1,y1, x2,y2, ...)
+    Pwl,           // pwl(x, x1,y1, x2,y2, ...) alias for table
+    TableFile,     // tablefile("path") / tablefile(path) = file-backed table(time)
+    FastTable,     // fasttable("path") / fasttable(path) = file-backed table(time), no breakpoints
+    FastTableFile, // fasttablefile("path") / fasttablefile(path)
+    Mod,           // mod(x, y) = x % y - modulo
+    SpicePulse,    // spice_pulse(v1, v2, td, tr, tf, pw[, per])
     // Conditional
     If, // if(cond, then, else)
+}
+
+/// File-backed one-dimensional lookup data resolved during circuit build.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LookupTable {
+    /// Sorted `(x, y)` pairs used for piecewise-linear interpolation.
+    pub points: Arc<[(Value, Value)]>,
+    /// Whether the transient integrator should land on each `x` knot.
+    pub transient_breakpoints: bool,
 }
 
 #[allow(clippy::should_implement_trait)]

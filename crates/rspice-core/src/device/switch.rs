@@ -903,9 +903,15 @@ impl GenericSwitch {
             Expr::Const(_)
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
+            | Expr::StringLiteral(_)
             | Expr::Time
             | Expr::Frequency
             | Expr::Temperature => {}
+            Expr::LookupTable(table) => {
+                if table.transient_breakpoints {
+                    breakpoints.extend(table.points.iter().map(|(time, _)| *time));
+                }
+            }
         }
     }
 
@@ -974,6 +980,8 @@ impl GenericSwitch {
             Expr::Unary { .. }
             | Expr::NodeVoltage(_)
             | Expr::BranchCurrent(_)
+            | Expr::StringLiteral(_)
+            | Expr::LookupTable(_)
             | Expr::Frequency
             | Expr::Temperature
             | Expr::Function { .. } => None,

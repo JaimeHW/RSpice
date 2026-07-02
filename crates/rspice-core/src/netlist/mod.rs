@@ -3449,6 +3449,24 @@ mod tests {
     }
 
     #[test]
+    fn behavioral_source_preserves_unbraced_string_literals() {
+        let netlist = Netlist::parse(
+            "behavioral table source\n\
+             B1 1 0 V=table(\"sinewave2-1.dat\")\n\
+             .end\n",
+        )
+        .expect("behavioral expression with string literal should parse");
+
+        let ElementKind::BehavioralVoltage { expression, .. } = &netlist.elements[0].kind else {
+            panic!("expected behavioral voltage source");
+        };
+        assert!(
+            expression.contains("\"sinewave2-1.dat\""),
+            "behavioral expression must preserve string literal quotes, got {expression}"
+        );
+    }
+
+    #[test]
     fn multi_input_vcvs_gate_lowers_to_xspice_pwl() {
         let netlist = Netlist::parse(
             "multi-input VCVS gate\n\
@@ -6644,7 +6662,7 @@ mod tests {
                 } => value_expr
                     .as_deref()
                     .map(|expr| crate::netlist::expr::eval_expression(expr, &netlist.params))
-                    .or_else(|| Some(Ok(*value))),
+                    .or(Some(Ok(*value))),
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()

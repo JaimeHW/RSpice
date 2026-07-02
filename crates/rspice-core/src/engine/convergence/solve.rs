@@ -47,7 +47,7 @@ impl Engine {
     /// Solve a linear circuit (no nonlinear devices)
     pub(crate) fn solve_linear(
         &self,
-        circuit: &CircuitData,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
@@ -57,6 +57,12 @@ impl Engine {
         rhs.fill(0.0);
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin_floor);
+        if !circuit.behavioral_sources.is_empty()
+            && !circuit.behavioral_sources.has_solution_dependent_sources()
+        {
+            let zero_solution = vec![0.0; size];
+            circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0);
+        }
 
         let direct_result = matrix.solve(&rhs);
         if let Ok(sol) = direct_result {
@@ -660,6 +666,12 @@ impl Engine {
             time,
             self.dc_nodal_gmin_floor(circuit),
         );
+        if !circuit.behavioral_sources.is_empty()
+            && !circuit.behavioral_sources.has_solution_dependent_sources()
+        {
+            let zero_solution = vec![0.0; size];
+            circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, time);
+        }
         matrix.solve(&rhs).map_err(SimulationError::Solver)
     }
 

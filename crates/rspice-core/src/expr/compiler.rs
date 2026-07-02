@@ -40,6 +40,15 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
             program.instructions.push(Instruction::LoadCurrent(idx));
         }
 
+        Expr::StringLiteral(_) => {
+            program.instructions.push(Instruction::PushConst(0.0));
+        }
+
+        Expr::LookupTable(table) => {
+            let index = program.add_lookup_table(table.clone());
+            program.instructions.push(Instruction::LookupTable(index));
+        }
+
         Expr::Binary { op, left, right } => {
             // Compile operands first (left-to-right)
             compile_expr(left, program);
@@ -123,6 +132,9 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 Function::Pow => Instruction::Pow,
                 Function::Table => Instruction::Table(args.len()),
                 Function::Pwl => Instruction::Pwl(args.len()),
+                Function::TableFile | Function::FastTable | Function::FastTableFile => {
+                    Instruction::PushConst(0.0)
+                }
                 Function::Mod => Instruction::Mod,
                 Function::SpicePulse => Instruction::SpicePulse(args.len()),
                 Function::If => Instruction::IfElse,

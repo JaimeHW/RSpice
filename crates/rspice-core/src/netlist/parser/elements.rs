@@ -5235,7 +5235,7 @@ pub(super) fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String
     match token {
         TokenKind::Ident(s) => Some(s.clone()),
         TokenKind::Number(n) => Some(format!("{}", n)),
-        TokenKind::StringLit(s) => Some(s.clone()),
+        TokenKind::StringLit(s) => Some(format_behavioral_string_literal(s)),
         TokenKind::Expression(expr) => Some(expr.clone()),
         TokenKind::Equals => Some("=".to_string()),
         TokenKind::Comma => Some(",".to_string()),
@@ -5258,6 +5258,20 @@ fn append_behavioral_expr_token(expression: &mut String, token: &TokenKind) {
     if let Some(fragment) = behavioral_expr_token_fragment(token) {
         append_behavioral_expr_fragment(expression, &fragment);
     }
+}
+
+fn format_behavioral_string_literal(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            _ => quoted.push(ch),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 fn append_behavioral_expr_fragment(expression: &mut String, fragment: &str) {
