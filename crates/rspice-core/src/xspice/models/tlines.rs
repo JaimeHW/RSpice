@@ -1487,7 +1487,7 @@ fn tline_impedance(ctx: &CmContext) -> CmResult<Value> {
 }
 
 fn tline_attenuation(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "a", 0.0)
+    nonnegative_param(ctx, "a", 0.0)
 }
 
 fn tline_ac_impedances_uncached(
@@ -1881,11 +1881,11 @@ fn cpline_odd_permittivity(ctx: &CmContext) -> CmResult<Value> {
 }
 
 fn cpline_even_attenuation(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "ae", 0.0)
+    nonnegative_param(ctx, "ae", 0.0)
 }
 
 fn cpline_odd_attenuation(ctx: &CmContext) -> CmResult<Value> {
-    finite_param(ctx, "ao", 0.0)
+    nonnegative_param(ctx, "ao", 0.0)
 }
 
 fn cpline_reference_impedance(ctx: &CmContext) -> CmResult<Value> {
@@ -2947,6 +2947,21 @@ mod tests {
         let mut cpmlin = coupled_microstrip_cache_context();
         cpmlin.set_param("l", -1.0);
         assert_invalid_param(CoupledMicrostripLine.init(&mut cpmlin), "l");
+    }
+
+    #[test]
+    fn transmission_lines_reject_negative_attenuation() {
+        let mut tline = CmContext::new();
+        tline.set_param("a", -1.0);
+        assert_invalid_param(GenericTransmissionLine.init(&mut tline), "a");
+
+        let mut cpline_even = CmContext::new();
+        cpline_even.set_param("ae", -1.0);
+        assert_invalid_param(CoupledTransmissionLine.init(&mut cpline_even), "ae");
+
+        let mut cpline_odd = CmContext::new();
+        cpline_odd.set_param("ao", -1.0);
+        assert_invalid_param(CoupledTransmissionLine.init(&mut cpline_odd), "ao");
     }
 
     #[test]
