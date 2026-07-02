@@ -415,12 +415,19 @@ enum XspiceAutoBridgeKind {
     Adc,
     Dac,
     Bidi,
+    RealToV,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct PlannedXspiceAutoBridge {
     node: usize,
     kind: XspiceAutoBridgeKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum XspiceAutoBridgeOutputBranch {
+    Scalar { port_idx: usize },
+    Vector { port_idx: usize, element_idx: usize },
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -450,6 +457,13 @@ impl XspiceAutoBridgeUsage {
             None
         }
     }
+}
+
+fn direction_outputs_events(direction: crate::xspice::PortDirection) -> bool {
+    matches!(
+        direction,
+        crate::xspice::PortDirection::Out | crate::xspice::PortDirection::InOut
+    )
 }
 
 fn insert_non_ground_node(nodes: &mut BTreeSet<usize>, node: usize) {
@@ -608,10 +622,36 @@ fn register_digital_connection_nodes(
     }
 }
 
-fn is_xspice_bridge_model(model_name: &str) -> bool {
+fn register_real_output_connection_nodes(
+    nodes: &mut BTreeSet<usize>,
+    connection: &crate::xspice::PortConnection,
+    direction: crate::xspice::PortDirection,
+) {
+    use crate::xspice::PortConnection;
+
+    if !direction_outputs_events(direction) {
+        return;
+    }
+
+    match connection {
+        PortConnection::Real(node) => insert_non_ground_node(nodes, *node),
+        PortConnection::RealVector(vector) => {
+            for node in vector {
+                insert_non_ground_node(nodes, *node);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_xspice_digital_bridge_model(model_name: &str) -> bool {
     model_name.eq_ignore_ascii_case("adc_bridge")
         || model_name.eq_ignore_ascii_case("dac_bridge")
         || model_name.eq_ignore_ascii_case("bidi_bridge")
+}
+
+fn is_xspice_real_bridge_model(model_name: &str) -> bool {
+    model_name.eq_ignore_ascii_case("real_to_v")
 }
 
 fn plan_xspice_auto_bridges(
@@ -620,38 +660,67 @@ fn plan_xspice_auto_bridges(
 ) -> Vec<PlannedXspiceAutoBridge> {
     let mut analog_nodes = BTreeSet::new();
     let mut digital_nodes = BTreeMap::new();
-    let mut explicit_bridge_nodes = BTreeSet::new();
+    let mut real_output_nodes = BTreeSet::new();
+    let mut explicit_digital_bridge_nodes = BTreeSet::new();
+    let mut explicit_real_bridge_nodes = BTreeSet::new();
 
     collect_flat_analog_nodes(&mut analog_nodes, circuit, flat_elements);
 
     for instance in &circuit.xspice_instances {
-        let explicit_bridge = is_xspice_bridge_model(instance.model_name());
+        let explicit_digital_bridge = is_xspice_digital_bridge_model(instance.model_name());
+        let explicit_real_bridge = is_xspice_real_bridge_model(instance.model_name());
         for (port_idx, port) in instance.ports().iter().enumerate() {
             let Some(connection) = instance.connection_at(port_idx) else {
                 continue;
             };
 
-            if explicit_bridge {
-                collect_connection_nodes(&mut explicit_bridge_nodes, connection);
+            if explicit_digital_bridge {
+                collect_connection_nodes(&mut explicit_digital_bridge_nodes, connection);
+                continue;
+            }
+            if explicit_real_bridge {
+                collect_connection_nodes(&mut explicit_real_bridge_nodes, connection);
                 continue;
             }
 
             collect_analog_connection_nodes(&mut analog_nodes, connection);
             if port.default_type == crate::xspice::PortType::Digital {
                 register_digital_connection_nodes(&mut digital_nodes, connection, port.direction);
+            } else if port.default_type == crate::xspice::PortType::Real {
+                register_real_output_connection_nodes(
+                    &mut real_output_nodes,
+                    connection,
+                    port.direction,
+                );
             }
         }
     }
 
-    digital_nodes
+    let mut planned: Vec<PlannedXspiceAutoBridge> = digital_nodes
         .into_iter()
-        .filter(|(node, _)| analog_nodes.contains(node) && !explicit_bridge_nodes.contains(node))
+        .filter(|(node, _)| {
+            analog_nodes.contains(node) && !explicit_digital_bridge_nodes.contains(node)
+        })
         .filter_map(|(node, usage)| {
             usage
                 .bridge_kind()
                 .map(|kind| PlannedXspiceAutoBridge { node, kind })
         })
-        .collect()
+        .collect();
+
+    planned.extend(
+        real_output_nodes
+            .into_iter()
+            .filter(|node| {
+                analog_nodes.contains(node) && !explicit_real_bridge_nodes.contains(node)
+            })
+            .map(|node| PlannedXspiceAutoBridge {
+                node,
+                kind: XspiceAutoBridgeKind::RealToV,
+            }),
+    );
+
+    planned
 }
 
 fn xspice_auto_bridge_vcc(netlist: &Netlist) -> crate::Value {
@@ -685,47 +754,60 @@ fn add_planned_xspice_auto_bridge(
     use crate::xspice::PortConnection;
 
     let half_vcc = vcc / 2.0;
-    let (model_name, instance_name, connections, numeric_params, dac_output_port) =
-        match bridge.kind {
-            XspiceAutoBridgeKind::Adc => (
-                "adc_bridge",
-                format!("__rspice_auto_adc_{}", bridge.node),
-                vec![
-                    PortConnection::AnalogVector(vec![bridge.node]),
-                    PortConnection::DigitalVector(vec![bridge.node]),
-                ],
-                vec![
-                    ("in_low".to_string(), half_vcc),
-                    ("in_high".to_string(), half_vcc),
-                ],
-                None,
-            ),
-            XspiceAutoBridgeKind::Dac => (
-                "dac_bridge",
-                format!("__rspice_auto_dac_{}", bridge.node),
-                vec![
-                    PortConnection::DigitalVector(vec![bridge.node]),
-                    PortConnection::AnalogVector(vec![bridge.node]),
-                ],
-                vec![("out_low".to_string(), 0.0), ("out_high".to_string(), vcc)],
-                Some(1),
-            ),
-            XspiceAutoBridgeKind::Bidi => (
-                "bidi_bridge",
-                format!("__rspice_auto_bidi_{}", bridge.node),
-                vec![
-                    PortConnection::AnalogVector(vec![bridge.node]),
-                    PortConnection::DigitalVector(vec![bridge.node]),
-                    PortConnection::Null,
-                ],
-                vec![
-                    ("out_high".to_string(), vcc),
-                    ("in_low".to_string(), half_vcc),
-                    ("in_high".to_string(), half_vcc),
-                ],
-                None,
-            ),
-        };
+    let (model_name, instance_name, connections, numeric_params, output_branch) = match bridge.kind
+    {
+        XspiceAutoBridgeKind::Adc => (
+            "adc_bridge",
+            format!("__rspice_auto_adc_{}", bridge.node),
+            vec![
+                PortConnection::AnalogVector(vec![bridge.node]),
+                PortConnection::DigitalVector(vec![bridge.node]),
+            ],
+            vec![
+                ("in_low".to_string(), half_vcc),
+                ("in_high".to_string(), half_vcc),
+            ],
+            None,
+        ),
+        XspiceAutoBridgeKind::Dac => (
+            "dac_bridge",
+            format!("__rspice_auto_dac_{}", bridge.node),
+            vec![
+                PortConnection::DigitalVector(vec![bridge.node]),
+                PortConnection::AnalogVector(vec![bridge.node]),
+            ],
+            vec![("out_low".to_string(), 0.0), ("out_high".to_string(), vcc)],
+            Some(XspiceAutoBridgeOutputBranch::Vector {
+                port_idx: 1,
+                element_idx: 0,
+            }),
+        ),
+        XspiceAutoBridgeKind::Bidi => (
+            "bidi_bridge",
+            format!("__rspice_auto_bidi_{}", bridge.node),
+            vec![
+                PortConnection::AnalogVector(vec![bridge.node]),
+                PortConnection::DigitalVector(vec![bridge.node]),
+                PortConnection::Null,
+            ],
+            vec![
+                ("out_high".to_string(), vcc),
+                ("in_low".to_string(), half_vcc),
+                ("in_high".to_string(), half_vcc),
+            ],
+            None,
+        ),
+        XspiceAutoBridgeKind::RealToV => (
+            "real_to_v",
+            format!("__rspice_auto_real_to_v_{}", bridge.node),
+            vec![
+                PortConnection::Real(bridge.node),
+                PortConnection::Analog(bridge.node),
+            ],
+            Vec::new(),
+            Some(XspiceAutoBridgeOutputBranch::Scalar { port_idx: 1 }),
+        ),
+    };
 
     let code_model = circuit.xspice_registry.get(model_name).ok_or_else(|| {
         SimulationError::Circuit(format!(
@@ -754,17 +836,36 @@ fn add_planned_xspice_auto_bridge(
     instance.set_temperature(temperature);
     instance.set_ramptime(ramptime);
 
-    if let Some(port_idx) = dac_output_port {
-        let branch_name = format!("{}#out[0]", instance_name);
-        let branch_ordinal = circuit.allocate_branch_named(&branch_name);
-        instance
-            .set_output_vector_branch(port_idx, 0, branch_ordinal)
-            .map_err(|e| {
-                SimulationError::Circuit(format!(
-                    "Failed to assign branch for generated XSPICE auto-bridge '{}': {}",
-                    instance_name, e
-                ))
-            })?;
+    if let Some(output_branch) = output_branch {
+        match output_branch {
+            XspiceAutoBridgeOutputBranch::Scalar { port_idx } => {
+                let branch_name = format!("{}#out", instance_name);
+                let branch_ordinal = circuit.allocate_branch_named(&branch_name);
+                instance
+                    .set_output_branch(port_idx, branch_ordinal)
+                    .map_err(|e| {
+                        SimulationError::Circuit(format!(
+                            "Failed to assign branch for generated XSPICE auto-bridge '{}': {}",
+                            instance_name, e
+                        ))
+                    })?;
+            }
+            XspiceAutoBridgeOutputBranch::Vector {
+                port_idx,
+                element_idx,
+            } => {
+                let branch_name = format!("{}#out[{}]", instance_name, element_idx);
+                let branch_ordinal = circuit.allocate_branch_named(&branch_name);
+                instance
+                    .set_output_vector_branch(port_idx, element_idx, branch_ordinal)
+                    .map_err(|e| {
+                        SimulationError::Circuit(format!(
+                            "Failed to assign branch for generated XSPICE auto-bridge '{}': {}",
+                            instance_name, e
+                        ))
+                    })?;
+            }
+        }
     }
 
     instance.init().map_err(|e| {
