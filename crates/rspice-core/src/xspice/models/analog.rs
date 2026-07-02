@@ -672,21 +672,15 @@ fn mult_output_from_context(ctx: &CmContext) -> CmResult<Value> {
 
 fn mult_partials_from_transfer(transfer: &MultTransfer) -> Vec<(String, usize, Value)> {
     let mut partials = Vec::with_capacity(transfer.shifted_inputs.len());
-    let zero_count = transfer
-        .shifted_inputs
-        .iter()
-        .filter(|&&shifted| shifted == 0.0)
-        .count();
-    let single_zero_product = if zero_count == 1 {
-        transfer
-            .shifted_inputs
-            .iter()
-            .copied()
-            .filter(|shifted| *shifted != 0.0)
-            .product::<Value>()
-    } else {
-        0.0
-    };
+    let mut zero_count = 0usize;
+    let mut nonzero_product = 1.0;
+    for shifted in transfer.shifted_inputs.iter().copied() {
+        if shifted == 0.0 {
+            zero_count += 1;
+        } else {
+            nonzero_product *= shifted;
+        }
+    }
 
     for (index, shifted) in transfer.shifted_inputs.iter().copied().enumerate() {
         let partial = if !transfer.transfer_gain.is_finite() {
@@ -697,8 +691,8 @@ fn mult_partials_from_transfer(transfer: &MultTransfer) -> Vec<(String, usize, V
             && shifted != 0.0
         {
             transfer.accumulate_in / shifted * transfer.transfer_gain
-        } else if zero_count == 1 && shifted == 0.0 && single_zero_product.is_finite() {
-            single_zero_product * transfer.transfer_gain
+        } else if zero_count == 1 && shifted == 0.0 && nonzero_product.is_finite() {
+            nonzero_product * transfer.transfer_gain
         } else {
             0.0
         };
