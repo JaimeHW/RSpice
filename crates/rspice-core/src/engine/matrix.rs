@@ -1006,6 +1006,25 @@ impl Engine {
                                 );
                             }
                         }
+                        crate::xspice::PortConnection::Hybrid { pos, neg, .. } => {
+                            if *pos > 0 {
+                                inout_analog_nodes.push(*pos);
+                            }
+                            if *neg > 0 {
+                                inout_analog_nodes.push(*neg);
+                            }
+                            if let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) {
+                                push_voltage_output_branch_topology(
+                                    &mut triplets,
+                                    circuit,
+                                    instance,
+                                    ports,
+                                    branch_ordinal,
+                                    *pos,
+                                    *neg,
+                                );
+                            }
+                        }
                         crate::xspice::PortConnection::AnalogVector(nodes) => {
                             for &node in nodes {
                                 if node > 0 {
@@ -1097,7 +1116,9 @@ impl Engine {
 
                 match port.default_type {
                     crate::xspice::PortType::Voltage
-                    | crate::xspice::PortType::DifferentialVoltage => match connection {
+                    | crate::xspice::PortType::DifferentialVoltage
+                    | crate::xspice::PortType::Hybrid
+                    | crate::xspice::PortType::DifferentialHybrid => match connection {
                         crate::xspice::PortConnection::Analog(node) => {
                             if let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) {
                                 push_voltage_output_branch_topology(
@@ -1112,6 +1133,19 @@ impl Engine {
                             }
                         }
                         crate::xspice::PortConnection::Differential(pos, neg) => {
+                            if let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) {
+                                push_voltage_output_branch_topology(
+                                    &mut triplets,
+                                    circuit,
+                                    instance,
+                                    ports,
+                                    branch_ordinal,
+                                    *pos,
+                                    *neg,
+                                );
+                            }
+                        }
+                        crate::xspice::PortConnection::Hybrid { pos, neg, .. } => {
                             if let Some(branch_ordinal) = instance.branch_ordinal_at(port_idx) {
                                 push_voltage_output_branch_topology(
                                     &mut triplets,

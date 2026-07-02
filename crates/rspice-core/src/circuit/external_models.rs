@@ -992,7 +992,9 @@ impl CircuitData {
                                     instance.analog_vector_contribution_at(port_idx, index);
                                 match port.default_type {
                                     crate::xspice::PortType::Voltage
-                                    | crate::xspice::PortType::DifferentialVoltage => {
+                                    | crate::xspice::PortType::DifferentialVoltage
+                                    | crate::xspice::PortType::Hybrid
+                                    | crate::xspice::PortType::DifferentialHybrid => {
                                         if let Some(branch_ordinal) =
                                             instance.branch_vector_output_ordinal(port_idx, index)
                                         {
@@ -1039,7 +1041,9 @@ impl CircuitData {
                                     crate::xspice::AnalogInputConnection::Node(node) => {
                                         match port.default_type {
                                             crate::xspice::PortType::Voltage
-                                            | crate::xspice::PortType::DifferentialVoltage => {
+                                            | crate::xspice::PortType::DifferentialVoltage
+                                            | crate::xspice::PortType::Hybrid
+                                            | crate::xspice::PortType::DifferentialHybrid => {
                                                 if let Some(branch_ordinal) = instance
                                                     .branch_vector_output_ordinal(port_idx, index)
                                                 {
@@ -1080,9 +1084,16 @@ impl CircuitData {
                                     crate::xspice::AnalogInputConnection::Differential(
                                         pos,
                                         neg,
-                                    ) => match port.default_type {
+                                    )
+                                    | crate::xspice::AnalogInputConnection::Hybrid {
+                                        pos,
+                                        neg,
+                                        ..
+                                    } => match port.default_type {
                                         crate::xspice::PortType::Voltage
-                                        | crate::xspice::PortType::DifferentialVoltage => {
+                                        | crate::xspice::PortType::DifferentialVoltage
+                                        | crate::xspice::PortType::Hybrid
+                                        | crate::xspice::PortType::DifferentialHybrid => {
                                             if let Some(branch_ordinal) = instance
                                                 .branch_vector_output_ordinal(port_idx, index)
                                             {
