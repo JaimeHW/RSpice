@@ -1313,18 +1313,29 @@ fn test_xyce_resistor_value_model_temperature_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/RESISTOR_TD/temp_dep.cir";
 
-    let result = runner.run_test(root.join(relative));
+    for (relative, contract) in [
+        ("Netlists/RESISTOR_TD/temp_dep.cir", "static_prn_dc"),
+        (
+            "Netlists/RESISTOR_TD/exp_temp_dep.cir",
+            "wrapper_static_prn_step_dc",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
 
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native Xyce resistor value-plus-model temperature comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce resistor value-plus-model temperature comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, contract,
+            "{relative} should report the expected DC .prn contract"
+        );
+    }
 }
 
 #[test]

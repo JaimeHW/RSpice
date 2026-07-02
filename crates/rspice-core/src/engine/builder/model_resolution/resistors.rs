@@ -503,28 +503,48 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
         }
     })?;
 
-    let tc1 = instance_param(instance_params, &["TC1", "TC"])
-        .or_else(|| {
-            model_def.and_then(|model_def| {
-                resolve_model_param(model_def, &["TC1", "TC"], &eval_ctx)
-                    .ok()
-                    .flatten()
-            })
+    let tce = instance_param(instance_params, &["TCE"]).or_else(|| {
+        model_def.and_then(|model_def| {
+            resolve_model_param(model_def, &["TCE"], &eval_ctx)
+                .ok()
+                .flatten()
         })
-        .unwrap_or(0.0);
-    let tc2 = instance_param(instance_params, &["TC2"])
-        .or_else(|| {
-            model_def.and_then(|model_def| {
-                resolve_model_param(model_def, &["TC2"], &eval_ctx)
-                    .ok()
-                    .flatten()
+    });
+    if let Some(tce) = tce {
+        let temp_delta_c = current_temp_c - tnom_c;
+        let scale = 1.01_f64.powf(tce * temp_delta_c);
+        if !scale.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' TCE temperature scaling produced non-finite resistance multiplier {}",
+                element_name, scale
+            )));
+        }
+        resolved *= scale;
+    } else {
+        let tc1 = instance_param(instance_params, &["TC1", "TC"])
+            .or_else(|| {
+                model_def.and_then(|model_def| {
+                    resolve_model_param(model_def, &["TC1", "TC"], &eval_ctx)
+                        .ok()
+                        .flatten()
+                })
             })
-        })
-        .unwrap_or(0.0);
-    if tc1 != 0.0 || tc2 != 0.0 {
-        let temp_ctx = crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
-        resolved = crate::analysis::ResistorTempCoeffs::new(tc1, tc2)
-            .scale_resistance(resolved, &temp_ctx);
+            .unwrap_or(0.0);
+        let tc2 = instance_param(instance_params, &["TC2"])
+            .or_else(|| {
+                model_def.and_then(|model_def| {
+                    resolve_model_param(model_def, &["TC2"], &eval_ctx)
+                        .ok()
+                        .flatten()
+                })
+            })
+            .unwrap_or(0.0);
+        if tc1 != 0.0 || tc2 != 0.0 {
+            let temp_ctx =
+                crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
+            resolved = crate::analysis::ResistorTempCoeffs::new(tc1, tc2)
+                .scale_resistance(resolved, &temp_ctx);
+        }
     }
 
     apply_resistor_instance_scaling(element_name, "resistance", resolved, instance_params)
@@ -562,6 +582,14 @@ mod tests {
     use super::*;
 
     fn resolve_resistor_from_source(source: &str, name: &str) -> (f64, Option<f64>) {
+        resolve_resistor_from_source_at(source, name, crate::constants::TEMP_REFERENCE)
+    }
+
+    fn resolve_resistor_from_source_at(
+        source: &str,
+        name: &str,
+        temperature_kelvin: f64,
+    ) -> (f64, Option<f64>) {
         let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
         let element = netlist
             .elements
@@ -587,7 +615,7 @@ mod tests {
             value_expr.as_deref(),
             model.as_deref(),
             instance_params,
-            crate::constants::TEMP_REFERENCE,
+            temperature_kelvin,
         )
         .expect("resistor resolves");
         let ac = instance_param(instance_params, &["AC"])
@@ -596,6 +624,55 @@ mod tests {
             .expect("resistor AC value resolves");
 
         (dc, ac)
+    }
+
+    #[test]
+    fn resistor_tce_uses_xyce_percent_compounding_and_precedence() {
+        let temperature_kelvin = crate::analysis::temperature::celsius_to_kelvin(37.0);
+        let expected_instance = 1.01_f64.powf(3.0 * 10.0);
+        let expected_model = 1.01_f64.powf(4.0 * 10.0);
+        let expected_override = 1.01_f64.powf(-6.0 * 10.0);
+
+        let (instance_tce, _) = resolve_resistor_from_source_at(
+            r#"instance TCE overrides polynomial TC
+R1 a 0 1 TC1=1 TC2=2 TCE=3
+.end
+"#,
+            "R1",
+            temperature_kelvin,
+        );
+        assert!(
+            (instance_tce - expected_instance).abs() < 1e-12,
+            "instance TCE resistance {instance_tce}, expected {expected_instance}"
+        );
+
+        let (model_tce, _) = resolve_resistor_from_source_at(
+            r#"model TCE overrides instance polynomial TC
+R2 a 0 1 RMOD TC1=1 TC2=2
+.model RMOD R (TCE=4)
+.end
+"#,
+            "R2",
+            temperature_kelvin,
+        );
+        assert!(
+            (model_tce - expected_model).abs() < 1e-12,
+            "model TCE resistance {model_tce}, expected {expected_model}"
+        );
+
+        let (instance_overrides_model, _) = resolve_resistor_from_source_at(
+            r#"instance TCE overrides model TCE
+R3 a 0 1 RMOD TCE=-6
+.model RMOD R (TCE=4)
+.end
+"#,
+            "R3",
+            temperature_kelvin,
+        );
+        assert!(
+            (instance_overrides_model - expected_override).abs() < 1e-12,
+            "instance override TCE resistance {instance_overrides_model}, expected {expected_override}"
+        );
     }
 
     #[test]

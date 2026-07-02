@@ -1063,6 +1063,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperResistorDefault);
         }
 
+        if Self::is_native_resistor_temperature_step_wrapper_candidate(relative_path, source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperDefault);
+        }
+
         if Self::is_native_step_data_wrapper_candidate(source) {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperDefault);
@@ -1121,6 +1126,31 @@ impl XyceTestRunner {
         relative_path.starts_with("netlists/resistor/")
             && normalized_source.contains("default to 1000")
             && normalized_source.contains("warning")
+    }
+
+    fn is_native_resistor_temperature_step_wrapper_candidate(
+        relative_path: &str,
+        source: &str,
+    ) -> bool {
+        let relative_path = Self::normalize_manifest_key(relative_path);
+        if !relative_path.starts_with("netlists/resistor_td/") {
+            return false;
+        }
+
+        let mut has_step_temp = false;
+        let mut has_tce = false;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line)
+                .trim()
+                .to_ascii_lowercase();
+            if trimmed.starts_with(".step ") && trimmed.contains("temp") {
+                has_step_temp = true;
+            }
+            if trimmed.contains("tce") {
+                has_tce = true;
+            }
+        }
+        has_step_temp && has_tce
     }
 
     fn is_native_step_data_wrapper_candidate(source: &str) -> bool {
