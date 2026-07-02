@@ -1,7 +1,7 @@
 //! External host interfaces used by XSPICE code models.
 
-use crate::xspice::{CmError, CmResult, DigitalValue};
 use crate::Value;
+use crate::xspice::{CmError, CmResult, DigitalValue};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 /// Startup configuration for the official XSPICE `d_process` code model.
@@ -280,8 +280,8 @@ impl DigitalProcessRuntimeFactory for WasmDigitalProcessFactory {
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::{
-        validate_digital_process_spec, CmError, CmResult, DigitalProcessRuntime,
-        DigitalProcessRuntimeFactory, DigitalProcessSpec, Value,
+        CmError, CmResult, DigitalProcessRuntime, DigitalProcessRuntimeFactory, DigitalProcessSpec,
+        Value, validate_digital_process_spec,
     };
     use std::io::{Read, Write};
     use std::process::{Child, Command, Stdio};
@@ -484,7 +484,7 @@ mod native_cosim {
     };
     use crate::xspice::{DigitalState, DigitalStrength};
     use libloading::Library;
-    use std::ffi::{c_char, c_uint, c_void, CStr, CString};
+    use std::ffi::{CStr, CString, c_char, c_uint, c_void};
     use std::path::{Path, PathBuf};
 
     #[cfg(unix)]
@@ -988,18 +988,28 @@ mod native_cosim {
     }
 
     fn from_ng_digital(value: NgDigital) -> DigitalValue {
-        let state = match value.state {
-            0 => DigitalState::Zero,
-            1 => DigitalState::One,
-            _ => DigitalState::Unknown,
-        };
-        let strength = match value.strength {
-            0 => DigitalStrength::Strong,
-            1 => DigitalStrength::Resistive,
-            2 => DigitalStrength::HighZ,
-            _ => DigitalStrength::Undetermined,
-        };
-        DigitalValue::new(state, strength)
+        match value.strength {
+            0 => match value.state {
+                0 => DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
+                1 => DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
+                _ => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Strong),
+            },
+            1 => match value.state {
+                0 => DigitalValue::new(DigitalState::ZeroR, DigitalStrength::Resistive),
+                1 => DigitalValue::new(DigitalState::OneR, DigitalStrength::Resistive),
+                _ => DigitalValue::new(DigitalState::UnknownR, DigitalStrength::Resistive),
+            },
+            2 => match value.state {
+                0 => DigitalValue::new(DigitalState::ZeroZ, DigitalStrength::HighZ),
+                1 => DigitalValue::new(DigitalState::OneZ, DigitalStrength::HighZ),
+                _ => DigitalValue::new(DigitalState::UnknownZ, DigitalStrength::HighZ),
+            },
+            _ => match value.state {
+                0 => DigitalValue::new(DigitalState::Zero, DigitalStrength::Undetermined),
+                1 => DigitalValue::new(DigitalState::One, DigitalStrength::Undetermined),
+                _ => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined),
+            },
+        }
     }
 
     unsafe extern "C" fn accept_output(pinfo: *mut CoInfo, bit_num: c_uint, value: *mut NgDigital) {
@@ -1114,6 +1124,31 @@ mod native_cosim {
 
         fn test_runtime(counts: &mut CallbackCounts) -> NativeDigitalCosimRuntime {
             test_runtime_with_method(counts, COSIM_METHOD_AFTER_INPUT, 1, 0)
+        }
+
+        #[test]
+        fn native_cosim_decodes_ngspice_strength_specific_digital_values() {
+            assert_eq!(
+                from_ng_digital(NgDigital {
+                    state: 0,
+                    strength: 1,
+                }),
+                DigitalValue::new(DigitalState::ZeroR, DigitalStrength::Resistive)
+            );
+            assert_eq!(
+                from_ng_digital(NgDigital {
+                    state: 1,
+                    strength: 2,
+                }),
+                DigitalValue::new(DigitalState::OneZ, DigitalStrength::HighZ)
+            );
+            assert_eq!(
+                from_ng_digital(NgDigital {
+                    state: 2,
+                    strength: 3,
+                }),
+                DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined)
+            );
         }
 
         #[test]
