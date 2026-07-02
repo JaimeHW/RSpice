@@ -197,6 +197,24 @@ pub enum IntegrationOrder {
     Second,
 }
 
+fn trace_canonical_ir_phase(
+    enabled: bool,
+    module_name: &str,
+    phase: &str,
+    elapsed: Option<std::time::Duration>,
+) {
+    if !enabled {
+        return;
+    }
+    if let Some(elapsed) = elapsed {
+        eprintln!("canonical IR {module_name}: finished {phase} in {elapsed:.2?}");
+    } else {
+        eprintln!("canonical IR {module_name}: starting {phase}");
+    }
+    use std::io::Write as _;
+    let _ = std::io::stderr().flush();
+}
+
 impl VerilogACompiler {
     /// Create a new compiler with the given options
     pub fn new(options: CompilerOptions) -> Self {
@@ -340,11 +358,21 @@ impl VerilogACompiler {
         module_name: Option<&str>,
     ) -> CompileResult<canonical_ir::CanonicalIrArtifact> {
         let module = self.select_analyzed_module(analyzed, module_name)?;
+        let trace = std::env::var_os("RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE").is_some();
         let metadata = canonical_ir::CanonicalMetadata::for_source(source_package, source);
+        trace_canonical_ir_phase(trace, &module.name, "hir", None);
+        let phase_started = std::time::Instant::now();
         let hir = canonical_ir::HirModel::from_analyzed_module(&metadata, module);
+        trace_canonical_ir_phase(trace, &module.name, "hir", Some(phase_started.elapsed()));
+        trace_canonical_ir_phase(trace, &module.name, "mir", None);
+        let phase_started = std::time::Instant::now();
         let mir = canonical_ir::MirModel::from_hir(&hir).map_err(Self::canonical_ir_error)?;
+        trace_canonical_ir_phase(trace, &module.name, "mir", Some(phase_started.elapsed()));
+        trace_canonical_ir_phase(trace, &module.name, "opt", None);
+        let phase_started = std::time::Instant::now();
         let opt = canonical_ir::OptModel::from_hir_and_mir(&hir, &mir)
             .map_err(Self::canonical_ir_error)?;
+        trace_canonical_ir_phase(trace, &module.name, "opt", Some(phase_started.elapsed()));
 
         canonical_ir::CanonicalIrArtifact::from_parts(metadata, hir, mir, opt)
             .map_err(Self::canonical_ir_error)

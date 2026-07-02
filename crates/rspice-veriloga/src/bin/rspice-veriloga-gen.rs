@@ -2,7 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 use rspice_veriloga::rust_backend::{
-    regenerate_generated_builtins_with_progress, validate_generated_builtins,
+    generate_generated_builtin_subset_with_progress, regenerate_generated_builtins_with_progress,
+    validate_generated_builtins,
 };
 
 type CommandResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -10,6 +11,7 @@ type CommandResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Command {
     RegenerateBuiltins,
+    GenerateBuiltinsSubset,
     CheckBuiltins,
 }
 
@@ -19,6 +21,7 @@ struct Options {
     model_root: PathBuf,
     generated_root: PathBuf,
     generator_root: PathBuf,
+    filter: Option<String>,
 }
 
 fn main() {
@@ -35,6 +38,12 @@ fn run() -> CommandResult<()> {
     };
     match options.command {
         Command::RegenerateBuiltins => {
+            if options.filter.is_some() {
+                return Err(
+                    "--filter is only supported by generate-builtins-subset; full regeneration must update every generated built-in"
+                        .into(),
+                );
+            }
             let report = regenerate_generated_builtins_with_progress(
                 &options.model_root,
                 &options.generated_root,
@@ -57,7 +66,33 @@ fn run() -> CommandResult<()> {
                 report.manifest.source_tree_digest, report.manifest.generator_digest
             );
         }
+        Command::GenerateBuiltinsSubset => {
+            let Some(filter) = options.filter.as_deref() else {
+                return Err("generate-builtins-subset requires --filter FILTER".into());
+            };
+            let report = generate_generated_builtin_subset_with_progress(
+                &options.model_root,
+                &options.generated_root,
+                filter,
+                true,
+            )?;
+            println!(
+                "generated {} filtered Verilog-A built-ins at {}",
+                report.device_count,
+                options.generated_root.display()
+            );
+            println!("[partial output: registry.rs and manifest.txt were not rewritten]");
+            println!(
+                "backend selection: scalar={}, scalar-hybrid={}, legacy-device={}",
+                report.backend_counts.scalar,
+                report.backend_counts.hybrid,
+                report.backend_counts.legacy_device
+            );
+        }
         Command::CheckBuiltins => {
+            if options.filter.is_some() {
+                return Err("--filter is not supported by check-builtins".into());
+            }
             let manifest = validate_generated_builtins(
                 &options.model_root,
                 &options.generated_root,
@@ -83,15 +118,21 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Op
     }
     let command = match command.as_str() {
         "regenerate-builtins" => Command::RegenerateBuiltins,
+        "generate-builtins-subset" => Command::GenerateBuiltinsSubset,
         "check-builtins" => Command::CheckBuiltins,
         other => return Err(format!("unknown command '{other}'\n\n{}", usage()).into()),
     };
 
     let workspace_root = workspace_root();
     let mut model_root = workspace_root.join("models/veriloga");
-    let mut generated_root =
-        workspace_root.join("crates/rspice-core/src/device/veriloga_generated");
+    let mut generated_root = match command {
+        Command::GenerateBuiltinsSubset => workspace_root.join("target/veriloga-generated-subset"),
+        Command::RegenerateBuiltins | Command::CheckBuiltins => {
+            workspace_root.join("crates/rspice-core/src/device/veriloga_generated")
+        }
+    };
     let mut generator_root = workspace_root.join("crates/rspice-veriloga");
+    let mut filter = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -103,6 +144,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Op
             }
             "--generator-root" => {
                 generator_root = path_arg("--generator-root", args.next())?;
+            }
+            "--filter" => {
+                filter = Some(string_arg("--filter", args.next())?);
             }
             "-h" | "--help" => {
                 return Ok(None);
@@ -116,6 +160,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> CommandResult<Option<Op
         model_root,
         generated_root,
         generator_root,
+        filter,
     }))
 }
 
@@ -123,6 +168,10 @@ fn path_arg(flag: &str, value: Option<String>) -> CommandResult<PathBuf> {
     value
         .map(PathBuf::from)
         .ok_or_else(|| format!("{flag} requires a path argument").into())
+}
+
+fn string_arg(flag: &str, value: Option<String>) -> CommandResult<String> {
+    value.ok_or_else(|| format!("{flag} requires an argument").into())
 }
 
 fn workspace_root() -> PathBuf {
@@ -137,6 +186,7 @@ fn usage() -> String {
     [
         "usage:",
         "  cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins [--models PATH] [--out PATH]",
+        "  cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- generate-builtins-subset --filter FILTER [--models PATH] [--out PATH]",
         "  cargo run -p rspice-veriloga --bin rspice-veriloga-gen -- check-builtins [--models PATH] [--out PATH]",
     ]
     .join("\n")

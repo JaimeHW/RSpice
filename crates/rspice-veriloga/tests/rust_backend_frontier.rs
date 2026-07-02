@@ -10,12 +10,14 @@
 //! `RSPICE_RUST_BACKEND_FRONTIER_TRACE_NON_SCALAR=1 ...`
 
 use rspice_veriloga::canonical_ir::{
-    CanonicalIrArtifact, ExprId, HirAnalogOperator, HirExprKind, InvalidationClass, OptOp,
+    CanonicalIrArtifact, ExprId, HirAnalogOperator, HirAssignment, HirExprKind, HirStatement,
+    InvalidationClass, OptOp,
 };
 use rspice_veriloga::rust_backend::{
     RustBackendSelection, RustTranspileOptions, RustTranspiler, discover_veriloga_sources,
 };
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
+use std::collections::BTreeSet;
 use std::env;
 use std::path::Path;
 
@@ -177,6 +179,112 @@ fn trace_scalar_gap(artifact: &CanonicalIrArtifact) {
         if opt_root.is_none() && !traced_missing_detail {
             traced_missing_detail = true;
             trace_expression_tree(artifact, equation.expression.id, 2, &mut Vec::new());
+            trace_missing_identifier_assignments(artifact, equation.expression.id);
+        }
+    }
+}
+
+fn trace_missing_identifier_assignments(artifact: &CanonicalIrArtifact, expr: ExprId) {
+    let mut identifiers = BTreeSet::new();
+    collect_expression_identifiers(artifact, expr, &mut identifiers, &mut Vec::new());
+    for identifier in identifiers {
+        trace_identifier_assignment_chain(artifact, &identifier, 2, &mut Vec::new(), 5);
+    }
+}
+
+fn collect_expression_identifiers(
+    artifact: &CanonicalIrArtifact,
+    expr: ExprId,
+    identifiers: &mut BTreeSet<String>,
+    stack: &mut Vec<ExprId>,
+) {
+    if stack.contains(&expr) {
+        return;
+    }
+    let Some(expression) = artifact.mir.expressions.get(usize::from(expr)) else {
+        return;
+    };
+    if let HirExprKind::Identifier { name } = &expression.kind {
+        identifiers.insert(name.to_string());
+    }
+    stack.push(expr);
+    for child in expression_children(&expression.kind) {
+        collect_expression_identifiers(artifact, child, identifiers, stack);
+    }
+    stack.pop();
+}
+
+fn trace_identifier_assignment_chain(
+    artifact: &CanonicalIrArtifact,
+    name: &str,
+    indent: usize,
+    stack: &mut Vec<String>,
+    depth: usize,
+) {
+    if depth == 0 || stack.iter().any(|seen| seen == name) {
+        return;
+    }
+    let Some(variable) = artifact
+        .hir
+        .variables
+        .iter()
+        .find(|variable| variable.name.as_str() == name)
+    else {
+        return;
+    };
+    let mut assignments = Vec::new();
+    collect_variable_assignments(&artifact.hir.statements, variable.id, &mut assignments);
+    if assignments.last().is_none() {
+        eprintln!(
+            "{:indent$}identifier {name}: no assignment history",
+            "",
+            indent = indent
+        );
+        return;
+    }
+    let mut next_identifiers = BTreeSet::new();
+    for (offset, assignment) in assignments.iter().rev().take(4).enumerate() {
+        let expression = artifact
+            .mir
+            .expressions
+            .get(usize::from(assignment.expr.id));
+        eprintln!(
+            "{:indent$}identifier {name}: assignment -{offset} expr {:?}: {:?}",
+            "",
+            assignment.expr.id,
+            expression.map(|expression| &expression.kind),
+            indent = indent
+        );
+        trace_expression_tree(artifact, assignment.expr.id, indent + 2, &mut Vec::new());
+        collect_expression_identifiers(
+            artifact,
+            assignment.expr.id,
+            &mut next_identifiers,
+            &mut Vec::new(),
+        );
+    }
+
+    stack.push(name.to_string());
+    for identifier in next_identifiers {
+        trace_identifier_assignment_chain(artifact, &identifier, indent + 2, stack, depth - 1);
+    }
+    stack.pop();
+}
+
+fn collect_variable_assignments<'a>(
+    statements: &'a [HirStatement],
+    variable: rspice_veriloga::canonical_ir::VariableId,
+    assignments: &mut Vec<&'a HirAssignment>,
+) {
+    for statement in statements {
+        match statement {
+            HirStatement::Assignment(assignment) if assignment.target == variable => {
+                assignments.push(assignment);
+            }
+            HirStatement::Assignment(_) => {}
+            HirStatement::Loop(loop_statement) => {
+                collect_variable_assignments(&loop_statement.body, variable, assignments);
+            }
         }
     }
 }

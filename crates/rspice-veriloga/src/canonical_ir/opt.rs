@@ -4,17 +4,66 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::{
     BranchId, BranchUnknownId, CanonicalValueType, CompilerPhase, EquationId, ExprId,
-    HirAnalogOperator, HirAssignment, HirExprKind, HirLoop, HirModel, HirStatement, IrDiagnostic,
-    IrValidationResult, MirEquation, MirEquationKind, MirModel, NodeId, ParamId, ScheduleId,
-    ValueId, VariableId,
+    HirAnalogOperator, HirAssignment, HirExprKind, HirLoop, HirModel, HirParamRange, HirStatement,
+    IrDiagnostic, IrValidationResult, MirEquation, MirEquationKind, MirModel, NodeId, ParamId,
+    ScheduleId, ValueId, VariableId,
 };
 
 const MAX_SCALAR_LOOP_UNROLL_ITERATIONS: usize = 1024;
 const MAX_SCALAR_BOUNDED_LOOP_UNROLL_ITERATIONS: usize = 128;
 const MAX_SCALAR_BOUNDED_LOOP_ASSIGNMENT_EXPANSIONS: usize = 2048;
 const MAX_SCALAR_GUARD_HISTORY_RECONSTRUCTION_ENTRIES: usize = 16;
+const MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES: usize = 32;
+const MAX_SCALAR_HISTORY_RECONSTRUCTION_STEPS: usize = 20_000;
+const MAX_SCALAR_EXPRESSION_LOWERING_DEPTH: usize = 1024;
+const MAX_SCALAR_CONDITION_REASONING_DEPTH: usize = 128;
+const MAX_SCALAR_STRUCTURAL_EQUALITY_DEPTH: usize = 192;
 pub(crate) const LIMEXP_MAX: f64 = 5.54062238439351e34;
 pub(crate) const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
+
+fn trace_opt_phase(
+    enabled: bool,
+    module_name: &str,
+    phase: &str,
+    elapsed: Option<std::time::Duration>,
+    value_count: Option<usize>,
+) {
+    if !enabled {
+        return;
+    }
+    let values = value_count
+        .map(|count| format!(", values={count}"))
+        .unwrap_or_default();
+    if let Some(elapsed) = elapsed {
+        eprintln!("OptIR {module_name}: finished {phase} in {elapsed:.2?}{values}");
+    } else {
+        eprintln!("OptIR {module_name}: starting {phase}{values}");
+    }
+    use std::io::Write as _;
+    let _ = std::io::stderr().flush();
+}
+
+fn hir_statement_trace_label(statement: &HirStatement) -> String {
+    match statement {
+        HirStatement::Assignment(assignment) => format!(
+            "assign {} expr={} type={:?} span={}:{}..{}",
+            assignment.target_name,
+            assignment.expr.id.index(),
+            assignment.expr_type,
+            assignment.span.source_file_id,
+            assignment.span.start,
+            assignment.span.end
+        ),
+        HirStatement::Loop(loop_statement) => format!(
+            "loop cond={} body={} span={}:{}..{}",
+            loop_statement.condition.id.index(),
+            loop_statement.body.len(),
+            loop_statement.span.source_file_id,
+            loop_statement.span.start,
+            loop_statement.span.end
+        ),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InvalidationClass {
@@ -267,19 +316,58 @@ impl OptModel {
         hir: Option<&HirModel>,
         mir: &MirModel,
     ) -> Result<Self, Vec<IrDiagnostic>> {
+        let trace = std::env::var_os("RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE").is_some();
         let mut builder = ScalarGraphBuilder::new(hir, mir);
         if let Some(hir) = hir {
+            trace_opt_phase(trace, &mir.module_name, "lower statements", None, None);
+            let phase_started = std::time::Instant::now();
             builder.lower_statements(&hir.statements);
+            trace_opt_phase(
+                trace,
+                &mir.module_name,
+                "lower statements",
+                Some(phase_started.elapsed()),
+                Some(builder.values.len()),
+            );
         }
         let mut equation_values = Vec::with_capacity(mir.equations.len());
+        trace_opt_phase(trace, &mir.module_name, "lower equations", None, None);
+        let phase_started = std::time::Instant::now();
         for equation in &mir.equations {
             let value = builder.lower_equation_expression(equation);
             builder.cache_declared_branch_current(equation, value);
             equation_values.push(value);
         }
+        trace_opt_phase(
+            trace,
+            &mir.module_name,
+            "lower equations",
+            Some(phase_started.elapsed()),
+            Some(builder.values.len()),
+        );
+        trace_opt_phase(trace, &mir.module_name, "add derivatives", None, None);
+        let phase_started = std::time::Instant::now();
         builder.add_sparse_derivatives();
+        trace_opt_phase(
+            trace,
+            &mir.module_name,
+            "add derivatives",
+            Some(phase_started.elapsed()),
+            Some(builder.values.len()),
+        );
+        trace_opt_phase(trace, &mir.module_name, "finish", None, None);
+        let phase_started = std::time::Instant::now();
         let (values, runtime_loops) = builder.finish(&mut equation_values);
+        trace_opt_phase(
+            trace,
+            &mir.module_name,
+            "finish",
+            Some(phase_started.elapsed()),
+            Some(values.len()),
+        );
 
+        trace_opt_phase(trace, &mir.module_name, "build schedules", None, None);
+        let phase_started = std::time::Instant::now();
         let mut schedules = Vec::new();
         for invalidation in [
             InvalidationClass::InstanceStatic,
@@ -309,6 +397,13 @@ impl OptModel {
             invalidation: InvalidationClass::NewtonIteration,
             ops: newton_ops,
         });
+        trace_opt_phase(
+            trace,
+            &mir.module_name,
+            "build schedules",
+            Some(phase_started.elapsed()),
+            Some(values.len()),
+        );
 
         let opt = Self {
             module_name: mir.module_name.clone(),
@@ -326,7 +421,24 @@ impl OptModel {
             schedules,
         };
 
-        opt.validate().map(|()| opt)
+        trace_opt_phase(
+            trace,
+            &mir.module_name,
+            "validate",
+            None,
+            Some(opt.values.len()),
+        );
+        let phase_started = std::time::Instant::now();
+        opt.validate().map(|()| {
+            trace_opt_phase(
+                trace,
+                &mir.module_name,
+                "validate",
+                Some(phase_started.elapsed()),
+                Some(opt.values.len()),
+            );
+            opt
+        })
     }
 
     pub fn validate(&self) -> IrValidationResult {
@@ -370,6 +482,10 @@ struct ScalarGraphBuilder<'a> {
     guarded_path_assignment_exprs: HashMap<VariableId, GuardedPathAssignmentExpr>,
     variable_lowering_stack: HashSet<VariableId>,
     guard_history_lowering_stack: HashSet<(VariableId, usize)>,
+    expression_lowering_stack: HashSet<ExprId>,
+    expression_lowering_depth: usize,
+    assignment_history_reference_stack: Vec<(VariableId, usize)>,
+    history_reconstruction_steps: usize,
     guard_alias_lowering_depth: usize,
     branch_current_values: HashMap<String, ValueId>,
     branch_flow_context: Option<BranchUnknownId>,
@@ -387,6 +503,13 @@ struct ConditionalPathPredicate {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GuardedPathAssignmentExpr {
     condition: ExprId,
+    value_expr: ExprId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConditionalSelfUpdate {
+    condition: ExprId,
+    active_truth: bool,
     value_expr: ExprId,
 }
 
@@ -562,6 +685,10 @@ impl<'a> ScalarGraphBuilder<'a> {
             guarded_path_assignment_exprs: HashMap::new(),
             variable_lowering_stack: HashSet::new(),
             guard_history_lowering_stack: HashSet::new(),
+            expression_lowering_stack: HashSet::new(),
+            expression_lowering_depth: 0,
+            assignment_history_reference_stack: Vec::new(),
+            history_reconstruction_steps: 0,
             guard_alias_lowering_depth: 0,
             branch_current_values: HashMap::new(),
             branch_flow_context: None,
@@ -657,14 +784,21 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn mark_live_value(&self, value: ValueId, live: &mut [bool]) {
-        let index = usize::from(value);
-        if live.get(index).copied().unwrap_or(false) {
-            return;
+        let mut stack = vec![value];
+        while let Some(value) = stack.pop() {
+            let index = usize::from(value);
+            if live.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            let Some(slot) = live.get_mut(index) else {
+                continue;
+            };
+            *slot = true;
+            self.push_live_value_dependencies(index, &mut stack);
         }
-        let Some(slot) = live.get_mut(index) else {
-            return;
-        };
-        *slot = true;
+    }
+
+    fn push_live_value_dependencies(&self, index: usize, stack: &mut Vec<ValueId>) {
         match self.values[index].kind {
             OptValueKind::RealConstant(_)
             | OptValueKind::BooleanConstant(_)
@@ -681,9 +815,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::LoopIndex { .. }
             | OptValueKind::RuntimeLoopVariable { .. }
             | OptValueKind::RuntimeLoopVariableDerivative { .. }
-            | OptValueKind::EquationValue { .. } => {}
-            OptValueKind::RuntimeLoopResult { loop_id, .. } => {
-                self.mark_runtime_loop_live(loop_id, live);
+            | OptValueKind::EquationValue { .. }
+            | OptValueKind::DdtScale => {}
+            OptValueKind::RuntimeLoopResult { loop_id, .. }
+            | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
+                self.push_runtime_loop_live_dependencies(loop_id, stack);
             }
             OptValueKind::CountedSum {
                 count,
@@ -691,41 +827,33 @@ impl<'a> ScalarGraphBuilder<'a> {
                 term,
                 ..
             } => {
-                self.mark_live_value(count, live);
-                self.mark_live_value(initial, live);
-                self.mark_live_value(term, live);
-            }
-            OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
-                self.mark_runtime_loop_live(loop_id, live);
+                stack.extend([count, initial, term]);
             }
             OptValueKind::Ddx {
                 value,
                 pos_node,
                 neg_node,
             } => {
-                self.mark_live_value(value, live);
-                self.mark_ddx_projection_values(value, pos_node, neg_node, live);
+                stack.push(value);
+                self.push_ddx_projection_values(value, pos_node, neg_node, stack);
             }
-            OptValueKind::Ddt { input, .. } => self.mark_live_value(input, live),
-            OptValueKind::DdtScale => {}
-            OptValueKind::Unary { input, .. } => self.mark_live_value(input, live),
+            OptValueKind::Ddt { input, .. } | OptValueKind::Unary { input, .. } => {
+                stack.push(input);
+            }
             OptValueKind::Binary { left, right, .. } => {
-                self.mark_live_value(left, live);
-                self.mark_live_value(right, live);
+                stack.extend([left, right]);
             }
             OptValueKind::Select {
                 condition,
                 then_value,
                 else_value,
             } => {
-                self.mark_live_value(condition, live);
-                self.mark_live_value(then_value, live);
-                self.mark_live_value(else_value, live);
+                stack.extend([condition, then_value, else_value]);
             }
         }
     }
 
-    fn mark_runtime_loop_live(&self, loop_id: u32, live: &mut [bool]) {
+    fn push_runtime_loop_live_dependencies(&self, loop_id: u32, stack: &mut Vec<ValueId>) {
         let Some(runtime_loop) = self
             .runtime_loops
             .iter()
@@ -734,29 +862,27 @@ impl<'a> ScalarGraphBuilder<'a> {
             return;
         };
         for variable in &runtime_loop.variables {
-            self.mark_live_value(variable.initial, live);
-            self.mark_live_value(variable.variable, live);
-            self.mark_live_value(variable.result, live);
+            stack.extend([variable.initial, variable.variable, variable.result]);
         }
-        self.mark_live_value(runtime_loop.condition, live);
+        stack.push(runtime_loop.condition);
         for assignment in &runtime_loop.assignments {
-            self.mark_live_value(assignment.value, live);
+            stack.push(assignment.value);
             for derivative in &self.values[usize::from(assignment.value)].derivatives {
-                self.mark_live_value(derivative.value, live);
+                stack.push(derivative.value);
             }
         }
     }
 
-    fn mark_ddx_projection_values(
+    fn push_ddx_projection_values(
         &self,
         value: ValueId,
         pos_node: Option<NodeId>,
         neg_node: Option<NodeId>,
-        live: &mut [bool],
+        stack: &mut Vec<ValueId>,
     ) {
         for node in [pos_node, neg_node].into_iter().flatten() {
             if let Some(derivative) = self.derivative_value(value, DerivativeLane::node(node)) {
-                self.mark_live_value(derivative, live);
+                stack.push(derivative);
             }
         }
     }
@@ -773,8 +899,30 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_statements(&mut self, statements: &[HirStatement]) {
-        for statement in statements {
+        let trace = std::env::var_os("RSPICE_VERILOGA_CANONICAL_IR_PHASE_TRACE").is_some();
+        for (index, statement) in statements.iter().enumerate() {
+            let phase = format!(
+                "lower statement {}/{} {}",
+                index + 1,
+                statements.len(),
+                hir_statement_trace_label(statement)
+            );
+            trace_opt_phase(
+                trace,
+                &self.mir.module_name,
+                &phase,
+                None,
+                Some(self.values.len()),
+            );
+            let phase_started = std::time::Instant::now();
             self.lower_statement(statement);
+            trace_opt_phase(
+                trace,
+                &self.mir.module_name,
+                &phase,
+                Some(phase_started.elapsed()),
+                Some(self.values.len()),
+            );
         }
     }
 
@@ -909,9 +1057,7 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn try_lower_runtime_bounded_guarded_loop(&mut self, loop_statement: &HirLoop) -> bool {
-        let Some((counter, _iteration_count)) =
-            self.bounded_guarded_loop_iteration_count(loop_statement.condition.id)
-        else {
+        let Some(counter) = self.runtime_loop_counter(loop_statement.condition.id) else {
             return false;
         };
         if loop_statement
@@ -1029,6 +1175,46 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
         self.expression_values.clear();
         true
+    }
+
+    fn runtime_loop_counter(&mut self, condition: ExprId) -> Option<VariableId> {
+        if let Some((counter, _iteration_count)) =
+            self.bounded_guarded_loop_iteration_count(condition)
+        {
+            return Some(counter);
+        }
+
+        let counter = self.runtime_loop_bound_counter(condition)?;
+        (self.variable_value_type(counter) == Some(CanonicalValueType::Integer)).then_some(counter)
+    }
+
+    fn runtime_loop_bound_counter(&mut self, condition: ExprId) -> Option<VariableId> {
+        if let Some(counter) = self.runtime_loop_simple_bound_counter(condition) {
+            return Some(counter);
+        }
+
+        let expression = self.mir.expressions.get(usize::from(condition))?;
+        let HirExprKind::Binary { op, left, right } = &expression.kind else {
+            return None;
+        };
+        if op.as_str() != "And" {
+            return None;
+        }
+        self.runtime_loop_bound_counter(*left)
+            .or_else(|| self.runtime_loop_bound_counter(*right))
+    }
+
+    fn runtime_loop_simple_bound_counter(&mut self, condition: ExprId) -> Option<VariableId> {
+        let expression = self.mir.expressions.get(usize::from(condition))?;
+        let HirExprKind::Binary { op, left, right } = &expression.kind else {
+            return None;
+        };
+        if !matches!(op.as_str(), "Lt" | "Le") {
+            return None;
+        }
+        let counter = self.variable_identifier(*left)?;
+        self.lower_expression(*right)?;
+        Some(counter)
     }
 
     fn try_lower_bounded_guarded_loop(&mut self, loop_statement: &HirLoop) -> bool {
@@ -1265,6 +1451,38 @@ impl<'a> ScalarGraphBuilder<'a> {
             return false;
         }
 
+        let loop_carried_candidates: HashSet<_> = assigned_variables
+            .iter()
+            .copied()
+            .filter(|variable| *variable != counter)
+            .collect();
+        let mut safe_loop_local_targets = HashSet::new();
+        for statement in &loop_statement.body {
+            let HirStatement::Assignment(assignment) = statement else {
+                return false;
+            };
+            if self.is_counter_increment_assignment(assignment, counter)
+                || accumulator_targets.contains(&assignment.target)
+            {
+                continue;
+            }
+            let expr = self.counted_loop_assignment_expr(assignment);
+            if assignment.index.is_some()
+                || !supported_assignment_value_type(assignment.expr_type)
+                || self.expr_references_any_variable(expr, &loop_carried_candidates)
+            {
+                return false;
+            }
+            safe_loop_local_targets.insert(assignment.target);
+        }
+        let forbidden_accumulator_term_targets: HashSet<_> = assigned_variables
+            .iter()
+            .copied()
+            .filter(|variable| *variable != counter)
+            .filter(|variable| !accumulator_targets.contains(variable))
+            .filter(|variable| !safe_loop_local_targets.contains(variable))
+            .collect();
+
         let original_variable_values = self.variable_values.clone();
         let Some(loop_id) = self.allocate_loop_id() else {
             return false;
@@ -1287,6 +1505,10 @@ impl<'a> ScalarGraphBuilder<'a> {
                 if self.expr_references_any_variable(term_expr, &accumulator_targets) {
                     return false;
                 }
+                if self.expr_references_any_variable(term_expr, &forbidden_accumulator_term_targets)
+                {
+                    return false;
+                }
                 let Some(previous) =
                     self.variable_value_from_snapshot(assignment.target, &original_variable_values)
                 else {
@@ -1300,7 +1522,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                 continue;
             }
 
-            if self.expr_references_any_variable(expr, &accumulator_targets) {
+            if !safe_loop_local_targets.contains(&assignment.target) {
                 return false;
             }
             self.expression_values.clear();
@@ -1559,58 +1781,55 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn expr_references_any_variable(&self, expr: ExprId, variables: &HashSet<VariableId>) -> bool {
         let mut visited = HashSet::new();
-        self.expr_references_any_variable_inner(expr, variables, &mut visited)
-    }
-
-    fn expr_references_any_variable_inner(
-        &self,
-        expr: ExprId,
-        variables: &HashSet<VariableId>,
-        visited: &mut HashSet<ExprId>,
-    ) -> bool {
-        if !visited.insert(expr) {
-            return false;
+        let mut stack = vec![expr];
+        while let Some(expr) = stack.pop() {
+            if !visited.insert(expr) {
+                continue;
+            }
+            let Some(expression) = self.mir.expressions.get(usize::from(expr)) else {
+                return true;
+            };
+            match &expression.kind {
+                HirExprKind::Identifier { .. } => {
+                    if self
+                        .variable_identifier(expr)
+                        .is_some_and(|variable| variables.contains(&variable))
+                    {
+                        return true;
+                    }
+                }
+                HirExprKind::Binary { left, right, .. } => {
+                    stack.extend([*left, *right]);
+                }
+                HirExprKind::Unary { operand, .. } => {
+                    stack.push(*operand);
+                }
+                HirExprKind::Conditional {
+                    condition,
+                    then_expr,
+                    else_expr,
+                } => {
+                    stack.extend([*condition, *then_expr, *else_expr]);
+                }
+                HirExprKind::Call { args, .. } | HirExprKind::SystemFunction { args, .. } => {
+                    stack.extend(args.iter().copied());
+                }
+                HirExprKind::AnalogOperator {
+                    op: HirAnalogOperator::Limexp { expr },
+                } => stack.push(*expr),
+                HirExprKind::Number { .. }
+                | HirExprKind::StringLiteral { .. }
+                | HirExprKind::BranchAccess { .. }
+                | HirExprKind::NamedBranchAccess { .. } => {}
+                HirExprKind::ArrayAccess { .. }
+                | HirExprKind::ArrayLiteral { .. }
+                | HirExprKind::AnalogOperator { .. }
+                | HirExprKind::Laplace { .. }
+                | HirExprKind::Zi { .. }
+                | HirExprKind::NoiseSource { .. } => return true,
+            }
         }
-        let Some(expression) = self.mir.expressions.get(usize::from(expr)) else {
-            return true;
-        };
-        match &expression.kind {
-            HirExprKind::Identifier { .. } => self
-                .variable_identifier(expr)
-                .is_some_and(|variable| variables.contains(&variable)),
-            HirExprKind::Binary { left, right, .. } => {
-                self.expr_references_any_variable_inner(*left, variables, visited)
-                    || self.expr_references_any_variable_inner(*right, variables, visited)
-            }
-            HirExprKind::Unary { operand, .. } => {
-                self.expr_references_any_variable_inner(*operand, variables, visited)
-            }
-            HirExprKind::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                self.expr_references_any_variable_inner(*condition, variables, visited)
-                    || self.expr_references_any_variable_inner(*then_expr, variables, visited)
-                    || self.expr_references_any_variable_inner(*else_expr, variables, visited)
-            }
-            HirExprKind::Call { args, .. } | HirExprKind::SystemFunction { args, .. } => args
-                .iter()
-                .any(|arg| self.expr_references_any_variable_inner(*arg, variables, visited)),
-            HirExprKind::AnalogOperator {
-                op: HirAnalogOperator::Limexp { expr },
-            } => self.expr_references_any_variable_inner(*expr, variables, visited),
-            HirExprKind::Number { .. }
-            | HirExprKind::StringLiteral { .. }
-            | HirExprKind::BranchAccess { .. }
-            | HirExprKind::NamedBranchAccess { .. } => false,
-            HirExprKind::ArrayAccess { .. }
-            | HirExprKind::ArrayLiteral { .. }
-            | HirExprKind::AnalogOperator { .. }
-            | HirExprKind::Laplace { .. }
-            | HirExprKind::Zi { .. }
-            | HirExprKind::NoiseSource { .. } => true,
-        }
+        false
     }
 
     fn mark_loop_assignments_unknown(&mut self, loop_statement: &HirLoop) {
@@ -1636,13 +1855,32 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_expression(&mut self, expr_id: ExprId) -> Option<ValueId> {
-        let use_cache = self.conditional_path_stack.is_empty();
+        let use_cache = self.conditional_path_stack.is_empty()
+            && self.assignment_history_reference_stack.is_empty();
         if use_cache && let Some(value) = self.expression_values.get(&expr_id) {
             return *value;
         }
 
+        if self.expression_lowering_depth >= MAX_SCALAR_EXPRESSION_LOWERING_DEPTH
+            || !self.expression_lowering_stack.insert(expr_id)
+        {
+            return None;
+        }
+
+        self.expression_lowering_depth += 1;
+        let lowered = self.lower_expression_inner(expr_id);
+        self.expression_lowering_depth -= 1;
+        self.expression_lowering_stack.remove(&expr_id);
+
+        if use_cache {
+            self.expression_values.insert(expr_id, lowered);
+        }
+        lowered
+    }
+
+    fn lower_expression_inner(&mut self, expr_id: ExprId) -> Option<ValueId> {
         let expression = self.mir.expressions.get(usize::from(expr_id))?;
-        let lowered = match &expression.kind {
+        match &expression.kind {
             HirExprKind::Number { value, .. } => {
                 Some(self.push_value(OptValueType::Real, OptValueKind::RealConstant(*value)))
             }
@@ -1673,12 +1911,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                 op: HirAnalogOperator::Limexp { expr },
             } => self.lower_intrinsic_unary(OptUnaryOp::LimExp, *expr),
             _ => None,
-        };
-
-        if use_cache {
-            self.expression_values.insert(expr_id, lowered);
         }
-        lowered
     }
 
     fn lower_equation_expression(&mut self, equation: &MirEquation) -> Option<ValueId> {
@@ -2070,6 +2303,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             let derivatives = self.lower_value_derivatives(value);
             self.values[index].derivatives = derivatives
                 .into_iter()
+                .filter(|(_, value)| !self.is_real_constant(*value, 0.0))
                 .map(|(lane, value)| OptDerivative { lane, value })
                 .collect();
         }
@@ -2679,6 +2913,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             .variables
             .iter()
             .find(|variable| variable.name == *name)?;
+        if let Some(limit) = self.assignment_history_reference_limit(variable.id) {
+            return Some(self.lower_assignment_history_prefix(variable.id, limit));
+        }
         if let Some(value) = self.variable_values.get(&variable.id).copied() {
             if value.is_none()
                 && let Some(contextual) =
@@ -2693,8 +2930,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             }
             if value.is_none()
                 && self.guard_alias_lowering_depth > 0
-                && let Some(guard_history) =
-                    self.lower_guard_condition_assignment_history_value(variable.id)
+                && let Some(guard_history) = self.lower_assignment_history_value(variable.id)
             {
                 return Some(Some(guard_history));
             }
@@ -2703,6 +2939,12 @@ impl<'a> ScalarGraphBuilder<'a> {
                 && let Some(guard) = self.lower_guard_alias_variable_identifier(variable.id)
             {
                 return Some(Some(guard));
+            }
+            if value.is_none()
+                && let Some(history_value) =
+                    self.lower_complementary_assignment_history_value(variable.id)
+            {
+                return Some(Some(history_value));
             }
             return Some(value);
         }
@@ -2722,22 +2964,20 @@ impl<'a> ScalarGraphBuilder<'a> {
         lowered
     }
 
-    fn lower_guard_condition_assignment_history_value(
-        &mut self,
-        variable: VariableId,
-    ) -> Option<ValueId> {
+    fn lower_assignment_history_value(&mut self, variable: VariableId) -> Option<ValueId> {
         let limit = self.variable_assignment_history.get(&variable)?.len();
         if limit > MAX_SCALAR_GUARD_HISTORY_RECONSTRUCTION_ENTRIES {
             return None;
         }
-        self.lower_guard_condition_assignment_history_prefix(variable, limit)
+        self.lower_assignment_history_prefix(variable, limit)
     }
 
-    fn lower_guard_condition_assignment_history_prefix(
+    fn lower_assignment_history_prefix(
         &mut self,
         variable: VariableId,
         limit: usize,
     ) -> Option<ValueId> {
+        self.consume_history_reconstruction_step()?;
         if limit == 0 {
             return self.default_variable_value(self.variable_value_type(variable)?);
         }
@@ -2748,12 +2988,12 @@ impl<'a> ScalarGraphBuilder<'a> {
             .variable_assignment_history
             .get(&variable)?
             .get(limit - 1)?;
-        let lowered = self.lower_guard_condition_assignment_history_expr(variable, limit, expr);
+        let lowered = self.lower_assignment_history_expr(variable, limit, expr);
         self.guard_history_lowering_stack.remove(&(variable, limit));
         lowered
     }
 
-    fn lower_guard_condition_assignment_history_expr(
+    fn lower_assignment_history_expr(
         &mut self,
         variable: VariableId,
         limit: usize,
@@ -2766,19 +3006,42 @@ impl<'a> ScalarGraphBuilder<'a> {
             else_expr,
         } = &expression.kind
         else {
-            return self.lower_expression(expr);
+            return self.lower_expression_with_assignment_history_reference(
+                variable,
+                limit - 1,
+                expr,
+            );
         };
 
-        let condition = self.lower_expression(*condition)?;
+        if let Some(update) = self.conditional_self_update(variable, expr)
+            && let Some(value) =
+                self.lower_complementary_self_assignment_pair(variable, limit, update)
+        {
+            return Some(value);
+        }
+
+        let condition = self.lower_expression_with_assignment_history_reference(
+            variable,
+            limit - 1,
+            *condition,
+        )?;
         let then_value = if self.variable_identifier(*then_expr) == Some(variable) {
-            self.lower_guard_condition_assignment_history_prefix(variable, limit - 1)?
+            self.lower_assignment_history_prefix(variable, limit - 1)?
         } else {
-            self.lower_expression(*then_expr)?
+            self.lower_expression_with_assignment_history_reference(
+                variable,
+                limit - 1,
+                *then_expr,
+            )?
         };
         let else_value = if self.variable_identifier(*else_expr) == Some(variable) {
-            self.lower_guard_condition_assignment_history_prefix(variable, limit - 1)?
+            self.lower_assignment_history_prefix(variable, limit - 1)?
         } else {
-            self.lower_expression(*else_expr)?
+            self.lower_expression_with_assignment_history_reference(
+                variable,
+                limit - 1,
+                *else_expr,
+            )?
         };
         let value_type = self.values[usize::from(then_value)].value_type;
         Some(self.push_value(
@@ -2789,6 +3052,137 @@ impl<'a> ScalarGraphBuilder<'a> {
                 else_value,
             },
         ))
+    }
+
+    fn lower_expression_with_assignment_history_reference(
+        &mut self,
+        variable: VariableId,
+        limit: usize,
+        expr: ExprId,
+    ) -> Option<ValueId> {
+        self.assignment_history_reference_stack
+            .push((variable, limit));
+        let lowered = self.lower_expression(expr);
+        self.assignment_history_reference_stack.pop();
+        lowered
+    }
+
+    fn assignment_history_reference_limit(&self, variable: VariableId) -> Option<usize> {
+        self.assignment_history_reference_stack
+            .iter()
+            .rev()
+            .find_map(|(candidate, limit)| (*candidate == variable).then_some(*limit))
+    }
+
+    fn lower_complementary_assignment_history_value(
+        &mut self,
+        variable: VariableId,
+    ) -> Option<ValueId> {
+        let limit = self.variable_assignment_history.get(&variable)?.len();
+        let expr = *self
+            .variable_assignment_history
+            .get(&variable)?
+            .get(limit.checked_sub(1)?)?;
+        let update = self.conditional_self_update(variable, expr)?;
+        self.lower_complementary_self_assignment_pair(variable, limit, update)
+    }
+
+    fn lower_complementary_self_assignment_pair(
+        &mut self,
+        variable: VariableId,
+        limit: usize,
+        current: ConditionalSelfUpdate,
+    ) -> Option<ValueId> {
+        if limit < 2 {
+            return None;
+        }
+        if self.expr_references_variable(current.value_expr, variable) {
+            return None;
+        }
+
+        let previous_expr = *self
+            .variable_assignment_history
+            .get(&variable)?
+            .get(limit - 2)?;
+        let previous = self.conditional_self_update(variable, previous_expr)?;
+        if self.expr_references_variable(previous.value_expr, variable) {
+            return None;
+        }
+
+        let previous_truth =
+            self.self_update_active_truth_relative_to(previous, previous.condition)?;
+        let current_truth =
+            self.self_update_active_truth_relative_to(current, previous.condition)?;
+        if previous_truth == current_truth {
+            return None;
+        }
+
+        let previous_value = self.lower_expression(previous.value_expr)?;
+        let current_value = self.lower_expression(current.value_expr)?;
+        let condition = self.lower_expression(previous.condition)?;
+        let (then_value, else_value) = if previous_truth {
+            (previous_value, current_value)
+        } else {
+            (current_value, previous_value)
+        };
+        let value_type = self.values[usize::from(then_value)].value_type;
+        Some(self.push_value(
+            value_type,
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            },
+        ))
+    }
+
+    fn conditional_self_update(
+        &self,
+        variable: VariableId,
+        expr: ExprId,
+    ) -> Option<ConditionalSelfUpdate> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } = &expression.kind
+        else {
+            return None;
+        };
+        let then_self = self.variable_identifier(*then_expr) == Some(variable);
+        let else_self = self.variable_identifier(*else_expr) == Some(variable);
+        match (then_self, else_self) {
+            (false, true) => Some(ConditionalSelfUpdate {
+                condition: *condition,
+                active_truth: true,
+                value_expr: *then_expr,
+            }),
+            (true, false) => Some(ConditionalSelfUpdate {
+                condition: *condition,
+                active_truth: false,
+                value_expr: *else_expr,
+            }),
+            _ => None,
+        }
+    }
+
+    fn self_update_active_truth_relative_to(
+        &self,
+        update: ConditionalSelfUpdate,
+        reference_condition: ExprId,
+    ) -> Option<bool> {
+        if self.expr_structurally_equal(update.condition, reference_condition) {
+            Some(update.active_truth)
+        } else if self.expr_is_logical_complement(update.condition, reference_condition) {
+            Some(!update.active_truth)
+        } else {
+            None
+        }
+    }
+
+    fn expr_references_variable(&self, expr: ExprId, variable: VariableId) -> bool {
+        self.expr_references_any_variable(expr, &HashSet::from([variable]))
     }
 
     fn lower_conditional_path_variable_identifier(
@@ -2811,11 +3205,21 @@ impl<'a> ScalarGraphBuilder<'a> {
         &mut self,
         variable: VariableId,
     ) -> Option<ValueId> {
+        self.consume_history_reconstruction_step()?;
         let history = self.variable_assignment_history.get(&variable)?.clone();
         history
             .into_iter()
             .rev()
+            .take(MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES)
             .find_map(|expr| self.lower_assignment_expr_for_current_path(variable, expr))
+    }
+
+    fn consume_history_reconstruction_step(&mut self) -> Option<()> {
+        if self.history_reconstruction_steps >= MAX_SCALAR_HISTORY_RECONSTRUCTION_STEPS {
+            return None;
+        }
+        self.history_reconstruction_steps += 1;
+        Some(())
     }
 
     fn lower_guarded_path_assignment_for_current_path(
@@ -2855,43 +3259,63 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn condition_truth_in_current_path(&self, condition: ExprId) -> Option<bool> {
-        for predicate in self.conditional_path_stack.iter().rev() {
-            if let Some(truth) = self.condition_truth_from_predicate(condition, *predicate) {
-                return Some(truth);
-            }
+        let mut active = HashSet::new();
+        self.condition_truth_in_current_path_inner(condition, 0, &mut active)
+    }
+
+    fn condition_truth_in_current_path_inner(
+        &self,
+        condition: ExprId,
+        depth: usize,
+        active: &mut HashSet<ExprId>,
+    ) -> Option<bool> {
+        if depth > MAX_SCALAR_CONDITION_REASONING_DEPTH || !active.insert(condition) {
+            return None;
         }
 
-        if let Some(alias) = self.guard_alias_expr(condition) {
-            return self.condition_truth_in_current_path(alias);
-        }
+        let result = (|| {
+            for predicate in self.conditional_path_stack.iter().rev() {
+                if let Some(truth) = self.condition_truth_from_predicate(condition, *predicate) {
+                    return Some(truth);
+                }
+            }
 
-        let expression = self.mir.expressions.get(usize::from(condition))?;
-        match &expression.kind {
-            HirExprKind::Unary { op, operand } if op.as_str() == "Not" => self
-                .condition_truth_in_current_path(*operand)
-                .map(|truth| !truth),
-            HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
-                match (
-                    self.condition_truth_in_current_path(*left),
-                    self.condition_truth_in_current_path(*right),
-                ) {
-                    (Some(false), _) | (_, Some(false)) => Some(false),
-                    (Some(true), Some(true)) => Some(true),
-                    _ => None,
-                }
+            if let Some(alias) = self.guard_alias_expr(condition) {
+                return self.condition_truth_in_current_path_inner(alias, depth + 1, active);
             }
-            HirExprKind::Binary { op, left, right } if op.as_str() == "Or" => {
-                match (
-                    self.condition_truth_in_current_path(*left),
-                    self.condition_truth_in_current_path(*right),
-                ) {
-                    (Some(true), _) | (_, Some(true)) => Some(true),
-                    (Some(false), Some(false)) => Some(false),
-                    _ => None,
+
+            let expression = self.mir.expressions.get(usize::from(condition))?;
+            match &expression.kind {
+                HirExprKind::Unary { op, operand } if op.as_str() == "Not" => self
+                    .condition_truth_in_current_path_inner(*operand, depth + 1, active)
+                    .map(|truth| !truth),
+                HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
+                    let left_truth =
+                        self.condition_truth_in_current_path_inner(*left, depth + 1, active);
+                    let right_truth =
+                        self.condition_truth_in_current_path_inner(*right, depth + 1, active);
+                    match (left_truth, right_truth) {
+                        (Some(false), _) | (_, Some(false)) => Some(false),
+                        (Some(true), Some(true)) => Some(true),
+                        _ => None,
+                    }
                 }
+                HirExprKind::Binary { op, left, right } if op.as_str() == "Or" => {
+                    let left_truth =
+                        self.condition_truth_in_current_path_inner(*left, depth + 1, active);
+                    let right_truth =
+                        self.condition_truth_in_current_path_inner(*right, depth + 1, active);
+                    match (left_truth, right_truth) {
+                        (Some(true), _) | (_, Some(true)) => Some(true),
+                        (Some(false), Some(false)) => Some(false),
+                        _ => None,
+                    }
+                }
+                _ => None,
             }
-            _ => None,
-        }
+        })();
+        active.remove(&condition);
+        result
     }
 
     fn condition_truth_from_predicate(
@@ -2907,6 +3331,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         {
             return Some(!predicate.truth);
         }
+        if self.expr_is_logical_complement(condition, predicate.condition) {
+            return Some(!predicate.truth);
+        }
         if predicate.truth && self.expr_conjunctively_contains(predicate.condition, condition) {
             return Some(true);
         }
@@ -2914,238 +3341,493 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn expr_conjunctively_contains(&self, container: ExprId, target: ExprId) -> bool {
-        if self.expr_structurally_equal(container, target) {
-            return true;
-        }
-        if let Some(alias) = self.guard_alias_expr(container) {
-            return self.expr_conjunctively_contains(alias, target);
-        }
-        let Some(expression) = self.mir.expressions.get(usize::from(container)) else {
+        let mut active = HashSet::new();
+        self.expr_conjunctively_contains_inner(container, target, 0, &mut active)
+    }
+
+    fn expr_conjunctively_contains_inner(
+        &self,
+        container: ExprId,
+        target: ExprId,
+        depth: usize,
+        active: &mut HashSet<ExprId>,
+    ) -> bool {
+        if depth > MAX_SCALAR_CONDITION_REASONING_DEPTH || !active.insert(container) {
             return false;
-        };
-        match &expression.kind {
-            HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
-                self.expr_conjunctively_contains(*left, target)
-                    || self.expr_conjunctively_contains(*right, target)
-            }
-            _ => false,
         }
+
+        let result = (|| {
+            if self.expr_structurally_equal(container, target) {
+                return true;
+            }
+            if let Some(alias) = self.guard_alias_expr(container) {
+                return self.expr_conjunctively_contains_inner(alias, target, depth + 1, active);
+            }
+            let Some(expression) = self.mir.expressions.get(usize::from(container)) else {
+                return false;
+            };
+            match &expression.kind {
+                HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
+                    self.expr_conjunctively_contains_inner(*left, target, depth + 1, active)
+                        || self.expr_conjunctively_contains_inner(*right, target, depth + 1, active)
+                }
+                _ => false,
+            }
+        })();
+        active.remove(&container);
+        result
     }
 
     fn expr_is_logical_not(&self, expr: ExprId, inner: ExprId) -> bool {
-        if let Some(alias) = self.guard_alias_expr(expr) {
-            return self.expr_is_logical_not(alias, inner);
+        let mut active = HashSet::new();
+        self.expr_is_logical_not_inner(expr, inner, 0, &mut active)
+    }
+
+    fn expr_is_logical_not_inner(
+        &self,
+        expr: ExprId,
+        inner: ExprId,
+        depth: usize,
+        active: &mut HashSet<ExprId>,
+    ) -> bool {
+        if depth > MAX_SCALAR_CONDITION_REASONING_DEPTH || !active.insert(expr) {
+            return false;
         }
-        let Some(expression) = self.mir.expressions.get(usize::from(expr)) else {
+
+        let result = (|| {
+            if let Some(alias) = self.guard_alias_expr(expr) {
+                return self.expr_is_logical_not_inner(alias, inner, depth + 1, active);
+            }
+            let Some(expression) = self.mir.expressions.get(usize::from(expr)) else {
+                return false;
+            };
+            matches!(
+                &expression.kind,
+                HirExprKind::Unary { op, operand }
+                    if op.as_str() == "Not" && self.expr_structurally_equal(*operand, inner)
+            )
+        })();
+        active.remove(&expr);
+        result
+    }
+
+    fn expr_is_logical_complement(&self, left: ExprId, right: ExprId) -> bool {
+        let mut active = HashSet::new();
+        self.expr_is_logical_complement_inner(left, right, 0, &mut active)
+    }
+
+    fn expr_is_logical_complement_inner(
+        &self,
+        left: ExprId,
+        right: ExprId,
+        depth: usize,
+        active: &mut HashSet<(ExprId, ExprId)>,
+    ) -> bool {
+        if depth > MAX_SCALAR_CONDITION_REASONING_DEPTH || !active.insert((left, right)) {
+            return false;
+        }
+
+        let result = (|| {
+            if let Some(alias) = self.guard_alias_expr(left) {
+                return self.expr_is_logical_complement_inner(alias, right, depth + 1, active);
+            }
+            if let Some(alias) = self.guard_alias_expr(right) {
+                return self.expr_is_logical_complement_inner(left, alias, depth + 1, active);
+            }
+            self.expr_is_logical_not(left, right)
+                || self.expr_is_logical_not(right, left)
+                || self.binary_conditions_are_complements(left, right)
+        })();
+        active.remove(&(left, right));
+        result
+    }
+
+    fn binary_conditions_are_complements(&self, left: ExprId, right: ExprId) -> bool {
+        let Some(left_expr) = self.mir.expressions.get(usize::from(left)) else {
             return false;
         };
+        let Some(right_expr) = self.mir.expressions.get(usize::from(right)) else {
+            return false;
+        };
+        let HirExprKind::Binary {
+            op: left_op,
+            left: left_left,
+            right: left_right,
+        } = &left_expr.kind
+        else {
+            return false;
+        };
+        let HirExprKind::Binary {
+            op: right_op,
+            left: right_left,
+            right: right_right,
+        } = &right_expr.kind
+        else {
+            return false;
+        };
+
+        let complements = matches!(
+            (left_op.as_str(), right_op.as_str()),
+            ("Eq", "Ne") | ("Ne", "Eq") | ("Lt", "Ge") | ("Ge", "Lt") | ("Le", "Gt") | ("Gt", "Le")
+        );
+        if left_op.as_str() == "Eq"
+            && right_op.as_str() == "Eq"
+            && self.binary_switch_equalities_are_complements(
+                *left_left,
+                *left_right,
+                *right_left,
+                *right_right,
+            )
+        {
+            return true;
+        }
+        if !complements {
+            return false;
+        }
+
+        if self.expr_structurally_equal(*left_left, *right_left)
+            && self.expr_structurally_equal(*left_right, *right_right)
+        {
+            return true;
+        }
+
         matches!(
-            &expression.kind,
-            HirExprKind::Unary { op, operand }
-                if op.as_str() == "Not" && self.expr_structurally_equal(*operand, inner)
-        )
+            (left_op.as_str(), right_op.as_str()),
+            ("Eq", "Ne") | ("Ne", "Eq")
+        ) && self.expr_structurally_equal(*left_left, *right_right)
+            && self.expr_structurally_equal(*left_right, *right_left)
+    }
+
+    fn binary_switch_equalities_are_complements(
+        &self,
+        left_left: ExprId,
+        left_right: ExprId,
+        right_left: ExprId,
+        right_right: ExprId,
+    ) -> bool {
+        let Some((left_parameter, left_value)) =
+            self.binary_switch_equality_operand(left_left, left_right)
+        else {
+            return false;
+        };
+        let Some((right_parameter, right_value)) =
+            self.binary_switch_equality_operand(right_left, right_right)
+        else {
+            return false;
+        };
+        left_parameter == right_parameter
+            && ((left_value == 0.0 && right_value == 1.0)
+                || (left_value == 1.0 && right_value == 0.0))
+    }
+
+    fn binary_switch_equality_operand(
+        &self,
+        left: ExprId,
+        right: ExprId,
+    ) -> Option<(ParamId, f64)> {
+        if let Some(parameter) = self.binary_switch_parameter_expr(left)
+            && let Some(value) = self.number_constant_expr(right)
+        {
+            return Some((parameter, value));
+        }
+        if let Some(parameter) = self.binary_switch_parameter_expr(right)
+            && let Some(value) = self.number_constant_expr(left)
+        {
+            return Some((parameter, value));
+        }
+        None
+    }
+
+    fn binary_switch_parameter_expr(&self, expr: ExprId) -> Option<ParamId> {
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Identifier { name } = &expression.kind else {
+            return None;
+        };
+        self.mir
+            .parameters
+            .iter()
+            .find(|parameter| {
+                parameter.name == *name || parameter.aliases.iter().any(|alias| alias == name)
+            })
+            .filter(|parameter| {
+                parameter.value_type == CanonicalValueType::Integer
+                    && parameter.range.as_ref().is_some_and(binary_switch_range)
+            })
+            .map(|parameter| parameter.id)
     }
 
     fn expr_structurally_equal(&self, left: ExprId, right: ExprId) -> bool {
-        self.expr_structurally_equal_inner(left, right, 0)
+        let mut active = HashSet::new();
+        self.expr_structurally_equal_inner(left, right, 0, &mut active)
     }
 
-    fn expr_structurally_equal_inner(&self, left: ExprId, right: ExprId, depth: usize) -> bool {
+    fn expr_structurally_equal_inner(
+        &self,
+        left: ExprId,
+        right: ExprId,
+        depth: usize,
+        active: &mut HashSet<(ExprId, ExprId)>,
+    ) -> bool {
         if left == right {
             return true;
         }
-        if depth < 64 {
+        if depth > MAX_SCALAR_STRUCTURAL_EQUALITY_DEPTH || !active.insert((left, right)) {
+            return false;
+        }
+
+        let result = (|| {
             if let Some(alias) = self.guard_alias_expr(left)
-                && self.expr_structurally_equal_inner(alias, right, depth + 1)
+                && self.expr_structurally_equal_inner(alias, right, depth + 1, active)
             {
                 return true;
             }
             if let Some(alias) = self.guard_alias_expr(right)
-                && self.expr_structurally_equal_inner(left, alias, depth + 1)
+                && self.expr_structurally_equal_inner(left, alias, depth + 1, active)
             {
                 return true;
             }
-        }
-        let Some(left) = self.mir.expressions.get(usize::from(left)) else {
-            return false;
-        };
-        let Some(right) = self.mir.expressions.get(usize::from(right)) else {
-            return false;
-        };
-        match (&left.kind, &right.kind) {
-            (HirExprKind::Number { value: left, .. }, HirExprKind::Number { value: right, .. }) => {
-                left.to_bits() == right.to_bits()
+
+            let Some(left_expr) = self.mir.expressions.get(usize::from(left)) else {
+                return false;
+            };
+            let Some(right_expr) = self.mir.expressions.get(usize::from(right)) else {
+                return false;
+            };
+            match (&left_expr.kind, &right_expr.kind) {
+                (
+                    HirExprKind::Number { value: left, .. },
+                    HirExprKind::Number { value: right, .. },
+                ) => left.to_bits() == right.to_bits(),
+                (
+                    HirExprKind::StringLiteral { value: left },
+                    HirExprKind::StringLiteral { value: right },
+                )
+                | (
+                    HirExprKind::Identifier { name: left },
+                    HirExprKind::Identifier { name: right },
+                ) => left == right,
+                (
+                    HirExprKind::SystemFunction {
+                        name: left_name,
+                        args: left_args,
+                    },
+                    HirExprKind::SystemFunction {
+                        name: right_name,
+                        args: right_args,
+                    },
+                )
+                | (
+                    HirExprKind::Call {
+                        name: left_name,
+                        args: left_args,
+                    },
+                    HirExprKind::Call {
+                        name: right_name,
+                        args: right_args,
+                    },
+                ) => {
+                    left_name == right_name
+                        && left_args.len() == right_args.len()
+                        && left_args.iter().zip(right_args).all(|(left, right)| {
+                            self.expr_structurally_equal_inner(*left, *right, depth + 1, active)
+                        })
+                }
+                (
+                    HirExprKind::Binary {
+                        op: left_op,
+                        left: left_left,
+                        right: left_right,
+                    },
+                    HirExprKind::Binary {
+                        op: right_op,
+                        left: right_left,
+                        right: right_right,
+                    },
+                ) => {
+                    left_op == right_op
+                        && self.expr_structurally_equal_inner(
+                            *left_left,
+                            *right_left,
+                            depth + 1,
+                            active,
+                        )
+                        && self.expr_structurally_equal_inner(
+                            *left_right,
+                            *right_right,
+                            depth + 1,
+                            active,
+                        )
+                }
+                (
+                    HirExprKind::Unary {
+                        op: left_op,
+                        operand: left_operand,
+                    },
+                    HirExprKind::Unary {
+                        op: right_op,
+                        operand: right_operand,
+                    },
+                ) => {
+                    left_op == right_op
+                        && self.expr_structurally_equal_inner(
+                            *left_operand,
+                            *right_operand,
+                            depth + 1,
+                            active,
+                        )
+                }
+                (
+                    HirExprKind::Conditional {
+                        condition: left_condition,
+                        then_expr: left_then,
+                        else_expr: left_else,
+                    },
+                    HirExprKind::Conditional {
+                        condition: right_condition,
+                        then_expr: right_then,
+                        else_expr: right_else,
+                    },
+                ) => {
+                    self.expr_structurally_equal_inner(
+                        *left_condition,
+                        *right_condition,
+                        depth + 1,
+                        active,
+                    ) && self.expr_structurally_equal_inner(
+                        *left_then,
+                        *right_then,
+                        depth + 1,
+                        active,
+                    ) && self.expr_structurally_equal_inner(
+                        *left_else,
+                        *right_else,
+                        depth + 1,
+                        active,
+                    )
+                }
+                (
+                    HirExprKind::BranchAccess {
+                        access: left_access,
+                        pos: left_pos,
+                        neg: left_neg,
+                    },
+                    HirExprKind::BranchAccess {
+                        access: right_access,
+                        pos: right_pos,
+                        neg: right_neg,
+                    },
+                ) => left_access == right_access && left_pos == right_pos && left_neg == right_neg,
+                (
+                    HirExprKind::NamedBranchAccess {
+                        access: left_access,
+                        name: left_name,
+                    },
+                    HirExprKind::NamedBranchAccess {
+                        access: right_access,
+                        name: right_name,
+                    },
+                ) => left_access == right_access && left_name == right_name,
+                (
+                    HirExprKind::ArrayAccess {
+                        array: left_array,
+                        index: left_index,
+                    },
+                    HirExprKind::ArrayAccess {
+                        array: right_array,
+                        index: right_index,
+                    },
+                ) => {
+                    left_array == right_array
+                        && self.expr_structurally_equal_inner(
+                            *left_index,
+                            *right_index,
+                            depth + 1,
+                            active,
+                        )
+                }
+                (
+                    HirExprKind::ArrayLiteral {
+                        elements: left_elements,
+                    },
+                    HirExprKind::ArrayLiteral {
+                        elements: right_elements,
+                    },
+                ) => {
+                    left_elements.len() == right_elements.len()
+                        && left_elements
+                            .iter()
+                            .zip(right_elements)
+                            .all(|(left, right)| {
+                                self.expr_structurally_equal_inner(*left, *right, depth + 1, active)
+                            })
+                }
+                (
+                    HirExprKind::AnalogOperator { op: left_op },
+                    HirExprKind::AnalogOperator { op: right_op },
+                ) => left_op == right_op,
+                (
+                    HirExprKind::Laplace {
+                        expr: left_expr,
+                        kind: left_kind,
+                    },
+                    HirExprKind::Laplace {
+                        expr: right_expr,
+                        kind: right_kind,
+                    },
+                ) => {
+                    left_kind == right_kind
+                        && self.expr_structurally_equal_inner(
+                            *left_expr,
+                            *right_expr,
+                            depth + 1,
+                            active,
+                        )
+                }
+                (
+                    HirExprKind::Zi {
+                        expr: left_expr,
+                        kind: left_kind,
+                    },
+                    HirExprKind::Zi {
+                        expr: right_expr,
+                        kind: right_kind,
+                    },
+                ) => {
+                    left_kind == right_kind
+                        && self.expr_structurally_equal_inner(
+                            *left_expr,
+                            *right_expr,
+                            depth + 1,
+                            active,
+                        )
+                }
+                (
+                    HirExprKind::NoiseSource {
+                        source: left_source,
+                        operands: left_operands,
+                        name: left_name,
+                    },
+                    HirExprKind::NoiseSource {
+                        source: right_source,
+                        operands: right_operands,
+                        name: right_name,
+                    },
+                ) => {
+                    left_source == right_source
+                        && left_name == right_name
+                        && left_operands.len() == right_operands.len()
+                        && left_operands
+                            .iter()
+                            .zip(right_operands)
+                            .all(|(left, right)| {
+                                self.expr_structurally_equal_inner(*left, *right, depth + 1, active)
+                            })
+                }
+                _ => false,
             }
-            (
-                HirExprKind::StringLiteral { value: left },
-                HirExprKind::StringLiteral { value: right },
-            )
-            | (HirExprKind::Identifier { name: left }, HirExprKind::Identifier { name: right }) => {
-                left == right
-            }
-            (
-                HirExprKind::SystemFunction {
-                    name: left_name,
-                    args: left_args,
-                },
-                HirExprKind::SystemFunction {
-                    name: right_name,
-                    args: right_args,
-                },
-            )
-            | (
-                HirExprKind::Call {
-                    name: left_name,
-                    args: left_args,
-                },
-                HirExprKind::Call {
-                    name: right_name,
-                    args: right_args,
-                },
-            ) => {
-                left_name == right_name
-                    && left_args.len() == right_args.len()
-                    && left_args
-                        .iter()
-                        .zip(right_args)
-                        .all(|(left, right)| self.expr_structurally_equal(*left, *right))
-            }
-            (
-                HirExprKind::Binary {
-                    op: left_op,
-                    left: left_left,
-                    right: left_right,
-                },
-                HirExprKind::Binary {
-                    op: right_op,
-                    left: right_left,
-                    right: right_right,
-                },
-            ) => {
-                left_op == right_op
-                    && self.expr_structurally_equal(*left_left, *right_left)
-                    && self.expr_structurally_equal(*left_right, *right_right)
-            }
-            (
-                HirExprKind::Unary {
-                    op: left_op,
-                    operand: left_operand,
-                },
-                HirExprKind::Unary {
-                    op: right_op,
-                    operand: right_operand,
-                },
-            ) => left_op == right_op && self.expr_structurally_equal(*left_operand, *right_operand),
-            (
-                HirExprKind::Conditional {
-                    condition: left_condition,
-                    then_expr: left_then,
-                    else_expr: left_else,
-                },
-                HirExprKind::Conditional {
-                    condition: right_condition,
-                    then_expr: right_then,
-                    else_expr: right_else,
-                },
-            ) => {
-                self.expr_structurally_equal(*left_condition, *right_condition)
-                    && self.expr_structurally_equal(*left_then, *right_then)
-                    && self.expr_structurally_equal(*left_else, *right_else)
-            }
-            (
-                HirExprKind::BranchAccess {
-                    access: left_access,
-                    pos: left_pos,
-                    neg: left_neg,
-                },
-                HirExprKind::BranchAccess {
-                    access: right_access,
-                    pos: right_pos,
-                    neg: right_neg,
-                },
-            ) => left_access == right_access && left_pos == right_pos && left_neg == right_neg,
-            (
-                HirExprKind::NamedBranchAccess {
-                    access: left_access,
-                    name: left_name,
-                },
-                HirExprKind::NamedBranchAccess {
-                    access: right_access,
-                    name: right_name,
-                },
-            ) => left_access == right_access && left_name == right_name,
-            (
-                HirExprKind::ArrayAccess {
-                    array: left_array,
-                    index: left_index,
-                },
-                HirExprKind::ArrayAccess {
-                    array: right_array,
-                    index: right_index,
-                },
-            ) => {
-                left_array == right_array && self.expr_structurally_equal(*left_index, *right_index)
-            }
-            (
-                HirExprKind::ArrayLiteral {
-                    elements: left_elements,
-                },
-                HirExprKind::ArrayLiteral {
-                    elements: right_elements,
-                },
-            ) => {
-                left_elements.len() == right_elements.len()
-                    && left_elements
-                        .iter()
-                        .zip(right_elements)
-                        .all(|(left, right)| self.expr_structurally_equal(*left, *right))
-            }
-            (
-                HirExprKind::AnalogOperator { op: left_op },
-                HirExprKind::AnalogOperator { op: right_op },
-            ) => left_op == right_op,
-            (
-                HirExprKind::Laplace {
-                    expr: left_expr,
-                    kind: left_kind,
-                },
-                HirExprKind::Laplace {
-                    expr: right_expr,
-                    kind: right_kind,
-                },
-            ) => left_kind == right_kind && self.expr_structurally_equal(*left_expr, *right_expr),
-            (
-                HirExprKind::Zi {
-                    expr: left_expr,
-                    kind: left_kind,
-                },
-                HirExprKind::Zi {
-                    expr: right_expr,
-                    kind: right_kind,
-                },
-            ) => left_kind == right_kind && self.expr_structurally_equal(*left_expr, *right_expr),
-            (
-                HirExprKind::NoiseSource {
-                    source: left_source,
-                    operands: left_operands,
-                    name: left_name,
-                },
-                HirExprKind::NoiseSource {
-                    source: right_source,
-                    operands: right_operands,
-                    name: right_name,
-                },
-            ) => {
-                left_source == right_source
-                    && left_name == right_name
-                    && left_operands.len() == right_operands.len()
-                    && left_operands
-                        .iter()
-                        .zip(right_operands)
-                        .all(|(left, right)| self.expr_structurally_equal(*left, *right))
-            }
-            _ => false,
-        }
+        })();
+        active.remove(&(left, right));
+        result
     }
 
     fn guard_alias_expr(&self, expr: ExprId) -> Option<ExprId> {
@@ -3525,7 +4207,22 @@ impl<'a> ScalarGraphBuilder<'a> {
         if name.eq_ignore_ascii_case("ddx") {
             return self.lower_ddx_call(args);
         }
+        if name.eq_ignore_ascii_case("expm1") {
+            let [arg] = args else {
+                return None;
+            };
+            return self.lower_expm1_call(*arg);
+        }
+        if name.eq_ignore_ascii_case("log1p") {
+            let [arg] = args else {
+                return None;
+            };
+            return self.lower_log1p_call(*arg);
+        }
         if args.len() == 2 {
+            if name.eq_ignore_ascii_case("fpow") {
+                return self.lower_fpow_call(args[0], args[1]);
+            }
             return self.lower_binary_intrinsic_call(name, args[0], args[1]);
         }
         if args.len() == 1 {
@@ -3552,6 +4249,51 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
 
         None
+    }
+
+    fn lower_expm1_call(&mut self, arg: ExprId) -> Option<ValueId> {
+        let input = self.lower_expression(arg)?;
+        let exp = self.push_value(
+            OptValueType::Real,
+            OptValueKind::Unary {
+                op: OptUnaryOp::Exp,
+                input,
+            },
+        );
+        let one = self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+        Some(self.push_binary_value(OptBinaryOp::Sub, exp, one))
+    }
+
+    fn lower_log1p_call(&mut self, arg: ExprId) -> Option<ValueId> {
+        let input = self.lower_expression(arg)?;
+        let one = self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+        let sum = self.push_binary_value(OptBinaryOp::Add, one, input);
+        Some(self.push_value(
+            OptValueType::Real,
+            OptValueKind::Unary {
+                op: OptUnaryOp::Ln,
+                input: sum,
+            },
+        ))
+    }
+
+    fn lower_fpow_call(&mut self, left: ExprId, right: ExprId) -> Option<ValueId> {
+        let left = self.lower_expression(left)?;
+        let right = self.lower_expression(right)?;
+        let pow = self.push_binary_value(OptBinaryOp::Pow, left, right);
+        let zero = self.zero_real();
+        let one = self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+        let left_is_zero = self.push_binary_value(OptBinaryOp::Eq, left, zero);
+        let right_is_zero = self.push_binary_value(OptBinaryOp::Eq, right, zero);
+        let both_zero = self.push_binary_value(OptBinaryOp::And, left_is_zero, right_is_zero);
+        Some(self.push_value(
+            OptValueType::Real,
+            OptValueKind::Select {
+                condition: both_zero,
+                then_value: one,
+                else_value: pow,
+            },
+        ))
     }
 
     fn zero_real(&mut self) -> ValueId {
@@ -3809,6 +4551,14 @@ pub(crate) fn limited_exp_derivative(value: f64) -> f64 {
 
 pub(crate) fn real_truth_value(value: f64) -> bool {
     value != 0.0
+}
+
+fn binary_switch_range(range: &HirParamRange) -> bool {
+    range.min == Some(0.0)
+        && range.max == Some(1.0)
+        && !range.min_exclusive
+        && !range.max_exclusive
+        && range.exclude.is_empty()
 }
 
 fn supported_assignment_value_type(value_type: CanonicalValueType) -> bool {

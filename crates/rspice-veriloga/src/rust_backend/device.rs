@@ -13935,12 +13935,41 @@ fn generate_stamp_file(
     let mut helper_modules = StampHelperModules::default();
     let common_usage = StampCommonUsage::from_artifact(artifact);
     let transient_operator_usage = StampOperatorUsage::transient(ddt_slots);
+    let scalar_hybrid_shared_plan = if let Some(plan) = scalar_hybrid_plan {
+        let transient_roots = plan.transient_roots();
+        super::scalar::shared_stamp_values_plan_for_roots(
+            artifact,
+            &plan.static_cache,
+            &transient_roots,
+            &plan.ddt_roots,
+        )?
+    } else {
+        None
+    };
+    if let Some(plan) = &scalar_hybrid_shared_plan {
+        super::scalar::emit_shared_stamp_values_struct(artifact, plan, &mut out)?;
+    }
     out.push_str("impl Instance {\n");
+    if let Some(plan) = &scalar_hybrid_shared_plan {
+        super::scalar::emit_shared_stamp_values_method(
+            artifact,
+            parameter_fields,
+            &scalar_hybrid_plan
+                .expect("shared scalar hybrid plan requires scalar hybrid plan")
+                .static_cache,
+            ddt_slots,
+            plan,
+            &mut out,
+        )?;
+    }
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
     emit_temperature_static_refresh(&mut out, scalar_hybrid_plan);
     emit_stamp_common_bindings(&mut out, common_usage, transient_operator_usage.has_any());
+    if scalar_hybrid_shared_plan.is_some() {
+        out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
+    }
     emit_stamp_body(
         artifact,
         parameter_fields,
@@ -13953,6 +13982,7 @@ fn generate_stamp_file(
         "stamp_transient",
         common_usage,
         scalar_hybrid_plan,
+        scalar_hybrid_shared_plan.as_ref(),
         native_local_storage,
         &mut helper_modules,
         &mut out,
@@ -13964,6 +13994,9 @@ fn generate_stamp_file(
     if ddt_slots.len() > 0 {
         emit_temperature_static_refresh(&mut out, scalar_hybrid_plan);
         emit_stamp_common_bindings(&mut out, common_usage, false);
+        if scalar_hybrid_shared_plan.is_some() {
+            out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
+        }
         emit_stamp_body(
             artifact,
             parameter_fields,
@@ -13976,6 +14009,7 @@ fn generate_stamp_file(
             "stamp_reactive",
             common_usage,
             scalar_hybrid_plan,
+            scalar_hybrid_shared_plan.as_ref(),
             native_local_storage,
             &mut helper_modules,
             &mut out,
@@ -24840,6 +24874,7 @@ fn emit_stamp_body(
     helper_prefix: &str,
     common_usage: StampCommonUsage,
     scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
+    scalar_hybrid_shared_plan: Option<&super::scalar::SharedStampValuesPlan>,
     native_local_storage: bool,
     helper_modules: &mut StampHelperModules,
     out: &mut String,
@@ -24900,42 +24935,48 @@ fn emit_stamp_body(
         } else {
             &transient_roots
         };
-        super::scalar::emit_static_current_values(
+        super::scalar::emit_static_current_values_with_shared_plan(
             artifact,
             parameter_fields,
             roots,
             &plan.static_cache,
+            scalar_hybrid_shared_plan,
             out,
         )?;
         if reactive {
-            super::scalar::emit_current_reactive_stamps(
+            super::scalar::emit_current_reactive_stamps_with_shared_plan(
                 artifact,
+                parameter_fields,
                 &plan.ddt_roots,
                 &plan.static_cache,
+                scalar_hybrid_shared_plan,
                 out,
             )?;
         } else {
-            super::scalar::emit_static_current_stamps(
+            super::scalar::emit_static_current_stamps_with_shared_plan(
                 artifact,
                 parameter_fields,
                 &plan.large_signal_roots,
                 &plan.static_cache,
+                scalar_hybrid_shared_plan,
                 out,
             )?;
-            super::scalar::emit_ddt_current_stamps(
+            super::scalar::emit_ddt_current_stamps_with_shared_plan(
                 artifact,
                 parameter_fields,
                 &plan.ddt_roots,
                 &plan.static_cache,
                 ddt_slots,
+                scalar_hybrid_shared_plan,
                 out,
             )?;
-            super::scalar::emit_ddt_current_stamps(
+            super::scalar::emit_ddt_current_stamps_with_shared_plan(
                 artifact,
                 parameter_fields,
                 &plan.idt_roots,
                 &plan.static_cache,
                 ddt_slots,
+                scalar_hybrid_shared_plan,
                 out,
             )?;
         }

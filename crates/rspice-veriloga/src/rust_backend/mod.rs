@@ -11,8 +11,9 @@ mod registry;
 mod scalar;
 
 pub use builtins::{
-    BuiltinBackendSelectionCounts, BuiltinGenerationReport, GENERATED_BUILTIN_MANIFEST_FILE_NAME,
-    REGENERATE_BUILTINS_COMMAND, regenerate_generated_builtins,
+    BuiltinBackendSelectionCounts, BuiltinGenerationReport, BuiltinSubsetGenerationReport,
+    GENERATED_BUILTIN_MANIFEST_FILE_NAME, REGENERATE_BUILTINS_COMMAND,
+    generate_generated_builtin_subset_with_progress, regenerate_generated_builtins,
     regenerate_generated_builtins_with_progress, validate_generated_builtins,
 };
 pub use device::render_runtime_support_module;
@@ -234,6 +235,107 @@ endmodule
                 .contains("model cannot be lowered by scalar Rust backends"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn scalar_backend_emits_shared_limexp_helpers() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module shared_limexp_helpers(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ limexp(V(p, n));
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("limexp should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("fn scalar_limexp("), "{stamp}");
+        assert!(stamp.contains("fn scalar_limexp_derivative("), "{stamp}");
+        assert!(stamp.contains("scalar_limexp(v"), "{stamp}");
+        assert!(stamp.contains("scalar_limexp_derivative(v"), "{stamp}");
+        assert!(!stamp.contains("let limexp_arg"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_prunes_zero_derivative_lanes() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module zero_derivative_pow(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ pow(V(p, n), 0.0);
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("zero derivative lanes should not block scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("stamp_current_const_local"), "{stamp}");
+        assert!(!stamp.contains("stamp_current_node"), "{stamp}");
+        assert!(!stamp.contains("let d"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_inlines_stamp_derivative_values() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module inline_stamp_derivatives(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("resistor contribution should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
+        assert!(!stamp.contains("let d"), "{stamp}");
     }
 
     #[test]
@@ -476,6 +578,43 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_ignores_dead_runtime_indexed_array_work() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module dead_runtime_indexed_array_work(p, n);
+    inout p, n;
+    electrical p, n;
+    integer idx;
+    real scratch[0:1];
+    analog begin
+        idx = 0;
+        scratch[idx] = V(p, n);
+        I(p, n) <+ 2.0 * V(p, n);
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("dead indexed array work should not force scalar-hybrid fallback");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_reconstructs_history_for_guard_alias_condition() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
@@ -512,6 +651,144 @@ endmodule
         let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
             .transpile_with_report(&artifact)
             .expect("history guard alias condition should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_reconstructs_complementary_guard_overwrite_history() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module complementary_guard_overwrite_history(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real tmp, out;
+    analog begin
+        tmp = $simparam("unsupported_scalar_probe");
+
+        if (mode == 1) begin
+            tmp = V(p, n);
+        end else begin
+            tmp = 2.0 * V(p, n);
+        end
+
+        out = tmp;
+        I(p, n) <+ out;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("complete guarded overwrite should ignore unreachable stale history");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_reconstructs_indirect_previous_value_alias_history() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module indirect_previous_value_alias_history(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    parameter integer mode = 1 from [0:1];
+    real state, alias;
+    analog begin
+        state = $simparam("unsupported_scalar_probe");
+        if (enable == 1) begin
+            state = V(p, n);
+        end
+
+        if (mode == 1) begin
+            alias = state + V(p, n);
+        end else begin
+            alias = state - V(p, n);
+        end
+
+        state = alias;
+        if (enable == 1) begin
+            I(p, n) <+ state;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("history replay should resolve indirect references to the previous value");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_uses_binary_switch_range_for_guard_complements() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module binary_switch_guard_complements(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer flag = 1 from [0:1];
+    real tmp;
+    analog begin
+        tmp = $simparam("unsupported_scalar_probe");
+        if (flag == 0) begin
+            tmp = $simparam("inactive_scalar_probe");
+        end else begin
+            tmp = V(p, n);
+        end
+
+        if (flag == 1) begin
+            I(p, n) <+ tmp;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("binary switch complements should make the active guarded value visible");
 
         let stamp = report
             .device
@@ -784,7 +1061,8 @@ endmodule
             .count();
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
-        assert!(stamp.contains("runtime_loop_"), "{stamp}");
+        assert!(stamp.contains("let mut r0_"), "{stamp}");
+        assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
         assert!(stamp.contains("while {"), "{stamp}");
         assert!(
             value_locals < 400,
@@ -880,6 +1158,138 @@ endmodule
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
         assert!(stamp.contains("while (counted_sum_"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_lowers_parameter_bounded_runtime_for_loop() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module parameter_bounded_runtime_for_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    integer i;
+    real acc, filtered, term;
+    analog begin
+        acc = 0.0;
+        filtered = 1.0;
+        for (i = 0; i < nf; i = i + 1) begin
+            term = V(p, n) + i;
+            filtered = 0.5 * (filtered + term);
+            acc = acc + filtered;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("parameter-bounded recurrence loop should lower to a scalar runtime loop");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("let mut r0_"), "{stamp}");
+        assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_lowers_parameter_bounded_inclusive_runtime_for_loop() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module parameter_bounded_inclusive_runtime_for_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [1:inf);
+    integer i;
+    real filtered, term;
+    analog begin
+        filtered = 1.0;
+        for (i = 1; i <= nf; i = i + 1) begin
+            term = V(p, n) / (10.0 + i);
+            filtered = 0.5 * (filtered + term);
+        end
+        I(p, n) <+ filtered;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("inclusive parameter-bounded loop should lower to a scalar runtime loop");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("let mut r0_"), "{stamp}");
+        assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_lowers_scalar_bounded_runtime_for_loop() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module scalar_bounded_runtime_for_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 3 from [0:inf);
+    integer i, limit;
+    real filtered, term;
+    analog begin
+        filtered = 1.0;
+        limit = (V(p, n) > 0.0) ? nf : nf + 1;
+        for (i = 0; i < limit; i = i + 1) begin
+            term = V(p, n) / (2.0 + i);
+            filtered = 0.5 * (filtered + term);
+        end
+        I(p, n) <+ filtered;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("scalar-bounded loop should lower to a guarded runtime loop");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("let mut r0_"), "{stamp}");
+        assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
         assert!(!stamp.contains("AdValue"), "{stamp}");
     }
 }

@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::canonical_ir::opt::LIMEXP_MAX;
 use crate::canonical_ir::{
     BranchId, BranchUnknownId, CanonicalIrArtifact, CanonicalValueType, DerivativeLane,
-    DerivativeLaneKind, EquationId, ExprId, HirAnalogOperator, HirExprKind, HirStatement,
-    InvalidationClass, MirEquation, MirEquationKind, NodeId, OptBinaryOp, OptOp, OptUnaryOp,
-    OptValue, OptValueKind, OptValueType, ValueId,
+    DerivativeLaneKind, EquationId, ExprId, HirAnalogOperator, HirExprKind, InvalidationClass,
+    MirEquation, MirEquationKind, NodeId, OptBinaryOp, OptOp, OptUnaryOp, OptValue, OptValueKind,
+    OptValueType, ValueId,
 };
 
 use super::expr::{DdtSlots, LoweredVariable, analysis_predicate_expr, parameter_field_names};
@@ -14,59 +14,100 @@ use super::{RustTranspileOptions, device};
 
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 240_000;
-const MAX_SCALAR_INLINE_EXPR_COST: usize = 24;
+const MAX_SCALAR_INLINE_EXPR_COST: usize = 128;
+const MIN_SHARED_STAMP_LIVE_VALUES: usize = 1024;
 
 pub(super) struct ScalarStaticCache {
     instance_values: Vec<ValueId>,
     temperature_values: Vec<ValueId>,
     set: HashSet<ValueId>,
+    refs: HashMap<ValueId, String>,
+    f64_count: usize,
+    bool_count: usize,
 }
 
 impl ScalarStaticCache {
-    fn from_artifact(artifact: &CanonicalIrArtifact) -> Self {
+    fn from_artifact(artifact: &CanonicalIrArtifact) -> Result<Self, RustBackendError> {
         let instance_values = scheduled_values(artifact, InvalidationClass::InstanceStatic, None);
         let temperature_values =
             scheduled_values(artifact, InvalidationClass::TemperatureStatic, None);
-        let set = instance_values
-            .iter()
-            .chain(temperature_values.iter())
-            .copied()
-            .collect();
-        Self {
-            instance_values,
-            temperature_values,
-            set,
-        }
+        Self::with_values(artifact, instance_values, temperature_values)
     }
 
     pub(super) fn from_roots(
         artifact: &CanonicalIrArtifact,
         roots: &HashMap<EquationId, ValueId>,
     ) -> Result<Self, RustBackendError> {
-        let empty_cache = Self {
-            instance_values: Vec::new(),
-            temperature_values: Vec::new(),
-            set: HashSet::new(),
-        };
+        let empty_cache = Self::empty();
         let live = collect_stamp_live_values(artifact, roots, &empty_cache)?;
         let instance_values =
             scheduled_values(artifact, InvalidationClass::InstanceStatic, Some(&live));
         let temperature_values =
             scheduled_values(artifact, InvalidationClass::TemperatureStatic, Some(&live));
-        let set = instance_values
-            .iter()
-            .chain(temperature_values.iter())
-            .copied()
-            .collect();
+        Self::with_values(artifact, instance_values, temperature_values)
+    }
+
+    fn empty() -> Self {
+        Self {
+            instance_values: Vec::new(),
+            temperature_values: Vec::new(),
+            set: HashSet::new(),
+            refs: HashMap::new(),
+            f64_count: 0,
+            bool_count: 0,
+        }
+    }
+
+    fn with_values(
+        artifact: &CanonicalIrArtifact,
+        instance_values: Vec<ValueId>,
+        temperature_values: Vec<ValueId>,
+    ) -> Result<Self, RustBackendError> {
+        let mut set = HashSet::new();
+        let mut refs = HashMap::new();
+        let mut f64_count = 0;
+        let mut bool_count = 0;
+        for value_id in instance_values.iter().chain(temperature_values.iter()) {
+            if !set.insert(*value_id) {
+                continue;
+            }
+            let value = artifact
+                .opt
+                .values
+                .get(usize::from(*value_id))
+                .ok_or_else(|| {
+                    unsupported(artifact, format!("missing static scalar value {value_id}"))
+                })?;
+            let reference = match value.value_type {
+                OptValueType::Real => {
+                    let slot = f64_count;
+                    f64_count += 1;
+                    format!("self.scalar_static_f64[{slot}]")
+                }
+                OptValueType::Boolean => {
+                    let slot = bool_count;
+                    bool_count += 1;
+                    format!("self.scalar_static_bool[{slot}]")
+                }
+            };
+            refs.insert(*value_id, reference);
+        }
         Ok(Self {
             instance_values,
             temperature_values,
             set,
+            refs,
+            f64_count,
+            bool_count,
         })
     }
 
     fn contains(&self, value: ValueId) -> bool {
         self.set.contains(&value)
+    }
+
+    fn cache_ref(&self, value: ValueId) -> Option<&str> {
+        self.refs.get(&value).map(String::as_str)
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -75,6 +116,14 @@ impl ScalarStaticCache {
 
     pub(super) fn has_temperature_values(&self) -> bool {
         !self.temperature_values.is_empty()
+    }
+
+    fn has_f64_values(&self) -> bool {
+        self.f64_count > 0
+    }
+
+    fn has_bool_values(&self) -> bool {
+        self.bool_count > 0
     }
 }
 
@@ -100,9 +149,11 @@ fn scheduled_values(
 
 struct ValueEmitContext<'a> {
     cached_values: &'a HashSet<ValueId>,
+    cached_value_refs: &'a HashMap<ValueId, String>,
     inline_values: &'a HashSet<ValueId>,
     use_cached_fields: bool,
     inline_uncached_constants: bool,
+    use_exp_helpers: bool,
     limexp_max_expr: String,
     temperature_expr: String,
     thermal_voltage_expr: String,
@@ -111,12 +162,44 @@ struct ValueEmitContext<'a> {
     loop_index_exprs: HashMap<u32, String>,
     runtime_loop_values: HashMap<(u32, u32), String>,
     runtime_loop_derivatives: HashMap<(u32, u32, DerivativeLane), String>,
+    external_value_refs: HashMap<ValueId, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DdtEmitMode {
     Transient,
     ReactiveLinearized,
+}
+
+fn local_stamp_context<'a>(
+    static_cache: &'a ScalarStaticCache,
+    inline_values: &'a HashSet<ValueId>,
+    ddt_slots: Option<&'a DdtSlots>,
+    ddt_mode: DdtEmitMode,
+) -> ValueEmitContext<'a> {
+    ValueEmitContext {
+        cached_values: &static_cache.set,
+        cached_value_refs: &static_cache.refs,
+        inline_values,
+        use_cached_fields: true,
+        inline_uncached_constants: false,
+        use_exp_helpers: true,
+        limexp_max_expr: "LIMEXP_MAX".to_string(),
+        temperature_expr: "ctx.temperature()".to_string(),
+        thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
+        ddt_slots,
+        ddt_mode,
+        loop_index_exprs: HashMap::new(),
+        runtime_loop_values: HashMap::new(),
+        runtime_loop_derivatives: HashMap::new(),
+        external_value_refs: HashMap::new(),
+    }
+}
+
+pub(super) struct SharedStampValuesPlan {
+    pub(super) live: HashSet<ValueId>,
+    boundary: Vec<ValueId>,
+    refs: HashMap<ValueId, String>,
 }
 
 struct ScalarDerivatives {
@@ -151,7 +234,7 @@ pub fn generate_device(
         artifact.metadata.source_digest.as_str(),
     );
     let parameter_fields = parameter_field_names(artifact);
-    let static_cache = ScalarStaticCache::from_artifact(artifact);
+    let static_cache = ScalarStaticCache::from_artifact(artifact)?;
     let ddt_slots = device::collect_ddt_slots(artifact)?;
     let potential_branch_count = artifact.mir.branch_unknowns.len();
     let stamp = generate_stamp_file(
@@ -227,7 +310,34 @@ fn generate_stamp_file(
             ),
         ));
     }
-    let stamp_inline_values = scalar_inline_values(artifact, &stamp_live, static_cache, &roots)?;
+    let reactive_roots = reactive_equation_roots(artifact, &roots)?;
+    let reactive_live = if reactive_roots.is_empty() {
+        HashSet::new()
+    } else {
+        collect_stamp_live_values(artifact, &reactive_roots, static_cache)?
+    };
+    let shared_plan = if reactive_roots.is_empty() {
+        None
+    } else {
+        shared_stamp_values_plan(
+            artifact,
+            &stamp_live,
+            &reactive_live,
+            static_cache,
+            &roots,
+            &reactive_roots,
+        )?
+    };
+    let stamp_emit_live = shared_plan
+        .as_ref()
+        .map(|plan| tail_live_values(&stamp_live, &plan.live))
+        .unwrap_or_else(|| stamp_live.clone());
+    let reactive_emit_live = shared_plan
+        .as_ref()
+        .map(|plan| tail_live_values(&reactive_live, &plan.live))
+        .unwrap_or_else(|| reactive_live.clone());
+    let stamp_inline_values =
+        scalar_stamp_inline_values(artifact, &stamp_emit_live, static_cache, &roots)?;
     let has_idt_slots = ddt_slots.idt_len() > 0;
     let stamp_needs_params = has_idt_slots
         || artifact.opt.values.iter().any(|value| {
@@ -251,16 +361,31 @@ fn generate_stamp_file(
         "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};\n\n",
         options.runtime_path
     ));
-    if scalar_model_uses_limexp(artifact) {
+    let exp_helpers = scalar_exp_helper_usage(artifact);
+    if !exp_helpers.is_empty() {
         out.push_str(&format!(
             "const LIMEXP_MAX: f64 = {};\n\n",
             format_f64(LIMEXP_MAX)
         ));
+        emit_scalar_exp_helpers(&mut out, exp_helpers);
     }
     if ddt_slots.len() > 0 || has_idt_slots {
         emit_transient_state_helpers(ddt_slots, &mut out);
     }
+    if let Some(plan) = &shared_plan {
+        emit_shared_stamp_values_struct(artifact, plan, &mut out)?;
+    }
     out.push_str("impl Instance {\n");
+    if let Some(plan) = &shared_plan {
+        emit_shared_stamp_values_method(
+            artifact,
+            parameter_fields,
+            static_cache,
+            ddt_slots,
+            plan,
+            &mut out,
+        )?;
+    }
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
@@ -318,12 +443,17 @@ fn generate_stamp_file(
     if has_idt_slots {
         out.push_str("        let idt_scale = if ddt_active { timestep } else { 0.0 };\n");
     }
+    if shared_plan.is_some() {
+        out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
+    }
 
     let stamp_context = ValueEmitContext {
         cached_values: &static_cache.set,
+        cached_value_refs: &static_cache.refs,
         inline_values: &stamp_inline_values,
         use_cached_fields: true,
         inline_uncached_constants: false,
+        use_exp_helpers: true,
         limexp_max_expr: "LIMEXP_MAX".to_string(),
         temperature_expr: "ctx.temperature()".to_string(),
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
@@ -332,11 +462,15 @@ fn generate_stamp_file(
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
+        external_value_refs: shared_plan
+            .as_ref()
+            .map(|plan| plan.refs.clone())
+            .unwrap_or_default(),
     };
     emit_live_values(
         artifact,
         parameter_fields,
-        &stamp_live,
+        &stamp_emit_live,
         static_cache,
         &stamp_context,
         &mut out,
@@ -346,22 +480,24 @@ fn generate_stamp_file(
         artifact,
         parameter_fields,
         &roots,
-        static_cache,
+        &stamp_context,
         Some(ddt_slots),
         &mut out,
     )?;
 
     out.push_str("    }\n\n");
-    let reactive_roots = reactive_equation_roots(artifact, &roots)?;
     if reactive_roots.is_empty() {
         out.push_str(
             "    pub fn stamp_reactive(&mut self, _ctx: &GeneratedEvalContext<'_>, _stamper: &mut GeneratedReactiveStamper<'_>) {\n",
         );
         out.push_str("    }\n");
     } else {
-        let reactive_live = collect_stamp_live_values(artifact, &reactive_roots, static_cache)?;
-        let reactive_inline_values =
-            scalar_inline_values(artifact, &reactive_live, static_cache, &reactive_roots)?;
+        let reactive_inline_values = scalar_stamp_inline_values(
+            artifact,
+            &reactive_emit_live,
+            static_cache,
+            &reactive_roots,
+        )?;
         let reactive_needs_param_given = artifact.opt.values.iter().any(|value| {
             reactive_live.contains(&value.id)
                 && matches!(value.kind, OptValueKind::ParamGiven { .. })
@@ -381,11 +517,16 @@ fn generate_stamp_file(
             out.push_str("        let param_given = self.param_given.as_ref();\n");
         }
         out.push_str("        let multiplicity = self.multiplicity;\n");
+        if shared_plan.is_some() {
+            out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
+        }
         let reactive_context = ValueEmitContext {
             cached_values: &static_cache.set,
+            cached_value_refs: &static_cache.refs,
             inline_values: &reactive_inline_values,
             use_cached_fields: true,
             inline_uncached_constants: false,
+            use_exp_helpers: true,
             limexp_max_expr: "LIMEXP_MAX".to_string(),
             temperature_expr: "ctx.temperature()".to_string(),
             thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
@@ -394,20 +535,286 @@ fn generate_stamp_file(
             loop_index_exprs: HashMap::new(),
             runtime_loop_values: HashMap::new(),
             runtime_loop_derivatives: HashMap::new(),
+            external_value_refs: shared_plan
+                .as_ref()
+                .map(|plan| plan.refs.clone())
+                .unwrap_or_default(),
         };
         emit_live_values(
             artifact,
             parameter_fields,
-            &reactive_live,
+            &reactive_emit_live,
             static_cache,
             &reactive_context,
             &mut out,
         )?;
-        emit_current_reactive_stamps(artifact, &reactive_roots, static_cache, &mut out)?;
+        emit_current_reactive_stamps_with_context(
+            artifact,
+            parameter_fields,
+            &reactive_roots,
+            &reactive_context,
+            &mut out,
+        )?;
         out.push_str("    }\n");
     }
     out.push_str("}\n");
     Ok(out)
+}
+
+fn shared_stamp_values_plan(
+    artifact: &CanonicalIrArtifact,
+    stamp_live: &HashSet<ValueId>,
+    reactive_live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+    roots: &HashMap<EquationId, ValueId>,
+    reactive_roots: &HashMap<EquationId, ValueId>,
+) -> Result<Option<SharedStampValuesPlan>, RustBackendError> {
+    let live = shareable_common_stamp_values(artifact, stamp_live, reactive_live, static_cache)?;
+    if live.len() < MIN_SHARED_STAMP_LIVE_VALUES {
+        return Ok(None);
+    }
+
+    let mut boundary = HashSet::new();
+    for value in stamp_live.iter().chain(reactive_live.iter()).copied() {
+        if live.contains(&value) || static_cache.contains(value) {
+            continue;
+        }
+        for dependency in scalar_value_dependencies(artifact, value)? {
+            if live.contains(&dependency) {
+                boundary.insert(dependency);
+            }
+        }
+    }
+    for value in stamp_external_values(artifact, roots)?
+        .into_iter()
+        .chain(stamp_external_values(artifact, reactive_roots)?)
+    {
+        if live.contains(&value) {
+            boundary.insert(value);
+        }
+    }
+
+    if boundary.is_empty() {
+        return Ok(None);
+    }
+
+    let mut boundary = boundary.into_iter().collect::<Vec<_>>();
+    boundary.sort_by_key(|value| value.index());
+    let refs = boundary
+        .iter()
+        .map(|value| (*value, format!("common.{}", value_name(*value))))
+        .collect();
+    Ok(Some(SharedStampValuesPlan {
+        live,
+        boundary,
+        refs,
+    }))
+}
+
+pub(super) fn shared_stamp_values_plan_for_roots(
+    artifact: &CanonicalIrArtifact,
+    static_cache: &ScalarStaticCache,
+    roots: &HashMap<EquationId, ValueId>,
+    reactive_roots: &HashMap<EquationId, ValueId>,
+) -> Result<Option<SharedStampValuesPlan>, RustBackendError> {
+    if reactive_roots.is_empty() {
+        return Ok(None);
+    }
+    let stamp_live = collect_stamp_live_values(artifact, roots, static_cache)?;
+    let reactive_live = collect_stamp_live_values(artifact, reactive_roots, static_cache)?;
+    shared_stamp_values_plan(
+        artifact,
+        &stamp_live,
+        &reactive_live,
+        static_cache,
+        roots,
+        reactive_roots,
+    )
+}
+
+fn shareable_common_stamp_values(
+    artifact: &CanonicalIrArtifact,
+    stamp_live: &HashSet<ValueId>,
+    reactive_live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+) -> Result<HashSet<ValueId>, RustBackendError> {
+    let common = stamp_live
+        .intersection(reactive_live)
+        .copied()
+        .filter(|value| !static_cache.contains(*value))
+        .collect::<HashSet<_>>();
+    let mut shared = HashSet::new();
+    for value_id in ordered_live_values(artifact, &common, static_cache)? {
+        if !common.contains(&value_id) {
+            continue;
+        }
+        let value = artifact
+            .opt
+            .values
+            .get(usize::from(value_id))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+        if !scalar_value_kind_can_share_between_stamp_modes(&value.kind) {
+            continue;
+        }
+        let dependencies = scalar_value_dependencies(artifact, value_id)?;
+        if dependencies
+            .iter()
+            .all(|dependency| static_cache.contains(*dependency) || shared.contains(dependency))
+        {
+            shared.insert(value_id);
+        }
+    }
+    Ok(shared)
+}
+
+fn scalar_value_kind_can_share_between_stamp_modes(kind: &OptValueKind) -> bool {
+    matches!(
+        kind,
+        OptValueKind::RealConstant(_)
+            | OptValueKind::BooleanConstant(_)
+            | OptValueKind::Parameter { .. }
+            | OptValueKind::ParamGiven { .. }
+            | OptValueKind::Temperature
+            | OptValueKind::ThermalVoltage
+            | OptValueKind::Multiplicity
+            | OptValueKind::Time
+            | OptValueKind::Analysis { .. }
+            | OptValueKind::NodePotential { .. }
+            | OptValueKind::BranchFlow { .. }
+            | OptValueKind::BranchUnknownFlow { .. }
+            | OptValueKind::Unary { .. }
+            | OptValueKind::Binary { .. }
+            | OptValueKind::Select { .. }
+    )
+}
+
+fn tail_live_values(live: &HashSet<ValueId>, shared_live: &HashSet<ValueId>) -> HashSet<ValueId> {
+    live.difference(shared_live).copied().collect()
+}
+
+pub(super) fn emit_shared_stamp_values_struct(
+    artifact: &CanonicalIrArtifact,
+    plan: &SharedStampValuesPlan,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    out.push_str("struct CommonStampValues {\n");
+    for value_id in &plan.boundary {
+        let value = artifact
+            .opt
+            .values
+            .get(usize::from(*value_id))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+        out.push_str(&format!(
+            "    {}: {},\n",
+            value_name(*value_id),
+            rust_type(value.value_type)
+        ));
+    }
+    out.push_str("}\n\n");
+    Ok(())
+}
+
+pub(super) fn emit_shared_stamp_values_method(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    static_cache: &ScalarStaticCache,
+    ddt_slots: &DdtSlots,
+    plan: &SharedStampValuesPlan,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let mandatory = plan.boundary.iter().copied().collect::<HashSet<_>>();
+    let inline_values = scalar_inline_values_for_live_values(
+        artifact,
+        &plan.live,
+        &static_cache.set,
+        &mandatory,
+        &plan.boundary,
+    )?;
+    let context = ValueEmitContext {
+        cached_values: &static_cache.set,
+        cached_value_refs: &static_cache.refs,
+        inline_values: &inline_values,
+        use_cached_fields: true,
+        inline_uncached_constants: false,
+        use_exp_helpers: true,
+        limexp_max_expr: "LIMEXP_MAX".to_string(),
+        temperature_expr: "ctx.temperature()".to_string(),
+        thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
+        ddt_slots: Some(ddt_slots),
+        ddt_mode: DdtEmitMode::Transient,
+        loop_index_exprs: HashMap::new(),
+        runtime_loop_values: HashMap::new(),
+        runtime_loop_derivatives: HashMap::new(),
+        external_value_refs: HashMap::new(),
+    };
+
+    out.push_str("    #[inline(always)]\n");
+    out.push_str(
+        "    fn eval_common_stamp_values(&mut self, ctx: &GeneratedEvalContext<'_>) -> CommonStampValues {\n",
+    );
+    out.push_str("        let nodes = self.nodes;\n");
+    if live_values_need_branches(artifact, &plan.live) {
+        out.push_str("        let branches = self.branches;\n");
+    }
+    if static_cache.has_temperature_values() {
+        out.push_str(
+            "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
+        );
+    }
+    if live_values_need_params(artifact, &plan.live) {
+        out.push_str("        let p = &(*self.params);\n");
+    }
+    if live_values_need_param_given(artifact, &plan.live) {
+        out.push_str("        let param_given = self.param_given.as_ref();\n");
+    }
+    if live_values_need_multiplicity(artifact, &plan.live) {
+        out.push_str("        let multiplicity = self.multiplicity;\n");
+    }
+    emit_live_values(
+        artifact,
+        parameter_fields,
+        &plan.live,
+        static_cache,
+        &context,
+        out,
+    )?;
+    out.push_str("        CommonStampValues {\n");
+    for value_id in &plan.boundary {
+        out.push_str(&format!("            {},\n", value_name(*value_id)));
+    }
+    out.push_str("        }\n");
+    out.push_str("    }\n\n");
+    Ok(())
+}
+
+fn live_values_need_params(artifact: &CanonicalIrArtifact, live: &HashSet<ValueId>) -> bool {
+    artifact.opt.values.iter().any(|value| {
+        live.contains(&value.id) && matches!(value.kind, OptValueKind::Parameter { .. })
+    })
+}
+
+fn live_values_need_param_given(artifact: &CanonicalIrArtifact, live: &HashSet<ValueId>) -> bool {
+    artifact.opt.values.iter().any(|value| {
+        live.contains(&value.id) && matches!(value.kind, OptValueKind::ParamGiven { .. })
+    })
+}
+
+fn live_values_need_branches(artifact: &CanonicalIrArtifact, live: &HashSet<ValueId>) -> bool {
+    artifact.opt.values.iter().any(|value| {
+        live.contains(&value.id)
+            && matches!(
+                value.kind,
+                OptValueKind::BranchFlow { .. } | OptValueKind::BranchUnknownFlow { .. }
+            )
+    })
+}
+
+fn live_values_need_multiplicity(artifact: &CanonicalIrArtifact, live: &HashSet<ValueId>) -> bool {
+    artifact
+        .opt
+        .values
+        .iter()
+        .any(|value| live.contains(&value.id) && matches!(value.kind, OptValueKind::Multiplicity))
 }
 
 fn emit_transient_state_helpers(ddt_slots: &DdtSlots, out: &mut String) {
@@ -489,19 +896,73 @@ fn emit_transient_state_helpers(ddt_slots: &DdtSlots, out: &mut String) {
     }
 }
 
-fn scalar_model_uses_limexp(artifact: &CanonicalIrArtifact) -> bool {
-    artifact.opt.values.iter().any(|value| {
-        matches!(
-            &value.kind,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ScalarExpHelperUsage {
+    limexp: bool,
+    limexp_derivative: bool,
+    limited_exp: bool,
+    limited_exp_derivative: bool,
+}
+
+impl ScalarExpHelperUsage {
+    fn is_empty(self) -> bool {
+        !self.limexp && !self.limexp_derivative && !self.limited_exp && !self.limited_exp_derivative
+    }
+}
+
+fn emit_scalar_exp_helpers(out: &mut String, usage: ScalarExpHelperUsage) {
+    if usage.limexp {
+        out.push_str("#[inline]\n");
+        out.push_str("fn scalar_limexp(arg: f64) -> f64 {\n");
+        out.push_str("    if arg < 80.0 { arg.exp() } else { LIMEXP_MAX * (1.0 + arg - 80.0) }\n");
+        out.push_str("}\n\n");
+    }
+    if usage.limexp_derivative {
+        out.push_str("#[inline]\n");
+        out.push_str("fn scalar_limexp_derivative(arg: f64) -> f64 {\n");
+        out.push_str("    if arg < 80.0 { arg.exp() } else { LIMEXP_MAX }\n");
+        out.push_str("}\n\n");
+    }
+    if usage.limited_exp {
+        out.push_str("#[inline]\n");
+        out.push_str("fn scalar_limited_exp(arg: f64) -> f64 {\n");
+        out.push_str("    if arg > 80.0 { LIMEXP_MAX * (1.0 + arg - 80.0) } else if arg < -80.0 { 1.804851387e-35 } else { arg.exp() }\n");
+        out.push_str("}\n\n");
+    }
+    if usage.limited_exp_derivative {
+        out.push_str("#[inline]\n");
+        out.push_str("fn scalar_limited_exp_derivative(arg: f64) -> f64 {\n");
+        out.push_str(
+            "    if arg > 80.0 { LIMEXP_MAX } else if arg < -80.0 { 0.0 } else { arg.exp() }\n",
+        );
+        out.push_str("}\n\n");
+    }
+}
+
+fn scalar_exp_helper_usage(artifact: &CanonicalIrArtifact) -> ScalarExpHelperUsage {
+    let mut usage = ScalarExpHelperUsage::default();
+    for value in &artifact.opt.values {
+        match value.kind {
             OptValueKind::Unary {
-                op: OptUnaryOp::LimExp
-                    | OptUnaryOp::LimExpDerivative
-                    | OptUnaryOp::LimitedExp
-                    | OptUnaryOp::LimitedExpDerivative,
+                op: OptUnaryOp::LimExp,
                 ..
-            }
-        )
-    })
+            } => usage.limexp = true,
+            OptValueKind::Unary {
+                op: OptUnaryOp::LimExpDerivative,
+                ..
+            } => usage.limexp_derivative = true,
+            OptValueKind::Unary {
+                op: OptUnaryOp::LimitedExp,
+                ..
+            } => usage.limited_exp = true,
+            OptValueKind::Unary {
+                op: OptUnaryOp::LimitedExpDerivative,
+                ..
+            } => usage.limited_exp_derivative = true,
+            _ => {}
+        }
+    }
+    usage
 }
 
 pub(super) fn scalar_state_extensions(
@@ -516,23 +977,11 @@ pub(super) fn scalar_state_extensions(
     let no_inline_values = HashSet::new();
     let instance_context = ValueEmitContext {
         cached_values: &static_cache.set,
-        inline_values: &no_inline_values,
-        use_cached_fields: false,
-        inline_uncached_constants: true,
-        limexp_max_expr: format_f64(LIMEXP_MAX),
-        temperature_expr: "temperature".to_string(),
-        thermal_voltage_expr: "thermal_voltage".to_string(),
-        ddt_slots: None,
-        ddt_mode: DdtEmitMode::Transient,
-        loop_index_exprs: HashMap::new(),
-        runtime_loop_values: HashMap::new(),
-        runtime_loop_derivatives: HashMap::new(),
-    };
-    let temperature_context = ValueEmitContext {
-        cached_values: &static_cache.set,
+        cached_value_refs: &static_cache.refs,
         inline_values: &no_inline_values,
         use_cached_fields: true,
         inline_uncached_constants: true,
+        use_exp_helpers: false,
         limexp_max_expr: format_f64(LIMEXP_MAX),
         temperature_expr: "temperature".to_string(),
         thermal_voltage_expr: "thermal_voltage".to_string(),
@@ -541,23 +990,28 @@ pub(super) fn scalar_state_extensions(
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
+        external_value_refs: HashMap::new(),
+    };
+    let temperature_context = ValueEmitContext {
+        cached_values: &static_cache.set,
+        cached_value_refs: &static_cache.refs,
+        inline_values: &no_inline_values,
+        use_cached_fields: true,
+        inline_uncached_constants: true,
+        use_exp_helpers: false,
+        limexp_max_expr: format_f64(LIMEXP_MAX),
+        temperature_expr: "temperature".to_string(),
+        thermal_voltage_expr: "thermal_voltage".to_string(),
+        ddt_slots: None,
+        ddt_mode: DdtEmitMode::Transient,
+        loop_index_exprs: HashMap::new(),
+        runtime_loop_values: HashMap::new(),
+        runtime_loop_derivatives: HashMap::new(),
+        external_value_refs: HashMap::new(),
     };
     let mut methods = String::new();
 
-    for value_id in static_cache
-        .instance_values
-        .iter()
-        .chain(static_cache.temperature_values.iter())
-    {
-        let value = artifact
-            .opt
-            .values
-            .get(usize::from(*value_id))
-            .ok_or_else(|| {
-                unsupported(artifact, format!("missing static scalar value {value_id}"))
-            })?;
-        push_cached_value_state_fields(&mut extensions, *value_id, value.value_type);
-    }
+    push_scalar_static_cache_state_fields(&mut extensions, static_cache);
 
     if !static_cache.instance_values.is_empty() {
         methods.push_str("\n    #[inline]\n");
@@ -574,14 +1028,14 @@ pub(super) fn scalar_state_extensions(
                 .ok_or_else(|| {
                     unsupported(artifact, format!("missing static scalar value {value_id}"))
                 })?;
-            let local = value_name(*value_id);
-            let ty = rust_type(value.value_type);
             let expr = emit_value_expr(artifact, parameter_fields, value, &instance_context)?;
-            methods.push_str(&format!("        let {local}: {ty} = {expr};\n"));
-            methods.push_str(&format!(
-                "        self.{} = {local};\n",
-                cache_field_name(*value_id)
-            ));
+            let target = static_cache.cache_ref(*value_id).ok_or_else(|| {
+                unsupported(
+                    artifact,
+                    format!("missing static scalar cache slot {value_id}"),
+                )
+            })?;
+            methods.push_str(&format!("        {target}={expr};\n"));
         }
         methods.push_str("    }\n");
         extensions
@@ -620,14 +1074,14 @@ pub(super) fn scalar_state_extensions(
                         format!("missing temperature-static scalar value {value_id}"),
                     )
                 })?;
-            let local = value_name(*value_id);
-            let ty = rust_type(value.value_type);
             let expr = emit_value_expr(artifact, parameter_fields, value, &temperature_context)?;
-            methods.push_str(&format!("        let {local}: {ty} = {expr};\n"));
-            methods.push_str(&format!(
-                "        self.{} = {local};\n",
-                cache_field_name(*value_id)
-            ));
+            let target = static_cache.cache_ref(*value_id).ok_or_else(|| {
+                unsupported(
+                    artifact,
+                    format!("missing temperature-static scalar cache slot {value_id}"),
+                )
+            })?;
+            methods.push_str(&format!("        {target}={expr};\n"));
         }
         methods.push_str("        self.scalar_temperature_static_temperature = temperature;\n");
         methods.push_str(
@@ -651,29 +1105,48 @@ fn cached_values_need_param_given(artifact: &CanonicalIrArtifact, values: &[Valu
     })
 }
 
-fn push_cached_value_state_fields(
+fn push_scalar_static_cache_state_fields(
     extensions: &mut device::StateFileExtensions,
-    value_id: ValueId,
-    value_type: OptValueType,
+    static_cache: &ScalarStaticCache,
 ) {
-    let field = cache_field_name(value_id);
-    let ty = rust_type(value_type);
-    let default = default_value(value_type);
-    extensions
-        .instance_fields
-        .push_str(&format!("    pub(crate) {field}: {ty},\n"));
-    extensions
-        .clone_fields
-        .push_str(&format!("            {field}: self.{field},\n"));
-    extensions
-        .new_initializers
-        .push_str(&format!("            {field}: {default},\n"));
-    extensions
-        .restore_destructure_fields
-        .push_str(&format!("            {field},\n"));
-    extensions
-        .restore_initializers
-        .push_str(&format!("            {field},\n"));
+    if static_cache.has_f64_values() {
+        extensions.instance_fields.push_str(&format!(
+            "    pub(crate) scalar_static_f64: Box<[f64; {}]>,\n",
+            static_cache.f64_count
+        ));
+        extensions
+            .clone_fields
+            .push_str("            scalar_static_f64: self.scalar_static_f64.clone(),\n");
+        extensions.new_initializers.push_str(&format!(
+            "            scalar_static_f64: boxed_zero_f64_array::<{}>(),\n",
+            static_cache.f64_count
+        ));
+        extensions
+            .restore_destructure_fields
+            .push_str("            scalar_static_f64,\n");
+        extensions
+            .restore_initializers
+            .push_str("            scalar_static_f64,\n");
+    }
+    if static_cache.has_bool_values() {
+        extensions.instance_fields.push_str(&format!(
+            "    pub(crate) scalar_static_bool: Box<[bool; {}]>,\n",
+            static_cache.bool_count
+        ));
+        extensions
+            .clone_fields
+            .push_str("            scalar_static_bool: self.scalar_static_bool.clone(),\n");
+        extensions.new_initializers.push_str(&format!(
+            "            scalar_static_bool: boxed_zero_bool_array::<{}>(),\n",
+            static_cache.bool_count
+        ));
+        extensions
+            .restore_destructure_fields
+            .push_str("            scalar_static_bool,\n");
+        extensions
+            .restore_initializers
+            .push_str("            scalar_static_bool,\n");
+    }
 }
 
 fn push_temperature_cache_state_fields(extensions: &mut device::StateFileExtensions) {
@@ -807,20 +1280,27 @@ pub(super) fn scalarizable_idt_equation_roots(
     Ok(selected)
 }
 
-pub(super) fn emit_static_current_values(
+pub(super) fn emit_static_current_values_with_shared_plan(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
     static_cache: &ScalarStaticCache,
+    shared_plan: Option<&SharedStampValuesPlan>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let stamp_live = collect_stamp_live_values(artifact, roots, static_cache)?;
-    let stamp_inline_values = scalar_inline_values(artifact, &stamp_live, static_cache, roots)?;
+    let stamp_emit_live = shared_plan
+        .map(|plan| tail_live_values(&stamp_live, &plan.live))
+        .unwrap_or_else(|| stamp_live.clone());
+    let stamp_inline_values =
+        scalar_inline_values(artifact, &stamp_emit_live, static_cache, roots)?;
     let stamp_context = ValueEmitContext {
         cached_values: &static_cache.set,
+        cached_value_refs: &static_cache.refs,
         inline_values: &stamp_inline_values,
         use_cached_fields: true,
         inline_uncached_constants: false,
+        use_exp_helpers: false,
         limexp_max_expr: "LIMEXP_MAX".to_string(),
         temperature_expr: "ctx.temperature()".to_string(),
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
@@ -829,11 +1309,14 @@ pub(super) fn emit_static_current_values(
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
+        external_value_refs: shared_plan
+            .map(|plan| plan.refs.clone())
+            .unwrap_or_default(),
     };
     emit_live_values(
         artifact,
         parameter_fields,
-        &stamp_live,
+        &stamp_emit_live,
         static_cache,
         &stamp_context,
         out,
@@ -852,6 +1335,9 @@ fn emit_live_values(
     let values = ordered_live_values(artifact, live, static_cache)?;
     let mut emitted_runtime_loops = HashSet::new();
     for value_id in values {
+        if context.external_value_refs.contains_key(&value_id) {
+            continue;
+        }
         if context.inline_values.contains(&value_id) {
             continue;
         }
@@ -874,12 +1360,7 @@ fn emit_live_values(
             continue;
         }
         let expr = emit_value_expr(artifact, parameter_fields, value, context)?;
-        out.push_str(&format!(
-            "        let {}: {} = {};\n",
-            value_name(value.id),
-            rust_type(value.value_type),
-            expr
-        ));
+        out.push_str(&format!("        let {}={};\n", value_name(value.id), expr));
     }
     if !live.is_empty() {
         out.push('\n');
@@ -887,29 +1368,47 @@ fn emit_live_values(
     Ok(())
 }
 
-pub(super) fn emit_static_current_stamps(
+pub(super) fn emit_static_current_stamps_with_shared_plan(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
     static_cache: &ScalarStaticCache,
+    shared_plan: Option<&SharedStampValuesPlan>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
-    emit_current_stamps(artifact, parameter_fields, roots, static_cache, None, out)
+    let inline_values = HashSet::new();
+    let mut context =
+        local_stamp_context(static_cache, &inline_values, None, DdtEmitMode::Transient);
+    if let Some(plan) = shared_plan {
+        context.external_value_refs = plan.refs.clone();
+    }
+    emit_current_stamps(artifact, parameter_fields, roots, &context, None, out)
 }
 
-pub(super) fn emit_ddt_current_stamps(
+pub(super) fn emit_ddt_current_stamps_with_shared_plan(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
     static_cache: &ScalarStaticCache,
     ddt_slots: &DdtSlots,
+    shared_plan: Option<&SharedStampValuesPlan>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
+    let inline_values = HashSet::new();
+    let mut context = local_stamp_context(
+        static_cache,
+        &inline_values,
+        Some(ddt_slots),
+        DdtEmitMode::Transient,
+    );
+    if let Some(plan) = shared_plan {
+        context.external_value_refs = plan.refs.clone();
+    }
     emit_current_stamps(
         artifact,
         parameter_fields,
         roots,
-        static_cache,
+        &context,
         Some(ddt_slots),
         out,
     )
@@ -919,7 +1418,7 @@ fn emit_current_stamps(
     artifact: &CanonicalIrArtifact,
     parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
-    static_cache: &ScalarStaticCache,
+    context: &ValueEmitContext<'_>,
     ddt_slots: Option<&DdtSlots>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
@@ -934,7 +1433,7 @@ fn emit_current_stamps(
                     parameter_fields,
                     equation,
                     root,
-                    static_cache,
+                    context,
                     ddt_slots,
                     out,
                 )?;
@@ -945,7 +1444,7 @@ fn emit_current_stamps(
                     parameter_fields,
                     equation,
                     root,
-                    static_cache,
+                    context,
                     ddt_slots,
                     out,
                 )?;
@@ -958,17 +1457,39 @@ fn emit_current_stamps(
     Ok(())
 }
 
-pub(super) fn emit_current_reactive_stamps(
+pub(super) fn emit_current_reactive_stamps_with_shared_plan(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
     static_cache: &ScalarStaticCache,
+    shared_plan: Option<&SharedStampValuesPlan>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let inline_values = HashSet::new();
+    let mut context = local_stamp_context(
+        static_cache,
+        &inline_values,
+        None,
+        DdtEmitMode::ReactiveLinearized,
+    );
+    if let Some(plan) = shared_plan {
+        context.external_value_refs = plan.refs.clone();
+    }
+    emit_current_reactive_stamps_with_context(artifact, parameter_fields, roots, &context, out)
+}
+
+fn emit_current_reactive_stamps_with_context(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    roots: &HashMap<EquationId, ValueId>,
+    context: &ValueEmitContext<'_>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     for equation in &artifact.mir.equations {
         let Some(root) = roots.get(&equation.id).copied() else {
             continue;
         };
-        emit_current_reactive_stamp(artifact, equation, root, static_cache, out)?;
+        emit_current_reactive_stamp(artifact, parameter_fields, equation, root, context, out)?;
     }
     Ok(())
 }
@@ -1147,7 +1668,7 @@ fn emit_transient_operator_root(
             })?;
             let ddt_value = format!("{}_ddt", value_name(root));
             out.push_str(&format!(
-                "        let {ddt_value}: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, {slot}, {root_expr});\n"
+                "        let {ddt_value}=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, {slot}, {root_expr});\n"
             ));
             Ok((ddt_value, "ddt_scale".to_string()))
         }
@@ -1163,7 +1684,7 @@ fn emit_transient_operator_root(
             let ic_expr = emit_idt_ic_expr(artifact, parameter_fields, ic)?;
             let idt_value = format!("{}_idt", value_name(root));
             out.push_str(&format!(
-                "        let {idt_value}: f64 = eval_idt(idt_state_current, idt_state_previous, idt_state_initialized, ddt_active, idt_scale, {slot}, {root_expr}, {ic_expr});\n"
+                "        let {idt_value}=eval_idt(idt_state_current, idt_state_previous, idt_state_initialized, ddt_active, idt_scale, {slot}, {root_expr}, {ic_expr});\n"
             ));
             Ok((idt_value, "idt_scale".to_string()))
         }
@@ -1176,7 +1697,7 @@ fn emit_current_stamp(
     parameter_fields: &HashMap<String, String>,
     equation: &MirEquation,
     root: ValueId,
-    static_cache: &ScalarStaticCache,
+    context: &ValueEmitContext<'_>,
     ddt_slots: Option<&DdtSlots>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
@@ -1187,25 +1708,10 @@ fn emit_current_stamp(
         .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
     let derivatives = scalar_derivatives(artifact, equation, root)?;
 
-    for (node, value) in &derivatives.nodes {
-        out.push_str(&format!(
-            "        let {}: f64 = {};\n",
-            derivative_name(root, *node),
-            cached_or_local_value_name(*value, static_cache)
-        ));
-    }
-    for (branch, value) in &derivatives.branches {
-        out.push_str(&format!(
-            "        let {}: f64 = {};\n",
-            branch_derivative_name(root, *branch),
-            cached_or_local_value_name(*value, static_cache)
-        ));
-    }
-
     let pos = optional_node_local_expr(equation.branch.pos_node);
     let neg = optional_node_local_expr(equation.branch.neg_node);
-    let root_name = cached_or_local_value_name(root, static_cache);
-    let root_expr = current_root_expr(root_value.value_type, &root_name);
+    let root_ref = value_ref(artifact, parameter_fields, root, context)?;
+    let root_expr = current_root_expr(root_value.value_type, &root_ref);
     let (root_expr, derivative_scale) = emit_transient_operator_root(
         artifact,
         parameter_fields,
@@ -1226,7 +1732,7 @@ fn emit_current_stamp(
             out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
             out.push_str("        );\n");
         }
-        ([(node0, _)], []) => {
+        ([(node0, value0)], []) => {
             out.push_str("        stamper.stamp_current_node1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1234,11 +1740,17 @@ fn emit_current_stamp(
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _), (node1, _)], []) => {
+        ([(node0, value0), (node1, value1)], []) => {
             out.push_str("        stamper.stamp_current_node2_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1246,16 +1758,28 @@ fn emit_current_stamp(
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {node1},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value1,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _), (node1, _), (node2, _)], []) => {
+        ([(node0, value0), (node1, value1), (node2, value2)], []) => {
             out.push_str("        stamper.stamp_current_node3_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1263,21 +1787,39 @@ fn emit_current_stamp(
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {node1},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value1,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {node2},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node2), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value2,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([], [(branch0, _)]) => {
+        ([], [(branch0, value0)]) => {
             out.push_str("        stamper.stamp_current_branch1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1285,14 +1827,17 @@ fn emit_current_stamp(
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch0),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([], [(branch0, _), (branch1, _)]) => {
+        ([], [(branch0, value0), (branch1, value1)]) => {
             out.push_str("        stamper.stamp_current_branch2_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1300,22 +1845,28 @@ fn emit_current_stamp(
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch0),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str(&format!("            {branch1},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch1),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value1,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _)], [(branch0, _)]) => {
+        ([(node0, node_value0)], [(branch0, branch_value0)]) => {
             out.push_str("        stamper.stamp_current_node1_branch1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1323,19 +1874,28 @@ fn emit_current_stamp(
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *node_value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch0),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *branch_value0,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _), (node1, _)], [(branch0, _)]) => {
+        ([(node0, node_value0), (node1, node_value1)], [(branch0, branch_value0)]) => {
             out.push_str("        stamper.stamp_current_node2_branch1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
@@ -1343,35 +1903,51 @@ fn emit_current_stamp(
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *node_value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {node1},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *node_value1,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch0),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *branch_value0,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str("        );\n");
         }
         _ => {
             emit_wide_current_stamp(
                 artifact,
-                root,
                 &derivatives.nodes,
                 &derivatives.branches,
                 &pos,
                 &neg,
                 &root_expr,
+                parameter_fields,
+                context,
                 derivative_scale.as_str(),
                 out,
-            );
+            )?;
         }
     }
     Ok(())
@@ -1382,7 +1958,7 @@ fn emit_potential_stamp(
     parameter_fields: &HashMap<String, String>,
     equation: &MirEquation,
     root: ValueId,
-    static_cache: &ScalarStaticCache,
+    context: &ValueEmitContext<'_>,
     ddt_slots: Option<&DdtSlots>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
@@ -1393,26 +1969,11 @@ fn emit_potential_stamp(
         .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
     let derivatives = scalar_derivatives(artifact, equation, root)?;
 
-    for (node, value) in &derivatives.nodes {
-        out.push_str(&format!(
-            "        let {}: f64 = {};\n",
-            derivative_name(root, *node),
-            cached_or_local_value_name(*value, static_cache)
-        ));
-    }
-    for (branch, value) in &derivatives.branches {
-        out.push_str(&format!(
-            "        let {}: f64 = {};\n",
-            branch_derivative_name(root, *branch),
-            cached_or_local_value_name(*value, static_cache)
-        ));
-    }
-
     let branch_slot = potential_branch_slot(artifact, equation)?;
     let pos = optional_node_local_expr(equation.branch.pos_node);
     let neg = optional_node_local_expr(equation.branch.neg_node);
-    let root_name = cached_or_local_value_name(root, static_cache);
-    let root_expr = current_root_expr(root_value.value_type, &root_name);
+    let root_ref = value_ref(artifact, parameter_fields, root, context)?;
+    let root_expr = current_root_expr(root_value.value_type, &root_ref);
     let (root_expr, derivative_scale) = emit_transient_operator_root(
         artifact,
         parameter_fields,
@@ -1439,123 +2000,175 @@ fn emit_potential_stamp(
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str("        );\n");
         }
-        ([(node0, _)], []) => {
+        ([(node0, value0)], []) => {
             out.push_str("        stamper.stamp_potential_node1_local(\n");
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _), (node1, _)], []) => {
+        ([(node0, value0), (node1, value1)], []) => {
             out.push_str("        stamper.stamp_potential_node2_local(\n");
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {node1},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value1,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([], [(branch0, _)]) => {
+        ([], [(branch0, value0)]) => {
             out.push_str("        stamper.stamp_potential_branch1_local(\n");
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch0),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([], [(branch0, _), (branch1, _)]) => {
+        ([], [(branch0, value0), (branch1, value1)]) => {
             out.push_str("        stamper.stamp_potential_branch2_local(\n");
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch0),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value0,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str(&format!("            {branch1},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch1),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value1,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _)], [(branch0, _)]) => {
+        ([(node0, node_value0)], [(branch0, branch_value0)]) => {
             out.push_str("        stamper.stamp_potential_node1_branch1_local(\n");
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *node_value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch0),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *branch_value0,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _), (node1, _)], [(branch0, _)]) => {
+        ([(node0, node_value0), (node1, node_value1)], [(branch0, branch_value0)]) => {
             out.push_str("        stamper.stamp_potential_node2_branch1_local(\n");
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
             out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(derivative_name(root, *node0), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *node_value0,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {node1},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(derivative_name(root, *node1), derivative_scale.as_str())
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *node_value1,
+                    context,
+                    derivative_scale.as_str()
+                )?
             ));
             out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            {},\n",
-                scaled_derivative_expr(
-                    branch_derivative_name(root, *branch0),
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *branch_value0,
+                    context,
                     derivative_scale.as_str()
-                )
+                )?
             ));
             out.push_str("        );\n");
         }
         _ => {
             emit_wide_potential_stamp(
                 artifact,
-                root,
                 &derivatives.nodes,
                 &derivatives.branches,
                 branch_slot,
                 &root_expr,
+                parameter_fields,
+                context,
                 derivative_scale.as_str(),
                 out,
-            );
+            )?;
         }
     }
     Ok(())
@@ -1563,27 +2176,13 @@ fn emit_potential_stamp(
 
 fn emit_current_reactive_stamp(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     equation: &MirEquation,
     root: ValueId,
-    static_cache: &ScalarStaticCache,
+    context: &ValueEmitContext<'_>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let derivatives = scalar_derivatives(artifact, equation, root)?;
-
-    for (node, value) in &derivatives.nodes {
-        out.push_str(&format!(
-            "        let {}: f64 = {};\n",
-            derivative_name(root, *node),
-            cached_or_local_value_name(*value, static_cache)
-        ));
-    }
-    for (branch, value) in &derivatives.branches {
-        out.push_str(&format!(
-            "        let {}: f64 = {};\n",
-            branch_derivative_name(root, *branch),
-            cached_or_local_value_name(*value, static_cache)
-        ));
-    }
 
     let pos = optional_node_global_expr(equation.branch.pos_node);
     let neg = optional_node_global_expr(equation.branch.neg_node);
@@ -1592,128 +2191,129 @@ fn emit_current_reactive_stamp(
         derivatives.branches.as_slice(),
     ) {
         ([], []) => {}
-        ([(node0, _)], []) => {
+        ([(node0, value0)], []) => {
             out.push_str("        stamper.stamp_current_reactive_node1(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
             out.push_str(&format!("            nodes[{node0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node0)
+                value_ref(artifact, parameter_fields, *value0, context)?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _), (node1, _)], []) => {
+        ([(node0, value0), (node1, value1)], []) => {
             out.push_str("        stamper.stamp_current_reactive_node2(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
             out.push_str(&format!("            nodes[{node0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node0)
+                value_ref(artifact, parameter_fields, *value0, context)?
             ));
             out.push_str(&format!("            nodes[{node1}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node1)
+                value_ref(artifact, parameter_fields, *value1, context)?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _), (node1, _), (node2, _)], []) => {
+        ([(node0, value0), (node1, value1), (node2, value2)], []) => {
             out.push_str("        stamper.stamp_current_reactive_node3(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
             out.push_str(&format!("            nodes[{node0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node0)
+                value_ref(artifact, parameter_fields, *value0, context)?
             ));
             out.push_str(&format!("            nodes[{node1}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node1)
+                value_ref(artifact, parameter_fields, *value1, context)?
             ));
             out.push_str(&format!("            nodes[{node2}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node2)
+                value_ref(artifact, parameter_fields, *value2, context)?
             ));
             out.push_str("        );\n");
         }
-        ([], [(branch0, _)]) => {
+        ([], [(branch0, value0)]) => {
             out.push_str("        stamper.stamp_current_reactive_branch1(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
             out.push_str(&format!("            branches[{branch0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                branch_derivative_name(root, *branch0)
+                value_ref(artifact, parameter_fields, *value0, context)?
             ));
             out.push_str("        );\n");
         }
-        ([], [(branch0, _), (branch1, _)]) => {
+        ([], [(branch0, value0), (branch1, value1)]) => {
             out.push_str("        stamper.stamp_current_reactive_branch2(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
             out.push_str(&format!("            branches[{branch0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                branch_derivative_name(root, *branch0)
+                value_ref(artifact, parameter_fields, *value0, context)?
             ));
             out.push_str(&format!("            branches[{branch1}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                branch_derivative_name(root, *branch1)
+                value_ref(artifact, parameter_fields, *value1, context)?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _)], [(branch0, _)]) => {
+        ([(node0, node_value0)], [(branch0, branch_value0)]) => {
             out.push_str("        stamper.stamp_current_reactive_node1_branch1(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
             out.push_str(&format!("            nodes[{node0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node0)
+                value_ref(artifact, parameter_fields, *node_value0, context)?
             ));
             out.push_str(&format!("            branches[{branch0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                branch_derivative_name(root, *branch0)
+                value_ref(artifact, parameter_fields, *branch_value0, context)?
             ));
             out.push_str("        );\n");
         }
-        ([(node0, _), (node1, _)], [(branch0, _)]) => {
+        ([(node0, node_value0), (node1, node_value1)], [(branch0, branch_value0)]) => {
             out.push_str("        stamper.stamp_current_reactive_node2_branch1(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
             out.push_str(&format!("            nodes[{node0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node0)
+                value_ref(artifact, parameter_fields, *node_value0, context)?
             ));
             out.push_str(&format!("            nodes[{node1}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                derivative_name(root, *node1)
+                value_ref(artifact, parameter_fields, *node_value1, context)?
             ));
             out.push_str(&format!("            branches[{branch0}],\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
-                branch_derivative_name(root, *branch0)
+                value_ref(artifact, parameter_fields, *branch_value0, context)?
             ));
             out.push_str("        );\n");
         }
         _ => {
             emit_wide_current_reactive_stamp(
                 artifact,
-                root,
                 &derivatives.nodes,
                 &derivatives.branches,
                 &pos,
                 &neg,
+                parameter_fields,
+                context,
                 out,
-            );
+            )?;
         }
     }
     Ok(())
@@ -1721,54 +2321,45 @@ fn emit_current_reactive_stamp(
 
 fn emit_wide_current_reactive_stamp(
     artifact: &CanonicalIrArtifact,
-    root: ValueId,
     node_derivatives: &[(u32, ValueId)],
     branch_derivatives: &[(u32, ValueId)],
     pos: &str,
     neg: &str,
+    parameter_fields: &HashMap<String, String>,
+    context: &ValueEmitContext<'_>,
     out: &mut String,
-) {
+) -> Result<(), RustBackendError> {
     if branch_derivatives.is_empty() {
-        emit_wide_node_current_reactive_stamp(artifact, root, node_derivatives, pos, neg, out);
-        return;
+        return emit_wide_node_current_reactive_stamp(
+            artifact,
+            node_derivatives,
+            pos,
+            neg,
+            parameter_fields,
+            context,
+            out,
+        );
     }
 
     if node_derivatives.len() == artifact.mir.nodes.len()
         && branch_derivatives.len() == artifact.mir.branch_unknowns.len()
     {
         let mut node_values = vec!["0.0".to_string(); artifact.mir.nodes.len()];
-        for (node, _) in node_derivatives {
-            node_values[*node as usize] = derivative_name(root, *node);
+        for (node, value) in node_derivatives {
+            node_values[*node as usize] = value_ref(artifact, parameter_fields, *value, context)?;
         }
         let mut branch_values = vec!["0.0".to_string(); artifact.mir.branch_unknowns.len()];
-        for (branch, _) in branch_derivatives {
-            branch_values[*branch as usize] = branch_derivative_name(root, *branch);
+        for (branch, value) in branch_derivatives {
+            branch_values[*branch as usize] =
+                value_ref(artifact, parameter_fields, *value, context)?;
         }
-        out.push_str(&format!(
-            "        let {}_reactive_node_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            node_values.len(),
-            node_values.join(", ")
-        ));
-        out.push_str(&format!(
-            "        let {}_reactive_branch_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            branch_values.len(),
-            branch_values.join(", ")
-        ));
         out.push_str("        stamper.stamp_current_reactive_dense(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
         out.push_str("            &nodes,\n");
-        out.push_str(&format!(
-            "            &{}_reactive_node_derivatives,\n",
-            value_name(root)
-        ));
+        out.push_str(&format!("            &[{}],\n", node_values.join(",")));
         out.push_str("            &branches,\n");
-        out.push_str(&format!(
-            "            &{}_reactive_branch_derivatives,\n",
-            value_name(root)
-        ));
+        out.push_str(&format!("            &[{}],\n", branch_values.join(",")));
         out.push_str("            multiplicity,\n");
         out.push_str("        );\n");
     } else {
@@ -1779,8 +2370,8 @@ fn emit_wide_current_reactive_stamp(
             .join(", ");
         let node_values = node_derivatives
             .iter()
-            .map(|(node, _)| derivative_name(root, *node))
-            .collect::<Vec<_>>()
+            .map(|(_, value)| value_ref(artifact, parameter_fields, *value, context))
+            .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let branch_indices = branch_derivatives
             .iter()
@@ -1789,84 +2380,42 @@ fn emit_wide_current_reactive_stamp(
             .join(", ");
         let branch_values = branch_derivatives
             .iter()
-            .map(|(branch, _)| branch_derivative_name(root, *branch))
-            .collect::<Vec<_>>()
+            .map(|(_, value)| value_ref(artifact, parameter_fields, *value, context))
+            .collect::<Result<Vec<_>, _>>()?
             .join(", ");
-        out.push_str(&format!(
-            "        let {}_reactive_nodes: [usize; {}] = [{}];\n",
-            value_name(root),
-            node_derivatives.len(),
-            node_indices
-        ));
-        out.push_str(&format!(
-            "        let {}_reactive_node_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            node_derivatives.len(),
-            node_values
-        ));
-        out.push_str(&format!(
-            "        let {}_reactive_branches: [usize; {}] = [{}];\n",
-            value_name(root),
-            branch_derivatives.len(),
-            branch_indices
-        ));
-        out.push_str(&format!(
-            "        let {}_reactive_branch_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            branch_derivatives.len(),
-            branch_values
-        ));
         out.push_str("        stamper.stamp_current_reactive_dense(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
-        out.push_str(&format!(
-            "            &{}_reactive_nodes,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_reactive_node_derivatives,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_reactive_branches,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_reactive_branch_derivatives,\n",
-            value_name(root)
-        ));
+        out.push_str(&format!("            &[{node_indices}],\n"));
+        out.push_str(&format!("            &[{node_values}],\n"));
+        out.push_str(&format!("            &[{branch_indices}],\n"));
+        out.push_str(&format!("            &[{branch_values}],\n"));
         out.push_str("            multiplicity,\n");
         out.push_str("        );\n");
     }
+    Ok(())
 }
 
 fn emit_wide_node_current_reactive_stamp(
     artifact: &CanonicalIrArtifact,
-    root: ValueId,
     derivatives: &[(u32, ValueId)],
     pos: &str,
     neg: &str,
+    parameter_fields: &HashMap<String, String>,
+    context: &ValueEmitContext<'_>,
     out: &mut String,
-) {
+) -> Result<(), RustBackendError> {
     if derivatives.len() == artifact.mir.nodes.len() {
         let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
-        for (node, _) in derivatives {
-            node_derivatives[*node as usize] = derivative_name(root, *node);
+        for (node, value) in derivatives {
+            node_derivatives[*node as usize] =
+                value_ref(artifact, parameter_fields, *value, context)?;
         }
-        out.push_str(&format!(
-            "        let {}_reactive_node_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            node_derivatives.len(),
-            node_derivatives.join(", ")
-        ));
         out.push_str("        stamper.stamp_current_reactive_dense(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
         out.push_str("            &nodes,\n");
-        out.push_str(&format!(
-            "            &{}_reactive_node_derivatives,\n",
-            value_name(root)
-        ));
+        out.push_str(&format!("            &[{}],\n", node_derivatives.join(",")));
         out.push_str("            &[],\n");
         out.push_str("            &[],\n");
         out.push_str("            multiplicity,\n");
@@ -1879,85 +2428,61 @@ fn emit_wide_node_current_reactive_stamp(
             .join(", ");
         let node_derivatives = derivatives
             .iter()
-            .map(|(node, _)| derivative_name(root, *node))
-            .collect::<Vec<_>>()
+            .map(|(_, value)| value_ref(artifact, parameter_fields, *value, context))
+            .collect::<Result<Vec<_>, _>>()?
             .join(", ");
-        out.push_str(&format!(
-            "        let {}_reactive_nodes: [usize; {}] = [{}];\n",
-            value_name(root),
-            derivatives.len(),
-            node_indices
-        ));
-        out.push_str(&format!(
-            "        let {}_reactive_node_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            derivatives.len(),
-            node_derivatives
-        ));
         out.push_str("        stamper.stamp_current_reactive_dense(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
-        out.push_str(&format!(
-            "            &{}_reactive_nodes,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_reactive_node_derivatives,\n",
-            value_name(root)
-        ));
+        out.push_str(&format!("            &[{node_indices}],\n"));
+        out.push_str(&format!("            &[{node_derivatives}],\n"));
         out.push_str("            &[],\n");
         out.push_str("            &[],\n");
         out.push_str("            multiplicity,\n");
         out.push_str("        );\n");
     }
+    Ok(())
 }
 
 fn emit_wide_potential_stamp(
     artifact: &CanonicalIrArtifact,
-    root: ValueId,
     node_derivatives: &[(u32, ValueId)],
     branch_derivatives: &[(u32, ValueId)],
     branch_slot: usize,
     root_expr: &str,
+    parameter_fields: &HashMap<String, String>,
+    context: &ValueEmitContext<'_>,
     derivative_scale: &str,
     out: &mut String,
-) {
+) -> Result<(), RustBackendError> {
     if node_derivatives.len() == artifact.mir.nodes.len()
         && branch_derivatives.len() == artifact.mir.branch_unknowns.len()
     {
         let mut node_values = vec!["0.0".to_string(); artifact.mir.nodes.len()];
-        for (node, _) in node_derivatives {
-            node_values[*node as usize] =
-                scaled_derivative_expr(derivative_name(root, *node), derivative_scale);
+        for (node, value) in node_derivatives {
+            node_values[*node as usize] = scaled_derivative_value_expr(
+                artifact,
+                parameter_fields,
+                *value,
+                context,
+                derivative_scale,
+            )?;
         }
         let mut branch_values = vec!["0.0".to_string(); artifact.mir.branch_unknowns.len()];
-        for (branch, _) in branch_derivatives {
-            branch_values[*branch as usize] =
-                scaled_derivative_expr(branch_derivative_name(root, *branch), derivative_scale);
+        for (branch, value) in branch_derivatives {
+            branch_values[*branch as usize] = scaled_derivative_value_expr(
+                artifact,
+                parameter_fields,
+                *value,
+                context,
+                derivative_scale,
+            )?;
         }
-        out.push_str(&format!(
-            "        let {}_node_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            node_values.len(),
-            node_values.join(", ")
-        ));
-        out.push_str(&format!(
-            "        let {}_branch_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            branch_values.len(),
-            branch_values.join(", ")
-        ));
         out.push_str("        stamper.stamp_potential_dense_local(\n");
         out.push_str(&format!("            {branch_slot},\n"));
         out.push_str(&format!("            {root_expr},\n"));
-        out.push_str(&format!(
-            "            &{}_node_derivatives,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_branch_derivatives,\n",
-            value_name(root)
-        ));
+        out.push_str(&format!("            &[{}],\n", node_values.join(",")));
+        out.push_str(&format!("            &[{}],\n", branch_values.join(",")));
         out.push_str("        );\n");
     } else {
         let node_indices = node_derivatives
@@ -1967,8 +2492,16 @@ fn emit_wide_potential_stamp(
             .join(", ");
         let node_values = node_derivatives
             .iter()
-            .map(|(node, _)| scaled_derivative_expr(derivative_name(root, *node), derivative_scale))
-            .collect::<Vec<_>>()
+            .map(|(_, value)| {
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value,
+                    context,
+                    derivative_scale,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let branch_indices = branch_derivatives
             .iter()
@@ -1977,10 +2510,16 @@ fn emit_wide_potential_stamp(
             .join(", ");
         let branch_values = branch_derivatives
             .iter()
-            .map(|(branch, _)| {
-                scaled_derivative_expr(branch_derivative_name(root, *branch), derivative_scale)
+            .map(|(_, value)| {
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value,
+                    context,
+                    derivative_scale,
+                )
             })
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         if node_derivatives.len() + branch_derivatives.len() <= SPARSE_STAMP_DERIVATIVE_THRESHOLD {
             out.push_str(&format!(
@@ -1996,102 +2535,60 @@ fn emit_wide_potential_stamp(
             out.push_str(&format!("            [{branch_values}],\n"));
             out.push_str("        );\n");
         } else {
-            out.push_str(&format!(
-                "        let {}_node_derivative_indices: [usize; {}] = [{}];\n",
-                value_name(root),
-                node_derivatives.len(),
-                node_indices
-            ));
-            out.push_str(&format!(
-                "        let {}_node_derivatives: [f64; {}] = [{}];\n",
-                value_name(root),
-                node_derivatives.len(),
-                node_values
-            ));
-            out.push_str(&format!(
-                "        let {}_branch_derivative_indices: [usize; {}] = [{}];\n",
-                value_name(root),
-                branch_derivatives.len(),
-                branch_indices
-            ));
-            out.push_str(&format!(
-                "        let {}_branch_derivatives: [f64; {}] = [{}];\n",
-                value_name(root),
-                branch_derivatives.len(),
-                branch_values
-            ));
             out.push_str("        stamper.stamp_potential_indexed_dense_local(\n");
             out.push_str(&format!("            {branch_slot},\n"));
             out.push_str(&format!("            {root_expr},\n"));
-            out.push_str(&format!(
-                "            &{}_node_derivative_indices,\n",
-                value_name(root)
-            ));
-            out.push_str(&format!(
-                "            &{}_node_derivatives,\n",
-                value_name(root)
-            ));
-            out.push_str(&format!(
-                "            &{}_branch_derivative_indices,\n",
-                value_name(root)
-            ));
-            out.push_str(&format!(
-                "            &{}_branch_derivatives,\n",
-                value_name(root)
-            ));
+            out.push_str(&format!("            &[{node_indices}],\n"));
+            out.push_str(&format!("            &[{node_values}],\n"));
+            out.push_str(&format!("            &[{branch_indices}],\n"));
+            out.push_str(&format!("            &[{branch_values}],\n"));
             out.push_str("        );\n");
         }
     }
+    Ok(())
 }
 
 fn emit_wide_current_stamp(
     artifact: &CanonicalIrArtifact,
-    root: ValueId,
     node_derivatives: &[(u32, ValueId)],
     branch_derivatives: &[(u32, ValueId)],
     pos: &str,
     neg: &str,
     root_expr: &str,
+    parameter_fields: &HashMap<String, String>,
+    context: &ValueEmitContext<'_>,
     derivative_scale: &str,
     out: &mut String,
-) {
+) -> Result<(), RustBackendError> {
     if node_derivatives.len() == artifact.mir.nodes.len()
         && branch_derivatives.len() == artifact.mir.branch_unknowns.len()
     {
         let mut node_values = vec!["0.0".to_string(); artifact.mir.nodes.len()];
-        for (node, _) in node_derivatives {
-            node_values[*node as usize] =
-                scaled_derivative_expr(derivative_name(root, *node), derivative_scale);
+        for (node, value) in node_derivatives {
+            node_values[*node as usize] = scaled_derivative_value_expr(
+                artifact,
+                parameter_fields,
+                *value,
+                context,
+                derivative_scale,
+            )?;
         }
         let mut branch_values = vec!["0.0".to_string(); artifact.mir.branch_unknowns.len()];
-        for (branch, _) in branch_derivatives {
-            branch_values[*branch as usize] =
-                scaled_derivative_expr(branch_derivative_name(root, *branch), derivative_scale);
+        for (branch, value) in branch_derivatives {
+            branch_values[*branch as usize] = scaled_derivative_value_expr(
+                artifact,
+                parameter_fields,
+                *value,
+                context,
+                derivative_scale,
+            )?;
         }
-        out.push_str(&format!(
-            "        let {}_node_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            node_values.len(),
-            node_values.join(", ")
-        ));
-        out.push_str(&format!(
-            "        let {}_branch_derivatives: [f64; {}] = [{}];\n",
-            value_name(root),
-            branch_values.len(),
-            branch_values.join(", ")
-        ));
         out.push_str("        stamper.stamp_current_dense_local(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
         out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
-        out.push_str(&format!(
-            "            &{}_node_derivatives,\n",
-            value_name(root)
-        ));
-        out.push_str(&format!(
-            "            &{}_branch_derivatives,\n",
-            value_name(root)
-        ));
+        out.push_str(&format!("            &[{}],\n", node_values.join(",")));
+        out.push_str(&format!("            &[{}],\n", branch_values.join(",")));
         out.push_str("            multiplicity,\n");
         out.push_str("        );\n");
     } else {
@@ -2102,8 +2599,16 @@ fn emit_wide_current_stamp(
             .join(", ");
         let node_values = node_derivatives
             .iter()
-            .map(|(node, _)| scaled_derivative_expr(derivative_name(root, *node), derivative_scale))
-            .collect::<Vec<_>>()
+            .map(|(_, value)| {
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value,
+                    context,
+                    derivative_scale,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         let branch_indices = branch_derivatives
             .iter()
@@ -2112,10 +2617,16 @@ fn emit_wide_current_stamp(
             .join(", ");
         let branch_values = branch_derivatives
             .iter()
-            .map(|(branch, _)| {
-                scaled_derivative_expr(branch_derivative_name(root, *branch), derivative_scale)
+            .map(|(_, value)| {
+                scaled_derivative_value_expr(
+                    artifact,
+                    parameter_fields,
+                    *value,
+                    context,
+                    derivative_scale,
+                )
             })
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>, _>>()?
             .join(", ");
         if node_derivatives.len() + branch_derivatives.len() <= SPARSE_STAMP_DERIVATIVE_THRESHOLD {
             out.push_str(&format!(
@@ -2133,60 +2644,25 @@ fn emit_wide_current_stamp(
             out.push_str("            multiplicity,\n");
             out.push_str("        );\n");
         } else {
-            out.push_str(&format!(
-                "        let {}_node_derivative_indices: [usize; {}] = [{}];\n",
-                value_name(root),
-                node_derivatives.len(),
-                node_indices
-            ));
-            out.push_str(&format!(
-                "        let {}_node_derivatives: [f64; {}] = [{}];\n",
-                value_name(root),
-                node_derivatives.len(),
-                node_values
-            ));
-            out.push_str(&format!(
-                "        let {}_branch_derivative_indices: [usize; {}] = [{}];\n",
-                value_name(root),
-                branch_derivatives.len(),
-                branch_indices
-            ));
-            out.push_str(&format!(
-                "        let {}_branch_derivatives: [f64; {}] = [{}];\n",
-                value_name(root),
-                branch_derivatives.len(),
-                branch_values
-            ));
             out.push_str("        stamper.stamp_current_indexed_dense_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
             out.push_str(&format!("            multiplicity * ({root_expr}),\n"));
-            out.push_str(&format!(
-                "            &{}_node_derivative_indices,\n",
-                value_name(root)
-            ));
-            out.push_str(&format!(
-                "            &{}_node_derivatives,\n",
-                value_name(root)
-            ));
-            out.push_str(&format!(
-                "            &{}_branch_derivative_indices,\n",
-                value_name(root)
-            ));
-            out.push_str(&format!(
-                "            &{}_branch_derivatives,\n",
-                value_name(root)
-            ));
+            out.push_str(&format!("            &[{node_indices}],\n"));
+            out.push_str(&format!("            &[{node_values}],\n"));
+            out.push_str(&format!("            &[{branch_indices}],\n"));
+            out.push_str(&format!("            &[{branch_values}],\n"));
             out.push_str("            multiplicity,\n");
             out.push_str("        );\n");
         }
     }
+    Ok(())
 }
 
 fn current_root_expr(value_type: OptValueType, root_name: &str) -> String {
     match value_type {
         OptValueType::Real => root_name.to_string(),
-        OptValueType::Boolean => format!("if {root_name} {{ 1.0 }} else {{ 0.0 }}"),
+        OptValueType::Boolean => format!("if {root_name}{{1.0}}else{{0.0}}"),
     }
 }
 
@@ -2282,6 +2758,7 @@ fn emit_value_expr(
             value_ref(artifact, parameter_fields, *input, context)?,
             value_type(artifact, *input)?,
             &context.limexp_max_expr,
+            context.use_exp_helpers,
         ),
         OptValueKind::Binary { op, left, right } => {
             let left_type = value_type(artifact, *left)?;
@@ -2301,7 +2778,7 @@ fn emit_value_expr(
         } => {
             let condition_type = value_type(artifact, *condition)?;
             format!(
-                "(if {} {{ {} }} else {{ {} }})",
+                "(if {}{{{}}}else{{{}}})",
                 truth_expr(
                     value_ref(artifact, parameter_fields, *condition, context)?,
                     condition_type,
@@ -2337,11 +2814,25 @@ fn emit_counted_sum_expr(
     let counter_name = format!("counted_sum_{}_i", owner.index());
     let index_name = format!("counted_sum_{}_index", owner.index());
 
+    let mut loop_live = HashSet::new();
+    mark_counted_sum_term_live(artifact, term, context.cached_values, &mut loop_live)?;
+    let mandatory = HashSet::new();
+    let mut loop_inline_values: HashSet<ValueId> = context.inline_values.iter().copied().collect();
+    loop_inline_values.extend(scalar_inline_values_for_live_values(
+        artifact,
+        &loop_live,
+        context.cached_values,
+        &mandatory,
+        &[term],
+    )?);
+
     let mut loop_context = ValueEmitContext {
         cached_values: context.cached_values,
-        inline_values: context.inline_values,
+        cached_value_refs: context.cached_value_refs,
+        inline_values: &loop_inline_values,
         use_cached_fields: context.use_cached_fields,
         inline_uncached_constants: context.inline_uncached_constants,
+        use_exp_helpers: context.use_exp_helpers,
         limexp_max_expr: context.limexp_max_expr.clone(),
         temperature_expr: context.temperature_expr.clone(),
         thermal_voltage_expr: context.thermal_voltage_expr.clone(),
@@ -2350,29 +2841,26 @@ fn emit_counted_sum_expr(
         loop_index_exprs: context.loop_index_exprs.clone(),
         runtime_loop_values: context.runtime_loop_values.clone(),
         runtime_loop_derivatives: context.runtime_loop_derivatives.clone(),
+        external_value_refs: context.external_value_refs.clone(),
     };
     loop_context
         .loop_index_exprs
         .insert(loop_id, index_name.clone());
 
-    let mut loop_live = HashSet::new();
-    mark_counted_sum_term_live(artifact, term, context.cached_values, &mut loop_live)?;
     let loop_values = ordered_counted_sum_values(artifact, &loop_live, context.cached_values)?;
 
     let mut expr = String::new();
     expr.push_str("{\n");
     expr.push_str(&format!(
-        "            let mut {accumulator_name}: f64 = {initial_expr};\n"
+        "            let mut {accumulator_name}={initial_expr};\n"
     ));
-    expr.push_str(&format!(
-        "            let {count_name}: f64 = {count_expr};\n"
-    ));
+    expr.push_str(&format!("            let {count_name}={count_expr};\n"));
     expr.push_str(&format!("            let mut {counter_name}: i64 = 0;\n"));
     expr.push_str(&format!(
         "            while ({counter_name} as f64) < {count_name} {{\n"
     ));
     expr.push_str(&format!(
-        "                let {index_name}: f64 = {counter_name} as f64;\n"
+        "                let {index_name}={counter_name} as f64;\n"
     ));
     for value_id in loop_values {
         let value = artifact
@@ -2383,11 +2871,13 @@ fn emit_counted_sum_expr(
         if matches!(value.kind, OptValueKind::LoopIndex { .. }) {
             continue;
         }
+        if loop_context.inline_values.contains(&value_id) {
+            continue;
+        }
         let value_expr = emit_value_expr(artifact, parameter_fields, value, &loop_context)?;
         expr.push_str(&format!(
-            "                let {}: {} = {};\n",
+            "                let {}={};\n",
             value_name(value.id),
-            rust_type(value.value_type),
             value_expr
         ));
     }
@@ -2418,11 +2908,51 @@ fn emit_runtime_loop(
         .ok_or_else(|| unsupported(artifact, format!("missing runtime loop {loop_id}")))?;
     let derivative_lanes = runtime_loop_live_derivative_lanes(artifact, loop_id, live);
 
+    let mut condition_live = HashSet::new();
+    mark_counted_sum_term_live(
+        artifact,
+        runtime_loop.condition,
+        context.cached_values,
+        &mut condition_live,
+    )?;
+
+    let mut body_live = HashSet::new();
+    let mut external_uses = vec![runtime_loop.condition];
+    for assignment in &runtime_loop.assignments {
+        external_uses.push(assignment.value);
+        mark_counted_sum_term_live(
+            artifact,
+            assignment.value,
+            context.cached_values,
+            &mut body_live,
+        )?;
+        for lane in &derivative_lanes {
+            if let Some(value) = derivative_value_for_lane(artifact, assignment.value, *lane)? {
+                external_uses.push(value);
+                mark_counted_sum_term_live(artifact, value, context.cached_values, &mut body_live)?;
+            }
+        }
+    }
+
+    let mut loop_live = condition_live.clone();
+    loop_live.extend(body_live.iter().copied());
+    let mandatory = HashSet::new();
+    let mut loop_inline_values: HashSet<ValueId> = context.inline_values.iter().copied().collect();
+    loop_inline_values.extend(scalar_inline_values_for_live_values(
+        artifact,
+        &loop_live,
+        context.cached_values,
+        &mandatory,
+        &external_uses,
+    )?);
+
     let mut loop_context = ValueEmitContext {
         cached_values: context.cached_values,
-        inline_values: context.inline_values,
+        cached_value_refs: context.cached_value_refs,
+        inline_values: &loop_inline_values,
         use_cached_fields: context.use_cached_fields,
         inline_uncached_constants: context.inline_uncached_constants,
+        use_exp_helpers: context.use_exp_helpers,
         limexp_max_expr: context.limexp_max_expr.clone(),
         temperature_expr: context.temperature_expr.clone(),
         thermal_voltage_expr: context.thermal_voltage_expr.clone(),
@@ -2431,15 +2961,19 @@ fn emit_runtime_loop(
         loop_index_exprs: context.loop_index_exprs.clone(),
         runtime_loop_values: context.runtime_loop_values.clone(),
         runtime_loop_derivatives: context.runtime_loop_derivatives.clone(),
+        external_value_refs: context.external_value_refs.clone(),
     };
 
-    out.push_str("        {\n");
     for (slot, variable) in runtime_loop.variables.iter().enumerate() {
         let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
         let local = runtime_loop_value_name(loop_id, slot);
-        let initial = value_ref(artifact, parameter_fields, variable.initial, context)?;
+        let initial = coerce_value_expr(
+            value_ref(artifact, parameter_fields, variable.initial, context)?,
+            value_type(artifact, variable.initial)?,
+            variable.value_type,
+        );
         out.push_str(&format!(
-            "            let mut {local}: {} = {initial};\n",
+            "        let mut {local}: {}={initial};\n",
             rust_type(variable.value_type)
         ));
         loop_context
@@ -2455,24 +2989,17 @@ fn emit_runtime_loop(
                 "0.0".to_string()
             };
             out.push_str(&format!(
-                "            let mut {derivative_local}: f64 = {initial_derivative};\n"
+                "        let mut {derivative_local}: f64={initial_derivative};\n"
             ));
             loop_context
                 .runtime_loop_derivatives
                 .insert((loop_id, slot, *lane), derivative_local);
         }
     }
-    out.push_str(&format!(
-        "            let mut runtime_loop_{loop_id}_guard: usize = 0;\n"
-    ));
+    out.push_str("        {\n");
+    let guard = runtime_loop_guard_name(loop_id);
+    out.push_str(&format!("            let mut {guard}=0usize;\n"));
 
-    let mut condition_live = HashSet::new();
-    mark_counted_sum_term_live(
-        artifact,
-        runtime_loop.condition,
-        context.cached_values,
-        &mut condition_live,
-    )?;
     let condition_values =
         ordered_counted_sum_values(artifact, &condition_live, context.cached_values)?;
     out.push_str("            while {\n");
@@ -2498,27 +3025,11 @@ fn emit_runtime_loop(
         truth_expr(condition, condition_type)
     ));
     out.push_str("            } {\n");
+    out.push_str(&format!("                {guard}+=1;\n"));
     out.push_str(&format!(
-        "                runtime_loop_{loop_id}_guard += 1;\n"
-    ));
-    out.push_str(&format!(
-        "                assert!(runtime_loop_{loop_id}_guard <= Self::MAX_ANALOG_LOOP_ITERATIONS, \"generated Verilog-A scalar runtime loop exceeded iteration guard\");\n"
+        "                assert!({guard}<=Self::MAX_ANALOG_LOOP_ITERATIONS,\"generated Verilog-A scalar runtime loop exceeded iteration guard\");\n"
     ));
 
-    let mut body_live = HashSet::new();
-    for assignment in &runtime_loop.assignments {
-        mark_counted_sum_term_live(
-            artifact,
-            assignment.value,
-            context.cached_values,
-            &mut body_live,
-        )?;
-        for lane in &derivative_lanes {
-            if let Some(value) = derivative_value_for_lane(artifact, assignment.value, *lane)? {
-                mark_counted_sum_term_live(artifact, value, context.cached_values, &mut body_live)?;
-            }
-        }
-    }
     let body_values = ordered_counted_sum_values(artifact, &body_live, context.cached_values)?;
     for value_id in body_values {
         emit_runtime_loop_inner_value(
@@ -2531,9 +3042,26 @@ fn emit_runtime_loop(
         )?;
     }
     for assignment in &runtime_loop.assignments {
+        let variable = runtime_loop
+            .variables
+            .get(usize::try_from(assignment.slot).expect("runtime loop slot exceeds usize::MAX"))
+            .ok_or_else(|| {
+                unsupported(
+                    artifact,
+                    format!(
+                        "runtime loop {loop_id} assignment targets missing slot {}",
+                        assignment.slot
+                    ),
+                )
+            })?;
         let target = runtime_loop_value_name(loop_id, assignment.slot);
-        let value = value_ref(artifact, parameter_fields, assignment.value, &loop_context)?;
-        out.push_str(&format!("                {target} = {value};\n"));
+        let value = coerce_value_expr(
+            value_ref(artifact, parameter_fields, assignment.value, &loop_context)?,
+            value_type(artifact, assignment.value)?,
+            variable.value_type,
+        );
+        let mut targets = vec![target];
+        let mut values = vec![value];
         for lane in &derivative_lanes {
             let target = runtime_loop_derivative_name(loop_id, assignment.slot, *lane);
             let value = if let Some(value) =
@@ -2543,19 +3071,25 @@ fn emit_runtime_loop(
             } else {
                 "0.0".to_string()
             };
-            out.push_str(&format!("                {target} = {value};\n"));
+            targets.push(target);
+            values.push(value);
         }
+        out.push_str(&format!(
+            "                ({})=({});\n",
+            targets.join(","),
+            values.join(",")
+        ));
     }
     out.push_str("            }\n");
+    out.push_str("        }\n");
 
     for (slot, variable) in runtime_loop.variables.iter().enumerate() {
         if live.contains(&variable.result) {
             let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
             let local = runtime_loop_value_name(loop_id, slot);
             out.push_str(&format!(
-                "            let {}: {} = {local};\n",
-                value_name(variable.result),
-                rust_type(variable.value_type)
+                "        let {}={local};\n",
+                value_name(variable.result)
             ));
         }
     }
@@ -2571,13 +3105,10 @@ fn emit_runtime_loop(
             && value_loop_id == loop_id
         {
             let local = runtime_loop_derivative_name(loop_id, slot, lane);
-            out.push_str(&format!(
-                "            let {}: f64 = {local};\n",
-                value_name(value.id)
-            ));
+            out.push_str(&format!("        let {}={local};\n", value_name(value.id)));
         }
     }
-    out.push_str("        }\n\n");
+    out.push('\n');
     Ok(())
 }
 
@@ -2603,13 +3134,11 @@ fn emit_runtime_loop_inner_value(
     ) {
         return Ok(());
     }
+    if context.inline_values.contains(&value_id) {
+        return Ok(());
+    }
     let expr = emit_value_expr(artifact, parameter_fields, value, context)?;
-    out.push_str(&format!(
-        "{indent}let {}: {} = {};\n",
-        value_name(value.id),
-        rust_type(value.value_type),
-        expr
-    ));
+    out.push_str(&format!("{indent}let {}={};\n", value_name(value.id), expr));
     Ok(())
 }
 
@@ -2935,7 +3464,7 @@ fn idt_ic_parameter_arg(
 }
 
 fn value_truth_expr(value: &str) -> String {
-    format!("(({value}) != 0.0)")
+    format!("(({value})!=0.0)")
 }
 
 fn emit_parameter_expr(
@@ -3029,7 +3558,20 @@ fn value_ref(
     }
 
     if context.use_cached_fields && context.cached_values.contains(&value) {
-        return Ok(format!("self.{}", cache_field_name(value)));
+        return context
+            .cached_value_refs
+            .get(&value)
+            .cloned()
+            .ok_or_else(|| {
+                unsupported(
+                    artifact,
+                    format!("missing static scalar cache slot {value}"),
+                )
+            });
+    }
+
+    if let Some(value_ref) = context.external_value_refs.get(&value) {
+        return Ok(value_ref.clone());
     }
 
     if context.inline_values.contains(&value) {
@@ -3093,21 +3635,30 @@ fn emit_unary_expr(
     input: String,
     input_type: OptValueType,
     limexp_max: &str,
+    use_exp_helpers: bool,
 ) -> String {
     match op {
         OptUnaryOp::Pos => input,
         OptUnaryOp::Neg => format!("(-{input})"),
         OptUnaryOp::Not => format!("(!{})", truth_expr(input, input_type)),
         OptUnaryOp::Exp => format!("{}.exp()", f64_method_receiver(&input)),
+        OptUnaryOp::LimExp if use_exp_helpers => format!("scalar_limexp({input})"),
         OptUnaryOp::LimExp => format!(
             "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} * (1.0 + (limexp_arg - 80.0)) }} }}"
         ),
+        OptUnaryOp::LimExpDerivative if use_exp_helpers => {
+            format!("scalar_limexp_derivative({input})")
+        }
         OptUnaryOp::LimExpDerivative => format!(
             "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} }} }}"
         ),
+        OptUnaryOp::LimitedExp if use_exp_helpers => format!("scalar_limited_exp({input})"),
         OptUnaryOp::LimitedExp => format!(
             "{{ let limited_exp_arg = {input}; if limited_exp_arg > 80.0 {{ {limexp_max} * (1.0 + limited_exp_arg - 80.0) }} else if limited_exp_arg < -80.0 {{ 1.804851387e-35 }} else {{ limited_exp_arg.exp() }} }}"
         ),
+        OptUnaryOp::LimitedExpDerivative if use_exp_helpers => {
+            format!("scalar_limited_exp_derivative({input})")
+        }
         OptUnaryOp::LimitedExpDerivative => format!(
             "{{ let limited_exp_arg = {input}; if limited_exp_arg > 80.0 {{ {limexp_max} }} else if limited_exp_arg < -80.0 {{ 0.0 }} else {{ limited_exp_arg.exp() }} }}"
         ),
@@ -3135,34 +3686,48 @@ fn emit_binary_expr(
     right_type: OptValueType,
 ) -> String {
     match op {
-        OptBinaryOp::Add => format!("({left} + {right})"),
-        OptBinaryOp::Sub => format!("({left} - {right})"),
-        OptBinaryOp::Mul => format!("({left} * {right})"),
-        OptBinaryOp::Div => format!("({left} / {right})"),
-        OptBinaryOp::Pow => format!("f64::powf({left}, {right})"),
-        OptBinaryOp::Eq => format!("({left} == {right})"),
-        OptBinaryOp::Ne => format!("({left} != {right})"),
-        OptBinaryOp::Lt => format!("({left} < {right})"),
-        OptBinaryOp::Le => format!("({left} <= {right})"),
-        OptBinaryOp::Gt => format!("({left} > {right})"),
-        OptBinaryOp::Ge => format!("({left} >= {right})"),
+        OptBinaryOp::Add => binary_expr(left, "+", right),
+        OptBinaryOp::Sub => binary_expr(left, "-", right),
+        OptBinaryOp::Mul => binary_expr(left, "*", right),
+        OptBinaryOp::Div => binary_expr(left, "/", right),
+        OptBinaryOp::Pow => format!("f64::powf({left},{right})"),
+        OptBinaryOp::Eq => binary_expr(left, "==", right),
+        OptBinaryOp::Ne => binary_expr(left, "!=", right),
+        OptBinaryOp::Lt => binary_expr(left, "<", right),
+        OptBinaryOp::Le => binary_expr(left, "<=", right),
+        OptBinaryOp::Gt => binary_expr(left, ">", right),
+        OptBinaryOp::Ge => binary_expr(left, ">=", right),
         OptBinaryOp::And => format!(
-            "({} && {})",
+            "({}&&{})",
             truth_expr(left, left_type),
             truth_expr(right, right_type)
         ),
         OptBinaryOp::Or => format!(
-            "({} || {})",
+            "({}||{})",
             truth_expr(left, left_type),
             truth_expr(right, right_type)
         ),
     }
 }
 
+fn binary_expr(left: String, op: &str, right: String) -> String {
+    let separator = if right.starts_with('-') { " " } else { "" };
+    format!("({left}{op}{separator}{right})")
+}
+
+fn coerce_value_expr(expr: String, source_type: OptValueType, target_type: OptValueType) -> String {
+    match (source_type, target_type) {
+        (OptValueType::Real, OptValueType::Real)
+        | (OptValueType::Boolean, OptValueType::Boolean) => expr,
+        (OptValueType::Real, OptValueType::Boolean) => truth_expr(expr, OptValueType::Real),
+        (OptValueType::Boolean, OptValueType::Real) => format!("if {expr}{{1.0}}else{{0.0}}"),
+    }
+}
+
 fn truth_expr(expr: String, value_type: OptValueType) -> String {
     match value_type {
         OptValueType::Boolean => expr,
-        OptValueType::Real => format!("({expr} != 0.0)"),
+        OptValueType::Real => format!("({expr}!=0.0)"),
     }
 }
 
@@ -3474,11 +4039,7 @@ fn validate_scalar_value_graph(
     root: ValueId,
 ) -> Result<(), RustBackendError> {
     let roots = HashMap::from([(equation.id, root)]);
-    let empty_cache = ScalarStaticCache {
-        instance_values: Vec::new(),
-        temperature_values: Vec::new(),
-        set: HashSet::new(),
-    };
+    let empty_cache = ScalarStaticCache::empty();
     let live = collect_stamp_live_values(artifact, &roots, &empty_cache)?;
     for value in live {
         let value_slot = artifact
@@ -3531,11 +4092,88 @@ fn scalar_inline_values(
     roots: &HashMap<EquationId, ValueId>,
 ) -> Result<HashSet<ValueId>, RustBackendError> {
     let mandatory = mandatory_stamp_local_values(artifact, roots)?;
-    let use_counts = scalar_value_use_counts(artifact, live, static_cache)?;
+    scalar_inline_values_for_live_values(artifact, live, &static_cache.set, &mandatory, &[])
+}
+
+fn scalar_stamp_inline_values(
+    artifact: &CanonicalIrArtifact,
+    live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+    roots: &HashMap<EquationId, ValueId>,
+) -> Result<HashSet<ValueId>, RustBackendError> {
+    let mandatory = HashSet::new();
+    let external_uses = stamp_external_values(artifact, roots)?;
+    scalar_inline_values_for_live_values(
+        artifact,
+        live,
+        &static_cache.set,
+        &mandatory,
+        &external_uses,
+    )
+}
+
+fn mandatory_stamp_local_values(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+) -> Result<HashSet<ValueId>, RustBackendError> {
+    let mut mandatory = HashSet::new();
+    for root in roots.values().copied() {
+        mandatory.insert(root);
+        let root_value =
+            artifact.opt.values.get(usize::from(root)).ok_or_else(|| {
+                unsupported(artifact, format!("missing root scalar value {root}"))
+            })?;
+        for derivative in &root_value.derivatives {
+            mandatory.insert(derivative.value);
+        }
+    }
+    Ok(mandatory)
+}
+
+fn stamp_external_values(
+    artifact: &CanonicalIrArtifact,
+    roots: &HashMap<EquationId, ValueId>,
+) -> Result<Vec<ValueId>, RustBackendError> {
+    let mut values = Vec::new();
+    for root in roots.values().copied() {
+        values.push(root);
+        let root_value =
+            artifact.opt.values.get(usize::from(root)).ok_or_else(|| {
+                unsupported(artifact, format!("missing root scalar value {root}"))
+            })?;
+        values.extend(
+            root_value
+                .derivatives
+                .iter()
+                .map(|derivative| derivative.value),
+        );
+    }
+    Ok(values)
+}
+
+fn scalar_inline_values_for_live_values(
+    artifact: &CanonicalIrArtifact,
+    live: &HashSet<ValueId>,
+    cached_values: &HashSet<ValueId>,
+    mandatory: &HashSet<ValueId>,
+    external_uses: &[ValueId],
+) -> Result<HashSet<ValueId>, RustBackendError> {
+    let mut use_counts = scalar_value_use_counts(artifact, live, cached_values)?;
+    for value in external_uses {
+        if live.contains(value) && !cached_values.contains(value) {
+            let Some(count) = use_counts.get_mut(usize::from(*value)) else {
+                return Err(unsupported(
+                    artifact,
+                    format!("missing scalar value {value}"),
+                ));
+            };
+            *count = count.saturating_add(1);
+        }
+    }
     let candidates: HashSet<_> = live
         .iter()
         .copied()
-        .filter(|value| !static_cache.contains(*value))
+        .filter(|value| !cached_values.contains(value))
         .filter(|value| !mandatory.contains(value))
         .filter(|value| {
             use_counts
@@ -3564,36 +4202,18 @@ fn scalar_inline_values(
     Ok(inline_values)
 }
 
-fn mandatory_stamp_local_values(
-    artifact: &CanonicalIrArtifact,
-    roots: &HashMap<EquationId, ValueId>,
-) -> Result<HashSet<ValueId>, RustBackendError> {
-    let mut mandatory = HashSet::new();
-    for root in roots.values().copied() {
-        mandatory.insert(root);
-        let root_value =
-            artifact.opt.values.get(usize::from(root)).ok_or_else(|| {
-                unsupported(artifact, format!("missing root scalar value {root}"))
-            })?;
-        for derivative in &root_value.derivatives {
-            mandatory.insert(derivative.value);
-        }
-    }
-    Ok(mandatory)
-}
-
 fn scalar_value_use_counts(
     artifact: &CanonicalIrArtifact,
     live: &HashSet<ValueId>,
-    static_cache: &ScalarStaticCache,
+    cached_values: &HashSet<ValueId>,
 ) -> Result<Vec<usize>, RustBackendError> {
     let mut counts = vec![0usize; artifact.opt.values.len()];
     for value in live {
-        if static_cache.contains(*value) {
+        if cached_values.contains(value) {
             continue;
         }
         for dependency in scalar_value_dependencies(artifact, *value)? {
-            if live.contains(&dependency) && !static_cache.contains(dependency) {
+            if live.contains(&dependency) && !cached_values.contains(&dependency) {
                 let Some(count) = counts.get_mut(usize::from(dependency)) else {
                     return Err(unsupported(
                         artifact,
@@ -3743,75 +4363,13 @@ fn mark_stamp_live_value(
     static_cache: &ScalarStaticCache,
     live: &mut HashSet<ValueId>,
 ) -> Result<(), RustBackendError> {
-    if static_cache.contains(value) || !live.insert(value) {
-        return Ok(());
-    }
-
-    let value_slot = artifact
-        .opt
-        .values
-        .get(usize::from(value))
-        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
-    match value_slot.kind {
-        OptValueKind::RealConstant(_)
-        | OptValueKind::BooleanConstant(_)
-        | OptValueKind::Parameter { .. }
-        | OptValueKind::ParamGiven { .. }
-        | OptValueKind::Temperature
-        | OptValueKind::ThermalVoltage
-        | OptValueKind::Multiplicity
-        | OptValueKind::Time
-        | OptValueKind::Analysis { .. }
-        | OptValueKind::NodePotential { .. }
-        | OptValueKind::BranchFlow { .. }
-        | OptValueKind::BranchUnknownFlow { .. }
-        | OptValueKind::LoopIndex { .. }
-        | OptValueKind::RuntimeLoopVariable { .. }
-        | OptValueKind::RuntimeLoopVariableDerivative { .. }
-        | OptValueKind::EquationValue { .. } => {}
-        OptValueKind::RuntimeLoopResult { loop_id, .. }
-        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
-            for initial in runtime_loop_initial_values(artifact, loop_id)? {
-                mark_stamp_live_value(artifact, initial, static_cache, live)?;
-            }
-        }
-        OptValueKind::CountedSum { count, initial, .. } => {
-            mark_stamp_live_value(artifact, count, static_cache, live)?;
-            mark_stamp_live_value(artifact, initial, static_cache, live)?;
-        }
-        OptValueKind::Ddx {
-            value: input,
-            pos_node,
-            neg_node,
-        } => {
-            mark_stamp_live_value(artifact, input, static_cache, live)?;
-            for derivative in projected_ddx_derivative_values(artifact, input, pos_node, neg_node)?
-            {
-                mark_stamp_live_value(artifact, derivative, static_cache, live)?;
-            }
-        }
-        OptValueKind::Ddt { input, .. } => {
-            mark_stamp_live_value(artifact, input, static_cache, live)?;
-        }
-        OptValueKind::DdtScale => {}
-        OptValueKind::Unary { input, .. } => {
-            mark_stamp_live_value(artifact, input, static_cache, live)?;
-        }
-        OptValueKind::Binary { left, right, .. } => {
-            mark_stamp_live_value(artifact, left, static_cache, live)?;
-            mark_stamp_live_value(artifact, right, static_cache, live)?;
-        }
-        OptValueKind::Select {
-            condition,
-            then_value,
-            else_value,
-        } => {
-            mark_stamp_live_value(artifact, condition, static_cache, live)?;
-            mark_stamp_live_value(artifact, then_value, static_cache, live)?;
-            mark_stamp_live_value(artifact, else_value, static_cache, live)?;
-        }
-    }
-    Ok(())
+    mark_live_values_iterative(
+        artifact,
+        value,
+        &static_cache.set,
+        live,
+        ScalarValueDependencyMode::Stamp,
+    )
 }
 
 fn mark_counted_sum_term_live(
@@ -3820,75 +4378,29 @@ fn mark_counted_sum_term_live(
     cached_values: &HashSet<ValueId>,
     live: &mut HashSet<ValueId>,
 ) -> Result<(), RustBackendError> {
-    if cached_values.contains(&value) || !live.insert(value) {
-        return Ok(());
-    }
+    mark_live_values_iterative(
+        artifact,
+        value,
+        cached_values,
+        live,
+        ScalarValueDependencyMode::CountedSum,
+    )
+}
 
-    let value_slot = artifact
-        .opt
-        .values
-        .get(usize::from(value))
-        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
-    match value_slot.kind {
-        OptValueKind::RealConstant(_)
-        | OptValueKind::BooleanConstant(_)
-        | OptValueKind::Parameter { .. }
-        | OptValueKind::ParamGiven { .. }
-        | OptValueKind::Temperature
-        | OptValueKind::ThermalVoltage
-        | OptValueKind::Multiplicity
-        | OptValueKind::Time
-        | OptValueKind::Analysis { .. }
-        | OptValueKind::NodePotential { .. }
-        | OptValueKind::BranchFlow { .. }
-        | OptValueKind::BranchUnknownFlow { .. }
-        | OptValueKind::LoopIndex { .. }
-        | OptValueKind::RuntimeLoopVariable { .. }
-        | OptValueKind::RuntimeLoopVariableDerivative { .. }
-        | OptValueKind::RuntimeLoopResult { .. }
-        | OptValueKind::RuntimeLoopResultDerivative { .. }
-        | OptValueKind::EquationValue { .. } => {}
-        OptValueKind::Ddx {
-            value: input,
-            pos_node,
-            neg_node,
-        } => {
-            mark_counted_sum_term_live(artifact, input, cached_values, live)?;
-            for derivative in projected_ddx_derivative_values(artifact, input, pos_node, neg_node)?
-            {
-                mark_counted_sum_term_live(artifact, derivative, cached_values, live)?;
-            }
+fn mark_live_values_iterative(
+    artifact: &CanonicalIrArtifact,
+    root: ValueId,
+    cached_values: &HashSet<ValueId>,
+    live: &mut HashSet<ValueId>,
+    mode: ScalarValueDependencyMode,
+) -> Result<(), RustBackendError> {
+    let mut stack = vec![root];
+    while let Some(value) = stack.pop() {
+        if cached_values.contains(&value) || !live.insert(value) {
+            continue;
         }
-        OptValueKind::Ddt { input, .. } => {
-            mark_counted_sum_term_live(artifact, input, cached_values, live)?;
-        }
-        OptValueKind::DdtScale => {}
-        OptValueKind::Unary { input, .. } => {
-            mark_counted_sum_term_live(artifact, input, cached_values, live)?;
-        }
-        OptValueKind::Binary { left, right, .. } => {
-            mark_counted_sum_term_live(artifact, left, cached_values, live)?;
-            mark_counted_sum_term_live(artifact, right, cached_values, live)?;
-        }
-        OptValueKind::Select {
-            condition,
-            then_value,
-            else_value,
-        } => {
-            mark_counted_sum_term_live(artifact, condition, cached_values, live)?;
-            mark_counted_sum_term_live(artifact, then_value, cached_values, live)?;
-            mark_counted_sum_term_live(artifact, else_value, cached_values, live)?;
-        }
-        OptValueKind::CountedSum {
-            count,
-            initial,
-            term,
-            ..
-        } => {
-            mark_counted_sum_term_live(artifact, count, cached_values, live)?;
-            mark_counted_sum_term_live(artifact, initial, cached_values, live)?;
-            mark_counted_sum_term_live(artifact, term, cached_values, live)?;
-        }
+        let dependencies = scalar_value_dependency_values(artifact, value, mode)?;
+        stack.extend(dependencies);
     }
     Ok(())
 }
@@ -3898,6 +4410,12 @@ enum ValueVisitState {
     Unvisited,
     Visiting,
     Done,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScalarValueDependencyMode {
+    Stamp,
+    CountedSum,
 }
 
 fn ordered_live_values(
@@ -3956,94 +4474,15 @@ fn visit_live_value(
     state: &mut [ValueVisitState],
     ordered: &mut Vec<ValueId>,
 ) -> Result<(), RustBackendError> {
-    if static_cache.contains(value) || !live.contains(&value) {
-        return Ok(());
-    }
-
-    let index = usize::from(value);
-    match state
-        .get(index)
-        .copied()
-        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?
-    {
-        ValueVisitState::Done => return Ok(()),
-        ValueVisitState::Visiting => {
-            return Err(unsupported(
-                artifact,
-                format!("cyclic scalar value dependency at {value}"),
-            ));
-        }
-        ValueVisitState::Unvisited => {}
-    }
-
-    state[index] = ValueVisitState::Visiting;
-    let value_slot = artifact
-        .opt
-        .values
-        .get(index)
-        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
-    match value_slot.kind {
-        OptValueKind::RealConstant(_)
-        | OptValueKind::BooleanConstant(_)
-        | OptValueKind::Parameter { .. }
-        | OptValueKind::ParamGiven { .. }
-        | OptValueKind::Temperature
-        | OptValueKind::ThermalVoltage
-        | OptValueKind::Multiplicity
-        | OptValueKind::Time
-        | OptValueKind::Analysis { .. }
-        | OptValueKind::NodePotential { .. }
-        | OptValueKind::BranchFlow { .. }
-        | OptValueKind::BranchUnknownFlow { .. }
-        | OptValueKind::LoopIndex { .. }
-        | OptValueKind::RuntimeLoopVariable { .. }
-        | OptValueKind::RuntimeLoopVariableDerivative { .. }
-        | OptValueKind::EquationValue { .. } => {}
-        OptValueKind::RuntimeLoopResult { loop_id, .. }
-        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
-            for initial in runtime_loop_initial_values(artifact, loop_id)? {
-                visit_live_value(artifact, initial, live, static_cache, state, ordered)?;
-            }
-        }
-        OptValueKind::CountedSum { count, initial, .. } => {
-            visit_live_value(artifact, count, live, static_cache, state, ordered)?;
-            visit_live_value(artifact, initial, live, static_cache, state, ordered)?;
-        }
-        OptValueKind::Ddx {
-            value: input,
-            pos_node,
-            neg_node,
-        } => {
-            visit_live_value(artifact, input, live, static_cache, state, ordered)?;
-            for derivative in projected_ddx_derivative_values(artifact, input, pos_node, neg_node)?
-            {
-                visit_live_value(artifact, derivative, live, static_cache, state, ordered)?;
-            }
-        }
-        OptValueKind::Ddt { input, .. } => {
-            visit_live_value(artifact, input, live, static_cache, state, ordered)?;
-        }
-        OptValueKind::DdtScale => {}
-        OptValueKind::Unary { input, .. } => {
-            visit_live_value(artifact, input, live, static_cache, state, ordered)?;
-        }
-        OptValueKind::Binary { left, right, .. } => {
-            visit_live_value(artifact, left, live, static_cache, state, ordered)?;
-            visit_live_value(artifact, right, live, static_cache, state, ordered)?;
-        }
-        OptValueKind::Select {
-            condition,
-            then_value,
-            else_value,
-        } => {
-            visit_live_value(artifact, condition, live, static_cache, state, ordered)?;
-            visit_live_value(artifact, then_value, live, static_cache, state, ordered)?;
-            visit_live_value(artifact, else_value, live, static_cache, state, ordered)?;
-        }
-    }
-    state[index] = ValueVisitState::Done;
-    ordered.push(value);
-    Ok(())
+    visit_ordered_value_iterative(
+        artifact,
+        value,
+        live,
+        &static_cache.set,
+        state,
+        ordered,
+        ScalarValueDependencyMode::Stamp,
+    )
 }
 
 fn visit_counted_sum_value(
@@ -4054,33 +4493,85 @@ fn visit_counted_sum_value(
     state: &mut [ValueVisitState],
     ordered: &mut Vec<ValueId>,
 ) -> Result<(), RustBackendError> {
-    if cached_values.contains(&value) || !live.contains(&value) {
-        return Ok(());
-    }
+    visit_ordered_value_iterative(
+        artifact,
+        value,
+        live,
+        cached_values,
+        state,
+        ordered,
+        ScalarValueDependencyMode::CountedSum,
+    )
+}
 
-    let index = usize::from(value);
-    match state
-        .get(index)
-        .copied()
-        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?
-    {
-        ValueVisitState::Done => return Ok(()),
-        ValueVisitState::Visiting => {
-            return Err(unsupported(
-                artifact,
-                format!("cyclic counted-sum value dependency at {value}"),
-            ));
+#[derive(Clone, Copy)]
+enum OrderedVisitFrame {
+    Enter(ValueId),
+    Exit(ValueId),
+}
+
+fn visit_ordered_value_iterative(
+    artifact: &CanonicalIrArtifact,
+    root: ValueId,
+    live: &HashSet<ValueId>,
+    cached_values: &HashSet<ValueId>,
+    state: &mut [ValueVisitState],
+    ordered: &mut Vec<ValueId>,
+    mode: ScalarValueDependencyMode,
+) -> Result<(), RustBackendError> {
+    let mut stack = vec![OrderedVisitFrame::Enter(root)];
+    while let Some(frame) = stack.pop() {
+        match frame {
+            OrderedVisitFrame::Enter(value) => {
+                if cached_values.contains(&value) || !live.contains(&value) {
+                    continue;
+                }
+                let index = usize::from(value);
+                match state
+                    .get(index)
+                    .copied()
+                    .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?
+                {
+                    ValueVisitState::Done => continue,
+                    ValueVisitState::Visiting => {
+                        return Err(unsupported(
+                            artifact,
+                            format!("cyclic scalar value dependency at {value}"),
+                        ));
+                    }
+                    ValueVisitState::Unvisited => {}
+                }
+
+                state[index] = ValueVisitState::Visiting;
+                stack.push(OrderedVisitFrame::Exit(value));
+                let dependencies = scalar_value_dependency_values(artifact, value, mode)?;
+                for dependency in dependencies.into_iter().rev() {
+                    stack.push(OrderedVisitFrame::Enter(dependency));
+                }
+            }
+            OrderedVisitFrame::Exit(value) => {
+                let index = usize::from(value);
+                if state.get(index).copied() == Some(ValueVisitState::Visiting) {
+                    state[index] = ValueVisitState::Done;
+                    ordered.push(value);
+                }
+            }
         }
-        ValueVisitState::Unvisited => {}
     }
+    Ok(())
+}
 
-    state[index] = ValueVisitState::Visiting;
+fn scalar_value_dependency_values(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    mode: ScalarValueDependencyMode,
+) -> Result<Vec<ValueId>, RustBackendError> {
     let value_slot = artifact
         .opt
         .values
-        .get(index)
+        .get(usize::from(value))
         .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
-    match value_slot.kind {
+    let dependencies = match value_slot.kind {
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
@@ -4096,54 +4587,45 @@ fn visit_counted_sum_value(
         | OptValueKind::LoopIndex { .. }
         | OptValueKind::RuntimeLoopVariable { .. }
         | OptValueKind::RuntimeLoopVariableDerivative { .. }
-        | OptValueKind::RuntimeLoopResult { .. }
-        | OptValueKind::RuntimeLoopResultDerivative { .. }
-        | OptValueKind::EquationValue { .. } => {}
-        OptValueKind::Ddx {
-            value: input,
-            pos_node,
-            neg_node,
-        } => {
-            visit_counted_sum_value(artifact, input, live, cached_values, state, ordered)?;
-            for derivative in projected_ddx_derivative_values(artifact, input, pos_node, neg_node)?
-            {
-                visit_counted_sum_value(artifact, derivative, live, cached_values, state, ordered)?;
-            }
+        | OptValueKind::EquationValue { .. }
+        | OptValueKind::DdtScale => Vec::new(),
+        OptValueKind::RuntimeLoopResult { loop_id, .. }
+        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. }
+            if mode == ScalarValueDependencyMode::Stamp =>
+        {
+            runtime_loop_initial_values(artifact, loop_id)?
         }
-        OptValueKind::Ddt { input, .. } => {
-            visit_counted_sum_value(artifact, input, live, cached_values, state, ordered)?;
-        }
-        OptValueKind::DdtScale => {}
-        OptValueKind::Unary { input, .. } => {
-            visit_counted_sum_value(artifact, input, live, cached_values, state, ordered)?;
-        }
-        OptValueKind::Binary { left, right, .. } => {
-            visit_counted_sum_value(artifact, left, live, cached_values, state, ordered)?;
-            visit_counted_sum_value(artifact, right, live, cached_values, state, ordered)?;
-        }
-        OptValueKind::Select {
-            condition,
-            then_value,
-            else_value,
-        } => {
-            visit_counted_sum_value(artifact, condition, live, cached_values, state, ordered)?;
-            visit_counted_sum_value(artifact, then_value, live, cached_values, state, ordered)?;
-            visit_counted_sum_value(artifact, else_value, live, cached_values, state, ordered)?;
-        }
+        OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. } => Vec::new(),
         OptValueKind::CountedSum {
             count,
             initial,
             term,
             ..
+        } => match mode {
+            ScalarValueDependencyMode::Stamp => vec![count, initial],
+            ScalarValueDependencyMode::CountedSum => vec![count, initial, term],
+        },
+        OptValueKind::Ddx {
+            value: input,
+            pos_node,
+            neg_node,
         } => {
-            visit_counted_sum_value(artifact, count, live, cached_values, state, ordered)?;
-            visit_counted_sum_value(artifact, initial, live, cached_values, state, ordered)?;
-            visit_counted_sum_value(artifact, term, live, cached_values, state, ordered)?;
+            let mut dependencies = vec![input];
+            dependencies.extend(projected_ddx_derivative_values(
+                artifact, input, pos_node, neg_node,
+            )?);
+            dependencies
         }
-    }
-    state[index] = ValueVisitState::Done;
-    ordered.push(value);
-    Ok(())
+        OptValueKind::Ddt { input, .. } | OptValueKind::Unary { input, .. } => vec![input],
+        OptValueKind::Binary { left, right, .. } => vec![left, right],
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => vec![condition, then_value, else_value],
+    };
+    Ok(dependencies)
 }
 
 fn projected_ddx_derivative_values(
@@ -4181,9 +4663,6 @@ fn derivative_value_for_lane(
 }
 
 fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(), RustBackendError> {
-    if !artifact.hir.arrays.is_empty() {
-        return Err(unsupported(artifact, "arrays"));
-    }
     for variable in &artifact.hir.variables {
         if variable.is_state {
             return Err(unsupported(
@@ -4200,9 +4679,6 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
                 ),
             ));
         }
-    }
-    for statement in &artifact.hir.statements {
-        reject_unsupported_scalar_statement_shape(artifact, statement)?;
     }
     if !artifact.mir.state_slots.is_empty() {
         return Err(unsupported(artifact, "state slots"));
@@ -4247,35 +4723,6 @@ fn reject_unsupported_scalar_shape(artifact: &CanonicalIrArtifact) -> Result<(),
     Ok(())
 }
 
-fn reject_unsupported_scalar_statement_shape(
-    artifact: &CanonicalIrArtifact,
-    statement: &HirStatement,
-) -> Result<(), RustBackendError> {
-    match statement {
-        HirStatement::Assignment(assignment)
-            if assignment.index.is_none() && supported_scalar_value_type(assignment.expr_type) =>
-        {
-            Ok(())
-        }
-        HirStatement::Assignment(assignment) if assignment.index.is_some() => {
-            Err(unsupported(artifact, "indexed assignments"))
-        }
-        HirStatement::Assignment(assignment) => Err(unsupported(
-            artifact,
-            format!(
-                "assignment '{}' with type {:?}",
-                assignment.target_name, assignment.expr_type
-            ),
-        )),
-        HirStatement::Loop(loop_statement) => {
-            for statement in &loop_statement.body {
-                reject_unsupported_scalar_statement_shape(artifact, statement)?;
-            }
-            Ok(())
-        }
-    }
-}
-
 fn supported_scalar_value_type(value_type: CanonicalValueType) -> bool {
     matches!(
         value_type,
@@ -4293,40 +4740,47 @@ fn rust_type(value_type: OptValueType) -> &'static str {
     }
 }
 
-fn default_value(value_type: OptValueType) -> &'static str {
-    match value_type {
-        OptValueType::Real => "0.0",
-        OptValueType::Boolean => "false",
-    }
-}
-
 fn value_name(value: ValueId) -> String {
     format!("v{}", value.index())
 }
 
 fn runtime_loop_value_name(loop_id: u32, slot: u32) -> String {
-    format!("runtime_loop_{loop_id}_slot_{slot}")
+    format!("r{loop_id}_{slot}")
 }
 
 fn runtime_loop_derivative_name(loop_id: u32, slot: u32, lane: DerivativeLane) -> String {
     match lane.kind {
-        DerivativeLaneKind::Node => format!("runtime_loop_{loop_id}_slot_{slot}_dn{}", lane.index),
-        DerivativeLaneKind::BranchUnknown => {
-            format!("runtime_loop_{loop_id}_slot_{slot}_db{}", lane.index)
-        }
+        DerivativeLaneKind::Node => format!("r{loop_id}_{slot}n{}", lane.index),
+        DerivativeLaneKind::BranchUnknown => format!("r{loop_id}_{slot}b{}", lane.index),
     }
 }
 
-fn cache_field_name(value: ValueId) -> String {
-    format!("scalar_v{}", value.index())
+fn runtime_loop_guard_name(loop_id: u32) -> String {
+    format!("r{loop_id}g")
 }
 
 fn cached_or_local_value_name(value: ValueId, static_cache: &ScalarStaticCache) -> String {
     if static_cache.contains(value) {
-        format!("self.{}", cache_field_name(value))
+        static_cache
+            .cache_ref(value)
+            .expect("cached scalar value must have generated state slot")
+            .to_string()
     } else {
         value_name(value)
     }
+}
+
+fn scaled_derivative_value_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    value: ValueId,
+    context: &ValueEmitContext<'_>,
+    scale: &str,
+) -> Result<String, RustBackendError> {
+    Ok(scaled_derivative_expr(
+        value_ref(artifact, parameter_fields, value, context)?,
+        scale,
+    ))
 }
 
 fn derivative_name(root: ValueId, node: u32) -> String {
@@ -4457,5 +4911,5 @@ fn format_f64(value: f64) -> String {
 }
 
 fn f64_method_receiver(value: &str) -> String {
-    format!("(({value}) as f64)")
+    format!("({value})")
 }

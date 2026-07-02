@@ -2,14 +2,16 @@ use std::fmt::Write;
 use std::fs;
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use crate::canonical_ir::StableDigest;
 use crate::{CompilerOptions, VerilogACompiler};
 
 use super::{
     GeneratedBuiltinManifest, GeneratedRustDevice, RustBackendSelection, RustTranspiler,
-    VERILOGA_DISCOVERY_SKIP_MARKER, cleanup_stale_generated_device_folders,
-    discover_veriloga_sources, parse_generated_builtin_manifest, render_generated_builtin_manifest,
+    VERILOGA_DISCOVERY_SKIP_MARKER, VerilogASourceCandidate,
+    cleanup_stale_generated_device_folders, discover_veriloga_sources,
+    parse_generated_builtin_manifest, render_generated_builtin_manifest,
     resolve_generated_registry_model_names, write_generated_device, write_text_file_if_changed,
 };
 
@@ -43,6 +45,12 @@ const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltinGenerationReport {
     pub manifest: GeneratedBuiltinManifest,
+    pub backend_counts: BuiltinBackendSelectionCounts,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltinSubsetGenerationReport {
+    pub device_count: usize,
     pub backend_counts: BuiltinBackendSelectionCounts,
 }
 
@@ -82,7 +90,7 @@ pub fn regenerate_generated_builtins_with_progress(
     let source_tree_digest = tree_digest(model_root, false)?;
     let generator_digest = generator_digest(generator_root, false)?;
     let (devices, backend_counts) =
-        generate_devices_with_stack(model_root.to_path_buf(), progress)?;
+        generate_devices_with_stack(model_root.to_path_buf(), None, progress)?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any discovered modules",
@@ -105,6 +113,33 @@ pub fn regenerate_generated_builtins_with_progress(
 
     Ok(BuiltinGenerationReport {
         manifest,
+        backend_counts,
+    })
+}
+
+pub fn generate_generated_builtin_subset_with_progress(
+    model_root: &Path,
+    generated_root: &Path,
+    filter: &str,
+    progress: bool,
+) -> BuiltinResult<BuiltinSubsetGenerationReport> {
+    validate_model_root(model_root)?;
+
+    let (devices, backend_counts) =
+        generate_devices_with_stack(model_root.to_path_buf(), Some(filter.to_string()), progress)?;
+    if devices.is_empty() {
+        return Err(format!(
+            "Verilog-A built-ins source directory '{}' does not contain any modules matching filter '{filter}'",
+            model_root.display()
+        )
+        .into());
+    }
+
+    reject_legacy_ad_runtime(&devices)?;
+    write_device_subset(generated_root, &devices)?;
+
+    Ok(BuiltinSubsetGenerationReport {
+        device_count: devices.len(),
         backend_counts,
     })
 }
@@ -296,6 +331,17 @@ fn write_devices(generated_root: &Path, devices: &[GeneratedRustDevice]) -> Buil
     Ok(())
 }
 
+fn write_device_subset(
+    generated_root: &Path,
+    devices: &[GeneratedRustDevice],
+) -> BuiltinResult<()> {
+    std::fs::create_dir_all(generated_root)?;
+    for device in devices {
+        write_generated_device(generated_root, device)?;
+    }
+    Ok(())
+}
+
 fn remove_stale_support(generated_root: &Path) -> BuiltinResult<()> {
     let support = generated_root.join("support.rs");
     if support.is_file() {
@@ -362,13 +408,13 @@ fn collect_tree_files(root: &Path, files: &mut Vec<PathBuf>) -> BuiltinResult<()
 
 fn generate_devices(
     model_root: &Path,
+    filter: Option<&str>,
     progress: bool,
 ) -> BuiltinResult<(Vec<GeneratedRustDevice>, BuiltinBackendSelectionCounts)> {
     let candidates = discover_veriloga_sources(model_root)?;
-    let total_modules = candidates
-        .iter()
-        .map(|candidate| candidate.modules.len())
-        .sum::<usize>();
+    let filter = filter.map(BuiltinSourceFilter::new).transpose()?;
+    let work_items = builtin_module_work_items(model_root, &candidates, filter.as_ref());
+    let total_modules = work_items.len();
     let mut options = CompilerOptions::default();
     options.include_paths.push(model_root.to_path_buf());
     let compiler = VerilogACompiler::new(options);
@@ -377,26 +423,63 @@ fn generate_devices(
     let mut backend_counts = BuiltinBackendSelectionCounts::default();
     let mut module_index = 0usize;
 
-    for candidate in candidates {
-        for module in &candidate.modules {
-            module_index += 1;
-            if progress {
-                eprintln!(
-                    "generating Verilog-A built-in {module_index}/{total_modules}: {} :: {module}",
-                    candidate
-                        .path
-                        .strip_prefix(model_root)
-                        .unwrap_or(&candidate.path)
-                        .display()
-                );
-                let _ = std::io::stderr().flush();
-            }
-            let compiled =
-                compiler.compile_file_canonical_ir_with_metadata(&candidate.path, Some(module))?;
-            let report = transpiler.transpile_with_report(&compiled.artifact)?;
-            backend_counts.record(report.backend);
-            devices.push(report.device);
+    for item in work_items {
+        module_index += 1;
+        if progress {
+            eprintln!(
+                "generating Verilog-A built-in {module_index}/{total_modules}: {} :: {}",
+                item.path
+                    .strip_prefix(model_root)
+                    .unwrap_or(&item.path)
+                    .display(),
+                item.module
+            );
+            let _ = std::io::stderr().flush();
         }
+        let started = Instant::now();
+        let compiled =
+            compiler.compile_file_canonical_ir_with_metadata(&item.path, Some(&item.module))?;
+        if progress {
+            eprintln!(
+                "compiled Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:.2?})",
+                item.path
+                    .strip_prefix(model_root)
+                    .unwrap_or(&item.path)
+                    .display(),
+                item.module,
+                started.elapsed()
+            );
+            let _ = std::io::stderr().flush();
+        }
+        let transpile_started = Instant::now();
+        if progress {
+            eprintln!(
+                "transpiling Verilog-A built-in {module_index}/{total_modules}: {} :: {}",
+                item.path
+                    .strip_prefix(model_root)
+                    .unwrap_or(&item.path)
+                    .display(),
+                item.module
+            );
+            let _ = std::io::stderr().flush();
+        }
+        let report = transpiler.transpile_with_report(&compiled.artifact)?;
+        backend_counts.record(report.backend);
+        if progress {
+            eprintln!(
+                "generated Verilog-A built-in {module_index}/{total_modules}: {} :: {} ({:?}, transpile {:.2?}, total {:.2?})",
+                item.path
+                    .strip_prefix(model_root)
+                    .unwrap_or(&item.path)
+                    .display(),
+                item.module,
+                report.backend,
+                transpile_started.elapsed(),
+                started.elapsed()
+            );
+            let _ = std::io::stderr().flush();
+        }
+        devices.push(report.device);
     }
 
     devices.sort_by(|left, right| {
@@ -407,8 +490,66 @@ fn generate_devices(
     Ok((devices, backend_counts))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BuiltinSourceFilter {
+    terms: Vec<String>,
+}
+
+impl BuiltinSourceFilter {
+    fn new(filter: &str) -> BuiltinResult<Self> {
+        let terms = filter
+            .split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
+            .filter(|term| !term.is_empty())
+            .map(|term| term.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        if terms.is_empty() {
+            return Err("Verilog-A built-in generation filter cannot be empty".into());
+        }
+        Ok(Self { terms })
+    }
+
+    fn matches(&self, model_root: &Path, path: &Path, module: &str) -> bool {
+        let relative = path
+            .strip_prefix(model_root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase();
+        let module = module.to_ascii_lowercase();
+        self.terms
+            .iter()
+            .any(|term| relative.contains(term) || module.contains(term))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BuiltinModuleWorkItem {
+    path: PathBuf,
+    module: String,
+}
+
+fn builtin_module_work_items(
+    model_root: &Path,
+    candidates: &[VerilogASourceCandidate],
+    filter: Option<&BuiltinSourceFilter>,
+) -> Vec<BuiltinModuleWorkItem> {
+    let mut work_items = Vec::new();
+    for candidate in candidates {
+        for module in &candidate.modules {
+            if filter.is_none_or(|filter| filter.matches(model_root, &candidate.path, module)) {
+                work_items.push(BuiltinModuleWorkItem {
+                    path: candidate.path.clone(),
+                    module: module.clone(),
+                });
+            }
+        }
+    }
+    work_items
+}
+
 fn generate_devices_with_stack(
     model_root: PathBuf,
+    filter: Option<String>,
     progress: bool,
 ) -> Result<
     (Vec<GeneratedRustDevice>, BuiltinBackendSelectionCounts),
@@ -417,10 +558,54 @@ fn generate_devices_with_stack(
     std::thread::Builder::new()
         .name("rspice-veriloga-builtin-generator".to_string())
         .stack_size(256 * 1024 * 1024)
-        .spawn(move || generate_devices(&model_root, progress).map_err(|error| error.to_string()))?
+        .spawn(move || {
+            generate_devices(&model_root, filter.as_deref(), progress)
+                .map_err(|error| error.to_string())
+        })?
         .join()
         .map_err(|_| "Verilog-A built-in generator thread panicked")?
         .map_err(|error| error.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_subset_filter_matches_module_without_selecting_siblings() {
+        let model_root = Path::new("models");
+        let candidates = vec![VerilogASourceCandidate {
+            path: PathBuf::from("models/cmc/hicum.va"),
+            modules: vec!["hicuml2".to_string(), "hicuml0".to_string()],
+        }];
+        let filter = BuiltinSourceFilter::new("hicuml2").expect("filter");
+
+        let work_items = builtin_module_work_items(model_root, &candidates, Some(&filter));
+
+        assert_eq!(
+            work_items,
+            vec![BuiltinModuleWorkItem {
+                path: PathBuf::from("models/cmc/hicum.va"),
+                module: "hicuml2".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn builtin_subset_filter_matches_all_modules_when_path_matches() {
+        let model_root = Path::new("models");
+        let candidates = vec![VerilogASourceCandidate {
+            path: PathBuf::from("models/cmc/hicum.va"),
+            modules: vec!["hicuml2".to_string(), "hicuml0".to_string()],
+        }];
+        let filter = BuiltinSourceFilter::new("cmc/hicum").expect("filter");
+
+        let work_items = builtin_module_work_items(model_root, &candidates, Some(&filter));
+
+        assert_eq!(work_items.len(), 2);
+        assert_eq!(work_items[0].module, "hicuml2");
+        assert_eq!(work_items[1].module, "hicuml0");
+    }
 }
 
 fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> BuiltinResult<()> {
