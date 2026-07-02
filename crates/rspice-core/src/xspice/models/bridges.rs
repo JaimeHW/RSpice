@@ -170,6 +170,19 @@ impl CodeModel for AdcBridge {
 #[derive(Debug, Default)]
 pub struct DacBridge;
 
+const DAC_BRIDGE_STATE_STRIDE: usize = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DacBridgeStateLayout {
+    state_count: usize,
+}
+
+impl DacBridgeStateLayout {
+    fn state_base(self, index: usize) -> usize {
+        index * DAC_BRIDGE_STATE_STRIDE
+    }
+}
+
 /// Bidirectional digital/analog bridge.
 #[derive(Debug, Default)]
 pub struct BidiBridge;
@@ -1029,8 +1042,20 @@ fn digital_vector_input_value(ctx: &CmContext, name: &str, index: usize) -> Digi
         .unwrap_or_default()
 }
 
+fn dac_bridge_state_layout_error(width: usize) -> CmError {
+    CmError::InvalidPortConnection(format!("dac_bridge vector width {width} is too large"))
+}
+
+fn dac_bridge_state_layout(width: usize) -> CmResult<DacBridgeStateLayout> {
+    let state_count = width
+        .checked_mul(DAC_BRIDGE_STATE_STRIDE)
+        .ok_or_else(|| dac_bridge_state_layout_error(width))?;
+    Ok(DacBridgeStateLayout { state_count })
+}
+
+#[cfg(test)]
 fn dac_bridge_state_base(index: usize) -> usize {
-    index * 4
+    index * DAC_BRIDGE_STATE_STRIDE
 }
 
 fn dac_bridge_out_undef(ctx: &CmContext, out_low: Value, out_high: Value) -> CmResult<Value> {
@@ -1099,12 +1124,13 @@ impl CodeModel for DacBridge {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let width = bridge_vector_width(ctx, "dac_bridge")?;
-        ctx.allocate_states(4 * width);
+        let layout = dac_bridge_state_layout(width)?;
+        ctx.allocate_states(layout.state_count);
         let out_low = finite_bridge_param(ctx, "dac_bridge", "out_low")?;
         let out_high = finite_bridge_param(ctx, "dac_bridge", "out_high")?;
         let undef = dac_bridge_out_undef(ctx, out_low, out_high)?;
         for index in 0..width {
-            let base = dac_bridge_state_base(index);
+            let base = layout.state_base(index);
             ctx.set_initial_state(base, undef);
             ctx.set_initial_state(base + 1, undef);
             ctx.set_initial_state(base + 2, 0.0);
@@ -1121,6 +1147,7 @@ impl CodeModel for DacBridge {
         let t_rise = bridge_timing_param(ctx, "dac_bridge", "t_rise")?;
         let t_fall = bridge_timing_param(ctx, "dac_bridge", "t_fall")?;
         let commit_outputs = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
+        let layout = dac_bridge_state_layout(width)?;
 
         for index in 0..width {
             let d_in = digital_vector_input_value(ctx, "in", index);
@@ -1131,7 +1158,7 @@ impl CodeModel for DacBridge {
             } else {
                 out_undef
             };
-            let base = dac_bridge_state_base(index);
+            let base = layout.state_base(index);
 
             if !ctx.is_transient() {
                 ctx.set_state(base, v_target);
