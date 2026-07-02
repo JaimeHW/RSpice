@@ -451,6 +451,79 @@ fn test_xyce_vpwl_step_delay_repeat_case_runs() {
 }
 
 #[test]
+fn test_xyce_pat_pattern_source_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in ["Netlists/VPAT/vpat.cir", "Netlists/IPAT/ipat.cir"] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce PAT transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should use the standard native transient .prn contract"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_pat_pattern_source_step_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in ["Netlists/VPAT/vpat_step.cir", "Netlists/IPAT/ipat_step.cir"] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream .STEP TRAN wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native stepped Xyce PAT transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_step_tran",
+            "{relative} should report the native wrapper-origin stepped transient .prn contract"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_201_SON/bug201b.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce inductor IC transient operating-point comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_dc_upgrade_sweep_modes_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
