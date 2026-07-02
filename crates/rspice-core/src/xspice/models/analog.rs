@@ -4369,6 +4369,35 @@ mod tests {
     }
 
     #[test]
+    fn sample_hold_rejects_nonfinite_scalar_params() {
+        for (param, value) in [("cntl_th", f64::NAN), ("out_ic", f64::INFINITY)] {
+            let mut ctx = CmContext::new();
+            ctx.set_param(param, value);
+
+            let err = SampleHold
+                .init(&mut ctx)
+                .expect_err("s_h must reject nonfinite scalar parameters");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "s_h {param} produced {err:?}"
+            );
+            assert!(
+                err.to_string().contains(param),
+                "s_h error should name rejected parameter {param}: {err}"
+            );
+        }
+
+        let mut ctx = CmContext::new();
+        SampleHold
+            .init(&mut ctx)
+            .expect("default s_h params are valid");
+        ctx.set_param("cntl_th", f64::NAN);
+        SampleHold
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite s_h params must fail at evaluation time");
+    }
+
+    #[test]
     fn astate_does_not_commit_rollbackable_probe_history() {
         let mut ctx = CmContext::new();
         ctx.analysis = crate::xspice::AnalysisType::Transient;
@@ -5149,14 +5178,15 @@ impl CodeModel for SampleHold {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
+        validate_analog_scalar_params(ctx, "s_h", &["cntl_th", "out_ic"])?;
         ctx.allocate_states(1);
-        let ic = ctx.param("out_ic");
+        let ic = finite_analog_scalar_param(ctx, "s_h", "out_ic")?;
         ctx.set_state(0, ic);
         Ok(())
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-        let cntl_th = ctx.param("cntl_th");
+        let cntl_th = finite_analog_scalar_param(ctx, "s_h", "cntl_th")?;
 
         let v_cntl = ctx.input("cntl");
         let v_in = ctx.input("in");
