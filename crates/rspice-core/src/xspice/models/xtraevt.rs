@@ -2,7 +2,8 @@
 
 use crate::Value;
 use crate::xspice::{
-    CmContext, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec, PortType,
+    CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
+    PortType,
 };
 
 const MIN_EVENT_DELAY: Value = 1.0e-15;
@@ -52,6 +53,16 @@ fn transition_value(
 
 fn limited_event_delay(ctx: &CmContext, name: &str, default: Value) -> Value {
     ctx.param_or(name, default).max(MIN_EVENT_DELAY)
+}
+
+fn finite_event_delay(ctx: &CmContext, model: &str, name: &str, default: Value) -> CmResult<Value> {
+    let delay = ctx.param_or(name, default);
+    if !delay.is_finite() {
+        return Err(CmError::EvaluationError(format!(
+            "{model}: {name} must be finite, got {delay}"
+        )));
+    }
+    Ok(delay)
 }
 
 fn commit_event_outputs(ctx: &CmContext) -> bool {
@@ -246,7 +257,7 @@ impl CodeModel for RealGain {
             return Ok(());
         }
 
-        let delay = ctx.param_or("delay", 1.0e-9);
+        let delay = finite_event_delay(ctx, "real_gain", "delay", 1.0e-9)?;
         let startup_state = ctx.int_state(REAL_GAIN_STARTUP_STATE);
         if ctx.is_transient() && startup_state != REAL_GAIN_STARTUP_ACTIVE {
             if startup_state == 0 {
@@ -629,6 +640,29 @@ mod tests {
             REAL_GAIN_STARTUP_HOLDING
         );
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
+    }
+
+    #[test]
+    fn real_gain_rejects_nonfinite_delay_before_queueing_outputs() {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_param("delay", f64::NAN);
+        ctx.set_input_real("in", 3.0);
+        RealGain.init(&mut ctx).expect("real_gain initializes");
+
+        let err = RealGain
+            .evaluate(&mut ctx)
+            .expect_err("nonfinite real_gain delay must fail evaluation");
+
+        assert!(
+            err.to_string().contains("delay must be finite"),
+            "error should identify nonfinite delay, got {err:?}"
+        );
+        assert_eq!(
+            ctx.output_real("out"),
+            None,
+            "real_gain must not queue outputs after rejecting delay"
+        );
     }
 
     #[test]
