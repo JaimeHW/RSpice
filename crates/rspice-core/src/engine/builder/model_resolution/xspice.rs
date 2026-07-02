@@ -76,6 +76,96 @@ fn merge_vector_params<T: Clone>(
     merged
 }
 
+fn model_param_type(
+    code_model: &dyn crate::xspice::CodeModel,
+    name: &str,
+) -> Option<crate::xspice::ParamType> {
+    code_model
+        .parameters()
+        .iter()
+        .find(|spec| spec.name.eq_ignore_ascii_case(name))
+        .map(|spec| spec.param_type)
+}
+
+fn vector_param_can_coerce_to_scalar_string(
+    code_model: &dyn crate::xspice::CodeModel,
+    name: &str,
+) -> bool {
+    matches!(
+        model_param_type(code_model, name),
+        Some(crate::xspice::ParamType::String)
+    ) && crate::netlist::xspice_param_preserves_numeric_string(name)
+}
+
+fn digit_string_from_real_vector(
+    code_model: &dyn crate::xspice::CodeModel,
+    name: &str,
+    values: &[f64],
+) -> Result<String, SimulationError> {
+    let mut output = String::with_capacity(values.len());
+    for value in values {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE model '{}' scalar string parameter '{}' got non-finite vector entry {}",
+                code_model.name(),
+                name,
+                value
+            )));
+        }
+        let rounded = value.round();
+        let integral_tolerance = f64::EPSILON * rounded.abs().max(1.0);
+        if (*value - rounded).abs() > integral_tolerance || !(0.0..=9.0).contains(&rounded) {
+            return Err(SimulationError::Circuit(format!(
+                "XSPICE model '{}' scalar string parameter '{}' expected digit vector entries, got {}",
+                code_model.name(),
+                name,
+                value
+            )));
+        }
+        output.push(char::from_digit(rounded as u32, 10).expect("validated digit"));
+    }
+    Ok(output)
+}
+
+fn split_real_vectors_for_scalar_strings(
+    code_model: &dyn crate::xspice::CodeModel,
+    vectors: &[(String, Vec<f64>)],
+) -> Result<(Vec<(String, Vec<f64>)>, Vec<(String, String)>), SimulationError> {
+    let mut real_vectors = Vec::new();
+    let mut string_params = Vec::new();
+
+    for (name, values) in vectors {
+        if vector_param_can_coerce_to_scalar_string(code_model, name) {
+            string_params.push((
+                name.clone(),
+                digit_string_from_real_vector(code_model, name, values)?,
+            ));
+        } else {
+            real_vectors.push((name.clone(), values.clone()));
+        }
+    }
+
+    Ok((real_vectors, string_params))
+}
+
+fn split_string_vectors_for_scalar_strings(
+    code_model: &dyn crate::xspice::CodeModel,
+    vectors: &[(String, Vec<String>)],
+) -> (Vec<(String, Vec<String>)>, Vec<(String, String)>) {
+    let mut string_vectors = Vec::new();
+    let mut string_params = Vec::new();
+
+    for (name, values) in vectors {
+        if vector_param_can_coerce_to_scalar_string(code_model, name) {
+            string_params.push((name.clone(), values.join("")));
+        } else {
+            string_vectors.push((name.clone(), values.clone()));
+        }
+    }
+
+    (string_vectors, string_params)
+}
+
 fn reject_param_names_for_vector_specs<'a>(
     code_model: &dyn crate::xspice::CodeModel,
     names: impl IntoIterator<Item = &'a str>,
@@ -959,6 +1049,16 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
                 instance_string_vector_params,
                 &resolved_instance_string_vector_expr_params,
             );
+            let (instance_string_vector_params, string_params_from_string_vectors) =
+                split_string_vectors_for_scalar_strings(
+                    code_model.as_ref(),
+                    &instance_string_vector_params,
+                );
+            let (instance_real_vector_params, string_params_from_real_vectors) =
+                split_real_vectors_for_scalar_strings(
+                    code_model.as_ref(),
+                    &instance_real_vector_params,
+                )?;
             let (real_vector_params, integer_vector_params) =
                 resolve_vector_params(code_model.as_ref(), &instance_real_vector_params)?;
             let string_vector_params =
@@ -981,6 +1081,10 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
                 instance_string_params,
                 &resolved_instance_string_expr_params,
             );
+            let string_params =
+                merge_string_params(&string_params, &string_params_from_string_vectors);
+            let string_params =
+                merge_string_params(&string_params, &string_params_from_real_vectors);
             return Ok(ResolvedXspiceModel {
                 code_model,
                 numeric_params,
@@ -1046,6 +1150,11 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         instance_string_vector_params,
         &resolved_instance_string_vector_expr_params,
     );
+    let (instance_string_vector_params, instance_string_params_from_string_vectors) =
+        split_string_vectors_for_scalar_strings(
+            code_model.as_ref(),
+            &instance_string_vector_params,
+        );
 
     let expr_params = resolve_scalar_expression_params(netlist, model_def, code_model.as_ref())?;
     let model_real_vector_expr_params =
@@ -1063,30 +1172,53 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         model_name,
         instance_string_expr_params,
     )?;
+    let (model_string_vector_params, model_string_params_from_string_vectors) =
+        split_string_vectors_for_scalar_strings(
+            code_model.as_ref(),
+            &model_def.string_vector_params,
+        );
     let string_vector_params =
-        resolve_string_vector_params(code_model.as_ref(), &model_def.string_vector_params)?;
+        resolve_string_vector_params(code_model.as_ref(), &model_string_vector_params)?;
     let model_real_vector_params = merge_vector_params(
         &model_def.real_vector_params,
         &model_real_vector_expr_params,
     );
+    let (model_real_vector_params, model_string_params_from_real_vectors) =
+        split_real_vectors_for_scalar_strings(code_model.as_ref(), &model_real_vector_params)?;
     let (real_vector_params, mut integer_vector_params) =
         resolve_vector_params(code_model.as_ref(), &model_real_vector_params)?;
     let instance_string_vector_params =
         resolve_string_vector_params(code_model.as_ref(), &instance_string_vector_params)?;
+    let (instance_real_vector_params, instance_string_params_from_real_vectors) =
+        split_real_vectors_for_scalar_strings(code_model.as_ref(), &instance_real_vector_params)?;
     let (instance_real_vector_params, instance_integer_vector_params) =
         resolve_vector_params(code_model.as_ref(), &instance_real_vector_params)?;
     integer_vector_params.extend(model_def.integer_vector_params.clone());
     let model_numeric_params = merge_numeric_params(&model_def.params, &expr_params);
     let instance_numeric_params = merge_numeric_params(instance_params, &instance_expr_params);
+    let model_string_params = merge_string_params(
+        &model_def.string_params,
+        &model_string_params_from_string_vectors,
+    );
+    let model_string_params =
+        merge_string_params(&model_string_params, &model_string_params_from_real_vectors);
     let instance_string_params = merge_string_params(
         instance_string_params,
         &resolved_instance_string_expr_params,
+    );
+    let instance_string_params = merge_string_params(
+        &instance_string_params,
+        &instance_string_params_from_string_vectors,
+    );
+    let instance_string_params = merge_string_params(
+        &instance_string_params,
+        &instance_string_params_from_real_vectors,
     );
 
     Ok(ResolvedXspiceModel {
         code_model,
         numeric_params: merge_numeric_params(&model_numeric_params, &instance_numeric_params),
-        string_params: merge_string_params(&model_def.string_params, &instance_string_params),
+        string_params: merge_string_params(&model_string_params, &instance_string_params),
         string_vector_params: merge_vector_params(
             &string_vector_params,
             &instance_string_vector_params,
@@ -1223,6 +1355,51 @@ mod tests {
                 .find(|(name, _)| name.eq_ignore_ascii_case("points"))
                 .map(|(_, values)| values.as_slice()),
             Some(&[1.0, 2.5, 4.0][..])
+        );
+    }
+
+    #[test]
+    fn xspice_resolver_coerces_table_values_vector_to_scalar_string() {
+        let netlist = Netlist::parse(
+            "xspice lookup table vector string model\n\
+             .model lut table_probe (table_values=[0 1 1 0])\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        let mut registry = crate::xspice::CodeModelRegistry::new();
+        registry.register(Arc::new(ParamOnlyModel::new(
+            "table_probe",
+            vec![ParamSpec::string("table_values", "").required()],
+        )));
+
+        let resolved = resolve_xspice_model_instance(
+            &netlist,
+            &registry,
+            "lut",
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("xspice model resolves");
+
+        assert_eq!(
+            resolved
+                .string_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("table_values"))
+                .map(|(_, value)| value.as_str()),
+            Some("0110")
+        );
+        assert!(
+            resolved
+                .real_vector_params
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("table_values"))
         );
     }
 
