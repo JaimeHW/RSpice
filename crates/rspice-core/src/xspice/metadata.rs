@@ -56,6 +56,10 @@ impl CodeModel for MetadataOverlayModel {
         self.inner.requires_conservative_newton_damping()
     }
 
+    fn has_memoryless_linear_transient_stamp(&self) -> bool {
+        self.inner.has_memoryless_linear_transient_stamp()
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         self.inner.init(ctx)
     }

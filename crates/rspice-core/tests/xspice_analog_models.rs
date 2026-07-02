@@ -913,6 +913,33 @@ rload out 0 1k
 }
 
 #[test]
+fn xspice_gain_current_output_transient_remains_linear() {
+    let deck = "\
+* Reduced ngspice polarity.deck regression
+v1 in 0 0.0 sin(0 1 1k)
+a1 in %i out amp
+.model amp gain (gain=10)
+rout out 0 1k
+.tran 1e-6 3e-5
+.end
+";
+
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 3.0e-5, 1.0e-6)
+        .expect("affine XSPICE current-output transient should solve directly");
+    let out = transient_node_series(&result, "out");
+    let sample_time = 2.0e-5;
+    let got = value_at_time(&result.time, out, sample_time);
+    let expected = -10.0 * 1.0e3 * (2.0 * std::f64::consts::PI * 1.0e3 * sample_time).sin();
+
+    assert!(
+        (got - expected).abs() < 1.0,
+        "gain %i transient output should follow the affine current source, expected {expected}, got {got}"
+    );
+}
+
+#[test]
 fn limit_smooths_and_linearizes_like_ngspice() {
     let missing_bounds = "\
 * XSPICE limit requires explicit output bounds
