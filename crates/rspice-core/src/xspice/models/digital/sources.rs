@@ -14,7 +14,6 @@ pub struct DigitalSource;
 
 const D_SOURCE_NO_ROW: i64 = -1;
 const D_SOURCE_BEFORE_FIRST_ROW: i64 = -2;
-const D_SOURCE_LOAD_FAILED: i64 = -3;
 const D_SOURCE_EMITTED_ROW: usize = 0;
 const D_SOURCE_SCHEDULED_ROW: usize = 1;
 const D_SOURCE_ROWS_RESOURCE: &str = "xspice.d_source.rows";
@@ -399,17 +398,7 @@ impl CodeModel for DigitalSource {
             .unwrap_or("source.txt")
             .to_string();
         let width = ctx.port_width("out");
-        if ctx.int_state(D_SOURCE_EMITTED_ROW) == D_SOURCE_LOAD_FAILED {
-            return Ok(());
-        }
-        let rows = match load_d_source_rows_for_context(ctx, &input_file, width) {
-            Ok(rows) => rows,
-            Err(_) => {
-                d_source_set_row_state(ctx, D_SOURCE_EMITTED_ROW, D_SOURCE_LOAD_FAILED);
-                d_source_set_row_state(ctx, D_SOURCE_SCHEDULED_ROW, D_SOURCE_NO_ROW);
-                return Ok(());
-            }
-        };
+        let rows = load_d_source_rows_for_context(ctx, &input_file, width)?;
         if rows.first().is_some_and(|row| row.time < 0.0) {
             if ctx.int_state(D_SOURCE_EMITTED_ROW) != D_SOURCE_BEFORE_FIRST_ROW {
                 d_source_set_unknown_output(ctx, width);
@@ -1478,7 +1467,7 @@ mod tests {
     }
 
     #[test]
-    fn d_source_malformed_file_returns_only_initial_state_like_ngspice() {
+    fn d_source_malformed_file_fails_closed() {
         let _guard = data_file_test_guard();
         let input_file = "virtual://d_source/malformed";
         unregister_test_data_file(input_file);
@@ -1491,14 +1480,14 @@ mod tests {
         ctx.set_string_param("input_file", input_file);
         model.init(&mut ctx).expect("d_source init");
 
-        model
+        let err = model
             .evaluate(&mut ctx)
-            .expect("ngspice logs malformed d_source files but does not fail evaluation");
+            .expect_err("malformed d_source files must fail evaluation");
+        let message = err.to_string();
 
-        let events = ctx.take_pending_events();
         assert!(
-            events.is_empty(),
-            "malformed d_source files should leave the source at its initial state, got {events:?}"
+            message.contains("time values must increase monotonically"),
+            "malformed d_source error should explain the parser failure, got {message}"
         );
 
         unregister_test_data_file(input_file);
