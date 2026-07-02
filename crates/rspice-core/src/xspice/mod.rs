@@ -48,7 +48,9 @@ mod data_file;
 mod digital;
 mod event;
 mod external;
+pub mod ifspec;
 mod instance;
+mod metadata;
 mod registry;
 mod traits;
 
