@@ -989,7 +989,9 @@ impl CircuitData {
                                         }
                                     }
                                     crate::xspice::PortType::Current
-                                    | crate::xspice::PortType::DifferentialCurrent => {
+                                    | crate::xspice::PortType::DifferentialCurrent
+                                    | crate::xspice::PortType::Conductance
+                                    | crate::xspice::PortType::DifferentialConductance => {
                                         stamp_current_vector_output_port(
                                             matrix,
                                             rhs,
@@ -1034,7 +1036,9 @@ impl CircuitData {
                                                 }
                                             }
                                             crate::xspice::PortType::Current
-                                            | crate::xspice::PortType::DifferentialCurrent => {
+                                            | crate::xspice::PortType::DifferentialCurrent
+                                            | crate::xspice::PortType::Conductance
+                                            | crate::xspice::PortType::DifferentialConductance => {
                                                 stamp_current_vector_output_port(
                                                     matrix,
                                                     rhs,
@@ -1075,7 +1079,9 @@ impl CircuitData {
                                             }
                                         }
                                         crate::xspice::PortType::Current
-                                        | crate::xspice::PortType::DifferentialCurrent => {
+                                        | crate::xspice::PortType::DifferentialCurrent
+                                        | crate::xspice::PortType::Conductance
+                                        | crate::xspice::PortType::DifferentialConductance => {
                                             stamp_current_vector_output_port(
                                                 matrix,
                                                 rhs,
@@ -1247,7 +1253,9 @@ impl CircuitData {
                             }
                         }
                         crate::xspice::PortType::Current
-                        | crate::xspice::PortType::DifferentialCurrent => {
+                        | crate::xspice::PortType::DifferentialCurrent
+                        | crate::xspice::PortType::Conductance
+                        | crate::xspice::PortType::DifferentialConductance => {
                             let (pos, neg) = match connection {
                                 crate::xspice::PortConnection::Analog(node) => (*node, 0),
                                 crate::xspice::PortConnection::Differential(pos, neg) => {
