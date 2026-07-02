@@ -14,7 +14,8 @@ const MAX_SCALAR_BOUNDED_LOOP_UNROLL_ITERATIONS: usize = 128;
 const MAX_SCALAR_BOUNDED_LOOP_ASSIGNMENT_EXPANSIONS: usize = 2048;
 const MAX_SCALAR_GUARD_HISTORY_RECONSTRUCTION_ENTRIES: usize = 16;
 const MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES: usize = 32;
-const MAX_SCALAR_HISTORY_RECONSTRUCTION_STEPS: usize = 20_000;
+const MAX_SCALAR_RECENT_HISTORY_RECONSTRUCTION_ENTRIES: usize = 32;
+const MAX_SCALAR_HISTORY_RECONSTRUCTION_STEPS: usize = 2_000;
 const MAX_SCALAR_EXPRESSION_LOWERING_DEPTH: usize = 1024;
 const MAX_SCALAR_CONDITION_REASONING_DEPTH: usize = 128;
 const MAX_SCALAR_STRUCTURAL_EQUALITY_DEPTH: usize = 192;
@@ -511,6 +512,12 @@ struct ConditionalSelfUpdate {
     condition: ExprId,
     active_truth: bool,
     value_expr: ExprId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RelativeCondition {
+    condition: ExprId,
+    truth: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1310,7 +1317,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.expression_values.clear();
             return true;
         };
-        let value_type = self.values[usize::from(next)].value_type;
+        let Some(value_type) = self.variable_opt_value_type(assignment.target) else {
+            self.variable_values.insert(assignment.target, None);
+            self.expression_values.clear();
+            return true;
+        };
         let value = self.push_value(
             value_type,
             OptValueKind::Select {
@@ -2946,6 +2957,16 @@ impl<'a> ScalarGraphBuilder<'a> {
             {
                 return Some(Some(history_value));
             }
+            if value.is_none()
+                && let Some(history_value) = self.lower_recent_assignment_history_value(variable.id)
+            {
+                return Some(Some(history_value));
+            }
+            if value.is_none()
+                && let Some(history_value) = self.lower_assignment_history_value(variable.id)
+            {
+                return Some(Some(history_value));
+            }
             return Some(value);
         }
 
@@ -3043,7 +3064,7 @@ impl<'a> ScalarGraphBuilder<'a> {
                 *else_expr,
             )?
         };
-        let value_type = self.values[usize::from(then_value)].value_type;
+        let value_type = self.variable_opt_value_type(variable)?;
         Some(self.push_value(
             value_type,
             OptValueKind::Select {
@@ -3125,7 +3146,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         } else {
             (current_value, previous_value)
         };
-        let value_type = self.values[usize::from(then_value)].value_type;
+        let value_type = self.variable_opt_value_type(variable)?;
         Some(self.push_value(
             value_type,
             OptValueKind::Select {
@@ -3165,6 +3186,74 @@ impl<'a> ScalarGraphBuilder<'a> {
             }),
             _ => None,
         }
+    }
+
+    fn lower_recent_assignment_history_value(&mut self, variable: VariableId) -> Option<ValueId> {
+        self.consume_history_reconstruction_step()?;
+        let history = self.variable_assignment_history.get(&variable)?.clone();
+        let scan_start = history
+            .len()
+            .saturating_sub(MAX_SCALAR_RECENT_HISTORY_RECONSTRUCTION_ENTRIES);
+        for base_index in (scan_start..history.len()).rev() {
+            let base_expr = history[base_index];
+            if self.expr_references_variable(base_expr, variable) {
+                continue;
+            }
+            let mut value = self.lower_expression(base_expr)?;
+            for expr in history.iter().copied().skip(base_index + 1) {
+                value = self.lower_assignment_history_expr_from_previous(variable, expr, value)?;
+            }
+            return Some(value);
+        }
+        None
+    }
+
+    fn lower_assignment_history_expr_from_previous(
+        &mut self,
+        variable: VariableId,
+        expr: ExprId,
+        previous_value: ValueId,
+    ) -> Option<ValueId> {
+        self.consume_history_reconstruction_step()?;
+        let expression = self.mir.expressions.get(usize::from(expr))?;
+        let HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } = &expression.kind
+        else {
+            if self.expr_references_variable(expr, variable) {
+                return None;
+            }
+            return self.lower_expression(expr);
+        };
+
+        let condition = self.lower_expression(*condition)?;
+        let then_value = if self.variable_identifier(*then_expr) == Some(variable) {
+            previous_value
+        } else {
+            if self.expr_references_variable(*then_expr, variable) {
+                return None;
+            }
+            self.lower_expression(*then_expr)?
+        };
+        let else_value = if self.variable_identifier(*else_expr) == Some(variable) {
+            previous_value
+        } else {
+            if self.expr_references_variable(*else_expr, variable) {
+                return None;
+            }
+            self.lower_expression(*else_expr)?
+        };
+        let value_type = self.variable_opt_value_type(variable)?;
+        Some(self.push_value(
+            value_type,
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            },
+        ))
     }
 
     fn self_update_active_truth_relative_to(
@@ -3207,11 +3296,15 @@ impl<'a> ScalarGraphBuilder<'a> {
     ) -> Option<ValueId> {
         self.consume_history_reconstruction_step()?;
         let history = self.variable_assignment_history.get(&variable)?.clone();
-        history
+        let direct = history
             .into_iter()
             .rev()
             .take(MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES)
-            .find_map(|expr| self.lower_assignment_expr_for_current_path(variable, expr))
+            .find_map(|expr| self.lower_assignment_expr_for_current_path(variable, expr));
+        direct.or_else(|| {
+            let history = self.variable_assignment_history.get(&variable)?.clone();
+            self.lower_complementary_assignment_history_pair_for_current_path(variable, &history)
+        })
     }
 
     fn consume_history_reconstruction_step(&mut self) -> Option<()> {
@@ -3256,6 +3349,153 @@ impl<'a> ScalarGraphBuilder<'a> {
             return None;
         }
         self.lower_expression(selected)
+    }
+
+    fn lower_complementary_assignment_history_pair_for_current_path(
+        &mut self,
+        variable: VariableId,
+        history: &[ExprId],
+    ) -> Option<ValueId> {
+        let scan_start = history
+            .len()
+            .saturating_sub(MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES);
+        for current_index in (scan_start.saturating_add(1)..history.len()).rev() {
+            let previous_expr = history[current_index - 1];
+            let current_expr = history[current_index];
+            let Some(previous) = self.conditional_self_update(variable, previous_expr) else {
+                continue;
+            };
+            let Some(current) = self.conditional_self_update(variable, current_expr) else {
+                continue;
+            };
+            if self.expr_references_variable(previous.value_expr, variable)
+                || self.expr_references_variable(current.value_expr, variable)
+            {
+                continue;
+            }
+            let previous_condition = self.self_update_relative_to_current_path(previous)?;
+            let current_condition = self.self_update_relative_to_current_path(current)?;
+            if !self.relative_conditions_are_complements(previous_condition, current_condition) {
+                continue;
+            }
+
+            self.conditional_path_stack.push(ConditionalPathPredicate {
+                condition: previous_condition.condition,
+                truth: previous_condition.truth,
+            });
+            let previous_value = self.lower_expression(previous.value_expr);
+            self.conditional_path_stack.pop();
+            let previous_value = previous_value?;
+
+            self.conditional_path_stack.push(ConditionalPathPredicate {
+                condition: current_condition.condition,
+                truth: current_condition.truth,
+            });
+            let current_value = self.lower_expression(current.value_expr);
+            self.conditional_path_stack.pop();
+            let current_value = current_value?;
+
+            let condition = self.lower_expression(previous_condition.condition)?;
+            let (then_value, else_value) = if previous_condition.truth {
+                (previous_value, current_value)
+            } else {
+                (current_value, previous_value)
+            };
+            let value_type = self.variable_opt_value_type(variable)?;
+            return Some(self.push_value(
+                value_type,
+                OptValueKind::Select {
+                    condition,
+                    then_value,
+                    else_value,
+                },
+            ));
+        }
+        None
+    }
+
+    fn self_update_relative_to_current_path(
+        &self,
+        update: ConditionalSelfUpdate,
+    ) -> Option<RelativeCondition> {
+        let mut condition = self.relative_condition_in_current_path(update.condition)?;
+        if !update.active_truth {
+            condition.truth = !condition.truth;
+        }
+        Some(condition)
+    }
+
+    fn relative_conditions_are_complements(
+        &self,
+        left: RelativeCondition,
+        right: RelativeCondition,
+    ) -> bool {
+        if self.expr_structurally_equal(left.condition, right.condition) {
+            return left.truth != right.truth;
+        }
+        if self.expr_is_logical_complement(left.condition, right.condition) {
+            return left.truth == right.truth;
+        }
+        false
+    }
+
+    fn relative_condition_in_current_path(&self, condition: ExprId) -> Option<RelativeCondition> {
+        let mut active = HashSet::new();
+        self.relative_condition_in_current_path_inner(condition, 0, &mut active)
+    }
+
+    fn relative_condition_in_current_path_inner(
+        &self,
+        condition: ExprId,
+        depth: usize,
+        active: &mut HashSet<ExprId>,
+    ) -> Option<RelativeCondition> {
+        if depth > MAX_SCALAR_CONDITION_REASONING_DEPTH || !active.insert(condition) {
+            return None;
+        }
+
+        let result = (|| {
+            if let Some(true) = self.condition_truth_in_current_path(condition) {
+                return None;
+            }
+            if let Some(alias) = self.guard_alias_expr(condition) {
+                return self.relative_condition_in_current_path_inner(alias, depth + 1, active);
+            }
+            let expression = self.mir.expressions.get(usize::from(condition))?;
+            match &expression.kind {
+                HirExprKind::Unary { op, operand } if op.as_str() == "Not" => {
+                    let mut relative =
+                        self.relative_condition_in_current_path_inner(*operand, depth + 1, active)?;
+                    relative.truth = !relative.truth;
+                    Some(relative)
+                }
+                HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
+                    match (
+                        self.condition_truth_in_current_path(*left),
+                        self.condition_truth_in_current_path(*right),
+                    ) {
+                        (Some(false), _) | (_, Some(false)) => None,
+                        (Some(true), Some(true)) => None,
+                        (Some(true), _) => {
+                            self.relative_condition_in_current_path_inner(*right, depth + 1, active)
+                        }
+                        (_, Some(true)) => {
+                            self.relative_condition_in_current_path_inner(*left, depth + 1, active)
+                        }
+                        _ => Some(RelativeCondition {
+                            condition,
+                            truth: true,
+                        }),
+                    }
+                }
+                _ => Some(RelativeCondition {
+                    condition,
+                    truth: true,
+                }),
+            }
+        })();
+        active.remove(&condition);
+        result
     }
 
     fn condition_truth_in_current_path(&self, condition: ExprId) -> Option<bool> {

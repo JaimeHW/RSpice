@@ -710,6 +710,50 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_reconstructs_current_path_complementary_overwrites() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module current_path_complementary_overwrites(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real tmp;
+    analog begin
+        tmp = $simparam("unsupported_scalar_probe");
+
+        if (mode == 1) begin
+            if (V(p, n) > 0.0) begin
+                tmp = sqrt(V(p, n));
+            end else begin
+                tmp = 0.0;
+            end
+            I(p, n) <+ tmp * V(p, n);
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("current-path complementary overwrites should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_reconstructs_indirect_previous_value_alias_history() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(

@@ -2777,14 +2777,24 @@ fn emit_value_expr(
             else_value,
         } => {
             let condition_type = value_type(artifact, *condition)?;
+            let then_type = value_type(artifact, *then_value)?;
+            let else_type = value_type(artifact, *else_value)?;
             format!(
                 "(if {}{{{}}}else{{{}}})",
                 truth_expr(
                     value_ref(artifact, parameter_fields, *condition, context)?,
                     condition_type,
                 ),
-                value_ref(artifact, parameter_fields, *then_value, context)?,
-                value_ref(artifact, parameter_fields, *else_value, context)?
+                coerce_value_expr(
+                    value_ref(artifact, parameter_fields, *then_value, context)?,
+                    then_type,
+                    value.value_type,
+                ),
+                coerce_value_expr(
+                    value_ref(artifact, parameter_fields, *else_value, context)?,
+                    else_type,
+                    value.value_type,
+                )
             )
         }
         OptValueKind::EquationValue { .. } => {
@@ -3637,44 +3647,51 @@ fn emit_unary_expr(
     limexp_max: &str,
     use_exp_helpers: bool,
 ) -> String {
+    let real_input = || coerce_value_expr(input.clone(), input_type, OptValueType::Real);
     match op {
-        OptUnaryOp::Pos => input,
-        OptUnaryOp::Neg => format!("(-{input})"),
+        OptUnaryOp::Pos => real_input(),
+        OptUnaryOp::Neg => format!("(-{})", real_input()),
         OptUnaryOp::Not => format!("(!{})", truth_expr(input, input_type)),
-        OptUnaryOp::Exp => format!("{}.exp()", f64_method_receiver(&input)),
-        OptUnaryOp::LimExp if use_exp_helpers => format!("scalar_limexp({input})"),
+        OptUnaryOp::Exp => format!("{}.exp()", f64_method_receiver(&real_input())),
+        OptUnaryOp::LimExp if use_exp_helpers => format!("scalar_limexp({})", real_input()),
         OptUnaryOp::LimExp => format!(
-            "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} * (1.0 + (limexp_arg - 80.0)) }} }}"
+            "{{ let limexp_arg = {}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} * (1.0 + (limexp_arg - 80.0)) }} }}",
+            real_input()
         ),
         OptUnaryOp::LimExpDerivative if use_exp_helpers => {
-            format!("scalar_limexp_derivative({input})")
+            format!("scalar_limexp_derivative({})", real_input())
         }
         OptUnaryOp::LimExpDerivative => format!(
-            "{{ let limexp_arg = {input}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} }} }}"
+            "{{ let limexp_arg = {}; if limexp_arg < 80.0 {{ limexp_arg.exp() }} else {{ {limexp_max} }} }}",
+            real_input()
         ),
-        OptUnaryOp::LimitedExp if use_exp_helpers => format!("scalar_limited_exp({input})"),
+        OptUnaryOp::LimitedExp if use_exp_helpers => {
+            format!("scalar_limited_exp({})", real_input())
+        }
         OptUnaryOp::LimitedExp => format!(
-            "{{ let limited_exp_arg = {input}; if limited_exp_arg > 80.0 {{ {limexp_max} * (1.0 + limited_exp_arg - 80.0) }} else if limited_exp_arg < -80.0 {{ 1.804851387e-35 }} else {{ limited_exp_arg.exp() }} }}"
+            "{{ let limited_exp_arg = {}; if limited_exp_arg > 80.0 {{ {limexp_max} * (1.0 + limited_exp_arg - 80.0) }} else if limited_exp_arg < -80.0 {{ 1.804851387e-35 }} else {{ limited_exp_arg.exp() }} }}",
+            real_input()
         ),
         OptUnaryOp::LimitedExpDerivative if use_exp_helpers => {
-            format!("scalar_limited_exp_derivative({input})")
+            format!("scalar_limited_exp_derivative({})", real_input())
         }
         OptUnaryOp::LimitedExpDerivative => format!(
-            "{{ let limited_exp_arg = {input}; if limited_exp_arg > 80.0 {{ {limexp_max} }} else if limited_exp_arg < -80.0 {{ 0.0 }} else {{ limited_exp_arg.exp() }} }}"
+            "{{ let limited_exp_arg = {}; if limited_exp_arg > 80.0 {{ {limexp_max} }} else if limited_exp_arg < -80.0 {{ 0.0 }} else {{ limited_exp_arg.exp() }} }}",
+            real_input()
         ),
-        OptUnaryOp::Ln => format!("{}.ln()", f64_method_receiver(&input)),
-        OptUnaryOp::Sqrt => format!("{}.sqrt()", f64_method_receiver(&input)),
-        OptUnaryOp::Abs => format!("{}.abs()", f64_method_receiver(&input)),
-        OptUnaryOp::Sin => format!("{}.sin()", f64_method_receiver(&input)),
-        OptUnaryOp::Cos => format!("{}.cos()", f64_method_receiver(&input)),
-        OptUnaryOp::Tan => format!("{}.tan()", f64_method_receiver(&input)),
-        OptUnaryOp::Sinh => format!("{}.sinh()", f64_method_receiver(&input)),
-        OptUnaryOp::Cosh => format!("{}.cosh()", f64_method_receiver(&input)),
-        OptUnaryOp::Tanh => format!("{}.tanh()", f64_method_receiver(&input)),
-        OptUnaryOp::Atan => format!("{}.atan()", f64_method_receiver(&input)),
-        OptUnaryOp::Asinh => format!("{}.asinh()", f64_method_receiver(&input)),
-        OptUnaryOp::Floor => format!("{}.floor()", f64_method_receiver(&input)),
-        OptUnaryOp::Ceil => format!("{}.ceil()", f64_method_receiver(&input)),
+        OptUnaryOp::Ln => format!("{}.ln()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Sqrt => format!("{}.sqrt()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Abs => format!("{}.abs()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Sin => format!("{}.sin()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Cos => format!("{}.cos()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Tan => format!("{}.tan()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Sinh => format!("{}.sinh()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Cosh => format!("{}.cosh()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Tanh => format!("{}.tanh()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Atan => format!("{}.atan()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Asinh => format!("{}.asinh()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Floor => format!("{}.floor()", f64_method_receiver(&real_input())),
+        OptUnaryOp::Ceil => format!("{}.ceil()", f64_method_receiver(&real_input())),
     }
 }
 
@@ -3686,17 +3703,61 @@ fn emit_binary_expr(
     right_type: OptValueType,
 ) -> String {
     match op {
-        OptBinaryOp::Add => binary_expr(left, "+", right),
-        OptBinaryOp::Sub => binary_expr(left, "-", right),
-        OptBinaryOp::Mul => binary_expr(left, "*", right),
-        OptBinaryOp::Div => binary_expr(left, "/", right),
-        OptBinaryOp::Pow => format!("f64::powf({left},{right})"),
-        OptBinaryOp::Eq => binary_expr(left, "==", right),
-        OptBinaryOp::Ne => binary_expr(left, "!=", right),
-        OptBinaryOp::Lt => binary_expr(left, "<", right),
-        OptBinaryOp::Le => binary_expr(left, "<=", right),
-        OptBinaryOp::Gt => binary_expr(left, ">", right),
-        OptBinaryOp::Ge => binary_expr(left, ">=", right),
+        OptBinaryOp::Add => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            "+",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Sub => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            "-",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Mul => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            "*",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Div => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            "/",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Pow => format!(
+            "f64::powf({},{})",
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            coerce_value_expr(right, right_type, OptValueType::Real)
+        ),
+        OptBinaryOp::Eq => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            "==",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Ne => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            "!=",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Lt => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            "<",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Le => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            "<=",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Gt => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            ">",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
+        OptBinaryOp::Ge => binary_expr(
+            coerce_value_expr(left, left_type, OptValueType::Real),
+            ">=",
+            coerce_value_expr(right, right_type, OptValueType::Real),
+        ),
         OptBinaryOp::And => format!(
             "({}&&{})",
             truth_expr(left, left_type),
@@ -3720,7 +3781,7 @@ fn coerce_value_expr(expr: String, source_type: OptValueType, target_type: OptVa
         (OptValueType::Real, OptValueType::Real)
         | (OptValueType::Boolean, OptValueType::Boolean) => expr,
         (OptValueType::Real, OptValueType::Boolean) => truth_expr(expr, OptValueType::Real),
-        (OptValueType::Boolean, OptValueType::Real) => format!("if {expr}{{1.0}}else{{0.0}}"),
+        (OptValueType::Boolean, OptValueType::Real) => format!("(if {expr}{{1.0}}else{{0.0}})"),
     }
 }
 
@@ -4912,4 +4973,51 @@ fn format_f64(value: f64) -> String {
 
 fn f64_method_receiver(value: &str) -> String {
     format!("({value})")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scalar_emitter_coerces_boolean_numeric_operands() {
+        assert_eq!(
+            coerce_value_expr(
+                "flag".to_string(),
+                OptValueType::Boolean,
+                OptValueType::Real,
+            ),
+            "(if flag{1.0}else{0.0})"
+        );
+        assert_eq!(
+            emit_binary_expr(
+                OptBinaryOp::Mul,
+                "flag".to_string(),
+                OptValueType::Boolean,
+                "x".to_string(),
+                OptValueType::Real,
+            ),
+            "((if flag{1.0}else{0.0})*x)"
+        );
+        assert_eq!(
+            emit_binary_expr(
+                OptBinaryOp::Lt,
+                "flag".to_string(),
+                OptValueType::Boolean,
+                "x".to_string(),
+                OptValueType::Real,
+            ),
+            "((if flag{1.0}else{0.0})<x)"
+        );
+        assert_eq!(
+            emit_unary_expr(
+                OptUnaryOp::Sqrt,
+                "flag".to_string(),
+                OptValueType::Boolean,
+                "1.0",
+                false,
+            ),
+            "((if flag{1.0}else{0.0})).sqrt()"
+        );
+    }
 }
