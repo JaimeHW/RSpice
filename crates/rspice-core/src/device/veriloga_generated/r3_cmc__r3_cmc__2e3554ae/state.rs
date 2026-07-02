@@ -759,7 +759,7 @@ impl Instance {
         self.scalar_static_bool[0]=(self.scalar_static_f64[27]>0.0);
         self.scalar_static_f64[28]=p.p8;
         self.scalar_static_bool[1]=(self.scalar_static_f64[28]>0.0);
-        self.scalar_static_f64[29]=(self.scalar_static_bool[0]+self.scalar_static_bool[1]);
+        self.scalar_static_f64[29]=((if self.scalar_static_bool[0]{1.0}else{0.0})+(if self.scalar_static_bool[1]{1.0}else{0.0}));
         self.scalar_static_f64[30]=(self.scalar_static_f64[15]*self.scalar_static_f64[29]);
         self.scalar_static_f64[31]=(self.scalar_static_f64[26]+self.scalar_static_f64[30]);
         self.scalar_static_f64[32]=(self.scalar_static_f64[29]*0.5);

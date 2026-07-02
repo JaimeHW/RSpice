@@ -2394,6 +2394,24 @@ impl Instance {
             13,
             multiplicity * (eq48_e627_d_n13),
         );
+        let (eq51_e647, eq51_e647_d_n0, eq51_e647_d_n2, eq51_e647_d_n6, eq51_e647_d_n7, eq51_e647_d_n10, eq51_e647_d_n11, eq51_e647_d_n12, eq51_e647_d_n17,) = {
+    if ((locals.var_guard1227 != 0.0) && (locals.var_guard1228 != 0.0)) {
+        (locals.var_iqh_nqs, locals.var_iqh_nqs_dn0, locals.var_iqh_nqs_dn2, locals.var_iqh_nqs_dn6, locals.var_iqh_nqs_dn7, locals.var_iqh_nqs_dn10, locals.var_iqh_nqs_dn11, locals.var_iqh_nqs_dn12, locals.var_iqh_nqs_dn17,)
+    } else {
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+    }
+};
+        let eq51_value: f64 = eq51_e647;
+        stamper.stamp_current_sparse_local::<8, 0>(
+            Some(17),
+            None,
+            multiplicity * (eq51_value),
+            [0, 2, 6, 7, 10, 11, 12, 17],
+            [multiplicity * (eq51_e647_d_n0), multiplicity * (eq51_e647_d_n2), multiplicity * (eq51_e647_d_n6), multiplicity * (eq51_e647_d_n7), multiplicity * (eq51_e647_d_n10), multiplicity * (eq51_e647_d_n11), multiplicity * (eq51_e647_d_n12), multiplicity * (eq51_e647_d_n17)],
+            [],
+            [],
+            1.0,
+        );
         let (eq53_e666, eq53_e666_d_n17,) = {
     if ((locals.var_guard1227 != 0.0) && (locals.var_guard1228 != 0.0)) {
         let eq53_e661: f64 = (1e-9 / 0.0001);
@@ -2480,6 +2498,24 @@ impl Instance {
             multiplicity * (eq56_value),
             [0, 2, 6, 7, 10, 11, 12, 17],
             [multiplicity * (eq56_e691_d_n0), multiplicity * (eq56_e691_d_n2), multiplicity * (eq56_e691_d_n6), multiplicity * (eq56_e691_d_n7), multiplicity * (eq56_e691_d_n10), multiplicity * (eq56_e691_d_n11), multiplicity * (eq56_e691_d_n12), multiplicity * (eq56_e691_d_n17)],
+            [],
+            [],
+            1.0,
+        );
+        let (eq58_e703, eq58_e703_d_n0, eq58_e703_d_n2, eq58_e703_d_n6, eq58_e703_d_n7, eq58_e703_d_n10, eq58_e703_d_n11, eq58_e703_d_n12, eq58_e703_d_n17,) = {
+    if ((locals.var_guard1227 == 0.0) && (p.p37 != 0.0)) {
+        (locals.var_iqh_nqs, locals.var_iqh_nqs_dn0, locals.var_iqh_nqs_dn2, locals.var_iqh_nqs_dn6, locals.var_iqh_nqs_dn7, locals.var_iqh_nqs_dn10, locals.var_iqh_nqs_dn11, locals.var_iqh_nqs_dn12, locals.var_iqh_nqs_dn17,)
+    } else {
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
+    }
+};
+        let eq58_value: f64 = eq58_e703;
+        stamper.stamp_current_sparse_local::<8, 0>(
+            Some(17),
+            None,
+            multiplicity * (eq58_value),
+            [0, 2, 6, 7, 10, 11, 12, 17],
+            [multiplicity * (eq58_e703_d_n0), multiplicity * (eq58_e703_d_n2), multiplicity * (eq58_e703_d_n6), multiplicity * (eq58_e703_d_n7), multiplicity * (eq58_e703_d_n10), multiplicity * (eq58_e703_d_n11), multiplicity * (eq58_e703_d_n12), multiplicity * (eq58_e703_d_n17)],
             [],
             [],
             1.0,
