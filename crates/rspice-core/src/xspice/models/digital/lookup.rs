@@ -218,42 +218,42 @@ fn d_genlut_expand_param_values(
     width: usize,
     default: Value,
     clamp_delay: bool,
-) -> Arc<[Value]> {
+) -> CmResult<Arc<[Value]>> {
     let values = ctx.real_vector_param(name).unwrap_or(&[]);
     let fallback = values.last().copied().unwrap_or(default);
-    (0..width)
+    let expanded = (0..width)
         .map(|index| {
             let value = values.get(index).copied().unwrap_or(fallback);
             if clamp_delay {
-                d_lookup_delay(value)
+                d_lookup_delay(name, value)
             } else {
-                value
+                d_lookup_finite_delay(name, value)
             }
         })
-        .collect::<Vec<_>>()
-        .into()
+        .collect::<CmResult<Vec<_>>>()?;
+    Ok(expanded.into())
 }
 
 fn d_genlut_delay_plan(
     ctx: &mut CmContext,
     input_width: usize,
     output_width: usize,
-) -> Arc<DGenlutDelayPlan> {
+) -> CmResult<Arc<DGenlutDelayPlan>> {
     let signature = d_genlut_delay_signature(ctx, input_width, output_width);
     if let Some(resource) = ctx.resource::<DGenlutDelayPlan>(D_GENLUT_DELAY_PLAN_RESOURCE)
         && resource.signature == signature
     {
-        return resource;
+        return Ok(resource);
     }
 
     let plan = Arc::new(DGenlutDelayPlan {
         signature,
-        rise_delays: d_genlut_expand_param_values(ctx, "rise_delay", output_width, 1.0e-9, true),
-        fall_delays: d_genlut_expand_param_values(ctx, "fall_delay", output_width, 1.0e-9, true),
-        input_delays: d_genlut_expand_param_values(ctx, "input_delay", input_width, 0.0, false),
+        rise_delays: d_genlut_expand_param_values(ctx, "rise_delay", output_width, 1.0e-9, true)?,
+        fall_delays: d_genlut_expand_param_values(ctx, "fall_delay", output_width, 1.0e-9, true)?,
+        input_delays: d_genlut_expand_param_values(ctx, "input_delay", input_width, 0.0, false)?,
     });
     ctx.set_resource(D_GENLUT_DELAY_PLAN_RESOURCE, Arc::clone(&plan));
-    plan
+    Ok(plan)
 }
 
 fn d_lut_table_state(table: &[u8], index: usize) -> DigitalState {
@@ -334,8 +334,22 @@ fn d_genlut_param_value(ctx: &CmContext, name: &str, index: usize, default: Valu
     }
 }
 
-fn d_lookup_delay(value: Value) -> Value {
-    value.max(D_LOOKUP_DELAY_MIN)
+fn d_lookup_finite_delay(name: &str, value: Value) -> CmResult<Value> {
+    if !value.is_finite() {
+        return Err(CmError::InvalidParameter {
+            name: name.to_string(),
+            message: format!("delay must be finite, got {value}"),
+        });
+    }
+    Ok(value)
+}
+
+fn d_lookup_delay(name: &str, value: Value) -> CmResult<Value> {
+    d_lookup_finite_delay(name, value).map(|value| value.max(D_LOOKUP_DELAY_MIN))
+}
+
+fn d_lookup_param_delay(ctx: &CmContext, name: &str) -> CmResult<Value> {
+    d_lookup_delay(name, ctx.param(name))
 }
 
 fn d_genlut_output_delay(
@@ -413,9 +427,15 @@ fn d_genlut_scan_inputs(
     inputs: &[DigitalValue],
     input_width: usize,
     input_start: usize,
-) -> DGenlutInputScan {
-    let input_delays = d_genlut_expand_param_values(ctx, "input_delay", input_width, 0.0, false);
-    d_genlut_scan_inputs_with_delays(ctx, inputs, input_width, input_start, &input_delays)
+) -> CmResult<DGenlutInputScan> {
+    let input_delays = d_genlut_expand_param_values(ctx, "input_delay", input_width, 0.0, false)?;
+    Ok(d_genlut_scan_inputs_with_delays(
+        ctx,
+        inputs,
+        input_width,
+        input_start,
+        &input_delays,
+    ))
 }
 
 fn d_genlut_scan_inputs_with_delays(
@@ -565,8 +585,8 @@ impl CodeModel for DigitalLookupTable {
                 ctx,
                 output_code,
                 previous_code,
-                d_lookup_delay(ctx.param("rise_delay")),
-                d_lookup_delay(ctx.param("fall_delay")),
+                d_lookup_param_delay(ctx, "rise_delay")?,
+                d_lookup_param_delay(ctx, "fall_delay")?,
             );
             ctx.set_output_digital(
                 "out",
@@ -644,7 +664,7 @@ impl CodeModel for DigitalGenericLookupTable {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let (input_width, output_width) = d_genlut_shape(ctx)?;
         let table = d_genlut_table_values(ctx, input_width, output_width)?;
-        let delay_plan = d_genlut_delay_plan(ctx, input_width, output_width);
+        let delay_plan = d_genlut_delay_plan(ctx, input_width, output_width)?;
         let input_start = d_genlut_previous_input_start(input_width, output_width);
         let state_start = d_genlut_previous_state_start(input_width, output_width);
         let strength_start = d_genlut_previous_strength_start(input_width, output_width);
@@ -765,6 +785,52 @@ mod tests {
             assert_eq!(port.vector_min_len, *min_len, "{} min length", port.name);
             assert_eq!(port.vector_max_len, *max_len, "{} max length", port.name);
         }
+    }
+
+    fn assert_invalid_param(result: CmResult<()>, expected_name: &str) {
+        match result {
+            Err(CmError::InvalidParameter { name, .. }) => assert_eq!(name, expected_name),
+            other => panic!("expected InvalidParameter for {expected_name}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lookup_models_reject_nonfinite_delay_params() {
+        let mut lut_ctx = CmContext::new();
+        lut_ctx.set_port_width("in", 1);
+        lut_ctx.set_string_param("table_values", "01");
+        lut_ctx.set_param("rise_delay", f64::INFINITY);
+        lut_ctx.set_input("in", InputValue::DigitalVector(vec![DigitalValue::one()]));
+        DigitalLookupTable.init(&mut lut_ctx).expect("d_lut init");
+        assert_invalid_param(DigitalLookupTable.evaluate(&mut lut_ctx), "rise_delay");
+
+        let mut genlut_rise_ctx = CmContext::new();
+        genlut_rise_ctx.set_port_width("in", 1);
+        genlut_rise_ctx.set_port_width("out", 1);
+        genlut_rise_ctx.set_string_param("table_values", "01");
+        genlut_rise_ctx.set_real_vector_param("rise_delay", vec![f64::NAN]);
+        genlut_rise_ctx.set_input("in", InputValue::DigitalVector(vec![DigitalValue::one()]));
+        DigitalGenericLookupTable
+            .init(&mut genlut_rise_ctx)
+            .expect("d_genlut init");
+        assert_invalid_param(
+            DigitalGenericLookupTable.evaluate(&mut genlut_rise_ctx),
+            "rise_delay",
+        );
+
+        let mut genlut_input_ctx = CmContext::new();
+        genlut_input_ctx.set_port_width("in", 1);
+        genlut_input_ctx.set_port_width("out", 1);
+        genlut_input_ctx.set_string_param("table_values", "01");
+        genlut_input_ctx.set_real_vector_param("input_delay", vec![f64::INFINITY]);
+        genlut_input_ctx.set_input("in", InputValue::DigitalVector(vec![DigitalValue::one()]));
+        DigitalGenericLookupTable
+            .init(&mut genlut_input_ctx)
+            .expect("d_genlut init");
+        assert_invalid_param(
+            DigitalGenericLookupTable.evaluate(&mut genlut_input_ctx),
+            "input_delay",
+        );
     }
 
     #[test]
@@ -957,7 +1023,7 @@ mod tests {
             DigitalValue::unknown(),
             DigitalValue::zero(),
         ];
-        let scan = d_genlut_scan_inputs(&ctx, &inputs, 4, 0);
+        let scan = d_genlut_scan_inputs(&ctx, &inputs, 4, 0).expect("input scan");
 
         assert_eq!(scan.index, None);
         assert_eq!(scan.one_bits, 0b0001);
