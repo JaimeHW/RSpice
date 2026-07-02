@@ -1,4 +1,5 @@
-use rspice_core::engine::Engine;
+use rspice_core::analysis::IntegrationMethod;
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
 #[test]
@@ -36,6 +37,69 @@ r2 mid 0 1k
             "R2 current should be positive from MID to ground, got {i_r2}"
         );
     }
+}
+
+#[test]
+fn transient_records_linear_capacitor_branch_current_waveforms() {
+    let deck = "\
+* linear capacitor transient branch currents
+v1 supply 0 dc 0
+r1 n supply 1k
+c1 n 0 1u ic=1
+.options timeint method=trap
+.tran 1u 5u
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::default()
+        .run_tran(&netlist, 5.0e-6, 1.0e-6)
+        .expect("transient solves");
+
+    let v_n = result
+        .try_voltage_waveform_named("n")
+        .expect("node N waveform exists");
+    let c1 = result
+        .try_branch_current_waveform_named("c1")
+        .expect("C1 branch current waveform exists");
+
+    assert_eq!(c1.len(), result.time.len());
+    for (&time, (&voltage, &current)) in result.time.iter().zip(v_n.iter().zip(c1.iter())) {
+        let expected_kcl_current = -voltage / 1000.0;
+        assert!(
+            (current - expected_kcl_current).abs() < 1.0e-10,
+            "C1 current should satisfy KCL from N to ground, got {current} expected {expected_kcl_current} at {time}"
+        );
+    }
+}
+
+#[test]
+fn transient_records_linear_capacitor_ic_startup_branch_current() {
+    let deck = "\
+* linear capacitor IC startup branch current
+v1 supply 0 dc 0
+r1 n supply 1k
+c1 n 0 40u ic=1
+.options timeint method=trap
+.tran 0.5u 1u
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::Trapezoidal,
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 1.0e-6, 0.5e-6)
+    .expect("transient solves");
+
+    let c1 = result
+        .try_branch_current_waveform_named("c1")
+        .expect("C1 branch current waveform exists");
+    assert!(
+        (c1[0] + 1.0e-3).abs() < 1.0e-8,
+        "C1 initial branch current should balance the IC discharge path, got {}",
+        c1[0]
+    );
 }
 
 #[test]

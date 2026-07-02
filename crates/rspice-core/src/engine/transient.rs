@@ -62,6 +62,7 @@ struct DerivedTransientBranchCurrent {
 #[derive(Debug, Clone, Copy)]
 enum DerivedTransientBranchCurrentKind {
     LinearResistor,
+    LinearCapacitor,
     BehavioralCurrentSource,
 }
 
@@ -80,6 +81,21 @@ impl Engine {
             }
             derived.push(DerivedTransientBranchCurrent {
                 kind: DerivedTransientBranchCurrentKind::LinearResistor,
+                index,
+            });
+        }
+        for (index, name) in circuit.capacitors.names.iter().enumerate() {
+            if existing_branch_names
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(name))
+                || derived.iter().any(|&branch| {
+                    Self::derived_transient_branch_name(circuit, branch).eq_ignore_ascii_case(name)
+                })
+            {
+                continue;
+            }
+            derived.push(DerivedTransientBranchCurrent {
+                kind: DerivedTransientBranchCurrentKind::LinearCapacitor,
                 index,
             });
         }
@@ -115,6 +131,9 @@ impl Engine {
             DerivedTransientBranchCurrentKind::LinearResistor => {
                 circuit.resistors.names[branch.index].clone()
             }
+            DerivedTransientBranchCurrentKind::LinearCapacitor => {
+                circuit.capacitors.names[branch.index].clone()
+            }
             DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
                 circuit.behavioral_sources.current_sources[branch.index]
                     .name
@@ -143,6 +162,9 @@ impl Engine {
                     solution.get(stamp.nn.row - 1).copied().unwrap_or(0.0)
                 };
                 (v_pos - v_neg) * circuit.resistors.conductances[branch.index]
+            }
+            DerivedTransientBranchCurrentKind::LinearCapacitor => {
+                circuit.capacitors.i_prev[branch.index]
             }
             DerivedTransientBranchCurrentKind::BehavioralCurrentSource => {
                 circuit.behavioral_sources.current_sources[branch.index].evaluate(solution, time)
@@ -197,6 +219,35 @@ impl Engine {
             currents.push(Self::derived_transient_branch_current(
                 circuit, solution, time, *branch,
             ));
+        }
+    }
+
+    fn backfill_initial_linear_capacitor_branch_currents(
+        result: &mut TransientResult,
+        circuit: &crate::circuit::CircuitData,
+        derived_branches: &[DerivedTransientBranchCurrent],
+    ) {
+        if result.time.len() != 1 {
+            return;
+        }
+
+        let solved_branch_count = circuit.num_branches();
+        for (derived_index, branch) in derived_branches.iter().enumerate() {
+            if !matches!(
+                branch.kind,
+                DerivedTransientBranchCurrentKind::LinearCapacitor
+            ) || circuit.capacitors.ic[branch.index].is_none()
+            {
+                continue;
+            }
+            let Some(initial_current) = result
+                .branch_currents
+                .get_mut(solved_branch_count + derived_index)
+                .and_then(|waveform| waveform.first_mut())
+            else {
+                continue;
+            };
+            *initial_current = circuit.capacitors.i_prev[branch.index];
         }
     }
 
@@ -2177,6 +2228,11 @@ impl Engine {
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
                         log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
                     }
+                    Self::backfill_initial_linear_capacitor_branch_currents(
+                        &mut result,
+                        &circuit,
+                        &derived_branch_currents,
+                    );
                     Self::record_transient_solution_sample(
                         &mut result,
                         &mut circuit,
@@ -2963,6 +3019,11 @@ impl Engine {
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
                         log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
                     }
+                    Self::backfill_initial_linear_capacitor_branch_currents(
+                        &mut result,
+                        &circuit,
+                        &derived_branch_currents,
+                    );
                     Self::record_transient_solution_sample(
                         &mut result,
                         &mut circuit,
@@ -3185,6 +3246,11 @@ impl Engine {
             }
 
             // Store results
+            Self::backfill_initial_linear_capacitor_branch_currents(
+                &mut result,
+                &circuit,
+                &derived_branch_currents,
+            );
             Self::record_transient_solution_sample(
                 &mut result,
                 &mut circuit,
