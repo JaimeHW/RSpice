@@ -2229,15 +2229,22 @@ fn oneshot_table_optional_uncached(ctx: &CmContext) -> CmResult<Option<Vec<OneSh
         .real_vector_param("pw_array")
         .ok_or_else(|| CmError::MissingParameter("pw_array".to_string()))?;
 
-    if controls.len() != widths.len() {
-        return Ok(None);
-    }
     if controls.len() < 2 {
         return Err(oneshot_invalid_param(
             "cntl_array",
             format!(
                 "cntl_array and pw_array require at least 2 points, got {}",
                 controls.len()
+            ),
+        ));
+    }
+    if controls.len() != widths.len() {
+        return Err(oneshot_invalid_param(
+            "cntl_array/pw_array",
+            format!(
+                "cntl_array length must match pw_array length, got {}/{}",
+                controls.len(),
+                widths.len()
             ),
         ));
     }
@@ -3268,17 +3275,18 @@ mod tests {
     }
 
     #[test]
-    fn oneshot_ignores_mismatched_control_tables_like_ngspice() {
+    fn oneshot_rejects_mismatched_control_tables() {
         let mut ctx = mismatched_oneshot_context();
 
-        AnalogOneShot
+        let err = AnalogOneShot
             .init(&mut ctx)
-            .expect("ngspice reports mismatched oneshot tables but does not fail init");
-        AnalogOneShot
-            .evaluate(&mut ctx)
-            .expect("ngspice returns without fatal error on mismatched oneshot tables");
+            .expect_err("oneshot must reject mismatched control tables");
+        let message = err.to_string();
 
-        assert_eq!(ctx.output("out"), 0.0);
+        assert!(
+            message.contains("cntl_array length must match pw_array length"),
+            "oneshot error should explain mismatched table lengths, got {message}"
+        );
     }
 
     #[test]
