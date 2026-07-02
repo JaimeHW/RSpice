@@ -403,17 +403,17 @@ fn transformed_rows_signature(
     file: &str,
     width: usize,
     virtual_stamp: Option<data_file::DataFileStamp>,
-) -> FileSourceTransformedRowsSignature {
-    FileSourceTransformedRowsSignature {
+) -> CmResult<FileSourceTransformedRowsSignature> {
+    Ok(FileSourceTransformedRowsSignature {
         file: file.to_string(),
         width,
         virtual_stamp,
         timeoffset: ctx.param("timeoffset"),
         timescale: ctx.param("timescale"),
-        timerelative: bool_param(ctx, "timerelative"),
+        timerelative: bool_param(ctx, "timerelative")?,
         amploffset_revision: ctx.real_vector_param_revision("amploffset"),
         amplscale_revision: ctx.real_vector_param_revision("amplscale"),
-    }
+    })
 }
 
 fn transformed_rows_signature_matches(
@@ -422,15 +422,15 @@ fn transformed_rows_signature_matches(
     file: &str,
     width: usize,
     virtual_stamp: Option<data_file::DataFileStamp>,
-) -> bool {
-    signature.file == file
+) -> CmResult<bool> {
+    Ok(signature.file == file
         && signature.width == width
         && signature.virtual_stamp == virtual_stamp
         && signature.timeoffset == ctx.param("timeoffset")
         && signature.timescale == ctx.param("timescale")
-        && signature.timerelative == bool_param(ctx, "timerelative")
+        && signature.timerelative == bool_param(ctx, "timerelative")?
         && ctx.real_vector_param_revision("amploffset") == signature.amploffset_revision
-        && ctx.real_vector_param_revision("amplscale") == signature.amplscale_revision
+        && ctx.real_vector_param_revision("amplscale") == signature.amplscale_revision)
 }
 
 fn transformed_rows_for_context(
@@ -441,12 +441,12 @@ fn transformed_rows_for_context(
     let (raw_fields, virtual_stamp) = load_filesource_for_context(ctx, file, width)?;
     if let Some(resource) =
         ctx.resource::<FileSourceTransformedRowsResource>(FILESOURCE_TRANSFORMED_ROWS_RESOURCE)
-        && transformed_rows_signature_matches(ctx, &resource.signature, file, width, virtual_stamp)
+        && transformed_rows_signature_matches(ctx, &resource.signature, file, width, virtual_stamp)?
     {
         return resource.rows.clone();
     }
 
-    let signature = transformed_rows_signature(ctx, file, width, virtual_stamp);
+    let signature = transformed_rows_signature(ctx, file, width, virtual_stamp)?;
     let rows = transform_rows(ctx, &raw_fields, width).map(Arc::new);
     ctx.set_resource(
         FILESOURCE_TRANSFORMED_ROWS_RESOURCE,
@@ -466,7 +466,7 @@ fn transformed_rows_from_context(
     let (raw_fields, virtual_stamp) = load_filesource_from_context(ctx, file, width)?;
     if let Some(resource) =
         ctx.resource::<FileSourceTransformedRowsResource>(FILESOURCE_TRANSFORMED_ROWS_RESOURCE)
-        && transformed_rows_signature_matches(ctx, &resource.signature, file, width, virtual_stamp)
+        && transformed_rows_signature_matches(ctx, &resource.signature, file, width, virtual_stamp)?
     {
         return resource.rows.clone();
     }
@@ -485,8 +485,15 @@ fn finite_param(ctx: &CmContext, name: &str) -> CmResult<Value> {
     Ok(value)
 }
 
-fn bool_param(ctx: &CmContext, name: &str) -> bool {
-    ctx.param(name) != 0.0
+fn bool_param(ctx: &CmContext, name: &str) -> CmResult<bool> {
+    let value = ctx.param(name);
+    if !value.is_finite() {
+        return Err(invalid_filesource_param(
+            name,
+            format!("value must be finite, got {value}"),
+        ));
+    }
+    Ok(value != 0.0)
 }
 
 fn vector_transform_param<'a>(ctx: &'a CmContext, name: &str) -> CmResult<&'a [Value]> {
@@ -509,7 +516,7 @@ fn transform_rows(
 ) -> CmResult<FileSourceRowsData> {
     let timeoffset = finite_param(ctx, "timeoffset")?;
     let timescale = finite_param(ctx, "timescale")?;
-    let timerelative = bool_param(ctx, "timerelative");
+    let timerelative = bool_param(ctx, "timerelative")?;
     let amplscale = vector_transform_param(ctx, "amplscale")?;
     let amploffset = vector_transform_param(ctx, "amploffset")?;
 
@@ -659,7 +666,7 @@ fn set_filesource_output_from_row(ctx: &mut CmContext, data: &FileSourceRowsData
     ctx.set_output_vector_from_slice("out", values);
 }
 
-fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
+fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData, step_mode: bool) {
     let rows = data.rows.as_slice();
 
     let first = &rows[0];
@@ -677,7 +684,6 @@ fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
         return;
     }
 
-    let step_mode = bool_param(ctx, "amplstep");
     let lower = locate_filesource_interval(ctx, data);
     if data.strictly_increasing_time {
         let next = lower + 1;
@@ -720,9 +726,10 @@ fn evaluate_rows_into_output(ctx: &mut CmContext, data: &FileSourceRowsData) {
 }
 
 #[cfg(test)]
-fn evaluate_rows(ctx: &mut CmContext, data: &FileSourceRowsData) -> Vec<Value> {
-    evaluate_rows_into_output(ctx, data);
-    ctx.output_vector("out")
+fn evaluate_rows(ctx: &mut CmContext, data: &FileSourceRowsData) -> CmResult<Vec<Value>> {
+    let step_mode = bool_param(ctx, "amplstep")?;
+    evaluate_rows_into_output(ctx, data, step_mode);
+    Ok(ctx.output_vector("out"))
 }
 
 fn filesource_ports() -> &'static [PortSpec] {
@@ -794,6 +801,7 @@ impl CodeModel for FileSource {
             .unwrap_or("filesource.txt")
             .to_string();
         let rows = transformed_rows_for_context(ctx, &file, width)?;
+        bool_param(ctx, "amplstep")?;
         ctx.allocate_int_states(1);
         ctx.set_int_state(FILESOURCE_ROW_CURSOR_STATE, 0);
         set_filesource_output_from_row(ctx, &rows, 0);
@@ -811,7 +819,8 @@ impl CodeModel for FileSource {
             .unwrap_or("filesource.txt")
             .to_string();
         let rows = transformed_rows_for_context(ctx, &file, width)?;
-        evaluate_rows_into_output(ctx, &rows);
+        let step_mode = bool_param(ctx, "amplstep")?;
+        evaluate_rows_into_output(ctx, &rows, step_mode);
         Ok(())
     }
 
@@ -891,6 +900,18 @@ mod tests {
         )
     }
 
+    fn filesource_context(file: &str) -> CmContext {
+        let mut ctx = CmContext::new();
+        ctx.analysis = AnalysisType::Transient;
+        ctx.set_port_width("out", 1);
+        ctx.set_string_param("file", file);
+        ctx.set_param("timeoffset", 0.0);
+        ctx.set_param("timescale", 1.0);
+        ctx.set_param("timerelative", 0.0);
+        ctx.set_param("amplstep", 0.0);
+        ctx
+    }
+
     fn poison_filesource_cache_lock() {
         let result = std::panic::catch_unwind(|| {
             let _guard = lock_filesource_cache();
@@ -926,6 +947,46 @@ mod tests {
     }
 
     #[test]
+    fn filesource_rejects_nonfinite_boolean_params() {
+        let _guard = data_file_test_guard();
+        let file = "virtual://filesource/nonfinite-bool-params";
+        let _ = data_file::unregister_data_file(file);
+        data_file::register_data_file(file, "0 1\n1e-9 2\n").expect("register filesource data");
+
+        for (param, value) in [("timerelative", f64::NAN), ("amplstep", f64::INFINITY)] {
+            let mut ctx = filesource_context(file);
+            ctx.set_param(param, value);
+
+            let err = FileSource
+                .init(&mut ctx)
+                .expect_err("filesource must reject nonfinite boolean params during init");
+            assert!(
+                matches!(&err, CmError::InvalidParameter { .. }),
+                "filesource {param} produced {err:?}"
+            );
+            assert!(
+                err.to_string().contains(param),
+                "filesource error should name rejected parameter {param}: {err}"
+            );
+        }
+
+        let mut ctx = filesource_context(file);
+        FileSource.init(&mut ctx).expect("filesource initializes");
+        ctx.set_param("amplstep", f64::NAN);
+        FileSource
+            .evaluate(&mut ctx)
+            .expect_err("mutated nonfinite amplstep must fail during evaluation");
+
+        let mut ctx = filesource_context(file);
+        ctx.set_param("timerelative", f64::INFINITY);
+        FileSource
+            .transient_breakpoints(&ctx)
+            .expect_err("nonfinite timerelative must fail during breakpoint generation");
+
+        let _ = data_file::unregister_data_file(file);
+    }
+
+    #[test]
     fn filesource_interval_cursor_advances_and_rolls_back_like_ngspice_pointer() {
         let rows = single_value_rows(&[(0.0, 0.0), (1.0e-9, 1.0), (2.0e-9, 2.0)]);
         let mut ctx = CmContext::new();
@@ -933,12 +994,12 @@ mod tests {
         ctx.allocate_int_states(1);
 
         ctx.time = 1.5e-9;
-        let mid = evaluate_rows(&mut ctx, &rows);
+        let mid = evaluate_rows(&mut ctx, &rows).expect("filesource rows evaluate");
         assert!((mid[0] - 1.5).abs() < 1.0e-12);
         assert_eq!(ctx.int_state(FILESOURCE_ROW_CURSOR_STATE), 1);
 
         ctx.time = 0.5e-9;
-        let back = evaluate_rows(&mut ctx, &rows);
+        let back = evaluate_rows(&mut ctx, &rows).expect("filesource rows evaluate");
         assert!((back[0] - 0.5).abs() < 1.0e-12);
         assert_eq!(ctx.int_state(FILESOURCE_ROW_CURSOR_STATE), 0);
     }
@@ -953,12 +1014,12 @@ mod tests {
         ctx.set_output_vector("out", vec![10.0]);
 
         ctx.time = 0.5e-9;
-        evaluate_rows_into_output(&mut ctx, &rows);
+        evaluate_rows_into_output(&mut ctx, &rows, false);
         assert_eq!(ctx.output_vector("out"), vec![1.0]);
         assert_eq!(ctx.output_vector_prev("out"), vec![10.0]);
 
         ctx.time = 1.5e-9;
-        evaluate_rows_into_output(&mut ctx, &rows);
+        evaluate_rows_into_output(&mut ctx, &rows, false);
         assert_eq!(ctx.output_vector("out"), vec![3.0]);
         assert_eq!(ctx.output_vector_prev("out"), vec![1.0]);
     }
@@ -972,7 +1033,7 @@ mod tests {
         ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
 
         ctx.time = 0.5e-9;
-        let out = evaluate_rows(&mut ctx, &rows);
+        let out = evaluate_rows(&mut ctx, &rows).expect("filesource rows evaluate");
         assert_eq!(out, vec![0.5]);
         assert_eq!(ctx.int_state(FILESOURCE_ROW_CURSOR_STATE), 0);
         assert!(
@@ -1034,7 +1095,7 @@ mod tests {
         ctx.set_param("amplstep", 1.0);
         ctx.time = 1.0e-9;
 
-        let out = evaluate_rows(&mut ctx, &rows);
+        let out = evaluate_rows(&mut ctx, &rows).expect("filesource rows evaluate");
         assert_eq!(out, vec![0.0]);
         assert_eq!(ctx.int_state(FILESOURCE_ROW_CURSOR_STATE), 0);
         assert_eq!(
