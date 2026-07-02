@@ -1943,6 +1943,24 @@ impl CmContext {
             .and_then(|resource| resource.downcast_mut::<T>())
     }
 
+    /// Fetch a typed host resource mutably, cloning it first if shared.
+    pub fn resource_make_mut<T>(&mut self, key: &str) -> Option<&mut T>
+    where
+        T: Any + Send + Sync + Clone + 'static,
+    {
+        let resource = self.resources.values.get_mut(key)?;
+        if Arc::strong_count(resource) == 1 {
+            return Arc::get_mut(resource).and_then(|resource| resource.downcast_mut::<T>());
+        }
+
+        let cloned = Arc::clone(resource)
+            .downcast::<T>()
+            .ok()
+            .map(|typed| (*typed).clone())?;
+        *resource = Arc::new(cloned);
+        Arc::get_mut(resource).and_then(|resource| resource.downcast_mut::<T>())
+    }
+
     //-------------------------------------------------------------------------
     // State Variable Access
     //-------------------------------------------------------------------------

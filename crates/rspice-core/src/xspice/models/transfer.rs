@@ -1167,17 +1167,17 @@ fn with_s_xfer_transient_scratch<R>(
     ensure_s_xfer_transient_scratch(ctx);
     let mut scratch = {
         let scratch = ctx
-            .resource_mut::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+            .resource_make_mut::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
             .ok_or_else(|| {
-                s_xfer_error("transient scratch is not initialized or is not uniquely owned")
+                s_xfer_error("transient scratch is not initialized or has an unexpected type")
             })?;
         std::mem::take(scratch)
     };
     let result = f(ctx, &mut scratch);
     let restore = ctx
-        .resource_mut::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
+        .resource_make_mut::<SXferTransientScratchResource>(SXFER_TRANSIENT_SCRATCH_RESOURCE)
         .ok_or_else(|| {
-            s_xfer_error("transient scratch is not initialized or is not uniquely owned")
+            s_xfer_error("transient scratch is not initialized or has an unexpected type")
         })
         .map(|slot| {
             *slot = scratch;

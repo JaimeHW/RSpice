@@ -670,7 +670,7 @@ impl CodeModel for DigitalRam {
             if ctx.evaluation_phase() == EvaluationPhase::RollbackableProbe {
                 let mut scratch = {
                     let scratch = ctx
-                        .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+                        .resource_make_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
                         .ok_or_else(|| d_ram_error("scratch state is not initialized"))?;
                     std::mem::take(scratch)
                 };
@@ -688,7 +688,7 @@ impl CodeModel for DigitalRam {
                     )
                 });
                 let restore = ctx
-                    .resource_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
+                    .resource_make_mut::<DRamScratchStateResource>(D_RAM_SCRATCH_STATE_RESOURCE)
                     .ok_or_else(|| d_ram_error("scratch state is not initialized"))
                     .map(|scratch_slot| {
                         *scratch_slot = scratch;
