@@ -390,6 +390,240 @@ impl Engine {
         }
     }
 
+    #[inline]
+    fn stamp_xspice_ac_voltage_branch_topology(
+        circuit: &CircuitData,
+        ac_matrix: &mut ComplexMatrix,
+        branch_ordinal: usize,
+        pos: usize,
+        neg: usize,
+    ) {
+        Self::stamp_xspice_ac_current_probe(circuit, ac_matrix, pos, neg, branch_ordinal);
+    }
+
+    #[inline]
+    fn xspice_ac_current_output_self_conductance(
+        port: &crate::xspice::PortSpec,
+        conductance: Value,
+    ) -> Value {
+        match port.default_type {
+            crate::xspice::PortType::Current
+            | crate::xspice::PortType::DifferentialCurrent
+            | crate::xspice::PortType::Conductance
+            | crate::xspice::PortType::DifferentialConductance => conductance,
+            _ => 0.0,
+        }
+    }
+
+    #[inline]
+    fn stamp_xspice_ac_current_self_conductance(
+        ac_matrix: &mut ComplexMatrix,
+        pos: usize,
+        neg: usize,
+        conductance: Value,
+    ) {
+        if !conductance.is_finite() || conductance == 0.0 {
+            return;
+        }
+        if pos > 0 {
+            ac_matrix.add_real(pos - 1, pos - 1, conductance);
+            if neg > 0 {
+                ac_matrix.add_real(pos - 1, neg - 1, -conductance);
+            }
+        }
+        if neg > 0 {
+            if pos > 0 {
+                ac_matrix.add_real(neg - 1, pos - 1, -conductance);
+            }
+            ac_matrix.add_real(neg - 1, neg - 1, conductance);
+        }
+    }
+
+    fn stamp_xspice_ac_vector_voltage_controls(
+        ac_matrix: &mut ComplexMatrix,
+        instance: &crate::xspice::XspiceInstance,
+        output_port: &str,
+        output_index: usize,
+        branch_row: usize,
+        frequency_hz: Value,
+        num_nodes: usize,
+    ) {
+        for (control_port, partial) in
+            instance.output_vector_input_ac_partials(output_port, output_index, frequency_hz)
+        {
+            if !Self::is_nonzero_finite_complex(partial) {
+                continue;
+            }
+            if let Some(control_connection) = instance.connection(&control_port) {
+                Self::stamp_xspice_ac_control_partial(
+                    ac_matrix,
+                    branch_row,
+                    control_connection,
+                    partial,
+                    -1.0,
+                    num_nodes,
+                );
+            }
+        }
+        for (control_port, index, partial) in
+            instance.output_vector_input_vector_ac_partials(output_port, output_index, frequency_hz)
+        {
+            if !Self::is_nonzero_finite_complex(partial) {
+                continue;
+            }
+            if let Some(control_connection) = instance.connection(&control_port) {
+                Self::stamp_xspice_ac_vector_control_partial(
+                    ac_matrix,
+                    branch_row,
+                    control_connection,
+                    index,
+                    partial,
+                    -1.0,
+                    num_nodes,
+                );
+            }
+        }
+    }
+
+    fn stamp_xspice_ac_vector_current_controls(
+        ac_matrix: &mut ComplexMatrix,
+        instance: &crate::xspice::XspiceInstance,
+        output_port: &str,
+        output_index: usize,
+        pos: usize,
+        neg: usize,
+        frequency_hz: Value,
+        num_nodes: usize,
+    ) {
+        for (control_port, partial) in
+            instance.output_vector_input_ac_partials(output_port, output_index, frequency_hz)
+        {
+            if !Self::is_nonzero_finite_complex(partial) {
+                continue;
+            }
+            let Some(control_connection) = instance.connection(&control_port) else {
+                continue;
+            };
+            if pos > 0 {
+                Self::stamp_xspice_ac_control_partial(
+                    ac_matrix,
+                    pos - 1,
+                    control_connection,
+                    partial,
+                    1.0,
+                    num_nodes,
+                );
+            }
+            if neg > 0 {
+                Self::stamp_xspice_ac_control_partial(
+                    ac_matrix,
+                    neg - 1,
+                    control_connection,
+                    partial,
+                    -1.0,
+                    num_nodes,
+                );
+            }
+        }
+        for (control_port, index, partial) in
+            instance.output_vector_input_vector_ac_partials(output_port, output_index, frequency_hz)
+        {
+            if !Self::is_nonzero_finite_complex(partial) {
+                continue;
+            }
+            let Some(control_connection) = instance.connection(&control_port) else {
+                continue;
+            };
+            if pos > 0 {
+                Self::stamp_xspice_ac_vector_control_partial(
+                    ac_matrix,
+                    pos - 1,
+                    control_connection,
+                    index,
+                    partial,
+                    1.0,
+                    num_nodes,
+                );
+            }
+            if neg > 0 {
+                Self::stamp_xspice_ac_vector_control_partial(
+                    ac_matrix,
+                    neg - 1,
+                    control_connection,
+                    index,
+                    partial,
+                    -1.0,
+                    num_nodes,
+                );
+            }
+        }
+    }
+
+    fn stamp_xspice_ac_vector_output_element(
+        circuit: &CircuitData,
+        ac_matrix: &mut ComplexMatrix,
+        instance: &crate::xspice::XspiceInstance,
+        port: &crate::xspice::PortSpec,
+        port_idx: usize,
+        output_index: usize,
+        pos: usize,
+        neg: usize,
+        frequency_hz: Value,
+        num_nodes: usize,
+    ) {
+        let (conductance, _) = instance.analog_vector_contribution_at(port_idx, output_index);
+        match port.default_type {
+            crate::xspice::PortType::Voltage | crate::xspice::PortType::DifferentialVoltage => {
+                let Some(branch_ordinal) =
+                    instance.branch_vector_output_ordinal(port_idx, output_index)
+                else {
+                    return;
+                };
+                Self::stamp_xspice_ac_voltage_branch_topology(
+                    circuit,
+                    ac_matrix,
+                    branch_ordinal,
+                    pos,
+                    neg,
+                );
+                let branch = circuit.get_branch_matrix_index(branch_ordinal);
+                Self::stamp_xspice_ac_vector_voltage_controls(
+                    ac_matrix,
+                    instance,
+                    &port.name,
+                    output_index,
+                    branch - 1,
+                    frequency_hz,
+                    num_nodes,
+                );
+            }
+            crate::xspice::PortType::Current
+            | crate::xspice::PortType::DifferentialCurrent
+            | crate::xspice::PortType::Conductance
+            | crate::xspice::PortType::DifferentialConductance => {
+                let self_conductance =
+                    Self::xspice_ac_current_output_self_conductance(port, conductance);
+                Self::stamp_xspice_ac_current_self_conductance(
+                    ac_matrix,
+                    pos,
+                    neg,
+                    self_conductance,
+                );
+                Self::stamp_xspice_ac_vector_current_controls(
+                    ac_matrix,
+                    instance,
+                    &port.name,
+                    output_index,
+                    pos,
+                    neg,
+                    frequency_hz,
+                    num_nodes,
+                );
+            }
+            _ => {}
+        }
+    }
+
     fn stamp_xspice_small_signal_ac(
         circuit: &CircuitData,
         ac_matrix: &mut ComplexMatrix,
@@ -412,7 +646,87 @@ impl Engine {
                     continue;
                 }
 
+                if instance.has_analog_vector_contributions(port_idx) {
+                    match connection {
+                        crate::xspice::PortConnection::AnalogVector(nodes) => {
+                            for (output_index, node) in nodes.iter().copied().enumerate() {
+                                Self::stamp_xspice_ac_vector_output_element(
+                                    circuit,
+                                    ac_matrix,
+                                    instance,
+                                    port,
+                                    port_idx,
+                                    output_index,
+                                    node,
+                                    0,
+                                    frequency_hz,
+                                    num_nodes,
+                                );
+                            }
+                        }
+                        crate::xspice::PortConnection::TypedAnalogVector(elements) => {
+                            for (output_index, element) in elements.iter().enumerate() {
+                                match element {
+                                    crate::xspice::AnalogInputConnection::Node(node) => {
+                                        Self::stamp_xspice_ac_vector_output_element(
+                                            circuit,
+                                            ac_matrix,
+                                            instance,
+                                            port,
+                                            port_idx,
+                                            output_index,
+                                            *node,
+                                            0,
+                                            frequency_hz,
+                                            num_nodes,
+                                        );
+                                    }
+                                    crate::xspice::AnalogInputConnection::Differential(
+                                        pos,
+                                        neg,
+                                    )
+                                    | crate::xspice::AnalogInputConnection::CurrentOutput {
+                                        pos,
+                                        neg,
+                                    }
+                                    | crate::xspice::AnalogInputConnection::Hybrid {
+                                        pos,
+                                        neg,
+                                        ..
+                                    } => {
+                                        Self::stamp_xspice_ac_vector_output_element(
+                                            circuit,
+                                            ac_matrix,
+                                            instance,
+                                            port,
+                                            port_idx,
+                                            output_index,
+                                            *pos,
+                                            *neg,
+                                            frequency_hz,
+                                            num_nodes,
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 if let crate::xspice::PortConnection::CurrentOutput { pos, neg } = connection {
+                    if let Some((conductance, _)) = instance.get_analog_contribution(port_idx) {
+                        let self_conductance =
+                            Self::xspice_ac_current_output_self_conductance(port, conductance);
+                        Self::stamp_xspice_ac_current_self_conductance(
+                            ac_matrix,
+                            *pos,
+                            *neg,
+                            self_conductance,
+                        );
+                    }
                     for (control_port, partial) in
                         instance.output_input_ac_partials(&port.name, frequency_hz)
                     {
@@ -547,6 +861,30 @@ impl Engine {
                     | crate::xspice::PortType::DifferentialCurrent
                     | crate::xspice::PortType::Conductance
                     | crate::xspice::PortType::DifferentialConductance => {
+                        if let Some((conductance, _)) = instance.get_analog_contribution(port_idx) {
+                            let self_conductance =
+                                Self::xspice_ac_current_output_self_conductance(port, conductance);
+                            match connection {
+                                crate::xspice::PortConnection::Analog(node) => {
+                                    Self::stamp_xspice_ac_current_self_conductance(
+                                        ac_matrix,
+                                        *node,
+                                        0,
+                                        self_conductance,
+                                    );
+                                }
+                                crate::xspice::PortConnection::Differential(pos, neg)
+                                | crate::xspice::PortConnection::CurrentOutput { pos, neg } => {
+                                    Self::stamp_xspice_ac_current_self_conductance(
+                                        ac_matrix,
+                                        *pos,
+                                        *neg,
+                                        self_conductance,
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
                         for (control_port, partial) in
                             instance.output_input_ac_partials(&port.name, frequency_hz)
                         {
