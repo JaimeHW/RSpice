@@ -1062,6 +1062,63 @@ fn find_xspice_auto_bridge_template_key<'a>(
         .find(|template| template.key.eq_ignore_ascii_case(key))
 }
 
+fn xspice_auto_bridge_standard_family_template(
+    bridge: &PlannedXspiceAutoBridge,
+    source_path: Option<&Path>,
+) -> Option<XspiceAutoBridgeTemplate> {
+    let family = bridge.family.as_deref()?.trim();
+    if family.is_empty() || family.starts_with('*') {
+        return None;
+    }
+
+    let type_name = xspice_auto_bridge_template_type_name(bridge.kind);
+    let direction = xspice_auto_bridge_template_direction(bridge.kind);
+    let include_file = format!("bridge_{family}_{type_name}_{direction}.subcir");
+    let include_path = Path::new(&include_file);
+    let include_exists = if include_path.is_absolute() {
+        include_path.exists()
+    } else if let Some(parent) = source_path.and_then(Path::parent) {
+        parent.join(include_path).exists()
+    } else {
+        include_path.exists()
+    };
+    if !include_exists {
+        return None;
+    }
+
+    let key = format!("auto_bridge_{family}_{type_name}_{direction}");
+    Some(XspiceAutoBridgeTemplate {
+        key,
+        setup_card: format!(".include {include_file}"),
+        device_card: format!("Xauto_bridge%d %s %s bridge_{family}_{type_name}_{direction} vcc=%g"),
+        max_nodes: Some(1),
+    })
+}
+
+fn xspice_auto_bridge_effective_templates(
+    templates: &[XspiceAutoBridgeTemplate],
+    bridges: &[PlannedXspiceAutoBridge],
+    source_path: Option<&Path>,
+    family_enabled: bool,
+) -> Vec<XspiceAutoBridgeTemplate> {
+    let mut effective_templates = templates.to_vec();
+    if !family_enabled {
+        return effective_templates;
+    }
+
+    let mut seen_standard_keys = BTreeSet::new();
+    for bridge in bridges {
+        let Some(template) = xspice_auto_bridge_standard_family_template(bridge, source_path)
+        else {
+            continue;
+        };
+        if seen_standard_keys.insert(template.key.to_ascii_uppercase()) {
+            effective_templates.push(template);
+        }
+    }
+    effective_templates
+}
+
 enum XspiceAutoBridgeFormatArg<'a> {
     Int(usize),
     Str(&'a str),
@@ -2061,6 +2118,9 @@ fn add_planned_xspice_auto_bridges(
     show_generated: bool,
 ) -> Result<(), SimulationError> {
     let node_names = show_generated.then(|| circuit.node_names_sorted());
+    let effective_templates =
+        xspice_auto_bridge_effective_templates(templates, bridges, source_path, family_enabled);
+    let templates = effective_templates.as_slice();
     let mut consumed = vec![false; bridges.len()];
 
     for index in 0..bridges.len() {
@@ -2442,6 +2502,57 @@ set auto_bridge_74HCT_d_out = ( \".model family_dac dac_bridge(out_low = -2 out_
         assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_low"), -2.0);
         assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 5.0);
+    }
+
+    #[test]
+    fn auto_bridge_uses_standard_family_include_template() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!(
+            "rspice-auto-bridge-family-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        std::fs::write(
+            temp_dir.join("bridge_74HCT_d_out.subcir"),
+            "\
+.subckt bridge_74HCT_d_out dig ana vcc=5
+.model family_dac dac_bridge(out_low = -0.75 out_high = {vcc})
+abuf [ dig ] [ ana ] family_dac
+.ends
+",
+        )
+        .expect("write family bridge include file");
+
+        let deck_path = temp_dir.join("main.cir");
+        let netlist = Netlist::parse_with_path(
+            "\
+* auto bridge uses standard family include
+.param vcc=4.4
+rload mix 0 1k
+.model pull d_pullup(family=\"74HCT\")
+apull [mix] pull
+.end
+",
+            &deck_path,
+        )
+        .expect("deck parses with source path");
+
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(xspice_model_count(&circuit, "d_pullup"), 1);
+        assert_eq!(xspice_model_count(&circuit, "dac_bridge"), 1);
+        assert_eq!(
+            single_xspice_param(&circuit, "dac_bridge", "out_low"),
+            -0.75
+        );
+        assert_eq!(single_xspice_param(&circuit, "dac_bridge", "out_high"), 4.4);
+
+        std::fs::remove_dir_all(temp_dir).expect("remove temp dir");
     }
 
     #[test]
