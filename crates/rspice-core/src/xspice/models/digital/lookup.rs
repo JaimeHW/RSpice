@@ -6,7 +6,7 @@ use std::sync::Arc;
 const D_LUT_INITIAL_STATE: i64 = i64::MIN;
 const D_LOOKUP_DELAY_MIN: Value = 1.0e-12;
 const D_LUT_TABLE_RESOURCE: &str = "xspice.d_lut.table_values";
-const D_GENLUT_TABLE_RESOURCE: &str = "xspice.d_genlut.table_values";
+const D_GENLUT_TABLE_RESOURCE: &str = "xspice.d_genlut.parsed_table_values";
 const D_GENLUT_DELAY_PLAN_RESOURCE: &str = "xspice.d_genlut.delay_plan";
 
 #[derive(Debug, Default)]
@@ -19,6 +19,19 @@ pub struct DigitalGenericLookupTable;
 struct DLookupTableBytes {
     table_revision: u64,
     bytes: Arc<[u8]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DGenlutTableSignature {
+    table_revision: u64,
+    input_width: usize,
+    output_width: usize,
+}
+
+#[derive(Debug, Clone)]
+struct DGenlutTableValues {
+    signature: DGenlutTableSignature,
+    values: Arc<[DigitalValue]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +95,69 @@ fn d_lookup_table_bytes(ctx: &mut CmContext, resource_key: &str) -> CmResult<Arc
         }),
     );
     Ok(bytes)
+}
+
+fn d_genlut_table_signature(
+    ctx: &CmContext,
+    input_width: usize,
+    output_width: usize,
+) -> DGenlutTableSignature {
+    DGenlutTableSignature {
+        table_revision: ctx.string_param_revision("table_values").unwrap_or(0),
+        input_width,
+        output_width,
+    }
+}
+
+fn d_genlut_table_len(input_width: usize, output_width: usize) -> CmResult<usize> {
+    let entry_len = 1usize
+        .checked_shl(input_width as u32)
+        .ok_or_else(|| d_genlut_error(format!("input vector width {input_width} is too large")))?;
+    entry_len.checked_mul(output_width).ok_or_else(|| {
+        d_genlut_error(format!(
+            "lookup table shape {input_width} inputs x {output_width} outputs is too large"
+        ))
+    })
+}
+
+fn d_genlut_table_value_from_byte(byte: Option<u8>) -> DigitalValue {
+    match byte {
+        Some(b'0') => DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
+        Some(b'1') => DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
+        Some(b'z') => DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ),
+        _ => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined),
+    }
+}
+
+fn d_genlut_table_values(
+    ctx: &mut CmContext,
+    input_width: usize,
+    output_width: usize,
+) -> CmResult<Arc<[DigitalValue]>> {
+    let table = ctx
+        .string_param("table_values")
+        .ok_or_else(|| CmError::MissingParameter("table_values".to_string()))?;
+    let signature = d_genlut_table_signature(ctx, input_width, output_width);
+    if let Some(resource) = ctx.resource::<DGenlutTableValues>(D_GENLUT_TABLE_RESOURCE)
+        && resource.signature == signature
+    {
+        return Ok(Arc::clone(&resource.values));
+    }
+
+    let table_len = d_genlut_table_len(input_width, output_width)?;
+    let bytes = table.as_bytes();
+    let values: Arc<[DigitalValue]> = (0..table_len)
+        .map(|index| d_genlut_table_value_from_byte(bytes.get(index).copied()))
+        .collect::<Vec<_>>()
+        .into();
+    ctx.set_resource(
+        D_GENLUT_TABLE_RESOURCE,
+        Arc::new(DGenlutTableValues {
+            signature,
+            values: Arc::clone(&values),
+        }),
+    );
+    Ok(values)
 }
 
 fn d_genlut_delay_signature(
@@ -171,12 +247,7 @@ fn d_genlut_strength_from_code(code: i64) -> DigitalStrength {
 }
 
 fn d_genlut_lookup_value(table: &[u8], index: usize) -> DigitalValue {
-    match table.get(index).copied() {
-        Some(b'0') => DigitalValue::new(DigitalState::Zero, DigitalStrength::Strong),
-        Some(b'1') => DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
-        Some(b'z') => DigitalValue::new(DigitalState::Unknown, DigitalStrength::HighZ),
-        _ => DigitalValue::new(DigitalState::Unknown, DigitalStrength::Undetermined),
-    }
+    d_genlut_table_value_from_byte(table.get(index).copied())
 }
 
 fn d_genlut_unknown_value() -> DigitalValue {
@@ -538,7 +609,7 @@ impl CodeModel for DigitalGenericLookupTable {
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let (input_width, output_width) = d_genlut_shape(ctx)?;
-        let table = d_lookup_table_bytes(ctx, D_GENLUT_TABLE_RESOURCE)?;
+        let table = d_genlut_table_values(ctx, input_width, output_width)?;
         let delay_plan = d_genlut_delay_plan(ctx, input_width, output_width);
         let input_start = d_genlut_previous_input_start(input_width, output_width);
         let state_start = d_genlut_previous_state_start(input_width, output_width);
@@ -559,9 +630,7 @@ impl CodeModel for DigitalGenericLookupTable {
         let entry_len = 1usize << input_width;
         for output_index in 0..output_width {
             let value = match scan.index {
-                Some(index) => {
-                    d_genlut_lookup_value(table.as_ref(), index + output_index * entry_len)
-                }
+                Some(index) => table[index + output_index * entry_len],
                 None => d_genlut_unknown_value(),
             };
             let (state_code, strength_code) = d_genlut_value_code(value);
