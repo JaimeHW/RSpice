@@ -75,11 +75,14 @@ fn adc_bridge_crossing_time(
 ) -> Option<Value> {
     if previous_state == ADC_UNINITIALIZED_STATE
         || previous_state == new_state
+        || previous_state != 1
+        || new_state != -1
         || !previous_input.is_finite()
         || !input.is_finite()
         || !start_time.is_finite()
         || !end_time.is_finite()
         || end_time <= start_time
+        || input >= previous_input
         || (input - previous_input).abs() <= Value::EPSILON
     {
         return None;
@@ -1782,7 +1785,7 @@ mod tests {
     }
 
     #[test]
-    fn adc_bridge_recovers_low_to_high_event_time_inside_accepted_step() {
+    fn adc_bridge_uses_accepted_time_for_rising_unknown_region() {
         let mut ctx = CmContext::new();
         ctx.set_port_width("in", 1);
         ctx.set_port_width("out", 1);
@@ -1813,18 +1816,18 @@ mod tests {
 
         ctx.time = 5.0e-9;
         ctx.timestep = 4.0e-9;
-        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(1.0)]));
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(0.5)]));
         AdcBridge
             .evaluate(&mut ctx)
-            .expect("recovers low-to-high threshold crossing");
+            .expect("handles low-to-unknown threshold crossing");
 
         let events = ctx.take_pending_events();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].values[0], DigitalValue::one());
-        let expected_delay = 1.0e-9 + (4.0e-9 * 0.9) + 1.0e-9 - 5.0e-9;
+        assert_eq!(events[0].values[0], DigitalValue::unknown());
+        let expected_delay = 1.0e-9;
         assert!(
             (events[0].delay - expected_delay).abs() <= 1.0e-21,
-            "adc_bridge should schedule low-to-high output from recovered threshold time, got {}",
+            "ngspice schedules rising ADC region changes from the accepted event time, got {}",
             events[0].delay
         );
     }
