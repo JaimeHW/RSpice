@@ -1,6 +1,7 @@
 //! Linear, nonlinear, and transient operating-point solve entry points.
 
 use super::*;
+use crate::SpiceDialect;
 
 /// Name the matrix rows behind a singular linear system so the user sees
 /// which node or branch carries no constraining equation instead of a bare
@@ -127,7 +128,185 @@ impl Engine {
             initial_guess[node_id - 1] = voltage;
         }
 
+        if !node_hints.is_empty() {
+            match self.solve_nonlinear_nodeset_dc_startup_with_abort(
+                circuit,
+                matrix,
+                &initial_guess,
+                node_hints,
+                abort,
+            ) {
+                Ok(nodeset_solution) => {
+                    initial_guess = nodeset_solution;
+                }
+                Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                Err(err) => {
+                    log::debug!(
+                        "NODESET-constrained DC startup did not converge: {err}; continuing from hinted seed."
+                    );
+                }
+            }
+        }
+
         self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
+    }
+
+    fn apply_node_voltage_constraints(
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        node_hints: &[(usize, Value)],
+    ) -> Result<(), SimulationError> {
+        for &(node_id, voltage) in node_hints {
+            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
+                continue;
+            }
+            let row = node_id - 1;
+            if row >= rhs.len() {
+                continue;
+            }
+            matrix
+                .force_identity_row(row)
+                .map_err(SimulationError::Solver)?;
+            rhs[row] = voltage;
+        }
+        Ok(())
+    }
+
+    fn enforce_node_voltage_hints(
+        circuit: &CircuitData,
+        solution: &mut [Value],
+        node_hints: &[(usize, Value)],
+    ) {
+        for &(node_id, voltage) in node_hints {
+            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
+                continue;
+            }
+            if let Some(slot) = solution.get_mut(node_id - 1) {
+                *slot = voltage;
+            }
+        }
+    }
+
+    fn constrained_dc_residual_converged(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        node_hints: &[(usize, Value)],
+    ) -> Result<bool, SimulationError> {
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        let junction_gmin =
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
+        let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
+            let node_count = circuit.num_nodes().min(rhs.len());
+            for i in 0..node_count {
+                probe.add(i, i, gmin_floor);
+            }
+            circuit.stamp_dc_direct(probe, rhs);
+            self.try_stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+                circuit,
+                probe,
+                rhs,
+                solution,
+                junction_gmin,
+            )?;
+            Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints)?;
+            Ok(self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs))
+        });
+        circuit.restore_nonlinear_state(snapshot);
+        result
+    }
+
+    fn constrained_transient_op_residual_converged(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        time: Value,
+        node_hints: &[(usize, Value)],
+    ) -> Result<bool, SimulationError> {
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
+        let result = matrix.with_probe_values(|probe, rhs| -> Result<bool, SimulationError> {
+            circuit.refresh_jiles_atherton_inductances(solution);
+            Self::stamp_transient_operating_point_linear(
+                circuit, probe, rhs, time, gmin_floor, false,
+            );
+            self.try_stamp_nonlinear_devices_for_operating_point(
+                circuit,
+                probe,
+                rhs,
+                solution,
+                time,
+                crate::xspice::AnalysisType::Transient,
+                junction_gmin,
+            )?;
+            Self::apply_node_voltage_constraints(circuit, probe, rhs, node_hints)?;
+            Ok(self.residual_probe_fixed_point_converged(circuit, probe, solution, rhs))
+        });
+        circuit.restore_nonlinear_state(snapshot);
+        result
+    }
+
+    fn solve_nonlinear_nodeset_dc_startup_with_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        node_hints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let node_count = circuit.num_nodes().min(size);
+        let mut solution = Self::sanitize_initial_guess(initial_guess, size, node_count);
+        Self::enforce_node_voltage_hints(circuit, &mut solution, node_hints);
+        self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
+
+        let mut rhs = vec![0.0; size];
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        let max_iterations = self.continuation_iteration_budget(1, 64);
+
+        for iteration in 0..max_iterations {
+            if Self::should_abort_iteration(abort, iteration) {
+                return Err(SimulationError::Aborted);
+            }
+
+            matrix.clear_values();
+            rhs.fill(0.0);
+            for i in 0..node_count {
+                matrix.add(i, i, gmin_floor);
+            }
+            circuit.stamp_dc_direct(matrix, &mut rhs);
+            self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
+            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
+
+            let mut new_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
+            Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
+
+            let voltage_converged =
+                self.node_voltage_convergence_met(&solution, &new_solution, node_count);
+            self.update_device_states_for_dc(circuit, &new_solution);
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            let nonlinear_residual_converged = voltage_converged
+                && device_converged
+                && self.constrained_dc_residual_converged(
+                    circuit,
+                    matrix,
+                    &new_solution,
+                    node_hints,
+                )?;
+
+            solution = new_solution;
+            if voltage_converged && device_converged && nonlinear_residual_converged {
+                return Ok(solution);
+            }
+        }
+
+        Err(SimulationError::ConvergenceFailed(max_iterations))
     }
 
     /// Solve a nonlinear circuit using Newton-Raphson iteration with optional initial guess
@@ -645,6 +824,86 @@ impl Engine {
         Err(SimulationError::ConvergenceFailed(dc_max_iterations))
     }
 
+    fn solve_nonlinear_nodeset_transient_op_startup_with_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        initial_guess: &[Value],
+        node_hints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let node_count = circuit.num_nodes().min(size);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
+        let mut solution = Self::sanitize_initial_guess(initial_guess, size, node_count);
+        Self::enforce_node_voltage_hints(circuit, &mut solution, node_hints);
+        self.prime_operating_point_seed(
+            circuit,
+            &solution,
+            time,
+            crate::xspice::AnalysisType::Transient,
+        );
+
+        let mut rhs = vec![0.0; size];
+        let max_iterations = self.continuation_iteration_budget(1, 64);
+
+        for iteration in 0..max_iterations {
+            if Self::should_abort_iteration(abort, iteration) {
+                return Err(SimulationError::Aborted);
+            }
+
+            matrix.clear_values();
+            rhs.fill(0.0);
+            circuit.refresh_jiles_atherton_inductances(&solution);
+            Self::stamp_transient_operating_point_linear(
+                circuit, matrix, &mut rhs, time, gmin_floor, false,
+            );
+            self.try_stamp_nonlinear_devices_for_operating_point(
+                circuit,
+                matrix,
+                &mut rhs,
+                &solution,
+                time,
+                crate::xspice::AnalysisType::Transient,
+                junction_gmin,
+            )?;
+            Self::apply_node_voltage_constraints(circuit, matrix, &mut rhs, node_hints)?;
+
+            let mut new_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
+            Self::enforce_node_voltage_hints(circuit, &mut new_solution, node_hints);
+
+            let voltage_converged =
+                self.node_voltage_convergence_met(&solution, &new_solution, node_count);
+            self.update_device_states_for_operating_point(
+                circuit,
+                &new_solution,
+                time,
+                crate::xspice::AnalysisType::Transient,
+                junction_gmin,
+            );
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            let nonlinear_residual_converged = voltage_converged
+                && device_converged
+                && self.constrained_transient_op_residual_converged(
+                    circuit,
+                    matrix,
+                    &new_solution,
+                    time,
+                    node_hints,
+                )?;
+
+            solution = new_solution;
+            if voltage_converged && device_converged && nonlinear_residual_converged {
+                return Ok(solution);
+            }
+        }
+
+        Err(SimulationError::ConvergenceFailed(max_iterations))
+    }
+
     pub(crate) fn solve_linear_transient_operating_point_with_abort(
         &self,
         circuit: &mut CircuitData,
@@ -715,7 +974,12 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        let gmin_floor =
+            if self.config.spice_dialect == SpiceDialect::Xyce && !node_hints.is_empty() {
+                0.0
+            } else {
+                self.dc_nodal_gmin_floor(circuit)
+            };
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let mut solution = self
             .linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {
@@ -733,6 +997,23 @@ impl Engine {
         }
 
         solution = Self::sanitize_initial_guess(&solution, size, circuit.num_nodes().min(size));
+        let mut nodeset_startup_solution = None;
+        if !node_hints.is_empty() {
+            match self.solve_nonlinear_nodeset_transient_op_startup_with_abort(
+                circuit, matrix, time, &solution, node_hints, abort,
+            ) {
+                Ok(nodeset_solution) => {
+                    solution = nodeset_solution;
+                    nodeset_startup_solution = Some(solution.clone());
+                }
+                Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                Err(err) => {
+                    log::debug!(
+                        "NODESET-constrained transient operating-point startup did not converge: {err}; continuing from hinted seed."
+                    );
+                }
+            }
+        }
         self.prime_operating_point_seed(
             circuit,
             &solution,
@@ -777,7 +1058,18 @@ impl Engine {
                 junction_gmin,
             )?;
 
-            let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            let raw_solution = match matrix.solve(&rhs) {
+                Ok(solution) => solution,
+                Err(err) => {
+                    if let Some(startup_solution) = nodeset_startup_solution.as_ref() {
+                        log::debug!(
+                            "Unconstrained transient operating-point solve failed after NODESET startup ({err}); using the NODESET startup state."
+                        );
+                        return Ok(startup_solution.clone());
+                    }
+                    return Err(SimulationError::Solver(err));
+                }
+            };
             let mut new_solution = if requires_conservative_nonlinear_limiting
                 && !junction_owns_steps
             {
@@ -830,6 +1122,13 @@ impl Engine {
             if voltage_converged && device_converged && nonlinear_residual_converged {
                 return Ok(solution);
             }
+        }
+
+        if let Some(startup_solution) = nodeset_startup_solution {
+            log::debug!(
+                "Unconstrained transient operating-point solve did not converge after NODESET startup; using the NODESET startup state."
+            );
+            return Ok(startup_solution);
         }
 
         Err(SimulationError::ConvergenceFailed(tranop_max_iterations))

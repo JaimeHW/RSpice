@@ -3,7 +3,7 @@
 use super::*;
 
 impl Engine {
-    fn residual_probe_fixed_point_converged(
+    pub(in crate::engine::convergence) fn residual_probe_fixed_point_converged(
         &self,
         circuit: &CircuitData,
         probe: &mut StaticMatrix,

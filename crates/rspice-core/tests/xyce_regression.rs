@@ -751,6 +751,24 @@ fn test_xyce_hierarchical_print_alias_transient_case_runs_natively() {
 }
 
 #[test]
+fn test_xyce_nodeset_hierarchical_behavioral_transient_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let relative = "Netlists/Certification_Tests/BUG_1962/nodeset.cir";
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native hierarchical NODESET behavioral transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
 fn test_xyce_mixed_device_param_source_step_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

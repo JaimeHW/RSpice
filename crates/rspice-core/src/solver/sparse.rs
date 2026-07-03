@@ -347,6 +347,47 @@ impl StaticMatrix {
         self.values[idx.0] += value;
     }
 
+    /// Replace one existing row with an identity constraint.
+    ///
+    /// The sparsity pattern remains frozen; callers use this for temporary
+    /// operating-point constraints such as `.NODESET` startup solves.
+    pub fn force_identity_row(&mut self, row: usize) -> Result<(), SolverError> {
+        if row >= self.nrows || row >= self.ncols {
+            return Err(SolverError::InvalidCircuit(format!(
+                "identity row {} outside {}x{} matrix",
+                row, self.nrows, self.ncols
+            )));
+        }
+
+        let mut row_entries = Vec::new();
+        for (&(entry_row, entry_col), &idx) in &self.position_map {
+            if entry_row == row {
+                row_entries.push((entry_col, idx));
+            }
+        }
+
+        let mut diagonal_found = false;
+        for (col, idx) in row_entries {
+            let value = if col == row {
+                diagonal_found = true;
+                1.0
+            } else {
+                0.0
+            };
+            self.values[idx] = value;
+        }
+
+        if diagonal_found {
+            Ok(())
+        } else {
+            self.record_missing_position("StaticMatrix::force_identity_row", row, row);
+            Err(SolverError::InvalidCircuit(format!(
+                "identity row {} has no diagonal matrix position",
+                row
+            )))
+        }
+    }
+
     /// Get the number of values in the matrix (for parallel matrix sizing)
     #[inline]
     pub fn values_len(&self) -> usize {

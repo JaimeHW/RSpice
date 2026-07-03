@@ -675,6 +675,16 @@ impl Engine {
         } else if self.config.spice_dialect == SpiceDialect::Xyce {
             Self::apply_capacitor_element_initial_conditions(&circuit, &mut solution);
         }
+        let startup_voltage_hints_active = resume.is_none()
+            && !self
+                .collect_node_voltage_hints(netlist, &circuit)
+                .is_empty();
+        let transient_baseline_diag_gmin =
+            if self.config.spice_dialect == SpiceDialect::Xyce && startup_voltage_hints_active {
+                0.0
+            } else {
+                self.config.convergence_config.gmin_target.max(0.0)
+            };
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&solution);
         }
@@ -1523,6 +1533,7 @@ impl Engine {
                         bsim4_history: &bsim4_history,
                         ekv26_history: &ekv26_history,
                         suppress_gate_charge,
+                        baseline_diag_gmin: transient_baseline_diag_gmin,
                         tline_dc_refs: &tline_dc_refs,
                         coupled_tline_refs: &coupled_tline_refs,
                     },
@@ -1871,6 +1882,7 @@ impl Engine {
                             bsim4_history: &bsim4_history,
                             ekv26_history: &ekv26_history,
                             suppress_gate_charge,
+                            baseline_diag_gmin: transient_baseline_diag_gmin,
                             tline_dc_refs: &tline_dc_refs,
                             coupled_tline_refs: &coupled_tline_refs,
                         },

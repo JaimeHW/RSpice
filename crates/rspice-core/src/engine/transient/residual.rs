@@ -28,6 +28,7 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) bsim4_history: &'a Bsim4TransientHistory,
     pub(super) ekv26_history: &'a Ekv26TransientHistory,
     pub(super) suppress_gate_charge: bool,
+    pub(super) baseline_diag_gmin: Value,
     pub(super) tline_dc_refs: &'a [(Value, Value)],
     pub(super) coupled_tline_refs: &'a [CoupledTlineReferenceState],
 }
@@ -61,7 +62,7 @@ impl Engine {
         matrix.clear_values();
         rhs.fill(0.0);
 
-        let diag_gmin = self.config.convergence_config.gmin_target.max(0.0) + extra_diag_gmin;
+        let diag_gmin = ctx.baseline_diag_gmin.max(0.0) + extra_diag_gmin;
         if diag_gmin > 0.0 {
             for i in 0..num_nodes {
                 matrix.add(i, i, diag_gmin);
@@ -446,6 +447,7 @@ Q1 C B E 0 QN
             bsim4_history: &bsim4_history,
             ekv26_history: &ekv26_history,
             suppress_gate_charge: false,
+            baseline_diag_gmin: engine.config.convergence_config.gmin_target.max(0.0),
             tline_dc_refs: &tline_dc_refs,
             coupled_tline_refs: &coupled_tline_refs,
         };
@@ -865,6 +867,7 @@ Q1 C B E 0 QN
                 bsim4_history: &bsim4_history,
                 ekv26_history: &ekv26_history,
                 suppress_gate_charge: false,
+                baseline_diag_gmin: engine.config.convergence_config.gmin_target.max(0.0),
                 tline_dc_refs: &tline_dc_refs,
                 coupled_tline_refs: &coupled_tline_refs,
             };
