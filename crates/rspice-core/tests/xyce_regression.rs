@@ -2950,12 +2950,18 @@ fn test_xyce_bsim_gm_device_operating_point_probes_run() {
 }
 
 #[test]
-fn test_xyce_bsim4_v4p82_static_dc_cases_run() {
+fn test_xyce_bsim4_static_dc_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
     for relative in [
+        "Netlists/BSIM4/test1.X.cir",
+        "Netlists/BSIM4/test2.X.cir",
+        "Netlists/BSIM4_rbodymod1/test1.X.cir",
+        "Netlists/BSIM4_rbodymod2/test1.X.cir",
+        "Netlists/BSIM4_v4p7/test1.cir",
+        "Netlists/BSIM4_v4p7/test2.cir",
         "Netlists/BSIM4_v4p82/test1.cir",
         "Netlists/BSIM4_v4p82/test4.cir",
     ] {
@@ -2966,7 +2972,7 @@ fn test_xyce_bsim4_v4p82_static_dc_cases_run() {
         let result = runner.run_test(root.join(relative));
         assert!(
             result.passed && !result.expected_unsupported,
-            "{relative} should run as a native Xyce BSIM4 v4.82 static DC comparison, got {result:?}"
+            "{relative} should run as a native Xyce BSIM4 static DC comparison, got {result:?}"
         );
         assert!(
             result.mismatches.is_empty(),
