@@ -238,14 +238,25 @@ impl XyceStaticTranContract {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticAcContract {
     PlainStatic,
+    PlainCsv,
     WrapperStatic,
+    WrapperCsv,
 }
 
 impl XyceStaticAcContract {
     fn result_contract(self) -> &'static str {
         match self {
             Self::PlainStatic => "static_fd_prn_ac",
+            Self::PlainCsv => "static_fd_csv_ac",
             Self::WrapperStatic => "wrapper_static_fd_prn_ac",
+            Self::WrapperCsv => "wrapper_static_fd_csv_ac",
+        }
+    }
+
+    fn reference_extension(self) -> &'static str {
+        match self {
+            Self::PlainStatic | Self::WrapperStatic => "FD.prn",
+            Self::PlainCsv | Self::WrapperCsv => "FD.csv",
         }
     }
 }
@@ -1190,16 +1201,6 @@ impl XyceTestRunner {
 
     fn static_ac_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticAcPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
-        let reference_path = self
-            .static_fd_prn_reference_path(&deck.path)
-            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-        if !reference_path.is_file() {
-            return Err(format!(
-                "no checked-in static .FD.prn oracle at {}",
-                self.display_path(&reference_path)
-            ));
-        }
-
         let source =
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
         if Self::contains_control_block(&source) {
@@ -1210,10 +1211,28 @@ impl XyceTestRunner {
         }
         Self::reject_unsupported_source_directives(&source)?;
         if requires_wrapper {
-            Self::validate_native_static_fd_prn_ac_wrapper_contract(&source)?;
+            Self::validate_native_static_fd_ac_wrapper_contract(&source)?;
         }
 
-        let print = Self::single_ac_print_request(&source)?;
+        let print_output = Self::single_ac_print_output_request(&source)?;
+        let contract = Self::static_ac_contract_for_print_format(
+            requires_wrapper,
+            print_output.format.as_deref(),
+        )?;
+        let reference_path = self
+            .static_output_reference_path(&deck.path, contract.reference_extension())
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        if !reference_path.is_file() {
+            return Err(format!(
+                "no checked-in static .{} oracle at {}",
+                contract.reference_extension(),
+                self.display_path(&reference_path)
+            ));
+        }
+
+        let print = XycePrintRequest {
+            probes: print_output.probes,
+        };
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let ac = Self::single_ac_analysis(&netlist)?;
@@ -1232,11 +1251,7 @@ impl XyceTestRunner {
             source,
             print,
             ac,
-            contract: if requires_wrapper {
-                XyceStaticAcContract::WrapperStatic
-            } else {
-                XyceStaticAcContract::PlainStatic
-            },
+            contract,
         })
     }
 
@@ -1974,7 +1989,7 @@ impl XyceTestRunner {
         }
     }
 
-    fn validate_native_static_fd_prn_ac_wrapper_contract(source: &str) -> Result<(), String> {
+    fn validate_native_static_fd_ac_wrapper_contract(source: &str) -> Result<(), String> {
         let mut primary_ac_print_count = 0usize;
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
@@ -1992,7 +2007,7 @@ impl XyceTestRunner {
                 };
                 if !analysis.eq_ignore_ascii_case("AC") {
                     return Err(format!(
-                        "wrapper-origin frequency-domain .prn contract does not cover .PRINT {analysis}"
+                        "wrapper-origin frequency-domain static output contract does not cover .PRINT {analysis}"
                     ));
                 }
                 let mut index = 2usize;
@@ -2004,14 +2019,16 @@ impl XyceTestRunner {
                         match raw_key.trim().to_ascii_lowercase().as_str() {
                             "file" => {
                                 return Err(
-                                    "wrapper-origin frequency-domain .prn contract does not cover FILE= side outputs"
+                                    "wrapper-origin frequency-domain static output contract does not cover FILE= side outputs"
                                         .to_string(),
                                 );
                             }
                             "format" => {
-                                if !Self::ac_print_format_is_prn_compatible(value) {
+                                if !Self::ac_print_format_is_prn_compatible(value)
+                                    && !value.eq_ignore_ascii_case("CSV")
+                                {
                                     return Err(format!(
-                                        "wrapper-origin frequency-domain .prn contract does not cover .PRINT AC FORMAT={value}"
+                                        "wrapper-origin frequency-domain static output contract does not cover .PRINT AC FORMAT={value}"
                                     ));
                                 }
                             }
@@ -2027,7 +2044,7 @@ impl XyceTestRunner {
             }
             if Self::is_extra_wrapper_ac_output_analysis_command(command) {
                 return Err(format!(
-                    "wrapper-origin frequency-domain .prn contract does not cover {command} directives"
+                    "wrapper-origin frequency-domain static output contract does not cover {command} directives"
                 ));
             }
         }
@@ -2035,11 +2052,11 @@ impl XyceTestRunner {
         match primary_ac_print_count {
             1 => Ok(()),
             0 => Err(
-                "wrapper-origin frequency-domain .prn contract requires one primary .PRINT AC statement"
+                "wrapper-origin frequency-domain static output contract requires one primary .PRINT AC statement"
                     .to_string(),
             ),
             _ => Err(format!(
-                "wrapper-origin frequency-domain .prn contract requires one primary .PRINT AC statement, found {primary_ac_print_count}"
+                "wrapper-origin frequency-domain static output contract requires one primary .PRINT AC statement, found {primary_ac_print_count}"
             )),
         }
     }
@@ -2264,6 +2281,30 @@ impl XyceTestRunner {
             }),
             _ => None,
         }
+    }
+
+    fn static_ac_contract_for_print_format(
+        requires_wrapper: bool,
+        format: Option<&str>,
+    ) -> Result<XyceStaticAcContract, String> {
+        let normalized = format.unwrap_or("STD").trim();
+        if Self::ac_print_format_is_prn_compatible(normalized) {
+            return Ok(if requires_wrapper {
+                XyceStaticAcContract::WrapperStatic
+            } else {
+                XyceStaticAcContract::PlainStatic
+            });
+        }
+        if normalized.eq_ignore_ascii_case("CSV") {
+            return Ok(if requires_wrapper {
+                XyceStaticAcContract::WrapperCsv
+            } else {
+                XyceStaticAcContract::PlainCsv
+            });
+        }
+        Err(format!(
+            "native static .PRINT AC comparison does not cover FORMAT={normalized}"
+        ))
     }
 
     fn dc_print_format_is_prn_compatible(format: &str) -> bool {
@@ -7028,6 +7069,20 @@ impl XyceTestRunner {
         {
             return Ok(());
         }
+        if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
+            match parameter.as_str() {
+                "r" if Self::find_resistor_element(netlist, &element_name).is_some() => {
+                    return Ok(());
+                }
+                "c" if Self::find_capacitor_element(netlist, &element_name).is_some() => {
+                    return Ok(());
+                }
+                "l" if Self::find_inductor_element(netlist, &element_name).is_some() => {
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
         Err(format!("unsupported .PRINT AC probe '{}'", original))
     }
 
@@ -7921,6 +7976,10 @@ impl XyceTestRunner {
                 });
         }
 
+        if let Some(value) = Self::evaluate_static_ac_device_parameter_probe(netlist, normalized) {
+            return value;
+        }
+
         Err(format!("unsupported AC probe '{}'", normalized))
     }
 
@@ -7990,6 +8049,27 @@ impl XyceTestRunner {
             None => Complex64::new(0.0, 0.0),
         };
         Ok(pos - neg)
+    }
+
+    fn evaluate_static_ac_device_parameter_probe(
+        netlist: &Netlist,
+        normalized: &str,
+    ) -> Option<Result<Value, String>> {
+        let (element_name, parameter) = Self::parse_device_parameter_probe(normalized)?;
+        Some(match parameter.as_str() {
+            "r" => Self::effective_resistor_value(netlist, &element_name).ok_or_else(|| {
+                format!("AC device parameter probe '{element_name}:R' has no finite resistance")
+            }),
+            "c" => Self::effective_capacitor_value(netlist, &element_name).ok_or_else(|| {
+                format!("AC device parameter probe '{element_name}:C' has no finite capacitance")
+            }),
+            "l" => Self::effective_inductor_value(netlist, &element_name).ok_or_else(|| {
+                format!("AC device parameter probe '{element_name}:L' has no finite inductance")
+            }),
+            _ => Err(format!(
+                "AC device parameter probe '{element_name}:{parameter}' is not supported"
+            )),
+        })
     }
 
     fn evaluate_tran_probe(
@@ -10943,13 +11023,18 @@ impl XyceTestRunner {
         }
     }
 
+    #[cfg(test)]
     fn single_ac_print_request(source: &str) -> Result<XycePrintRequest, String> {
+        let request = Self::single_ac_print_output_request(source)?;
+        Ok(XycePrintRequest {
+            probes: request.probes,
+        })
+    }
+
+    fn single_ac_print_output_request(source: &str) -> Result<XycePrintOutputRequest, String> {
         let requests = Self::print_output_requests(source, "AC")?
             .into_iter()
             .filter(|request| request.file.is_none())
-            .map(|request| XycePrintRequest {
-                probes: request.probes,
-            })
             .collect::<Vec<_>>();
 
         match requests.len() {
@@ -11763,10 +11848,6 @@ impl XyceTestRunner {
 
     fn static_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
         self.static_output_reference_path(deck_path, "prn")
-    }
-
-    fn static_fd_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
-        self.static_output_reference_path(deck_path, "FD.prn")
     }
 
     fn static_raw_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
@@ -13312,6 +13393,55 @@ R2 b 0 2
             ".OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=TRUE\n\
              .OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=FALSE\n"
         ));
+    }
+
+    #[test]
+    fn ac_csv_contract_selects_csv_oracle_extension() {
+        assert_eq!(
+            XyceTestRunner::static_ac_contract_for_print_format(true, Some("CSV"))
+                .expect("CSV wrapper contract is supported"),
+            XyceStaticAcContract::WrapperCsv
+        );
+        assert_eq!(
+            XyceStaticAcContract::WrapperCsv.reference_extension(),
+            "FD.csv"
+        );
+        assert_eq!(
+            XyceTestRunner::static_ac_contract_for_print_format(false, Some("CSV"))
+                .expect("plain CSV contract is supported"),
+            XyceStaticAcContract::PlainCsv
+        );
+    }
+
+    #[test]
+    fn ac_probe_evaluates_static_device_parameter() {
+        let netlist = Netlist::parse(
+            "\
+ac device parameter output
+V1 a 0 AC 1
+R1 a b 2
+R2 b 0 3
+.AC DEC 1 1 10
+.PRINT AC R1:R
+.END
+",
+        )
+        .expect("AC device parameter deck parses");
+        let result = AcResult {
+            frequency: 1.0,
+            node_names: vec!["a".to_string(), "b".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            currents: Vec::new(),
+        };
+
+        XyceTestRunner::validate_ac_probe("R1:R", &netlist)
+            .expect("static resistor parameter validates for AC output");
+        assert_eq!(
+            XyceTestRunner::evaluate_ac_probe("R1:R", &netlist, &result, false)
+                .expect("static resistor parameter evaluates for AC output"),
+            2.0
+        );
     }
 
     #[test]
