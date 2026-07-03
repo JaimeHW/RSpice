@@ -4,7 +4,7 @@
 //! [`B3SoiFdSized`] is computed per (W, L, rth0, cth0) combination; RSpice
 //! computes one per device instance and shares it behind an `Arc`.
 
-use super::super::common::{CHARGE_Q, EPSOX, EPSSI, KB_OVER_Q};
+use super::super::common::{B3SoiDialect, CHARGE_Q, EPSOX, EPSSI, KB_OVER_Q};
 use super::params::B3SoiFdModel;
 use crate::Value;
 
@@ -293,7 +293,10 @@ impl B3SoiFdSized {
         p.cf = m.cf;
         p.clc = m.clc;
         p.cle = m.cle;
-        p.abulk_cv_factor = (1.0 + p.clc / p.leff).powf(p.cle);
+        p.abulk_cv_factor = match m.dialect {
+            B3SoiDialect::Ngspice => (1.0 + p.clc / p.leff).powf(p.cle),
+            B3SoiDialect::Xyce => 1.0 + (p.clc / p.leff).powf(p.cle),
+        };
 
         // --- Binned parameters (lines 199-527) ---
         let (inv_l, inv_w, inv_lw) = if m.bin_unit == 1 {

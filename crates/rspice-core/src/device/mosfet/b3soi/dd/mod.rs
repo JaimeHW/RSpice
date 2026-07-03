@@ -105,9 +105,6 @@ pub struct B3SoiDd {
     pub model: Arc<B3SoiDdModel>,
     /// Size/temperature-resolved parameters (one per instance geometry).
     pub sized: Arc<B3SoiDdSized>,
-    /// Instance geometry retained for self-heating re-evaluation at
-    /// `CKTtemp + delTemp`.
-    geometry: B3SoiDdGeometry,
     base_temp_k: Value,
     /// Model scalars needed inside the load.
     consts: ModelConsts,
@@ -150,6 +147,9 @@ pub struct B3SoiDd {
     /// The previous full evaluation engaged the body limiter (ngspice
     /// `Check != 0`), which disqualifies the next iterate from bypassing.
     last_limited: std::cell::Cell<bool>,
+    /// The previous update evaluated at a bias adjusted by the body/temperature
+    /// limiter. The stamp must use that same bias/op pair.
+    bias_was_limited: std::cell::Cell<bool>,
     /// `DEBUG=-1` instance flag (ngspice `debugMod`): the charge state is
     /// still evaluated for probes, but `ChargeComputationNeeded` is forced to
     /// zero before the companion assembly, so the device contributes no
@@ -187,6 +187,7 @@ impl B3SoiDd {
         let consts = ModelConsts {
             cap_mod: model.cap_mod,
             rgate_mod: model.rgate_mod,
+            dialect: model.dialect,
             cox: model.cox,
             cbox: model.cbox,
             csi: model.csi,
@@ -196,6 +197,8 @@ impl B3SoiDd {
             adice: model.adice,
             tox: model.tox,
             tsi: model.tsi,
+            xbjt: model.xbjt,
+            xdif: model.xdif,
             xj: model.xj,
             charge_q: super::common::CHARGE_Q,
             mob_mod: model.mob_mod,
@@ -206,6 +209,8 @@ impl B3SoiDd {
             // ngspice clamps PhiBSWG model-wide to >= 0.1 (b3soiddtemp.c).
             phibswg: model.gate_sidewall_jct_potential.max(0.1),
             cjswg: model.unit_length_gate_sidewall_jct_cap,
+            tpbswg: model.tpbswg,
+            tcjswg: model.tcjswg,
             mtype: model.mtype,
         };
         Ok(Self {
@@ -222,7 +227,6 @@ impl B3SoiDd {
             body_mode,
             model,
             sized,
-            geometry: geom,
             base_temp_k: temp_k,
             consts,
             eval_gmin: 0.0,
@@ -253,6 +257,7 @@ impl B3SoiDd {
             bypass_active: std::cell::Cell::new(false),
             force_full_eval: std::cell::Cell::new(true),
             last_limited: std::cell::Cell::new(false),
+            bias_was_limited: std::cell::Cell::new(false),
             charges_suppressed: false,
             instance_ic: super::common::B3SoiInstanceIc::new(),
         })
@@ -272,6 +277,7 @@ impl B3SoiDd {
         self.limit_anchor_valid.set(false);
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
+        self.bias_was_limited.set(false);
     }
 
     /// Enable the ngspice-style transient device bypass with the engine's
@@ -456,10 +462,17 @@ impl B3SoiDd {
         // (ngspice reuses the CKTstate charges verbatim under ByPass).
         let bias = self.charge_bias(voltages);
         let sized = self.sized_for_bias(bias);
-        let mut charge = eval::eval(&sized, &self.consts, bias, self.mtype, true)
-            .charge
-            .expect("compute_charges=true yields a charge state");
-        if self.self_heating_active() {
+        let mut charge = eval::eval_with_self_heat(
+            &sized,
+            &self.consts,
+            bias,
+            self.mtype,
+            true,
+            self.self_heating_active(),
+        )
+        .charge
+        .expect("compute_charges=true yields a charge state");
+        if self.self_heating_active() && self.model.cap_mod != 2 {
             self.fill_charge_thermal_derivatives(&mut charge, bias);
         }
         charge.qth = self.thermal_capacitance() * bias.del_temp;
@@ -671,10 +684,7 @@ impl B3SoiDd {
             return Cow::Borrowed(self.sized.as_ref());
         }
 
-        Cow::Owned(
-            B3SoiDdSized::new(&self.model, &self.geometry, temp)
-                .expect("self-heated B3SOIDD temperature evaluation"),
-        )
+        Cow::Owned(self.sized.self_heated_at(&self.model, temp))
     }
 
     fn eval_op_for_bias(&self, bias: B3SoiDdBias) -> B3SoiDdOp {
@@ -693,8 +703,9 @@ impl B3SoiDd {
 
         let sample = |del_temp: Value| {
             let sample_bias = B3SoiDdBias { del_temp, ..bias };
-            let sized = B3SoiDdSized::new(&self.model, &self.geometry, self.base_temp_k + del_temp)
-                .expect("self-heated B3SOIDD derivative temperature evaluation");
+            let sized = self
+                .sized
+                .self_heated_at(&self.model, self.base_temp_k + del_temp);
             let sample_op = eval::eval_dc(&sized, &self.consts, sample_bias, self.mtype);
             let drain_junction = sample_op.cjd
                 + sample_op.gjdb * sample_bias.vbs
@@ -753,8 +764,9 @@ impl B3SoiDd {
 
         let sample = |del_temp: Value| {
             let sample_bias = B3SoiDdBias { del_temp, ..bias };
-            let sized = B3SoiDdSized::new(&self.model, &self.geometry, self.base_temp_k + del_temp)
-                .expect("self-heated B3SOIDD charge derivative temperature evaluation");
+            let sized = self
+                .sized
+                .self_heated_at(&self.model, self.base_temp_k + del_temp);
             eval::eval(&sized, &self.consts, sample_bias, self.mtype, true)
                 .charge
                 .expect("compute_charges=true yields a charge state")
@@ -768,10 +780,13 @@ impl B3SoiDd {
             center
         };
         let denom = h + lower_h;
-        charge.gcg_t = (plus.qg - minus.qg) / denom;
-        charge.gcb_t = (plus.qb - minus.qb) / denom;
-        charge.gcd_t = (plus.qd - minus.qd) / denom;
-        charge.gce_t = (plus.qe - minus.qe) / denom;
+        // Xyce maps the intrinsic cgT/cbT/cdT/ceT column into the stamped
+        // CAPc*T entries with the device polarity. The sampled charges are in
+        // the folded device frame; delTemp itself is not folded.
+        charge.gcg_t = self.mtype * (plus.qg - minus.qg) / denom;
+        charge.gcb_t = self.mtype * (plus.qb - minus.qb) / denom;
+        charge.gcd_t = self.mtype * (plus.qd - minus.qd) / denom;
+        charge.gce_t = self.mtype * (plus.qe - minus.qe) / denom;
     }
 
     /// Floating-body convergence aids `B3SOIDDlimit` + `B3SOIDDSmartVbs`
@@ -849,9 +864,11 @@ impl NonlinearDevice for B3SoiDd {
         }
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
-        let mut bias = self.raw_branch_voltages(voltages);
+        let raw_bias = self.raw_branch_voltages(voltages);
+        let mut bias = raw_bias;
         let limited = self.apply_body_limiting(&mut bias);
         self.last_limited.set(limited);
+        self.bias_was_limited.set(!biases_match(raw_bias, bias));
         self.bias = bias;
         self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
@@ -875,11 +892,13 @@ impl NonlinearDevice for B3SoiDd {
             self.stamp_instance_ic(matrix);
             return;
         }
-        let bias = self.branch_voltages(voltages);
-        let op = if biases_match(bias, self.bias) {
-            self.op.clone()
+        let raw_bias = self.branch_voltages(voltages);
+        let (op, bias) = if self.bias_was_limited.get() {
+            (self.op.clone(), self.bias)
+        } else if biases_match(raw_bias, self.bias) {
+            (self.op.clone(), self.bias)
         } else {
-            self.eval_op_for_bias(bias)
+            (self.eval_op_for_bias(raw_bias), raw_bias)
         };
         // `cdreq`/`ceq*` must be formed from the *same* bias that produced `op`,
         // not the (possibly stale) `self.bias` cached at the last `update`.
@@ -1242,6 +1261,7 @@ fn biases_match(a: B3SoiDdBias, b: B3SoiDdBias) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::common::B3SoiDialect;
     use super::*;
     use std::{collections::HashMap, sync::Arc};
 
@@ -1380,6 +1400,7 @@ mod tests {
             rth0: 0.006,
             cth0: 0.0,
             nseg: 1.0,
+            frbody: 1.0,
         }
     }
 
@@ -1387,6 +1408,7 @@ mod tests {
         ModelConsts {
             cap_mod: m.cap_mod,
             rgate_mod: m.rgate_mod,
+            dialect: m.dialect,
             cox: m.cox,
             cbox: m.cbox,
             csi: m.csi,
@@ -1396,6 +1418,8 @@ mod tests {
             adice: m.adice,
             tox: m.tox,
             tsi: m.tsi,
+            xbjt: m.xbjt,
+            xdif: m.xdif,
             xj: m.xj,
             charge_q: super::super::common::CHARGE_Q,
             mob_mod: m.mob_mod,
@@ -1405,6 +1429,8 @@ mod tests {
             mjswg: m.body_jct_gate_side_grading_coeff,
             phibswg: m.gate_sidewall_jct_potential.max(0.1),
             cjswg: m.unit_length_gate_sidewall_jct_cap,
+            tpbswg: m.tpbswg,
+            tcjswg: m.tcjswg,
             mtype: m.mtype,
         }
     }
@@ -1681,7 +1707,7 @@ mod tests {
             del_temp: 50.0,
         };
         let cold_sized = B3SoiDdSized::new(&model, &geometry, 300.15).expect("cold sized");
-        let hot_sized = B3SoiDdSized::new(&model, &geometry, 350.15).expect("hot sized");
+        let hot_sized = cold_sized.self_heated_at(&model, 350.15);
         let cold = eval::eval_dc(&cold_sized, &mc, bias, 1.0);
         let hot = eval::eval_dc(&hot_sized, &mc, bias, 1.0);
 
@@ -1693,7 +1719,7 @@ mod tests {
         );
         assert!(
             (dev.op.ids - hot.ids).abs() <= 1.0e-10 * hot.ids.abs().max(1.0) + 1.0e-15,
-            "self-heated update should evaluate at CKTtemp + delTemp; got ids={:.9e}, expected hot ids={:.9e}, cold ids={:.9e}",
+            "self-heated update should evaluate Xyce's local temperature subset at CKTtemp + delTemp; got ids={:.9e}, expected hot ids={:.9e}, cold ids={:.9e}",
             dev.op.ids,
             hot.ids,
             cold.ids
@@ -1730,8 +1756,9 @@ mod tests {
         dev.stamp_nonlinear(&hot_voltages, &mut stamper, &mut rhs);
 
         let mc = model_consts(&model);
+        let ambient_sized = B3SoiDdSized::new(&model, &geometry, 300.15).expect("sized");
         let eval_cd_at = |del_temp: Value| {
-            let sized = B3SoiDdSized::new(&model, &geometry, 300.15 + del_temp).expect("sized");
+            let sized = ambient_sized.self_heated_at(&model, 300.15 + del_temp);
             eval::eval_dc(
                 &sized,
                 &mc,
@@ -1796,8 +1823,9 @@ mod tests {
         );
 
         let mc = model_consts(&model);
+        let ambient_sized = B3SoiDdSized::new(&model, &geometry, 300.15).expect("sized");
         let eval_qg_at = |del_temp: Value| {
-            let sized = B3SoiDdSized::new(&model, &geometry, 300.15 + del_temp).expect("sized");
+            let sized = ambient_sized.self_heated_at(&model, 300.15 + del_temp);
             eval::eval(
                 &sized,
                 &mc,
@@ -1834,8 +1862,57 @@ mod tests {
         assert!(sized.u0temp > 0.0 && sized.u0temp < 1.0);
         assert!(sized.vth0.is_finite());
         assert!(sized.rds0 >= 0.0);
+        assert_eq!(model.dialect, B3SoiDialect::Ngspice);
+        assert_eq!(
+            sized.abulk_cv_factor,
+            (1.0 + sized.clc / sized.leff).powf(sized.cle)
+        );
         // jbjt etc. must be positive saturation densities.
         assert!(sized.jbjt > 0.0 && sized.jrec > 0.0 && sized.jdif > 0.0);
+    }
+
+    #[test]
+    fn temp_setup_uses_xyce_abulk_cv_factor_for_level_10_origin() {
+        let mut params = n1_params();
+        params.insert("LEVEL".to_string(), 10.0);
+        let model = B3SoiDdModel::from_params(&params, false, 300.15);
+        let sized = B3SoiDdSized::new(&model, &geom(), 300.15).expect("sized");
+
+        assert_eq!(model.dialect, B3SoiDialect::Xyce);
+        assert_eq!(
+            sized.abulk_cv_factor,
+            1.0 + (sized.clc / sized.leff).powf(sized.cle)
+        );
+    }
+
+    #[test]
+    fn self_heated_cache_keeps_ambient_geometry_and_bulk_terms() {
+        let model = B3SoiDdModel::from_params(&n1_params(), false, 300.15);
+        let cold = B3SoiDdSized::new(&model, &geom(), 300.15).expect("cold sized");
+        let same_temp = cold.self_heated_at(&model, 300.15);
+        let hot = cold.self_heated_at(&model, 350.15);
+        let full_hot = B3SoiDdSized::new(&model, &geom(), 350.15).expect("full hot sized");
+
+        assert_eq!(same_temp.jtun, cold.jtun);
+        assert_eq!(hot.phi, cold.phi);
+        assert_eq!(hot.sqrt_phi, cold.sqrt_phi);
+        assert_eq!(hot.xdep0, cold.xdep0);
+        assert_eq!(hot.cdep0, cold.cdep0);
+        assert_eq!(hot.vsdfb, cold.vsdfb);
+        assert_eq!(hot.vsdth, cold.vsdth);
+        assert_eq!(hot.sdt1, cold.sdt1);
+        assert_eq!(hot.dt2, cold.dt2);
+        assert_eq!(hot.cgso, cold.cgso);
+        assert_eq!(hot.cgdo, cold.cgdo);
+
+        assert_ne!(hot.vtm, cold.vtm);
+        assert_ne!(hot.vbi, cold.vbi);
+        assert_ne!(hot.vfbb, cold.vfbb);
+        assert_ne!(hot.u0temp, cold.u0temp);
+        assert_ne!(hot.vsattemp, cold.vsattemp);
+
+        assert_ne!(full_hot.phi, cold.phi);
+        assert_eq!(hot.phi, cold.phi);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 use super::super::common::{
     B3SOI_BINUNIT_VALUES, B3SOI_CAPMOD_VALUES, B3SOI_MOBMOD_VALUES, B3SOI_PARAMCHK_VALUES,
-    B3SOI_SHMOD_VALUES, EPSOX, PI, mobmod_selector, model_selector,
+    B3SOI_SHMOD_VALUES, B3SoiDialect, EPSOX, PI, mobmod_selector, model_selector,
 };
 use crate::Value;
 use std::collections::HashMap;
@@ -40,6 +40,7 @@ pub struct B3SoiFdModel {
     pub sh_mod: i32,
     pub bin_unit: i32,
     pub param_chk: i32,
+    pub dialect: B3SoiDialect,
     pub version: Value,
     pub tox: Value,
 
@@ -268,6 +269,12 @@ impl B3SoiFdModel {
         let mtype: Value = if is_pmos { -1.0 } else { 1.0 };
 
         let mob_mod = mobmod_selector(p, 1, B3SOI_MOBMOD_VALUES)?;
+        let dialect =
+            if get(p, "LEVEL").is_some_and(|level| (level.round() - 10.0).abs() <= 1.0e-12) {
+                B3SoiDialect::Xyce
+            } else {
+                B3SoiDialect::Ngspice
+            };
         let tox = val(p, "TOX", 100.0e-10);
         let cox = 3.453133e-11 / tox;
 
@@ -314,6 +321,7 @@ impl B3SoiFdModel {
             sh_mod: model_selector(p, "SHMOD", 0, B3SOI_SHMOD_VALUES)?,
             bin_unit: model_selector(p, "BINUNIT", 1, B3SOI_BINUNIT_VALUES)?,
             param_chk: model_selector(p, "PARAMCHK", 0, B3SOI_PARAMCHK_VALUES)?,
+            dialect,
             version: val(p, "VERSION", 2.0),
             tox,
 

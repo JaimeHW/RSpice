@@ -84,6 +84,7 @@ impl Engine {
             rth0: instance_param(instance_params, &["RTH0"]).unwrap_or(model.rth0),
             cth0: instance_param(instance_params, &["CTH0"]).unwrap_or(model.cth0),
             nseg: instance_param(instance_params, &["NSEG"]).unwrap_or(1.0),
+            frbody: instance_param(instance_params, &["FRBODY"]).unwrap_or(1.0),
         };
 
         let node_gate = match model.rgate_mod {

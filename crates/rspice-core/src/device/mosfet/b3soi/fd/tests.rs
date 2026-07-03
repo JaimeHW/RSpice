@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::circuit::NodeId;
+use crate::device::mosfet::b3soi::common::B3SoiDialect;
 use crate::device::mosfet::b3soi::fd::params::B3SoiFdModel;
 use crate::device::mosfet::b3soi::fd::temp::{B3SoiFdGeometry, B3SoiFdSized};
 use crate::device::traits::MatrixStamper;
@@ -394,7 +395,26 @@ fn temp_setup_is_finite_and_physical() {
     assert!(sized.u0temp > 0.0 && sized.u0temp < 1.0);
     assert!(sized.vth0.is_finite());
     assert!(sized.rds0 >= 0.0);
+    assert_eq!(model.dialect, B3SoiDialect::Ngspice);
+    assert_eq!(
+        sized.abulk_cv_factor,
+        (1.0 + sized.clc / sized.leff).powf(sized.cle)
+    );
     assert!(sized.jbjt > 0.0 && sized.jrec > 0.0 && sized.jdif > 0.0);
+}
+
+#[test]
+fn temp_setup_uses_xyce_abulk_cv_factor_for_level_10_origin() {
+    let mut params = n1_params();
+    params.insert("LEVEL".to_string(), 10.0);
+    let model = B3SoiFdModel::from_params(&params, false, 300.15);
+    let sized = B3SoiFdSized::new(&model, &geom(), 300.15).expect("sized");
+
+    assert_eq!(model.dialect, B3SoiDialect::Xyce);
+    assert_eq!(
+        sized.abulk_cv_factor,
+        1.0 + (sized.clc / sized.leff).powf(sized.cle)
+    );
 }
 
 #[test]

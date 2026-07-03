@@ -12,6 +12,17 @@ pub(crate) const B3SOI_SHMOD_VALUES: &[i32] = &[0, 1];
 pub(crate) const B3SOI_BINUNIT_VALUES: &[i32] = &[0, 1, 2];
 pub(crate) const B3SOI_PARAMCHK_VALUES: &[i32] = &[0, 1];
 
+/// Source-dialect compatibility for native BSIMSOI models.
+///
+/// Ngspice exposes the BSIMSOI families as LEVEL=55/56/57. Xyce exposes
+/// BSIMSOI3 as LEVEL=10 and uses SOIMOD to select the same physical family, but
+/// a few equations and setup formulas differ from the ngspice ports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum B3SoiDialect {
+    Ngspice,
+    Xyce,
+}
+
 pub(crate) fn model_selector(
     params: &HashMap<String, Value>,
     name: &str,

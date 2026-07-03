@@ -5,7 +5,7 @@
 
 use super::super::common::{
     B3SOI_BINUNIT_VALUES, B3SOI_CAPMOD_VALUES, B3SOI_MOBMOD_VALUES, B3SOI_PARAMCHK_VALUES,
-    B3SOI_SHMOD_VALUES, EPSOX, PI, mobmod_selector, model_selector,
+    B3SOI_SHMOD_VALUES, B3SoiDialect, EPSOX, PI, mobmod_selector, model_selector,
 };
 use crate::Value;
 use std::collections::HashMap;
@@ -41,6 +41,7 @@ pub struct B3SoiDdModel {
     pub bin_unit: i32,
     pub param_chk: i32,
     pub rgate_mod: i32,
+    pub dialect: B3SoiDialect,
     pub version: Value,
     pub tox: Value,
 
@@ -183,6 +184,7 @@ pub struct B3SoiDdModel {
     pub xj: Value,
     pub rbody: Value,
     pub rbsh: Value,
+    pub rhalo: Value,
     pub rshg: Value,
     pub ngcon: Value,
     pub xgw: Value,
@@ -209,16 +211,23 @@ pub struct B3SoiDdModel {
     pub dwc: Value,
     pub dlc: Value,
     pub dlc_given: bool,
+    pub dlcb: Value,
+    pub dlbg: Value,
+    pub fbody: Value,
     pub cgso: Value,
     pub cgdo: Value,
     pub cgeo: Value,
     pub xpart: Value,
+    pub noff: Binned,
+    pub delvt: Binned,
 
     pub tnom: Value,
     pub sheet_resistance: Value,
     pub body_jct_gate_side_grading_coeff: Value,
     pub gate_sidewall_jct_potential: Value,
     pub unit_length_gate_sidewall_jct_cap: Value,
+    pub tpbswg: Value,
+    pub tcjswg: Value,
     pub csdesw: Value,
 
     // Geometry scaling.
@@ -301,6 +310,12 @@ impl B3SoiDdModel {
         let mtype: Value = if is_pmos { -1.0 } else { 1.0 };
 
         let mob_mod = mobmod_selector(p, 1, B3SOI_MOBMOD_VALUES)?;
+        let dialect =
+            if get(p, "LEVEL").is_some_and(|level| (level.round() - 10.0).abs() <= 1.0e-12) {
+                B3SoiDialect::Xyce
+            } else {
+                B3SoiDialect::Ngspice
+            };
         let tox = val(p, "TOX", 100.0e-10);
         let cox = 3.453133e-11 / tox;
 
@@ -331,11 +346,8 @@ impl B3SoiDdModel {
             0.6 * xj * cox
         });
 
-        // NOTE (faithful to ngspice): the IF-parameter table maps "xdif" onto
-        // the XBJT slot (`IOPR("xdif", B3SOIDD_MOD_XBJT, ...)` in b3soidd.c),
-        // so a model card XDIF actually overwrites xbjt and the internal xdif
-        // keeps its default of 2.0.
-        let xbjt = get(p, "XDIF").or_else(|| get(p, "XBJT")).unwrap_or(2.0);
+        let xbjt = val(p, "XBJT", 1.0);
+        let xdif = get(p, "XDIF").unwrap_or(xbjt);
 
         // TNOM on the card is Celsius; CKTnomTemp is Kelvin.
         let tnom = get(p, "TNOM").map(|t| t + 273.15).unwrap_or(nominal_temp_k);
@@ -348,6 +360,7 @@ impl B3SoiDdModel {
             bin_unit: model_selector(p, "BINUNIT", 1, B3SOI_BINUNIT_VALUES)?,
             param_chk: model_selector(p, "PARAMCHK", 0, B3SOI_PARAMCHK_VALUES)?,
             rgate_mod: model_selector(p, "RGATEMOD", 0, &[0, 1, 2])?,
+            dialect,
             version: val(p, "VERSION", 2.0),
             tox,
 
@@ -522,6 +535,7 @@ impl B3SoiDdModel {
             xj,
             rbody: val(p, "RBODY", 0.0),
             rbsh: val(p, "RBSH", 0.0),
+            rhalo: val(p, "RHALO", 1.0e15),
             rshg: val(p, "RSHG", 0.1),
             ngcon: val(p, "NGCON", 1.0),
             xgw: val(p, "XGW", 0.0),
@@ -530,8 +544,8 @@ impl B3SoiDdModel {
             rth0: val(p, "RTH0", 0.0),
             cth0: val(p, "CTH0", 1.0e-5),
             xbjt,
-            xdif: 2.0,
-            xrec: val(p, "XREC", 20.0),
+            xdif,
+            xrec: val(p, "XREC", 1.0),
             xtun: val(p, "XTUN", 0.0),
             tt: val(p, "TT", 1e-12),
             asd: val(p, "ASD", 0.3),
@@ -547,16 +561,23 @@ impl B3SoiDdModel {
             dwc,
             dlc,
             dlc_given,
+            dlcb: val(p, "DLCB", 0.0),
+            dlbg: val(p, "DLBG", 0.0),
+            fbody: val(p, "FBODY", 1.0),
             cgso,
             cgdo,
             cgeo: val(p, "CGEO", 0.0),
             xpart: val(p, "XPART", 0.0),
+            noff: binned(p, "NOFF", 1.0, 0.0, 0.0, 0.0),
+            delvt: binned(p, "DELVT", 0.0, 0.0, 0.0, 0.0),
 
             tnom,
             sheet_resistance: val(p, "RSH", 0.0),
             body_jct_gate_side_grading_coeff: val(p, "MJSWG", 0.5),
             gate_sidewall_jct_potential: val(p, "PBSWG", 0.7),
             unit_length_gate_sidewall_jct_cap: val(p, "CJSWG", 1e-10),
+            tpbswg: val(p, "TPBSWG", 0.0),
+            tcjswg: val(p, "TCJSWG", 0.0),
             csdesw: val(p, "CSDESW", 0.0),
 
             lint,
