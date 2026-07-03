@@ -1884,6 +1884,20 @@ mod tests {
         params.insert("FBJTII".into(), 0.7);
         params.insert("LII".into(), 5.0e-8);
         params.insert("TII".into(), -0.2);
+        params.insert("NRECF0".into(), 1.8);
+        params.insert("NRECR0".into(), 1.1);
+        params.insert("AHLI".into(), 1.0e-15);
+        params.insert("LBJT0".into(), 2.0e-7);
+        params.insert("VABJT".into(), 9.0);
+        params.insert("AELY".into(), 0.25);
+        params.insert("VREC0".into(), 0.05);
+        params.insert("VTUN0".into(), 5.0);
+        params.insert("NTRECF".into(), 0.1);
+        params.insert("NTRECR".into(), -1.0);
+        params.insert("LN".into(), 2.0e-6);
+        params.insert("NBJT".into(), 1.2);
+        params.insert("NDIF".into(), -0.8);
+        params.insert("LDIF0".into(), 0.001);
 
         let model = B3SoiDdModel::from_params(&params, false, 300.15);
         let sized = B3SoiDdSized::new(&model, &geom(), 300.15).expect("sized");
@@ -1900,6 +1914,20 @@ mod tests {
         assert_eq!(sized.fbjtii, 0.7);
         assert_eq!(sized.lii, 5.0e-8);
         assert_eq!(sized.tii, -0.2);
+        assert_eq!(sized.nrecf0, 1.8);
+        assert_eq!(sized.nrecr0, 1.1);
+        assert_eq!(sized.ahli, 1.0e-15);
+        assert_eq!(sized.lbjt0, 2.0e-7);
+        assert_eq!(sized.vabjt, 9.0);
+        assert_eq!(sized.aely, 0.25);
+        assert_eq!(sized.vrec0, 0.05);
+        assert_eq!(sized.vtun0, 5.0);
+        assert_eq!(sized.ntrecf, 0.1);
+        assert_eq!(sized.ntrecr, -1.0);
+        assert!(sized.arfabjt > 0.0 && sized.arfabjt <= 1.0);
+        assert!(sized.lratio.is_finite() && sized.lratio > 0.0);
+        assert!(sized.lratiodif.is_finite() && sized.lratiodif > 0.0);
+        assert!(sized.vearly >= 1.0);
     }
 
     /// The floating-body DC equilibrium must rise into forward bias as the gate

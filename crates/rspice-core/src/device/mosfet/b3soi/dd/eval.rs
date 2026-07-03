@@ -1324,23 +1324,30 @@ pub fn eval(
         }
     }
 
-    // --- Body diodes + parasitic BJT (b3soiddld.c:2353-2470) ---
-    let w_tsi = p.weff * m.tsi;
-    let n_vtm1 = vtm * p.ndiode;
-    let n_vtm2 = vtm * p.ntun;
-
+    // --- Xyce v3.2 body diodes + parasitic BJT (N_DEV_MOSFET_B3SOI.C). ---
+    let w_tsi = p.weff / p.nseg * m.tsi;
     let vbd = vbs - vds; // device-internal Vbd in evaluation frame
-    let (exp_vbs1, dexp_vbs1_dvb) = exp_lin(vbs, n_vtm1);
-    let (exp_vbd1, dexp_vbd1_dvb) = exp_lin(vbd, n_vtm1);
-    let (exp_vbs4, dexp_vbs4_dvb, exp_vbd4, dexp_vbd4_dvb) = if jtun > 0.0 {
-        let (a, da) = exp_lin(-vbs, n_vtm2);
-        let (b, db) = exp_lin(-vbd, n_vtm2);
-        (a, -da, b, -db)
-    } else {
-        (0.0, 0.0, 0.0, 0.0)
+    let n_vtm1 = vtm * p.ndiode;
+    let dexp = |arg: Value| -> (Value, Value) {
+        const MAX_EXPL: Value = 2.688_117_142e43;
+        const MIN_EXPL: Value = 3.720_075_976e-44;
+        const EXPL_THRESHOLD: Value = 100.0;
+        if arg > EXPL_THRESHOLD {
+            (MAX_EXPL * (1.0 + arg - EXPL_THRESHOLD), MAX_EXPL)
+        } else if arg < -EXPL_THRESHOLD {
+            (MIN_EXPL, 0.0)
+        } else {
+            let e = arg.exp();
+            (e, e)
+        }
     };
+    let (exp_vbs_n, dexp_vbs_n) = dexp(vbs / n_vtm1);
+    let dexp_vbs_n_dvb = dexp_vbs_n / n_vtm1;
+    let (exp_vbd_n, dexp_vbd_n) = dexp(vbd / n_vtm1);
+    let dexp_vbd_n_dvb = dexp_vbd_n / n_vtm1;
+    let dexp_vbd_n_dvd = -dexp_vbd_n_dvb;
 
-    // Ibs1 / Ibd1 (diffusion)
+    // Ibs1 / Ibd1: diffusion.
     let (ibs1, dibs1_dvb, ibd1, dibd1_dvb, dibd1_dvd);
     if jdif == 0.0 {
         ibs1 = 0.0;
@@ -1349,15 +1356,17 @@ pub fn eval(
         dibd1_dvb = 0.0;
         dibd1_dvd = 0.0;
     } else {
-        let t5 = w_tsi * jdif;
-        ibs1 = t5 * (exp_vbs1 - 1.0);
-        dibs1_dvb = t5 * dexp_vbs1_dvb;
-        ibd1 = t5 * (exp_vbd1 - 1.0);
-        dibd1_dvb = t5 * dexp_vbd1_dvb;
+        let t0 = w_tsi * jdif;
+        ibs1 = t0 * (exp_vbs_n - 1.0);
+        dibs1_dvb = t0 * dexp_vbs_n_dvb;
+        ibd1 = t0 * (exp_vbd_n - 1.0);
+        dibd1_dvb = t0 * dexp_vbd_n_dvb;
         dibd1_dvd = -dibd1_dvb;
     }
 
-    // Ibs2 / Ibd2 (recombination)
+    // Ibs2 / Ibd2: recombination + reverse trap-assisted tunneling.
+    let n_vtmf = 0.026 * p.nrecf0 * (1.0 + p.ntrecf * temp_ratio);
+    let n_vtmr = 0.026 * p.nrecr0 * (1.0 + p.ntrecr * temp_ratio);
     let (ibs2, dibs2_dvb, ibd2, dibd2_dvb, dibd2_dvd);
     if jrec == 0.0 {
         ibs2 = 0.0;
@@ -1366,30 +1375,44 @@ pub fn eval(
         dibd2_dvb = 0.0;
         dibd2_dvd = 0.0;
     } else {
-        let exp_vbs2 = exp_vbs1.sqrt();
-        let dexp_vbs2_dvb = if exp_vbs2 > 1e-20 {
-            0.5 / exp_vbs2 * dexp_vbs1_dvb
+        let (t10s, e10s) = dexp(vbs / n_vtmf);
+        let dt10s_dvb = e10s / n_vtmf;
+        let (t11s, dt11s_dvb) = if (p.vrec0 - vbs) < 1.0e-3 {
+            let t0 = -vbs / n_vtmr * p.vrec0 * 1.0e3;
+            (-t0.exp(), 0.0)
         } else {
-            0.0
+            let t1 = 1.0 / (p.vrec0 - vbs);
+            let t0 = -vbs / n_vtmr * p.vrec0 * t1;
+            let dt0_dvb = -p.vrec0 / n_vtmr * (t1 + vbs * t1 * t1);
+            let (e, de) = dexp(t0);
+            (-e, -de * dt0_dvb)
         };
-        let exp_vbd2 = exp_vbd1.sqrt();
-        let dexp_vbd2_dvb = if exp_vbd2 > 1e-20 {
-            0.5 / exp_vbd2 * dexp_vbd1_dvb
+        let t3s = w_tsi * jrec;
+        ibs2 = t3s * (t10s + t11s);
+        dibs2_dvb = t3s * (dt10s_dvb + dt11s_dvb);
+
+        let (t10d, e10d) = dexp(vbd / n_vtmf);
+        let dt10d_dvb = e10d / n_vtmf;
+        let (t11d, dt11d_dvb) = if (p.vrec0 - vbd) < 1.0e-3 {
+            let t0 = -vbd / n_vtmr * p.vrec0 * 1.0e3;
+            (-t0.exp(), 0.0)
         } else {
-            0.0
+            let t1 = 1.0 / (p.vrec0 - vbd);
+            let t0 = -vbd / n_vtmr * p.vrec0 * t1;
+            let dt0_dvb = -p.vrec0 / n_vtmr * (t1 + vbd * t1 * t1);
+            let (e, de) = dexp(t0);
+            (-e, -de * dt0_dvb)
         };
-        let t8 = w_tsi * jrec;
-        ibs2 = t8 * (exp_vbs2 - 1.0);
-        dibs2_dvb = t8 * dexp_vbs2_dvb;
-        ibd2 = t8 * (exp_vbd2 - 1.0);
-        dibd2_dvb = t8 * dexp_vbd2_dvb;
+        let t3d = w_tsi * jrec;
+        ibd2 = t3d * (t10d + t11d);
+        dibd2_dvb = t3d * (dt10d_dvb + dt11d_dvb);
         dibd2_dvd = -dibd2_dvb;
     }
 
-    // Ibjt / Ibs3 / Ibd3 (parasitic BJT), b3soiddld.c:2398-2440
+    // Ibs3 / Ibd3: neutral-body recombination with high-level injection, plus Ic.
     let (mut ic, mut gcd, mut gcb) = (0.0, 0.0, 0.0);
     let (ibs3, dibs3_dvb, dibs3_dvd, ibd3, dibd3_dvb, dibd3_dvd);
-    if vds == 0.0 || jbjt == 0.0 {
+    if jbjt == 0.0 {
         ibs3 = 0.0;
         dibs3_dvb = 0.0;
         dibs3_dvd = 0.0;
@@ -1397,37 +1420,81 @@ pub fn eval(
         dibd3_dvb = 0.0;
         dibd3_dvd = 0.0;
     } else {
-        let t0 = leff - p.kbjt1 * vds;
-        let mut t1 = t0 / p.edl;
-        let mut dt1_dvd = -p.kbjt1 / p.edl;
-        if t1 < 1e-3 {
-            let t2 = 1.0 / (3.0 - 2.0e3 * t1);
-            t1 = (2.0e-3 - t1) * t2;
-            dt1_dvd *= t2 * t2;
-        } else if t1 > 1.0 {
-            t1 = 1.0;
-            dt1_dvd = 0.0;
+        let ien = w_tsi * jbjt * p.lratio;
+        let ahli = p.ahli0;
+
+        let (ehlis, dehlis_dvb, ehlis_factor, dehlis_factor_dvb) = {
+            let e = ahli * (exp_vbs_n - 1.0);
+            if e < 1.0e-5 {
+                (0.0, 0.0, 1.0, 0.0)
+            } else {
+                let de = ahli * dexp_vbs_n_dvb;
+                let f = 1.0 / (1.0 + e).sqrt();
+                let t0 = -0.5 * f / (1.0 + e);
+                (e, de, f, t0 * de)
+            }
+        };
+        let (ehlid, dehlid_dvb, dehlid_dvd, ehlid_factor, ehlid_factor_dvb) = {
+            let e = ahli * (exp_vbd_n - 1.0);
+            if e < 1.0e-5 {
+                (0.0, 0.0, 0.0, 1.0, 0.0)
+            } else {
+                let de = ahli * dexp_vbd_n_dvb;
+                let de_dvd = -de;
+                let f = 1.0 / (1.0 + e).sqrt();
+                let t0 = -0.5 * f / (1.0 + e);
+                (e, de, de_dvd, f, t0 * de)
+            }
+        };
+
+        let t0a = 1.0 - p.arfabjt;
+        if t0a < 1.0e-2 {
+            ibs3 = 0.0;
+            dibs3_dvb = 0.0;
+            dibs3_dvd = 0.0;
+            ibd3 = 0.0;
+            dibd3_dvb = 0.0;
+            dibd3_dvd = 0.0;
+        } else {
+            let t1 = t0a * ien;
+            ibs3 = t1 * (exp_vbs_n - 1.0) * ehlis_factor;
+            dibs3_dvb =
+                t1 * (dexp_vbs_n_dvb * ehlis_factor + (exp_vbs_n - 1.0) * dehlis_factor_dvb);
+            dibs3_dvd = 0.0;
+            ibd3 = t1 * (exp_vbd_n - 1.0) * ehlid_factor;
+            dibd3_dvb = t1 * (dexp_vbd_n_dvb * ehlid_factor + (exp_vbd_n - 1.0) * ehlid_factor_dvb);
+            dibd3_dvd = -dibd3_dvb;
         }
-        let bjt_a = 1.0 - 0.5 * t1 * t1;
-        let dbjt_a_dvd = -t1 * dt1_dvd;
-        let t5 = w_tsi * jbjt;
-        let ibjt = t5 * (exp_vbs1 - exp_vbd1);
-        let dibjt_dvb = t5 * (dexp_vbs1_dvb - dexp_vbd1_dvb);
-        let dibjt_dvd = t5 * dexp_vbd1_dvb;
-        let t3 = (1.0 - bjt_a) * t5;
-        let t4 = -t5 * dbjt_a_dvd;
-        ibs3 = t3 * exp_vbs1;
-        dibs3_dvb = t3 * dexp_vbs1_dvb;
-        dibs3_dvd = t4 * exp_vbs1;
-        ibd3 = t3 * exp_vbd1;
-        dibd3_dvb = t3 * dexp_vbd1_dvb;
-        dibd3_dvd = t4 * exp_vbd1 - dibd3_dvb;
-        ic = ibjt - ibs3 + ibd3;
-        gcd = dibjt_dvd - dibs3_dvd + dibd3_dvd;
-        gcb = dibjt_dvb - dibs3_dvb + dibd3_dvb;
+
+        if vds != 0.0 {
+            let t0 = 1.0 + (vbs + vbd) / p.vearly;
+            let dt0_dvb = 2.0 / p.vearly;
+            let dt0_dvd = -1.0 / p.vearly;
+            let t1 = ehlis + ehlid;
+            let dt1_dvb = dehlis_dvb + dehlid_dvb;
+            let dt1_dvd = dehlid_dvd;
+            let t3 = (t0 * t0 + 4.0 * t1).sqrt();
+            let dt3_dvb = 0.5 / t3 * (2.0 * t0 * dt0_dvb + 4.0 * dt1_dvb);
+            let dt3_dvd = 0.5 / t3 * (2.0 * t0 * dt0_dvd + 4.0 * dt1_dvd);
+            let t2 = (t0 + t3) / 2.0;
+            let dt2_dvb = (dt0_dvb + dt3_dvb) / 2.0;
+            let dt2_dvd = (dt0_dvd + dt3_dvd) / 2.0;
+            let (e2nd, de2nd_dvb, de2nd_dvd) = if t2 < 0.1 {
+                (10.0, 0.0, 0.0)
+            } else {
+                let f = 1.0 / t2;
+                (f, -f / t2 * dt2_dvb, -f / t2 * dt2_dvd)
+            };
+            let t0c = p.arfabjt * ien;
+            ic = t0c * (exp_vbs_n - exp_vbd_n) * e2nd;
+            gcb = t0c
+                * ((dexp_vbs_n_dvb - dexp_vbd_n_dvb) * e2nd + (exp_vbs_n - exp_vbd_n) * de2nd_dvb);
+            gcd = t0c * (-dexp_vbd_n_dvd * e2nd + (exp_vbs_n - exp_vbd_n) * de2nd_dvd);
+        }
     }
 
-    // Ibs4 / Ibd4 (tunneling)
+    // Ibs4 / Ibd4: band-to-band tunneling.
+    let n_vtm2 = 0.026 * p.ntun;
     let (ibs4, dibs4_dvb, ibd4, dibd4_dvb, dibd4_dvd);
     if jtun == 0.0 {
         ibs4 = 0.0;
@@ -1436,12 +1503,35 @@ pub fn eval(
         dibd4_dvb = 0.0;
         dibd4_dvd = 0.0;
     } else {
-        let t5 = w_tsi * jtun;
-        ibs4 = t5 * (1.0 - exp_vbs4);
-        dibs4_dvb = -t5 * dexp_vbs4_dvb;
-        ibd4 = t5 * (1.0 - exp_vbd4);
-        dibd4_dvb = -t5 * dexp_vbd4_dvb;
-        dibd4_dvd = -dibd4_dvb;
+        let t3s = w_tsi * jtun;
+        if (p.vtun0 - vbs) < 1.0e-3 {
+            let t0 = -vbs / n_vtm2 * p.vtun0 * 1.0e3;
+            ibs4 = t3s * (1.0 - t0.exp());
+            dibs4_dvb = 0.0;
+        } else {
+            let t1 = 1.0 / (p.vtun0 - vbs);
+            let t0 = -vbs / n_vtm2 * p.vtun0 * t1;
+            let dt0_dvb = -p.vtun0 / n_vtm2 * (t1 + vbs * t1 * t1);
+            let (e, de) = dexp(t0);
+            ibs4 = t3s * (1.0 - e);
+            dibs4_dvb = -t3s * de * dt0_dvb;
+        }
+
+        let t3d = w_tsi * jtun;
+        if (p.vtun0 - vbd) < 1.0e-3 {
+            let t0 = -vbd / n_vtm2 * p.vtun0 * 1.0e3;
+            ibd4 = t3d * (1.0 - t0.exp());
+            dibd4_dvb = 0.0;
+            dibd4_dvd = 0.0;
+        } else {
+            let t1 = 1.0 / (p.vtun0 - vbd);
+            let t0 = -vbd / n_vtm2 * p.vtun0 * t1;
+            let dt0_dvb = -p.vtun0 / n_vtm2 * (t1 + vbd * t1 * t1);
+            let (e, de) = dexp(t0);
+            ibd4 = t3d * (1.0 - e);
+            dibd4_dvb = -t3d * de * dt0_dvb;
+            dibd4_dvd = -dibd4_dvb;
+        }
     }
 
     let ibs = ibs1 + ibs2 + ibs3 + ibs4;
@@ -1684,21 +1774,6 @@ fn smooth_etab(eta0: Value, etab: Value, vb: Value) -> (Value, Value) {
         ((2.0e-4 - t3) * t9, t9 * t9 * etab)
     } else {
         (t3, etab)
-    }
-}
-
-/// Linearized exp with ngspice's 30-clamp (b3soiddld.c:2356-2396).
-/// Returns `(exp(v/nvt), d/dv)`.
-#[inline]
-fn exp_lin(v: Value, nvt: Value) -> (Value, Value) {
-    let t0 = v / nvt;
-    if t0 < 30.0 {
-        let e = t0.exp();
-        (e, e / nvt)
-    } else {
-        let t1 = 1.0686e13; // exp(30)
-        let d = t1 / nvt;
-        (d * v - 29.0 * t1, d)
     }
 }
 

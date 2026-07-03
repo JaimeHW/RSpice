@@ -4,7 +4,7 @@
 //! [`B3SoiDdSized`] is computed per (W, L, rth0, cth0) combination; RSpice
 //! computes one per device instance and shares it behind an `Arc`.
 
-use super::super::common::{CHARGE_Q, EPSOX, EPSSI, KB_OVER_Q};
+use super::super::common::{CHARGE_Q, EG300, EPSOX, EPSSI, KB_OVER_Q};
 use super::params::B3SoiDdModel;
 use crate::Value;
 
@@ -26,6 +26,7 @@ pub struct B3SoiDdSized {
     pub weff: Value,
     pub leff_cv: Value,
     pub weff_cv: Value,
+    pub nseg: Value,
     pub abulk_cv_factor: Value,
 
     // Binned values (pParam).
@@ -106,6 +107,21 @@ pub struct B3SoiDdSized {
     pub fbjtii: Value,
     pub lii: Value,
     pub tii: Value,
+    pub nrecf0: Value,
+    pub nrecr0: Value,
+    pub ahli: Value,
+    pub ahli0: Value,
+    pub lbjt0: Value,
+    pub vabjt: Value,
+    pub aely: Value,
+    pub vrec0: Value,
+    pub vtun0: Value,
+    pub ntrecf: Value,
+    pub ntrecr: Value,
+    pub arfabjt: Value,
+    pub lratio: Value,
+    pub lratiodif: Value,
+    pub vearly: Value,
     pub agidl: Value,
     pub bgidl: Value,
     pub ngidl: Value,
@@ -302,6 +318,10 @@ impl B3SoiDdSized {
         p.prt = m.prt;
         p.lii = m.lii;
         p.tii = m.tii;
+        p.vrec0 = m.vrec0;
+        p.vtun0 = m.vtun0;
+        p.ntrecf = m.ntrecf;
+        p.ntrecr = m.ntrecr;
 
         // CV model.
         p.cgsl = m.cgsl;
@@ -402,6 +422,12 @@ impl B3SoiDdSized {
         bin!(sii2);
         bin!(siid);
         bin!(fbjtii);
+        bin!(nrecf0);
+        bin!(nrecr0);
+        bin!(ahli);
+        bin!(lbjt0);
+        bin!(vabjt);
+        bin!(aely);
         bin!(agidl);
         bin!(bgidl);
         bin!(ngidl);
@@ -425,6 +451,7 @@ impl B3SoiDdSized {
         p.uctemp = p.uc;
         p.rds0denom = (p.weff * 1e6).powf(p.wr);
         let nseg = geom.nseg.max(1.0e-30);
+        p.nseg = nseg;
         let thermal_width = (p.weff + m.wth0).max(1.0e-30);
         p.rth = geom.rth0 / thermal_width * nseg;
         p.cth = geom.cth0 * thermal_width / nseg;
@@ -462,18 +489,25 @@ impl B3SoiDdSized {
             p.npeak = 3.021e22 * t0 * t0;
         }
 
-        // --- Diode/BJT saturation current temperature scaling (574-584) ---
-        let t0 = tratio.powf(m.xbjt / p.ndiode);
-        let t1 = tratio.powf(m.xdif / p.ndiode);
-        let t2 = tratio.powf(m.xrec / p.ndiode / 2.0);
-        let t4 = -eg0 / p.ndiode / p.vtm * (1.0 - tratio);
-        let t5 = t4.exp();
-        let t6 = t5.sqrt();
-        p.jbjt = p.isbjt * t0 * t5;
-        p.jdif = p.isdif * t1 * t5;
-        p.jrec = p.isrec * t2 * t6;
+        // --- Diode/BJT saturation current temperature scaling (Xyce v3.2). ---
+        let t4 = EG300 / p.vtm * (tratio - 1.0);
+        let t0 = (m.xbjt * t4 / p.ndiode).exp();
+        let t1 = (m.xdif * t4 / p.ndiode).exp();
+        let t2 = (m.xrec * t4 / p.nrecf0).exp();
+        p.ahli0 = p.ahli * t0;
+        p.jbjt = p.isbjt * t0;
+        p.jdif = p.isdif * t1;
+        p.jrec = p.isrec * t2;
         let t0 = tratio.powf(m.xtun / p.ntun);
         p.jtun = p.istun * t0;
+
+        let ln = if m.ln < 1.0e-15 { 1.0e-15 } else { m.ln };
+        let t0 = -0.5 * p.leff * p.leff / (ln * ln);
+        p.arfabjt = t0.exp();
+        let t0 = p.lbjt0 * (1.0 / p.leff + 1.0 / ln);
+        p.lratio = t0.powf(m.nbjt);
+        p.lratiodif = 1.0 + m.ldif0 * t0.powf(m.ndif);
+        p.vearly = (p.vabjt + p.aely * p.leff).max(1.0);
 
         // --- Back-gate flat band (586-601) ---
         if p.nsub > 0.0 {
