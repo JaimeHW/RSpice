@@ -1099,6 +1099,32 @@ fn test_xyce_step_static_dc_cases_run() {
 }
 
 #[test]
+fn test_xyce_param_refactor_dependency_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        ("Netlists/PARAM_REFACTOR/paramDep1.cir", "static_prn_dc"),
+        ("Netlists/PARAM_REFACTOR/paramDep5.cir", "static_prn_tran"),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce parameter-dependency comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the expected native .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_step_data_static_dc_wrapper_case_runs_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
