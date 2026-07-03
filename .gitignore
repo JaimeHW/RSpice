@@ -26,6 +26,7 @@ Thumbs.db
 
 # Test outputs
 *.raw
+!tests/xyce/OutputData/**/*.raw
 *.log
 *.pyc
 __pycache__/
