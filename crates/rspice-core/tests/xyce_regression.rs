@@ -1094,6 +1094,7 @@ fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
         "Netlists/BUG_174/nlrcs10.cir",
         "Netlists/Certification_Tests/BUG_201_SON/bug201a.cir",
         "Netlists/Certification_Tests/BUG_201_SON/bug201b.cir",
+        "Netlists/MULTIPLICITY_FACTOR/inductor_ic.cir",
     ] {
         let result = runner.run_test(root.join(relative));
 
