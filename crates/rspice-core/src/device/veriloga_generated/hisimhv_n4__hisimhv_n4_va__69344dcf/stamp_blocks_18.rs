@@ -1740,24 +1740,6 @@ impl Instance {
             12,
             multiplicity * (eq62_e1365_d_n12),
         );
-        let (eq65_e1379, eq65_e1379_d_n0, eq65_e1379_d_n2, eq65_e1379_d_n4, eq65_e1379_d_n5, eq65_e1379_d_n6, eq65_e1379_d_n7, eq65_e1379_d_n8, eq65_e1379_d_n9, eq65_e1379_d_n10, eq65_e1379_d_n13,) = {
-    if (p.p29 != 0.0) {
-        (locals.var_ibd_nqs, locals.var_ibd_nqs_dn0, locals.var_ibd_nqs_dn2, locals.var_ibd_nqs_dn4, locals.var_ibd_nqs_dn5, locals.var_ibd_nqs_dn6, locals.var_ibd_nqs_dn7, locals.var_ibd_nqs_dn8, locals.var_ibd_nqs_dn9, locals.var_ibd_nqs_dn10, locals.var_ibd_nqs_dn13,)
-    } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
-    }
-};
-        let eq65_value: f64 = eq65_e1379;
-        stamper.stamp_current_sparse_local::<10, 0>(
-            Some(13),
-            None,
-            multiplicity * (eq65_value),
-            [0, 2, 4, 5, 6, 7, 8, 9, 10, 13],
-            [multiplicity * (eq65_e1379_d_n0), multiplicity * (eq65_e1379_d_n2), multiplicity * (eq65_e1379_d_n4), multiplicity * (eq65_e1379_d_n5), multiplicity * (eq65_e1379_d_n6), multiplicity * (eq65_e1379_d_n7), multiplicity * (eq65_e1379_d_n8), multiplicity * (eq65_e1379_d_n9), multiplicity * (eq65_e1379_d_n10), multiplicity * (eq65_e1379_d_n13)],
-            [],
-            [],
-            1.0,
-        );
         let (eq66_e1384, eq66_e1384_d_n13,) = {
     if (p.p29 != 0.0) {
         let eq66_e1382: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 20, (nv13 - 0.0));

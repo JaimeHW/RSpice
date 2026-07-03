@@ -1866,28 +1866,6 @@ impl Instance {
             13,
             multiplicity * (eq63_e1369_d_n13),
         );
-        let (eq66_e1383, eq66_e1383_d_n0, eq66_e1383_d_n2, eq66_e1383_d_n4, eq66_e1383_d_n5, eq66_e1383_d_n6, eq66_e1383_d_n7, eq66_e1383_d_n8, eq66_e1383_d_n9, eq66_e1383_d_n10, eq66_e1383_d_n11, eq66_e1383_d_n14,) = {
-    if (p.p29 != 0.0) {
-        (locals.var_ibd_nqs, locals.var_ibd_nqs_dn0, locals.var_ibd_nqs_dn2, locals.var_ibd_nqs_dn4, locals.var_ibd_nqs_dn5, locals.var_ibd_nqs_dn6, locals.var_ibd_nqs_dn7, locals.var_ibd_nqs_dn8, locals.var_ibd_nqs_dn9, locals.var_ibd_nqs_dn10, locals.var_ibd_nqs_dn11, locals.var_ibd_nqs_dn14,)
-    } else {
-        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
-    }
-};
-        let eq66_value: f64 = eq66_e1383;
-        let eq66_node_derivative_indices: [usize; 11] = [0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 14];
-        let eq66_node_derivatives: [f64; 11] = [eq66_e1383_d_n0, eq66_e1383_d_n2, eq66_e1383_d_n4, eq66_e1383_d_n5, eq66_e1383_d_n6, eq66_e1383_d_n7, eq66_e1383_d_n8, eq66_e1383_d_n9, eq66_e1383_d_n10, eq66_e1383_d_n11, eq66_e1383_d_n14];
-        let eq66_branch_derivative_indices: [usize; 0] = [];
-        let eq66_branch_derivatives: [f64; 0] = [];
-        stamper.stamp_current_indexed_dense_local(
-            Some(14),
-            None,
-            multiplicity * (eq66_value),
-            &eq66_node_derivative_indices,
-            &eq66_node_derivatives,
-            &eq66_branch_derivative_indices,
-            &eq66_branch_derivatives,
-            multiplicity,
-        );
         let (eq67_e1388, eq67_e1388_d_n14,) = {
     if (p.p29 != 0.0) {
         let eq67_e1386: f64 = eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 20, (nv14 - 0.0));
