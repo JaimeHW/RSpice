@@ -336,6 +336,38 @@ fn test_xyce_static_prn_cases_run() {
 }
 
 #[test]
+fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/ABM_DB/dbTest.cir",
+        "Netlists/ACtests/RC_simple.cir",
+        "Netlists/ACtests/lowpass_old.cir",
+        "Netlists/ACtests/reg0.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native wrapper-origin Xyce AC .FD.prn comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .FD.prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_fd_prn_ac",
+            "{relative} should report the wrapper-origin AC .FD.prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_transient_delimiter_option_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

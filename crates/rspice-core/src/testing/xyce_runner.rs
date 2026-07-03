@@ -8,6 +8,8 @@
 //! executed.
 
 use crate::abort_signal::AbortSignal;
+use crate::analysis::AcResult;
+use crate::analysis::ac::ac_sweep_frequencies;
 use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
     TransientResult, extract_dc_value,
@@ -15,10 +17,11 @@ use crate::engine::{
 use crate::expr::{Expr, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
-    AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, FreqVariation, Netlist,
+    NetlistParseOptions, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
-use crate::{Engine, Value};
+use crate::{Complex64, Engine, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -199,6 +202,16 @@ struct XyceStaticTranPlan {
     wrapper_tolerance: Option<XyceComparisonTolerance>,
 }
 
+#[derive(Debug, Clone)]
+struct XyceStaticAcPlan {
+    deck_path: PathBuf,
+    reference_path: PathBuf,
+    source: String,
+    print: XycePrintRequest,
+    ac: XyceAcAnalysis,
+    contract: XyceStaticAcContract,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticTranContract {
     PlainStatic,
@@ -217,6 +230,21 @@ impl XyceStaticTranContract {
             (Self::WrapperStaticExpectedError, true) => {
                 "wrapper_static_prn_step_tran_expected_error"
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStaticAcContract {
+    PlainStatic,
+    WrapperStatic,
+}
+
+impl XyceStaticAcContract {
+    fn result_contract(self) -> &'static str {
+        match self {
+            Self::PlainStatic => "static_fd_prn_ac",
+            Self::WrapperStatic => "wrapper_static_fd_prn_ac",
         }
     }
 }
@@ -330,6 +358,7 @@ enum XyceVoltageAccessor {
     Imaginary,
     Magnitude,
     Phase,
+    Decibels,
 }
 
 impl XyceVoltageAccessor {
@@ -340,12 +369,13 @@ impl XyceVoltageAccessor {
             "vi" => Some(Self::Imaginary),
             "vm" => Some(Self::Magnitude),
             "vp" => Some(Self::Phase),
+            "vdb" => Some(Self::Decibels),
             _ => None,
         }
     }
 
     fn uses_voltage_tolerance(self) -> bool {
-        !matches!(self, Self::Phase)
+        !matches!(self, Self::Phase | Self::Decibels)
     }
 
     fn evaluate_dc(self, real: Value) -> Value {
@@ -354,7 +384,23 @@ impl XyceVoltageAccessor {
             Self::Imaginary => 0.0,
             Self::Magnitude => real.abs(),
             Self::Phase => 0.0_f64.atan2(real).to_degrees(),
+            Self::Decibels => Self::db(real.abs()),
         }
+    }
+
+    fn evaluate_ac_scalar(self, value: Complex64) -> Option<Value> {
+        match self {
+            Self::Value => None,
+            Self::Real => Some(value.re),
+            Self::Imaginary => Some(value.im),
+            Self::Magnitude => Some(value.norm()),
+            Self::Phase => Some(value.arg().to_degrees()),
+            Self::Decibels => Some(Self::db(value.norm())),
+        }
+    }
+
+    fn db(magnitude: Value) -> Value {
+        20.0 * magnitude.max(1.0e-38).log10()
     }
 }
 
@@ -413,6 +459,28 @@ struct XyceTranAnalysis {
     start: Option<Value>,
     max_step: Option<Value>,
     uic: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XyceAcAnalysis {
+    variation: FreqVariation,
+    points: usize,
+    start_freq: Value,
+    stop_freq: Value,
+}
+
+impl XyceAcAnalysis {
+    fn frequencies(self) -> Vec<Value> {
+        ac_sweep_frequencies(self.variation, self.points, self.start_freq, self.stop_freq)
+    }
+}
+
+impl XyceAcReferenceColumn {
+    fn probe_name(&self) -> &str {
+        match self {
+            Self::Probe { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -490,6 +558,21 @@ struct XyceStepBinding {
 enum XyceReferenceColumn {
     PrimarySweep { name: String },
     Probe { name: String },
+}
+
+#[derive(Debug, Clone)]
+enum XyceAcReferenceColumn {
+    Probe {
+        name: String,
+        component: XyceAcProbeComponent,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAcProbeComponent {
+    Scalar,
+    Real,
+    Imaginary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -809,21 +892,26 @@ impl XyceTestRunner {
 
         let result = match self.execution_plan(deck) {
             Ok(plan) => self.run_static_prn_dc_plan(deck, plan, start),
-            Err(dc_reason) => match self.static_tran_plan_for_deck(deck) {
-                Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
-                Err(tran_reason) => {
-                    let reason = if self.deck_has_print_analysis(deck, "TRAN") {
-                        tran_reason
-                    } else {
-                        dc_reason
-                    };
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "unsupported_xyce_contract",
-                        &reason,
-                    );
-                }
+            Err(dc_reason) => match self.static_ac_plan_for_deck(deck) {
+                Ok(plan) => self.run_static_fd_prn_ac_plan(deck, plan, start),
+                Err(ac_reason) => match self.static_tran_plan_for_deck(deck) {
+                    Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
+                    Err(tran_reason) => {
+                        let reason = if self.deck_has_print_analysis(deck, "AC") {
+                            ac_reason
+                        } else if self.deck_has_print_analysis(deck, "TRAN") {
+                            tran_reason
+                        } else {
+                            dc_reason
+                        };
+                        return self.expected_unsupported_result(
+                            deck,
+                            start,
+                            "unsupported_xyce_contract",
+                            &reason,
+                        );
+                    }
+                },
             },
         };
         if self.config.verbose {
@@ -1052,6 +1140,58 @@ impl XyceTestRunner {
                 native_static_prn_wrapper.unwrap_or(XyceStaticTranContract::WrapperStatic)
             } else {
                 XyceStaticTranContract::PlainStatic
+            },
+        })
+    }
+
+    fn static_ac_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticAcPlan, String> {
+        let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
+        let reference_path = self
+            .static_fd_prn_reference_path(&deck.path)
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        if !reference_path.is_file() {
+            return Err(format!(
+                "no checked-in static .FD.prn oracle at {}",
+                self.display_path(&reference_path)
+            ));
+        }
+
+        let source =
+            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        if Self::contains_control_block(&source) {
+            return Err(
+                "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
+                    .to_string(),
+            );
+        }
+        Self::reject_unsupported_source_directives(&source)?;
+        if requires_wrapper {
+            Self::validate_native_static_fd_prn_ac_wrapper_contract(&source)?;
+        }
+
+        let print = Self::single_ac_print_request(&source)?;
+        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
+            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        let ac = Self::single_ac_analysis(&netlist)?;
+        let steps = Self::step_commands(&netlist)?;
+        if !steps.is_empty() {
+            return Err(
+                "native static .PRINT AC comparison does not support .STEP AC decks yet"
+                    .to_string(),
+            );
+        }
+        Self::validate_static_ac_contract(&netlist, &ac, &print)?;
+
+        Ok(XyceStaticAcPlan {
+            deck_path: deck.path.clone(),
+            reference_path,
+            source,
+            print,
+            ac,
+            contract: if requires_wrapper {
+                XyceStaticAcContract::WrapperStatic
+            } else {
+                XyceStaticAcContract::PlainStatic
             },
         })
     }
@@ -1645,6 +1785,76 @@ impl XyceTestRunner {
         }
     }
 
+    fn validate_native_static_fd_prn_ac_wrapper_contract(source: &str) -> Result<(), String> {
+        let mut primary_ac_print_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") {
+                let tokens = Self::split_print_fields(&trimmed)?;
+                let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+                let Some(analysis) = token_refs.get(1).copied() else {
+                    return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
+                };
+                if !analysis.eq_ignore_ascii_case("AC") {
+                    return Err(format!(
+                        "wrapper-origin frequency-domain .prn contract does not cover .PRINT {analysis}"
+                    ));
+                }
+                let mut index = 2usize;
+                while index < token_refs.len() {
+                    if let Some((raw_key, raw_value, consumed)) =
+                        Self::print_option_assignment(&token_refs, index)
+                    {
+                        let value = raw_value.trim().trim_matches(['"', '\'']);
+                        match raw_key.trim().to_ascii_lowercase().as_str() {
+                            "file" => {
+                                return Err(
+                                    "wrapper-origin frequency-domain .prn contract does not cover FILE= side outputs"
+                                        .to_string(),
+                                );
+                            }
+                            "format" => {
+                                if !Self::ac_print_format_is_prn_compatible(value) {
+                                    return Err(format!(
+                                        "wrapper-origin frequency-domain .prn contract does not cover .PRINT AC FORMAT={value}"
+                                    ));
+                                }
+                            }
+                            _ => {}
+                        }
+                        index += consumed;
+                        continue;
+                    }
+                    index += 1;
+                }
+                primary_ac_print_count += 1;
+                continue;
+            }
+            if Self::is_extra_wrapper_ac_output_analysis_command(command) {
+                return Err(format!(
+                    "wrapper-origin frequency-domain .prn contract does not cover {command} directives"
+                ));
+            }
+        }
+
+        match primary_ac_print_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin frequency-domain .prn contract requires one primary .PRINT AC statement"
+                    .to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin frequency-domain .prn contract requires one primary .PRINT AC statement, found {primary_ac_print_count}"
+            )),
+        }
+    }
+
     fn native_static_prn_tran_wrapper_contract(
         deck_path: &Path,
         relative_path: &str,
@@ -1858,6 +2068,30 @@ impl XyceTestRunner {
         )
     }
 
+    fn ac_print_format_is_prn_compatible(format: &str) -> bool {
+        matches!(
+            format.to_ascii_lowercase().as_str(),
+            "std" | "tecplot" | "noindex" | "gnuplot" | "splot"
+        )
+    }
+
+    fn is_extra_wrapper_ac_output_analysis_command(command: &str) -> bool {
+        matches!(
+            command.to_ascii_lowercase().as_str(),
+            ".dc"
+                | ".four"
+                | ".fft"
+                | ".hb"
+                | ".measure"
+                | ".meas"
+                | ".noise"
+                | ".probe"
+                | ".save"
+                | ".sens"
+                | ".tran"
+        )
+    }
+
     fn is_extra_wrapper_tran_output_analysis_command(command: &str) -> bool {
         matches!(
             command.to_ascii_lowercase().as_str(),
@@ -1921,6 +2155,101 @@ impl XyceTestRunner {
             };
             Self::is_extra_wrapper_output_analysis_command(command)
         })
+    }
+
+    fn run_static_fd_prn_ac_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticAcPlan,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.contract.result_contract();
+        let reference = match Self::parse_prn_file(&plan.reference_path) {
+            Ok(reference) => reference,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("failed to parse Xyce .FD.prn oracle: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
+            Ok(netlist) => netlist,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("parse failed after contract validation: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let frequencies = plan.ac.frequencies();
+        if frequencies.is_empty() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                "AC analysis produced no frequency points".to_string(),
+                Vec::new(),
+            );
+        }
+
+        let engine = self.create_xyce_engine();
+        let results = match engine.run_ac(&netlist, &frequencies) {
+            Ok(results) => results,
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this static AC deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("simulation error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let mismatches = match self.compare_ac_prn_reference(
+            &reference,
+            &plan.print,
+            &netlist,
+            &plan.source,
+            &results,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("reference comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("{} Xyce AC reference mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
     }
 
     fn run_static_prn_dc_plan(
@@ -3991,6 +4320,133 @@ impl XyceTestRunner {
         Ok(mismatches)
     }
 
+    fn compare_ac_prn_reference(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        source: &str,
+        results: &[AcResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if reference.columns.is_empty() {
+            return Err("reference table has no columns".to_string());
+        }
+
+        let mut data_column_offset = 0usize;
+        let index_column = reference
+            .columns
+            .first()
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            .then_some(0usize);
+        if index_column.is_some() {
+            data_column_offset += 1;
+        }
+
+        let frequency_column = reference
+            .columns
+            .get(data_column_offset)
+            .filter(|column| Self::is_ac_frequency_reference_column(column))
+            .map(|_| data_column_offset)
+            .ok_or_else(|| {
+                format!(
+                    "expected Xyce .FD.prn frequency column at position {}, got '{}'",
+                    data_column_offset,
+                    reference
+                        .columns
+                        .get(data_column_offset)
+                        .map(String::as_str)
+                        .unwrap_or("<missing>")
+                )
+            })?;
+        data_column_offset += 1;
+
+        if reference.rows.len() != results.len() {
+            return Err(format!(
+                "reference row count ({}) does not match AC simulation point count ({})",
+                reference.rows.len(),
+                results.len()
+            ));
+        }
+
+        let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
+        let comp_columns = data_columns
+            .iter()
+            .map(|column| XyceReferenceColumn::Probe {
+                name: column.probe_name().to_string(),
+            })
+            .collect::<Vec<_>>();
+        let comp_tolerances = self.comp_tolerances(source, &comp_columns)?;
+        let frequency_tolerance = XyceComparisonTolerance::from_config(&self.config);
+
+        let mut mismatches = Vec::new();
+        for (row_index, (row, result)) in reference.rows.iter().zip(results).enumerate() {
+            if row.len() != reference.columns.len() {
+                return Err(format!(
+                    "row {} has {} values, expected {}",
+                    row_index,
+                    row.len(),
+                    reference.columns.len()
+                ));
+            }
+            if let Some(index_column) = index_column {
+                let expected_index = row[index_column];
+                let actual_index = row_index as f64;
+                if (expected_index - actual_index).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "Index".to_string(),
+                        expected: expected_index,
+                        actual: actual_index,
+                        relative_error: 1.0,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+
+            let expected_frequency = row[frequency_column];
+            if let Some(relative_error) =
+                self.value_mismatch(expected_frequency, result.frequency, frequency_tolerance)
+            {
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: reference.columns[frequency_column].clone(),
+                    expected: expected_frequency,
+                    actual: result.frequency,
+                    relative_error,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
+            }
+
+            for (column_index, column) in data_columns.iter().enumerate() {
+                let expected = row[column_index + data_column_offset];
+                let actual = Self::evaluate_ac_reference_column(column, netlist, result)?;
+                let normalized_probe = Self::normalize_probe(column.probe_name());
+                let tolerance = comp_tolerances
+                    .get(&normalized_probe)
+                    .copied()
+                    .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: reference.columns[column_index + data_column_offset].clone(),
+                        expected,
+                        actual,
+                        relative_error,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+        }
+
+        Ok(mismatches)
+    }
+
     fn compare_tran_prn_reference(
         &self,
         reference: &XycePrnTable,
@@ -5032,9 +5488,10 @@ impl XyceTestRunner {
     }
 
     fn parse_xyce_numeric_token(token: &str) -> Result<f64, std::num::ParseFloatError> {
-        token
+        let normalized = token.trim_end_matches(',');
+        normalized
             .parse::<f64>()
-            .or_else(|_| token.replace(['D', 'd'], "e").parse::<f64>())
+            .or_else(|_| normalized.replace(['D', 'd'], "e").parse::<f64>())
     }
 
     fn reference_data_columns(
@@ -5148,6 +5605,80 @@ impl XyceTestRunner {
                 || normalized_column == format!("{source_name}#branch");
         }
         false
+    }
+
+    fn reference_ac_data_columns(
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        data_column_offset: usize,
+    ) -> Result<Vec<XyceAcReferenceColumn>, String> {
+        let mut columns = Vec::new();
+        for column in reference.columns.iter().skip(data_column_offset) {
+            if let Some((component, probe)) = Self::parse_ac_component_reference_column(column) {
+                if !Self::print_requests_complex_ac_probe(print, &probe) {
+                    return Err(format!(
+                        "AC reference column '{}' is not produced by the deck's .PRINT AC probes",
+                        column
+                    ));
+                }
+                columns.push(XyceAcReferenceColumn::Probe {
+                    name: probe,
+                    component,
+                });
+                continue;
+            }
+
+            if !Self::print_requests_scalar_ac_probe(print, column) {
+                return Err(format!(
+                    "AC reference column '{}' is not produced by the deck's .PRINT AC probes",
+                    column
+                ));
+            }
+            columns.push(XyceAcReferenceColumn::Probe {
+                name: column.clone(),
+                component: XyceAcProbeComponent::Scalar,
+            });
+        }
+        Ok(columns)
+    }
+
+    fn is_ac_frequency_reference_column(column: &str) -> bool {
+        matches!(Self::normalize_probe(column).as_str(), "freq" | "frequency")
+    }
+
+    fn parse_ac_component_reference_column(column: &str) -> Option<(XyceAcProbeComponent, String)> {
+        let normalized = Self::normalize_probe(column);
+        let (prefix, component) = if normalized.starts_with("re(") {
+            ("re(", XyceAcProbeComponent::Real)
+        } else if normalized.starts_with("im(") {
+            ("im(", XyceAcProbeComponent::Imaginary)
+        } else {
+            return None;
+        };
+        if !normalized.ends_with(')') {
+            return None;
+        }
+        let inner = &normalized[prefix.len()..normalized.len() - 1];
+        (!inner.is_empty()).then(|| (component, inner.to_string()))
+    }
+
+    fn print_requests_complex_ac_probe(print: &XycePrintRequest, probe: &str) -> bool {
+        let normalized_probe = Self::normalize_probe(probe);
+        print.probes.iter().any(|requested| {
+            Self::normalize_probe(requested) == normalized_probe
+                && Self::parse_voltage_probe(&normalized_probe)
+                    .is_some_and(|voltage| voltage.accessor == XyceVoltageAccessor::Value)
+                || Self::parse_current_probe(&normalized_probe).is_some()
+                    && Self::normalize_probe(requested) == normalized_probe
+        })
+    }
+
+    fn print_requests_scalar_ac_probe(print: &XycePrintRequest, column: &str) -> bool {
+        let normalized_column = Self::normalize_probe(column);
+        print
+            .probes
+            .iter()
+            .any(|requested| Self::normalize_probe(requested) == normalized_column)
     }
 
     fn compact_reference_probe_alias(normalized_column: &str) -> Option<&'static str> {
@@ -5403,6 +5934,76 @@ impl XyceTestRunner {
             Self::validate_tran_probe(probe, netlist)?;
         }
         Self::validate_native_transient_contract(netlist)?;
+
+        Ok(())
+    }
+
+    fn validate_static_ac_contract(
+        netlist: &Netlist,
+        ac: &XyceAcAnalysis,
+        print: &XycePrintRequest,
+    ) -> Result<(), String> {
+        let frequencies = ac.frequencies();
+        if frequencies.is_empty() {
+            return Err(format!(
+                ".AC sweep has invalid bounds or point count: {:?} {} {} {}",
+                ac.variation, ac.points, ac.start_freq, ac.stop_freq
+            ));
+        }
+
+        for probe in &print.probes {
+            Self::validate_ac_probe(probe, netlist)?;
+        }
+        Self::validate_native_static_ac_contract(netlist)?;
+
+        Ok(())
+    }
+
+    fn validate_native_static_ac_contract(netlist: &Netlist) -> Result<(), String> {
+        if netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            return Err(
+                "native static .PRINT AC comparison does not support subcircuit flattening yet"
+                    .to_string(),
+            );
+        }
+
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::VoltageSource(_)
+                | ElementKind::CurrentSource(_)
+                | ElementKind::Resistor { .. }
+                | ElementKind::Capacitor { .. }
+                | ElementKind::Inductor { .. } => {}
+                ElementKind::Coupling { coefficient, .. } => {
+                    if !coefficient.is_finite() {
+                        return Err(format!(
+                            "native static .PRINT AC comparison does not support coupling '{}' with non-finite coefficient {}",
+                            element.name, coefficient
+                        ));
+                    }
+                }
+                ElementKind::Vccs {
+                    transconductance, ..
+                } => {
+                    Self::validate_finite_controlled_source_gain(
+                        "VCCS",
+                        &element.name,
+                        "transconductance",
+                        *transconductance,
+                    )?;
+                }
+                _ => {
+                    return Err(format!(
+                        "native static .PRINT AC comparison currently supports independent sources, R/L/C passives, mutual inductors, and finite-gain VCCS elements; element '{}' requires a broader AC oracle contract",
+                        element.name
+                    ));
+                }
+            }
+        }
 
         Ok(())
     }
@@ -6061,6 +6662,92 @@ impl XyceTestRunner {
 
         let normalized = Self::normalize_probe(probe);
         Self::validate_atomic_tran_probe(&normalized, probe, netlist)
+    }
+
+    fn validate_ac_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
+        if let Some(expression) = Self::print_expression_inner(probe) {
+            let normalized_expression = Self::normalize_probe(expression);
+            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+                return Self::validate_atomic_ac_probe(&normalized_expression, expression, netlist);
+            }
+            if let Some(inner) = Self::ac_db_expression_inner(expression) {
+                return Self::validate_ac_complex_probe(inner, netlist);
+            }
+            if Self::print_expression_contains_probe_reference(expression) {
+                let context = Self::print_eval_context(netlist, None, None);
+                let mut call_value = |call: &str| {
+                    let normalized = Self::normalize_probe(call);
+                    Self::validate_atomic_ac_probe(&normalized, call, netlist)?;
+                    let Some(voltage_probe) = Self::parse_voltage_probe(&normalized) else {
+                        return Err(format!("unsupported .PRINT AC expression probe '{call}'"));
+                    };
+                    voltage_probe.accessor.evaluate_ac_scalar(Complex64::new(1.0, 0.0)).ok_or_else(
+                        || {
+                            format!(
+                                "unsupported .PRINT AC expression probe '{call}'; use VR/VI/VM/VP/VDB or DB(V(...)) for scalar expressions"
+                            )
+                        },
+                    )
+                };
+                Self::evaluate_print_expression_with_probe_calls(
+                    expression,
+                    context,
+                    &mut call_value,
+                )
+                .map_err(|err| {
+                    format!("unsupported .PRINT AC expression '{{{expression}}}': {err}")
+                })?;
+                return Ok(());
+            }
+            let context = Self::print_eval_context(netlist, None, None);
+            crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
+                format!("unsupported .PRINT AC expression '{{{expression}}}': {err}")
+            })?;
+            return Ok(());
+        }
+
+        let normalized = Self::normalize_probe(probe);
+        Self::validate_atomic_ac_probe(&normalized, probe, netlist)
+    }
+
+    fn validate_atomic_ac_probe(
+        normalized: &str,
+        original: &str,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+            if !voltage_probe.node_pos.is_empty()
+                && voltage_probe
+                    .node_neg
+                    .as_deref()
+                    .is_none_or(|node| !node.is_empty())
+            {
+                return Ok(());
+            }
+        }
+        if let Some(element_name) = Self::parse_current_probe(normalized)
+            && Self::netlist_has_recorded_branch_current(netlist, &element_name)
+        {
+            return Ok(());
+        }
+        Err(format!("unsupported .PRINT AC probe '{}'", original))
+    }
+
+    fn validate_ac_complex_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
+        let normalized = Self::normalize_probe(probe);
+        let Some(voltage_probe) = Self::parse_voltage_probe(&normalized) else {
+            return Err(format!(
+                "unsupported .PRINT AC dB expression argument '{}'",
+                probe.trim()
+            ));
+        };
+        if voltage_probe.accessor != XyceVoltageAccessor::Value {
+            return Err(format!(
+                ".PRINT AC DB() expects a complex V(...) argument, got '{}'",
+                probe.trim()
+            ));
+        }
+        Self::validate_atomic_ac_probe(&normalized, probe, netlist)
     }
 
     fn validate_atomic_tran_probe(
@@ -6834,6 +7521,131 @@ impl XyceTestRunner {
             })
     }
 
+    fn evaluate_ac_reference_column(
+        column: &XyceAcReferenceColumn,
+        netlist: &Netlist,
+        result: &AcResult,
+    ) -> Result<Value, String> {
+        match column {
+            XyceAcReferenceColumn::Probe { name, component } => match component {
+                XyceAcProbeComponent::Scalar => Self::evaluate_ac_probe(name, netlist, result),
+                XyceAcProbeComponent::Real => {
+                    Ok(Self::evaluate_ac_complex_probe(name, netlist, result)?.re)
+                }
+                XyceAcProbeComponent::Imaginary => {
+                    Ok(Self::evaluate_ac_complex_probe(name, netlist, result)?.im)
+                }
+            },
+        }
+    }
+
+    fn evaluate_ac_probe(
+        probe: &str,
+        netlist: &Netlist,
+        result: &AcResult,
+    ) -> Result<Value, String> {
+        if let Some(expression) = Self::print_expression_inner(probe) {
+            let normalized_expression = Self::normalize_probe(expression);
+            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+                return Self::evaluate_atomic_ac_probe(&normalized_expression, netlist, result);
+            }
+            if let Some(inner) = Self::ac_db_expression_inner(expression) {
+                let value = Self::evaluate_ac_complex_probe(inner, netlist, result)?;
+                return Ok(XyceVoltageAccessor::db(value.norm()));
+            }
+            if Self::print_expression_contains_probe_reference(expression) {
+                return Self::evaluate_ac_probe_expression(expression, netlist, result);
+            }
+            let context = Self::print_eval_context(netlist, None, None);
+            return crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
+                format!("failed to evaluate .PRINT AC expression '{{{expression}}}': {err}")
+            });
+        }
+
+        let normalized = Self::normalize_probe(probe);
+        Self::evaluate_atomic_ac_probe(&normalized, netlist, result)
+    }
+
+    fn evaluate_atomic_ac_probe(
+        normalized: &str,
+        netlist: &Netlist,
+        result: &AcResult,
+    ) -> Result<Value, String> {
+        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+            let value = Self::evaluate_ac_voltage_probe(&voltage_probe, netlist, result)?;
+            return voltage_probe
+                .accessor
+                .evaluate_ac_scalar(value)
+                .ok_or_else(|| {
+                    format!(
+                        "AC probe '{}' is complex-valued; compare Re()/Im() columns or use VM/VP/VDB",
+                        normalized
+                    )
+                });
+        }
+
+        if let Some(element_name) = Self::parse_current_probe(normalized) {
+            let current = Self::ac_branch_current_named(result, &element_name)
+                .ok_or_else(|| format!("branch '{}' not found in AC result", element_name))?;
+            return Ok(current.re);
+        }
+
+        Err(format!("unsupported AC probe '{}'", normalized))
+    }
+
+    fn evaluate_ac_complex_probe(
+        probe: &str,
+        netlist: &Netlist,
+        result: &AcResult,
+    ) -> Result<Complex64, String> {
+        let normalized = Self::normalize_probe(probe);
+        if let Some(voltage_probe) = Self::parse_voltage_probe(&normalized) {
+            if voltage_probe.accessor != XyceVoltageAccessor::Value {
+                return Err(format!(
+                    "AC complex probe '{}' must use bare V(...) accessor",
+                    probe.trim()
+                ));
+            }
+            return Self::evaluate_ac_voltage_probe(&voltage_probe, netlist, result);
+        }
+        if let Some(element_name) = Self::parse_current_probe(&normalized) {
+            return Self::ac_branch_current_named(result, &element_name)
+                .ok_or_else(|| format!("branch '{}' not found in AC result", element_name));
+        }
+        Err(format!("unsupported AC complex probe '{}'", probe.trim()))
+    }
+
+    fn evaluate_ac_probe_expression(
+        expression: &str,
+        netlist: &Netlist,
+        result: &AcResult,
+    ) -> Result<Value, String> {
+        let context = Self::print_eval_context(netlist, None, None);
+        let mut call_value = |call: &str| {
+            let normalized = Self::normalize_probe(call);
+            Self::evaluate_atomic_ac_probe(&normalized, netlist, result)
+        };
+        Self::evaluate_print_expression_with_probe_calls(expression, context, &mut call_value)
+            .map_err(|err| {
+                format!("failed to evaluate .PRINT AC expression '{{{expression}}}': {err}")
+            })
+    }
+
+    fn evaluate_ac_voltage_probe(
+        probe: &XyceVoltageProbe,
+        netlist: &Netlist,
+        result: &AcResult,
+    ) -> Result<Complex64, String> {
+        let pos = Self::ac_node_voltage_named(result, netlist, &probe.node_pos)
+            .ok_or_else(|| format!("node '{}' not found in AC result", probe.node_pos))?;
+        let neg = match probe.node_neg.as_deref() {
+            Some(node) => Self::ac_node_voltage_named(result, netlist, node)
+                .ok_or_else(|| format!("node '{}' not found in AC result", node))?,
+            None => Complex64::new(0.0, 0.0),
+        };
+        Ok(pos - neg)
+    }
+
     fn evaluate_tran_probe(
         probe: &str,
         netlist: &Netlist,
@@ -7510,6 +8322,20 @@ impl XyceTestRunner {
             .filter(|value| !value.is_empty())
     }
 
+    fn ac_db_expression_inner(expression: &str) -> Option<&str> {
+        let trimmed = expression.trim();
+        let open_index = trimmed.find('(')?;
+        if !trimmed[..open_index].trim().eq_ignore_ascii_case("db") {
+            return None;
+        }
+        let close_index = Self::matching_parenthesis_index(trimmed, open_index).ok()?;
+        if close_index + 1 != trimmed.len() {
+            return None;
+        }
+        let inner = trimmed[open_index + 1..close_index].trim();
+        (!inner.is_empty()).then_some(inner)
+    }
+
     fn print_expression_contains_probe_call(expression: &str) -> bool {
         let mut index = 0usize;
         while index < expression.len() {
@@ -7599,7 +8425,7 @@ impl XyceTestRunner {
 
         let rest = &expression[index..];
         for prefix in [
-            "id", "ig", "is", "ib", "ic", "ie", "vr", "vi", "vm", "vp", "v", "i", "p", "n",
+            "id", "ig", "is", "ib", "ic", "ie", "vdb", "vr", "vi", "vm", "vp", "v", "i", "p", "n",
         ] {
             let next_index = index + prefix.len();
             if rest.len() <= prefix.len()
@@ -8863,6 +9689,46 @@ impl XyceTestRunner {
         })
     }
 
+    fn ac_node_voltage_named(
+        result: &AcResult,
+        netlist: &Netlist,
+        node_name: &str,
+    ) -> Option<Complex64> {
+        if matches!(
+            node_name.to_ascii_lowercase().as_str(),
+            "0" | "gnd" | "ground"
+        ) {
+            return Some(Complex64::new(0.0, 0.0));
+        }
+        Self::node_lookup_candidates(netlist, node_name)
+            .into_iter()
+            .find_map(|candidate| {
+                result
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(&candidate))
+                    .and_then(|index| result.voltages.get(index).copied())
+            })
+    }
+
+    fn ac_branch_current_named(result: &AcResult, branch_name: &str) -> Option<Complex64> {
+        result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(branch_name))
+            .and_then(|index| result.currents.get(index).copied())
+            .or_else(|| {
+                let normalized = Self::normalize_device_instance_name(branch_name);
+                (normalized != branch_name).then(|| {
+                    result
+                        .branch_names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case(&normalized))
+                        .and_then(|index| result.currents.get(index).copied())
+                })?
+            })
+    }
+
     fn netlist_has_recorded_branch_current(netlist: &Netlist, source: &str) -> bool {
         if Self::elements_have_recorded_branch_current(&netlist.elements, source) {
             return true;
@@ -9515,6 +10381,36 @@ impl XyceTestRunner {
         }
     }
 
+    fn single_ac_analysis(netlist: &Netlist) -> Result<XyceAcAnalysis, String> {
+        let analyses = netlist
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Ac {
+                    variation,
+                    points,
+                    start_freq,
+                    stop_freq,
+                } => Some(XyceAcAnalysis {
+                    variation: *variation,
+                    points: *points,
+                    start_freq: *start_freq,
+                    stop_freq: *stop_freq,
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        match analyses.len() {
+            0 => Err("deck has no .AC analysis for static .PRINT AC output".to_string()),
+            1 => Ok(analyses[0]),
+            _ => Err(
+                "deck has multiple .AC analyses; multi-analysis AC comparison is not implemented yet"
+                    .to_string(),
+            ),
+        }
+    }
+
     fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
         let mut dimensions = Vec::new();
         for analysis in &netlist.analyses {
@@ -9644,6 +10540,22 @@ impl XyceTestRunner {
             0 => Err("deck has no .PRINT TRAN statement with static columns".to_string()),
             1 => Ok(requests.into_iter().next().expect("one request")),
             _ => Err("deck has multiple .PRINT TRAN statements; multi-table comparison is not implemented yet".to_string()),
+        }
+    }
+
+    fn single_ac_print_request(source: &str) -> Result<XycePrintRequest, String> {
+        let requests = Self::print_output_requests(source, "AC")?
+            .into_iter()
+            .filter(|request| request.file.is_none())
+            .map(|request| XycePrintRequest {
+                probes: request.probes,
+            })
+            .collect::<Vec<_>>();
+
+        match requests.len() {
+            0 => Err("deck has no .PRINT AC statement with static columns".to_string()),
+            1 => Ok(requests.into_iter().next().expect("one request")),
+            _ => Err("deck has multiple .PRINT AC statements; multi-table comparison is not implemented yet".to_string()),
         }
     }
 
@@ -10322,7 +11234,7 @@ impl XyceTestRunner {
             }
             let values = Self::split_prn_fields(line, delimiter)
                 .map(|token| {
-                    token.parse::<f64>().map_err(|err| {
+                    Self::parse_xyce_numeric_token(token).map_err(|err| {
                         format!(
                             "invalid numeric token '{}' on data line {}: {err}",
                             token, line_number
@@ -10451,6 +11363,10 @@ impl XyceTestRunner {
 
     fn static_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
         self.static_output_reference_path(deck_path, "prn")
+    }
+
+    fn static_fd_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
+        self.static_output_reference_path(deck_path, "FD.prn")
     }
 
     fn static_raw_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
@@ -10955,6 +11871,28 @@ End of Xyce(TM) Simulation
         );
         assert_eq!(table.rows.len(), 2);
         assert_eq!(table.rows[1], vec![1.0, 0.05, 0.0, -3.05537186e-9]);
+    }
+
+    #[test]
+    fn prn_parser_accepts_trailing_commas_in_whitespace_fd_output() {
+        let table = XyceTestRunner::parse_prn_table(
+            r#"Index     FREQ           Re(V(1))         Im(V(1))
+0	1.000000e+00,		-9.998421e+02,	1.256439e+01
+1	1.258925e+00,		-9.997498e+02,	1.581616e+01
+End of Xyce(TM) Simulation
+"#,
+        )
+        .expect("parser accepts Xyce whitespace-delimited FD output with trailing commas");
+
+        assert_eq!(
+            table.columns,
+            ["Index", "FREQ", "Re(V(1))", "Im(V(1))"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(table.rows.len(), 2);
+        assert_eq!(table.rows[0], vec![0.0, 1.0, -9.998421e2, 1.256439e1]);
     }
 
     #[test]
@@ -11822,6 +12760,12 @@ interval output
                 .expect("phase probe parses")
                 .accessor,
             XyceVoltageAccessor::Phase
+        );
+        assert_eq!(
+            XyceTestRunner::parse_voltage_probe("VDB(out)")
+                .expect("dB probe parses")
+                .accessor,
+            XyceVoltageAccessor::Decibels
         );
         assert!(XyceTestRunner::parse_voltage_probe("VX(A)").is_none());
     }
