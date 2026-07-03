@@ -175,7 +175,7 @@ impl EventQueue {
 
     /// Schedule an event
     pub fn schedule(&mut self, event: Event) {
-        if !event.time.is_finite() {
+        if !event.time.is_finite() || event.time < 0.0 {
             return;
         }
         let driver_key = event.driver_key();
@@ -226,10 +226,9 @@ impl EventQueue {
         driver_index: usize,
         value: DigitalValue,
     ) {
-        let event_time = current_time + delay;
-        if !event_time.is_finite() || event_time < 0.0 {
+        let Some(event_time) = scheduled_output_time(current_time, delay) else {
             return;
-        }
+        };
         let event = Event::new_with_driver_index(
             event_time,
             node_id,
@@ -273,10 +272,9 @@ impl EventQueue {
         driver_index: usize,
         value: Value,
     ) {
-        let event_time = current_time + delay;
-        if !event_time.is_finite() || event_time < 0.0 {
+        let Some(event_time) = scheduled_output_time(current_time, delay) else {
             return;
-        }
+        };
         let event = Event::new_with_driver_index(
             event_time,
             node_id,
@@ -510,6 +508,17 @@ impl EventQueue {
     }
 }
 
+fn scheduled_output_time(current_time: Value, delay: Value) -> Option<Value> {
+    if !current_time.is_finite() || !delay.is_finite() {
+        return None;
+    }
+    let event_time = current_time + delay;
+    if !event_time.is_finite() || event_time < 0.0 {
+        return None;
+    }
+    Some(event_time.max(current_time))
+}
+
 /// Event queue statistics
 #[derive(Debug, Clone)]
 pub struct EventQueueStats {
@@ -529,6 +538,13 @@ mod tests {
     fn event_queue_ignores_negative_absolute_output_times() {
         let mut queue = EventQueue::new();
 
+        queue.schedule(Event::new(
+            -1.0e-12,
+            1,
+            "out",
+            "a_negative_absolute_event_time",
+            EventValue::Digital(DigitalValue::one()),
+        ));
         queue.schedule_delayed(
             1.0e-12,
             -1.0e-9,
@@ -549,6 +565,33 @@ mod tests {
         assert!(
             queue.is_empty(),
             "event outputs before the start of transient analysis must be ignored"
+        );
+    }
+
+    #[test]
+    fn event_queue_clamps_rebased_delayed_outputs_to_current_time() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule_delayed(
+            10.0e-9,
+            -2.0e-9,
+            1,
+            "out",
+            "a_late_digital_output",
+            DigitalValue::one(),
+        );
+        queue.schedule_real_delayed(10.0e-9, -1.0e-9, 2, "real_out", "a_late_real_output", 1.25);
+
+        assert_eq!(
+            queue.next_event_time(),
+            Some(10.0e-9),
+            "rebased output events must not be inserted before the current event dispatch"
+        );
+        let events = queue.pop_events_at(10.0e-9);
+        assert_eq!(events.len(), 2);
+        assert!(
+            events.iter().all(|event| event.time == 10.0e-9),
+            "all late rebased events should apply at the current dispatch time: {events:?}"
         );
     }
 
