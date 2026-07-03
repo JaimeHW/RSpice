@@ -630,6 +630,9 @@ pub enum XspiceCheckpointSupport {
     /// The model has no hidden mutable state beyond parameters and the
     /// accepted MNA solution, so rebuilding and re-evaluating it is sufficient.
     Stateless,
+    /// The model's hidden mutable state is confined to `CmContext` state
+    /// arrays that are represented in transient checkpoint files.
+    Serializable,
     /// The model owns state that is not yet represented in checkpoint files.
     Unsupported { reason: String },
 }
@@ -644,7 +647,7 @@ impl XspiceCheckpointSupport {
 
     /// Whether checkpoint resume can proceed for this capability.
     pub fn is_supported(&self) -> bool {
-        matches!(self, Self::Stateless)
+        matches!(self, Self::Stateless | Self::Serializable)
     }
 }
 

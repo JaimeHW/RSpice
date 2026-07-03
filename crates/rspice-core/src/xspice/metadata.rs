@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::{Complex64, Value};
 
-use super::{CmContext, CmResult, CodeModel, ParamSpec, PortSpec};
+use super::{CmContext, CmResult, CodeModel, ParamSpec, PortSpec, XspiceCheckpointSupport};
 
 pub(crate) fn with_builtin_metadata(model: Arc<dyn CodeModel>) -> Arc<dyn CodeModel> {
     let mut ports = model.ports().to_vec();
@@ -58,6 +58,10 @@ impl CodeModel for MetadataOverlayModel {
 
     fn has_memoryless_linear_transient_stamp(&self) -> bool {
         self.inner.has_memoryless_linear_transient_stamp()
+    }
+
+    fn checkpoint_support(&self, ctx: &CmContext) -> XspiceCheckpointSupport {
+        self.inner.checkpoint_support(ctx)
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {

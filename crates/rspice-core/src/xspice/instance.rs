@@ -3,7 +3,7 @@
 //! Represents an instantiated code model in a circuit.
 //! Handles port connections, parameter binding, and matrix stamping.
 
-use super::context::{AnalogValue, PendingDigitalEvent, PendingRealEvent};
+use super::context::{AnalogValue, CmContextCheckpoint, PendingDigitalEvent, PendingRealEvent};
 use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
     EventQueue, ParamSpec, ParamType, PortSpec, PortType, XspiceCheckpointSupport,
@@ -803,6 +803,14 @@ pub struct XspiceInstance {
     initialized: bool,
 }
 
+/// Serializable state for one XSPICE code-model instance.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct XspiceInstanceCheckpoint {
+    pub name: String,
+    pub model: String,
+    pub context: CmContextCheckpoint,
+}
+
 impl std::fmt::Debug for XspiceInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("XspiceInstance")
@@ -1189,23 +1197,63 @@ impl XspiceInstance {
                 "event node values, drivers, event times, and pending events are not serialized",
             );
         }
-        if let Some(summary) = self.context.checkpoint_runtime_state_summary() {
+        if let Some(summary) = self
+            .context
+            .checkpoint_nonserializable_runtime_state_summary()
+        {
             return XspiceCheckpointSupport::unsupported(format!(
                 "context contains non-serialized runtime state ({summary})"
             ));
         }
-        self.model.checkpoint_support(&self.context)
+        let support = self.model.checkpoint_support(&self.context);
+        if matches!(support, XspiceCheckpointSupport::Stateless)
+            && self.context.has_serializable_checkpoint_state()
+        {
+            return XspiceCheckpointSupport::unsupported(
+                "model declared stateless checkpoint support but owns context state",
+            );
+        }
+        support
     }
 
     /// Human-readable checkpoint resume blocker, when this instance is unsafe.
     pub(crate) fn checkpoint_resume_blocker(&self) -> Option<String> {
         match self.checkpoint_support() {
-            XspiceCheckpointSupport::Stateless => None,
+            XspiceCheckpointSupport::Stateless | XspiceCheckpointSupport::Serializable => None,
             XspiceCheckpointSupport::Unsupported { reason } => {
                 let reason = sanitize_checkpoint_text(&reason);
                 Some(format!("{}({}): {reason}", self.name, self.model_name()))
             }
         }
+    }
+
+    /// Serializable state to store in transient checkpoint files.
+    pub(crate) fn checkpoint_state(&self) -> XspiceInstanceCheckpoint {
+        XspiceInstanceCheckpoint {
+            name: self.name.clone(),
+            model: self.model_name().to_string(),
+            context: self.context.checkpoint_state(),
+        }
+    }
+
+    /// Restore serializable state from a transient checkpoint.
+    pub(crate) fn restore_checkpoint_state(
+        &mut self,
+        checkpoint: &XspiceInstanceCheckpoint,
+    ) -> Result<(), String> {
+        if self.name != checkpoint.name || self.model_name() != checkpoint.model {
+            return Err(format!(
+                "checkpoint XSPICE instance mismatch: checkpoint has {}({}), \
+                 circuit has {}({})",
+                checkpoint.name,
+                checkpoint.model,
+                self.name,
+                self.model_name()
+            ));
+        }
+        self.context
+            .restore_checkpoint_state(&checkpoint.context)
+            .map_err(|err| format!("{}({}): {err}", self.name, self.model_name()))
     }
 
     /// Whether this instance needs global conservative Newton damping.

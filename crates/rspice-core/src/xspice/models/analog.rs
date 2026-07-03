@@ -5,7 +5,7 @@
 use crate::xspice::context::AnalogValue;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
-    PortType,
+    PortType, XspiceCheckpointSupport,
 };
 use crate::{Complex64, Value};
 use std::sync::{
@@ -3544,6 +3544,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn integrator_alias_delegates_checkpoint_support() {
+        let mut ctx = CmContext::new();
+        IntegratorAlias.init(&mut ctx).expect("int init");
+        assert_eq!(
+            IntegratorAlias.checkpoint_support(&ctx),
+            XspiceCheckpointSupport::Serializable
+        );
+
+        let registry = crate::xspice::CodeModelRegistry::with_builtins();
+        let model = registry.get("int").expect("int is registered");
+        let mut registry_ctx = CmContext::new();
+        model.init(&mut registry_ctx).expect("registered int init");
+        assert_eq!(
+            model.checkpoint_support(&registry_ctx),
+            XspiceCheckpointSupport::Serializable
+        );
+    }
+
     fn oneshot_point(control: Value, pulse_width: Value) -> OneShotPoint {
         OneShotPoint {
             control,
@@ -4999,6 +5018,10 @@ impl CodeModel for Integrator {
         })
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         validate_analog_scalar_params(
             ctx,
@@ -5301,6 +5324,10 @@ macro_rules! analog_model_alias {
 
             fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
                 $target.evaluate(ctx)
+            }
+
+            fn checkpoint_support(&self, ctx: &CmContext) -> XspiceCheckpointSupport {
+                <$target as CodeModel>::checkpoint_support(&$target, ctx)
             }
 
             fn ac_gain(&self, ctx: &CmContext) -> Vec<Value> {

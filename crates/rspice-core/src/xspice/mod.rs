@@ -59,6 +59,7 @@ mod traits;
 pub mod models;
 
 // Re-export primary types
+pub(crate) use context::CmContextCheckpoint;
 pub use context::{AnalogValue, AnalysisType, CallType, CmContext, EvaluationPhase};
 pub use data_file::{clear_registered_data_files, register_data_file, unregister_data_file};
 pub use digital::{DigitalState, DigitalStrength, DigitalValue};
@@ -68,6 +69,7 @@ pub use external::{
     DigitalCosimStep, DigitalProcessRuntime, DigitalProcessRuntimeFactory, DigitalProcessSpec,
     set_digital_cosim_runtime_factory, set_digital_process_runtime_factory,
 };
+pub(crate) use instance::XspiceInstanceCheckpoint;
 pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
 pub use registry::CodeModelRegistry;
 pub use traits::{

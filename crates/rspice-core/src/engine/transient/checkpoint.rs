@@ -21,9 +21,10 @@
 use crate::Value;
 use crate::circuit::Circuit;
 use crate::netlist::{ElementKind, Netlist};
+use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 3;
+const FORMAT_VERSION: u32 = 4;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +47,7 @@ pub struct TransientCheckpoint {
     ind_v_prev: Vec<Value>,
     xspice_instances: Vec<String>,
     xspice_resume_blockers: Vec<String>,
+    xspice_instance_states: Vec<XspiceInstanceCheckpoint>,
 }
 
 /// Stable fingerprint of the netlist identity (FNV-1a over the source text
@@ -74,6 +76,138 @@ pub fn netlist_fingerprint(netlist: &Netlist) -> u64 {
     hash
 }
 
+fn parse_count_header(line: &str, name: &str) -> Result<usize, String> {
+    let mut fields = line.split_whitespace();
+    let section = fields
+        .next()
+        .ok_or_else(|| format!("malformed '{name}' header: '{line}'"))?;
+    if section != name {
+        return Err(format!("malformed '{name}' header: '{line}'"));
+    }
+    let count = fields
+        .next()
+        .ok_or_else(|| format!("malformed '{name}' header: '{line}'"))?
+        .parse::<usize>()
+        .map_err(|_| format!("malformed '{name}' header: '{line}'"))?;
+    if let Some(extra) = fields.next() {
+        return Err(format!("malformed '{name}' header: extra field '{extra}'"));
+    }
+    Ok(count)
+}
+
+fn write_value_vector(out: &mut String, name: &str, values: &[Value]) {
+    out.push_str(&format!("{name} {}\n", values.len()));
+    for value in values {
+        out.push_str(&value.to_string());
+        out.push('\n');
+    }
+}
+
+fn write_i64_vector(out: &mut String, name: &str, values: &[i64]) {
+    out.push_str(&format!("{name} {}\n", values.len()));
+    for value in values {
+        out.push_str(&value.to_string());
+        out.push('\n');
+    }
+}
+
+fn read_value_vector<'a, I>(lines: &mut I, name: &str) -> Result<Vec<Value>, String>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let header = lines
+        .next()
+        .ok_or_else(|| format!("missing '{name}' vector"))?;
+    let count = parse_count_header(header, name)?;
+    let mut values = Vec::with_capacity(count);
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'{name}' vector truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        let field = fields
+            .next()
+            .ok_or_else(|| format!("'{name}' row {row} is empty"))?;
+        let value = field
+            .parse::<Value>()
+            .map_err(|_| format!("'{name}' row {row}: bad value '{field}'"))?;
+        if let Some(extra) = fields.next() {
+            return Err(format!("'{name}' row {row}: extra field '{extra}'"));
+        }
+        values.push(value);
+    }
+    Ok(values)
+}
+
+fn read_i64_vector<'a, I>(lines: &mut I, name: &str) -> Result<Vec<i64>, String>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let header = lines
+        .next()
+        .ok_or_else(|| format!("missing '{name}' vector"))?;
+    let count = parse_count_header(header, name)?;
+    let mut values = Vec::with_capacity(count);
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'{name}' vector truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        let field = fields
+            .next()
+            .ok_or_else(|| format!("'{name}' row {row} is empty"))?;
+        let value = field
+            .parse::<i64>()
+            .map_err(|_| format!("'{name}' row {row}: bad value '{field}'"))?;
+        if let Some(extra) = fields.next() {
+            return Err(format!("'{name}' row {row}: extra field '{extra}'"));
+        }
+        values.push(value);
+    }
+    Ok(values)
+}
+
+fn read_xspice_instance_states<'a, I>(
+    lines: &mut I,
+) -> Result<Vec<XspiceInstanceCheckpoint>, String>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let header = lines
+        .next()
+        .ok_or_else(|| "missing 'xspice_states' section".to_string())?;
+    let count = parse_count_header(header, "xspice_states")?;
+    let mut states = Vec::with_capacity(count);
+    for row in 0..count {
+        let line = lines
+            .next()
+            .ok_or_else(|| format!("'xspice_states' truncated at row {row}"))?;
+        let mut fields = line.split_whitespace();
+        if fields.next() != Some("xspice_state") {
+            return Err(format!("malformed 'xspice_state' header: '{line}'"));
+        }
+        let name = fields
+            .next()
+            .ok_or_else(|| format!("'xspice_state' row {row} is missing instance name"))?;
+        let model = fields
+            .next()
+            .ok_or_else(|| format!("'xspice_state' row {row} is missing model name"))?;
+        if let Some(extra) = fields.next() {
+            return Err(format!("'xspice_state' row {row}: extra field '{extra}'"));
+        }
+        states.push(XspiceInstanceCheckpoint {
+            name: name.to_string(),
+            model: model.to_string(),
+            context: CmContextCheckpoint {
+                state: read_value_vector(lines, "state")?,
+                state_prev: read_value_vector(lines, "state_prev")?,
+                int_state: read_i64_vector(lines, "int_state")?,
+            },
+        });
+    }
+    Ok(states)
+}
+
 impl TransientCheckpoint {
     /// Capture the integrator state from a circuit at time `time` with the
     /// current accepted `solution`.
@@ -96,6 +230,11 @@ impl TransientCheckpoint {
             .map(|instance| format!("{}({})", instance.name, instance.model_name()))
             .collect();
         let xspice_resume_blockers = circuit.xspice_checkpoint_resume_blockers();
+        let xspice_instance_states = if xspice_resume_blockers.is_empty() {
+            circuit.xspice_checkpoint_instance_states()
+        } else {
+            Vec::new()
+        };
         if !xspice_resume_blockers.is_empty() {
             log::warn!(
                 "transient checkpoint at t={time:.6e}: XSPICE code-model \
@@ -119,6 +258,7 @@ impl TransientCheckpoint {
             ind_v_prev: circuit.inductors.v_prev.clone(),
             xspice_instances,
             xspice_resume_blockers,
+            xspice_instance_states,
         }
     }
 
@@ -155,6 +295,7 @@ impl TransientCheckpoint {
             .i_prev_prev
             .copy_from_slice(&self.ind_i_prev_prev);
         circuit.inductors.v_prev.copy_from_slice(&self.ind_v_prev);
+        circuit.restore_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
         Ok(())
     }
 
@@ -238,6 +379,19 @@ impl TransientCheckpoint {
         for blocker in &self.xspice_resume_blockers {
             out.push_str(blocker);
             out.push('\n');
+        }
+        out.push_str(&format!(
+            "xspice_states {}\n",
+            self.xspice_instance_states.len()
+        ));
+        for instance in &self.xspice_instance_states {
+            out.push_str(&format!(
+                "xspice_state {} {}\n",
+                instance.name, instance.model
+            ));
+            write_value_vector(&mut out, "state", &instance.context.state);
+            write_value_vector(&mut out, "state_prev", &instance.context.state_prev);
+            write_i64_vector(&mut out, "int_state", &instance.context.int_state);
         }
         out
     }
@@ -356,6 +510,11 @@ impl TransientCheckpoint {
                 format!("{instance}: legacy checkpoint did not record model checkpoint support")
             }));
         }
+        let xspice_instance_states = if version >= 4 {
+            read_xspice_instance_states(&mut lines)?
+        } else {
+            Vec::new()
+        };
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -376,6 +535,7 @@ impl TransientCheckpoint {
             ind_v_prev: ind_iter.next().unwrap(),
             xspice_instances,
             xspice_resume_blockers,
+            xspice_instance_states,
         })
     }
 
@@ -419,6 +579,7 @@ mod tests {
             ind_v_prev: vec![0.02],
             xspice_instances: Vec::new(),
             xspice_resume_blockers: Vec::new(),
+            xspice_instance_states: Vec::new(),
         }
     }
 
@@ -437,12 +598,13 @@ mod tests {
     fn version_one_checkpoint_files_still_load_without_xspice_state() {
         let version_one = sample()
             .to_text()
-            .replace("RSPICE-CHECKPOINT 3", "RSPICE-CHECKPOINT 1")
-            .replace("xspice 0\nxspice_blockers 0\n", "");
+            .replace("RSPICE-CHECKPOINT 4", "RSPICE-CHECKPOINT 1")
+            .replace("xspice 0\nxspice_blockers 0\nxspice_states 0\n", "");
         let restored = TransientCheckpoint::from_text(&version_one)
             .expect("v1 checkpoint without XSPICE section still loads");
         assert!(restored.xspice_instances.is_empty());
         assert!(restored.xspice_resume_blockers.is_empty());
+        assert!(restored.xspice_instance_states.is_empty());
     }
 
     #[test]
@@ -455,9 +617,9 @@ mod tests {
 
         let version_two = original
             .to_text()
-            .replace("RSPICE-CHECKPOINT 3", "RSPICE-CHECKPOINT 2")
+            .replace("RSPICE-CHECKPOINT 4", "RSPICE-CHECKPOINT 2")
             .replace(
-                "xspice_blockers 1\na1(gain): model owns pending state\n",
+                "xspice_blockers 1\na1(gain): model owns pending state\nxspice_states 0\n",
                 "",
             );
         let restored = TransientCheckpoint::from_text(&version_two)
@@ -468,6 +630,31 @@ mod tests {
             "legacy v2 checkpoints must remain blocked, got {:?}",
             restored.xspice_resume_blockers
         );
+    }
+
+    #[test]
+    fn xspice_instance_states_round_trip_and_v3_loads_without_state_section() {
+        let mut original = sample();
+        original.xspice_instances = vec!["a1(int)".to_string()];
+        original.xspice_instance_states = vec![XspiceInstanceCheckpoint {
+            name: "a1".to_string(),
+            model: "int".to_string(),
+            context: CmContextCheckpoint {
+                state: vec![1.0, -0.0],
+                state_prev: vec![0.5, f64::MIN_POSITIVE],
+                int_state: vec![42, -7],
+            },
+        }];
+        let restored = TransientCheckpoint::from_text(&original.to_text()).unwrap();
+        assert_eq!(original, restored);
+
+        let version_three = sample()
+            .to_text()
+            .replace("RSPICE-CHECKPOINT 4", "RSPICE-CHECKPOINT 3")
+            .replace("xspice_states 0\n", "");
+        let restored = TransientCheckpoint::from_text(&version_three)
+            .expect("v3 checkpoint without serialized XSPICE state still loads");
+        assert!(restored.xspice_instance_states.is_empty());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use crate::xspice::XspiceInstanceCheckpoint;
 use std::collections::HashMap;
 
 fn apply_xspice_events_at_or_before(
@@ -1731,6 +1732,58 @@ impl CircuitData {
             .iter()
             .filter_map(|instance| instance.checkpoint_resume_blocker())
             .collect()
+    }
+
+    /// Serializable XSPICE instance state for transient checkpoint files.
+    pub(crate) fn xspice_checkpoint_instance_states(&self) -> Vec<XspiceInstanceCheckpoint> {
+        self.xspice_instances
+            .iter()
+            .map(|instance| instance.checkpoint_state())
+            .collect()
+    }
+
+    /// Restore XSPICE instance state from a transient checkpoint.
+    pub(crate) fn restore_xspice_checkpoint_instance_states(
+        &mut self,
+        checkpoints: &[XspiceInstanceCheckpoint],
+    ) -> Result<(), String> {
+        if checkpoints.is_empty() && !self.xspice_instances.is_empty() {
+            let blockers = self.xspice_checkpoint_resume_blockers();
+            if !blockers.is_empty() {
+                return Err(format!(
+                    "legacy checkpoint did not carry serialized XSPICE instance state, \
+                     and the target circuit contains unsupported XSPICE state: {}",
+                    blockers.join("; ")
+                ));
+            }
+
+            let context_state_present = self.xspice_instances.iter().any(|instance| {
+                let checkpoint = instance.checkpoint_state();
+                !checkpoint.context.state.is_empty()
+                    || !checkpoint.context.state_prev.is_empty()
+                    || !checkpoint.context.int_state.is_empty()
+            });
+            if context_state_present {
+                return Err(
+                    "legacy checkpoint did not carry serialized XSPICE context state".to_string(),
+                );
+            }
+            return Ok(());
+        }
+
+        if self.xspice_instances.len() != checkpoints.len() {
+            return Err(format!(
+                "checkpoint XSPICE shape mismatch: {} instance state(s) captured, \
+                 circuit has {} instance(s)",
+                checkpoints.len(),
+                self.xspice_instances.len()
+            ));
+        }
+
+        for (instance, checkpoint) in self.xspice_instances.iter_mut().zip(checkpoints) {
+            instance.restore_checkpoint_state(checkpoint)?;
+        }
+        Ok(())
     }
 
     /// Zero-based node-voltage entries excluded from generic transient LTE

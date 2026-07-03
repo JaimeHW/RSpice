@@ -4,6 +4,7 @@
 
 use rspice_core::engine::{Engine, SimulationConfig, TransientCheckpoint};
 use rspice_core::netlist::Netlist;
+use rspice_core::xspice::{register_data_file, unregister_data_file};
 
 /// Sine-driven RC: smooth, source phase depends on absolute time, so a
 /// resume that mishandles t0 or the capacitor history shows up immediately.
@@ -21,6 +22,16 @@ const XSPICE_GAIN_DECK: &str = "\
 vin in 0 sin(0 1 1meg)
 a1 in out amp
 .model amp gain (gain=2)
+rload out 0 1k
+.tran 1n 40n
+.end
+";
+
+const XSPICE_INTEGRATOR_DECK: &str = "\
+* checkpoint bench: stateful xspice integrator
+vin in 0 sin(0 1 1meg)
+a1 in out integ
+.model integ int (gain=1 out_lower_limit=-10 out_upper_limit=10)
 rload out 0 1k
 .tran 1n 40n
 .end
@@ -226,31 +237,74 @@ fn stateless_xspice_checkpoint_resume_tracks_unsegmented_gain() {
 }
 
 #[test]
-fn stateful_xspice_checkpoint_resume_is_refused_until_state_is_serialized() {
-    let netlist = Netlist::parse(
+fn stateful_xspice_checkpoint_resume_tracks_unsegmented_integrator() {
+    let netlist = Netlist::parse(XSPICE_INTEGRATOR_DECK).expect("XSPICE int deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let full = engine
+        .run_tran(&netlist, 40e-9, TAU_STEP)
+        .expect("full XSPICE int run completes");
+    let full_out = out_index(&full);
+
+    let (first, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 20e-9, TAU_STEP)
+        .expect("first XSPICE int segment can run");
+    let (second, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 40e-9, TAU_STEP)
+        .expect("stateful XSPICE int resumes");
+
+    let second_out = out_index(&second);
+    let mut worst = 0.0f64;
+    for k in 1..=12 {
+        let t = 20.0e-9 + (k as f64) * 1.5e-9;
+        let v_full = interpolate(&full.time, &full.voltages[full_out], t);
+        let v_seg = interpolate(&second.time, &second.voltages[second_out], t);
+        worst = worst.max((v_full - v_seg).abs());
+    }
+    assert!(
+        worst < 1e-9,
+        "stateful XSPICE int checkpoint resume must track the full run (worst |delta| = {worst})"
+    );
+
+    let v_seam_first = *first.voltages[out_index(&first)].last().unwrap();
+    let v_seam_second = second.voltages[second_out][0];
+    assert_eq!(
+        v_seam_first.to_bits(),
+        v_seam_second.to_bits(),
+        "stateful XSPICE seam state is carried bit-exactly"
+    );
+}
+
+#[test]
+fn event_driven_xspice_checkpoint_resume_is_refused_until_event_state_is_serialized() {
+    let uri = "virtual://transient_checkpoint/event_state_blocker";
+    register_data_file(uri, "0 0s\n1n 1s\n").expect("register virtual d_source data");
+    let deck = format!(
         "\
-* xspice checkpoint boundary
-vin in 0 sin(0 1 1meg)
-a1 in out integ
-.model integ int (gain=1 out_lower_limit=-10 out_upper_limit=10)
+* xspice event checkpoint boundary
+a_src [d] src
+a_dac [d] [out] dac
+.model src d_source (input_file=\"{uri}\")
+.model dac dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)
 rload out 0 1k
-.tran 1n 20n
+.tran 100p 2n
 .end
-",
-    )
-    .expect("XSPICE deck parses");
+"
+    );
+    let netlist = Netlist::parse(&deck).expect("XSPICE event deck parses");
     let engine = Engine::new(SimulationConfig::default());
 
     let (_, checkpoint) = engine
-        .run_tran_checkpointed(&netlist, 10e-9, TAU_STEP)
-        .expect("first XSPICE segment can run");
+        .run_tran_checkpointed(&netlist, 1e-9, 100e-12)
+        .expect("first XSPICE event segment can run");
     let err = engine
-        .run_tran_resume(&netlist, &checkpoint, 20e-9, TAU_STEP)
-        .expect_err("XSPICE checkpoint resume must be refused");
+        .run_tran_resume(&netlist, &checkpoint, 2e-9, 100e-12)
+        .expect_err("event-driven XSPICE checkpoint resume must be refused");
+    let _ = unregister_data_file(uri);
     let message = format!("{err}");
     assert!(
         message.contains("XSPICE")
-            && message.contains("real state")
+            && message.contains("event node values")
             && message.contains("Run XSPICE transient decks unsegmented"),
         "diagnostic should explain the unsupported checkpoint boundary: {message}"
     );

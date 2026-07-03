@@ -554,6 +554,14 @@ pub struct CmContext {
     rhs: Vec<(usize, Value)>,
 }
 
+/// Serializable code-model context state captured in transient checkpoints.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CmContextCheckpoint {
+    pub state: Vec<Value>,
+    pub state_prev: Vec<Value>,
+    pub int_state: Vec<i64>,
+}
+
 impl Default for CmContext {
     fn default() -> Self {
         Self::new()
@@ -1961,16 +1969,52 @@ impl CmContext {
         Arc::get_mut(resource).and_then(|resource| resource.downcast_mut::<T>())
     }
 
-    /// Summary of runtime-only state that is not serialized in transient
+    /// Snapshot the serializable model-owned state arrays.
+    pub(crate) fn checkpoint_state(&self) -> CmContextCheckpoint {
+        CmContextCheckpoint {
+            state: self.state.clone(),
+            state_prev: self.state_prev.clone(),
+            int_state: self.int_state.clone(),
+        }
+    }
+
+    /// Restore model-owned state arrays into an initialized context.
+    pub(crate) fn restore_checkpoint_state(
+        &mut self,
+        checkpoint: &CmContextCheckpoint,
+    ) -> CmResult<()> {
+        if self.state.len() != checkpoint.state.len()
+            || self.state_prev.len() != checkpoint.state_prev.len()
+            || self.int_state.len() != checkpoint.int_state.len()
+        {
+            return Err(CmError::EvaluationError(format!(
+                "checkpoint state shape mismatch: context has real {}/{}, integer {}; \
+                 checkpoint has real {}/{}, integer {}",
+                self.state.len(),
+                self.state_prev.len(),
+                self.int_state.len(),
+                checkpoint.state.len(),
+                checkpoint.state_prev.len(),
+                checkpoint.int_state.len()
+            )));
+        }
+
+        self.state.clone_from(&checkpoint.state);
+        self.state_prev.clone_from(&checkpoint.state_prev);
+        self.int_state.clone_from(&checkpoint.int_state);
+        Ok(())
+    }
+
+    /// Whether this context owns any state that must be represented in a
+    /// transient checkpoint before resume is safe.
+    pub(crate) fn has_serializable_checkpoint_state(&self) -> bool {
+        !self.state.is_empty() || !self.state_prev.is_empty() || !self.int_state.is_empty()
+    }
+
+    /// Summary of runtime-only state that is still not serialized in transient
     /// checkpoint files.
-    pub(crate) fn checkpoint_runtime_state_summary(&self) -> Option<String> {
+    pub(crate) fn checkpoint_nonserializable_runtime_state_summary(&self) -> Option<String> {
         let mut parts = Vec::new();
-        if !self.state.is_empty() || !self.state_prev.is_empty() {
-            parts.push(format!("{} real state value(s)", self.state.len()));
-        }
-        if !self.int_state.is_empty() {
-            parts.push(format!("{} integer state value(s)", self.int_state.len()));
-        }
         if !self.transient_histories.is_empty() {
             parts.push(format!(
                 "{} transient history buffer(s)",
