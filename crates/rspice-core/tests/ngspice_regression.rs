@@ -1341,6 +1341,33 @@ fn test_ngspice_hfet_suite() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+fn test_ngspice_hfet_focus_cases_run() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), suite_config("hfet"));
+
+    for (relative, expected_analysis) in [
+        ("hfet/id_vgs.cir", "DC Sweep"),
+        ("hfet/inverter.cir", "Transient"),
+    ] {
+        let result = runner.run_test(&tests_dir.join(relative));
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some(expected_analysis),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
+}
+
+#[test]
 fn test_ngspice_sensitivity_suite() {
     let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
     let stats = run_and_report(&runner, "sensitivity");
@@ -1367,6 +1394,33 @@ fn test_ngspice_polezero_suite() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // XSPICE Tests
 // ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_ngspice_polezero_focus_cases_run() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+
+    for (relative, expected_analysis) in [
+        ("polezero/filt_bridge_t.cir", "DC OP + PZ"),
+        ("polezero/filt_rc.cir", "PZ"),
+    ] {
+        let result = runner.run_test(&tests_dir.join(relative));
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some(expected_analysis),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
+}
 
 #[test]
 fn test_ngspice_xspice_digital_suite() {
