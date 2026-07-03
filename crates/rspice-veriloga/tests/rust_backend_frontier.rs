@@ -51,10 +51,7 @@ fn run_shipped_rust_backend_frontier() {
     if let Ok(filter) = env::var(FILTER_ENV)
         && !filter.trim().is_empty()
     {
-        sources = sources
-            .into_iter()
-            .filter(|source| source_matches_filter(source, &root, &filter))
-            .collect();
+        sources.retain(|source| source_matches_filter(source, &root, &filter));
         assert!(
             !sources.is_empty(),
             "{FILTER_ENV}={filter:?} did not match any shipped Verilog-A source or module"

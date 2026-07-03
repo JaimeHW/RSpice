@@ -32,7 +32,7 @@ const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES: usize = 8;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_HISTORY_ENTRIES: usize = 5;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_VARIABLES: usize = 16;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_TOTAL_ENTRIES: usize = 64;
-const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH: usize = 0;
+const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH: Option<usize> = None;
 const MAX_SELECTIVE_ASSIGNMENT_DEPENDENCY_EXPR_NODES: usize = 256;
 const MAX_SELECTIVE_ASSIGNMENT_DEPENDENCY_VARIABLES: usize = 64;
 const MAX_SELECTIVE_ASSIGNMENT_BROAD_DEPENDENCY_VARIABLES: usize = 256;
@@ -3058,11 +3058,10 @@ impl<'a> ScalarGraphBuilder<'a> {
         if self.expression_lowering_depth >= MAX_SCALAR_EXPRESSION_LOWERING_DEPTH {
             if self.trace_lower_failure() {
                 eprintln!(
-                    "OptIR {}: lower expression rejected before lowering expr={} depth={} stack_cycle={}",
+                    "OptIR {}: lower expression rejected before lowering expr={} depth={} stack_cycle=false",
                     self.mir.module_name,
                     expr_id.index(),
                     self.expression_lowering_depth,
-                    false
                 );
             }
             return None;
@@ -3071,11 +3070,10 @@ impl<'a> ScalarGraphBuilder<'a> {
             self.expression_lowering_stack_cycle_rejected = true;
             if self.trace_lower_failure() {
                 eprintln!(
-                    "OptIR {}: lower expression rejected before lowering expr={} depth={} stack_cycle={}",
+                    "OptIR {}: lower expression rejected before lowering expr={} depth={} stack_cycle=true",
                     self.mir.module_name,
                     expr_id.index(),
                     self.expression_lowering_depth,
-                    true
                 );
             }
             return None;
@@ -4700,15 +4698,17 @@ impl<'a> ScalarGraphBuilder<'a> {
                 );
                 return None;
             }
-            for entry in &history.entries {
-                if depth >= MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH {
-                    continue;
-                }
-                for dependency in &entry.local_dependencies {
-                    if *dependency != variable
-                        && self.local_assignment_history.contains_key(dependency)
-                    {
-                        pending.push_back((*dependency, depth + 1));
+            if let Some(max_dependency_depth) =
+                MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH
+                && depth < max_dependency_depth
+            {
+                for entry in &history.entries {
+                    for dependency in &entry.local_dependencies {
+                        if *dependency != variable
+                            && self.local_assignment_history.contains_key(dependency)
+                        {
+                            pending.push_back((*dependency, depth + 1));
+                        }
                     }
                 }
             }
@@ -4741,9 +4741,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                 .unwrap_or_default();
         }
         if let Some(variable) = self.variable_identifier(expr) {
-            return (variable != target)
-                .then(|| BTreeSet::from([variable]))
-                .unwrap_or_default();
+            return if variable != target {
+                BTreeSet::from([variable])
+            } else {
+                Default::default()
+            };
         }
         if self.expr_references_variable(expr, target)
             && let Some(variables) = self.self_assignment_alias_snapshot_variables(target, expr)
@@ -6125,7 +6127,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             }) {
                 return None;
             }
-            if !indexed.iter().any(|existing| *existing == literal) {
+            if !indexed.contains(&literal) {
                 indexed.push(literal);
             }
         }
