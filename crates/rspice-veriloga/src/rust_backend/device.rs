@@ -27,6 +27,7 @@ const MAX_LOCAL_ASSIGNMENT_TUPLE_LANES: usize = 16;
 const STAMP_LOCAL_FIELDS_PER_LINE: usize = 4;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES: usize = 1_024;
+const MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES: usize = 120_000;
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
@@ -378,7 +379,7 @@ pub(super) fn generate_hybrid_device(
         &scalar_cache_roots,
         &ddt_roots,
     )?;
-    if super::scalar::scalar_stamp_emitted_values_exceeds_budget(scalar_emit_estimate) {
+    if scalar_emit_estimate > MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES {
         return generate_device_with_scalar_hybrid_plan(artifact, options, None, true);
     }
     let scalar_hybrid_plan = ScalarHybridStampPlan {
