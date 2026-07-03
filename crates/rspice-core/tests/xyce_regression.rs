@@ -642,6 +642,78 @@ fn test_xyce_generic_wrapper_transient_guardrails_stay_unsupported() {
 }
 
 #[test]
+fn test_xyce_mixed_signal_python_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/MIXED_SIGNAL/Python/runACircuitWithBackwardStep.cir",
+            "wrapper_static_prn_tran",
+            true,
+        ),
+        (
+            "Netlists/MIXED_SIGNAL/Python/runMultipleSims1.cir",
+            "static_prn_tran",
+            false,
+        ),
+        (
+            "Netlists/MIXED_SIGNAL/Python/runMultipleSims2.cir",
+            "static_prn_tran",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper manifest provenance should match the promoted contract"
+        );
+
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce mixed-signal Python transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the expected transient .prn contract"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_nonlinear_convergence_wrapper_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Nonlinear/ConvergenceTests/Nox1Tran0.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native wrapper-origin Xyce nonlinear convergence transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_static_prn_tran",
+        "{relative} should report the wrapper-origin transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_zero_resistance_branch_current_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
