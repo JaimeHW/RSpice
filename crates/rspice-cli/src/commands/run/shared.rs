@@ -324,3 +324,25 @@ pub(super) fn ensure_finite_series<'a>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finite_series_gate_rejects_nonfinite_values_unless_allowed() {
+        let values = [f64::INFINITY];
+        let err = ensure_finite_series(false, "DC OP", [("V(out)", values.as_slice())])
+            .expect_err("non-finite values should fail by default");
+
+        let CliError::SimulationError { message, analysis } = err else {
+            panic!("expected simulation error for non-finite value");
+        };
+        assert_eq!(analysis.as_deref(), Some("DC OP"));
+        assert!(message.contains("V(out) is non-finite"));
+        assert!(message.contains("--allow-nonfinite"));
+
+        ensure_finite_series(true, "DC OP", [("V(out)", values.as_slice())])
+            .expect("allow flag should bypass non-finite export gate");
+    }
+}

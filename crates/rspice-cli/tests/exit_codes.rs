@@ -261,11 +261,11 @@ fn parallel_status_lines_mark_measurement_failures() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Conflicting parallel voltage sources produce a singular system; the
-/// NaN/Inf solution must be an error, not a quiet success.
+/// Conflicting parallel voltage sources are a topology error. This must remain
+/// a simulation failure even when the non-finite result escape hatch is enabled.
 #[test]
-fn nonfinite_result_is_a_simulation_error() {
-    let dir = test_dir("nonfinite");
+fn conflicting_voltage_sources_are_a_simulation_error() {
+    let dir = test_dir("singular");
     let deck = dir.join("vloop.sp");
     std::fs::write(
         &deck,
@@ -281,23 +281,23 @@ fn nonfinite_result_is_a_simulation_error() {
     assert_eq!(
         output.status.code(),
         Some(1),
-        "non-finite OP must exit 1; stderr: {}",
+        "singular OP must exit 1; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("non-finite"),
-        "stderr should explain the non-finite solution: {stderr}"
+        stderr.contains("matrix is singular") || stderr.contains("duplicate constraints"),
+        "stderr should explain the singular topology: {stderr}"
     );
 
-    // The escape hatch restores the old behavior for debugging.
+    // The non-finite export escape hatch must not mask topology failures.
     let output = run_rspice(&[
         "--quiet",
         "run",
         deck.to_str().unwrap(),
         "--allow-nonfinite",
     ]);
-    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.status.code(), Some(1));
 
     let _ = std::fs::remove_dir_all(&dir);
 }
