@@ -7,10 +7,6 @@ use crate::xspice::{
 };
 
 const MIN_EVENT_DELAY: Value = 1.0e-15;
-const REAL_GAIN_STARTUP_TIME: usize = 0;
-const REAL_GAIN_STARTUP_STATE: usize = 0;
-const REAL_GAIN_STARTUP_HOLDING: i64 = 1;
-const REAL_GAIN_STARTUP_ACTIVE: i64 = 2;
 
 fn digital_to_real_value(ctx: &CmContext) -> CmResult<Value> {
     let zero = finite_event_param(ctx, "d_to_real", "zero", 0.0)?;
@@ -255,9 +251,7 @@ impl CodeModel for RealGain {
         })
     }
 
-    fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_states(1);
-        ctx.allocate_int_states(1);
+    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
         Ok(())
     }
 
@@ -269,36 +263,6 @@ impl CodeModel for RealGain {
         }
 
         let delay = finite_event_delay(ctx, "real_gain", "delay", 1.0e-9)?;
-        let startup_state = ctx.int_state(REAL_GAIN_STARTUP_STATE);
-        if ctx.is_transient() && startup_state != REAL_GAIN_STARTUP_ACTIVE {
-            if startup_state == 0 {
-                set_real_output_when_changed(ctx, "out", ic, 0.0);
-                if delay > 0.0 && delay.is_finite() {
-                    let startup_time = ctx.time + delay;
-                    if commit_event_outputs(ctx) {
-                        ctx.set_state(REAL_GAIN_STARTUP_TIME, startup_time);
-                        ctx.set_int_state(REAL_GAIN_STARTUP_STATE, REAL_GAIN_STARTUP_HOLDING);
-                        ctx.request_breakpoint(startup_time);
-                    }
-                    return Ok(());
-                }
-                if commit_event_outputs(ctx) {
-                    ctx.set_int_state(REAL_GAIN_STARTUP_STATE, REAL_GAIN_STARTUP_ACTIVE);
-                }
-            } else {
-                let startup_time = ctx.state(REAL_GAIN_STARTUP_TIME);
-                if ctx.time < startup_time {
-                    if commit_event_outputs(ctx) {
-                        ctx.request_breakpoint(startup_time);
-                    }
-                    return Ok(());
-                }
-                if commit_event_outputs(ctx) {
-                    ctx.set_int_state(REAL_GAIN_STARTUP_STATE, REAL_GAIN_STARTUP_ACTIVE);
-                }
-            }
-        }
-
         let gain = finite_event_param(ctx, "real_gain", "gain", 1.0)?;
         let in_offset = finite_event_param(ctx, "real_gain", "in_offset", 0.0)?;
         let out_offset = finite_event_param(ctx, "real_gain", "out_offset", 0.0)?;
@@ -655,11 +619,12 @@ mod tests {
     }
 
     #[test]
-    fn real_gain_does_not_commit_rollbackable_probe_startup() {
+    fn real_gain_transient_outputs_immediately_without_startup_hold() {
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.set_param("delay", 1.0e-9);
-        ctx.set_param("ic", 2.0);
+        ctx.set_param("gain", 10.0);
+        ctx.set_input_real("in", 2.0);
         RealGain.init(&mut ctx).expect("real_gain initializes");
         ctx.set_evaluation_phase(EvaluationPhase::RollbackableProbe);
 
@@ -670,21 +635,11 @@ mod tests {
         assert_eq!(
             ctx.output_real("out"),
             None,
-            "rollbackable probes must not enqueue real_gain startup events"
-        );
-        assert_eq!(
-            ctx.state(REAL_GAIN_STARTUP_TIME),
-            0.0,
-            "rollbackable probes must not commit startup time"
-        );
-        assert_eq!(
-            ctx.int_state(REAL_GAIN_STARTUP_STATE),
-            0,
-            "rollbackable probes must not commit startup phase"
+            "rollbackable probes must not enqueue real_gain events"
         );
         assert!(
             ctx.take_requested_breakpoints().is_empty(),
-            "rollbackable probes must not leave startup breakpoints behind"
+            "real_gain should not use startup breakpoints"
         );
 
         ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
@@ -692,13 +647,12 @@ mod tests {
             .evaluate(&mut ctx)
             .expect("accepted real_gain step evaluates");
 
-        assert_eq!(ctx.output_real("out"), Some(2.0));
-        assert!((ctx.state(REAL_GAIN_STARTUP_TIME) - 1.0e-9).abs() < 1.0e-18);
-        assert_eq!(
-            ctx.int_state(REAL_GAIN_STARTUP_STATE),
-            REAL_GAIN_STARTUP_HOLDING
-        );
-        assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
+        assert_eq!(ctx.output_real("out"), Some(20.0));
+        let events = ctx.take_pending_real_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values, vec![20.0]);
+        assert_eq!(events[0].delay, 1.0e-9);
+        assert!(ctx.take_requested_breakpoints().is_empty());
     }
 
     #[test]
@@ -747,7 +701,6 @@ mod tests {
             ctx.analysis = AnalysisType::Transient;
             ctx.set_input_real("in", 3.0);
             RealGain.init(&mut ctx).expect("real_gain initializes");
-            ctx.set_int_state(REAL_GAIN_STARTUP_STATE, REAL_GAIN_STARTUP_ACTIVE);
             ctx.set_param(name, f64::NAN);
 
             let err = RealGain
