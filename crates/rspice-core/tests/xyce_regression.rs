@@ -2983,6 +2983,39 @@ fn test_xyce_output_dc_csv_wrapper_case_runs_natively() {
 }
 
 #[test]
+fn test_xyce_output_dc_probe_wrapper_cases_run_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        ("Netlists/Output/DC/dc-probe.cir", "wrapper_csd_dc"),
+        (
+            "Netlists/Output/DC/dc-step-probe.cir",
+            "wrapper_csd_step_dc",
+        ),
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native wrapper-origin PROBE/CSDF comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .csd oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the native wrapper-origin CSDF contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_output_dc_file_only_wrapper_case_runs_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

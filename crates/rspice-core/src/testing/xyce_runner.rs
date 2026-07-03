@@ -308,8 +308,10 @@ impl XyceBaselineFamilyKind {
 enum XyceStaticDcContract {
     PlainStatic,
     PlainCsv,
+    PlainCsd,
     WrapperDefault,
     WrapperCsv,
+    WrapperCsd,
     WrapperFilePrn,
     WrapperGnuplotSplot,
     WrapperHspiceMath,
@@ -326,10 +328,14 @@ impl XyceStaticDcContract {
             (Self::PlainStatic, true) => "static_prn_step_dc",
             (Self::PlainCsv, false) => "static_csv_dc",
             (Self::PlainCsv, true) => "static_csv_step_dc",
+            (Self::PlainCsd, false) => "static_csd_dc",
+            (Self::PlainCsd, true) => "static_csd_step_dc",
             (Self::WrapperDefault, false) => "wrapper_static_prn_dc",
             (Self::WrapperDefault, true) => "wrapper_static_prn_step_dc",
             (Self::WrapperCsv, false) => "wrapper_static_csv_dc",
             (Self::WrapperCsv, true) => "wrapper_static_csv_step_dc",
+            (Self::WrapperCsd, false) => "wrapper_csd_dc",
+            (Self::WrapperCsd, true) => "wrapper_csd_step_dc",
             (Self::WrapperFilePrn, false) => "wrapper_file_prn_dc",
             (Self::WrapperFilePrn, true) => "wrapper_file_prn_step_dc",
             (Self::WrapperGnuplotSplot, false) => "wrapper_gnuplot_splot_prn_dc",
@@ -356,6 +362,7 @@ impl XyceStaticDcContract {
     fn reference_extension(self) -> &'static str {
         match self {
             Self::PlainCsv | Self::WrapperCsv => "csv",
+            Self::PlainCsd | Self::WrapperCsd => "csd",
             Self::WrapperRaw => "raw",
             _ => "prn",
         }
@@ -1369,6 +1376,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperCsv);
         }
 
+        if Self::is_native_csd_dc_wrapper_candidate(relative_path, source) {
+            Self::validate_csd_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperCsd);
+        }
+
         if Self::is_native_file_only_prn_wrapper_candidate(relative_path, source) {
             Self::validate_file_only_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperFilePrn);
@@ -1457,6 +1469,21 @@ impl XyceTestRunner {
                         .format
                         .as_deref()
                         .is_some_and(|format| format.eq_ignore_ascii_case("CSV"))
+            })
+        })
+    }
+
+    fn is_native_csd_dc_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        if !Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dc/") {
+            return false;
+        }
+        Self::dc_print_output_requests(source).is_ok_and(|requests| {
+            requests.into_iter().any(|request| {
+                request.file.is_none()
+                    && request
+                        .format
+                        .as_deref()
+                        .is_some_and(|format| format.eq_ignore_ascii_case("PROBE"))
             })
         })
     }
@@ -1975,6 +2002,34 @@ impl XyceTestRunner {
         }
     }
 
+    fn validate_csd_wrapper_source(source: &str) -> Result<(), String> {
+        let mut primary_print_count = 0usize;
+        for request in Self::dc_print_output_requests(source)? {
+            let format = request.format.as_deref().unwrap_or("STD");
+            if request.file.is_some() {
+                return Err(format!(
+                    "wrapper-origin CSDF contract does not cover FILE= side output with FORMAT={format}"
+                ));
+            }
+            if !format.eq_ignore_ascii_case("PROBE") {
+                return Err(format!(
+                    "wrapper-origin CSDF contract does not cover primary .PRINT DC FORMAT={format}"
+                ));
+            }
+            primary_print_count += 1;
+        }
+
+        match primary_print_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin CSDF contract requires one primary .PRINT DC statement".to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin CSDF contract requires one primary .PRINT DC statement, found {primary_print_count}"
+            )),
+        }
+    }
+
     fn validate_file_only_prn_wrapper_source(source: &str) -> Result<(), String> {
         let requests = Self::dc_print_output_requests(source)?;
         if requests.is_empty() {
@@ -2434,6 +2489,13 @@ impl XyceTestRunner {
                 XyceStaticDcContract::PlainCsv
             });
         }
+        if normalized.eq_ignore_ascii_case("PROBE") {
+            return Ok(if requires_wrapper {
+                XyceStaticDcContract::WrapperCsd
+            } else {
+                XyceStaticDcContract::PlainCsd
+            });
+        }
         Err(format!(
             "native static .PRINT DC comparison does not cover FORMAT={normalized}"
         ))
@@ -2442,14 +2504,7 @@ impl XyceTestRunner {
     fn dc_print_format_is_prn_compatible(format: &str) -> bool {
         matches!(
             format.to_ascii_lowercase().as_str(),
-            "std"
-                | "probe"
-                | "tecplot"
-                | "touchstone"
-                | "touchstone2"
-                | "noindex"
-                | "gnuplot"
-                | "splot"
+            "std" | "tecplot" | "touchstone" | "touchstone2" | "noindex" | "gnuplot" | "splot"
         )
     }
 
@@ -11455,6 +11510,9 @@ impl XyceTestRunner {
             XyceStaticDcContract::PlainCsv | XyceStaticDcContract::WrapperCsv => {
                 Self::parse_csv_file(path)
             }
+            XyceStaticDcContract::PlainCsd | XyceStaticDcContract::WrapperCsd => {
+                Self::parse_csd_file(path)
+            }
             _ => Self::parse_prn_file(path),
         }
     }
@@ -11468,6 +11526,218 @@ impl XyceTestRunner {
     fn parse_raw_file(path: &Path) -> Result<XycePrnTable, String> {
         let bytes = fs::read(path).map_err(|err| format!("{}: {err}", path.display()))?;
         Self::parse_raw_table(&bytes)
+    }
+
+    fn parse_csd_file(path: &Path) -> Result<XycePrnTable, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_csd_table(&content)
+    }
+
+    fn parse_csd_table(content: &str) -> Result<XycePrnTable, String> {
+        let lines = content
+            .lines()
+            .enumerate()
+            .map(|(line_number, line)| (line_number + 1, line.trim()))
+            .filter(|(_, line)| !line.is_empty())
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            return Err("empty Xyce CSDF table".to_string());
+        }
+
+        let mut columns: Option<Vec<String>> = None;
+        let mut rows = Vec::new();
+        let mut index = 0usize;
+        while index < lines.len() {
+            let (line_number, line) = lines[index];
+            if !line.eq_ignore_ascii_case("#H") {
+                return Err(format!(
+                    "Xyce CSDF section must start with #H at line {line_number}, got '{line}'"
+                ));
+            }
+            index += 1;
+
+            let mut complex_values = false;
+            while index < lines.len() {
+                let (_, header_line) = lines[index];
+                if header_line.eq_ignore_ascii_case("#N") {
+                    break;
+                }
+                if let Some((key, value)) = Self::parse_csd_header_assignment(header_line) {
+                    if key.eq_ignore_ascii_case("COMPLEXVALUES")
+                        && value.eq_ignore_ascii_case("YES")
+                    {
+                        complex_values = true;
+                    }
+                }
+                index += 1;
+            }
+            if complex_values {
+                return Err("Xyce CSDF COMPLEXVALUES=YES is not supported".to_string());
+            }
+            if index >= lines.len() {
+                return Err("Xyce CSDF section has no #N column block".to_string());
+            }
+
+            index += 1;
+            let Some((column_line_number, column_line)) = lines.get(index).copied() else {
+                return Err("Xyce CSDF #N block has no column line".to_string());
+            };
+            let section_columns = Self::parse_csd_columns(column_line).map_err(|err| {
+                format!("invalid Xyce CSDF column line {column_line_number}: {err}")
+            })?;
+            if section_columns.is_empty() {
+                return Err(format!(
+                    "Xyce CSDF column line {column_line_number} has no columns"
+                ));
+            }
+            if let Some(columns) = &columns {
+                if !Self::same_prn_columns(columns, &section_columns) {
+                    return Err(format!(
+                        "Xyce CSDF section changes columns from {:?} to {:?}",
+                        columns, section_columns
+                    ));
+                }
+            } else {
+                columns = Some(section_columns);
+            }
+            index += 1;
+
+            while index < lines.len() {
+                let (line_number, line) = lines[index];
+                if line.eq_ignore_ascii_case("#;") {
+                    index += 1;
+                    break;
+                }
+                if line.eq_ignore_ascii_case("#H") {
+                    break;
+                }
+                if !line.starts_with("#C") {
+                    return Err(format!(
+                        "expected Xyce CSDF #C row header at line {line_number}, got '{line}'"
+                    ));
+                }
+                let expected_count = Self::parse_csd_row_count(line).map_err(|err| {
+                    format!("invalid Xyce CSDF #C row header at line {line_number}: {err}")
+                })?;
+                index += 1;
+
+                let mut row = Vec::with_capacity(expected_count);
+                while row.len() < expected_count {
+                    let Some((data_line_number, data_line)) = lines.get(index).copied() else {
+                        return Err(format!(
+                            "Xyce CSDF row beginning at line {line_number} ended after {} value(s), expected {expected_count}",
+                            row.len()
+                        ));
+                    };
+                    if data_line.starts_with('#') {
+                        return Err(format!(
+                            "Xyce CSDF row beginning at line {line_number} ended before {expected_count} value(s) at line {data_line_number}"
+                        ));
+                    }
+                    for token in data_line.split_whitespace() {
+                        if row.len() >= expected_count {
+                            return Err(format!(
+                                "Xyce CSDF row beginning at line {line_number} has more than {expected_count} value(s)"
+                            ));
+                        }
+                        let expected_position = row.len() + 1;
+                        row.push(Self::parse_csd_value_token(token, expected_position).map_err(
+                            |err| {
+                                format!(
+                                    "invalid Xyce CSDF data token '{token}' at line {data_line_number}: {err}"
+                                )
+                            },
+                        )?);
+                    }
+                    index += 1;
+                }
+                if let Some(columns) = &columns {
+                    if row.len() != columns.len() {
+                        return Err(format!(
+                            "Xyce CSDF row beginning at line {line_number} has {} value(s), expected {} column(s)",
+                            row.len(),
+                            columns.len()
+                        ));
+                    }
+                }
+                rows.push(row);
+            }
+        }
+
+        let columns = columns.ok_or_else(|| "Xyce CSDF table has no columns".to_string())?;
+        if rows.is_empty() {
+            return Err("Xyce CSDF table has no data rows".to_string());
+        }
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn parse_csd_header_assignment(line: &str) -> Option<(&str, &str)> {
+        let (key, rest) = line.split_once('=')?;
+        let value = rest
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_matches(['"', '\'']);
+        Some((key.trim(), value))
+    }
+
+    fn parse_csd_columns(line: &str) -> Result<Vec<String>, String> {
+        if !line.contains('\'') {
+            return Ok(line.split_whitespace().map(str::to_string).collect());
+        }
+
+        let mut columns = Vec::new();
+        let mut rest = line;
+        loop {
+            let Some(start) = rest.find('\'') else {
+                if rest.trim().is_empty() {
+                    return Ok(columns);
+                }
+                return Err(format!(
+                    "unexpected unquoted text after CSDF column list: '{}'",
+                    rest.trim()
+                ));
+            };
+            if !rest[..start].trim().is_empty() {
+                return Err(format!(
+                    "unexpected text before quoted CSDF column: '{}'",
+                    rest[..start].trim()
+                ));
+            }
+            let after_start = &rest[start + 1..];
+            let Some(end) = after_start.find('\'') else {
+                return Err("unterminated quoted CSDF column".to_string());
+            };
+            columns.push(after_start[..end].to_string());
+            rest = &after_start[end + 1..];
+        }
+    }
+
+    fn parse_csd_row_count(line: &str) -> Result<usize, String> {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        if fields.len() != 3 || !fields[0].eq_ignore_ascii_case("#C") {
+            return Err("expected '#C <sweep-value> <value-count>'".to_string());
+        }
+        fields[2]
+            .parse::<usize>()
+            .map_err(|err| format!("invalid value count '{}': {err}", fields[2]))
+    }
+
+    fn parse_csd_value_token(token: &str, expected_position: usize) -> Result<f64, String> {
+        let (value, position) = token
+            .split_once(':')
+            .ok_or_else(|| "expected '<value>:<position>'".to_string())?;
+        let position = position
+            .parse::<usize>()
+            .map_err(|err| format!("invalid position '{}': {err}", position))?;
+        if position != expected_position {
+            return Err(format!(
+                "position {position} does not match expected position {expected_position}"
+            ));
+        }
+        Self::parse_xyce_numeric_token(value)
+            .map_err(|err| format!("invalid numeric value '{}': {err}", value))
     }
 
     fn parse_raw_table(bytes: &[u8]) -> Result<XycePrnTable, String> {
@@ -13602,6 +13872,55 @@ R2 b 0 2
                 .expect("plain CSV contract is supported"),
             XyceStaticDcContract::PlainCsv
         );
+    }
+
+    #[test]
+    fn dc_probe_contract_selects_csd_oracle_extension() {
+        assert_eq!(
+            XyceTestRunner::static_dc_contract_for_print_format(true, Some("PROBE"))
+                .expect("PROBE wrapper contract is supported"),
+            XyceStaticDcContract::WrapperCsd
+        );
+        assert_eq!(
+            XyceStaticDcContract::WrapperCsd.reference_extension(),
+            "csd"
+        );
+        assert_eq!(
+            XyceTestRunner::static_dc_contract_for_print_format(false, Some("PROBE"))
+                .expect("plain PROBE contract is supported"),
+            XyceStaticDcContract::PlainCsd
+        );
+        assert!(!XyceTestRunner::dc_print_format_is_prn_compatible("PROBE"));
+    }
+
+    #[test]
+    fn csd_parser_reads_multisection_probe_tables() {
+        let table = XyceTestRunner::parse_csd_table(
+            "\
+#H
+SOURCE='Xyce' VERSION='7.0'
+COMPLEXVALUES='NO' NODES='2'
+#N
+'V(1)' 'I(V1)'
+#C 0.00000000e+00 2
+0.00000000e+00:1 -1.00000000e-01:2
+#;
+#H
+SOURCE='Xyce' VERSION='7.0'
+COMPLEXVALUES='NO' NODES='2'
+#N
+'V(1)' 'I(V1)'
+#C 1.00000000e+00 2
+1.00000000e+00:1 -2.00000000e-01:2
+#;
+",
+        )
+        .expect("CSDF table parses");
+
+        assert_eq!(table.columns, vec!["V(1)", "I(V1)"]);
+        assert_eq!(table.rows.len(), 2);
+        assert_eq!(table.rows[0], vec![0.0, -0.1]);
+        assert_eq!(table.rows[1], vec![1.0, -0.2]);
     }
 
     #[test]
