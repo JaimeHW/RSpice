@@ -470,6 +470,12 @@ fn request_absolute_breakpoint(ctx: &mut CmContext, time: Value) {
     }
 }
 
+fn time_window_contains(start: Value, time: Value, end: Value) -> bool {
+    let scale = start.abs().max(time.abs()).max(end.abs()).max(1.0);
+    let tolerance = 64.0 * Value::EPSILON * scale;
+    start - tolerance <= time && time <= end + tolerance
+}
+
 fn initialize_oscillator(ctx: &mut CmContext) -> CmResult<()> {
     controlled_frequency_table_optional(ctx)?;
     output_levels(ctx)?;
@@ -632,7 +638,7 @@ impl CodeModel for SquareOscillator {
             let mut time4 = ctx.state_prev(SQUARE_TIME4_STATE);
             let mut dphase = c_truncated_fraction(ctx.state_prev(PHASE_STATE));
 
-            let value = if time1 <= ctx.time && ctx.time <= time2 {
+            let value = if time_window_contains(time1, ctx.time, time2) {
                 time3 = ctx.time_prev + (1.0 - dphase) / frequency;
                 time4 = time3 + fall_time;
 
@@ -643,7 +649,7 @@ impl CodeModel for SquareOscillator {
                 request_absolute_breakpoint(ctx, time4);
 
                 low + ((ctx.time - time1) / (time2 - time1)) * amplitude
-            } else if time2 <= ctx.time && ctx.time <= time3 {
+            } else if time_window_contains(time2, ctx.time, time3) {
                 time3 = ctx.time_prev + (1.0 - dphase) / frequency;
                 time4 = time3 + fall_time;
 
@@ -653,7 +659,7 @@ impl CodeModel for SquareOscillator {
                 request_absolute_breakpoint(ctx, time4);
 
                 high
-            } else if time3 <= ctx.time && ctx.time <= time4 {
+            } else if time_window_contains(time3, ctx.time, time4) {
                 if dphase > 1.0 - duty {
                     dphase -= 1.0;
                 }
@@ -757,7 +763,7 @@ impl CodeModel for TriangleOscillator {
             let mut t_start = ctx.state_prev(TRIANGLE_START_STATE);
             let mut dphase = c_truncated_fraction(phase_prev);
 
-            let value = if time1 <= ctx.time && ctx.time <= time2 {
+            let value = if time_window_contains(time1, ctx.time, time2) {
                 time2 = ctx.time_prev + (1.0 - dphase) / frequency;
 
                 if ctx.time < time2 {
