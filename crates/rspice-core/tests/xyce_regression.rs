@@ -1863,6 +1863,29 @@ fn test_xyce_bug_1302_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_bug_1176_certification_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_1173_1176_SON/bug1176son.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce certification transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_post_1770_certification_transient_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -3170,10 +3193,60 @@ fn test_xyce_bsim4_static_dc_cases_run() {
     for relative in [
         "Netlists/BSIM4/test1.X.cir",
         "Netlists/BSIM4/test2.X.cir",
+        "Netlists/BSIM4/test3.X.cir",
+        "Netlists/BSIM4/test4.X.cir",
+        "Netlists/BSIM4/test5.X.cir",
+        "Netlists/BSIM4/test6.X.cir",
+        "Netlists/BSIM4/test7.X.cir",
+        "Netlists/BSIM4/test8.X.cir",
+        "Netlists/BSIM4/test9.X.cir",
+        "Netlists/BSIM4/test10.X.cir",
+        "Netlists/BSIM4/test11.X.cir",
+        "Netlists/BSIM4/test12.X.cir",
+        "Netlists/BSIM4/test13.X.cir",
+        "Netlists/BSIM4/test14.X.cir",
         "Netlists/BSIM4_rbodymod1/test1.X.cir",
+        "Netlists/BSIM4_rbodymod1/test2.X.cir",
+        "Netlists/BSIM4_rbodymod1/test3.X.cir",
+        "Netlists/BSIM4_rbodymod1/test4.X.cir",
+        "Netlists/BSIM4_rbodymod1/test5.X.cir",
+        "Netlists/BSIM4_rbodymod1/test6.X.cir",
+        "Netlists/BSIM4_rbodymod1/test7.X.cir",
+        "Netlists/BSIM4_rbodymod1/test8.X.cir",
+        "Netlists/BSIM4_rbodymod1/test9.X.cir",
+        "Netlists/BSIM4_rbodymod1/test10.X.cir",
+        "Netlists/BSIM4_rbodymod1/test11.X.cir",
+        "Netlists/BSIM4_rbodymod1/test12.X.cir",
+        "Netlists/BSIM4_rbodymod1/test13.X.cir",
+        "Netlists/BSIM4_rbodymod1/test14.X.cir",
         "Netlists/BSIM4_rbodymod2/test1.X.cir",
+        "Netlists/BSIM4_rbodymod2/test2.X.cir",
+        "Netlists/BSIM4_rbodymod2/test3.X.cir",
+        "Netlists/BSIM4_rbodymod2/test4.X.cir",
+        "Netlists/BSIM4_rbodymod2/test5.X.cir",
+        "Netlists/BSIM4_rbodymod2/test6.X.cir",
+        "Netlists/BSIM4_rbodymod2/test7.X.cir",
+        "Netlists/BSIM4_rbodymod2/test8.X.cir",
+        "Netlists/BSIM4_rbodymod2/test9.X.cir",
+        "Netlists/BSIM4_rbodymod2/test10.X.cir",
+        "Netlists/BSIM4_rbodymod2/test11.X.cir",
+        "Netlists/BSIM4_rbodymod2/test12.X.cir",
+        "Netlists/BSIM4_rbodymod2/test13.X.cir",
+        "Netlists/BSIM4_rbodymod2/test14.X.cir",
         "Netlists/BSIM4_v4p7/test1.cir",
         "Netlists/BSIM4_v4p7/test2.cir",
+        "Netlists/BSIM4_v4p7/test3.cir",
+        "Netlists/BSIM4_v4p7/test4.cir",
+        "Netlists/BSIM4_v4p7/test5.cir",
+        "Netlists/BSIM4_v4p7/test6.cir",
+        "Netlists/BSIM4_v4p7/test7.cir",
+        "Netlists/BSIM4_v4p7/test8.cir",
+        "Netlists/BSIM4_v4p7/test9.cir",
+        "Netlists/BSIM4_v4p7/test10.cir",
+        "Netlists/BSIM4_v4p7/test11.cir",
+        "Netlists/BSIM4_v4p7/test12.cir",
+        "Netlists/BSIM4_v4p7/test13.cir",
+        "Netlists/BSIM4_v4p7/test14.cir",
         "Netlists/BSIM4_v4p82/test1.cir",
         "Netlists/BSIM4_v4p82/test2.cir",
         "Netlists/BSIM4_v4p82/test3.cir",
