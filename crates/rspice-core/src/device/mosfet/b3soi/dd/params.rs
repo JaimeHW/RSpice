@@ -40,6 +40,7 @@ pub struct B3SoiDdModel {
     pub sh_mod: i32,
     pub bin_unit: i32,
     pub param_chk: i32,
+    pub rgate_mod: i32,
     pub version: Value,
     pub tox: Value,
 
@@ -129,6 +130,8 @@ pub struct B3SoiDdModel {
     pub vsdfb_given: bool,
     pub vsdth: Binned,
     pub vsdth_given: bool,
+    pub xrcrg1: Binned,
+    pub xrcrg2: Binned,
 
     // Non-binned DC/temperature parameters.
     pub at: Value,
@@ -155,6 +158,10 @@ pub struct B3SoiDdModel {
     pub xj: Value,
     pub rbody: Value,
     pub rbsh: Value,
+    pub rshg: Value,
+    pub ngcon: Value,
+    pub xgw: Value,
+    pub xgl: Value,
     pub rth0: Value,
     pub cth0: Value,
     pub xbjt: Value,
@@ -314,6 +321,7 @@ impl B3SoiDdModel {
             sh_mod: model_selector(p, "SHMOD", 0, B3SOI_SHMOD_VALUES)?,
             bin_unit: model_selector(p, "BINUNIT", 1, B3SOI_BINUNIT_VALUES)?,
             param_chk: model_selector(p, "PARAMCHK", 0, B3SOI_PARAMCHK_VALUES)?,
+            rgate_mod: model_selector(p, "RGATEMOD", 0, &[0, 1, 2])?,
             version: val(p, "VERSION", 2.0),
             tox,
 
@@ -437,6 +445,8 @@ impl B3SoiDdModel {
             vsdfb_given: get(p, "VSDFB").is_some(),
             vsdth: binned(p, "VSDTH", 0.0, 0.0, 0.0, 0.0),
             vsdth_given: get(p, "VSDTH").is_some(),
+            xrcrg1: binned(p, "XRCRG1", 12.0, 0.0, 0.0, 0.0),
+            xrcrg2: binned(p, "XRCRG2", 1.0, 0.0, 0.0, 0.0),
 
             at: val(p, "AT", 3.3e4),
             gamma1: val(p, "GAMMA1", 0.0),
@@ -461,6 +471,10 @@ impl B3SoiDdModel {
             xj,
             rbody: val(p, "RBODY", 0.0),
             rbsh: val(p, "RBSH", 0.0),
+            rshg: val(p, "RSHG", 0.1),
+            ngcon: val(p, "NGCON", 1.0),
+            xgw: val(p, "XGW", 0.0),
+            xgl: val(p, "XGL", 0.0),
             rth0: val(p, "RTH0", 0.0),
             cth0: val(p, "CTH0", 0.0),
             xbjt,

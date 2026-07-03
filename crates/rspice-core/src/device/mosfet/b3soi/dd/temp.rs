@@ -108,6 +108,8 @@ pub struct B3SoiDdSized {
     pub kbjt1: Value,
     pub vsdfb: Value,
     pub vsdth: Value,
+    pub xrcrg1: Value,
+    pub xrcrg2: Value,
 
     // Non-binned copies.
     pub at: Value,
@@ -188,6 +190,7 @@ pub struct B3SoiDdSized {
     pub drain_conductance: Value,
     pub source_conductance: Value,
     pub rbodyext: Value,
+    pub grgeltd: Value,
 }
 
 /// Instance geometry inputs needed by the sizing pass.
@@ -389,6 +392,8 @@ impl B3SoiDdSized {
         bin!(kbjt1);
         bin!(vsdfb);
         bin!(vsdth);
+        bin!(xrcrg1);
+        bin!(xrcrg2);
 
         // --- Temperature adjustment (lines 530-552) ---
         let t0 = tratio - 1.0;
@@ -399,6 +404,16 @@ impl B3SoiDdSized {
         p.rth = geom.rth0 * (m.tbox / m.tsi).sqrt() / p.weff;
         p.cth = geom.cth0 * m.tsi;
         p.rbody = m.rbody * p.weff / p.leff;
+        let gate_length = geom.l - m.xgl;
+        let gate_resistance = m.rshg * (m.xgw + p.weff / (3.0 * m.ngcon)) / (m.ngcon * gate_length);
+        p.grgeltd = if gate_resistance > 0.0 {
+            1.0 / gate_resistance
+        } else {
+            if m.rgate_mod != 0 {
+                log::warn!("B3SOIDD: gate conductance reset to 1.0e3 mho");
+            }
+            1.0e3
+        };
         p.ua += p.ua1 * t0;
         p.ub += p.ub1 * t0;
         p.uc += p.uc1 * t0;

@@ -108,6 +108,14 @@ pub struct B3SoiDdOp {
     pub gtemp_t: Value,
     pub thermal_eq_current: Value,
 
+    /// Bias-dependent gate-resistance conductance and derivatives
+    /// (`B3SOIDDgcrg*`, used by `RGATEMOD=2`).
+    pub gcrg: Value,
+    pub gcrgg: Value,
+    pub gcrgd: Value,
+    pub gcrgs: Value,
+    pub gcrgb: Value,
+
     /// Inversion charge proxy used by noise (`B3SOIDDqinv`).
     pub qinv: Value,
 
@@ -1409,6 +1417,38 @@ pub fn eval(
     op.gmbs = gmb + gcb;
     op.gme = gme;
 
+    // Bias-dependent gate resistance (Xyce/N_DEV_MOSFET_B3SOI.C, RF `Rg`
+    // block). For `RGATEMOD=2`, `gcrg` is the combined gate-electrode and
+    // intrinsic input conductance; derivatives remain in device polarity and
+    // are assembled by the device stamp with the mode swap.
+    if m.rgate_mod == 2 {
+        let t9 = p.xrcrg2 * vtm;
+        let t0 = t9 * beta;
+        let dt0_dvd = (dbeta_dvd + dbeta_dvg * dvgsteff_dvd) * t9;
+        let dt0_dvb = (dbeta_dvb + dbeta_dvg * dvgsteff_dvb) * t9;
+        let dt0_dvg = dbeta_dvg * t9;
+
+        op.gcrg = p.xrcrg1 * (t0 + ids);
+        op.gcrgd = p.xrcrg1 * (dt0_dvd + gds0);
+        op.gcrgb = p.xrcrg1 * (dt0_dvb + gmb0) * dvbseff_dvb;
+        op.gcrgg = p.xrcrg1 * (dt0_dvg + gm0) * dvgsteff_dvg;
+
+        let denom = p.grgeltd + op.gcrg;
+        if denom != 0.0 {
+            let scale = p.grgeltd * p.grgeltd / (denom * denom);
+            op.gcrg = p.grgeltd * op.gcrg / denom;
+            op.gcrgg *= scale;
+            op.gcrgd *= scale;
+            op.gcrgb *= scale;
+        } else {
+            op.gcrg = 0.0;
+            op.gcrgg = 0.0;
+            op.gcrgd = 0.0;
+            op.gcrgb = 0.0;
+        }
+        op.gcrgs = -(op.gcrgg + op.gcrgd + op.gcrgb);
+    }
+
     // Drain-side junction current into drain prime.
     op.gjdb = gjdb - giib;
     op.gjdd = gjdd - (giid + gdgidld);
@@ -1538,6 +1578,7 @@ pub fn eval(
 #[derive(Debug, Clone, Copy)]
 pub struct ModelConsts {
     pub cap_mod: i32,
+    pub rgate_mod: i32,
     pub cox: Value,
     pub cbox: Value,
     pub csi: Value,

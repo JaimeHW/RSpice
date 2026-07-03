@@ -84,6 +84,9 @@ pub struct B3SoiDd {
 
     // External / internal nodes (already resolved to NodeId by the builder).
     pub node_drain: NodeId,
+    /// External netlist gate terminal.
+    pub node_gate_external: NodeId,
+    /// Intrinsic gate-prime node used by the compact model.
     pub node_gate: NodeId,
     pub node_source: NodeId,
     /// Back-gate / substrate-under-BOX node `E`.
@@ -163,6 +166,7 @@ impl B3SoiDd {
     pub fn new(
         name: String,
         node_drain: NodeId,
+        node_gate_external: NodeId,
         node_gate: NodeId,
         node_source: NodeId,
         node_e: NodeId,
@@ -182,6 +186,7 @@ impl B3SoiDd {
         let sized = Arc::new(B3SoiDdSized::new(&model, &geom, temp_k)?);
         let consts = ModelConsts {
             cap_mod: model.cap_mod,
+            rgate_mod: model.rgate_mod,
             cox: model.cox,
             cbox: model.cbox,
             csi: model.csi,
@@ -207,6 +212,7 @@ impl B3SoiDd {
             name,
             mtype: model.mtype,
             node_drain,
+            node_gate_external,
             node_gate,
             node_source,
             node_e,
@@ -865,7 +871,7 @@ impl NonlinearDevice for B3SoiDd {
     ) {
         if self.bypass_active.get() {
             // Bypassed iterate: restamp the frozen linearization unchanged.
-            self.stamp_op(&self.op, self.bias, matrix);
+            self.stamp_op(&self.op, self.bias, voltages, matrix);
             self.stamp_instance_ic(matrix);
             return;
         }
@@ -877,7 +883,7 @@ impl NonlinearDevice for B3SoiDd {
         };
         // `cdreq`/`ceq*` must be formed from the *same* bias that produced `op`,
         // not the (possibly stale) `self.bias` cached at the last `update`.
-        self.stamp_op(&op, bias, matrix);
+        self.stamp_op(&op, bias, voltages, matrix);
         self.stamp_instance_ic(matrix);
     }
 
@@ -918,7 +924,13 @@ impl B3SoiDd {
     /// resistance exists. `bNode` is the body node (internal floating or
     /// external tie). For `bodyMod=1`, `pNode` is the external body contact and
     /// the body-contact resistor is stamped after the intrinsic compact model.
-    fn stamp_op(&self, op: &B3SoiDdOp, bias: B3SoiDdBias, matrix: &mut impl MatrixStamper) {
+    fn stamp_op(
+        &self,
+        op: &B3SoiDdOp,
+        bias: B3SoiDdBias,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+    ) {
         let (dp, g, sp, e, b) = (
             self.node_drain,
             self.node_gate,
@@ -927,6 +939,8 @@ impl B3SoiDd {
             self.node_body,
         );
         let mt = self.mtype;
+        let rgate_terms = (self.model.rgate_mod == 2)
+            .then(|| self.rgate_gcrg_terms(self.node_gate_external, voltages, bias, op));
 
         // The branch voltages used to form cdreq, in the *un-swapped* (raw)
         // frame, exactly as ngspice (vds/vgs/vbs/ves are pre-swap, device
@@ -1032,6 +1046,10 @@ impl B3SoiDd {
         stamp_rhs(matrix, b, -ceqbody);
         stamp_rhs(matrix, dp, ceqbd - cdreq);
         stamp_rhs(matrix, sp, cdreq + ceqbs);
+        if let Some((_, _, _, _, _, ceqgcrg)) = rgate_terms {
+            stamp_rhs(matrix, self.node_gate_external, -ceqgcrg);
+            stamp_rhs(matrix, g, ceqgcrg);
+        }
         self.stamp_thermal_rhs(op, matrix);
 
         stamp_conductance(matrix, b, sp, self.eval_gmin);
@@ -1050,6 +1068,19 @@ impl B3SoiDd {
         stamp(matrix, b, b, gbbb);
 
         // Gate row: gc* all zero in DC -> nothing.
+        if let Some((gcrg, gcrgg, gcrgd, gcrgs, gcrgb, _ceqgcrg)) = rgate_terms {
+            let ge = self.node_gate_external;
+            stamp(matrix, ge, ge, gcrg);
+            stamp(matrix, ge, g, gcrgg);
+            stamp(matrix, ge, dp, gcrgd);
+            stamp(matrix, ge, sp, gcrgs);
+            stamp(matrix, ge, b, gcrgb);
+            stamp(matrix, g, ge, -gcrg);
+            stamp(matrix, g, g, -gcrgg);
+            stamp(matrix, g, dp, -gcrgd);
+            stamp(matrix, g, sp, -gcrgs);
+            stamp(matrix, g, b, -gcrgb);
+        }
 
         // Drain-prime row (b3soiddld.c:4106-4112):
         stamp(matrix, dp, g, gm + gddpg);
@@ -1090,6 +1121,50 @@ impl B3SoiDd {
             rbody + rbodyext
         };
         1.0 / resistance
+    }
+
+    fn rgate_gcrg_terms(
+        &self,
+        branch_pos: NodeId,
+        voltages: &[Value],
+        bias: B3SoiDdBias,
+        op: &B3SoiDdOp,
+    ) -> (Value, Value, Value, Value, Value, Value) {
+        let node = |n: NodeId| if n == 0 { 0.0 } else { voltages[n - 1] };
+        let vge = self.mtype * (node(branch_pos) - node(self.node_source));
+        Self::rgate_gcrg_terms_from(self.mtype, op.mode, vge, bias, op)
+    }
+
+    fn rgate_gcrg_terms_from(
+        mtype: Value,
+        mode: i32,
+        vge: Value,
+        bias: B3SoiDdBias,
+        op: &B3SoiDdOp,
+    ) -> (Value, Value, Value, Value, Value, Value) {
+        let delta = vge - bias.vgs;
+        let (gcrgd, mut gcrgg, gcrgs, gcrgb, mut ceqgcrg) = if mode >= 0 {
+            let gcrgd = op.gcrgd * delta;
+            let gcrgg = op.gcrgg * delta;
+            let gcrgs = op.gcrgs * delta;
+            let gcrgb = op.gcrgb * delta;
+            let ceqgcrg = -(gcrgd * bias.vds + gcrgg * bias.vgs + gcrgb * bias.vbs);
+            (gcrgd, gcrgg, gcrgs, gcrgb, ceqgcrg)
+        } else {
+            let vgd = bias.vgs - bias.vds;
+            let vbd = bias.vbs - bias.vds;
+            let gcrgd = op.gcrgs * delta;
+            let gcrgg = op.gcrgg * delta;
+            let gcrgs = op.gcrgd * delta;
+            let gcrgb = op.gcrgb * delta;
+            let ceqgcrg = -(gcrgg * vgd - gcrgs * bias.vds + gcrgb * vbd);
+            (gcrgd, gcrgg, gcrgs, gcrgb, ceqgcrg)
+        };
+        if mtype < 0.0 {
+            ceqgcrg = -ceqgcrg;
+        }
+        gcrgg -= op.gcrg;
+        (op.gcrg, gcrgg, gcrgd, gcrgs, gcrgb, ceqgcrg)
     }
 
     fn stamp_thermal_rhs(&self, op: &B3SoiDdOp, matrix: &mut impl MatrixStamper) {
@@ -1310,6 +1385,7 @@ mod tests {
     fn model_consts(m: &B3SoiDdModel) -> ModelConsts {
         ModelConsts {
             cap_mod: m.cap_mod,
+            rgate_mod: m.rgate_mod,
             cox: m.cox,
             cbox: m.cbox,
             csi: m.csi,
@@ -1366,6 +1442,63 @@ mod tests {
         }
     }
 
+    fn rgate_op() -> B3SoiDdOp {
+        B3SoiDdOp {
+            mode: 1,
+            gcrg: 11.0,
+            gcrgg: 5.0,
+            gcrgd: 3.0,
+            gcrgs: -15.0,
+            gcrgb: 7.0,
+            ..B3SoiDdOp::default()
+        }
+    }
+
+    #[test]
+    fn rgate_mod2_terms_flip_ceqgcrg_for_pmos() {
+        let bias = B3SoiDdBias {
+            vds: 0.4,
+            vgs: 0.8,
+            vbs: -0.1,
+            ves: 0.0,
+            vps: 0.0,
+            del_temp: 0.0,
+        };
+        let op = rgate_op();
+
+        let (_, gcrgg, gcrgd, gcrgs, gcrgb, ceqgcrg) =
+            B3SoiDd::rgate_gcrg_terms_from(-1.0, 1, 1.0, bias, &op);
+
+        assert!((gcrgd - 0.6).abs() < 1e-14);
+        assert!((gcrgg + 10.0).abs() < 1e-14);
+        assert!((gcrgs + 3.0).abs() < 1e-14);
+        assert!((gcrgb - 1.4).abs() < 1e-14);
+        assert!((ceqgcrg - 0.9).abs() < 1e-14);
+    }
+
+    #[test]
+    fn rgate_mod2_terms_swap_drain_source_derivatives_in_reverse_mode() {
+        let bias = B3SoiDdBias {
+            vds: -0.3,
+            vgs: 0.7,
+            vbs: -0.2,
+            ves: 0.0,
+            vps: 0.0,
+            del_temp: 0.0,
+        };
+        let mut op = rgate_op();
+        op.mode = -1;
+
+        let (_, gcrgg, gcrgd, gcrgs, gcrgb, ceqgcrg) =
+            B3SoiDd::rgate_gcrg_terms_from(1.0, -1, 1.1, bias, &op);
+
+        assert!((gcrgd + 6.0).abs() < 1e-14);
+        assert!((gcrgg + 9.0).abs() < 1e-14);
+        assert!((gcrgs - 1.2).abs() < 1e-14);
+        assert!((gcrgb - 2.8).abs() < 1e-14);
+        assert!((ceqgcrg + 2.64).abs() < 1e-14);
+    }
+
     #[test]
     fn nonideal_body_tie_stamps_resolved_body_contact_resistance() {
         let mut params = n1_params();
@@ -1377,6 +1510,7 @@ mod tests {
         let dev = B3SoiDd::new(
             "m1".to_string(),
             1,
+            2,
             2,
             3,
             4,
@@ -1404,6 +1538,7 @@ mod tests {
                 vps: 0.0,
                 del_temp: 0.0,
             },
+            &[],
             &mut stamper,
         );
 
@@ -1423,6 +1558,7 @@ mod tests {
         let dev = B3SoiDd::new(
             "m1".to_string(),
             1,
+            2,
             2,
             3,
             4,
@@ -1478,6 +1614,7 @@ mod tests {
             "m1".to_string(),
             1,
             2,
+            2,
             3,
             4,
             5,
@@ -1516,6 +1653,7 @@ mod tests {
         let mut dev = B3SoiDd::new(
             "m1".to_string(),
             1,
+            2,
             2,
             3,
             4,
@@ -1571,6 +1709,7 @@ mod tests {
             "m1".to_string(),
             1,
             2,
+            2,
             3,
             4,
             5,
@@ -1625,6 +1764,7 @@ mod tests {
         let dev = B3SoiDd::new(
             "m1".to_string(),
             1,
+            2,
             2,
             3,
             4,

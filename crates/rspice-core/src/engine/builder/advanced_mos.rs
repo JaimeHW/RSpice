@@ -25,7 +25,7 @@ impl Engine {
         deferred_params: &[(String, String)],
         temperature_kelvin: f64,
     ) -> Result<(), SimulationError> {
-        use crate::device::mosfet::b3soi::dd::temp::B3SoiDdGeometry;
+        use crate::device::mosfet::b3soi::dd::temp::{B3SoiDdGeometry, B3SoiDdSized};
         use crate::device::{B3SoiDd, B3SoiDdModel, BodyMode};
 
         let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
@@ -46,7 +46,7 @@ impl Engine {
         );
 
         let node_drain_external = circuit.get_or_create_node(&element.nodes[0]);
-        let node_gate = circuit.get_or_create_node(&element.nodes[1]);
+        let node_gate_external = circuit.get_or_create_node(&element.nodes[1]);
         let node_source_external = circuit.get_or_create_node(&element.nodes[2]);
         let node_e = circuit.get_or_create_node(&element.nodes[3]);
 
@@ -89,6 +89,29 @@ impl Engine {
                 .unwrap_or(0.0),
         };
 
+        let node_gate = match model.rgate_mod {
+            1 => {
+                let gate_prime = circuit.get_or_create_node(&format!("{}.__gint", element.name));
+                let sized = B3SoiDdSized::new(&model, &geom, temp_k).map_err(|err| {
+                    SimulationError::Circuit(format!(
+                        "MOSFET '{}': native B3SOIDD gate resistance: {err}",
+                        element.name
+                    ))
+                })?;
+                if sized.grgeltd.is_finite() && sized.grgeltd > 0.0 {
+                    circuit.resistors.add(
+                        format!("{}.__rg", element.name),
+                        node_gate_external,
+                        gate_prime,
+                        1.0 / sized.grgeltd,
+                    );
+                }
+                gate_prime
+            }
+            2 => circuit.get_or_create_node(&format!("{}.__gint", element.name)),
+            _ => node_gate_external,
+        };
+
         let drain_resistance = model.sheet_resistance * geom.drain_squares;
         let node_drain = if drain_resistance.is_finite() && drain_resistance > 0.0 {
             let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
@@ -127,7 +150,7 @@ impl Engine {
             instance_params,
             deferred_params,
             node_drain,
-            node_gate,
+            node_gate_external,
             node_source,
             node_body,
             node_e,
@@ -137,6 +160,7 @@ impl Engine {
         let mut device = B3SoiDd::new(
             element.name.clone(),
             node_drain,
+            node_gate_external,
             node_gate,
             node_source,
             node_e,
