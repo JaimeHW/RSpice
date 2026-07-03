@@ -2495,18 +2495,27 @@ fn test_xyce_resistor_model_suffix_value_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/Certification_Tests/ISSUE_206/issue206.cir";
 
-    let result = runner.run_test(root.join(relative));
+    for relative in [
+        "Netlists/Certification_Tests/ISSUE_206/issue206.cir",
+        "Netlists/Certification_Tests/ISSUE_206/issue206binning1.cir",
+        "Netlists/Certification_Tests/ISSUE_206/issue206binning2.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
 
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native Xyce modeled-resistor value-suffix comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce modeled-resistor value-suffix comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_dc",
+            "{relative} should report the native static DC .prn contract"
+        );
+    }
 }
 
 #[test]
