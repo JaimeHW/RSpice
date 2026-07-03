@@ -175,3 +175,32 @@ fn resume_requires_a_later_stop_time() {
         .expect_err("earlier tstop must be refused");
     assert!(format!("{err}").contains("must exceed"));
 }
+
+#[test]
+fn xspice_checkpoint_resume_is_refused_until_state_is_serialized() {
+    let netlist = Netlist::parse(
+        "\
+* xspice checkpoint boundary
+vin in 0 sin(0 1 1meg)
+a1 in out amp
+.model amp gain (gain=2)
+rload out 0 1k
+.tran 1n 20n
+.end
+",
+    )
+    .expect("XSPICE deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 10e-9, TAU_STEP)
+        .expect("first XSPICE segment can run");
+    let err = engine
+        .run_tran_resume(&netlist, &checkpoint, 20e-9, TAU_STEP)
+        .expect_err("XSPICE checkpoint resume must be refused");
+    let message = format!("{err}");
+    assert!(
+        message.contains("XSPICE") && message.contains("Run XSPICE transient decks unsegmented"),
+        "diagnostic should explain the unsupported checkpoint boundary: {message}"
+    );
+}

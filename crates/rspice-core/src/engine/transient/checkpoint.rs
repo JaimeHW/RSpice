@@ -20,10 +20,10 @@
 
 use crate::Value;
 use crate::circuit::Circuit;
-use crate::netlist::Netlist;
+use crate::netlist::{ElementKind, Netlist};
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +44,7 @@ pub struct TransientCheckpoint {
     ind_i_prev: Vec<Value>,
     ind_i_prev_prev: Vec<Value>,
     ind_v_prev: Vec<Value>,
+    xspice_instances: Vec<String>,
 }
 
 /// Stable fingerprint of the netlist identity (FNV-1a over the source text
@@ -88,6 +89,13 @@ impl TransientCheckpoint {
                  semantics); prefer unsegmented runs for delay-dominated decks"
             );
         }
+        if !circuit.xspice_instances.is_empty() {
+            log::warn!(
+                "transient checkpoint at t={time:.6e}: XSPICE code-model \
+                 context/resources are not serialized; this checkpoint will be \
+                 refused for resume"
+            );
+        }
 
         Self {
             time,
@@ -101,6 +109,11 @@ impl TransientCheckpoint {
             ind_i_prev: circuit.inductors.i_prev.clone(),
             ind_i_prev_prev: circuit.inductors.i_prev_prev.clone(),
             ind_v_prev: circuit.inductors.v_prev.clone(),
+            xspice_instances: circuit
+                .xspice_instances
+                .iter()
+                .map(|instance| format!("{}({})", instance.name, instance.model_name()))
+                .collect(),
         }
     }
 
@@ -151,6 +164,21 @@ impl TransientCheckpoint {
                 self.netlist_fingerprint, fingerprint
             ));
         }
+        if !self.xspice_instances.is_empty() || netlist_has_xspice(netlist) {
+            let detail = if self.xspice_instances.is_empty() {
+                "the target netlist contains XSPICE code-model instances".to_string()
+            } else {
+                format!(
+                    "checkpoint contains XSPICE instance(s): {}",
+                    self.xspice_instances.join(", ")
+                )
+            };
+            return Err(format!(
+                "transient checkpoint resume does not yet serialize XSPICE \
+                 code-model context, pending events, or external runtime resources; \
+                 {detail}. Run XSPICE transient decks unsegmented."
+            ));
+        }
         Ok(())
     }
 
@@ -193,6 +221,11 @@ impl TransientCheckpoint {
             "inductors",
             &[&self.ind_i_prev, &self.ind_i_prev_prev, &self.ind_v_prev],
         );
+        out.push_str(&format!("xspice {}\n", self.xspice_instances.len()));
+        for instance in &self.xspice_instances {
+            out.push_str(instance);
+            out.push('\n');
+        }
         out
     }
 
@@ -205,7 +238,7 @@ impl TransientCheckpoint {
             .strip_prefix("RSPICE-CHECKPOINT ")
             .and_then(|v| v.trim().parse().ok())
             .ok_or_else(|| format!("not a checkpoint file (header: '{header}')"))?;
-        if version != FORMAT_VERSION {
+        if !matches!(version, 1 | FORMAT_VERSION) {
             return Err(format!(
                 "unsupported checkpoint version {version} (this build reads {FORMAT_VERSION})"
             ));
@@ -259,6 +292,29 @@ impl TransientCheckpoint {
         let mut solution_cols = read_section("solution", 1)?;
         let cap_cols = read_section("capacitors", 5)?;
         let ind_cols = read_section("inductors", 3)?;
+        let xspice_instances = if version >= 2 {
+            let header = lines
+                .next()
+                .ok_or_else(|| "missing 'xspice' section".to_string())?;
+            let count: usize = header
+                .strip_prefix("xspice")
+                .map(str::trim)
+                .and_then(|value| value.parse().ok())
+                .ok_or_else(|| format!("malformed 'xspice' header: '{header}'"))?;
+            let mut instances = Vec::with_capacity(count);
+            for row in 0..count {
+                let line = lines
+                    .next()
+                    .ok_or_else(|| format!("'xspice' truncated at row {row}"))?;
+                if line.trim().is_empty() {
+                    return Err(format!("'xspice' row {row} is empty"));
+                }
+                instances.push(line.trim().to_string());
+            }
+            instances
+        } else {
+            Vec::new()
+        };
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -277,6 +333,7 @@ impl TransientCheckpoint {
             ind_i_prev: ind_iter.next().unwrap(),
             ind_i_prev_prev: ind_iter.next().unwrap(),
             ind_v_prev: ind_iter.next().unwrap(),
+            xspice_instances,
         })
     }
 
@@ -292,6 +349,13 @@ impl TransientCheckpoint {
             .map_err(|e| format!("cannot read checkpoint '{}': {e}", path.display()))?;
         Self::from_text(&text)
     }
+}
+
+fn netlist_has_xspice(netlist: &Netlist) -> bool {
+    netlist
+        .elements
+        .iter()
+        .any(|element| matches!(element.kind, ElementKind::Xspice { .. }))
 }
 
 #[cfg(test)]
@@ -311,6 +375,7 @@ mod tests {
             ind_i_prev: vec![7e-3],
             ind_i_prev_prev: vec![6.5e-3],
             ind_v_prev: vec![0.02],
+            xspice_instances: Vec::new(),
         }
     }
 
@@ -323,6 +388,17 @@ mod tests {
         for (a, b) in original.solution.iter().zip(&restored.solution) {
             assert_eq!(a.to_bits(), b.to_bits());
         }
+    }
+
+    #[test]
+    fn version_one_checkpoint_files_still_load_without_xspice_state() {
+        let version_one = sample()
+            .to_text()
+            .replace("RSPICE-CHECKPOINT 2", "RSPICE-CHECKPOINT 1")
+            .replace("xspice 0\n", "");
+        let restored = TransientCheckpoint::from_text(&version_one)
+            .expect("v1 checkpoint without XSPICE section still loads");
+        assert!(restored.xspice_instances.is_empty());
     }
 
     #[test]
