@@ -181,7 +181,11 @@ jobs:
           fi
           wasm-bindgen --version
       - name: Build and verify site bundle
-        run: python3 tools/deploy/build_site.py --out _site-ci
+        run: |
+          mkdir -p _site-ci
+          printf 'site build did not complete; inspect the Build and verify site bundle logs.\n' > _site-ci/BUILD_FAILED.txt
+          python3 tools/deploy/build_site.py --out _site-ci
+          rm -f _site-ci/BUILD_FAILED.txt
       - name: Upload verified site bundle
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
