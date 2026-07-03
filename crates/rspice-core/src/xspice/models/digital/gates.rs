@@ -91,6 +91,30 @@ fn init_basic_gate_state(ctx: &mut CmContext) -> CmResult<()> {
     Ok(())
 }
 
+fn latest_gate_input_event_time(ctx: &CmContext) -> Option<Value> {
+    let scalar = ctx.input_digital_event_time("in");
+    let vector = ctx.input_digital_vector_values("in").and_then(|values| {
+        (0..values.len())
+            .filter_map(|index| ctx.input_digital_vector_event_time("in", index))
+            .max_by(|a, b| a.total_cmp(b))
+    });
+    scalar
+        .into_iter()
+        .chain(vector)
+        .filter(|time| time.is_finite() && *time <= ctx.time)
+        .max_by(|a, b| a.total_cmp(b))
+}
+
+fn gate_event_rebased_delay(ctx: &CmContext, delay: Value) -> Value {
+    if ctx.time == 0.0 {
+        return delay;
+    }
+    let Some(event_time) = latest_gate_input_event_time(ctx) else {
+        return delay;
+    };
+    event_time + delay - ctx.time
+}
+
 fn gate_params() -> &'static [ParamSpec] {
     use std::sync::OnceLock;
     static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
@@ -184,7 +208,14 @@ fn set_basic_gate_output(
     rise: Value,
     fall: Value,
 ) -> CmResult<()> {
-    set_gate_output_with_unknown_delays(ctx, name, value, previous, delay, Some((rise, fall)))
+    set_gate_output_with_unknown_delays(
+        ctx,
+        name,
+        value,
+        previous,
+        gate_event_rebased_delay(ctx, delay),
+        Some((rise, fall)),
+    )
 }
 
 fn set_gate_output_with_unknown_delays(
