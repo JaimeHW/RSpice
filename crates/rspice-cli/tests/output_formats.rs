@@ -290,6 +290,39 @@ fn transient_csv_is_text_not_binary() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn transient_csv_preserves_subnanosecond_knots_at_large_times() {
+    let dir = test_dir("csv_time_precision");
+    let deck = "* transient csv precision test
+vclk out 0 PWL(0 0 4.5 0 4.50000000001 1 4.50000000002 1)
+rload out 0 1k
+.tran 1 4.50000000002
+.print tran v(out)
+.end
+";
+    let path = run_export(&dir, "csv_time_precision", deck, "csv");
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let times = text
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split(',').next())
+        .filter_map(|field| field.parse::<f64>().ok())
+        .collect::<Vec<_>>();
+
+    assert!(
+        times
+            .windows(2)
+            .any(|pair| (pair[1] - pair[0]).abs() > 1.0e-12 && (pair[1] - pair[0]).abs() < 2.0e-11),
+        "CSV time column must preserve 10 ps-scale spacing near 4.5 s: {text}"
+    );
+    assert!(
+        text.contains("4.50000000001"),
+        "CSV should print enough significant digits to expose the 10 ps knot: {text}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn current_column_index(header: &str, name: &str) -> usize {
     header
         .split(',')

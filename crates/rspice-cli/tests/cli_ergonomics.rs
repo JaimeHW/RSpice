@@ -189,9 +189,15 @@ fn save_flag_quotes_differential_voltage_in_dc_csv() {
         csv.lines().any(|line| line.starts_with("\"V(in,out)\",")),
         "DC OP CSV must quote differential probe names as one field: {csv}"
     );
+    let value = csv
+        .lines()
+        .skip(1)
+        .find_map(|line| line.rsplit_once(',').map(|(_, value)| value))
+        .and_then(|field| field.parse::<f64>().ok())
+        .unwrap_or_else(|| panic!("missing numeric V(in,out) value: {csv}"));
     assert!(
-        csv.contains("2.500000000e0"),
-        "V(in,out) should equal 2.5 V: {csv}"
+        (value - 2.5).abs() < 1.0e-9,
+        "V(in,out) should equal 2.5 V, got {value:.17e}: {csv}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

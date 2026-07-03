@@ -163,7 +163,7 @@ impl StreamingWaveformWriter {
             for (row, chunk) in self.buffer.chunks(row_size).enumerate() {
                 write!(self.writer, "{}", row)?;
                 for &val in chunk {
-                    write!(self.writer, "\t{:.9e}", val)?;
+                    write!(self.writer, "\t{:.17e}", val)?;
                 }
                 writeln!(self.writer)?;
             }

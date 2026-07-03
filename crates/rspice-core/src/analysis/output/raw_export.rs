@@ -213,7 +213,7 @@ impl RawExporter {
                 for (i, point) in self.data.iter().enumerate() {
                     write!(writer, "{}", i)?;
                     for &value in point {
-                        write!(writer, "\t{:.15e}", value)?;
+                        write!(writer, "\t{:.17e}", value)?;
                     }
                     writeln!(writer)?;
                 }

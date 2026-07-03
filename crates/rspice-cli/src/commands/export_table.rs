@@ -334,15 +334,15 @@ impl ExportTable {
         writeln!(writer).map_err(io_err)?;
 
         for (row, scale_value) in self.scale.iter().enumerate() {
-            write!(writer, "{:.9e}", scale_value).map_err(io_err)?;
+            write!(writer, "{:.17e}", scale_value).map_err(io_err)?;
             for column in &self.columns {
                 let (re, im) = Self::value_at(&column.data, row);
                 match column.data {
                     ColumnData::Real(_) => {
-                        write!(writer, "{}{:.9e}", delimiter, re).map_err(io_err)?;
+                        write!(writer, "{}{:.17e}", delimiter, re).map_err(io_err)?;
                     }
                     ColumnData::Complex { .. } => {
-                        write!(writer, "{0}{1:.9e}{0}{2:.9e}", delimiter, re, im)
+                        write!(writer, "{0}{1:.17e}{0}{2:.17e}", delimiter, re, im)
                             .map_err(io_err)?;
                     }
                 }

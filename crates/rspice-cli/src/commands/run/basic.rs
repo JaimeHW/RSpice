@@ -207,7 +207,7 @@ fn write_dc_op_output(
             for signal in &signals {
                 writeln!(
                     file,
-                    "{},{:.9e}",
+                    "{},{:.17e}",
                     super::export::delimited_cell(&signal.display_name, ','),
                     signal.values[0]
                 )
@@ -223,7 +223,7 @@ fn write_dc_op_output(
                 source: e,
             })?;
             for signal in &signals {
-                writeln!(file, "{}\t{:.9e}", signal.display_name, signal.values[0]).map_err(
+                writeln!(file, "{}\t{:.17e}", signal.display_name, signal.values[0]).map_err(
                     |e| CliError::OutputError {
                         path: path.to_path_buf(),
                         source: e,
@@ -280,7 +280,7 @@ fn write_dc_op_output(
                 source: e,
             })?;
             for signal in &signals {
-                writeln!(file, "\t{:.9e}", signal.values[0]).map_err(|e| {
+                writeln!(file, "\t{:.17e}", signal.values[0]).map_err(|e| {
                     CliError::OutputError {
                         path: path.to_path_buf(),
                         source: e,
@@ -776,7 +776,7 @@ fn write_fourier_output(
                 for harmonic in &result.harmonics {
                     writeln!(
                         file,
-                        "{1}{0}{2}{0}{3:.9e}{0}{4:.9e}{0}{5:.6}{0}{6:.9e}{0}{7:.6}",
+                        "{1}{0}{2}{0}{3:.17e}{0}{4:.17e}{0}{5:.6}{0}{6:.17e}{0}{7:.6}",
                         sep,
                         output,
                         harmonic.harmonic_number,
@@ -932,7 +932,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
                     let values: String = voltages
                         .iter()
                         .skip(1)
-                        .map(|v| format!(",{:.9e}", v))
+                        .map(|v| format!(",{:.17e}", v))
                         .collect();
                     writeln!(file, "{:.2}{}", temp, values).map_err(|e| CliError::OutputError {
                         path: output_path.clone(),
