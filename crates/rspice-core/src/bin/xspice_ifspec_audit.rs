@@ -2,8 +2,9 @@ use rspice_core::testing::{TestResult, TestRunner, TestRunnerConfig};
 use rspice_core::xspice::CodeModelRegistry;
 use rspice_core::xspice::conformance::{
     ConformanceIssue, ConformanceSeverity, IfSpecConformancePolicy, XspiceParitySkippedDeck,
-    audit_ngspice_ifspec_tree, audit_ngspice_xspice_examples,
-    materialize_ngspice_xspice_parity_suite, materialize_ngspice_xspice_smoke_suite,
+    audit_ngspice_ifspec_event_port_types, audit_ngspice_ifspec_tree,
+    audit_ngspice_xspice_examples, materialize_ngspice_xspice_parity_suite,
+    materialize_ngspice_xspice_smoke_suite,
 };
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,19 +21,20 @@ fn main() {
 fn run() -> Result<(), String> {
     let args = Args::parse(std::env::args().skip(1))?;
     let registry = CodeModelRegistry::with_builtins();
-    let report = audit_ngspice_ifspec_tree(
-        &args
-            .ngspice_source_root
-            .join("src")
-            .join("xspice")
-            .join("icm"),
-        &registry,
-        &IfSpecConformancePolicy::ngspice46(),
-    )
-    .map_err(|err| err.to_string())?;
+    let icm_root = args
+        .ngspice_source_root
+        .join("src")
+        .join("xspice")
+        .join("icm");
+    let policy = IfSpecConformancePolicy::ngspice46();
+    let report =
+        audit_ngspice_ifspec_tree(&icm_root, &registry, &policy).map_err(|err| err.to_string())?;
+    let event_port_report =
+        audit_ngspice_ifspec_event_port_types(&icm_root, &policy).map_err(|err| err.to_string())?;
 
     print_ifspec_report(&args, &report.issues, report.checked_models);
-    let mut failed = report.has_errors();
+    print_event_port_report(&args, &event_port_report);
+    let mut failed = report.has_errors() || event_port_report.has_unsupported_event_ports();
 
     if args.audit_examples || args.run_examples {
         let corpus = audit_ngspice_xspice_examples(&args.ngspice_source_root)
@@ -291,6 +293,36 @@ fn print_ifspec_report(args: &Args, issues: &[ConformanceIssue], checked_models:
             "... {} additional issue(s) omitted; rerun with --max-issues {} or higher",
             issues.len() - args.max_issues,
             issues.len()
+        );
+    }
+}
+
+fn print_event_port_report(
+    args: &Args,
+    report: &rspice_core::xspice::conformance::XspiceEventPortCatalogReport,
+) {
+    println!();
+    println!("XSPICE event port type audit");
+    println!("official models checked: {}", report.checked_models);
+    println!(
+        "unsupported event port type references: {}",
+        report.unsupported_event_ports.len()
+    );
+    for port in report.unsupported_event_ports.iter().take(args.max_issues) {
+        println!(
+            "- {}.{} {} {:?} ({})",
+            port.model,
+            port.port,
+            port.source,
+            port.port_type,
+            port.path.display()
+        );
+    }
+    if report.unsupported_event_ports.len() > args.max_issues {
+        println!(
+            "... {} additional unsupported event port(s) omitted; rerun with --max-issues {} or higher",
+            report.unsupported_event_ports.len() - args.max_issues,
+            report.unsupported_event_ports.len()
         );
     }
 }
