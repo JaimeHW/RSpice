@@ -943,6 +943,21 @@ fn test_xyce_vpwl_repeat_error_wrapper_case_runs_natively() {
         repeat_fail_result.contract, "expected_error_pwl_repeat_value",
         "{repeat_fail} should report the native expected-error contract"
     );
+
+    let bad_source = "Netlists/Certification_Tests/BUG_657_SON/Bad_PWL_Source.cir";
+    assert!(
+        runner.requires_upstream_wrapper(bad_source),
+        "{bad_source} should retain its removed upstream VPWL error-wrapper provenance"
+    );
+    let bad_source_result = runner.run_test(root.join(bad_source));
+    assert!(
+        bad_source_result.passed && !bad_source_result.expected_unsupported,
+        "{bad_source} should run as a native Xyce expected-error PWL repeat validation, got {bad_source_result:?}"
+    );
+    assert_eq!(
+        bad_source_result.contract, "expected_error_pwl_repeat_value",
+        "{bad_source} should report the native expected-error contract"
+    );
 }
 
 #[test]
@@ -1358,6 +1373,37 @@ fn test_xyce_midrange_certification_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_noise_cancel_wrapper_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_534_SON/noise_cancel_test1.cir",
+        "Netlists/Certification_Tests/BUG_534_SON/noise_cancel_test1_rf.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native wrapper-origin Xyce noise-cancel transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_tran",
+            "{relative} should report the wrapper-origin transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_dc_upgrade_sweep_modes_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -1376,6 +1422,42 @@ fn test_xyce_dc_upgrade_sweep_modes_run() {
         assert!(
             result.mismatches.is_empty(),
             "{relative} should match the checked-in Xyce .prn oracle"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_issue_405_static_dc_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        (
+            "Netlists/Certification_Tests/ISSUE_405/test1.cir",
+            "static_prn_dc",
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_405/test2.cir",
+            "static_prn_step_dc",
+        ),
+        (
+            "Netlists/Certification_Tests/ISSUE_405/test3.cir",
+            "static_prn_dc",
+        ),
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce ISSUE 405 static comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the expected static .prn contract"
         );
     }
 }
