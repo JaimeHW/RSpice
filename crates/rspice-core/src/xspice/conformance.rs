@@ -637,6 +637,13 @@ pub struct XspiceParitySuite {
     pub parity_decks: Vec<PathBuf>,
     pub parity_relative_decks: Vec<PathBuf>,
     pub skipped_relative_decks: Vec<PathBuf>,
+    pub skipped_decks: Vec<XspiceParitySkippedDeck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XspiceParitySkippedDeck {
+    pub relative_path: PathBuf,
+    pub reason: String,
 }
 
 pub fn materialize_ngspice_xspice_smoke_suite(
@@ -700,6 +707,7 @@ pub fn materialize_ngspice_xspice_parity_suite(
     let mut parity_decks = Vec::new();
     let mut parity_relative_decks = Vec::new();
     let mut skipped_relative_decks = Vec::new();
+    let mut skipped_decks = Vec::new();
 
     for deck in report
         .decks
@@ -708,11 +716,19 @@ pub fn materialize_ngspice_xspice_parity_suite(
     {
         let destination_deck = destination_root.join(&deck.relative_path);
         let source = read_to_string(&destination_deck)?;
-        if xspice_parity_exclusion_reason(&deck.relative_path, &source).is_some() {
+        if let Some(reason) = xspice_parity_exclusion_reason(&deck.relative_path, &source) {
+            skipped_decks.push(XspiceParitySkippedDeck {
+                relative_path: deck.relative_path.clone(),
+                reason,
+            });
             skipped_relative_decks.push(deck.relative_path.clone());
             continue;
         }
         let Some(instrumented) = instrument_xspice_parity_deck(&source) else {
+            skipped_decks.push(XspiceParitySkippedDeck {
+                relative_path: deck.relative_path.clone(),
+                reason: xspice_parity_non_comparable_reason(&source),
+            });
             skipped_relative_decks.push(deck.relative_path.clone());
             continue;
         };
@@ -744,6 +760,7 @@ pub fn materialize_ngspice_xspice_parity_suite(
         parity_decks,
         parity_relative_decks,
         skipped_relative_decks,
+        skipped_decks,
     })
 }
 
@@ -816,11 +833,32 @@ impl XspiceParityAnalysisKind {
             Self::Op | Self::Pz | Self::Sens | Self::Tf => None,
         }
     }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Op => ".op",
+            Self::Dc => ".dc",
+            Self::Tran => ".tran",
+            Self::Ac => ".ac",
+            Self::Noise => ".noise",
+            Self::Pz => ".pz",
+            Self::Sens => ".sens",
+            Self::Tf => ".tf",
+        }
+    }
 }
 
 fn instrument_xspice_parity_deck(source: &str) -> Option<String> {
     let analyses = xspice_parity_analysis_kinds(source);
     if analyses.is_empty() {
+        return None;
+    }
+
+    let printable_count = analyses
+        .iter()
+        .filter(|analysis| analysis.print_directive().is_some())
+        .count();
+    if printable_count == 0 && !xspice_source_has_print_or_plot(source) {
         return None;
     }
 
@@ -857,6 +895,27 @@ fn instrument_xspice_parity_deck(source: &str) -> Option<String> {
         }
     }
     Some(output)
+}
+
+fn xspice_parity_non_comparable_reason(source: &str) -> String {
+    let analyses = xspice_parity_analysis_kinds(source);
+    if analyses.is_empty() {
+        return "does not contain a supported direct analysis directive".to_string();
+    }
+
+    let unprintable = analyses
+        .iter()
+        .filter(|analysis| analysis.print_directive().is_none())
+        .map(|analysis| analysis.label())
+        .collect::<Vec<_>>();
+    if !unprintable.is_empty() {
+        return format!(
+            "analysis directive(s) {} do not have a direct .print-all parity vector",
+            unprintable.join(", ")
+        );
+    }
+
+    "could not inject deterministic parity print directives".to_string()
 }
 
 fn xspice_parity_analysis_kinds(source: &str) -> BTreeSet<XspiceParityAnalysisKind> {
@@ -921,6 +980,72 @@ fn xspice_source_has_line(source: &str, target: &str) -> bool {
             .trim()
             .eq_ignore_ascii_case(target)
     })
+}
+
+fn xspice_source_has_print_or_plot(source: &str) -> bool {
+    source.lines().any(|line| {
+        let directive = strip_inline_comment(line)
+            .trim()
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        matches!(directive.as_str(), ".print" | ".plot")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parity_instrumentation_skips_unprintable_tf_only_deck() {
+        let source = "\
+tf-only xspice deck
+A1 [in] [out] inv
+.model inv d_inverter
+.tf v(out) vin
+.end
+";
+
+        assert!(instrument_xspice_parity_deck(source).is_none());
+        assert!(
+            xspice_parity_non_comparable_reason(source).contains(".tf"),
+            "reason should name the non-direct analysis"
+        );
+    }
+
+    #[test]
+    fn parity_instrumentation_keeps_printable_analysis_in_mixed_deck() {
+        let source = "\
+mixed xspice deck
+A1 [in] [out] inv
+.model inv d_inverter
+.tran 1n 10n
+.tf v(out) vin
+.end
+";
+
+        let instrumented =
+            instrument_xspice_parity_deck(source).expect("transient deck is printable");
+        assert!(instrumented.contains(".print tran all"));
+    }
+
+    #[test]
+    fn parity_instrumentation_keeps_existing_output_for_unprintable_analysis() {
+        let source = "\
+tf deck with explicit output
+A1 [in] [out] inv
+.model inv d_inverter
+.tf v(out) vin
+.print op all
+.end
+";
+
+        let instrumented =
+            instrument_xspice_parity_deck(source).expect("explicit output keeps deck comparable");
+        assert_eq!(instrumented, source);
+    }
 }
 
 fn xspice_parity_exclusion_reason(relative_path: &Path, source: &str) -> Option<String> {

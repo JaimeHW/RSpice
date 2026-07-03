@@ -1,9 +1,9 @@
 use rspice_core::testing::{TestResult, TestRunner, TestRunnerConfig};
 use rspice_core::xspice::CodeModelRegistry;
 use rspice_core::xspice::conformance::{
-    ConformanceIssue, ConformanceSeverity, IfSpecConformancePolicy, audit_ngspice_ifspec_tree,
-    audit_ngspice_xspice_examples, materialize_ngspice_xspice_parity_suite,
-    materialize_ngspice_xspice_smoke_suite,
+    ConformanceIssue, ConformanceSeverity, IfSpecConformancePolicy, XspiceParitySkippedDeck,
+    audit_ngspice_ifspec_tree, audit_ngspice_xspice_examples,
+    materialize_ngspice_xspice_parity_suite, materialize_ngspice_xspice_smoke_suite,
 };
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -118,7 +118,8 @@ fn run() -> Result<(), String> {
         print_example_parity_report(
             &results,
             parity_suite.parity_decks.len(),
-            parity_suite.skipped_relative_decks.len(),
+            &parity_suite.skipped_decks,
+            args.max_issues,
         );
         failed |= results.iter().any(|(_, result)| !result.passed);
 
@@ -372,17 +373,33 @@ fn print_example_run_report(results: &[(PathBuf, TestResult)], total_runnable: u
 fn print_example_parity_report(
     results: &[(PathBuf, TestResult)],
     total_parity: usize,
-    skipped: usize,
+    skipped: &[XspiceParitySkippedDeck],
+    max_issues: usize,
 ) {
     let passed = results.iter().filter(|(_, result)| result.passed).count();
     let failed = results.len().saturating_sub(passed);
     println!();
     println!("XSPICE runnable example numeric parity run");
     println!("parity-capable decks: {total_parity}");
-    println!("skipped non-comparable runnable decks: {skipped}");
+    println!("skipped non-comparable runnable decks: {}", skipped.len());
     println!("executed: {}", results.len());
     println!("passed: {passed}");
     println!("failed: {failed}");
+
+    for skipped in skipped.iter().take(max_issues) {
+        println!(
+            "- skipped {}: {}",
+            skipped.relative_path.display(),
+            skipped.reason
+        );
+    }
+    if skipped.len() > max_issues {
+        println!(
+            "... {} additional skipped deck(s) omitted; rerun with --max-issues {} or higher",
+            skipped.len() - max_issues,
+            skipped.len()
+        );
+    }
 
     for (relative, result) in results.iter().filter(|(_, result)| !result.passed) {
         println!(
