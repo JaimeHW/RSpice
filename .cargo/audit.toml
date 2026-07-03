@@ -1,0 +1,8 @@
+[advisories]
+# quick-xml is pulled only through wayland-scanner 0.31, whose latest stable
+# release still depends on quick-xml 0.39. This path is build-time codegen over
+# trusted Wayland protocol XML, not runtime untrusted XML parsing.
+ignore = [
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
