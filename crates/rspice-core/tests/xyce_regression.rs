@@ -882,6 +882,7 @@ fn test_xyce_step_static_dc_cases_run() {
         "Netlists/Certification_Tests/BUG_606_SON/resistor.cir",
         "Netlists/Certification_Tests/BUG_606_SON/global_params_step.cir",
         "Netlists/Certification_Tests/BUG_1203_SON/dot_step.cir",
+        "Netlists/GLOBALPAR/gp2.cir",
         "Netlists/PARAM_REFACTOR/paramDep2.cir",
         "Netlists/PARAM_REFACTOR/paramDep3.cir",
         "Netlists/PARAM_REFACTOR/paramDep4.cir",
