@@ -1609,6 +1609,29 @@ fn test_xyce_braced_print_expression_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_bsource_static_dc_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in ["Netlists/BSRC/Bsrc_A1.cir", "Netlists/BSRC/Bsrc_A2.cir"] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce B-source static DC comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_dc",
+            "{relative} should report the native static DC .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_bsource_table_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
