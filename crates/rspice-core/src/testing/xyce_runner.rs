@@ -186,6 +186,7 @@ struct XyceStaticDcPlan {
     source: String,
     expression_dialect: ExpressionDialect,
     print: XycePrintRequest,
+    print_format: Option<String>,
     dc: XyceDcSweep,
     steps: Vec<StepCommand>,
     diagnostics: Vec<crate::netlist::ParseDiagnostic>,
@@ -306,7 +307,9 @@ impl XyceBaselineFamilyKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticDcContract {
     PlainStatic,
+    PlainCsv,
     WrapperDefault,
+    WrapperCsv,
     WrapperGnuplotSplot,
     WrapperHspiceMath,
     WrapperRaw,
@@ -320,8 +323,12 @@ impl XyceStaticDcContract {
         match (self, stepped) {
             (Self::PlainStatic, false) => "static_prn_dc",
             (Self::PlainStatic, true) => "static_prn_step_dc",
+            (Self::PlainCsv, false) => "static_csv_dc",
+            (Self::PlainCsv, true) => "static_csv_step_dc",
             (Self::WrapperDefault, false) => "wrapper_static_prn_dc",
             (Self::WrapperDefault, true) => "wrapper_static_prn_step_dc",
+            (Self::WrapperCsv, false) => "wrapper_static_csv_dc",
+            (Self::WrapperCsv, true) => "wrapper_static_csv_step_dc",
             (Self::WrapperGnuplotSplot, false) => "wrapper_gnuplot_splot_prn_dc",
             (Self::WrapperGnuplotSplot, true) => "wrapper_gnuplot_splot_prn_step_dc",
             (Self::WrapperHspiceMath, false) => "wrapper_hspice_math_prn_dc",
@@ -341,6 +348,14 @@ impl XyceStaticDcContract {
 
     fn compares_step_res_reference(self) -> bool {
         matches!(self, Self::WrapperDefault | Self::WrapperRaw)
+    }
+
+    fn reference_extension(self) -> &'static str {
+        match self {
+            Self::PlainCsv | Self::WrapperCsv => "csv",
+            Self::WrapperRaw => "raw",
+            _ => "prn",
+        }
     }
 }
 
@@ -1055,10 +1070,10 @@ impl XyceTestRunner {
 
     fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
+        let source =
+            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
 
         let wrapper_contract = if requires_wrapper {
-            let source = fs::read_to_string(&deck.path)
-                .map_err(|err| format!("failed to read deck: {err}"))?;
             Some(Self::native_static_prn_wrapper_contract(
                 &deck.relative_path,
                 &deck.path,
@@ -1083,25 +1098,6 @@ impl XyceTestRunner {
         } else {
             (deck.path.clone(), None)
         };
-        let reference_path = match wrapper_contract {
-            Some(XyceStaticDcContract::WrapperRaw) => self
-                .static_raw_reference_path(&deck.path)
-                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?,
-            _ => self
-                .static_prn_reference_path(&deck.path)
-                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?,
-        };
-        if !reference_path.is_file() {
-            let extension = if matches!(wrapper_contract, Some(XyceStaticDcContract::WrapperRaw)) {
-                "raw"
-            } else {
-                "prn"
-            };
-            return Err(format!(
-                "no checked-in static .{extension} oracle at {}",
-                self.display_path(&reference_path)
-            ));
-        }
 
         let expression_dialect = if matches!(
             wrapper_contract,
@@ -1117,15 +1113,21 @@ impl XyceTestRunner {
             execution_dir.as_deref(),
         )?;
         let contract = if let Some(contract) = wrapper_contract {
-            self.validate_native_static_prn_wrapper_contract(
-                contract,
-                &static_plan,
-                &reference_path,
-            )?;
+            self.validate_native_static_prn_wrapper_contract(contract, &static_plan)?;
             contract
         } else {
-            XyceStaticDcContract::PlainStatic
+            Self::static_dc_contract_for_print_format(false, static_plan.print_format.as_deref())?
         };
+        let reference_path = self
+            .static_output_reference_path(&deck.path, contract.reference_extension())
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        if !reference_path.is_file() {
+            return Err(format!(
+                "no checked-in static .{} oracle at {}",
+                contract.reference_extension(),
+                self.display_path(&reference_path)
+            ));
+        }
 
         Ok(XyceExecutionPlan {
             deck_path: static_plan.deck_path,
@@ -1279,7 +1281,10 @@ impl XyceTestRunner {
         }
         Self::reject_unsupported_source_directives(&source)?;
 
-        let print = Self::single_dc_print_request(&source)?;
+        let print_output = Self::single_dc_print_output_request(&source)?;
+        let print = XycePrintRequest {
+            probes: print_output.probes,
+        };
         let netlist = Self::parse_netlist_with_expression_dialect_and_execution_dir(
             &source,
             deck_path,
@@ -1298,6 +1303,7 @@ impl XyceTestRunner {
             source,
             expression_dialect,
             print,
+            print_format: print_output.format,
             dc,
             steps,
             diagnostics,
@@ -1308,7 +1314,6 @@ impl XyceTestRunner {
         &self,
         contract: XyceStaticDcContract,
         plan: &XyceStaticDcPlan,
-        _reference_path: &Path,
     ) -> Result<(), String> {
         if matches!(contract, XyceStaticDcContract::WrapperResistorDefault) {
             Self::validate_resistor_default_wrapper_diagnostics(plan)?;
@@ -1348,6 +1353,11 @@ impl XyceTestRunner {
     ) -> Result<XyceStaticDcContract, String> {
         if Self::is_native_gnuplot_splot_wrapper_candidate(source) {
             return Ok(XyceStaticDcContract::WrapperGnuplotSplot);
+        }
+
+        if Self::is_native_csv_dc_wrapper_candidate(relative_path, source) {
+            Self::validate_csv_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperCsv);
         }
 
         if Self::is_native_raw_wrapper_candidate_path(relative_path) {
@@ -1420,6 +1430,21 @@ impl XyceTestRunner {
 
     fn is_native_default_prn_wrapper_candidate_path(relative_path: &str) -> bool {
         Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dc/")
+    }
+
+    fn is_native_csv_dc_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        if !Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dc/") {
+            return false;
+        }
+        Self::dc_print_output_requests(source).is_ok_and(|requests| {
+            requests.into_iter().any(|request| {
+                request.file.is_none()
+                    && request
+                        .format
+                        .as_deref()
+                        .is_some_and(|format| format.eq_ignore_ascii_case("CSV"))
+            })
+        })
     }
 
     fn is_native_raw_wrapper_candidate_path(relative_path: &str) -> bool {
@@ -1893,6 +1918,34 @@ impl XyceTestRunner {
         Ok(has_file_output)
     }
 
+    fn validate_csv_wrapper_source(source: &str) -> Result<(), String> {
+        let mut primary_print_count = 0usize;
+        for request in Self::dc_print_output_requests(source)? {
+            let format = request.format.as_deref().unwrap_or("STD");
+            if request.file.is_some() {
+                return Err(format!(
+                    "wrapper-origin CSV contract does not cover FILE= side output with FORMAT={format}"
+                ));
+            }
+            if !format.eq_ignore_ascii_case("CSV") {
+                return Err(format!(
+                    "wrapper-origin CSV contract does not cover primary .PRINT DC FORMAT={format}"
+                ));
+            }
+            primary_print_count += 1;
+        }
+
+        match primary_print_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin CSV contract requires one primary .PRINT DC statement".to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin CSV contract requires one primary .PRINT DC statement, found {primary_print_count}"
+            )),
+        }
+    }
+
     fn validate_raw_wrapper_source(source: &str) -> Result<(), String> {
         let mut primary_print_count = 0usize;
         for request in Self::dc_print_output_requests(source)? {
@@ -2304,6 +2357,30 @@ impl XyceTestRunner {
         }
         Err(format!(
             "native static .PRINT AC comparison does not cover FORMAT={normalized}"
+        ))
+    }
+
+    fn static_dc_contract_for_print_format(
+        requires_wrapper: bool,
+        format: Option<&str>,
+    ) -> Result<XyceStaticDcContract, String> {
+        let normalized = format.unwrap_or("STD").trim();
+        if Self::dc_print_format_is_prn_compatible(normalized) {
+            return Ok(if requires_wrapper {
+                XyceStaticDcContract::WrapperDefault
+            } else {
+                XyceStaticDcContract::PlainStatic
+            });
+        }
+        if normalized.eq_ignore_ascii_case("CSV") {
+            return Ok(if requires_wrapper {
+                XyceStaticDcContract::WrapperCsv
+            } else {
+                XyceStaticDcContract::PlainCsv
+            });
+        }
+        Err(format!(
+            "native static .PRINT DC comparison does not cover FORMAT={normalized}"
         ))
     }
 
@@ -10992,12 +11069,16 @@ impl XyceTestRunner {
     }
 
     fn single_dc_print_request(source: &str) -> Result<XycePrintRequest, String> {
+        let request = Self::single_dc_print_output_request(source)?;
+        Ok(XycePrintRequest {
+            probes: request.probes,
+        })
+    }
+
+    fn single_dc_print_output_request(source: &str) -> Result<XycePrintOutputRequest, String> {
         let requests = Self::print_output_requests(source, "DC")?
             .into_iter()
             .filter(|request| request.file.is_none())
-            .map(|request| XycePrintRequest {
-                probes: request.probes,
-            })
             .collect::<Vec<_>>();
 
         match requests.len() {
@@ -11281,11 +11362,19 @@ impl XyceTestRunner {
         contract: XyceStaticDcContract,
         path: &Path,
     ) -> Result<XycePrnTable, String> {
-        if matches!(contract, XyceStaticDcContract::WrapperRaw) {
-            Self::parse_raw_file(path)
-        } else {
-            Self::parse_prn_file(path)
+        match contract {
+            XyceStaticDcContract::WrapperRaw => Self::parse_raw_file(path),
+            XyceStaticDcContract::PlainCsv | XyceStaticDcContract::WrapperCsv => {
+                Self::parse_csv_file(path)
+            }
+            _ => Self::parse_prn_file(path),
         }
+    }
+
+    fn parse_csv_file(path: &Path) -> Result<XycePrnTable, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_prn_table(&content)
     }
 
     fn parse_raw_file(path: &Path) -> Result<XycePrnTable, String> {
@@ -11848,10 +11937,6 @@ impl XyceTestRunner {
 
     fn static_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
         self.static_output_reference_path(deck_path, "prn")
-    }
-
-    fn static_raw_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
-        self.static_output_reference_path(deck_path, "raw")
     }
 
     fn static_output_reference_path(&self, deck_path: &Path, extension: &str) -> Option<PathBuf> {
@@ -13410,6 +13495,24 @@ R2 b 0 2
             XyceTestRunner::static_ac_contract_for_print_format(false, Some("CSV"))
                 .expect("plain CSV contract is supported"),
             XyceStaticAcContract::PlainCsv
+        );
+    }
+
+    #[test]
+    fn dc_csv_contract_selects_csv_oracle_extension() {
+        assert_eq!(
+            XyceTestRunner::static_dc_contract_for_print_format(true, Some("CSV"))
+                .expect("CSV wrapper contract is supported"),
+            XyceStaticDcContract::WrapperCsv
+        );
+        assert_eq!(
+            XyceStaticDcContract::WrapperCsv.reference_extension(),
+            "csv"
+        );
+        assert_eq!(
+            XyceTestRunner::static_dc_contract_for_print_format(false, Some("CSV"))
+                .expect("plain CSV contract is supported"),
+            XyceStaticDcContract::PlainCsv
         );
     }
 
