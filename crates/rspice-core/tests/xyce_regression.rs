@@ -1375,6 +1375,34 @@ fn test_xyce_param_function_syntax_cases_run() {
 }
 
 #[test]
+fn test_xyce_parser_certification_static_dc_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/PARSER/bug_203.cir",
+        "Netlists/PARSER/bug_250.cir",
+        "Netlists/Certification_Tests/BUG_28_SON/bug_28_son1.cir",
+        "Netlists/Certification_Tests/BUG_138/bug_138_1.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce parser/certification static DC comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_dc",
+            "{relative} should report the native static DC .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_meter_unit_suffix_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
