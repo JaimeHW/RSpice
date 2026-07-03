@@ -446,6 +446,7 @@ fn test_xyce_diode_sidewall_cd_cases_run() {
         "Netlists/DIODE/diode_with_sidewall_nbv.cir",
         "Netlists/DIODE/diode_with_sidewall_ns.cir",
         "Netlists/DIODE/diode_with_sidewall_php.cir",
+        "Netlists/DIODE/diode_with_sidewall_temp.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
