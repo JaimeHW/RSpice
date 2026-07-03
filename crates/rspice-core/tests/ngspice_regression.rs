@@ -1842,8 +1842,16 @@ fn test_ngspice_bsim3soi_focus_cases_run() {
 fn test_ngspice_mes_mesa_focus_cases_run() {
     let tests_dir = get_tests_dir();
 
-    for (relative, expected_analysis) in [("mes/subth.cir", "DC Sweep"), ("mesa/mesgout.cir", "AC")]
-    {
+    for (relative, expected_analysis) in [
+        ("mes/subth.cir", "DC Sweep"),
+        ("mesa/mesa.cir", "DC Sweep"),
+        ("mesa/mesa11.cir", "DC OP + DC Sweep"),
+        ("mesa/mesa14.cir", "DC Sweep"),
+        ("mesa/mesa15.cir", "DC Sweep"),
+        ("mesa/mesgout.cir", "AC"),
+        ("mesa/mesinv.cir", "DC Sweep"),
+        ("mesa/mesosc.cir", "Transient"),
+    ] {
         let suite = relative
             .split_once('/')
             .expect("focused ngspice MES deck should include a suite")
