@@ -1573,6 +1573,9 @@ fn test_xyce_certification_static_dc_cases_run() {
         "Netlists/Certification_Tests/BUG_264_SON/bug_264.cir",
         "Netlists/Certification_Tests/BUG_606_SON/global_params.cir",
         "Netlists/Certification_Tests/BUG_606_SON/global_params_dev_options.cir",
+        "Netlists/Certification_Tests/BUG_1113_SON/bug_1113_SON.cir",
+        "Netlists/Certification_Tests/BUG_1203_SON/default_temp.cir",
+        "Netlists/Certification_Tests/BUG_1203_SON/device_options.cir",
         "Netlists/Certification_Tests/ISSUE_235/issue235.cir",
     ] {
         let result = runner.run_test(root.join(relative));
