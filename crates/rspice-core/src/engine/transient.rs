@@ -70,6 +70,20 @@ enum DerivedTransientBranchCurrentKind {
 }
 
 impl Engine {
+    fn normalized_locked_time_grid(grid: &[Value], resume_time: Value) -> Vec<Value> {
+        let mut points: Vec<Value> = grid
+            .iter()
+            .copied()
+            .filter(|&point| point.is_finite() && point > resume_time + 1e-30)
+            .collect();
+        points.sort_by(|a, b| a.total_cmp(b));
+        points.dedup_by(|a, b| {
+            let scale = a.abs().max(b.abs()).max(1.0);
+            (*a - *b).abs() <= 64.0 * Value::EPSILON * scale
+        });
+        points
+    }
+
     fn derived_transient_branch_currents(
         circuit: &crate::circuit::CircuitData,
         existing_branch_names: &[String],
@@ -965,16 +979,11 @@ impl Engine {
         // fails the run instead of sub-stepping, because history-coupled
         // devices sample accepted points and internal sub-steps would
         // perturb the trajectory under validation.
-        let locked_grid: Option<Vec<Value>> = self.config.locked_time_grid.as_ref().map(|grid| {
-            let mut points: Vec<Value> = grid
-                .iter()
-                .copied()
-                .filter(|&point| point.is_finite() && point > t + 1e-30)
-                .collect();
-            points.sort_by(|a, b| a.total_cmp(b));
-            points.dedup_by(|a, b| (*a - *b).abs() <= 1e-12 * a.abs().max(*b).max(1e-30));
-            points
-        });
+        let locked_grid: Option<Vec<Value>> = self
+            .config
+            .locked_time_grid
+            .as_ref()
+            .map(|grid| Self::normalized_locked_time_grid(grid, t));
         let mut locked_cursor = 0usize;
         let tstop = match locked_grid.as_ref().and_then(|grid| grid.last()) {
             Some(&last) => last.min(tstop),
@@ -3652,6 +3661,32 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locked_time_grid_preserves_picosecond_edges_at_large_times() {
+        let grid = [
+            0.0,
+            4.5,
+            4.50000000000775024,
+            4.50000000001000000,
+            4.50000000001000000 + 2.0 * Value::EPSILON,
+            f64::NAN,
+        ];
+
+        let normalized = Engine::normalized_locked_time_grid(&grid, 0.0);
+
+        assert!(normalized.contains(&4.5));
+        assert!(normalized.contains(&4.50000000000775024));
+        assert!(normalized.contains(&4.50000000001000000));
+        assert_eq!(
+            normalized
+                .iter()
+                .filter(|&&time| (time - 4.50000000001000000).abs() < 1.0e-14)
+                .count(),
+            1,
+            "ulp-scale duplicates should still be folded: {normalized:?}"
+        );
+    }
 
     #[test]
     fn stale_step_guard_counts_inductor_branch_current_motion() {
