@@ -642,7 +642,12 @@ mod tests {
 
         Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 20.0e-9, 0.5e-9);
 
-        assert_delays_close(breakpoints.times(), &[1.0e-9, 3.0e-9, 6.0e-9]);
+        assert_delays_close(
+            breakpoints.times(),
+            &[
+                1.0e-9, 3.0e-9, 6.0e-9, 8.0e-9, 11.0e-9, 13.0e-9, 16.0e-9, 18.0e-9,
+            ],
+        );
     }
 
     #[test]

@@ -431,9 +431,9 @@ impl VoltageSources {
         fall: Value,
         width: Value,
         period: Value,
-        width_defaults_to_zero: bool,
+        _width_defaults_to_zero: bool,
         step_default: Value,
-        stop_default: Value,
+        _stop_default: Value,
     ) -> (Value, Value, Value, Value, Value) {
         let period_was_omitted = period.is_nan();
 
@@ -444,18 +444,8 @@ impl VoltageSources {
         };
         let tr = if rise.is_nan() { step_default } else { rise };
         let tf = if fall.is_nan() { step_default } else { fall };
-        let pw = if width.is_nan() && width_defaults_to_zero {
-            0.0
-        } else if width.is_nan() {
-            stop_default
-        } else {
-            width
-        };
-        let per = if period.is_nan() {
-            stop_default
-        } else {
-            period
-        };
+        let pw = if width.is_nan() { 0.0 } else { width };
+        let per = if period.is_nan() { 0.0 } else { period };
 
         let tr = if tr.is_finite() && tr > 0.0 {
             tr
@@ -467,20 +457,13 @@ impl VoltageSources {
         } else {
             step_default
         };
-        let pw = if pw.is_finite() && pw >= 0.0 {
-            pw
-        } else {
-            stop_default
-        };
+        let pw = if pw.is_finite() && pw >= 0.0 { pw } else { 0.0 };
         let per = if period_was_omitted {
-            // Match ngspice's transient-context defaults for one-shot pulse
-            // decks: omitted PER must not restart the waveform before the
-            // default high interval has completed inside the active analysis.
-            stop_default + tr + pw + tf
+            tr + pw + tf
         } else if per.is_finite() && per > 0.0 {
             per
         } else {
-            stop_default
+            tr + pw + tf
         };
 
         (td, tr, tf, pw, per)
