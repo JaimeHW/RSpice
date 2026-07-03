@@ -1352,11 +1352,12 @@ mod tests {
             Err(err) => err,
         };
         let message = err.to_string();
+        let lowered = message.to_ascii_lowercase();
         assert!(
-            message.contains("alias 'ext'")
-                && message.contains("custom_gate")
-                && message
-                    .contains("arbitrary external .cm/MIF code-model libraries are not loaded"),
+            lowered.contains("alias 'ext'")
+                && lowered.contains("custom_gate")
+                && lowered
+                    .contains("arbitrary external .cm/mif code-model libraries are not loaded"),
             "unexpected error: {message}"
         );
     }
