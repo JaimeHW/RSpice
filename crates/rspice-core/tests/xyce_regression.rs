@@ -259,6 +259,7 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/EXPPRINT/expprint.cir",
         "Netlists/MOS6/nmos6_dc.cir",
         "Netlists/NMESFET/nmesfet.cir",
+        "Netlists/NJFET_DC/njfet-2109.cir",
         "Netlists/NMOS1_DC/nmos1.cir",
         "Netlists/NPN_DC/npn1.cir",
         "Netlists/PARAMS2/Params_A0.cir",
@@ -309,6 +310,7 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/PARAMS2/Params_D5_hs.cir",
         "Netlists/PARAMS2/Params_E1.cir",
         "Netlists/PARAMS2/Params_G1.cir",
+        "Netlists/PJFET_DC/pjfet-2108.cir",
         "Netlists/POLY/poly.cir",
         "Netlists/POLY/twoVarThirdOrd.cir",
         "Netlists/SUBCKT/subckt_h0.cir",
@@ -1037,10 +1039,12 @@ fn test_xyce_step_static_dc_cases_run() {
         "Netlists/Certification_Tests/BUG_606_SON/global_params_step.cir",
         "Netlists/Certification_Tests/BUG_1203_SON/dot_step.cir",
         "Netlists/GLOBALPAR/gp2.cir",
+        "Netlists/NJFET_DC/njfet.cir",
         "Netlists/PARAM_REFACTOR/paramDep2.cir",
         "Netlists/PARAM_REFACTOR/paramDep3.cir",
         "Netlists/PARAM_REFACTOR/paramDep4.cir",
         "Netlists/PARAM_REFACTOR/paramStep1.cir",
+        "Netlists/PJFET_DC/pjfet.cir",
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
