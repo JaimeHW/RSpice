@@ -15,8 +15,8 @@ use super::{
     MosType, Netlist, NodeSet, ParamContext, ParametricValue, ParseDiagnostic, ParseError,
     PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
     SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
-    StatisticalParamMode,
-    StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
+    VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};

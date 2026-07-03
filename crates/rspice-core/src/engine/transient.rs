@@ -1087,6 +1087,7 @@ impl Engine {
         let mut b3soi_history = Self::initialize_b3soi_history(&circuit, &solution);
         b3soi_history.accepted_dt_prev = hinted_max_step;
         b3soi_history.accepted_dt_prev_prev = hinted_max_step;
+        let b3soi_first_transient_handoff = resume.is_none() && circuit.has_b3soi_devices();
         let mut bsim3_history = Self::initialize_bsim3_history(&circuit, &solution);
         bsim3_history.accepted_dt_prev = hinted_max_step;
         bsim3_history.accepted_dt_prev_prev = hinted_max_step;
@@ -1475,6 +1476,13 @@ impl Engine {
                     &ideal_output_pairs,
                 );
             }
+            if b3soi_first_transient_handoff && result.time.len() == 1 {
+                Self::reseed_b3soi_first_transient_history(
+                    &circuit,
+                    &new_solution,
+                    &mut b3soi_history,
+                );
+            }
             let mut nonlinear_state_matches_new_solution = false;
             let mut had_solver_candidate = false;
             // Merit-gated Newton globalization state: the true nonlinear
@@ -1544,6 +1552,9 @@ impl Engine {
                         vdmos_history: &vdmos_history,
                         vdmos_companion_slots: &vdmos_companion_slots,
                         b3soi_history: &b3soi_history,
+                        b3soi_zero_first_transient_charge_derivative: b3soi_first_transient_handoff
+                            && result.time.len() == 1
+                            && _iter == 0,
                         bsim3_history: &bsim3_history,
                         bsim4_history: &bsim4_history,
                         ekv26_history: &ekv26_history,
@@ -1893,6 +1904,7 @@ impl Engine {
                             vdmos_history: &vdmos_history,
                             vdmos_companion_slots: &vdmos_companion_slots,
                             b3soi_history: &b3soi_history,
+                            b3soi_zero_first_transient_charge_derivative: false,
                             bsim3_history: &bsim3_history,
                             bsim4_history: &bsim4_history,
                             ekv26_history: &ekv26_history,

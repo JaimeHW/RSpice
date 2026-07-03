@@ -86,6 +86,92 @@ impl Engine {
         h
     }
 
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn b3soi_reseed_history_slot(
+        history: &mut B3SoiTransientHistory,
+        idx: usize,
+        qg: Value,
+        qb: Value,
+        qd: Value,
+        qe: Value,
+        qth: Value,
+    ) {
+        history.qg_prev[idx] = qg;
+        history.qg_prev_prev[idx] = qg;
+        history.qg_prev_prev_prev[idx] = qg;
+        history.cqg_prev[idx] = 0.0;
+        history.qb_prev[idx] = qb;
+        history.qb_prev_prev[idx] = qb;
+        history.qb_prev_prev_prev[idx] = qb;
+        history.cqb_prev[idx] = 0.0;
+        history.qd_prev[idx] = qd;
+        history.qd_prev_prev[idx] = qd;
+        history.qd_prev_prev_prev[idx] = qd;
+        history.cqd_prev[idx] = 0.0;
+        history.qe_prev[idx] = qe;
+        history.qe_prev_prev[idx] = qe;
+        history.qe_prev_prev_prev[idx] = qe;
+        history.cqe_prev[idx] = 0.0;
+        history.qth_prev[idx] = qth;
+        history.qth_prev_prev[idx] = qth;
+        history.qth_prev_prev_prev[idx] = qth;
+        history.cqth_prev[idx] = 0.0;
+    }
+
+    #[inline]
+    pub(super) fn reseed_b3soi_first_transient_history(
+        circuit: &crate::circuit::Circuit,
+        solution: &[Value],
+        history: &mut B3SoiTransientHistory,
+    ) {
+        if !circuit.has_b3soi_devices() {
+            return;
+        }
+
+        let expected_len = circuit.b3soi.devices.len()
+            + circuit.b3soi_fd.devices.len()
+            + circuit.b3soi_pd.devices.len();
+        debug_assert_eq!(history.qg_prev.len(), expected_len);
+
+        // Xyce's B3SOI loader resets the current charge state on
+        // `initTranFlag_ && newtonIter == 0`, so the first transient solve
+        // leaves the operating point without a synthetic DC-to-transient
+        // charge derivative. Reseed only the charge/current slots; the
+        // accepted timestep history remains owned by the transient controller.
+        let mut idx = 0;
+        for dev in &circuit.b3soi.devices {
+            let (qg, qb, qd, qe, qth) = if dev.charges_suppressed() {
+                (0.0, 0.0, 0.0, 0.0, 0.0)
+            } else {
+                let c = dev.charge_at(solution);
+                (c.qg, c.qb, c.qd, c.qe, c.qth)
+            };
+            Self::b3soi_reseed_history_slot(history, idx, qg, qb, qd, qe, qth);
+            idx += 1;
+        }
+        for dev in &circuit.b3soi_fd.devices {
+            let (qg, qb, qd, qe, qth) = if dev.charges_suppressed() {
+                (0.0, 0.0, 0.0, 0.0, 0.0)
+            } else {
+                let c = dev.charge_at(solution);
+                (c.qg, c.qb, c.qd, c.qe, c.qth)
+            };
+            Self::b3soi_reseed_history_slot(history, idx, qg, qb, qd, qe, qth);
+            idx += 1;
+        }
+        for dev in &circuit.b3soi_pd.devices {
+            let (qg, qb, qd, qe, qth) = if dev.charges_suppressed() {
+                (0.0, 0.0, 0.0, 0.0, 0.0)
+            } else {
+                let c = dev.charge_at(solution);
+                (c.qg, c.qb, c.qd, c.qe, c.qth)
+            };
+            Self::b3soi_reseed_history_slot(history, idx, qg, qb, qd, qe, qth);
+            idx += 1;
+        }
+    }
+
     /// Integrate one SOI device's node charges with the engine
     /// coefficient and its per-charge history slot, yielding the equivalent
     /// charge currents `(cqg, cqb, cqd, cqe, cqth)`.

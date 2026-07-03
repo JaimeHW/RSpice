@@ -153,6 +153,9 @@ pub struct B3SoiPd {
     /// dynamic charges to the matrix, RHS, or LTE - the transient runs
     /// quasi-statically.
     charges_suppressed: bool,
+    /// Xyce-style explicit instance `IC=` constraints, loaded as internal MNA
+    /// branch equations during the operating-point solve.
+    instance_ic: super::common::B3SoiInstanceIc,
 }
 
 impl B3SoiPd {
@@ -235,6 +238,7 @@ impl B3SoiPd {
             force_full_eval: std::cell::Cell::new(true),
             last_limited: std::cell::Cell::new(false),
             charges_suppressed: false,
+            instance_ic: super::common::B3SoiInstanceIc::new(),
         })
     }
 
@@ -243,7 +247,9 @@ impl B3SoiPd {
     /// The per-iteration `B3SOIPDlimit` change cap applies in both modes (it
     /// only protects the Newton path, not the solution).
     pub fn set_dc_mode(&self, dc: bool) {
-        self.dc_mode.set(dc);
+        if self.dc_mode.replace(dc) == dc {
+            return;
+        }
         // A mode switch invalidates the limiter anchor (different state vector).
         self.limit_anchor_valid.set(false);
         self.bypass_active.set(false);
@@ -269,6 +275,18 @@ impl B3SoiPd {
     /// contribute no dynamic charges to the matrix, RHS, or LTE.
     pub fn set_debug_mod(&mut self, debug_mod: i32) {
         self.charges_suppressed = debug_mod == -1;
+    }
+
+    pub fn set_instance_ic(&mut self, instance_ic: super::common::B3SoiInstanceIc) {
+        self.instance_ic = instance_ic;
+    }
+
+    pub fn instance_ic(&self) -> &super::common::B3SoiInstanceIc {
+        &self.instance_ic
+    }
+
+    pub fn resolve_instance_ic_branches(&mut self, num_nodes: NodeId) {
+        self.instance_ic.resolve_branch_matrix_indices(num_nodes);
     }
 
     pub fn set_eval_gmin(&mut self, gmin: Value) {
@@ -867,15 +885,18 @@ impl NonlinearDevice for B3SoiPd {
         if self.bypass_active.get() {
             // Bypassed iterate: restamp the frozen linearization unchanged.
             self.stamp_op(&self.op, self.bias, matrix);
+            self.stamp_instance_ic(matrix);
             return;
         }
         if self.startup_seed_pending.replace(false) {
             self.stamp_op(&self.op, self.bias, matrix);
+            self.stamp_instance_ic(matrix);
             return;
         }
         let bias = self.bias;
         let op = self.op.clone();
         self.stamp_op(&op, bias, matrix);
+        self.stamp_instance_ic(matrix);
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
@@ -896,6 +917,10 @@ impl NonlinearDevice for B3SoiPd {
 }
 
 impl B3SoiPd {
+    fn stamp_instance_ic(&self, matrix: &mut impl MatrixStamper) {
+        self.instance_ic.stamp(self.dc_mode.get(), matrix);
+    }
+
     /// Stamp the linearized DC operating point.
     ///
     /// Faithful transcription of the DC portion of the B3SOIPD matrix/RHS load

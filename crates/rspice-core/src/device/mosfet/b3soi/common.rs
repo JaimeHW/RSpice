@@ -3,7 +3,7 @@
 //! Values are transcribed from ngspice-46 `b3soiddld.c` / `b3soiddset.c` /
 //! `b3soiddtemp.c` (the FD and PD sources use the same numeric constants).
 
-use crate::Value;
+use crate::{Value, circuit::NodeId, device::traits::MatrixStamper};
 use std::collections::HashMap;
 
 pub(crate) const B3SOI_MOBMOD_VALUES: &[i32] = &[0, 1, 2, 3];
@@ -140,4 +140,189 @@ pub fn soi_limit(vnew: Value, vold: Value, limit: Value, check: &mut bool) -> Va
         *check = true;
     }
     vnew
+}
+
+/// One Xyce-style instance initial-condition voltage constraint.
+///
+/// Xyce models explicit MOS `IC=` entries as internal branch-current unknowns
+/// during the operating-point solve. The branch enforces `V(pos)-V(neg)=value`
+/// in DC/OP mode and is reduced to an isolated identity equation outside OP so
+/// the additional unknown remains well-conditioned without constraining the
+/// transient waveform.
+#[derive(Debug, Clone, Copy)]
+pub struct B3SoiIcConstraint {
+    pub node_pos: NodeId,
+    pub node_neg: NodeId,
+    pub value: Value,
+    branch_ordinal: NodeId,
+    branch_matrix_index: NodeId,
+}
+
+impl B3SoiIcConstraint {
+    pub fn new(node_pos: NodeId, node_neg: NodeId, value: Value, branch_ordinal: NodeId) -> Self {
+        Self {
+            node_pos,
+            node_neg,
+            value,
+            branch_ordinal,
+            branch_matrix_index: 0,
+        }
+    }
+
+    #[inline]
+    pub fn branch_ordinal(self) -> NodeId {
+        self.branch_ordinal
+    }
+
+    #[inline]
+    pub fn branch_matrix_index(self) -> NodeId {
+        self.branch_matrix_index
+    }
+
+    #[inline]
+    fn with_branch_matrix_index(mut self, num_nodes: NodeId) -> Self {
+        self.branch_matrix_index = num_nodes + self.branch_ordinal;
+        self
+    }
+}
+
+/// Parsed B3SOI instance `IC=` constraints.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct B3SoiInstanceIc {
+    constraints: [Option<B3SoiIcConstraint>; 5],
+}
+
+impl B3SoiInstanceIc {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_vds(
+        &mut self,
+        node_drain: NodeId,
+        node_source: NodeId,
+        value: Value,
+        branch_ordinal: NodeId,
+    ) {
+        self.constraints[0] = Some(B3SoiIcConstraint::new(
+            node_drain,
+            node_source,
+            value,
+            branch_ordinal,
+        ));
+    }
+
+    pub fn set_vgs(
+        &mut self,
+        node_gate: NodeId,
+        node_source: NodeId,
+        value: Value,
+        branch_ordinal: NodeId,
+    ) {
+        self.constraints[1] = Some(B3SoiIcConstraint::new(
+            node_gate,
+            node_source,
+            value,
+            branch_ordinal,
+        ));
+    }
+
+    pub fn set_vbs(
+        &mut self,
+        node_body: NodeId,
+        node_source: NodeId,
+        value: Value,
+        branch_ordinal: NodeId,
+    ) {
+        self.constraints[2] = Some(B3SoiIcConstraint::new(
+            node_body,
+            node_source,
+            value,
+            branch_ordinal,
+        ));
+    }
+
+    pub fn set_ves(
+        &mut self,
+        node_e: NodeId,
+        node_source: NodeId,
+        value: Value,
+        branch_ordinal: NodeId,
+    ) {
+        self.constraints[3] = Some(B3SoiIcConstraint::new(
+            node_e,
+            node_source,
+            value,
+            branch_ordinal,
+        ));
+    }
+
+    pub fn set_vps(
+        &mut self,
+        node_p: NodeId,
+        node_source: NodeId,
+        value: Value,
+        branch_ordinal: NodeId,
+    ) {
+        self.constraints[4] = Some(B3SoiIcConstraint::new(
+            node_p,
+            node_source,
+            value,
+            branch_ordinal,
+        ));
+    }
+
+    pub fn constraints(&self) -> &[Option<B3SoiIcConstraint>; 5] {
+        &self.constraints
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.constraints.iter().all(Option::is_none)
+    }
+
+    pub fn resolve_branch_matrix_indices(&mut self, num_nodes: NodeId) {
+        for constraint in self.constraints.iter_mut().flatten() {
+            *constraint = constraint.with_branch_matrix_index(num_nodes);
+        }
+    }
+
+    pub fn stamp(&self, operating_point_mode: bool, matrix: &mut impl MatrixStamper) {
+        for constraint in self.constraints.iter().flatten().copied() {
+            let branch = constraint.branch_matrix_index();
+            if branch == 0 {
+                continue;
+            }
+
+            if operating_point_mode {
+                stamp_voltage_constraint(
+                    matrix,
+                    constraint.node_pos,
+                    constraint.node_neg,
+                    branch,
+                    constraint.value,
+                );
+            } else {
+                matrix.stamp(branch, branch, 1.0);
+            }
+        }
+    }
+}
+
+#[inline]
+fn stamp_voltage_constraint(
+    matrix: &mut impl MatrixStamper,
+    node_pos: NodeId,
+    node_neg: NodeId,
+    branch: NodeId,
+    value: Value,
+) {
+    if node_pos != 0 {
+        matrix.stamp(branch, node_pos, 1.0);
+        matrix.stamp(node_pos, branch, 1.0);
+    }
+    if node_neg != 0 {
+        matrix.stamp(branch, node_neg, -1.0);
+        matrix.stamp(node_neg, branch, -1.0);
+    }
+    matrix.stamp_rhs(branch, value);
 }

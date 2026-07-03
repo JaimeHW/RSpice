@@ -112,6 +112,19 @@ impl Engine {
         } else {
             0
         };
+        let instance_ic = Self::native_b3soi_instance_ic(
+            circuit,
+            &element.name,
+            "B3SOIDD",
+            instance_params,
+            deferred_params,
+            node_drain,
+            node_gate,
+            node_source,
+            node_body,
+            node_e,
+            node_p,
+        )?;
 
         let mut device = B3SoiDd::new(
             element.name.clone(),
@@ -128,6 +141,7 @@ impl Engine {
             temp_k,
         )
         .map_err(SimulationError::Circuit)?;
+        device.set_instance_ic(instance_ic);
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
@@ -245,6 +259,19 @@ impl Engine {
         } else {
             0
         };
+        let instance_ic = Self::native_b3soi_instance_ic(
+            circuit,
+            &element.name,
+            "B3SOIFD",
+            instance_params,
+            deferred_params,
+            node_drain,
+            node_gate,
+            node_source,
+            node_body,
+            node_e,
+            0,
+        )?;
 
         let mut device = B3SoiFd::new(
             element.name.clone(),
@@ -260,6 +287,7 @@ impl Engine {
             temp_k,
         )
         .map_err(SimulationError::Circuit)?;
+        device.set_instance_ic(instance_ic);
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
@@ -393,6 +421,19 @@ impl Engine {
         } else {
             0
         };
+        let instance_ic = Self::native_b3soi_instance_ic(
+            circuit,
+            &element.name,
+            "B3SOIPD",
+            instance_params,
+            deferred_params,
+            node_drain,
+            node_gate,
+            node_source,
+            node_body,
+            node_e,
+            node_p,
+        )?;
 
         let mut device = B3SoiPd::new(
             element.name.clone(),
@@ -409,6 +450,7 @@ impl Engine {
             temp_k,
         )
         .map_err(SimulationError::Circuit)?;
+        device.set_instance_ic(instance_ic);
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
@@ -418,6 +460,109 @@ impl Engine {
         }
         circuit.b3soi_pd.add(device);
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn native_b3soi_instance_ic(
+        circuit: &mut CircuitData,
+        element_name: &str,
+        family: &str,
+        instance_params: &[(String, f64)],
+        deferred_params: &[(String, String)],
+        node_drain: crate::circuit::NodeId,
+        node_gate: crate::circuit::NodeId,
+        node_source: crate::circuit::NodeId,
+        node_body: crate::circuit::NodeId,
+        node_e: crate::circuit::NodeId,
+        node_p: crate::circuit::NodeId,
+    ) -> Result<crate::device::mosfet::b3soi::common::B3SoiInstanceIc, SimulationError> {
+        for (name, expr) in deferred_params {
+            if b3soi_ic_param_name(name) {
+                return Err(SimulationError::Circuit(format!(
+                    "MOSFET '{element_name}': native {family} instance initial condition {name}={expr} \
+                     must resolve to a finite numeric value before circuit construction"
+                )));
+            }
+        }
+
+        let mut instance_ic = crate::device::mosfet::b3soi::common::B3SoiInstanceIc::new();
+        if let Some(value) = native_b3soi_ic_value(element_name, family, "IC_VDS", instance_params)?
+        {
+            let branch = allocate_b3soi_ic_branch(
+                circuit,
+                element_name,
+                family,
+                "IC_VDS",
+                value,
+                node_drain,
+                node_source,
+            )?;
+            if let Some(branch) = branch {
+                instance_ic.set_vds(node_drain, node_source, value, branch);
+            }
+        }
+        if let Some(value) = native_b3soi_ic_value(element_name, family, "IC_VGS", instance_params)?
+        {
+            let branch = allocate_b3soi_ic_branch(
+                circuit,
+                element_name,
+                family,
+                "IC_VGS",
+                value,
+                node_gate,
+                node_source,
+            )?;
+            if let Some(branch) = branch {
+                instance_ic.set_vgs(node_gate, node_source, value, branch);
+            }
+        }
+        if let Some(value) = native_b3soi_ic_value(element_name, family, "IC_VBS", instance_params)?
+        {
+            let branch = allocate_b3soi_ic_branch(
+                circuit,
+                element_name,
+                family,
+                "IC_VBS",
+                value,
+                node_body,
+                node_source,
+            )?;
+            if let Some(branch) = branch {
+                instance_ic.set_vbs(node_body, node_source, value, branch);
+            }
+        }
+        if let Some(value) = native_b3soi_ic_value(element_name, family, "IC_VES", instance_params)?
+        {
+            let branch = allocate_b3soi_ic_branch(
+                circuit,
+                element_name,
+                family,
+                "IC_VES",
+                value,
+                node_e,
+                node_source,
+            )?;
+            if let Some(branch) = branch {
+                instance_ic.set_ves(node_e, node_source, value, branch);
+            }
+        }
+        if let Some(value) = native_b3soi_ic_value(element_name, family, "IC_VPS", instance_params)?
+        {
+            let branch = allocate_b3soi_ic_branch(
+                circuit,
+                element_name,
+                family,
+                "IC_VPS",
+                value,
+                node_p,
+                node_source,
+            )?;
+            if let Some(branch) = branch {
+                instance_ic.set_vps(node_p, node_source, value, branch);
+            }
+        }
+
+        Ok(instance_ic)
     }
 
     /// Build and register a native BSIM3v3.3 (MOS level 8/9/49) instance.
@@ -1028,6 +1173,54 @@ impl Engine {
         circuit.ekv3s.add(device);
         Ok(())
     }
+}
+
+fn b3soi_ic_param_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_uppercase().as_str(),
+        "IC_VDS" | "IC_VGS" | "IC_VBS" | "IC_VES" | "IC_VPS"
+    )
+}
+
+fn native_b3soi_ic_value(
+    element_name: &str,
+    family: &str,
+    name: &str,
+    instance_params: &[(String, f64)],
+) -> Result<Option<f64>, SimulationError> {
+    let Some(value) = instance_param(instance_params, &[name]) else {
+        return Ok(None);
+    };
+    if value.is_finite() {
+        Ok(Some(value))
+    } else {
+        Err(SimulationError::Circuit(format!(
+            "MOSFET '{element_name}': native {family} instance initial condition {name}={value} \
+             must be finite"
+        )))
+    }
+}
+
+fn allocate_b3soi_ic_branch(
+    circuit: &mut CircuitData,
+    element_name: &str,
+    family: &str,
+    name: &str,
+    value: f64,
+    node_pos: crate::circuit::NodeId,
+    node_neg: crate::circuit::NodeId,
+) -> Result<Option<crate::circuit::NodeId>, SimulationError> {
+    if node_pos == node_neg {
+        if value.abs() <= 1.0e-15 {
+            return Ok(None);
+        }
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{element_name}': native {family} instance initial condition {name}={value} \
+             cannot constrain identical nodes to a nonzero voltage"
+        )));
+    }
+
+    Ok(Some(circuit.allocate_branch()))
 }
 
 /// Per-`.model` shared BSIM3v3.3 state: the parsed card, its temperature

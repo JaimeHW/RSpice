@@ -48,6 +48,7 @@ impl Engine {
             circuit.stamp_dc_direct(matrix, &mut rhs);
             circuit.stamp_generic_switches(matrix, &mut rhs, 0.0);
             if circuit.has_nonlinear_devices() {
+                circuit.set_b3soi_operating_point_mode(true);
                 circuit.update_nonlinear(&solution);
                 circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
                 circuit.stamp_behavioral(
@@ -74,6 +75,7 @@ impl Engine {
             }
 
             if circuit.has_nonlinear_devices() {
+                circuit.set_b3soi_operating_point_mode(true);
                 circuit.update_nonlinear(&proposal);
             }
             if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {
@@ -117,6 +119,7 @@ impl Engine {
             circuit.stamp_generic_switches(matrix, &mut rhs, time);
 
             if circuit.has_nonlinear_devices() {
+                circuit.set_b3soi_operating_point_mode(true);
                 circuit.update_nonlinear(&solution);
                 circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
                 circuit.stamp_behavioral(
@@ -146,6 +149,7 @@ impl Engine {
             }
 
             if circuit.has_nonlinear_devices() {
+                circuit.set_b3soi_operating_point_mode(true);
                 circuit.update_nonlinear(&proposal);
             }
             if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {

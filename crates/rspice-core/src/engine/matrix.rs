@@ -5,6 +5,7 @@
 //! throughout simulation.
 
 use super::{Engine, SimulationError};
+use crate::device::mosfet::b3soi::common::B3SoiInstanceIc;
 use crate::solver::StaticMatrix;
 use crate::{CircuitData, Value};
 
@@ -226,6 +227,7 @@ impl Engine {
                     }
                 }
             }
+            reserve_b3soi_ic_constraint_triplets(circuit, &mut triplets, dev.instance_ic());
         }
 
         // B3SOIFD (BSIMSOI level 55) stamps. FD has no body circuit node (the body
@@ -245,6 +247,7 @@ impl Engine {
                     }
                 }
             }
+            reserve_b3soi_ic_constraint_triplets(circuit, &mut triplets, dev.instance_ic());
         }
 
         // B3SOIPD (BSIMSOI level 57) stamps. Like DD, PD couples the full
@@ -265,6 +268,7 @@ impl Engine {
                     }
                 }
             }
+            reserve_b3soi_ic_constraint_triplets(circuit, &mut triplets, dev.instance_ic());
         }
 
         // BSIM3v3.3 (MOS level 8/49) stamps. The DC load couples the
@@ -1446,5 +1450,28 @@ impl Engine {
             triplets.push((b1 - 1, b1 - 1, 0.0));
             triplets.push((b2 - 1, b2 - 1, 0.0));
         }
+    }
+}
+
+fn reserve_b3soi_ic_constraint_triplets(
+    circuit: &CircuitData,
+    triplets: &mut Vec<(usize, usize, Value)>,
+    instance_ic: &B3SoiInstanceIc,
+) {
+    for constraint in instance_ic.constraints().iter().flatten().copied() {
+        let branch = circuit.get_branch_matrix_index(constraint.branch_ordinal());
+
+        if constraint.node_pos > 0 {
+            triplets.push((branch - 1, constraint.node_pos - 1, 0.0));
+            triplets.push((constraint.node_pos - 1, branch - 1, 0.0));
+        }
+        if constraint.node_neg > 0 {
+            triplets.push((branch - 1, constraint.node_neg - 1, 0.0));
+            triplets.push((constraint.node_neg - 1, branch - 1, 0.0));
+        }
+
+        // Non-operating-point stamps isolate the internal branch with an
+        // identity equation, so the diagonal must exist in the static pattern.
+        triplets.push((branch - 1, branch - 1, 0.0));
     }
 }

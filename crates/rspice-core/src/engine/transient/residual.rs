@@ -24,6 +24,7 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) vdmos_history: &'a VdmosTransientHistory,
     pub(super) vdmos_companion_slots: &'a [[TwoTerminalStampSlots; 7]],
     pub(super) b3soi_history: &'a B3SoiTransientHistory,
+    pub(super) b3soi_zero_first_transient_charge_derivative: bool,
     pub(super) bsim3_history: &'a Bsim3TransientHistory,
     pub(super) bsim4_history: &'a Bsim4TransientHistory,
     pub(super) ekv26_history: &'a Ekv26TransientHistory,
@@ -78,6 +79,7 @@ impl Engine {
         circuit.current_sources.update_transient_rhs(rhs, time);
 
         circuit.refresh_jiles_atherton_inductances(solution);
+        circuit.set_b3soi_operating_point_mode(false);
         if refresh_nonlinear && circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(solution);
         }
@@ -151,16 +153,18 @@ impl Engine {
             ctx.vdmos_history,
             ctx.vdmos_companion_slots,
         );
-        Self::stamp_b3soi_transient_companions(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            ctx.method,
-            ctx.trap_order,
-            dt,
-            ctx.b3soi_history,
-        );
+        if !ctx.b3soi_zero_first_transient_charge_derivative {
+            Self::stamp_b3soi_transient_companions(
+                circuit,
+                matrix,
+                rhs,
+                solution,
+                ctx.method,
+                ctx.trap_order,
+                dt,
+                ctx.b3soi_history,
+            );
+        }
         Self::stamp_bsim3_transient_companions(
             circuit,
             matrix,
@@ -443,6 +447,7 @@ Q1 C B E 0 QN
             vdmos_history: &vdmos_history,
             vdmos_companion_slots: &vdmos_companion_slots,
             b3soi_history: &b3soi_history,
+            b3soi_zero_first_transient_charge_derivative: false,
             bsim3_history: &bsim3_history,
             bsim4_history: &bsim4_history,
             ekv26_history: &ekv26_history,
@@ -863,6 +868,7 @@ Q1 C B E 0 QN
                 vdmos_history: &vdmos_history,
                 vdmos_companion_slots: &vdmos_companion_slots,
                 b3soi_history: &b3soi_history,
+                b3soi_zero_first_transient_charge_derivative: false,
                 bsim3_history: &bsim3_history,
                 bsim4_history: &bsim4_history,
                 ekv26_history: &ekv26_history,

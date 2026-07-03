@@ -3824,14 +3824,17 @@ fn parse_mosfet_ic_vector(
     instance_params: &mut Vec<(String, Value)>,
     deferred_params: &mut Vec<(String, String)>,
 ) -> Result<(), ParseError> {
-    for (idx, label) in ["IC_VDS", "IC_VGS", "IC_VBS"].iter().enumerate() {
+    for (idx, label) in ["IC_VDS", "IC_VGS", "IC_VBS", "IC_VES", "IC_VPS"]
+        .iter()
+        .enumerate()
+    {
         let value = take_mosfet_ic_value(stream, line_num, params, defer_simple_param_refs)?;
         match value {
             DeferrableValue::Resolved(value) => instance_params.push(((*label).to_string(), value)),
             DeferrableValue::Deferred(expr) => deferred_params.push(((*label).to_string(), expr)),
         }
 
-        if idx == 2 || !stream.consume(&TokenKind::Comma) {
+        if idx == 4 || !stream.consume(&TokenKind::Comma) {
             break;
         }
     }

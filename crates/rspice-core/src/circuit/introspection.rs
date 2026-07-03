@@ -391,6 +391,15 @@ impl CircuitData {
         self.diodes.link_all(matrix);
         self.bjts.link_all(matrix);
         self.mosfets.link_all(matrix);
+        for dev in &mut self.b3soi.devices {
+            dev.resolve_instance_ic_branches(num_nodes);
+        }
+        for dev in &mut self.b3soi_fd.devices {
+            dev.resolve_instance_ic_branches(num_nodes);
+        }
+        for dev in &mut self.b3soi_pd.devices {
+            dev.resolve_instance_ic_branches(num_nodes);
+        }
         #[cfg(feature = "veriloga-builtins")]
         {
             let num_nodes = self.num_nodes;

@@ -128,6 +128,7 @@ impl Engine {
         solution: &[Value],
         junction_gmin: Value,
     ) -> Result<(), SimulationError> {
+        circuit.set_b3soi_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.update_bjt_static_linearizations(solution);
@@ -167,6 +168,7 @@ impl Engine {
         analysis: crate::xspice::AnalysisType,
         junction_gmin: Value,
     ) -> Result<(), SimulationError> {
+        circuit.set_b3soi_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.stamp_generic_switches(matrix, rhs, time);
@@ -217,6 +219,7 @@ impl Engine {
         analysis: crate::xspice::AnalysisType,
         junction_gmin: Value,
     ) {
+        circuit.set_b3soi_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         if circuit.has_xspice_devices() {

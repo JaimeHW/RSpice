@@ -160,6 +160,22 @@ impl CircuitData {
         !self.b3soi.is_empty() || !self.b3soi_fd.is_empty() || !self.b3soi_pd.is_empty()
     }
 
+    /// Select whether native BSIMSOI devices are being stamped for an
+    /// operating-point solve. Xyce-style instance IC branch constraints are
+    /// active only in this mode; real transient timesteps keep the internal IC
+    /// branch unknowns isolated with identity rows.
+    pub(crate) fn set_b3soi_operating_point_mode(&mut self, operating_point: bool) {
+        for dev in &self.b3soi.devices {
+            dev.set_dc_mode(operating_point);
+        }
+        for dev in &self.b3soi_fd.devices {
+            dev.set_dc_mode(operating_point);
+        }
+        for dev in &self.b3soi_pd.devices {
+            dev.set_dc_mode(operating_point);
+        }
+    }
+
     /// Check if circuit has any native BSIM3v3.3 (level 8/49) device.
     ///
     /// Their coupled charge companion runs through a dedicated transient
