@@ -78,7 +78,7 @@ impl Engine {
             .collect();
         points.sort_by(|a, b| a.total_cmp(b));
         points.dedup_by(|a, b| {
-            let scale = a.abs().max(b.abs()).max(1.0);
+            let scale = a.abs().max(b.abs()).max(Value::MIN_POSITIVE);
             (*a - *b).abs() <= 64.0 * Value::EPSILON * scale
         });
         points
@@ -3739,6 +3739,31 @@ mod tests {
             normalized
                 .iter()
                 .filter(|&&time| (time - 4.50000000001000000).abs() < 1.0e-14)
+                .count(),
+            1,
+            "ulp-scale duplicates should still be folded: {normalized:?}"
+        );
+    }
+
+    #[test]
+    fn locked_time_grid_preserves_attosecond_edges_at_nanosecond_times() {
+        let grid = [
+            0.0,
+            8.35111251e-9,
+            8.35111585e-9,
+            8.35111752e-9,
+            8.35111752e-9 + Value::EPSILON * 8.35111752e-9,
+        ];
+
+        let normalized = Engine::normalized_locked_time_grid(&grid, 0.0);
+
+        assert!(normalized.contains(&8.35111251e-9));
+        assert!(normalized.contains(&8.35111585e-9));
+        assert!(normalized.contains(&8.35111752e-9));
+        assert_eq!(
+            normalized
+                .iter()
+                .filter(|&&time| (time - 8.35111752e-9).abs() < 1.0e-22)
                 .count(),
             1,
             "ulp-scale duplicates should still be folded: {normalized:?}"
