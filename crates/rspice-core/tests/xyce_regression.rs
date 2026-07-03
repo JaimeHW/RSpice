@@ -1237,6 +1237,7 @@ fn test_xyce_zero_step_coupled_inductor_parameter_print_cases_run() {
 
     for (relative, contract) in [
         ("Netlists/MINDUCTORS/mutIndPrint1.cir", "static_prn_tran"),
+        ("Netlists/MINDUCTORS/mutIndPrint2.cir", "static_prn_tran"),
         ("Netlists/MINDUCTORS/mutIndStep.cir", "static_prn_step_tran"),
     ] {
         let result = runner.run_test(root.join(relative));
