@@ -24,7 +24,7 @@ use crate::netlist::{ElementKind, Netlist};
 use crate::xspice::{CmContextCheckpoint, XspiceInstanceCheckpoint};
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 4;
+const FORMAT_VERSION: u32 = 5;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +169,7 @@ where
 
 fn read_xspice_instance_states<'a, I>(
     lines: &mut I,
+    version: u32,
 ) -> Result<Vec<XspiceInstanceCheckpoint>, String>
 where
     I: Iterator<Item = &'a str>,
@@ -195,10 +196,24 @@ where
         if let Some(extra) = fields.next() {
             return Err(format!("'xspice_state' row {row}: extra field '{extra}'"));
         }
+        let (time, time_prev) = if version >= 5 {
+            let times = read_value_vector(lines, "context_time")?;
+            if times.len() != 2 {
+                return Err(format!(
+                    "'context_time' for XSPICE state row {row} must contain 2 values, got {}",
+                    times.len()
+                ));
+            }
+            (times[0], times[1])
+        } else {
+            (0.0, 0.0)
+        };
         states.push(XspiceInstanceCheckpoint {
             name: name.to_string(),
             model: model.to_string(),
             context: CmContextCheckpoint {
+                time,
+                time_prev,
                 state: read_value_vector(lines, "state")?,
                 state_prev: read_value_vector(lines, "state_prev")?,
                 int_state: read_i64_vector(lines, "int_state")?,
@@ -389,6 +404,11 @@ impl TransientCheckpoint {
                 "xspice_state {} {}\n",
                 instance.name, instance.model
             ));
+            write_value_vector(
+                &mut out,
+                "context_time",
+                &[instance.context.time, instance.context.time_prev],
+            );
             write_value_vector(&mut out, "state", &instance.context.state);
             write_value_vector(&mut out, "state_prev", &instance.context.state_prev);
             write_i64_vector(&mut out, "int_state", &instance.context.int_state);
@@ -511,7 +531,7 @@ impl TransientCheckpoint {
             }));
         }
         let xspice_instance_states = if version >= 4 {
-            read_xspice_instance_states(&mut lines)?
+            read_xspice_instance_states(&mut lines, version)?
         } else {
             Vec::new()
         };
@@ -598,7 +618,7 @@ mod tests {
     fn version_one_checkpoint_files_still_load_without_xspice_state() {
         let version_one = sample()
             .to_text()
-            .replace("RSPICE-CHECKPOINT 4", "RSPICE-CHECKPOINT 1")
+            .replace("RSPICE-CHECKPOINT 5", "RSPICE-CHECKPOINT 1")
             .replace("xspice 0\nxspice_blockers 0\nxspice_states 0\n", "");
         let restored = TransientCheckpoint::from_text(&version_one)
             .expect("v1 checkpoint without XSPICE section still loads");
@@ -617,7 +637,7 @@ mod tests {
 
         let version_two = original
             .to_text()
-            .replace("RSPICE-CHECKPOINT 4", "RSPICE-CHECKPOINT 2")
+            .replace("RSPICE-CHECKPOINT 5", "RSPICE-CHECKPOINT 2")
             .replace(
                 "xspice_blockers 1\na1(gain): model owns pending state\nxspice_states 0\n",
                 "",
@@ -640,6 +660,8 @@ mod tests {
             name: "a1".to_string(),
             model: "int".to_string(),
             context: CmContextCheckpoint {
+                time: 1.25,
+                time_prev: 1.0,
                 state: vec![1.0, -0.0],
                 state_prev: vec![0.5, f64::MIN_POSITIVE],
                 int_state: vec![42, -7],
@@ -650,11 +672,20 @@ mod tests {
 
         let version_three = sample()
             .to_text()
-            .replace("RSPICE-CHECKPOINT 4", "RSPICE-CHECKPOINT 3")
+            .replace("RSPICE-CHECKPOINT 5", "RSPICE-CHECKPOINT 3")
             .replace("xspice_states 0\n", "");
         let restored = TransientCheckpoint::from_text(&version_three)
             .expect("v3 checkpoint without serialized XSPICE state still loads");
         assert!(restored.xspice_instance_states.is_empty());
+
+        let version_four = original
+            .to_text()
+            .replace("RSPICE-CHECKPOINT 5", "RSPICE-CHECKPOINT 4")
+            .replace("context_time 2\n1.25\n1\n", "");
+        let restored = TransientCheckpoint::from_text(&version_four)
+            .expect("v4 XSPICE state checkpoint without context times still loads");
+        assert_eq!(restored.xspice_instance_states[0].context.time, 0.0);
+        assert_eq!(restored.xspice_instance_states[0].context.time_prev, 0.0);
     }
 
     #[test]

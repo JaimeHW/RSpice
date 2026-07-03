@@ -64,6 +64,52 @@ fn out_index(result: &rspice_core::engine::TransientResult) -> usize {
         .expect("out node present")
 }
 
+fn assert_segmented_xspice_deck_tracks(
+    label: &str,
+    deck: &str,
+    tstop: f64,
+    split: f64,
+    step: f64,
+    tolerance: f64,
+) {
+    let netlist = Netlist::parse(deck).unwrap_or_else(|err| panic!("{label} deck parses: {err}"));
+    let engine = Engine::new(SimulationConfig::default());
+
+    let full = engine
+        .run_tran(&netlist, tstop, step)
+        .unwrap_or_else(|err| panic!("{label} full run completes: {err}"));
+    let full_out = out_index(&full);
+
+    let (first, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, split, step)
+        .unwrap_or_else(|err| panic!("{label} first segment completes: {err}"));
+    let (second, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, tstop, step)
+        .unwrap_or_else(|err| panic!("{label} resumed segment completes: {err}"));
+    let second_out = out_index(&second);
+
+    let mut worst = 0.0f64;
+    let sample_step = (tstop - split) / 16.0;
+    for k in 1..=16 {
+        let t = split + (k as f64) * sample_step;
+        let v_full = interpolate(&full.time, &full.voltages[full_out], t);
+        let v_seg = interpolate(&second.time, &second.voltages[second_out], t);
+        worst = worst.max((v_full - v_seg).abs());
+    }
+    assert!(
+        worst < tolerance,
+        "{label} checkpoint resume must track the full run (worst |delta| = {worst})"
+    );
+
+    let v_seam_first = *first.voltages[out_index(&first)].last().unwrap();
+    let v_seam_second = second.voltages[second_out][0];
+    assert_eq!(
+        v_seam_first.to_bits(),
+        v_seam_second.to_bits(),
+        "{label} seam state is carried bit-exactly"
+    );
+}
+
 #[test]
 fn segmented_run_continues_the_unsegmented_trajectory() {
     let netlist = Netlist::parse(DECK).expect("deck parses");
@@ -273,6 +319,80 @@ fn stateful_xspice_checkpoint_resume_tracks_unsegmented_integrator() {
         v_seam_second.to_bits(),
         "stateful XSPICE seam state is carried bit-exactly"
     );
+}
+
+#[test]
+fn stateful_analog_xspice_checkpoint_resume_tracks_additional_models() {
+    let cases = [
+        (
+            "d_dt",
+            "\
+* checkpoint bench: differentiator
+vin in 0 sin(0 1 1meg)
+a1 in out diff
+.model diff d_dt (gain=1e-6 out_lower_limit=-10 out_upper_limit=10)
+rload out 0 1k
+.tran 0.5n 60n
+.end
+",
+            60.0e-9,
+            30.0e-9,
+            0.5e-9,
+            1.0e-6,
+        ),
+        (
+            "hyst",
+            "\
+* checkpoint bench: hysteresis
+vin in 0 pulse(0 2 0 1n 1n 20n 40n)
+a1 in out h
+.model h hyst (in_low=0.5 in_high=1.5 hyst=0.1 out_lower_limit=0 out_upper_limit=5 input_domain=0.01)
+rload out 0 1k
+.tran 1n 90n
+.end
+",
+            90.0e-9,
+            45.0e-9,
+            1.0e-9,
+            1.0e-9,
+        ),
+        (
+            "slew",
+            "\
+* checkpoint bench: slew
+vin in 0 pulse(0 1 0 1n 1n 20n 40n)
+a1 in out sl
+.model sl slew (rise_slope=1e8 fall_slope=1e8)
+rload out 0 1k
+.tran 1n 90n
+.end
+",
+            90.0e-9,
+            45.0e-9,
+            1.0e-9,
+            1.0e-9,
+        ),
+        (
+            "astate",
+            "\
+* checkpoint bench: analog state return
+vin in 0 pulse(0 1 0 1n 1n 10n 20n)
+a1 in out ast
+.model ast astate (astate_no=1)
+rload out 0 1k
+.tran 1n 60n
+.end
+",
+            60.0e-9,
+            30.0e-9,
+            1.0e-9,
+            1.0e-9,
+        ),
+    ];
+
+    for (label, deck, tstop, split, step, tolerance) in cases {
+        assert_segmented_xspice_deck_tracks(label, deck, tstop, split, step, tolerance);
+    }
 }
 
 #[test]

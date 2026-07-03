@@ -557,6 +557,8 @@ pub struct CmContext {
 /// Serializable code-model context state captured in transient checkpoints.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CmContextCheckpoint {
+    pub time: Value,
+    pub time_prev: Value,
     pub state: Vec<Value>,
     pub state_prev: Vec<Value>,
     pub int_state: Vec<i64>,
@@ -1972,6 +1974,8 @@ impl CmContext {
     /// Snapshot the serializable model-owned state arrays.
     pub(crate) fn checkpoint_state(&self) -> CmContextCheckpoint {
         CmContextCheckpoint {
+            time: self.time,
+            time_prev: self.time_prev,
             state: self.state.clone(),
             state_prev: self.state_prev.clone(),
             int_state: self.int_state.clone(),
@@ -2002,6 +2006,8 @@ impl CmContext {
         self.state.clone_from(&checkpoint.state);
         self.state_prev.clone_from(&checkpoint.state_prev);
         self.int_state.clone_from(&checkpoint.int_state);
+        self.time = checkpoint.time;
+        self.time_prev = checkpoint.time_prev;
         Ok(())
     }
 

@@ -1622,6 +1622,10 @@ impl CodeModel for HysteresisBlock {
         Ok(())
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let params = hyst_params(ctx)?;
         let (out, partial, state) =
@@ -1735,6 +1739,10 @@ impl CodeModel for SlewRateFollower {
         ctx.set_initial_state(SLEW_INPUT, 0.0);
         ctx.set_initial_state(SLEW_OUTPUT, 0.0);
         Ok(())
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -2175,6 +2183,10 @@ impl CodeModel for AnalogStateReturn {
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_states(ASTATE_STATE_COUNT);
         Ok(())
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -5229,6 +5241,10 @@ impl CodeModel for Differentiator {
         // Allocate state for previous input
         ctx.allocate_states(1);
         Ok(())
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::Serializable
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
