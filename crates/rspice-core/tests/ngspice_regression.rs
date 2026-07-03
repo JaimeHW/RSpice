@@ -10,8 +10,8 @@
 use rspice_core::{
     netlist::Netlist,
     testing::{
-        decode_test_result, TestResult, TestRunner as CoreTestRunner, TestRunnerConfig,
-        TestStatistics,
+        TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics,
+        decode_test_result,
     },
 };
 use std::{

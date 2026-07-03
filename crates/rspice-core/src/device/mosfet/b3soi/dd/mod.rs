@@ -1714,10 +1714,26 @@ mod tests {
 
         dev.update(&[10.0, 8.0, 0.0, 7.0, 0.0, 0.0, 9.0]);
 
-        assert!((dev.bias.vds - 3.0).abs() <= 1.0e-12, "vds={}", dev.bias.vds);
-        assert!((dev.bias.vgs - 3.0).abs() <= 1.0e-12, "vgs={}", dev.bias.vgs);
-        assert!((dev.bias.ves - 3.0).abs() <= 1.0e-12, "ves={}", dev.bias.ves);
-        assert!((dev.bias.vps - 3.0).abs() <= 1.0e-12, "vps={}", dev.bias.vps);
+        assert!(
+            (dev.bias.vds - 3.0).abs() <= 1.0e-12,
+            "vds={}",
+            dev.bias.vds
+        );
+        assert!(
+            (dev.bias.vgs - 3.0).abs() <= 1.0e-12,
+            "vgs={}",
+            dev.bias.vgs
+        );
+        assert!(
+            (dev.bias.ves - 3.0).abs() <= 1.0e-12,
+            "ves={}",
+            dev.bias.ves
+        );
+        assert!(
+            (dev.bias.vps - 3.0).abs() <= 1.0e-12,
+            "vps={}",
+            dev.bias.vps
+        );
         assert!(
             dev.last_limited.get(),
             "branch limiting should mark the iterate non-bypassable"

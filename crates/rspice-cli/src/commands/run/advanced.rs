@@ -1163,8 +1163,9 @@ pub(super) fn run_sparam_from_command(
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
     if frequencies.is_empty() {
         return Err(CliError::SimulationError {
-            message: ".SP produced no frequency points; check sweep type, count, and frequency range"
-                .to_string(),
+            message:
+                ".SP produced no frequency points; check sweep type, count, and frequency range"
+                    .to_string(),
             analysis: Some("S-Parameters".to_string()),
         });
     }
@@ -1183,7 +1184,11 @@ pub(super) fn run_sparam_from_command(
 
     let data = solve_netlist_sparameters(ctx, ports, frequencies)?;
     if !ctx.quiet
-        && let Some(first) = data.s.first().and_then(|row| row.first()).and_then(|v| v.first())
+        && let Some(first) = data
+            .s
+            .first()
+            .and_then(|row| row.first())
+            .and_then(|v| v.first())
     {
         println!(
             "  @ {:e} Hz: |S_1_1|={:.4}",
@@ -1556,8 +1561,7 @@ fn invert_complex_matrix(
 
 fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> bool {
     path.extension().is_some_and(|ext| {
-        ext.eq_ignore_ascii_case("snp")
-            || ext.eq_ignore_ascii_case(&format!("s{}p", num_ports))
+        ext.eq_ignore_ascii_case("snp") || ext.eq_ignore_ascii_case(&format!("s{}p", num_ports))
     })
 }
 
@@ -1584,8 +1588,7 @@ fn write_touchstone_nport(
     let mut file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
     writeln!(file, "! {}-port S-parameters", ports.len())
         .map_err(|e| CliError::output_error(path, e))?;
-    writeln!(file, "# HZ S RI R {}", first_port.z0)
-        .map_err(|e| CliError::output_error(path, e))?;
+    writeln!(file, "# HZ S RI R {}", first_port.z0).map_err(|e| CliError::output_error(path, e))?;
     for (index, freq) in frequencies.iter().enumerate() {
         write!(file, "{freq:.9e}").map_err(|e| CliError::output_error(path, e))?;
         if ports.len() == 2 {
