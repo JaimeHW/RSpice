@@ -1321,7 +1321,7 @@ fn solve_netlist_sparameters(
     let mut y =
         vec![vec![vec![rspice_core::Complex64::new(0.0, 0.0); num_freqs]; num_ports]; num_ports];
 
-    for excite_port in 0..num_ports {
+    for (excite_port, _) in ports.iter().enumerate() {
         let mut excited = ctx.netlist.clone();
         set_sparameter_port_excitations(&mut excited, &ports, excite_port)?;
         let ac_points = ctx
@@ -1516,8 +1516,8 @@ fn invert_complex_matrix(
     for col in 0..n {
         let mut pivot = col;
         let mut pivot_norm = augmented[pivot][col].norm();
-        for row in (col + 1)..n {
-            let norm = augmented[row][col].norm();
+        for (row, row_values) in augmented.iter().enumerate().take(n).skip(col + 1) {
+            let norm = row_values[col].norm();
             if norm > pivot_norm {
                 pivot = row;
                 pivot_norm = norm;
@@ -1536,24 +1536,24 @@ fn invert_complex_matrix(
         }
         let pivot_row = augmented[col].clone();
 
-        for row in 0..n {
+        for (row, row_values) in augmented.iter_mut().enumerate().take(n) {
             if row == col {
                 continue;
             }
-            let factor = augmented[row][col];
+            let factor = row_values[col];
             if factor.norm() <= 1e-30 {
                 continue;
             }
             for idx in 0..(2 * n) {
-                augmented[row][idx] -= factor * pivot_row[idx];
+                row_values[idx] -= factor * pivot_row[idx];
             }
         }
     }
 
     let mut inverse = vec![vec![rspice_core::Complex64::new(0.0, 0.0); n]; n];
-    for row in 0..n {
-        for col in 0..n {
-            inverse[row][col] = augmented[row][n + col];
+    for (row, row_values) in inverse.iter_mut().enumerate() {
+        for (col, value) in row_values.iter_mut().enumerate() {
+            *value = augmented[row][n + col];
         }
     }
     Some(inverse)
@@ -1561,7 +1561,7 @@ fn invert_complex_matrix(
 
 fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> bool {
     path.extension().is_some_and(|ext| {
-        ext.eq_ignore_ascii_case("snp") || ext.eq_ignore_ascii_case(&format!("s{}p", num_ports))
+        ext.eq_ignore_ascii_case("snp") || ext.eq_ignore_ascii_case(format!("s{}p", num_ports))
     })
 }
 
@@ -1601,9 +1601,9 @@ fn write_touchstone_nport(
                     .map_err(|e| CliError::output_error(path, e))?;
             }
         } else {
-            for row in 0..ports.len() {
-                for col in 0..ports.len() {
-                    let value = s[row][col]
+            for row_values in s.iter().take(ports.len()) {
+                for values in row_values.iter().take(ports.len()) {
+                    let value = values
                         .get(index)
                         .copied()
                         .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0));
