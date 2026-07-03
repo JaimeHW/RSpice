@@ -17,6 +17,7 @@ const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 300_000;
 const MAX_SCALAR_STAMP_EMITTED_VALUES: usize = 300_000;
 const MAX_SCALAR_STAMP_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SCALAR_STAMP_SOURCE_LINES: usize = 120_000;
+const SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE: usize = 1024;
 const MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_INLINE_EXPR_COST: usize = 128;
@@ -695,6 +696,14 @@ fn reject_oversized_scalar_stamp_value_emit(
         reactive_inline_values,
         common_inline_values,
     )?;
+    if scalar_stamp_source_line_estimate_exceeds_budget(emitted_values) {
+        return Err(unsupported(
+            artifact,
+            format!(
+                "pure scalar stamp would emit at least {emitted_values} value binding lines before stamp calls; current scalar source line budget is {MAX_SCALAR_STAMP_SOURCE_LINES}"
+            ),
+        ));
+    }
     if !scalar_stamp_emitted_values_exceeds_budget(emitted_values) {
         return Ok(());
     }
@@ -770,7 +779,12 @@ fn scalar_live_value_emit_count(
             .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
         if let Some(loop_id) = runtime_loop_result_id(&value.kind) {
             if emitted_runtime_loops.insert(loop_id) {
-                count = count.saturating_add(1);
+                count = count.saturating_add(runtime_loop_source_binding_estimate(
+                    artifact,
+                    loop_id,
+                    live,
+                    &static_cache.set,
+                )?);
             }
             continue;
         }
@@ -788,6 +802,11 @@ fn scalar_live_value_emit_count(
 
 pub(super) fn scalar_stamp_emitted_values_exceeds_budget(emitted_values: usize) -> bool {
     emitted_values > MAX_SCALAR_STAMP_EMITTED_VALUES
+}
+
+fn scalar_stamp_source_line_estimate_exceeds_budget(emitted_values: usize) -> bool {
+    emitted_values.saturating_add(SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE)
+        > MAX_SCALAR_STAMP_SOURCE_LINES
 }
 
 fn shared_stamp_values_plan(
@@ -3287,6 +3306,75 @@ fn emit_counted_sum_expr(
     expr.push_str(&format!("            {accumulator_name}\n"));
     expr.push_str("        }");
     Ok(expr)
+}
+
+fn runtime_loop_source_binding_estimate(
+    artifact: &CanonicalIrArtifact,
+    loop_id: u32,
+    live: &HashSet<ValueId>,
+    cached_values: &HashSet<ValueId>,
+) -> Result<usize, RustBackendError> {
+    let runtime_loop = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .find(|runtime_loop| runtime_loop.loop_id == loop_id)
+        .ok_or_else(|| unsupported(artifact, format!("missing runtime loop {loop_id}")))?;
+    let derivative_lanes = runtime_loop_live_derivative_lanes(artifact, loop_id, live);
+
+    let mut condition_live = HashSet::new();
+    mark_counted_sum_term_live(
+        artifact,
+        runtime_loop.condition,
+        cached_values,
+        &mut condition_live,
+    )?;
+
+    let mut body_live = HashSet::new();
+    for assignment in &runtime_loop.assignments {
+        mark_counted_sum_term_live(artifact, assignment.value, cached_values, &mut body_live)?;
+        for lane in &derivative_lanes {
+            if let Some(value) = derivative_value_for_lane(artifact, assignment.value, *lane)? {
+                mark_counted_sum_term_live(artifact, value, cached_values, &mut body_live)?;
+            }
+        }
+    }
+
+    let initialization_lines = runtime_loop
+        .variables
+        .len()
+        .saturating_mul(1usize.saturating_add(derivative_lanes.len()));
+    let condition_lines =
+        ordered_counted_sum_values(artifact, &condition_live, cached_values)?.len();
+    let body_lines = ordered_counted_sum_values(artifact, &body_live, cached_values)?.len();
+    let assignment_lines = runtime_loop.assignments.len();
+    let result_lines = runtime_loop
+        .variables
+        .iter()
+        .filter(|variable| live.contains(&variable.result))
+        .count();
+    let derivative_result_lines = artifact
+        .opt
+        .values
+        .iter()
+        .filter(|value| live.contains(&value.id))
+        .filter(|value| {
+            matches!(
+                value.kind,
+                OptValueKind::RuntimeLoopResultDerivative {
+                    loop_id: value_loop_id,
+                    ..
+                } if value_loop_id == loop_id
+            )
+        })
+        .count();
+
+    Ok(initialization_lines
+        .saturating_add(condition_lines)
+        .saturating_add(body_lines)
+        .saturating_add(assignment_lines)
+        .saturating_add(result_lines)
+        .saturating_add(derivative_result_lines))
 }
 
 fn emit_runtime_loop(
