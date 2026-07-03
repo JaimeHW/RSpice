@@ -44,7 +44,7 @@ impl TestRunner {
             Some(ValidationContract::LockedGrid)
         );
         if (locked_by_contract || std::env::var("RSPICE_GRID_LOCKED").as_deref() == Ok("1"))
-            && let Ok(Some(reference)) = self.load_reference_table_for_axis(cir_path, &["time"])
+            && let Ok(Some(reference)) = self.locked_grid_reference_table(cir_path, source)
             && let Some(series) = reference
                 .variables
                 .values()
@@ -106,5 +106,31 @@ impl TestRunner {
                 analysis_type: Some("Transient".to_string()),
             },
         }
+    }
+
+    fn locked_grid_reference_table(
+        &self,
+        cir_path: &Path,
+        source: &str,
+    ) -> Result<Option<ReferenceTable>, String> {
+        if Self::locked_grid_prefers_printed_table(source)
+            && let Some(reference) = self.load_printed_reference_table_for_axis(cir_path, &["time"])?
+        {
+            return Ok(Some(reference));
+        }
+        self.load_reference_table_for_axis(cir_path, &["time"])
+    }
+
+    fn locked_grid_prefers_printed_table(source: &str) -> bool {
+        source.lines().any(|line| {
+            Self::strip_netlist_comment(line)
+                .split_whitespace()
+                .any(|token| {
+                    matches!(
+                        token.to_ascii_lowercase().as_str(),
+                        "d_to_real" | "real_gain" | "real_delay" | "real_to_v"
+                    )
+                })
+        })
     }
 }

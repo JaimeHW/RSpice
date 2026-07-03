@@ -157,6 +157,31 @@ impl TestRunner {
         self.load_live_raw_reference_table_for_axis(cir_path, axis_candidates)
     }
 
+    pub(in crate::testing::ngspice_runner) fn load_printed_reference_table_for_axis(
+        &self,
+        cir_path: &Path,
+        axis_candidates: &[&str],
+    ) -> Result<Option<ReferenceTable>, String> {
+        if self.suppresses_historical_reference_output_for(cir_path) {
+            return Ok(None);
+        }
+        let Some(reference_output) = self.load_reference_output(cir_path)? else {
+            return Ok(None);
+        };
+        let Ok(tables) = self.parse_ngspice_output_tables(&reference_output.content) else {
+            return Ok(None);
+        };
+        if tables.is_empty() {
+            return Ok(None);
+        }
+        self.reference_table_for_axis_from_tables(
+            cir_path,
+            axis_candidates,
+            &tables,
+            &reference_output.description,
+        )
+    }
+
     fn reference_table_for_axis_from_tables(
         &self,
         cir_path: &Path,
