@@ -1556,6 +1556,34 @@ fn test_ngspice_regression_lib_processing_suite() {
 }
 
 #[test]
+fn test_ngspice_regression_lib_processing_focus_cases_run() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+
+    for relative in [
+        "regression/lib-processing/scope-1.cir",
+        "regression/lib-processing/scope-2.cir",
+        "regression/lib-processing/scope-3.cir",
+    ] {
+        let result = runner.run_test(&tests_dir.join(relative));
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some("DC OP"),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
+}
+
+#[test]
 fn test_ngspice_regression_misc_suite() {
     let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
     let stats = run_and_report(&runner, "regression/misc");
@@ -1564,6 +1592,30 @@ fn test_ngspice_regression_misc_suite() {
         "Regression Misc: {} tests, {:.1}% pass rate",
         stats.total,
         stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_regression_misc_focus_case_runs() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+    let relative = "regression/misc/bugs-1.cir";
+
+    let result = runner.run_test(&tests_dir.join(relative));
+
+    assert!(
+        result.passed,
+        "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+        result.error, result.mismatches
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "Focused ngspice {relative} deck should match its oracle"
+    );
+    assert_eq!(
+        result.analysis_type.as_deref(),
+        Some("DC OP"),
+        "Focused ngspice {relative} deck should report the expected analysis type"
     );
 }
 
