@@ -654,24 +654,7 @@ fn parse_pwl_spec(
         stream.advance();
         stream.consume(&TokenKind::Equals);
 
-        let path = match &stream.peek().kind {
-            TokenKind::StringLit(s) => {
-                let p = s.clone();
-                stream.advance();
-                p
-            }
-            TokenKind::Ident(s) => {
-                let p = s.clone();
-                stream.advance();
-                p
-            }
-            _ => {
-                return Err(ParseError::MissingParameter(format!(
-                    "PWL filename at line {}",
-                    line_num
-                )));
-            }
-        };
+        let path = parse_pwl_file_path(stream, line_num, has_paren)?;
 
         let mut time_scale = 1.0;
         let mut value_scale = 1.0;
@@ -697,11 +680,11 @@ fn parse_pwl_spec(
             stream.advance();
 
             let target = match key_upper.as_str() {
-                "TSCALE" | "TIMESCALE" => &mut time_scale,
-                "VSCALE" | "VALUESCALE" | "SCALE" => &mut value_scale,
-                "TOFFSET" | "TIMEOFFSET" => &mut time_offset,
-                "VOFFSET" | "VALUEOFFSET" | "DC" => &mut value_offset,
-                "TD" | "DELAY" => &mut delay,
+                key if is_pwl_file_time_scale_key(key) => &mut time_scale,
+                key if is_pwl_file_value_scale_key(key) => &mut value_scale,
+                key if is_pwl_file_time_offset_key(key) => &mut time_offset,
+                key if is_pwl_file_value_offset_key(key) => &mut value_offset,
+                key if is_pwl_file_delay_key(key) => &mut delay,
                 "R" | "REPEAT" => {
                     if !stream.consume(&TokenKind::Equals) {
                         return Err(ParseError::Syntax {
@@ -817,6 +800,85 @@ fn parse_pwl_spec(
         delay,
         repeat_from,
     })
+}
+
+fn parse_pwl_file_path(
+    stream: &mut TokenStream,
+    line_num: usize,
+    has_paren: bool,
+) -> Result<String, ParseError> {
+    if let TokenKind::StringLit(path) = &stream.peek().kind {
+        let path = path.clone();
+        stream.advance();
+        return Ok(path);
+    }
+
+    let mut path = String::new();
+    while !source_args_end(stream, has_paren) && !matches!(stream.peek().kind, TokenKind::Comma) {
+        if pwl_file_option_assignment_ahead(stream) {
+            break;
+        }
+        match &stream.peek().kind {
+            TokenKind::StringLit(_) | TokenKind::Expression(_) => break,
+            TokenKind::Equals => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "PWL FILE path cannot contain '='; quote the filename if needed"
+                        .to_string(),
+                });
+            }
+            _ => {
+                path.push_str(&stream.peek().lexeme);
+                stream.advance();
+            }
+        }
+    }
+
+    if path.is_empty() {
+        Err(ParseError::MissingParameter(format!(
+            "PWL filename at line {}",
+            line_num
+        )))
+    } else {
+        Ok(path)
+    }
+}
+
+fn pwl_file_option_assignment_ahead(stream: &TokenStream) -> bool {
+    let TokenKind::Ident(key) = &stream.peek().kind else {
+        return false;
+    };
+    matches!(stream.peek_n(1).kind, TokenKind::Equals) && is_pwl_file_option_key(key)
+}
+
+fn is_pwl_file_option_key(key: &str) -> bool {
+    let key = key.to_ascii_uppercase();
+    is_pwl_file_time_scale_key(&key)
+        || is_pwl_file_value_scale_key(&key)
+        || is_pwl_file_time_offset_key(&key)
+        || is_pwl_file_value_offset_key(&key)
+        || is_pwl_file_delay_key(&key)
+        || matches!(key.as_str(), "R" | "REPEAT")
+}
+
+fn is_pwl_file_time_scale_key(key: &str) -> bool {
+    matches!(key, "TSCALE" | "TIMESCALE")
+}
+
+fn is_pwl_file_value_scale_key(key: &str) -> bool {
+    matches!(key, "VSCALE" | "VALUESCALE" | "SCALE")
+}
+
+fn is_pwl_file_time_offset_key(key: &str) -> bool {
+    matches!(key, "TOFFSET" | "TIMEOFFSET")
+}
+
+fn is_pwl_file_value_offset_key(key: &str) -> bool {
+    matches!(key, "VOFFSET" | "VALUEOFFSET" | "DC")
+}
+
+fn is_pwl_file_delay_key(key: &str) -> bool {
+    matches!(key, "TD" | "DELAY")
 }
 
 fn parse_pat_spec(

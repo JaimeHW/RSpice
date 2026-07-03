@@ -8592,6 +8592,32 @@ mod tests {
     }
 
     #[test]
+    fn pwl_file_options_accept_unquoted_relative_paths() {
+        let netlist = Netlist::parse(
+            "pwl file unquoted relative path\n\
+             V1 out 0 PWL FILE ./stim.csv TD=3 R=1\n\
+             R1 out 0 1k\n\
+             .tran 1n 10n\n\
+             .end\n",
+        )
+        .expect("PWL FILE unquoted relative path parses");
+
+        match first_source_spec(&netlist) {
+            SourceSpec::PwlFile {
+                path,
+                delay,
+                repeat_from,
+                ..
+            } => {
+                assert_eq!(path, "./stim.csv");
+                assert_eq!(*delay, 3.0);
+                assert_eq!(*repeat_from, Some(1.0));
+            }
+            other => panic!("expected PWL FILE source, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn pwl_file_paths_resolve_relative_to_deck_path() {
         let deck_path = std::env::temp_dir()
             .join("rspice-pwl-file-path")
