@@ -1271,12 +1271,27 @@ impl Engine {
             }
 
             total_iterations += 1;
+            let mut locked_step_lands_on_grid = locked_grid.is_some();
             let (dt, mut at_breakpoint) = match locked_grid.as_ref() {
                 Some(grid) => {
                     let Some(&target) = grid.get(locked_cursor) else {
                         break;
                     };
-                    (target - t, false)
+                    let tolerance = ((target - t).abs() * 1.0e-12).max(1.0e-18);
+                    let mut step_target = circuit
+                        .next_xspice_event_time()
+                        .filter(|event_time| {
+                            *event_time > t + tolerance && *event_time < target - tolerance
+                        })
+                        .unwrap_or(target);
+                    if let Some(breakpoint) = breakpoints
+                        .next_after(t)
+                        .filter(|breakpoint| *breakpoint < target - tolerance)
+                    {
+                        step_target = step_target.min(breakpoint);
+                    }
+                    locked_step_lands_on_grid = (step_target - target).abs() <= tolerance;
+                    (step_target - t, false)
                 }
                 None => breakpoints.limit_step(t, timestep.dt()),
             };
@@ -3264,10 +3279,13 @@ impl Engine {
             // Accept this timestep
             t += dt;
             let hit_breakpoint = if let Some(grid) = locked_grid.as_ref() {
-                // Land exactly on the grid point (no floating-point drift)
-                // and never engage breakpoint-restart dynamics.
-                t = grid[locked_cursor];
-                locked_cursor += 1;
+                // Land exactly on reference grid points, but allow pending
+                // XSPICE events to split a locked interval before the next
+                // recorded reference sample.
+                if locked_step_lands_on_grid {
+                    t = grid[locked_cursor];
+                    locked_cursor += 1;
+                }
                 false
             } else {
                 at_breakpoint || breakpoints.at_breakpoint(t)
