@@ -824,7 +824,7 @@ impl Engine {
         Err(SimulationError::ConvergenceFailed(dc_max_iterations))
     }
 
-    fn solve_nonlinear_nodeset_transient_op_startup_with_abort(
+    pub(crate) fn solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
@@ -1013,7 +1013,7 @@ impl Engine {
         solution = Self::sanitize_initial_guess(&solution, size, circuit.num_nodes().min(size));
         let mut nodeset_startup_solution = None;
         if !node_hints.is_empty() {
-            match self.solve_nonlinear_nodeset_transient_op_startup_with_abort(
+            match self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
                 circuit, matrix, time, &solution, node_hints, abort,
             ) {
                 Ok(nodeset_solution) => {

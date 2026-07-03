@@ -829,6 +829,7 @@ fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
     for relative in [
+        "Netlists/BUG_174/nlrcs10.cir",
         "Netlists/Certification_Tests/BUG_201_SON/bug201a.cir",
         "Netlists/Certification_Tests/BUG_201_SON/bug201b.cir",
     ] {

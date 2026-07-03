@@ -78,6 +78,10 @@ impl Inductors {
         self.names.is_empty()
     }
 
+    pub fn has_explicit_initial_conditions(&self) -> bool {
+        self.ic.iter().any(Option::is_some)
+    }
+
     /// Get equivalent resistance for trapezoidal integration
     #[inline]
     pub fn req(&self, idx: usize, dt: Value) -> Value {

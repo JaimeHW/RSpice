@@ -1,6 +1,6 @@
 use super::{
     AbortSignal, AnalysisCommand, Engine, Netlist, SOURCE_ACTIVE_DELTA, STARTUP_RECOVERY_DELTA_V,
-    SimulationError, Value,
+    SimulationError, SpiceDialect, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,58 @@ impl Engine {
     fn startup_warmup_conditioning_gmin(&self, circuit: &crate::circuit::Circuit) -> Value {
         self.dc_nodal_gmin_floor(circuit)
             .clamp(STARTUP_WARMUP_MIN_GMIN, STARTUP_WARMUP_MAX_GMIN)
+    }
+
+    fn apply_inductor_element_initial_conditions(
+        circuit: &crate::circuit::Circuit,
+        solution: &mut [Value],
+    ) -> bool {
+        let num_nodes = circuit.num_nodes();
+        let mut applied = false;
+        for (ind_idx, ic) in circuit.inductors.ic.iter().enumerate() {
+            let Some(ic) = ic else {
+                continue;
+            };
+            let branch = circuit.inductors.branch_indices[ind_idx];
+            if branch == 0 {
+                continue;
+            }
+            if let Some(slot) = solution.get_mut(num_nodes + branch - 1) {
+                *slot = *ic;
+                applied = true;
+            }
+        }
+        applied
+    }
+
+    fn grounded_capacitor_startup_voltage_hints(
+        circuit: &crate::circuit::Circuit,
+        dc_solution: &[Value],
+    ) -> Vec<(usize, Value)> {
+        let mut hints = Vec::new();
+        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            let np = cap.pp.row;
+            let nn = cap.nn.row;
+            match (np, nn) {
+                (node, 0) if node > 0 => {
+                    let voltage = circuit.capacitors.ic[cap_idx]
+                        .unwrap_or_else(|| dc_solution.get(node - 1).copied().unwrap_or(0.0));
+                    if voltage.is_finite() {
+                        hints.push((node, voltage));
+                    }
+                }
+                (0, node) if node > 0 => {
+                    let voltage = circuit.capacitors.ic[cap_idx]
+                        .map(|ic| -ic)
+                        .unwrap_or_else(|| dc_solution.get(node - 1).copied().unwrap_or(0.0));
+                    if voltage.is_finite() {
+                        hints.push((node, voltage));
+                    }
+                }
+                _ => {}
+            }
+        }
+        hints
     }
 
     pub(super) fn nonlinear_startup_warmup_seed(
@@ -176,20 +228,53 @@ impl Engine {
         let xspice_ramptime_active = circuit.has_xspice_devices()
             && self.config.ramptime.is_finite()
             && self.config.ramptime > 0.0;
-        if source_delta < SOURCE_ACTIVE_DELTA && !xspice_ramptime_active {
+        let xyce_inductor_ic_active = self.config.spice_dialect == SpiceDialect::Xyce
+            && circuit.inductors.has_explicit_initial_conditions();
+        if source_delta < SOURCE_ACTIVE_DELTA && !xspice_ramptime_active && !xyce_inductor_ic_active
+        {
             log::debug!(
-                "Skipping t=0 transient seed: source_delta={source_delta:e}, xspice_ramptime_active={xspice_ramptime_active}"
+                "Skipping t=0 transient seed: source_delta={source_delta:e}, xspice_ramptime_active={xspice_ramptime_active}, xyce_inductor_ic_active={xyce_inductor_ic_active}"
             );
             return None;
         }
 
+        let mut nonlinear_seed_solved = false;
         let mut transient_seed = match self
             .solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
         {
             Ok(seed) => seed,
             Err(err) => {
-                log::debug!("t=0 transient seed solve failed: {err}");
-                return None;
+                if !xyce_inductor_ic_active || !circuit.has_nonlinear_devices() {
+                    log::debug!("t=0 transient seed solve failed: {err}");
+                    return None;
+                }
+                let mut ic_seed = dc_solution.to_vec();
+                if !Self::apply_inductor_element_initial_conditions(circuit, &mut ic_seed) {
+                    log::debug!("t=0 transient seed solve failed: {err}");
+                    return None;
+                }
+                let capacitor_hints =
+                    Self::grounded_capacitor_startup_voltage_hints(circuit, dc_solution);
+                match self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
+                    circuit,
+                    matrix,
+                    0.0,
+                    &ic_seed,
+                    &capacitor_hints,
+                    abort,
+                ) {
+                    Ok(seed) => {
+                        nonlinear_seed_solved = true;
+                        seed
+                    }
+                    Err(SimulationError::Aborted) => return None,
+                    Err(nonlinear_err) => {
+                        log::debug!(
+                            "t=0 transient seed solve failed: {err}; nonlinear inductor-IC startup seed also failed: {nonlinear_err}"
+                        );
+                        return None;
+                    }
+                }
             }
         };
 
@@ -225,7 +310,16 @@ impl Engine {
             return None;
         }
 
-        Some(self.nonlinear_transient_startup_warmup_seed(circuit, matrix, &transient_seed, 0.0))
+        if nonlinear_seed_solved {
+            Some(transient_seed)
+        } else {
+            Some(self.nonlinear_transient_startup_warmup_seed(
+                circuit,
+                matrix,
+                &transient_seed,
+                0.0,
+            ))
+        }
     }
 
     fn t0_linearized_transient_startup_seed(
