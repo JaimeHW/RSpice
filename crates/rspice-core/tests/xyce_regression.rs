@@ -2829,6 +2829,7 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
         ("Netlists/SUBCKT/subckt_f.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_f0.cir", "subckt_family_baseline"),
         ("Netlists/SUBCKT/subckt_f1.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_k.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_k0.cir", "subckt_family_baseline"),
         ("Netlists/SUBCKT/subckt_k1.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_k2.cir", "subckt_family_wrapper"),
