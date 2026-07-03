@@ -713,10 +713,14 @@ pub trait CodeModel: Send + Sync {
     /// Whether this model can participate in transient checkpoint resume.
     ///
     /// Stateful models, event-driven models, file/table models, and external
-    /// runtime models must keep the default until their owned state is added to
-    /// the checkpoint format. Pure memoryless analog models may opt into
-    /// `Stateless`.
+    /// runtime models must stay unsupported until their owned state is added to
+    /// the checkpoint format. Models that already declare a memoryless linear
+    /// transient stamp are safe by construction once the instance-level guards
+    /// have ruled out event nodes and runtime context state.
     fn checkpoint_support(&self, _ctx: &super::CmContext) -> XspiceCheckpointSupport {
+        if self.has_memoryless_linear_transient_stamp() {
+            return XspiceCheckpointSupport::Stateless;
+        }
         XspiceCheckpointSupport::unsupported(
             "model has not declared checkpoint-safe stateless behavior",
         )
