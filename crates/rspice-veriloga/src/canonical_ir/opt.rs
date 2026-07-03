@@ -12,7 +12,7 @@ use super::{
 const MAX_SCALAR_LOOP_UNROLL_ITERATIONS: usize = 1024;
 const MAX_SCALAR_BOUNDED_LOOP_UNROLL_ITERATIONS: usize = 128;
 const MAX_SCALAR_BOUNDED_LOOP_ASSIGNMENT_EXPANSIONS: usize = 2048;
-const MAX_SCALAR_GUARD_HISTORY_RECONSTRUCTION_ENTRIES: usize = 16;
+const MAX_SCALAR_GUARD_HISTORY_RECONSTRUCTION_ENTRIES: usize = 32;
 const MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES: usize = 512;
 const MAX_SCALAR_CURRENT_PATH_HISTORY_DEPTH: usize = 5;
 const MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_DEPTH: usize = 1;
@@ -1222,7 +1222,12 @@ impl<'a> ScalarGraphBuilder<'a> {
                 .or_default()
                 .push(entry);
         } else {
-            self.variable_assignment_exprs.remove(&assignment.target);
+            if self.should_retain_guard_alias_assignment_expr(assignment) {
+                self.variable_assignment_exprs
+                    .insert(assignment.target, assignment.expr.id);
+            } else {
+                self.variable_assignment_exprs.remove(&assignment.target);
+            }
             self.variable_assignment_history.remove(&assignment.target);
         }
         let value = if assignment.index.is_none()
@@ -1263,6 +1268,12 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
         self.self_assignment_alias_snapshot_variables(assignment.target, assignment.expr.id)
             .is_some()
+    }
+
+    fn should_retain_guard_alias_assignment_expr(&self, assignment: &HirAssignment) -> bool {
+        assignment.index.is_none()
+            && assignment.target_name.starts_with("__guard")
+            && supported_assignment_value_type(assignment.expr_type)
     }
 
     fn lower_loop_statement(&mut self, loop_statement: &HirLoop) {
@@ -8984,6 +8995,17 @@ mod tests {
         }
     }
 
+    fn test_assignment(target: VariableId, target_name: &str, expr: ExprId) -> HirAssignment {
+        HirAssignment {
+            target,
+            target_name: target_name.into(),
+            index: None,
+            expr: test_expr_ref(expr),
+            expr_type: CanonicalValueType::Boolean,
+            span: test_span(),
+        }
+    }
+
     #[test]
     fn selective_assignment_targets_prioritize_selected_root_dependencies() {
         let budget = SelectiveAssignmentHistoryBudget {
@@ -9120,5 +9142,51 @@ mod tests {
                 .contains_key(&cache_key)
         );
         assert!(builder.expression_lowering_stack_cycle_rejected);
+    }
+
+    #[test]
+    fn generated_guard_alias_assignment_retains_replay_expression() {
+        let left = ExprId::from(0);
+        let right = ExprId::from(1);
+        let guard = ExprId::from(2);
+        let mir = test_mir(vec![
+            HirExpression {
+                id: left,
+                kind: HirExprKind::Number {
+                    value: 1.0,
+                    raw: "1.0".into(),
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: right,
+                kind: HirExprKind::Number {
+                    value: 0.0,
+                    raw: "0.0".into(),
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: guard,
+                kind: HirExprKind::Binary {
+                    op: "Gt".into(),
+                    left,
+                    right,
+                },
+                span: test_span(),
+            },
+        ]);
+        let variable = VariableId::from(0);
+        let assignment = test_assignment(variable, "__guard0", guard);
+        let mut builder = ScalarGraphBuilder::new(None, &mir);
+        builder.track_assignment_history = false;
+
+        builder.lower_assignment_statement(&assignment);
+
+        assert_eq!(
+            builder.variable_assignment_exprs.get(&variable),
+            Some(&guard)
+        );
+        assert!(!builder.variable_assignment_history.contains_key(&variable));
     }
 }
