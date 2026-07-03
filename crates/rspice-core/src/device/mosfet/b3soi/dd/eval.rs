@@ -1199,42 +1199,90 @@ pub fn eval(
     let gds = gm0 * dvgsteff_dvd + gmb0 * dvbseff_dvd + gmc * dvcs_dvd + gds0;
     let gme = gm0 * dvgsteff_dve + gmb0 * dvbseff_dve + gmc * dvcs_dve;
 
-    // --- Impact-ionization Iii (b3soiddld.c:2233-2290) ---
+    // --- Xyce v3.2 impact-ionization Iii (N_DEV_MOSFET_B3SOI.C, soiMod != 2) ---
     let (mut iii, mut giig, mut giib, mut giid, mut giie) = (0.0, 0.0, 0.0, 0.0, 0.0);
-    {
-        let t2 = p.alpha1 + p.alpha0 / leff;
-        if t2 <= 0.0 || p.beta0 <= 0.0 {
-            // zeros
+    if p.alpha0 > 0.0 {
+        let dvgst_dvg = dvgs_eff_dvg;
+        let dvgst_dvd = -dvth_dvd;
+        let dvgst_dvb = -dvth_dvb;
+
+        let vdsatii0 = p.vdsatii0 * (1.0 + p.tii * temp_ratio) - p.lii / leff;
+
+        let t0 = p.esatii * leff;
+        let t1 = p.sii0 * t0 / (1.0 + t0);
+        let t0 = 1.0 / (1.0 + p.sii1 * vgsteff);
+        let t3 = t0 + p.sii2;
+        let t4 = vgst * p.sii1 * t0 * t0;
+        let t2 = vgst * t3;
+        let dt2_dvg = t3 * (dvgst_dvg - dvth_dvb * dvbseff_dvg) - t4 * dvgsteff_dvg;
+        let dt2_dvb = t3 * dvgst_dvb * dvbseff_dvb - t4 * dvgsteff_dvb;
+        let dt2_dve = t3 * dvgst_dvb * dvbseff_dve - t4 * dvgsteff_dve;
+        let dt2_dvd = t3 * (dvgst_dvd - dvth_dvb * dvbseff_dvd) - t4 * dvgsteff_dvd;
+
+        let t3d = 1.0 / (1.0 + p.siid * vds);
+        let dt3_dvd = -p.siid * t3d * t3d;
+
+        let vgs_step = t1 * t2 * t3d;
+        let vdsatii = vdsatii0 + vgs_step;
+        let vdiff = vds - vdsatii;
+        let dvdiff_dvg = -t1 * t3d * dt2_dvg;
+        let dvdiff_dvb = -t1 * t3d * dt2_dvb;
+        let dvdiff_dve = -t1 * t3d * dt2_dve;
+        let dvdiff_dvd = 1.0 - t1 * (t3d * dt2_dvd + t2 * dt3_dvd);
+
+        let t0 = p.beta2 + p.beta1 * vdiff + p.beta0 * vdiff * vdiff;
+        let (t0, dt0_dvg, dt0_dvb, dt0_dve, dt0_dvd) = if t0 < 1.0e-5 {
+            (1.0e-5, 0.0, 0.0, 0.0, 0.0)
         } else {
-            let t5 = p.beta0;
-            let (t1, dt1_dvg, dt1_dvd, dt1_dvb);
-            if diff_vdsii > t5 / EXP_THRESHOLD {
-                let t0 = -t5 / diff_vdsii;
-                let t10 = t0 / diff_vdsii;
-                let dt0_dvg = t10 * dvdseffii_dvg;
-                t1 = t2 * diff_vdsii * t0.exp();
-                let t3 = t1 / diff_vdsii * (t0 - 1.0);
-                dt1_dvg = t1 * (dt0_dvg - dvdseffii_dvg / diff_vdsii);
-                dt1_dvd = -t3 * (1.0 - dvdseffii_dvd);
-                dt1_dvb = t3 * dvdseffii_dvb;
-            } else {
-                let t3 = t2 * MIN_EXP;
-                t1 = t3 * diff_vdsii;
-                dt1_dvg = -t3 * dvdseffii_dvg;
-                dt1_dvd = t3 * (1.0 - dvdseffii_dvd);
-                dt1_dvb = -t3 * dvdseffii_dvb;
-            }
-            iii = t1 * ids;
-            let t2i = t1 * gm0 + ids * dt1_dvg;
-            let t3i = t1 * gds0 + ids * dt1_dvd;
-            let t4i = t1 * gmb0 + ids * dt1_dvb;
-            let t5i = t1 * gmc;
-            giig = t2i * dvgsteff_dvg + t4i * dvbseff_dvg + t5i * dvcs_dvg;
-            giib = t2i * dvgsteff_dvb + t4i * dvbseff_dvb + t5i * dvcs_dvb;
-            giid = t2i * dvgsteff_dvd + t4i * dvbseff_dvd + t5i * dvcs_dvd + t3i;
-            giie = t2i * dvgsteff_dve + t4i * dvbseff_dve + t5i * dvcs_dve;
+            let t1 = p.beta1 + 2.0 * p.beta0 * vdiff;
+            (
+                t0,
+                t1 * dvdiff_dvg,
+                t1 * dvdiff_dvb,
+                t1 * dvdiff_dve,
+                t1 * dvdiff_dvd,
+            )
+        };
+
+        let (mut ratio, mut dratio_dvg, mut dratio_dvb, mut dratio_dve, mut dratio_dvd);
+        if t0 < vdiff / EXP_THRESHOLD && vdiff > 0.0 {
+            ratio = p.alpha0 * MAX_EXP;
+            dratio_dvg = 0.0;
+            dratio_dvb = 0.0;
+            dratio_dve = 0.0;
+            dratio_dvd = 0.0;
+        } else if t0 < -vdiff / EXP_THRESHOLD && vdiff < 0.0 {
+            ratio = p.alpha0 * MIN_EXP;
+            dratio_dvg = 0.0;
+            dratio_dvb = 0.0;
+            dratio_dve = 0.0;
+            dratio_dvd = 0.0;
+        } else {
+            ratio = p.alpha0 * (vdiff / t0).exp();
+            let t1 = ratio / t0 / t0;
+            dratio_dvg = t1 * (t0 * dvdiff_dvg - vdiff * dt0_dvg);
+            dratio_dvb = t1 * (t0 * dvdiff_dvb - vdiff * dt0_dvb);
+            dratio_dve = t1 * (t0 * dvdiff_dve - vdiff * dt0_dve);
+            dratio_dvd = t1 * (t0 * dvdiff_dvd - vdiff * dt0_dvd);
         }
+        if ratio > 10.0 {
+            ratio = 10.0;
+            dratio_dvg = 0.0;
+            dratio_dvb = 0.0;
+            dratio_dve = 0.0;
+            dratio_dvd = 0.0;
+        }
+
+        // Xyce adds `fbjtii * Ic`; Ic is evaluated later in this port and the
+        // covered Xyce decks use FBJTII=0, so this remains the Ids term.
+        let t0 = ids + p.fbjtii * 0.0;
+        iii = ratio * t0;
+        giig = ratio * gm + t0 * dratio_dvg;
+        giib = ratio * gmb + t0 * dratio_dvb;
+        giid = ratio * gds + t0 * dratio_dvd;
+        giie = ratio * gme + t0 * dratio_dve;
     }
+    let _ = (diff_vdsii, dvdseffii_dvg, dvdseffii_dvd, dvdseffii_dvb);
 
     // --- GIDL (b3soiddld.c:2293-2350) ---
     let (mut idgidl, mut gdgidld, mut gdgidlg) = (0.0, 0.0, 0.0);

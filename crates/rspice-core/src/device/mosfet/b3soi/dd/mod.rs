@@ -1869,6 +1869,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn temp_setup_preserves_xyce_v32_impact_parameters() {
+        let mut params = n1_params();
+        params.insert("BETA0".into(), 0.03);
+        params.insert("BETA1".into(), 0.2);
+        params.insert("BETA2".into(), 0.05);
+        params.insert("VDSATII0".into(), 0.8);
+        params.insert("ESATII".into(), 1.0e8);
+        params.insert("SII0".into(), 0.55);
+        params.insert("SII1".into(), 0.25);
+        params.insert("SII2".into(), 0.1);
+        params.insert("SIID".into(), 0.3);
+        params.insert("FBJTII".into(), 0.7);
+        params.insert("LII".into(), 5.0e-8);
+        params.insert("TII".into(), -0.2);
+
+        let model = B3SoiDdModel::from_params(&params, false, 300.15);
+        let sized = B3SoiDdSized::new(&model, &geom(), 300.15).expect("sized");
+
+        assert_eq!(sized.beta0, 0.03);
+        assert_eq!(sized.beta1, 0.2);
+        assert_eq!(sized.beta2, 0.05);
+        assert_eq!(sized.vdsatii0, 0.8);
+        assert_eq!(sized.esatii, 1.0e8);
+        assert_eq!(sized.sii0, 0.55);
+        assert_eq!(sized.sii1, 0.25);
+        assert_eq!(sized.sii2, 0.1);
+        assert_eq!(sized.siid, 0.3);
+        assert_eq!(sized.fbjtii, 0.7);
+        assert_eq!(sized.lii, 5.0e-8);
+        assert_eq!(sized.tii, -0.2);
+    }
+
     /// The floating-body DC equilibrium must rise into forward bias as the gate
     /// turns the device on with the drain at 1.5 V (the RampVg2 bias), driven by
     /// impact ionization charging the body until the source diode clamps it.

@@ -95,6 +95,17 @@ pub struct B3SoiDdSized {
     pub alpha0: Value,
     pub alpha1: Value,
     pub beta0: Value,
+    pub beta1: Value,
+    pub beta2: Value,
+    pub vdsatii0: Value,
+    pub esatii: Value,
+    pub sii0: Value,
+    pub sii1: Value,
+    pub sii2: Value,
+    pub siid: Value,
+    pub fbjtii: Value,
+    pub lii: Value,
+    pub tii: Value,
     pub agidl: Value,
     pub bgidl: Value,
     pub ngidl: Value,
@@ -289,6 +300,8 @@ impl B3SoiDdSized {
         p.uc1 = m.uc1;
         p.ute = m.ute;
         p.prt = m.prt;
+        p.lii = m.lii;
+        p.tii = m.tii;
 
         // CV model.
         p.cgsl = m.cgsl;
@@ -380,6 +393,15 @@ impl B3SoiDdSized {
         bin!(alpha0);
         bin!(alpha1);
         bin!(beta0);
+        bin!(beta1);
+        bin!(beta2);
+        bin!(vdsatii0);
+        bin!(esatii);
+        bin!(sii0);
+        bin!(sii1);
+        bin!(sii2);
+        bin!(siid);
+        bin!(fbjtii);
         bin!(agidl);
         bin!(bgidl);
         bin!(ngidl);
