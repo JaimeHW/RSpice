@@ -29,6 +29,8 @@ fn coerce_xspice_connection_named(
     use crate::netlist::XspicePort;
     use crate::xspice::{DigitalPortConnection, PortConnection};
 
+    reject_unsupported_event_port_type(port_spec)?;
+
     if let Some(explicit_type) = explicit_xspice_port_type(parsed_port)
         && !port_spec_allows_type(port_spec, explicit_type)
     {
@@ -468,6 +470,21 @@ fn explicit_xspice_port_type(
         XspicePort::DifferentialHybrid { .. } => Some(PortType::DifferentialHybrid),
         _ => None,
     }
+}
+
+fn reject_unsupported_event_port_type(
+    port_spec: &crate::xspice::PortSpec,
+) -> Result<(), SimulationError> {
+    if matches!(
+        port_spec.default_type,
+        crate::xspice::PortType::Integer | crate::xspice::PortType::UserDefined
+    ) {
+        return Err(SimulationError::Circuit(format!(
+            "XSPICE port '{}' uses unsupported {:?} event node type; RSpice supports digital and real XSPICE event nodes",
+            port_spec.name, port_spec.default_type
+        )));
+    }
+    Ok(())
 }
 
 fn port_spec_allows_type(
@@ -1020,6 +1037,36 @@ mod tests {
         assert!(matches!(connections[0], PortConnection::Digital(_)));
         assert!(matches!(connections[1], PortConnection::Null));
         assert!(matches!(connections[2], PortConnection::Real(_)));
+    }
+
+    #[test]
+    fn unsupported_integer_event_port_is_not_coerced_to_digital() {
+        let mut circuit = CircuitData::new();
+        let port = PortSpec::input("count", PortType::Integer);
+        let parsed = XspicePort::Digital("COUNT".to_string());
+
+        let err = coerce_xspice_connection(&mut circuit, &port, &parsed)
+            .expect_err("integer event nodes must fail closed");
+        let message = format!("{err}");
+        assert!(
+            message.contains("unsupported Integer") && message.contains("digital and real"),
+            "diagnostic should identify unsupported integer event nodes: {message}"
+        );
+    }
+
+    #[test]
+    fn unsupported_user_defined_event_port_is_rejected_explicitly() {
+        let mut circuit = CircuitData::new();
+        let port = PortSpec::input("udn", PortType::UserDefined);
+        let parsed = XspicePort::Digital("UDN".to_string());
+
+        let err = coerce_xspice_connection(&mut circuit, &port, &parsed)
+            .expect_err("user-defined event nodes must fail closed");
+        let message = format!("{err}");
+        assert!(
+            message.contains("unsupported UserDefined") && message.contains("digital and real"),
+            "diagnostic should identify unsupported user-defined event nodes: {message}"
+        );
     }
 
     #[test]

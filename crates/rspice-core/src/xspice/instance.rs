@@ -230,8 +230,12 @@ fn hybrid_connection_allowed(port: &PortSpec) -> bool {
     })
 }
 
-fn event_connection_allowed(port: &PortSpec) -> bool {
-    port_declares_type(port, |port_type| port_type.is_event_driven())
+fn digital_event_connection_allowed(port: &PortSpec) -> bool {
+    port_declares_type(port, |port_type| port_type == PortType::Digital)
+}
+
+fn real_event_connection_allowed(port: &PortSpec) -> bool {
+    port_declares_type(port, |port_type| port_type == PortType::Real)
 }
 
 fn typed_analog_vector_connection_allowed(
@@ -481,9 +485,10 @@ fn validate_port_connection(
         PortConnection::Digital(_)
         | PortConnection::DigitalInverted(_)
         | PortConnection::DigitalVector(_)
-        | PortConnection::DigitalVectorMapped(_)
-        | PortConnection::Real(_)
-        | PortConnection::RealVector(_) => event_connection_allowed(port),
+        | PortConnection::DigitalVectorMapped(_) => digital_event_connection_allowed(port),
+        PortConnection::Real(_) | PortConnection::RealVector(_) => {
+            real_event_connection_allowed(port)
+        }
         PortConnection::Null => true,
     };
     if !category_allowed {
@@ -3581,6 +3586,24 @@ mod tests {
 
         assert!(matches!(err, CmError::InvalidPortConnection(_)));
         assert!(err.to_string().contains("in"));
+    }
+
+    #[test]
+    fn instance_rejects_digital_connection_for_integer_event_port() {
+        let model = model_with_ports(vec![PortSpec::input("in", PortType::Integer)]);
+        let err = XspiceInstance::new(
+            "Aport",
+            Arc::new(model),
+            vec![PortConnection::Digital(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect_err("integer event ports must not be treated as digital ports");
+
+        assert!(matches!(err, CmError::InvalidPortConnection(_)));
+        assert!(err.to_string().contains("Integer"));
     }
 
     #[test]
