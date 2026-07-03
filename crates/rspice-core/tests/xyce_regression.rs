@@ -808,6 +808,37 @@ fn test_xyce_independent_voltage_source_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_source_waveform_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/VSFFM/vsffm.cir",
+        "Netlists/SOURCES/ebh.cir",
+        "Netlists/SOURCES/ebh_sub.cir",
+    ] {
+        assert!(
+            !runner.requires_upstream_wrapper(relative),
+            "{relative} should be a native Xyce deck without removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce source-waveform transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_pat_pattern_source_step_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
