@@ -310,6 +310,7 @@ enum XyceStaticDcContract {
     PlainCsv,
     WrapperDefault,
     WrapperCsv,
+    WrapperFilePrn,
     WrapperGnuplotSplot,
     WrapperHspiceMath,
     WrapperRaw,
@@ -329,6 +330,8 @@ impl XyceStaticDcContract {
             (Self::WrapperDefault, true) => "wrapper_static_prn_step_dc",
             (Self::WrapperCsv, false) => "wrapper_static_csv_dc",
             (Self::WrapperCsv, true) => "wrapper_static_csv_step_dc",
+            (Self::WrapperFilePrn, false) => "wrapper_file_prn_dc",
+            (Self::WrapperFilePrn, true) => "wrapper_file_prn_step_dc",
             (Self::WrapperGnuplotSplot, false) => "wrapper_gnuplot_splot_prn_dc",
             (Self::WrapperGnuplotSplot, true) => "wrapper_gnuplot_splot_prn_step_dc",
             (Self::WrapperHspiceMath, false) => "wrapper_hspice_math_prn_dc",
@@ -1118,10 +1121,16 @@ impl XyceTestRunner {
         } else {
             Self::static_dc_contract_for_print_format(false, static_plan.print_format.as_deref())?
         };
+        if matches!(contract, XyceStaticDcContract::WrapperFilePrn) && !static_plan.steps.is_empty()
+        {
+            return Err(
+                "wrapper-origin file-output contract does not cover .STEP DC decks yet".to_string(),
+            );
+        }
         let reference_path = self
             .static_output_reference_path(&deck.path, contract.reference_extension())
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-        if !reference_path.is_file() {
+        if !reference_path.is_file() && !matches!(contract, XyceStaticDcContract::WrapperFilePrn) {
             return Err(format!(
                 "no checked-in static .{} oracle at {}",
                 contract.reference_extension(),
@@ -1281,7 +1290,7 @@ impl XyceTestRunner {
         }
         Self::reject_unsupported_source_directives(&source)?;
 
-        let print_output = Self::single_dc_print_output_request(&source)?;
+        let print_output = Self::single_dc_or_file_output_request(&source)?;
         let print = XycePrintRequest {
             probes: print_output.probes,
         };
@@ -1358,6 +1367,11 @@ impl XyceTestRunner {
         if Self::is_native_csv_dc_wrapper_candidate(relative_path, source) {
             Self::validate_csv_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperCsv);
+        }
+
+        if Self::is_native_file_only_prn_wrapper_candidate(relative_path, source) {
+            Self::validate_file_only_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperFilePrn);
         }
 
         if Self::is_native_raw_wrapper_candidate_path(relative_path) {
@@ -1444,6 +1458,21 @@ impl XyceTestRunner {
                         .as_deref()
                         .is_some_and(|format| format.eq_ignore_ascii_case("CSV"))
             })
+        })
+    }
+
+    fn is_native_file_only_prn_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        if !Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dc/") {
+            return false;
+        }
+        Self::dc_print_output_requests(source).is_ok_and(|requests| {
+            !requests.is_empty()
+                && requests.iter().all(|request| {
+                    request.file.is_some()
+                        && Self::dc_print_format_is_prn_compatible(
+                            request.format.as_deref().unwrap_or("STD"),
+                        )
+                })
         })
     }
 
@@ -1944,6 +1973,32 @@ impl XyceTestRunner {
                 "wrapper-origin CSV contract requires one primary .PRINT DC statement, found {primary_print_count}"
             )),
         }
+    }
+
+    fn validate_file_only_prn_wrapper_source(source: &str) -> Result<(), String> {
+        let requests = Self::dc_print_output_requests(source)?;
+        if requests.is_empty() {
+            return Err(
+                "wrapper-origin file-output contract requires at least one .PRINT DC statement"
+                    .to_string(),
+            );
+        }
+
+        for request in requests {
+            let format = request.format.as_deref().unwrap_or("STD");
+            if request.file.is_none() {
+                return Err(format!(
+                    "wrapper-origin file-output contract does not cover primary .PRINT DC FORMAT={format}"
+                ));
+            }
+            if !Self::dc_print_format_is_prn_compatible(format) {
+                return Err(format!(
+                    "wrapper-origin file-output contract does not cover FILE= side output with FORMAT={format}"
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn validate_raw_wrapper_source(source: &str) -> Result<(), String> {
@@ -2614,30 +2669,43 @@ impl XyceTestRunner {
             }
         };
 
-        let reference = match Self::parse_dc_reference_file(plan.contract, &plan.reference_path) {
-            Ok(reference) => reference,
-            Err(err) if Self::is_parameter_sweep_summary_reference(&plan.reference_path) => {
-                return self.expected_unsupported_result(
-                    deck,
-                    start,
-                    "unsupported_xyce_oracle",
-                    &format!(
-                        "checked-in Xyce sidecar is a parameter-sweep summary, not a numeric .PRINT table: {err}"
-                    ),
-                );
-            }
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("failed to parse Xyce reference oracle: {err}"),
-                    Vec::new(),
-                );
+        let reference = if matches!(plan.contract, XyceStaticDcContract::WrapperFilePrn) {
+            None
+        } else {
+            match Self::parse_dc_reference_file(plan.contract, &plan.reference_path) {
+                Ok(reference) => Some(reference),
+                Err(err) if Self::is_parameter_sweep_summary_reference(&plan.reference_path) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_oracle",
+                        &format!(
+                            "checked-in Xyce sidecar is a parameter-sweep summary, not a numeric .PRINT table: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("failed to parse Xyce reference oracle: {err}"),
+                        Vec::new(),
+                    );
+                }
             }
         };
 
         if !plan.steps.is_empty() {
+            let Some(reference) = reference else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    "file-output-only .STEP DC comparison is not implemented".to_string(),
+                    Vec::new(),
+                );
+            };
             return self.run_static_prn_step_dc_plan(deck, plan, netlist, reference, start);
         }
 
@@ -2682,24 +2750,28 @@ impl XyceTestRunner {
             }
         };
 
-        let mismatches = match self.compare_dc_prn_reference(
-            &reference,
-            &plan.print,
-            &netlist,
-            &plan.source,
-            &plan.dc,
-            &results,
-        ) {
-            Ok(mismatches) => mismatches,
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("reference comparison error: {err}"),
-                    Vec::new(),
-                );
+        let mismatches = if let Some(reference) = &reference {
+            match self.compare_dc_prn_reference(
+                reference,
+                &plan.print,
+                &netlist,
+                &plan.source,
+                &plan.dc,
+                &results,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("reference comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
             }
+        } else {
+            Vec::new()
         };
 
         if mismatches.is_empty()
@@ -11088,6 +11160,22 @@ impl XyceTestRunner {
         }
     }
 
+    fn single_dc_or_file_output_request(source: &str) -> Result<XycePrintOutputRequest, String> {
+        match Self::single_dc_print_output_request(source) {
+            Ok(request) => Ok(request),
+            Err(primary_error) => {
+                let mut side_outputs = Self::prn_compatible_side_output_requests(source)?
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                if side_outputs.is_empty() {
+                    return Err(primary_error);
+                }
+                side_outputs.sort_by(|left, right| left.file.cmp(&right.file));
+                Ok(side_outputs.remove(0))
+            }
+        }
+    }
+
     fn single_tran_print_request(source: &str) -> Result<XycePrintRequest, String> {
         let requests = Self::print_output_requests(source, "TRAN")?
             .into_iter()
@@ -13514,6 +13602,25 @@ R2 b 0 2
                 .expect("plain CSV contract is supported"),
             XyceStaticDcContract::PlainCsv
         );
+    }
+
+    #[test]
+    fn dc_file_only_wrapper_detects_prn_side_output_contract() {
+        let source = "\
+R1 1 0 10
+V1 1 0 DC 0
+.PRINT DC FILE=out1.prn V(1)
+.PRINT DC FILE=out2.prn V(1) I(V1)
+.DC V1 0 1 1
+.END
+";
+
+        assert!(XyceTestRunner::is_native_file_only_prn_wrapper_candidate(
+            "Netlists/Output/DC/dc-multiprn.cir",
+            source
+        ));
+        XyceTestRunner::validate_file_only_prn_wrapper_source(source)
+            .expect("PRN-compatible file-only DC output validates");
     }
 
     #[test]

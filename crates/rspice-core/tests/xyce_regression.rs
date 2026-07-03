@@ -2983,6 +2983,32 @@ fn test_xyce_output_dc_csv_wrapper_case_runs_natively() {
 }
 
 #[test]
+fn test_xyce_output_dc_file_only_wrapper_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Output/DC/dc-multiprn.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain its removed upstream wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native wrapper-origin file-output comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce side-output .prn oracles"
+    );
+    assert_eq!(
+        result.contract, "wrapper_file_prn_dc",
+        "{relative} should report the native wrapper-origin file-output contract"
+    );
+}
+
+#[test]
 fn test_xyce_plain_static_dc_wrapper_cases_run_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
