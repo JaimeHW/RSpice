@@ -1234,6 +1234,33 @@ fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
 }
 
 #[test]
+fn test_xyce_midrange_certification_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_574/bug_574_mpi.cir",
+        "Netlists/Certification_Tests/BUG_575_SON/bug575son.cir",
+        "Netlists/Certification_Tests/BUG_794_SON/test1.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce certification transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_dc_upgrade_sweep_modes_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -1265,6 +1292,7 @@ fn test_xyce_step_static_dc_cases_run() {
     for relative in [
         "Netlists/Certification_Tests/BUG_606_SON/resistor.cir",
         "Netlists/Certification_Tests/BUG_606_SON/global_params_step.cir",
+        "Netlists/Certification_Tests/BUG_654_SON/bug_654.cir",
         "Netlists/Certification_Tests/BUG_1203_SON/dot_step.cir",
         "Netlists/Certification_Tests/BUG_1144_SON/test3.cir",
         "Netlists/GLOBALPAR/gp2.cir",
@@ -1721,6 +1749,8 @@ fn test_xyce_certification_static_dc_cases_run() {
         "Netlists/Certification_Tests/BUG_250/bug_250.cir",
         "Netlists/Certification_Tests/BUG_264_SON/bug_264.cir",
         "Netlists/Certification_Tests/BUG_428/bug428.cir",
+        "Netlists/Certification_Tests/BUG_525_SON/bug_525.cir",
+        "Netlists/Certification_Tests/BUG_584_SON/bug_584.cir",
         "Netlists/Certification_Tests/BUG_606_SON/global_params.cir",
         "Netlists/Certification_Tests/BUG_606_SON/global_params_dev_options.cir",
         "Netlists/Certification_Tests/BUG_913_SON/bug913son.cir",
