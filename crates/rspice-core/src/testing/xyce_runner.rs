@@ -352,6 +352,12 @@ struct XyceVoltageProbe {
     node_neg: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceAcCurrentProbe {
+    accessor: XyceCurrentAccessor,
+    element_name: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceVoltageAccessor {
     Value,
@@ -389,12 +395,13 @@ impl XyceVoltageAccessor {
         }
     }
 
-    fn evaluate_ac_scalar(self, value: Complex64) -> Option<Value> {
+    fn evaluate_ac_scalar(self, value: Complex64, phase_output_radians: bool) -> Option<Value> {
         match self {
             Self::Value => None,
             Self::Real => Some(value.re),
             Self::Imaginary => Some(value.im),
             Self::Magnitude => Some(value.norm()),
+            Self::Phase if phase_output_radians => Some(value.arg()),
             Self::Phase => Some(value.arg().to_degrees()),
             Self::Decibels => Some(Self::db(value.norm())),
         }
@@ -402,6 +409,42 @@ impl XyceVoltageAccessor {
 
     fn db(magnitude: Value) -> Value {
         20.0 * magnitude.max(1.0e-38).log10()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceCurrentAccessor {
+    Value,
+    Real,
+    Imaginary,
+    Magnitude,
+    Phase,
+    Decibels,
+}
+
+impl XyceCurrentAccessor {
+    fn from_function_name(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "i" => Some(Self::Value),
+            "ir" => Some(Self::Real),
+            "ii" => Some(Self::Imaginary),
+            "im" => Some(Self::Magnitude),
+            "ip" => Some(Self::Phase),
+            "idb" => Some(Self::Decibels),
+            _ => None,
+        }
+    }
+
+    fn evaluate_ac_scalar(self, value: Complex64, phase_output_radians: bool) -> Option<Value> {
+        match self {
+            Self::Value => None,
+            Self::Real => Some(value.re),
+            Self::Imaginary => Some(value.im),
+            Self::Magnitude => Some(value.norm()),
+            Self::Phase if phase_output_radians => Some(value.arg()),
+            Self::Phase => Some(value.arg().to_degrees()),
+            Self::Decibels => Some(XyceVoltageAccessor::db(value.norm())),
+        }
     }
 }
 
@@ -2056,6 +2099,29 @@ impl XyceTestRunner {
                 && normalized.contains("timeint")
                 && normalized.contains("conststep")
         })
+    }
+
+    fn source_requests_ac_phase_output_radians(source: &str) -> bool {
+        let mut enabled = false;
+        for line in Self::logical_netlist_lines(source) {
+            let normalized = Self::strip_netlist_comment(&line)
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            if !normalized.starts_with(".options") || !normalized.contains("phase_output_radians") {
+                continue;
+            }
+            if normalized.contains("phase_output_radians=false")
+                || normalized.contains("phase_output_radians=0")
+                || normalized.contains("phase_output_radians=no")
+            {
+                enabled = false;
+                continue;
+            }
+            enabled = true;
+        }
+        enabled
     }
 
     fn validate_native_output_initial_interval_tran_wrapper_contract(
@@ -4522,6 +4588,7 @@ impl XyceTestRunner {
         }
 
         let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
+        let phase_output_radians = Self::source_requests_ac_phase_output_radians(source);
         let comp_columns = data_columns
             .iter()
             .map(|column| XyceReferenceColumn::Probe {
@@ -4576,7 +4643,12 @@ impl XyceTestRunner {
 
             for (column_index, column) in data_columns.iter().enumerate() {
                 let expected = row[column_index + data_column_offset];
-                let actual = Self::evaluate_ac_reference_column(column, netlist, result)?;
+                let actual = Self::evaluate_ac_reference_column(
+                    column,
+                    netlist,
+                    result,
+                    phase_output_radians,
+                )?;
                 let normalized_probe = Self::normalize_probe(column.probe_name());
                 let tolerance = comp_tolerances
                     .get(&normalized_probe)
@@ -5767,6 +5839,14 @@ impl XyceTestRunner {
     ) -> Result<Vec<XyceAcReferenceColumn>, String> {
         let mut columns = Vec::new();
         for column in reference.columns.iter().skip(data_column_offset) {
+            if Self::print_requests_scalar_ac_probe(print, column) {
+                columns.push(XyceAcReferenceColumn::Probe {
+                    name: column.clone(),
+                    component: XyceAcProbeComponent::Scalar,
+                });
+                continue;
+            }
+
             if let Some((component, probe)) = Self::parse_ac_component_reference_column(column) {
                 if !Self::print_requests_complex_ac_probe(print, &probe) {
                     return Err(format!(
@@ -5781,16 +5861,10 @@ impl XyceTestRunner {
                 continue;
             }
 
-            if !Self::print_requests_scalar_ac_probe(print, column) {
-                return Err(format!(
-                    "AC reference column '{}' is not produced by the deck's .PRINT AC probes",
-                    column
-                ));
-            }
-            columns.push(XyceAcReferenceColumn::Probe {
-                name: column.clone(),
-                component: XyceAcProbeComponent::Scalar,
-            });
+            return Err(format!(
+                "AC reference column '{}' is not produced by the deck's .PRINT AC probes",
+                column
+            ));
         }
         Ok(columns)
     }
@@ -5909,12 +5983,13 @@ impl XyceTestRunner {
 
     fn probe_uses_voltage_tolerance(normalized_probe: &str) -> bool {
         normalized_probe == "v-sweep"
-            || Self::parse_voltage_probe(normalized_probe)
+            || Self::parse_ac_voltage_probe(normalized_probe)
                 .is_some_and(|probe| probe.accessor.uses_voltage_tolerance())
     }
 
     fn probe_uses_current_tolerance(normalized_probe: &str) -> bool {
         Self::parse_current_probe(normalized_probe).is_some()
+            || Self::parse_ac_current_probe(normalized_probe).is_some()
             || Self::parse_lead_current_probe(normalized_probe).is_some()
     }
 
@@ -6938,7 +7013,7 @@ impl XyceTestRunner {
         original: &str,
         netlist: &Netlist,
     ) -> Result<(), String> {
-        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+        if let Some(voltage_probe) = Self::parse_ac_voltage_probe(normalized) {
             if !voltage_probe.node_pos.is_empty()
                 && voltage_probe
                     .node_neg
@@ -6948,8 +7023,8 @@ impl XyceTestRunner {
                 return Ok(());
             }
         }
-        if let Some(element_name) = Self::parse_current_probe(normalized)
-            && Self::netlist_has_recorded_branch_current(netlist, &element_name)
+        if let Some(current_probe) = Self::parse_ac_current_probe(normalized)
+            && Self::netlist_has_recorded_branch_current(netlist, &current_probe.element_name)
         {
             return Ok(());
         }
@@ -6958,7 +7033,7 @@ impl XyceTestRunner {
 
     fn validate_ac_complex_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
         let normalized = Self::normalize_probe(probe);
-        if let Some(voltage_probe) = Self::parse_voltage_probe(&normalized) {
+        if let Some(voltage_probe) = Self::parse_ac_voltage_probe(&normalized) {
             if voltage_probe.accessor != XyceVoltageAccessor::Value {
                 return Err(format!(
                     ".PRINT AC complex expression expects a complex V(...) argument, got '{}'",
@@ -6967,7 +7042,13 @@ impl XyceTestRunner {
             }
             return Self::validate_atomic_ac_probe(&normalized, probe, netlist);
         }
-        if Self::parse_current_probe(&normalized).is_some() {
+        if let Some(current_probe) = Self::parse_ac_current_probe(&normalized) {
+            if current_probe.accessor != XyceCurrentAccessor::Value {
+                return Err(format!(
+                    ".PRINT AC complex expression expects a complex I(...) argument, got '{}'",
+                    probe.trim()
+                ));
+            }
             return Self::validate_atomic_ac_probe(&normalized, probe, netlist);
         }
         Self::validate_ac_expression_probe(probe, netlist)
@@ -7761,10 +7842,13 @@ impl XyceTestRunner {
         column: &XyceAcReferenceColumn,
         netlist: &Netlist,
         result: &AcResult,
+        phase_output_radians: bool,
     ) -> Result<Value, String> {
         match column {
             XyceAcReferenceColumn::Probe { name, component } => match component {
-                XyceAcProbeComponent::Scalar => Self::evaluate_ac_probe(name, netlist, result),
+                XyceAcProbeComponent::Scalar => {
+                    Self::evaluate_ac_probe(name, netlist, result, phase_output_radians)
+                }
                 XyceAcProbeComponent::Real => {
                     Ok(Self::evaluate_ac_complex_probe(name, netlist, result)?.re)
                 }
@@ -7779,17 +7863,23 @@ impl XyceTestRunner {
         probe: &str,
         netlist: &Netlist,
         result: &AcResult,
+        phase_output_radians: bool,
     ) -> Result<Value, String> {
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
             if Self::braced_expression_is_atomic_ac_probe(&normalized_expression, netlist) {
-                return Self::evaluate_atomic_ac_probe(&normalized_expression, netlist, result);
+                return Self::evaluate_atomic_ac_probe(
+                    &normalized_expression,
+                    netlist,
+                    result,
+                    phase_output_radians,
+                );
             }
             return Ok(Self::evaluate_ac_complex_expression(expression, netlist, result)?.re);
         }
 
         let normalized = Self::normalize_probe(probe);
-        Self::evaluate_atomic_ac_probe(&normalized, netlist, result)
+        Self::evaluate_atomic_ac_probe(&normalized, netlist, result, phase_output_radians)
             .or_else(|_| Ok(Self::evaluate_ac_complex_expression(probe, netlist, result)?.re))
     }
 
@@ -7797,12 +7887,13 @@ impl XyceTestRunner {
         normalized: &str,
         netlist: &Netlist,
         result: &AcResult,
+        phase_output_radians: bool,
     ) -> Result<Value, String> {
-        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+        if let Some(voltage_probe) = Self::parse_ac_voltage_probe(normalized) {
             let value = Self::evaluate_ac_voltage_probe(&voltage_probe, netlist, result)?;
             return voltage_probe
                 .accessor
-                .evaluate_ac_scalar(value)
+                .evaluate_ac_scalar(value, phase_output_radians)
                 .ok_or_else(|| {
                     format!(
                         "AC probe '{}' is complex-valued; compare Re()/Im() columns or use VM/VP/VDB",
@@ -7811,10 +7902,23 @@ impl XyceTestRunner {
                 });
         }
 
-        if let Some(element_name) = Self::parse_current_probe(normalized) {
-            let current = Self::ac_branch_current_named(result, &element_name)
-                .ok_or_else(|| format!("branch '{}' not found in AC result", element_name))?;
-            return Ok(current.re);
+        if let Some(current_probe) = Self::parse_ac_current_probe(normalized) {
+            let current = Self::ac_branch_current_named(result, &current_probe.element_name)
+                .ok_or_else(|| {
+                    format!(
+                        "branch '{}' not found in AC result",
+                        current_probe.element_name
+                    )
+                })?;
+            return current_probe
+                .accessor
+                .evaluate_ac_scalar(current, phase_output_radians)
+                .ok_or_else(|| {
+                    format!(
+                        "AC probe '{}' is complex-valued; compare Re()/Im() columns or use IR/II/IM/IP/IDB",
+                        normalized
+                    )
+                });
         }
 
         Err(format!("unsupported AC probe '{}'", normalized))
@@ -7826,7 +7930,7 @@ impl XyceTestRunner {
         result: &AcResult,
     ) -> Result<Complex64, String> {
         let normalized = Self::normalize_probe(probe);
-        if let Some(voltage_probe) = Self::parse_voltage_probe(&normalized) {
+        if let Some(voltage_probe) = Self::parse_ac_voltage_probe(&normalized) {
             if voltage_probe.accessor != XyceVoltageAccessor::Value {
                 return Err(format!(
                     "AC complex probe '{}' must use bare V(...) accessor",
@@ -7835,9 +7939,21 @@ impl XyceTestRunner {
             }
             return Self::evaluate_ac_voltage_probe(&voltage_probe, netlist, result);
         }
-        if let Some(element_name) = Self::parse_current_probe(&normalized) {
-            return Self::ac_branch_current_named(result, &element_name)
-                .ok_or_else(|| format!("branch '{}' not found in AC result", element_name));
+        if let Some(current_probe) = Self::parse_ac_current_probe(&normalized) {
+            if current_probe.accessor != XyceCurrentAccessor::Value {
+                return Err(format!(
+                    "AC complex probe '{}' must use bare I(...) accessor",
+                    probe.trim()
+                ));
+            }
+            return Self::ac_branch_current_named(result, &current_probe.element_name).ok_or_else(
+                || {
+                    format!(
+                        "branch '{}' not found in AC result",
+                        current_probe.element_name
+                    )
+                },
+            );
         }
         Self::evaluate_ac_complex_expression(probe, netlist, result)
     }
@@ -8670,9 +8786,9 @@ impl XyceTestRunner {
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_lead_current_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
-            || Self::parse_voltage_probe(normalized_expression)
+            || Self::parse_ac_voltage_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
-            || Self::parse_current_probe(normalized_expression)
+            || Self::parse_ac_current_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_power_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
@@ -8708,7 +8824,8 @@ impl XyceTestRunner {
 
         let rest = &expression[index..];
         for prefix in [
-            "id", "ig", "is", "ib", "ic", "ie", "vdb", "vr", "vi", "vm", "vp", "v", "i", "p", "n",
+            "idb", "ir", "ii", "im", "ip", "id", "ig", "is", "ib", "ic", "ie", "vdb", "vr", "vi",
+            "vm", "vp", "v", "i", "p", "n",
         ] {
             let next_index = index + prefix.len();
             if rest.len() <= prefix.len()
@@ -11983,6 +12100,30 @@ impl XyceTestRunner {
         })
     }
 
+    fn parse_ac_voltage_probe(probe: &str) -> Option<XyceVoltageProbe> {
+        let normalized = Self::normalize_probe(probe);
+        if !normalized.starts_with("n(") {
+            return Self::parse_voltage_probe(&normalized);
+        }
+        if !normalized.ends_with(')') {
+            return None;
+        }
+        let inner = &normalized[2..normalized.len() - 1];
+        if inner.is_empty() || inner.contains(':') {
+            return None;
+        }
+        let (node_pos, node_neg) = if let Some((a, b)) = inner.split_once(',') {
+            (a.to_string(), Some(b.to_string()))
+        } else {
+            (inner.to_string(), None)
+        };
+        Some(XyceVoltageProbe {
+            accessor: XyceVoltageAccessor::Value,
+            node_pos,
+            node_neg,
+        })
+    }
+
     fn parse_current_probe(probe: &str) -> Option<String> {
         let normalized = Self::normalize_probe(probe);
         if !normalized.starts_with("i(") || !normalized.ends_with(')') {
@@ -11990,6 +12131,20 @@ impl XyceTestRunner {
         }
         let inner = &normalized[2..normalized.len() - 1];
         (!inner.is_empty()).then(|| inner.to_string())
+    }
+
+    fn parse_ac_current_probe(probe: &str) -> Option<XyceAcCurrentProbe> {
+        let normalized = Self::normalize_probe(probe);
+        let open_index = normalized.find('(')?;
+        if !normalized.ends_with(')') {
+            return None;
+        }
+        let accessor = XyceCurrentAccessor::from_function_name(&normalized[..open_index])?;
+        let inner = &normalized[open_index + 1..normalized.len() - 1];
+        (!inner.is_empty()).then(|| XyceAcCurrentProbe {
+            accessor,
+            element_name: inner.to_string(),
+        })
     }
 
     fn parse_power_probe(probe: &str) -> Option<String> {
@@ -13061,6 +13216,105 @@ interval output
     }
 
     #[test]
+    fn ac_probe_evaluates_node_alias_and_current_accessors() {
+        let netlist = Netlist::parse(
+            "\
+ac accessor probes
+V1 a 0 AC 1
+R1 a b 1
+R2 b 0 2
+.AC DEC 1 1 10
+.PRINT AC N(B) IR(V1) II(V1) IM(V1) IP(V1) IDB(V1)
+.END
+",
+        )
+        .expect("AC accessor deck parses");
+        let result = AcResult {
+            frequency: 1.0,
+            node_names: vec!["a".to_string(), "b".to_string()],
+            branch_names: vec!["v1".to_string()],
+            voltages: vec![Complex64::new(1.0, 0.0), Complex64::new(3.0, 4.0)],
+            currents: vec![Complex64::new(-3.0, -4.0)],
+        };
+
+        assert_eq!(
+            XyceTestRunner::parse_ac_voltage_probe("N(B)"),
+            Some(XyceVoltageProbe {
+                accessor: XyceVoltageAccessor::Value,
+                node_pos: "b".to_string(),
+                node_neg: None,
+            })
+        );
+        assert!(
+            XyceTestRunner::parse_ac_voltage_probe("N(M1:GM)").is_none(),
+            "AC N(...) voltage alias must not steal device operating-point probes"
+        );
+        assert_eq!(
+            XyceTestRunner::parse_ac_current_probe("IDB(V1)"),
+            Some(XyceAcCurrentProbe {
+                accessor: XyceCurrentAccessor::Decibels,
+                element_name: "v1".to_string(),
+            })
+        );
+
+        let n_b = XyceTestRunner::evaluate_ac_complex_probe("N(B)", &netlist, &result)
+            .expect("N(B) evaluates as an AC voltage alias");
+        assert_eq!(n_b, Complex64::new(3.0, 4.0));
+        assert_eq!(
+            XyceTestRunner::evaluate_ac_probe("IR(V1)", &netlist, &result, false)
+                .expect("real current accessor evaluates"),
+            -3.0
+        );
+        assert_eq!(
+            XyceTestRunner::evaluate_ac_probe("II(V1)", &netlist, &result, false)
+                .expect("imaginary current accessor evaluates"),
+            -4.0
+        );
+        assert_eq!(
+            XyceTestRunner::evaluate_ac_probe("IM(V1)", &netlist, &result, false)
+                .expect("magnitude current accessor evaluates"),
+            5.0
+        );
+        assert!(
+            (XyceTestRunner::evaluate_ac_probe("IP(V1)", &netlist, &result, false)
+                .expect("phase current accessor evaluates")
+                + 126.86989764584402)
+                .abs()
+                < 1.0e-12
+        );
+        assert!(
+            (XyceTestRunner::evaluate_ac_probe("IP(V1)", &netlist, &result, true)
+                .expect("radian phase current accessor evaluates")
+                + 2.214297435588181)
+                .abs()
+                < 1.0e-12
+        );
+        assert!(
+            (XyceTestRunner::evaluate_ac_probe("IDB(V1)", &netlist, &result, false)
+                .expect("decibel current accessor evaluates")
+                - 13.979400086720377)
+                .abs()
+                < 1.0e-12
+        );
+        assert!(
+            XyceTestRunner::validate_ac_complex_probe("IDB(V1)", &netlist)
+                .expect_err("scalar current accessor is not a complex probe")
+                .contains("complex I")
+        );
+    }
+
+    #[test]
+    fn ac_phase_output_radians_option_is_detected() {
+        assert!(XyceTestRunner::source_requests_ac_phase_output_radians(
+            ".OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=TRUE\n"
+        ));
+        assert!(!XyceTestRunner::source_requests_ac_phase_output_radians(
+            ".OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=TRUE\n\
+             .OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=FALSE\n"
+        ));
+    }
+
+    #[test]
     fn hierarchical_node_lookup_resolves_nested_sibling_subcircuit_definition() {
         let netlist = Netlist::parse(
             "\
@@ -13285,6 +13539,33 @@ C1 mid out 1u
         assert_eq!(columns.len(), 6);
         assert_eq!(columns[2].probe_name(), "{r0}");
         assert_eq!(columns[4].probe_name(), "{0.1+r2}");
+    }
+
+    #[test]
+    fn ac_reference_columns_preserve_current_magnitude_accessor() {
+        let source = "current accessor output\n\
+             .print ac I(V1) IM(V1)\n\
+             .END\n";
+        let print =
+            XyceTestRunner::single_ac_print_request(source).expect("AC print request parses");
+        let reference = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "FREQ".to_string(),
+                "Re(I(V1))".to_string(),
+                "Im(I(V1))".to_string(),
+                "IM(V1)".to_string(),
+            ],
+            rows: Vec::new(),
+        };
+
+        let columns = XyceTestRunner::reference_ac_data_columns(&reference, &print, 2)
+            .expect("current component and magnitude headers map to AC print probes");
+
+        assert_eq!(columns.len(), 3);
+        assert_eq!(columns[0].probe_name(), "i(v1)");
+        assert_eq!(columns[1].probe_name(), "i(v1)");
+        assert_eq!(columns[2].probe_name(), "IM(V1)");
     }
 
     #[test]

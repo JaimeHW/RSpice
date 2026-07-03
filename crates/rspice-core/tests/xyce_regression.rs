@@ -352,6 +352,8 @@ fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
         "Netlists/COMPLEX_NUM/test3.cir",
         "Netlists/Certification_Tests/BUG_401_SON/bug_401.cir",
         "Netlists/Certification_Tests/BUG_407_SON/bug_407_ac.cir",
+        "Netlists/Output/AC/ac-phase-in-radians.cir",
+        "Netlists/Output/AC/ac-prn.cir",
         "Netlists/Output/AC/ac-prn-diff.cir",
         "Netlists/Output/AC/op-prn.cir",
     ] {
@@ -696,6 +698,39 @@ fn test_xyce_pat_pattern_source_cases_run() {
         assert!(
             result.passed && !result.expected_unsupported,
             "{relative} should run as a native Xyce PAT transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should use the standard native transient .prn contract"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_independent_voltage_source_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/VSIN/vsin.cir",
+        "Netlists/VSIN/bug510.cir",
+        "Netlists/VSIN/bug1679.cir",
+        "Netlists/VPULSE/vpulse.cir",
+        "Netlists/VEXP/vexp.cir",
+    ] {
+        assert!(
+            !runner.requires_upstream_wrapper(relative),
+            "{relative} should be a native Xyce deck without removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce independent voltage-source transient comparison, got {result:?}"
         );
         assert!(
             result.mismatches.is_empty(),
