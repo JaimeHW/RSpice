@@ -7375,7 +7375,8 @@ fn selective_assignment_history_target_name(name: &str) -> bool {
 }
 
 fn high_churn_scratch_history_variable(name: &str, assignment_count: usize) -> bool {
-    assignment_count > MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS && numbered_temp_name(name, "T")
+    assignment_count > MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS
+        && (numbered_temp_name(name, "T") || numbered_temp_name(name, "TMF"))
 }
 
 fn numbered_temp_name(name: &str, prefix: &str) -> bool {
@@ -9206,6 +9207,10 @@ mod tests {
         ));
         assert!(high_churn_scratch_history_variable(
             "T12",
+            MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS + 1
+        ));
+        assert!(high_churn_scratch_history_variable(
+            "TMF1",
             MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS + 1
         ));
         assert!(!high_churn_scratch_history_variable(
