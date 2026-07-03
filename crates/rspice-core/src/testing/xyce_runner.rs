@@ -1650,14 +1650,15 @@ impl XyceTestRunner {
         relative_path: &str,
         source: &str,
     ) -> Option<XyceStaticTranContract> {
-        if Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
-            || Self::is_native_output_initial_interval_tran_wrapper_candidate(source)
-        {
-            return Some(XyceStaticTranContract::WrapperStatic);
-        }
-
         if Self::validate_native_pwl_repeat_error_tran_wrapper_contract(deck_path, source).is_ok() {
             return Some(XyceStaticTranContract::WrapperStaticExpectedError);
+        }
+
+        if Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
+            || Self::is_native_output_initial_interval_tran_wrapper_candidate(source)
+            || Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
+        {
+            return Some(XyceStaticTranContract::WrapperStatic);
         }
 
         None

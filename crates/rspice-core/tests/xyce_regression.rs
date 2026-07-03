@@ -385,6 +385,36 @@ fn test_xyce_hyperbolic_abm_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_bug_307_311_wrapper_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_307/bug_307_d.cir",
+        "Netlists/Certification_Tests/BUG_311/bug_311_a.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native wrapper-origin Xyce transient .prn comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_tran",
+            "{relative} should report the wrapper-origin transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_zero_resistance_branch_current_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
