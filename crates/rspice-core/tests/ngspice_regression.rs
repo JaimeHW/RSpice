@@ -1402,7 +1402,11 @@ fn test_ngspice_polezero_focus_cases_run() {
 
     for (relative, expected_analysis) in [
         ("polezero/filt_bridge_t.cir", "DC OP + PZ"),
+        ("polezero/filt_multistage.cir", "PZ"),
         ("polezero/filt_rc.cir", "PZ"),
+        ("polezero/pz2.cir", "PZ"),
+        ("polezero/pzt.cir", "PZ"),
+        ("polezero/simplepz.cir", "PZ"),
     ] {
         let result = runner.run_test(&tests_dir.join(relative));
         assert!(
