@@ -1,7 +1,7 @@
 use super::*;
 use rspice_core::netlist::{
-    AnalysisCommand, FreqVariation, Netlist, PoleZeroAnalysisType, PoleZeroTransferType,
-    StepCommand, StepTarget,
+    AnalysisCommand, ElementKind, FreqVariation, Netlist, PoleZeroAnalysisType,
+    PoleZeroTransferType, StepCommand, StepTarget,
 };
 
 use crate::services::simulation_runner::{
@@ -74,7 +74,7 @@ pub(super) fn build_manual_deck_queue(
         if matches!(command, AnalysisCommand::Temp { .. }) {
             continue;
         }
-        match command_to_queue_item(state, command) {
+        match command_to_queue_item(state, &parsed, command) {
             Ok(item) => queue.push(item),
             Err(err) => errors.push(err),
         }
@@ -367,6 +367,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Op => ".op",
         AnalysisCommand::Dc { .. } => ".dc",
         AnalysisCommand::Ac { .. } => ".ac",
+        AnalysisCommand::Sp { .. } => ".sp",
         AnalysisCommand::Stb { .. } => ".stb",
         AnalysisCommand::Disto { .. } => ".disto",
         AnalysisCommand::Tran { .. } => ".tran",
@@ -410,6 +411,57 @@ fn ac_sweep(variation: FreqVariation) -> AcSweepType {
     }
 }
 
+fn collect_sparameter_ports(netlist: &Netlist) -> Result<Vec<SpPort>, String> {
+    let mut ports = Vec::new();
+    for element in &netlist.elements {
+        let ElementKind::VoltageSource(spec) = &element.kind else {
+            continue;
+        };
+        let Some(port) = spec.rf_port() else {
+            continue;
+        };
+        if element.nodes.len() < 2 {
+            return Err(format!(
+                ".sp port source '{}' must have positive and negative nodes",
+                element.name
+            ));
+        }
+        if !port.z0.is_finite() || port.z0 <= 0.0 {
+            return Err(format!(
+                ".sp port source '{}' has invalid z0 {}; expected positive impedance",
+                element.name, port.z0
+            ));
+        }
+        ports.push((
+            port.portnum,
+            element.name.clone(),
+            SpPort {
+                node_pos: element.nodes[0].clone(),
+                node_neg: element.nodes[1].clone(),
+                z0: Some(port.z0),
+            },
+        ));
+    }
+
+    if ports.is_empty() {
+        return Err(
+            ".sp requires voltage sources annotated with portnum=<n> [z0=<ohms>]".to_string(),
+        );
+    }
+
+    ports.sort_by_key(|(number, _, _)| *number);
+    for (idx, (number, source_name, _)) in ports.iter().enumerate() {
+        let expected = idx + 1;
+        if *number != expected {
+            return Err(format!(
+                ".sp port numbers must be dense and unique starting at 1; expected portnum {expected}, found {number} on '{source_name}'"
+            ));
+        }
+    }
+
+    Ok(ports.into_iter().map(|(_, _, port)| port).collect())
+}
+
 fn pz_transfer_name(transfer_type: PoleZeroTransferType) -> String {
     match transfer_type {
         PoleZeroTransferType::Voltage => "VOL",
@@ -437,6 +489,7 @@ fn pz_config_type(analysis_type: PoleZeroAnalysisType) -> PzAnalysisType {
 
 fn command_to_queue_item(
     state: &AppState,
+    netlist: &Netlist,
     command: &AnalysisCommand,
 ) -> Result<QueuedAnalysis, String> {
     let spec_options = SpecExecutionOptions::default();
@@ -512,6 +565,29 @@ fn command_to_queue_item(
                 analysis_line: ".ac".to_string(),
                 spec,
                 spec_options,
+            })
+        }
+        AnalysisCommand::Sp {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            do_noise: _,
+        } => {
+            let ports = collect_sparameter_ports(netlist)?;
+            let z0 = ports.first().and_then(|port| port.z0).unwrap_or(50.0);
+            Ok(QueuedAnalysis {
+                spec: AnalysisSpec::SParameter {
+                    start_freq: *start_freq,
+                    stop_freq: *stop_freq,
+                    points_per_unit: *points,
+                    sweep: frequency_sweep(*variation),
+                    z0,
+                    ports,
+                },
+                config: None,
+                spec_options,
+                analysis_line: ".sp".to_string(),
             })
         }
         AnalysisCommand::Stb {
@@ -765,10 +841,49 @@ mod tests {
     }
 
     #[test]
+    fn manual_deck_sp_uses_rf_port_annotations() {
+        let specs = specs_for(
+            "deck\n\
+             V2 out 0 dc 0 ac 1 portnum 2 z0 75\n\
+             V1 in 0 dc 0 ac 1 portnum 1 z0 50\n\
+             R1 in out 100\n\
+             .sp lin 3 1Meg 3Meg\n\
+             .end\n",
+        );
+
+        let AnalysisSpec::SParameter {
+            start_freq,
+            stop_freq,
+            points_per_unit,
+            sweep,
+            z0,
+            ports,
+        } = &specs[0]
+        else {
+            panic!("expected S-parameter analysis");
+        };
+
+        assert_eq!(*points_per_unit, 3);
+        assert_eq!(*sweep, FrequencySweep::Linear);
+        assert!((*start_freq - 1.0e6).abs() < 1e-6);
+        assert!((*stop_freq - 3.0e6).abs() < 1e-6);
+        assert_eq!(*z0, 50.0);
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].node_pos, "IN");
+        assert_eq!(ports[0].node_neg, "0");
+        assert_eq!(ports[0].z0, Some(50.0));
+        assert_eq!(ports[1].node_pos, "OUT");
+        assert_eq!(ports[1].node_neg, "0");
+        assert_eq!(ports[1].z0, Some(75.0));
+    }
+
+    #[test]
     fn temp_command_queue_fallback_reports_error_without_panicking() {
         let state = AppState::default();
+        let netlist = Netlist::default();
         let err = command_to_queue_item(
             &state,
+            &netlist,
             &AnalysisCommand::Temp {
                 temperatures: vec![25.0],
             },
