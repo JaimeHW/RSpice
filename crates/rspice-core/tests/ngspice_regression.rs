@@ -1796,13 +1796,23 @@ fn test_ngspice_mesa_suite() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
-fn test_ngspice_bsim3soi_t3_dc_focus_cases_run() {
+fn test_ngspice_bsim3soi_focus_cases_run() {
     let tests_dir = get_tests_dir();
 
-    for relative in [
-        "bsim3soidd/t3.cir",
-        "bsim3soifd/t3.cir",
-        "bsim3soipd/t3.cir",
+    for (relative, expected_analysis) in [
+        ("bsim3soidd/inv2.cir", "DC Sweep"),
+        ("bsim3soidd/t3.cir", "DC Sweep"),
+        ("bsim3soidd/t4.cir", "DC Sweep"),
+        ("bsim3soidd/t5.cir", "DC Sweep"),
+        ("bsim3soifd/inv2.cir", "DC Sweep"),
+        ("bsim3soifd/t3.cir", "DC Sweep"),
+        ("bsim3soifd/t4.cir", "DC Sweep"),
+        ("bsim3soifd/t5.cir", "DC Sweep"),
+        ("bsim3soipd/inv2.cir", "DC Sweep"),
+        ("bsim3soipd/RampVg2.cir", "Transient"),
+        ("bsim3soipd/t3.cir", "DC Sweep"),
+        ("bsim3soipd/t4.cir", "DC Sweep"),
+        ("bsim3soipd/t5.cir", "DC Sweep"),
     ] {
         let suite = relative
             .split_once('/')
@@ -1822,7 +1832,7 @@ fn test_ngspice_bsim3soi_t3_dc_focus_cases_run() {
         );
         assert_eq!(
             result.analysis_type.as_deref(),
-            Some("DC Sweep"),
+            Some(expected_analysis),
             "Focused ngspice {relative} deck should report the expected analysis type"
         );
     }
