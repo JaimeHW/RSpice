@@ -596,6 +596,7 @@ struct ScalarGraphBuilder<'a> {
     variable_lowering_stack: HashSet<VariableId>,
     guard_history_lowering_stack: HashSet<(VariableId, usize)>,
     expression_lowering_stack: HashSet<ExprId>,
+    expression_lowering_stack_cycle_rejected: bool,
     expression_lowering_depth: usize,
     assignment_history_value_snapshot_stack: Vec<(VariableId, ValueId)>,
     assignment_history_snapshot_stack: Vec<(VariableId, usize)>,
@@ -914,6 +915,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             variable_lowering_stack: HashSet::new(),
             guard_history_lowering_stack: HashSet::new(),
             expression_lowering_stack: HashSet::new(),
+            expression_lowering_stack_cycle_rejected: false,
             expression_lowering_depth: 0,
             assignment_history_value_snapshot_stack: Vec::new(),
             assignment_history_snapshot_stack: Vec::new(),
@@ -2709,16 +2711,27 @@ impl<'a> ScalarGraphBuilder<'a> {
             return *value;
         }
 
-        if self.expression_lowering_depth >= MAX_SCALAR_EXPRESSION_LOWERING_DEPTH
-            || !self.expression_lowering_stack.insert(expr_id)
-        {
+        if self.expression_lowering_depth >= MAX_SCALAR_EXPRESSION_LOWERING_DEPTH {
             if self.trace_lower_failure() {
                 eprintln!(
                     "OptIR {}: lower expression rejected before lowering expr={} depth={} stack_cycle={}",
                     self.mir.module_name,
                     expr_id.index(),
                     self.expression_lowering_depth,
-                    self.expression_lowering_stack.contains(&expr_id)
+                    false
+                );
+            }
+            return None;
+        }
+        if !self.expression_lowering_stack.insert(expr_id) {
+            self.expression_lowering_stack_cycle_rejected = true;
+            if self.trace_lower_failure() {
+                eprintln!(
+                    "OptIR {}: lower expression rejected before lowering expr={} depth={} stack_cycle={}",
+                    self.mir.module_name,
+                    expr_id.index(),
+                    self.expression_lowering_depth,
+                    true
                 );
             }
             return None;
@@ -2845,6 +2858,19 @@ impl<'a> ScalarGraphBuilder<'a> {
             }
             _ => self.lower_expression(expr),
         }
+    }
+
+    fn lower_with_stack_cycle_probe<T>(
+        &mut self,
+        lower: impl FnOnce(&mut Self) -> Option<T>,
+    ) -> (Option<T>, bool) {
+        let previous_stack_cycle_rejected = self.expression_lowering_stack_cycle_rejected;
+        self.expression_lowering_stack_cycle_rejected = false;
+        let lowered = lower(self);
+        let stack_cycle_rejected = self.expression_lowering_stack_cycle_rejected;
+        self.expression_lowering_stack_cycle_rejected =
+            previous_stack_cycle_rejected || stack_cycle_rejected;
+        (lowered, stack_cycle_rejected)
     }
 
     fn equation_branch_unknown(&self, equation: &MirEquation) -> Option<BranchUnknownId> {
@@ -4496,10 +4522,26 @@ impl<'a> ScalarGraphBuilder<'a> {
             .assignment_history_prefix_cache
             .get(&cache_key)
             .copied()
-            .flatten()
         {
-            return Some(cached);
+            return cached;
         }
+        let (lowered, stack_cycle_rejected) = self.lower_with_stack_cycle_probe(|this| {
+            this.lower_recent_assignment_history_prefix_uncached(variable, limit)
+        });
+        if lowered.is_some()
+            || (!stack_cycle_rejected && !self.history_reconstruction_budget_exhausted)
+        {
+            self.assignment_history_prefix_cache
+                .insert(cache_key, lowered);
+        }
+        lowered
+    }
+
+    fn lower_recent_assignment_history_prefix_uncached(
+        &mut self,
+        variable: VariableId,
+        limit: usize,
+    ) -> Option<ValueId> {
         let history = self.variable_assignment_history.get(&variable)?.clone();
         let limit = limit.min(history.len());
         if limit == 0 {
@@ -4547,8 +4589,6 @@ impl<'a> ScalarGraphBuilder<'a> {
                 value = next;
             }
             if complete {
-                self.assignment_history_prefix_cache
-                    .insert(cache_key, Some(value));
                 return Some(value);
             }
         }
@@ -8888,6 +8928,61 @@ fn validate_schedule_ops(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canonical_ir::{
+        ContributionId, HirExprRef, HirExpression, MirBranchRef, SourceSpanRef,
+    };
+
+    fn test_span() -> SourceSpanRef {
+        SourceSpanRef {
+            source_file_id: 0,
+            start: 0,
+            end: 0,
+        }
+    }
+
+    fn test_expr_ref(id: ExprId) -> HirExprRef {
+        HirExprRef {
+            id,
+            kind: "test".into(),
+            span: test_span(),
+        }
+    }
+
+    fn test_mir(expressions: Vec<HirExpression>) -> MirModel {
+        MirModel {
+            module_name: "test".into(),
+            nodes: Vec::new(),
+            parameters: Vec::new(),
+            branches: Vec::new(),
+            branch_unknowns: Vec::new(),
+            state_slots: Vec::new(),
+            equations: vec![MirEquation {
+                id: EquationId::from(0),
+                contribution: ContributionId::from(0),
+                branch: MirBranchRef {
+                    label: "p,n".into(),
+                    declared_name: None,
+                    pos_node: None,
+                    neg_node: None,
+                },
+                kind: MirEquationKind::Current,
+                expression: test_expr_ref(ExprId::from(0)),
+                active_domains: Vec::new(),
+                span: test_span(),
+            }],
+            expressions,
+            value_symbols: Vec::new(),
+            ground_nodes: Vec::new(),
+        }
+    }
+
+    fn test_assignment_history_entry(expr: ExprId) -> AssignmentHistoryEntry {
+        AssignmentHistoryEntry {
+            expr,
+            value_snapshots: Vec::new(),
+            snapshots: Vec::new(),
+        }
+    }
 
     #[test]
     fn selective_assignment_targets_prioritize_selected_root_dependencies() {
@@ -8967,5 +9062,63 @@ mod tests {
         assert!(targets.contains(&sibling_root));
         assert!(targets.contains(&first_dependency));
         assert!(!targets.contains(&second_dependency));
+    }
+
+    #[test]
+    fn recent_assignment_history_prefix_caches_stable_failure() {
+        let expr = ExprId::from(0);
+        let mir = test_mir(vec![HirExpression {
+            id: expr,
+            kind: HirExprKind::StringLiteral {
+                value: "unsupported".into(),
+            },
+            span: test_span(),
+        }]);
+        let variable = VariableId::from(0);
+        let mut builder = ScalarGraphBuilder::new(None, &mir);
+        builder
+            .variable_assignment_history
+            .insert(variable, vec![test_assignment_history_entry(expr)]);
+
+        assert_eq!(
+            builder.lower_recent_assignment_history_prefix(variable, 1),
+            None
+        );
+        let cache_key = builder.assignment_history_prefix_cache_key(variable, 1);
+        assert_eq!(
+            builder.assignment_history_prefix_cache.get(&cache_key),
+            Some(&None)
+        );
+    }
+
+    #[test]
+    fn recent_assignment_history_prefix_does_not_cache_stack_cycle_failure() {
+        let expr = ExprId::from(0);
+        let mir = test_mir(vec![HirExpression {
+            id: expr,
+            kind: HirExprKind::Number {
+                value: 1.0,
+                raw: "1.0".into(),
+            },
+            span: test_span(),
+        }]);
+        let variable = VariableId::from(0);
+        let mut builder = ScalarGraphBuilder::new(None, &mir);
+        builder
+            .variable_assignment_history
+            .insert(variable, vec![test_assignment_history_entry(expr)]);
+        builder.expression_lowering_stack.insert(expr);
+
+        assert_eq!(
+            builder.lower_recent_assignment_history_prefix(variable, 1),
+            None
+        );
+        let cache_key = builder.assignment_history_prefix_cache_key(variable, 1);
+        assert!(
+            !builder
+                .assignment_history_prefix_cache
+                .contains_key(&cache_key)
+        );
+        assert!(builder.expression_lowering_stack_cycle_rejected);
     }
 }
