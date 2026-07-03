@@ -569,6 +569,7 @@ impl Engine {
                 node_names: Vec::new(),
                 branch_names: Vec::new(),
                 digital_traces: Vec::new(),
+                real_traces: Vec::new(),
             };
             let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit);
             return Ok((result, checkpoint));
@@ -886,9 +887,12 @@ impl Engine {
             node_names,
             branch_names,
             digital_traces: Vec::new(),
+            real_traces: Vec::new(),
         };
         let mut digital_snapshot = Vec::new();
+        let mut real_snapshot = Vec::new();
         let mut digital_trace_indices = HashMap::new();
+        let mut real_trace_indices = HashMap::new();
         if record_xspice_event_traces {
             circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
             result.record_digital_snapshot(
@@ -896,6 +900,8 @@ impl Engine {
                 &digital_snapshot,
                 &mut digital_trace_indices,
             );
+            circuit.fill_xspice_real_snapshot(&mut real_snapshot);
+            result.record_real_snapshot(resume_time, &real_snapshot, &mut real_trace_indices);
         }
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
@@ -2420,6 +2426,8 @@ impl Engine {
                             &digital_snapshot,
                             &mut digital_trace_indices,
                         );
+                        circuit.fill_xspice_real_snapshot(&mut real_snapshot);
+                        result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
                     }
 
                     let next_force_dt = Self::force_accept_recovery_timestep(
@@ -3214,6 +3222,8 @@ impl Engine {
                             &digital_snapshot,
                             &mut digital_trace_indices,
                         );
+                        circuit.fill_xspice_real_snapshot(&mut real_snapshot);
+                        result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
                     }
                     let next_force_dt = Self::force_accept_recovery_timestep(
                         dt,
@@ -3443,6 +3453,8 @@ impl Engine {
             if record_xspice_event_traces {
                 circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                 result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
+                circuit.fill_xspice_real_snapshot(&mut real_snapshot);
+                result.record_real_snapshot(t, &real_snapshot, &mut real_trace_indices);
             }
             if first_accepted_transient_step {
                 timestep.set_max_dt(hinted_max_step);

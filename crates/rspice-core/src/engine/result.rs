@@ -23,6 +23,24 @@ pub struct DigitalTrace {
     pub points: Vec<DigitalTracePoint>,
 }
 
+/// One accepted real-valued event sample for a named XSPICE real node.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RealTracePoint {
+    /// Event time in seconds.
+    pub time: Value,
+    /// Real event-node value at this event time.
+    pub value: Value,
+}
+
+/// Accepted real-valued event history for one XSPICE real node.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RealTrace {
+    /// Original netlist node name.
+    pub node_name: String,
+    /// Committed event samples for this node.
+    pub points: Vec<RealTracePoint>,
+}
+
 /// Result of transient analysis - time-domain waveforms
 #[derive(Debug, Clone)]
 pub struct TransientResult {
@@ -41,6 +59,8 @@ pub struct TransientResult {
     pub branch_names: Vec<String>,
     /// XSPICE digital node histories captured at accepted transient points.
     pub digital_traces: Vec<DigitalTrace>,
+    /// XSPICE real-valued event node histories captured at accepted transient points.
+    pub real_traces: Vec<RealTrace>,
 }
 
 impl TransientResult {
@@ -93,6 +113,60 @@ impl TransientResult {
     /// Get the complete digital event trace for a named XSPICE digital node.
     pub fn digital_trace_named(&self, name: &str) -> Option<&[DigitalTracePoint]> {
         self.digital_traces
+            .iter()
+            .find(|trace| trace.node_name.eq_ignore_ascii_case(name))
+            .map(|trace| trace.points.as_slice())
+    }
+
+    /// Append committed XSPICE real event values at an accepted transient time.
+    pub(crate) fn record_real_snapshot(
+        &mut self,
+        time: Value,
+        snapshot: &[(NodeId, Value)],
+        trace_indices: &mut HashMap<NodeId, usize>,
+    ) {
+        for &(node_id, value) in snapshot {
+            let Some(node_name) = node_id
+                .checked_sub(1)
+                .and_then(|index| self.node_names.get(index))
+            else {
+                continue;
+            };
+            let trace_idx = match trace_indices.get(&node_id).copied() {
+                Some(index) => index,
+                None => {
+                    let index = self.real_traces.len();
+                    self.real_traces.push(RealTrace {
+                        node_name: node_name.clone(),
+                        points: Vec::new(),
+                    });
+                    trace_indices.insert(node_id, index);
+                    index
+                }
+            };
+
+            let trace = &mut self.real_traces[trace_idx];
+            if trace
+                .points
+                .last()
+                .is_some_and(|point| point.time == time && point.value == value)
+            {
+                continue;
+            }
+            if trace
+                .points
+                .last()
+                .is_some_and(|point| point.value == value)
+            {
+                continue;
+            }
+            trace.points.push(RealTracePoint { time, value });
+        }
+    }
+
+    /// Get the complete real-valued event trace for a named XSPICE real node.
+    pub fn real_trace_named(&self, name: &str) -> Option<&[RealTracePoint]> {
+        self.real_traces
             .iter()
             .find(|trace| trace.node_name.eq_ignore_ascii_case(name))
             .map(|trace| trace.points.as_slice())
@@ -224,6 +298,7 @@ impl From<TransientResultCompressed> for TransientResult {
             node_names,
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            real_traces: Vec::new(),
         }
     }
 }

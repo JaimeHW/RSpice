@@ -99,6 +99,20 @@ fn digital_tokens(result: &TransientResult, node: &str) -> Vec<(f64, String)> {
         .collect()
 }
 
+fn real_event_values(result: &TransientResult, node: &str) -> Vec<(f64, f64)> {
+    result
+        .real_trace_named(node)
+        .unwrap_or_else(|| {
+            panic!(
+                "real event trace {node} missing from {:?}",
+                result.node_names
+            )
+        })
+        .iter()
+        .map(|point| (point.time, point.value))
+        .collect()
+}
+
 #[test]
 fn d_pullup_and_d_pulldown_expose_official_load_parameter() {
     let registry = CodeModelRegistry::with_builtins();
@@ -1653,6 +1667,53 @@ a_src [d] src
 }
 
 #[test]
+fn real_event_nodes_record_committed_transient_trace() {
+    let result = run_temp_deck(
+        "rspice-real-event-trace",
+        "0 0s\n1n 1s\n",
+        "\
+* real-valued XSPICE event trace oracle
+a_src [din] src
+a_d2r [din] r d2r
+a_gain r rout rg
+.model src d_source (input_file=\"stim.stim\")
+.model d2r d_to_real (zero=-1 one=2 delay=100p)
+.model rg real_gain (gain=3 out_offset=1 delay=50p)
+.end
+",
+        1.3e-9,
+        25.0e-12,
+    );
+
+    let r = real_event_values(&result, "r");
+    assert!(
+        r.iter()
+            .any(|(time, value)| *time == 0.0 && (*value + 1.0).abs() <= 1.0e-12),
+        "d_to_real should record initial real event at t=0, got {r:?}"
+    );
+    assert!(
+        r.iter()
+            .any(|(time, value)| (*time - 1.1e-9).abs() <= 1.0e-18
+                && (*value - 2.0).abs() <= 1.0e-12),
+        "d_to_real should record delayed high real event at 1.1ns, got {r:?}"
+    );
+
+    let rout = real_event_values(&result, "rout");
+    assert!(
+        rout.iter()
+            .any(|(time, value)| (*time - 50.0e-12).abs() <= 1.0e-18
+                && (*value + 2.0).abs() <= 1.0e-12),
+        "real_gain should record initial transformed event after its delay, got {rout:?}"
+    );
+    assert!(
+        rout.iter()
+            .any(|(time, value)| (*time - 1.15e-9).abs() <= 1.0e-18
+                && (*value - 7.0).abs() <= 1.0e-12),
+        "real_gain should record delayed transformed high event at 1.15ns, got {rout:?}"
+    );
+}
+
+#[test]
 fn control_esave_none_suppresses_digital_event_trace_output() {
     let result = run_temp_deck(
         "rspice-d-source-esave-none",
@@ -1660,7 +1721,9 @@ fn control_esave_none_suppresses_digital_event_trace_output() {
         "\
 * d_source esave none trace policy
 a_src [d] src
+a_d2r [d] r d2r
 .model src d_source (input_file=\"stim.stim\")
+.model d2r d_to_real
 .control
 esave none
 .endc
@@ -1674,6 +1737,11 @@ esave none
         result.digital_traces.is_empty(),
         "esave none should suppress digital event trace output, got {:?}",
         result.digital_traces
+    );
+    assert!(
+        result.real_traces.is_empty(),
+        "esave none should suppress real event trace output, got {:?}",
+        result.real_traces
     );
 }
 

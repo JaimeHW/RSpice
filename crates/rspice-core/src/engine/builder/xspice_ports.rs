@@ -262,6 +262,16 @@ pub(in crate::engine::builder) fn coerce_xspice_connections(
             continue;
         }
 
+        if port_spec.null_allowed
+            && xspice_connection_shapes_feasible(
+                &port_specs[spec_idx + 1..],
+                &parsed_ports[cursor..],
+            )
+        {
+            connections.push(crate::xspice::PortConnection::Null);
+            continue;
+        }
+
         if port_spec.is_vector && !parsed_ports[cursor].is_vector_connection() {
             let Some(take) = choose_unpacked_vector_take(
                 port_spec,
@@ -983,6 +993,33 @@ mod tests {
             other => panic!("expected one digital output bit, got {other:?}"),
         }
         assert!(matches!(single_bit_connections[2], PortConnection::Null));
+    }
+
+    #[test]
+    fn middle_nullable_scalar_port_may_be_omitted_before_required_output() {
+        let mut circuit = CircuitData::new();
+        let ports = vec![
+            PortSpec::input("in", PortType::Digital),
+            PortSpec::input("enable", PortType::Digital).nullable(),
+            PortSpec::output("out", PortType::Real),
+        ];
+
+        let connections = coerce_xspice_connections(
+            &mut circuit,
+            &ports,
+            &[
+                XspicePort::Digital("DIN".to_string()),
+                XspicePort::Analog("ROUT".to_string()),
+            ],
+            "A_D2R",
+            "d_to_real",
+        )
+        .expect("omitted middle nullable scalar should not consume the required output token");
+
+        assert_eq!(connections.len(), 3);
+        assert!(matches!(connections[0], PortConnection::Digital(_)));
+        assert!(matches!(connections[1], PortConnection::Null));
+        assert!(matches!(connections[2], PortConnection::Real(_)));
     }
 
     #[test]

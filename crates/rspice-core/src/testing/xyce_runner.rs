@@ -11210,6 +11210,7 @@ C1 out 0 40u IC=1
             node_names: vec!["1".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            real_traces: Vec::new(),
         };
 
         let initial = XyceTestRunner::evaluate_tran_probe("i(i1)", &netlist, &result, 0.0)
@@ -11301,6 +11302,7 @@ C1 out 0 40u IC=1
             node_names: vec!["1".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            real_traces: Vec::new(),
         };
         let tolerance = runner.default_comparison_tolerance("v(1)");
         let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(2.99999996);
@@ -11334,6 +11336,7 @@ C1 out 0 40u IC=1
             node_names: vec!["3".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            real_traces: Vec::new(),
         };
         let tolerance = runner
             .default_comparison_tolerance("v(3)")
@@ -11395,6 +11398,7 @@ interval output
             node_names: vec!["1".to_string()],
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
+            real_traces: Vec::new(),
         };
         let tolerance = runner.default_comparison_tolerance("v(1)");
 

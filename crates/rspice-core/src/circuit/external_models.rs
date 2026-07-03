@@ -540,6 +540,17 @@ impl CircuitData {
         snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
     }
 
+    /// Fill a reusable snapshot of committed XSPICE real event-node values.
+    pub(crate) fn fill_xspice_real_snapshot(&self, snapshot: &mut Vec<(NodeId, Value)>) {
+        snapshot.clear();
+        snapshot.extend(
+            self.xspice_real_values
+                .iter()
+                .filter_map(|(&node_id, &value)| (node_id > 0).then_some((node_id, value))),
+        );
+        snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
+    }
+
     /// Time of the next pending XSPICE digital event, if any.
     pub(crate) fn next_xspice_event_time(&self) -> Option<Value> {
         self.xspice_event_queue.next_event_time()
