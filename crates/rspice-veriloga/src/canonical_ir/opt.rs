@@ -7111,13 +7111,88 @@ fn selective_assignment_history_targets(
         .iter()
         .map(|variable| (variable.name.as_str(), variable.id))
         .collect();
-    let mut targets = HashSet::new();
-    let mut visited = HashSet::new();
-    let mut stack: Vec<_> = mir
-        .equations
+    let variable_names_by_id: HashMap<_, _> = hir
+        .variables
         .iter()
-        .map(|equation| equation.expression.id)
+        .map(|variable| (variable.id, variable.name.as_str()))
         .collect();
+    let direct_target_groups =
+        collect_selective_assignment_direct_target_groups(mir, &variables_by_name);
+    let mut assignments = Vec::new();
+    collect_hir_assignments(&hir.statements, &mut assignments);
+    let mut assignments_by_target: HashMap<_, Vec<_>> = HashMap::new();
+    for assignment in assignments {
+        assignments_by_target
+            .entry(assignment.target)
+            .or_default()
+            .push(assignment);
+    }
+
+    let mut targets = HashSet::new();
+    let mut processed_depths: HashMap<VariableId, SelectiveAssignmentDependencyDepth> =
+        HashMap::new();
+    select_selective_assignment_history_targets(
+        &direct_target_groups,
+        budget,
+        &mut targets,
+        &mut processed_depths,
+        |target, dependency_depth| {
+            let Some(assignments) = assignments_by_target.get(&target) else {
+                return Vec::new();
+            };
+            let mut dependencies = HashMap::new();
+            for assignment in assignments {
+                collect_selective_assignment_dependencies(
+                    mir,
+                    &variables_by_name,
+                    assignment,
+                    dependency_depth,
+                    &mut dependencies,
+                );
+            }
+            let mut dependencies: Vec<_> = dependencies.into_iter().collect();
+            dependencies.retain(|(dependency, _)| {
+                selective_assignment_history_target_variable(&variable_names_by_id, *dependency)
+            });
+            sort_selective_assignment_dependencies(&mut dependencies);
+            dependencies
+        },
+    );
+    trace_selective_assignment_history_targets(hir, &targets);
+    targets
+}
+
+fn collect_selective_assignment_direct_target_groups(
+    mir: &MirModel,
+    variables_by_name: &HashMap<&str, VariableId>,
+) -> Vec<Vec<VariableId>> {
+    let mut target_groups = Vec::new();
+    let mut seen = HashSet::new();
+    for equation in &mir.equations {
+        let mut targets = Vec::new();
+        collect_expression_direct_assignment_targets(
+            mir,
+            variables_by_name,
+            equation.expression.id,
+            &mut seen,
+            &mut targets,
+        );
+        if !targets.is_empty() {
+            target_groups.push(targets);
+        }
+    }
+    target_groups
+}
+
+fn collect_expression_direct_assignment_targets(
+    mir: &MirModel,
+    variables_by_name: &HashMap<&str, VariableId>,
+    root: ExprId,
+    seen: &mut HashSet<VariableId>,
+    targets: &mut Vec<VariableId>,
+) {
+    let mut visited = HashSet::new();
+    let mut stack = vec![root];
     while let Some(expr) = stack.pop() {
         if !visited.insert(expr) {
             continue;
@@ -7127,98 +7202,130 @@ fn selective_assignment_history_targets(
         };
         match &expression.kind {
             HirExprKind::Identifier { name } => {
-                if let Some(variable) = variables_by_name.get(name.as_str()) {
-                    targets.insert(*variable);
+                if !selective_assignment_history_target_name(name) {
+                    continue;
+                }
+                if let Some(variable) = variables_by_name.get(name.as_str()).copied()
+                    && seen.insert(variable)
+                {
+                    targets.push(variable);
                 }
             }
-            HirExprKind::Binary { left, right, .. } => stack.extend([*left, *right]),
+            HirExprKind::Binary { left, right, .. } => stack.extend([*right, *left]),
             HirExprKind::Unary { operand, .. } => stack.push(*operand),
             HirExprKind::Conditional {
                 condition,
                 then_expr,
                 else_expr,
-            } => stack.extend([*condition, *then_expr, *else_expr]),
+            } => stack.extend([*else_expr, *then_expr, *condition]),
             HirExprKind::Call { args, .. }
             | HirExprKind::SystemFunction { args, .. }
-            | HirExprKind::ArrayLiteral { elements: args } => stack.extend(args.iter().copied()),
+            | HirExprKind::ArrayLiteral { elements: args } => {
+                stack.extend(args.iter().rev().copied())
+            }
             HirExprKind::ArrayAccess { index, .. } => stack.push(*index),
             HirExprKind::AnalogOperator { op } => {
                 push_analog_operator_expr_children(op, &mut stack);
             }
             HirExprKind::Laplace { expr, .. } | HirExprKind::Zi { expr, .. } => stack.push(*expr),
-            HirExprKind::NoiseSource { operands, .. } => stack.extend(operands.iter().copied()),
+            HirExprKind::NoiseSource { operands, .. } => {
+                stack.extend(operands.iter().rev().copied())
+            }
             HirExprKind::Number { .. }
             | HirExprKind::StringLiteral { .. }
             | HirExprKind::BranchAccess { .. }
             | HirExprKind::NamedBranchAccess { .. } => {}
         }
     }
-    let mut assignments = Vec::new();
-    collect_hir_assignments(&hir.statements, &mut assignments);
-    let direct_targets = targets.clone();
-    let mut assignments_by_target: HashMap<_, Vec<_>> = HashMap::new();
-    for assignment in assignments {
-        assignments_by_target
-            .entry(assignment.target)
-            .or_default()
-            .push(assignment);
-    }
+}
 
-    let mut pending: Vec<_> = direct_targets
-        .iter()
-        .copied()
-        .map(|target| {
-            (
-                target,
-                SelectiveAssignmentDependencyDepth::from_budget(budget),
-            )
-        })
-        .collect();
-    pending.sort_by_key(|(target, depth)| (usize::from(*target), depth.arithmetic, depth.simple));
-    let mut pending: VecDeque<_> = pending.into();
-    let mut processed_depths: HashMap<VariableId, SelectiveAssignmentDependencyDepth> =
-        HashMap::new();
-    while let Some((target, dependency_depth)) = pending.pop_front() {
-        if processed_depths
-            .get(&target)
-            .is_some_and(|processed| processed.dominates(dependency_depth))
-        {
-            continue;
-        }
-        insert_selective_assignment_dependency(&mut processed_depths, target, dependency_depth);
-        let Some(assignments) = assignments_by_target.get(&target) else {
-            continue;
-        };
-        for assignment in assignments {
-            let mut dependencies = HashMap::new();
-            collect_selective_assignment_dependencies(
-                mir,
-                &variables_by_name,
-                assignment,
-                dependency_depth,
-                &mut dependencies,
-            );
-            let mut dependencies: Vec<_> = dependencies.into_iter().collect();
-            dependencies.sort_by_key(|(dependency, depth)| {
-                (usize::from(*dependency), depth.arithmetic, depth.simple)
-            });
-            for (dependency, dependency_depth) in dependencies {
+fn selective_assignment_history_target_variable(
+    variable_names_by_id: &HashMap<VariableId, &str>,
+    variable: VariableId,
+) -> bool {
+    variable_names_by_id
+        .get(&variable)
+        .is_none_or(|name| selective_assignment_history_target_name(name))
+}
+
+fn selective_assignment_history_target_name(name: &str) -> bool {
+    // Generated guards are normally available as current scalar values and can be
+    // snapshotted by history entries without spending selective history targets.
+    !name.starts_with("__guard")
+}
+
+fn select_selective_assignment_history_targets<F>(
+    direct_target_groups: &[Vec<VariableId>],
+    budget: SelectiveAssignmentHistoryBudget,
+    targets: &mut HashSet<VariableId>,
+    processed_depths: &mut HashMap<VariableId, SelectiveAssignmentDependencyDepth>,
+    mut dependencies_for: F,
+) where
+    F: FnMut(
+        VariableId,
+        SelectiveAssignmentDependencyDepth,
+    ) -> Vec<(VariableId, SelectiveAssignmentDependencyDepth)>,
+{
+    for direct_targets in direct_target_groups {
+        let root_depth = SelectiveAssignmentDependencyDepth::from_budget(budget);
+        for &root in direct_targets {
+            if !targets.contains(&root) {
                 if targets.len() >= budget.max_targets {
-                    trace_selective_assignment_history_targets(hir, &targets);
-                    return targets;
+                    return;
                 }
-                if targets.insert(dependency)
-                    || processed_depths
+                targets.insert(root);
+            }
+        }
+        for &root in direct_targets {
+            if processed_depths
+                .get(&root)
+                .is_some_and(|processed| processed.dominates(root_depth))
+            {
+                continue;
+            }
+            let mut pending = VecDeque::from([(root, root_depth)]);
+            while let Some((target, dependency_depth)) = pending.pop_front() {
+                if !targets.contains(&target) {
+                    if targets.len() >= budget.max_targets {
+                        return;
+                    }
+                    targets.insert(target);
+                }
+                if processed_depths
+                    .get(&target)
+                    .is_some_and(|processed| processed.dominates(dependency_depth))
+                {
+                    continue;
+                }
+                insert_selective_assignment_dependency(processed_depths, target, dependency_depth);
+                for (dependency, dependency_depth) in dependencies_for(target, dependency_depth) {
+                    if !targets.contains(&dependency) && targets.len() >= budget.max_targets {
+                        return;
+                    }
+                    if processed_depths
                         .get(&dependency)
                         .is_none_or(|processed| !processed.dominates(dependency_depth))
-                {
-                    pending.push_back((dependency, dependency_depth));
+                    {
+                        pending.push_back((dependency, dependency_depth));
+                    }
                 }
             }
         }
     }
-    trace_selective_assignment_history_targets(hir, &targets);
-    targets
+}
+
+fn sort_selective_assignment_dependencies(
+    dependencies: &mut [(VariableId, SelectiveAssignmentDependencyDepth)],
+) {
+    dependencies.sort_by(
+        |(left_variable, left_depth), (right_variable, right_depth)| {
+            right_depth
+                .arithmetic
+                .cmp(&left_depth.arithmetic)
+                .then_with(|| right_depth.simple.cmp(&left_depth.simple))
+                .then_with(|| usize::from(*left_variable).cmp(&usize::from(*right_variable)))
+        },
+    );
 }
 
 fn trace_selective_assignment_history_targets(hir: &HirModel, targets: &HashSet<VariableId>) {
@@ -8775,5 +8882,90 @@ fn validate_schedule_ops(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selective_assignment_targets_prioritize_selected_root_dependencies() {
+        let budget = SelectiveAssignmentHistoryBudget {
+            max_targets: 3,
+            arithmetic_dependency_depth: 0,
+            simple_dependency_depth: 2,
+        };
+        let root = VariableId::from(0);
+        let first_dependency = VariableId::from(1);
+        let second_dependency = VariableId::from(2);
+        let unrelated_root = VariableId::from(10);
+        let direct_target_groups = vec![vec![root], vec![unrelated_root]];
+        let mut targets = HashSet::new();
+        let mut processed_depths = HashMap::new();
+
+        select_selective_assignment_history_targets(
+            &direct_target_groups,
+            budget,
+            &mut targets,
+            &mut processed_depths,
+            |target, depth| match target {
+                target if target == root => depth
+                    .simple_dependency()
+                    .map(|depth| vec![(first_dependency, depth)])
+                    .unwrap_or_default(),
+                target if target == first_dependency => depth
+                    .simple_dependency()
+                    .map(|depth| vec![(second_dependency, depth)])
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            },
+        );
+
+        assert_eq!(targets.len(), budget.max_targets);
+        assert!(targets.contains(&root));
+        assert!(targets.contains(&first_dependency));
+        assert!(targets.contains(&second_dependency));
+        assert!(!targets.contains(&unrelated_root));
+    }
+
+    #[test]
+    fn selective_assignment_targets_admit_same_equation_roots_before_dependencies() {
+        let budget = SelectiveAssignmentHistoryBudget {
+            max_targets: 3,
+            arithmetic_dependency_depth: 0,
+            simple_dependency_depth: 2,
+        };
+        let root = VariableId::from(0);
+        let sibling_root = VariableId::from(1);
+        let first_dependency = VariableId::from(2);
+        let second_dependency = VariableId::from(3);
+        let direct_target_groups = vec![vec![root, sibling_root]];
+        let mut targets = HashSet::new();
+        let mut processed_depths = HashMap::new();
+
+        select_selective_assignment_history_targets(
+            &direct_target_groups,
+            budget,
+            &mut targets,
+            &mut processed_depths,
+            |target, depth| match target {
+                target if target == root => depth
+                    .simple_dependency()
+                    .map(|depth| vec![(first_dependency, depth)])
+                    .unwrap_or_default(),
+                target if target == first_dependency => depth
+                    .simple_dependency()
+                    .map(|depth| vec![(second_dependency, depth)])
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            },
+        );
+
+        assert_eq!(targets.len(), budget.max_targets);
+        assert!(targets.contains(&root));
+        assert!(targets.contains(&sibling_root));
+        assert!(targets.contains(&first_dependency));
+        assert!(!targets.contains(&second_dependency));
     }
 }
