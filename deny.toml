@@ -7,6 +7,8 @@ yanked = "deny"
 ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is a transitive proc-macro dependency of faer's GEMM stack; faer 0.24 still depends on it and no patched upgrade path is currently available." },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is pulled through egui 0.29 text rendering; upgrading to the newer egui font stack is a larger UI migration tracked separately from CI hardening." },
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml is pulled only through wayland-scanner 0.31, whose latest release still depends on quick-xml 0.39; this is a build-time code generator for trusted Wayland protocol XML, not runtime untrusted XML parsing." },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml is pulled only through wayland-scanner 0.31, whose latest release still depends on quick-xml 0.39; this is a build-time code generator for trusted Wayland protocol XML, not runtime untrusted XML parsing." },
 ]
 
 [licenses]
