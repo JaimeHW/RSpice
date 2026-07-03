@@ -2633,26 +2633,29 @@ fn test_xyce_current_source_probe_cases_run() {
 }
 
 #[test]
-fn test_xyce_generic_switch_hysteresis_transient_branch_current_case_runs() {
+fn test_xyce_generic_switch_transient_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/GSWITCH/gswitchHyst1.cir";
 
-    let result = runner.run_test(root.join(relative));
-
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a numeric Xyce generic switch branch-current transient comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
-    assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
-    );
+    for relative in [
+        "Netlists/GSWITCH/gswitch.cir",
+        "Netlists/GSWITCH/gswitchHyst1.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a numeric Xyce generic switch transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
 }
 
 #[test]
