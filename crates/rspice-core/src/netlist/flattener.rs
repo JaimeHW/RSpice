@@ -734,6 +734,39 @@ impl<'a> Flattener<'a> {
                     control_element: new_ctrl,
                 }
             }
+            ElementKind::VSwitch {
+                control_pos,
+                control_neg,
+                model,
+                initial_state,
+            } => ElementKind::VSwitch {
+                control_pos: self.remap_node(control_pos, prefix, node_map),
+                control_neg: self.remap_node(control_neg, prefix, node_map),
+                model: model.clone(),
+                initial_state: *initial_state,
+            },
+            ElementKind::ISwitch {
+                control_element,
+                model,
+                initial_state,
+            } => ElementKind::ISwitch {
+                control_element: Self::remap_local_element_reference(control_element, prefix),
+                model: model.clone(),
+                initial_state: *initial_state,
+            },
+            ElementKind::GenericSwitch {
+                model,
+                control_expression,
+                initial_state,
+            } => ElementKind::GenericSwitch {
+                model: model.clone(),
+                control_expression: self.remap_behavioral_expression(
+                    control_expression,
+                    prefix,
+                    node_map,
+                ),
+                initial_state: *initial_state,
+            },
             ElementKind::Coupling {
                 inductors,
                 coefficient,

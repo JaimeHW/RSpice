@@ -7671,6 +7671,41 @@ mod tests {
     }
 
     #[test]
+    fn nested_subckt_instance_param_sees_later_caller_body_param() {
+        let netlist = Netlist::parse(
+            "nested subckt instance parameter sees caller body param\n\
+             .param res=1\n\
+             Xtop 1 0 top\n\
+             .subckt top in out\n\
+             Xearly in out child params: r={2*res/1000}\n\
+             .param res=1k\n\
+             .subckt child a b params: r=1\n\
+             R1 a b {1000*r}\n\
+             .ends child\n\
+             .ends top\n\
+             .end\n",
+        )
+        .expect("nested subcircuit body parameter deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist)
+            .expect("nested subcircuit body parameter deck flattens");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. }
+                    if element.name.eq_ignore_ascii_case("Xtop.Xearly.R1") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("flattened nested resistor exists");
+
+        assert_eq!(resistance, 2000.0);
+    }
+
+    #[test]
     fn nested_subckt_instance_param_passes_caller_override() {
         let netlist = Netlist::parse(
             "nested subckt instance parameter precedence\n\
@@ -7862,6 +7897,107 @@ mod tests {
 
         assert_eq!(es_gain, 2.0);
         assert_eq!(fp_gain, 2.0);
+    }
+
+    #[test]
+    fn subckt_switch_controls_remap_to_hierarchical_nodes_when_flattened() {
+        let netlist = Netlist::parse(
+            "subckt switch control hierarchy scope\n\
+             .model SW VSWITCH (RON=1 ROFF=1MEG VON=1 VOFF=0)\n\
+             .model CSW ISWITCH (RON=1 ROFF=1MEG ION=1 IOFF=0)\n\
+             X1 A Y VCC TOP\n\
+             .subckt TOP a out vcc\n\
+             XG a 8 out vcc GATE\n\
+             .subckt GATE in ctrl out vcc\n\
+             VCTRL ctrl 0 0\n\
+             S1 out vcc ctrl 0 SW\n\
+             W1 out 0 VCTRL CSW\n\
+             S2 out 0 SW CONTROL={V(ctrl)+I(VCTRL)}\n\
+             .ends GATE\n\
+             .ends TOP\n\
+             .end\n",
+        )
+        .expect("subcircuit switch control deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("switch control deck flattens");
+
+        let (control_pos, control_neg) = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::VSwitch {
+                    control_pos,
+                    control_neg,
+                    ..
+                } if element.name == "X1.XG.S1" => {
+                    Some((control_pos.as_str(), control_neg.as_str()))
+                }
+                _ => None,
+            })
+            .expect("flattened voltage switch exists");
+        assert_eq!(control_pos, "X1.8");
+        assert_eq!(control_neg, "0");
+
+        let control_element = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::ISwitch {
+                    control_element, ..
+                } if element.name == "X1.XG.W1" => Some(control_element.as_str()),
+                _ => None,
+            })
+            .expect("flattened current switch exists");
+        assert_eq!(control_element, "X1.XG.VCTRL");
+
+        let control_expression = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::GenericSwitch {
+                    control_expression, ..
+                } if element.name == "X1.XG.S2" => Some(control_expression.as_str()),
+                _ => None,
+            })
+            .expect("flattened generic switch exists");
+        assert_eq!(control_expression, "V(X1.8)+I(X1.XG.VCTRL)");
+    }
+
+    #[test]
+    fn subckt_body_param_expression_resolves_after_instance_override() {
+        let netlist = Netlist::parse(
+            "subckt body param expression after instance override\n\
+             .param res=1\n\
+             Xtop 1 0 top\n\
+             .subckt top in out\n\
+             Xearly in out child params: r={2*res/1000}\n\
+             .param res=1k\n\
+             .subckt child a b params: r=1\n\
+             .param res2={10*r}\n\
+             R1 a b {1000*(res2/10)}\n\
+             .ends child\n\
+             .ends top\n\
+             .end\n",
+        )
+        .expect("subcircuit body expression deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("subcircuit body expression flattens");
+        let resistance = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Resistor { value, .. }
+                    if element.name.eq_ignore_ascii_case("Xtop.Xearly.R1") =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            })
+            .expect("flattened body-expression resistor exists");
+
+        assert_eq!(resistance, 2000.0);
     }
 
     #[test]
