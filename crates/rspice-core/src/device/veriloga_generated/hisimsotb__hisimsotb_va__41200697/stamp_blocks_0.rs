@@ -12,7 +12,6 @@ impl Instance {
         locals.var_qb_1 = 0.1;
         locals.var_i = 0.0;
         locals.var_flg_brk10 = 0.0;
-        (locals.var_gds0_ign, locals.var_gds0_ign_dn0, locals.var_gds0_ign_dn2, locals.var_gds0_ign_dn4, locals.var_gds0_ign_dn5, locals.var_gds0_ign_dn6, locals.var_gds0_ign_dn8, locals.var_gds0_ign_dn10, locals.var_gds0_ign_dn11, locals.var_gds0_ign_dn12, ) = (1e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         locals.var_lp_s0_max = 500.0;
         locals.var_lp_sl_max = 200.0;
         locals.var_sti2_dlt = 0.002;
@@ -83,13 +82,10 @@ impl Instance {
         (locals.var_fb, locals.var_fb_dn0, locals.var_fb_dn2, locals.var_fb_dn4, locals.var_fb_dn5, locals.var_fb_dn6, locals.var_fb_dn8, locals.var_fb_dn10, locals.var_fb_dn11, locals.var_fb_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         (locals.var_psdl, locals.var_psdl_dn0, locals.var_psdl_dn2, locals.var_psdl_dn4, locals.var_psdl_dn5, locals.var_psdl_dn6, locals.var_psdl_dn8, locals.var_psdl_dn10, locals.var_psdl_dn11, locals.var_psdl_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         (locals.var_vdsat, locals.var_vdsat_dn0, locals.var_vdsat_dn2, locals.var_vdsat_dn4, locals.var_vdsat_dn5, locals.var_vdsat_dn6, locals.var_vdsat_dn8, locals.var_vdsat_dn10, locals.var_vdsat_dn11, locals.var_vdsat_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
-        (locals.var_mud_hoso, locals.var_mud_hoso_dn0, locals.var_mud_hoso_dn2, locals.var_mud_hoso_dn4, locals.var_mud_hoso_dn5, locals.var_mud_hoso_dn6, locals.var_mud_hoso_dn8, locals.var_mud_hoso_dn10, locals.var_mud_hoso_dn11, locals.var_mud_hoso_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         (locals.var_kusai00, locals.var_kusai00_dn0, locals.var_kusai00_dn2, locals.var_kusai00_dn4, locals.var_kusai00_dn5, locals.var_kusai00_dn6, locals.var_kusai00_dn8, locals.var_kusai00_dn10, locals.var_kusai00_dn11, locals.var_kusai00_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         (locals.var_kusail, locals.var_kusail_dn0, locals.var_kusail_dn2, locals.var_kusail_dn4, locals.var_kusail_dn5, locals.var_kusail_dn6, locals.var_kusail_dn8, locals.var_kusail_dn10, locals.var_kusail_dn11, locals.var_kusail_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
-        (locals.var_kusai00l, locals.var_kusai00l_dn0, locals.var_kusai00l_dn2, locals.var_kusai00l_dn4, locals.var_kusai00l_dn5, locals.var_kusai00l_dn6, locals.var_kusai00l_dn8, locals.var_kusai00l_dn10, locals.var_kusai00l_dn11, locals.var_kusai00l_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
+        locals.var_kusai00l = 0.0;
         (locals.var_sqrtkusail, locals.var_sqrtkusail_dn0, locals.var_sqrtkusail_dn2, locals.var_sqrtkusail_dn4, locals.var_sqrtkusail_dn5, locals.var_sqrtkusail_dn6, locals.var_sqrtkusail_dn8, locals.var_sqrtkusail_dn10, locals.var_sqrtkusail_dn11, locals.var_sqrtkusail_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
-        (locals.var_kusai_ig, locals.var_kusai_ig_dn0, locals.var_kusai_ig_dn2, locals.var_kusai_ig_dn4, locals.var_kusai_ig_dn5, locals.var_kusai_ig_dn6, locals.var_kusai_ig_dn8, locals.var_kusai_ig_dn10, locals.var_kusai_ig_dn11, locals.var_kusai_ig_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
-        (locals.var_crl_f, locals.var_crl_f_dn0, locals.var_crl_f_dn2, locals.var_crl_f_dn4, locals.var_crl_f_dn5, locals.var_crl_f_dn6, locals.var_crl_f_dn8, locals.var_crl_f_dn10, locals.var_crl_f_dn11, locals.var_crl_f_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         (locals.var_vgs_shift, locals.var_vgs_shift_dn0, locals.var_vgs_shift_dn2, locals.var_vgs_shift_dn4, locals.var_vgs_shift_dn5, locals.var_vgs_shift_dn6, locals.var_vgs_shift_dn8, locals.var_vgs_shift_dn10, locals.var_vgs_shift_dn11, locals.var_vgs_shift_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         (locals.var_chi, locals.var_chi_dn0, locals.var_chi_dn2, locals.var_chi_dn4, locals.var_chi_dn5, locals.var_chi_dn6, locals.var_chi_dn8, locals.var_chi_dn10, locals.var_chi_dn11, locals.var_chi_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         (locals.var_ps0_isub, locals.var_ps0_isub_dn0, locals.var_ps0_isub_dn2, locals.var_ps0_isub_dn4, locals.var_ps0_isub_dn5, locals.var_ps0_isub_dn6, locals.var_ps0_isub_dn8, locals.var_ps0_isub_dn10, locals.var_ps0_isub_dn11, locals.var_ps0_isub_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
@@ -337,16 +333,16 @@ impl Instance {
         (locals.var_weff_cv, locals.var_weff_cv_dn0, locals.var_weff_cv_dn2, locals.var_weff_cv_dn4, locals.var_weff_cv_dn5, locals.var_weff_cv_dn6, locals.var_weff_cv_dn8, locals.var_weff_cv_dn10, locals.var_weff_cv_dn11, locals.var_weff_cv_dn12, ) = (assign1850_e1129, (-locals.var_dwsti_dn0), (-locals.var_dwsti_dn2), (-locals.var_dwsti_dn4), (-locals.var_dwsti_dn5), (-locals.var_dwsti_dn6), (-locals.var_dwsti_dn8), (-locals.var_dwsti_dn10), (-locals.var_dwsti_dn11), (-locals.var_dwsti_dn12), );
         let assign1860_e1132: f64 = (locals.var_weff * p.p5);
         (locals.var_weff_nf, locals.var_weff_nf_dn0, locals.var_weff_nf_dn2, locals.var_weff_nf_dn4, locals.var_weff_nf_dn5, locals.var_weff_nf_dn6, locals.var_weff_nf_dn8, locals.var_weff_nf_dn10, locals.var_weff_nf_dn11, locals.var_weff_nf_dn12, ) = (assign1860_e1132, (locals.var_weff_dn0 * p.p5), (locals.var_weff_dn2 * p.p5), (locals.var_weff_dn4 * p.p5), (locals.var_weff_dn5 * p.p5), (locals.var_weff_dn6 * p.p5), (locals.var_weff_dn8 * p.p5), (locals.var_weff_dn10 * p.p5), (locals.var_weff_dn11 * p.p5), (locals.var_weff_dn12 * p.p5), );
-    }
-    pub(super) fn stamp_transient_block_1(
-        p: &Parameters,
-        locals: &mut StampLocals,
-    ) {
         let assign1870_e1135: f64 = (locals.var_weff_cv * p.p5);
         (locals.var_weffcv_nf, locals.var_weffcv_nf_dn0, locals.var_weffcv_nf_dn2, locals.var_weffcv_nf_dn4, locals.var_weffcv_nf_dn5, locals.var_weffcv_nf_dn6, locals.var_weffcv_nf_dn8, locals.var_weffcv_nf_dn10, locals.var_weffcv_nf_dn11, locals.var_weffcv_nf_dn12, ) = (assign1870_e1135, (locals.var_weff_cv_dn0 * p.p5), (locals.var_weff_cv_dn2 * p.p5), (locals.var_weff_cv_dn4 * p.p5), (locals.var_weff_cv_dn5 * p.p5), (locals.var_weff_cv_dn6 * p.p5), (locals.var_weff_cv_dn8 * p.p5), (locals.var_weff_cv_dn10 * p.p5), (locals.var_weff_cv_dn11 * p.p5), (locals.var_weff_cv_dn12 * p.p5), );
         let assign1880_e1139: f64 = (locals.var_mfactor * locals.var_weff_nf);
         let assign1880_e1140: f64 = (locals.var_mks_rth0 / assign1880_e1139);
         (locals.var_rth, locals.var_rth_dn0, locals.var_rth_dn2, locals.var_rth_dn4, locals.var_rth_dn5, locals.var_rth_dn6, locals.var_rth_dn8, locals.var_rth_dn10, locals.var_rth_dn11, locals.var_rth_dn12, ) = (assign1880_e1140, (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn0)) / (assign1880_e1139 * assign1880_e1139))), (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn2)) / (assign1880_e1139 * assign1880_e1139))), (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn4)) / (assign1880_e1139 * assign1880_e1139))), (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn5)) / (assign1880_e1139 * assign1880_e1139))), (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn6)) / (assign1880_e1139 * assign1880_e1139))), (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn8)) / (assign1880_e1139 * assign1880_e1139))), (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn10)) / (assign1880_e1139 * assign1880_e1139))), (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn11)) / (assign1880_e1139 * assign1880_e1139))), (-((locals.var_mks_rth0 * (locals.var_mfactor * locals.var_weff_nf_dn12)) / (assign1880_e1139 * assign1880_e1139))), );
+    }
+    pub(super) fn stamp_transient_block_1(
+        p: &Parameters,
+        locals: &mut StampLocals,
+    ) {
         let assign1890_e1144: f64 = (locals.var_mfactor * locals.var_weffcv_nf);
         let assign1890_e1145: f64 = (locals.var_mks_cth0 * assign1890_e1144);
         (locals.var_cth, locals.var_cth_dn0, locals.var_cth_dn2, locals.var_cth_dn4, locals.var_cth_dn5, locals.var_cth_dn6, locals.var_cth_dn8, locals.var_cth_dn10, locals.var_cth_dn11, locals.var_cth_dn12, ) = (assign1890_e1145, (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn0)), (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn2)), (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn4)), (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn5)), (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn6)), (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn8)), (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn10)), (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn11)), (locals.var_mks_cth0 * (locals.var_mfactor * locals.var_weffcv_nf_dn12)), );
@@ -752,16 +748,18 @@ impl Instance {
             let assign2710_e1841: f64 = (p.p3 + assign2710_e1840);
             (locals.var_t1, locals.var_t1_dn0, locals.var_t1_dn2, locals.var_t1_dn4, locals.var_t1_dn5, locals.var_t1_dn6, locals.var_t1_dn8, locals.var_t1_dn10, locals.var_t1_dn11, locals.var_t1_dn12, ) = (assign2710_e1841, (locals.var_weff_dn0 / assign2710_e1839), (locals.var_weff_dn2 / assign2710_e1839), (locals.var_weff_dn4 / assign2710_e1839), (locals.var_weff_dn5 / assign2710_e1839), (locals.var_weff_dn6 / assign2710_e1839), (locals.var_weff_dn8 / assign2710_e1839), (locals.var_weff_dn10 / assign2710_e1839), (locals.var_weff_dn11 / assign2710_e1839), (locals.var_weff_dn12 / assign2710_e1839), );
         }
-        if (locals.var_guard19 != 0.0) {
-            let assign2720_e1847: f64 = (p.p48 * locals.var_t1);
-            let assign2720_e1851: f64 = (locals.var_lgate - p.p4);
-            let assign2720_e1852: f64 = (p.p2 * assign2720_e1851);
-            let assign2720_e1854: f64 = (assign2720_e1852 * p.p5);
-            let assign2720_e1855: f64 = (assign2720_e1847 / assign2720_e1854);
-            (locals.var_grg, locals.var_grg_dn0, locals.var_grg_dn2, locals.var_grg_dn4, locals.var_grg_dn5, locals.var_grg_dn6, locals.var_grg_dn8, locals.var_grg_dn10, locals.var_grg_dn11, locals.var_grg_dn12, ) = (assign2720_e1855, ((p.p48 * locals.var_t1_dn0) / assign2720_e1854), ((p.p48 * locals.var_t1_dn2) / assign2720_e1854), ((p.p48 * locals.var_t1_dn4) / assign2720_e1854), ((p.p48 * locals.var_t1_dn5) / assign2720_e1854), ((p.p48 * locals.var_t1_dn6) / assign2720_e1854), ((p.p48 * locals.var_t1_dn8) / assign2720_e1854), ((p.p48 * locals.var_t1_dn10) / assign2720_e1854), ((p.p48 * locals.var_t1_dn11) / assign2720_e1854), ((p.p48 * locals.var_t1_dn12) / assign2720_e1854), );
-        }
-        let assign2730_e1860: f64 = if locals.var_grg > 0.001 { 1.0 } else { 0.0 };
-        locals.var_guard20 = assign2730_e1860;
+        let assign2770_e1889: f64 = (locals.var_wg).powf(p.p132);
+        let assign2770_e1890: f64 = (p.p131 / assign2770_e1889);
+        let assign2770_e1891: f64 = (1.0 + assign2770_e1890);
+        locals.var_zvgs = assign2770_e1891;
+        let assign2780_e1897: f64 = (locals.var_lg).powf(p.p127);
+        let assign2780_e1898: f64 = (p.p126 / assign2780_e1897);
+        let assign2780_e1899: f64 = (1.0 + assign2780_e1898);
+        let assign2780_e1900: f64 = (p.p125 * assign2780_e1899);
+        locals.var_xvbs = assign2780_e1900;
+        let assign2790_e1904: f64 = (locals.var_lg + p.p124);
+        let assign2790_e1905: f64 = (locals.var_lg / assign2790_e1904);
+        locals.var_xgate = assign2790_e1905;
     }
     pub(super) fn stamp_transient_block_2(
         ctx: &GeneratedEvalContext<'_>,
@@ -779,30 +777,6 @@ impl Instance {
         let nv9 = ctx.node_voltage(nodes[9]);
         let nv11 = ctx.node_voltage(nodes[11]);
         let nv12 = ctx.node_voltage(nodes[12]);
-        if ((locals.var_guard19 != 0.0) && (locals.var_guard20 != 0.0)) {
-            let assign2740_e1866: f64 = (locals.var_mfactor / locals.var_grg);
-            (locals.var_grg, locals.var_grg_dn0, locals.var_grg_dn2, locals.var_grg_dn4, locals.var_grg_dn5, locals.var_grg_dn6, locals.var_grg_dn8, locals.var_grg_dn10, locals.var_grg_dn11, locals.var_grg_dn12, ) = (assign2740_e1866, (-((locals.var_mfactor * locals.var_grg_dn0) / (locals.var_grg * locals.var_grg))), (-((locals.var_mfactor * locals.var_grg_dn2) / (locals.var_grg * locals.var_grg))), (-((locals.var_mfactor * locals.var_grg_dn4) / (locals.var_grg * locals.var_grg))), (-((locals.var_mfactor * locals.var_grg_dn5) / (locals.var_grg * locals.var_grg))), (-((locals.var_mfactor * locals.var_grg_dn6) / (locals.var_grg * locals.var_grg))), (-((locals.var_mfactor * locals.var_grg_dn8) / (locals.var_grg * locals.var_grg))), (-((locals.var_mfactor * locals.var_grg_dn10) / (locals.var_grg * locals.var_grg))), (-((locals.var_mfactor * locals.var_grg_dn11) / (locals.var_grg * locals.var_grg))), (-((locals.var_mfactor * locals.var_grg_dn12) / (locals.var_grg * locals.var_grg))), );
-        }
-        if ((locals.var_guard19 != 0.0) && (locals.var_guard20 == 0.0)) {
-            let assign2750_e1875: f64 = (locals.var_mfactor * 1000.0);
-            (locals.var_grg, locals.var_grg_dn0, locals.var_grg_dn2, locals.var_grg_dn4, locals.var_grg_dn5, locals.var_grg_dn6, locals.var_grg_dn8, locals.var_grg_dn10, locals.var_grg_dn11, locals.var_grg_dn12, ) = (assign2750_e1875, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
-        }
-        if (locals.var_guard19 == 0.0) {
-            let assign2760_e1882: f64 = (locals.var_mfactor * 1000.0);
-            (locals.var_grg, locals.var_grg_dn0, locals.var_grg_dn2, locals.var_grg_dn4, locals.var_grg_dn5, locals.var_grg_dn6, locals.var_grg_dn8, locals.var_grg_dn10, locals.var_grg_dn11, locals.var_grg_dn12, ) = (assign2760_e1882, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
-        }
-        let assign2770_e1889: f64 = (locals.var_wg).powf(p.p132);
-        let assign2770_e1890: f64 = (p.p131 / assign2770_e1889);
-        let assign2770_e1891: f64 = (1.0 + assign2770_e1890);
-        locals.var_zvgs = assign2770_e1891;
-        let assign2780_e1897: f64 = (locals.var_lg).powf(p.p127);
-        let assign2780_e1898: f64 = (p.p126 / assign2780_e1897);
-        let assign2780_e1899: f64 = (1.0 + assign2780_e1898);
-        let assign2780_e1900: f64 = (p.p125 * assign2780_e1899);
-        locals.var_xvbs = assign2780_e1900;
-        let assign2790_e1904: f64 = (locals.var_lg + p.p124);
-        let assign2790_e1905: f64 = (locals.var_lg / assign2790_e1904);
-        locals.var_xgate = assign2790_e1905;
         let assign2800_e1911: f64 = (locals.var_lg).powf(p.p121);
         let assign2800_e1912: f64 = (p.p120 / assign2800_e1911);
         let assign2800_e1913: f64 = (1.0 + assign2800_e1912);
@@ -950,10 +924,6 @@ impl Instance {
         let assign3300_e2169: f64 = (1.3806226e-23 * locals.var_uc_tnom);
         let assign3300_e2170: f64 = (1.6021918e-19 / assign3300_e2169);
         locals.var_betatnom = assign3300_e2170;
-        let assign3310_e2174: f64 = (locals.var_ttemp / locals.var_uc_tnom);
-        let assign3310_e2176: f64 = (assign3310_e2174).powf(p.p202);
-        let assign3310_e2177: f64 = (p.p201 * assign3310_e2176);
-        (locals.var_uc_gidlbpl1, locals.var_uc_gidlbpl1_dn4, ) = (assign3310_e2177, (p.p201 * if 0.0 == 0.0 && ((p.p202) as f64).is_finite() && ((p.p202) as f64).fract() == 0.0 { if p.p202 == 0.0 { 0.0 } else { (p.p202 * ((assign3310_e2174).powf(p.p202 - 1.0) * (locals.var_ttemp_dn4 / locals.var_uc_tnom))) } } else { (assign3310_e2176 * (p.p202 * ((locals.var_ttemp_dn4 / locals.var_uc_tnom) / assign3310_e2174))) }), );
         let assign3320_e2183: f64 = (locals.var_wg).powf(p.p96);
         let assign3320_e2184: f64 = (p.p95 / assign3320_e2183);
         let assign3320_e2185: f64 = (1.0 + assign3320_e2184);
@@ -1173,11 +1143,6 @@ impl Instance {
             let assign3710_e2547: f64 = (0.5 * assign3710_e2546);
             (locals.var_t1, locals.var_t1_dn0, locals.var_t1_dn2, locals.var_t1_dn4, locals.var_t1_dn5, locals.var_t1_dn6, locals.var_t1_dn8, locals.var_t1_dn10, locals.var_t1_dn11, locals.var_t1_dn12, ) = (assign3710_e2547, (0.5 * (((locals.var_tmf1_dn0 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn0)) / (locals.var_tmf2 * locals.var_tmf2))), (0.5 * (((locals.var_tmf1_dn2 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn2)) / (locals.var_tmf2 * locals.var_tmf2))), (0.5 * (((locals.var_tmf1_dn4 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn4)) / (locals.var_tmf2 * locals.var_tmf2))), (0.5 * (((locals.var_tmf1_dn5 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn5)) / (locals.var_tmf2 * locals.var_tmf2))), (0.5 * (((locals.var_tmf1_dn6 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn6)) / (locals.var_tmf2 * locals.var_tmf2))), (0.5 * (((locals.var_tmf1_dn8 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn8)) / (locals.var_tmf2 * locals.var_tmf2))), (0.5 * (((locals.var_tmf1_dn10 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn10)) / (locals.var_tmf2 * locals.var_tmf2))), (0.5 * (((locals.var_tmf1_dn11 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn11)) / (locals.var_tmf2 * locals.var_tmf2))), (0.5 * (((locals.var_tmf1_dn12 * locals.var_tmf2) - (locals.var_tmf1 * locals.var_tmf2_dn12)) / (locals.var_tmf2 * locals.var_tmf2))), );
         }
-    }
-    pub(super) fn stamp_transient_block_3(
-        p: &Parameters,
-        locals: &mut StampLocals,
-    ) {
         if (locals.var_guard32 != 0.0) {
             let assign3720_e2555: f64 = (locals.var_tmf1 + locals.var_tmf2);
             let assign3720_e2556: f64 = (0.5 * assign3720_e2555);
@@ -1205,6 +1170,11 @@ impl Instance {
 };
             (locals.var_tmf2, locals.var_tmf2_dn0, locals.var_tmf2_dn2, locals.var_tmf2_dn4, locals.var_tmf2_dn5, locals.var_tmf2_dn6, locals.var_tmf2_dn8, locals.var_tmf2_dn10, locals.var_tmf2_dn11, locals.var_tmf2_dn12, ) = (assign3750_e2586, assign3750_e2586_d_n0, assign3750_e2586_d_n2, assign3750_e2586_d_n4, assign3750_e2586_d_n5, assign3750_e2586_d_n6, assign3750_e2586_d_n8, assign3750_e2586_d_n10, assign3750_e2586_d_n11, assign3750_e2586_d_n12, );
         }
+    }
+    pub(super) fn stamp_transient_block_3(
+        p: &Parameters,
+        locals: &mut StampLocals,
+    ) {
         if (locals.var_guard32 == 0.0) {
             let assign3760_e2593: f64 = (locals.var_tmf1 * locals.var_tmf1);
             let assign3760_e2595: f64 = (assign3760_e2593 + locals.var_tmf2);
@@ -1563,11 +1533,6 @@ impl Instance {
         (locals.var_t1, locals.var_t1_dn0, locals.var_t1_dn2, locals.var_t1_dn4, locals.var_t1_dn5, locals.var_t1_dn6, locals.var_t1_dn8, locals.var_t1_dn10, locals.var_t1_dn11, locals.var_t1_dn12, ) = (assign4900_e3235, ((((2.0 * locals.var_q_nsub_dn0) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), ((((2.0 * locals.var_q_nsub_dn2) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), ((((2.0 * locals.var_q_nsub_dn4) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), ((((2.0 * locals.var_q_nsub_dn5) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), ((((2.0 * locals.var_q_nsub_dn6) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), ((((2.0 * locals.var_q_nsub_dn8) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), ((((2.0 * locals.var_q_nsub_dn10) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), ((((2.0 * locals.var_q_nsub_dn11) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), ((((2.0 * locals.var_q_nsub_dn12) * 1.034943e-10) * locals.var_c_fox0_inv) * locals.var_c_fox0_inv), );
         let assign4910_e3238: f64 = (locals.var_vgs - locals.var_vfb);
         (locals.var_t2, locals.var_t2_dn0, locals.var_t2_dn2, locals.var_t2_dn4, locals.var_t2_dn5, locals.var_t2_dn6, locals.var_t2_dn8, locals.var_t2_dn10, locals.var_t2_dn11, locals.var_t2_dn12, ) = (assign4910_e3238, (-locals.var_vfb_dn0), (-locals.var_vfb_dn2), (-locals.var_vfb_dn4), (locals.var_vgs_dn5 - locals.var_vfb_dn5), (-locals.var_vfb_dn6), (-locals.var_vfb_dn8), (-locals.var_vfb_dn10), (locals.var_vgs_dn11 - locals.var_vfb_dn11), (locals.var_vgs_dn12 - locals.var_vfb_dn12), );
-    }
-    pub(super) fn stamp_transient_block_4(
-        p: &Parameters,
-        locals: &mut StampLocals,
-    ) {
         let assign4920_e3242: f64 = (2.0 / locals.var_t1);
         let assign4920_e3245: f64 = (locals.var_t2 - locals.var_beta_inv);
         let assign4920_e3247: f64 = (assign4920_e3245 - locals.var_vbs);
@@ -1593,6 +1558,13 @@ impl Instance {
         locals.var_guard51 = assign4960_e3278;
         if (locals.var_guard51 != 0.0) {
             (locals.var_t4, locals.var_t4_dn0, locals.var_t4_dn2, locals.var_t4_dn4, locals.var_t4_dn5, locals.var_t4_dn6, locals.var_t4_dn8, locals.var_t4_dn10, locals.var_t4_dn11, locals.var_t4_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
+        }
+    }
+    pub(super) fn stamp_transient_block_4(
+        p: &Parameters,
+        locals: &mut StampLocals,
+    ) {
+        if (locals.var_guard51 != 0.0) {
             (locals.var_t5, locals.var_t5_dn0, locals.var_t5_dn2, locals.var_t5_dn4, locals.var_t5_dn5, locals.var_t5_dn6, locals.var_t5_dn8, locals.var_t5_dn10, locals.var_t5_dn11, locals.var_t5_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         }
         let assign4990_e3289: f64 = (locals.var_t4 + 1e-50);
@@ -1970,11 +1942,6 @@ impl Instance {
             let assign5840_e3928: f64 = (1.0 + assign5840_e3927);
             (locals.var_t1, locals.var_t1_dn0, locals.var_t1_dn2, locals.var_t1_dn4, locals.var_t1_dn5, locals.var_t1_dn6, locals.var_t1_dn8, locals.var_t1_dn10, locals.var_t1_dn11, locals.var_t1_dn12, ) = (assign5840_e3928, ((locals.var_t5_dn0 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn0)), ((locals.var_t5_dn2 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn2)), ((locals.var_t5_dn4 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn4)), ((locals.var_t5_dn5 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn5)), ((locals.var_t5_dn6 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn6)), ((locals.var_t5_dn8 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn8)), ((locals.var_t5_dn10 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn10)), ((locals.var_t5_dn11 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn11)), ((locals.var_t5_dn12 * locals.var_t4) + (locals.var_t5 * locals.var_t4_dn12)), );
         }
-    }
-    pub(super) fn stamp_transient_block_5(
-        p: &Parameters,
-        locals: &mut StampLocals,
-    ) {
         if (locals.var_guard58 != 0.0) {
             let assign5850_e3934: f64 = (locals.var_t1 * locals.var_t1);
             let assign5850_e3937: f64 = (4.0 * 0.001);
@@ -2002,6 +1969,11 @@ impl Instance {
             (locals.var_t1, locals.var_t1_dn0, locals.var_t1_dn2, locals.var_t1_dn4, locals.var_t1_dn5, locals.var_t1_dn6, locals.var_t1_dn8, locals.var_t1_dn10, locals.var_t1_dn11, locals.var_t1_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
             (locals.var_t7, locals.var_t7_dn0, locals.var_t7_dn2, locals.var_t7_dn4, locals.var_t7_dn5, locals.var_t7_dn6, locals.var_t7_dn8, locals.var_t7_dn10, locals.var_t7_dn11, locals.var_t7_dn12, ) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, );
         }
+    }
+    pub(super) fn stamp_transient_block_5(
+        p: &Parameters,
+        locals: &mut StampLocals,
+    ) {
         if (locals.var_guard58 != 0.0) {
             let assign5910_e3985: f64 = (10.0 * 2.220446049250313e-16);
             let assign5910_e3986: f64 = (locals.var_t1 + assign5910_e3985);
@@ -2395,11 +2367,6 @@ impl Instance {
             let assign6680_e4665: f64 = (assign6680_e4663 * locals.var_beta);
             (locals.var_t2, locals.var_t2_dn0, locals.var_t2_dn2, locals.var_t2_dn4, locals.var_t2_dn5, locals.var_t2_dn6, locals.var_t2_dn8, locals.var_t2_dn10, locals.var_t2_dn11, locals.var_t2_dn12, ) = (assign6680_e4665, (((locals.var_cnst0soi_dn0 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn0)) * locals.var_beta), (((locals.var_cnst0soi_dn2 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn2)) * locals.var_beta), ((((locals.var_cnst0soi_dn4 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn4)) * locals.var_beta) + (assign6680_e4663 * locals.var_beta_dn4)), (((locals.var_cnst0soi_dn5 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn5)) * locals.var_beta), (((locals.var_cnst0soi_dn6 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn6)) * locals.var_beta), (((locals.var_cnst0soi_dn8 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn8)) * locals.var_beta), (((locals.var_cnst0soi_dn10 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn10)) * locals.var_beta), (((locals.var_cnst0soi_dn11 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn11)) * locals.var_beta), (((locals.var_cnst0soi_dn12 * locals.var_cnst0soi) + (locals.var_cnst0soi * locals.var_cnst0soi_dn12)) * locals.var_beta), );
         }
-    }
-    pub(super) fn stamp_transient_block_6(
-        p: &Parameters,
-        locals: &mut StampLocals,
-    ) {
         if (locals.var_guard67 == 0.0) {
             let assign6690_e4673: f64 = (2.0 * locals.var_vbsbiz);
             let assign6690_e4674: f64 = (locals.var_beta_inv + assign6690_e4673);
@@ -2424,6 +2391,11 @@ impl Instance {
             let assign6720_e4708: f64 = (assign6720_e4702 - assign6720_e4707);
             (locals.var_t6, locals.var_t6_dn0, locals.var_t6_dn2, locals.var_t6_dn4, locals.var_t6_dn5, locals.var_t6_dn6, locals.var_t6_dn8, locals.var_t6_dn10, locals.var_t6_dn11, locals.var_t6_dn12, ) = (assign6720_e4708, ((locals.var_t5_dn0 * locals.var_beta) - (((2.0 * locals.var_t3_dn0) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn0))), ((locals.var_t5_dn2 * locals.var_beta) - (((2.0 * locals.var_t3_dn2) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn2))), (((locals.var_t5_dn4 * locals.var_beta) + (locals.var_t5 * locals.var_beta_dn4)) - (((2.0 * locals.var_t3_dn4) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn4))), ((locals.var_t5_dn5 * locals.var_beta) - (((2.0 * locals.var_t3_dn5) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn5))), ((locals.var_t5_dn6 * locals.var_beta) - (((2.0 * locals.var_t3_dn6) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn6))), ((locals.var_t5_dn8 * locals.var_beta) - (((2.0 * locals.var_t3_dn8) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn8))), ((locals.var_t5_dn10 * locals.var_beta) - (((2.0 * locals.var_t3_dn10) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn10))), ((locals.var_t5_dn11 * locals.var_beta) - (((2.0 * locals.var_t3_dn11) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn11))), ((locals.var_t5_dn12 * locals.var_beta) - (((2.0 * locals.var_t3_dn12) * locals.var_t4) + (assign6720_e4705 * locals.var_t4_dn12))), );
         }
+    }
+    pub(super) fn stamp_transient_block_6(
+        p: &Parameters,
+        locals: &mut StampLocals,
+    ) {
         if (locals.var_guard67 == 0.0) {
             let assign6730_e4715: f64 = (locals.var_t6 * locals.var_t6);
             let assign6730_e4718: f64 = (4.0 * locals.var_t4);

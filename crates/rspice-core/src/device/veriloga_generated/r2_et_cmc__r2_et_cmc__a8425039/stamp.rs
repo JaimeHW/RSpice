@@ -58,87 +58,89 @@ impl Instance {
         let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
         let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
         let v0=1.0;
         let v1=0.0;
         let v8=0.01;
-        let v234=ctx.node_voltage(nodes[2]);
-        let v237=(self.scalar_static_f64[185]+(v234*self.scalar_static_f64[164]));
-        let v241=(if (v237<self.scalar_static_f64[166]){v0}else{v1});
-        let v244=(((v237-self.scalar_static_f64[165])-v0)).exp();
-        let v246=(if (v241!=0.0){(self.scalar_static_f64[165]+v244)}else{v237});
-        let v252=(((if (v246>self.scalar_static_f64[168]){v0}else{v1})!=0.0)&&(!(v241!=0.0)));
-        let v255=(((self.scalar_static_f64[167]-v246)-v0)).exp();
-        let v259=((273.15+(if v252{(self.scalar_static_f64[167]-v255)}else{v246}))-self.scalar_static_f64[13]);
-        let v261=(self.scalar_static_f64[137]+(self.scalar_static_f64[141]*v259));
-        let v263=(v0+(v259*v261));
-        let v264=0.1;
-        let v267=(if (v263<0.11){v0}else{v1});
-        let v268=10.0;
-        let v272=(((v268*(v263-v8))-v0)).exp();
-        let v276=(self.scalar_static_f64[107]*(if (v267!=0.0){(v8+(v264*v272))}else{v263}));
-        let v279=(ctx.node_voltage(nodes[0])-ctx.node_voltage(nodes[1]));
-        let v283=(if (self.scalar_static_f64[169]!=0.0){(v279/self.scalar_static_f64[113])}else{v1});
-        let v286=(if (self.scalar_static_f64[169]!=0.0){(v283*self.scalar_static_f64[170])}else{v1});
-        let v289=((v0+(v286*v286))).sqrt();
-        let v294=(if (self.scalar_static_f64[169]!=0.0){(self.scalar_static_f64[171]*(v283).abs())}else{v1});
-        let v309=(if self.scalar_static_bool[60]{v0}else{(if (self.scalar_static_f64[169]!=0.0){((self.scalar_static_f64[173]+(self.scalar_static_f64[114]*(if (self.scalar_static_f64[169]!=0.0){v289}else{v1})))+(self.scalar_static_f64[115]*(if (self.scalar_static_f64[169]!=0.0){f64::powf((v0+(v294*(v294*v294))),0.3333333333333333)}else{v1})))}else{v1})});
-        let v310=(v276*v309);
-        let v311=(v279/v310);
-        let v312=(-v279);
-        let v321=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, (self.scalar_static_f64[163]*v234));
-        let v324=(if (v241!=0.0){(self.scalar_static_f64[164]*v244)}else{self.scalar_static_f64[164]});
-        let v328=(if v252{(-(v255*(-v324)))}else{v324});
-        let v332=((v261*v328)+(v259*(self.scalar_static_f64[141]*v328)));
-        let v347=(v286*self.scalar_static_f64[180]);
-        let v349=(v286*self.scalar_static_f64[181]);
-        let v351=(2.0*v289);
-        let v367=(v310*v310);
-        let v368=((v310-(v279*(v276*(if self.scalar_static_bool[60]{v1}else{(if (self.scalar_static_f64[169]!=0.0){(self.scalar_static_f64[114]*(if (self.scalar_static_f64[169]!=0.0){((v347+v347)/v351)}else{v1}))}else{v1})}))))/v367);
-        let v372=(((-v310)-(v279*(v276*(if self.scalar_static_bool[60]{v1}else{(if (self.scalar_static_f64[169]!=0.0){(self.scalar_static_f64[114]*(if (self.scalar_static_f64[169]!=0.0){((v349+v349)/v351)}else{v1}))}else{v1})}))))/v367);
-        let v375=((-(v279*(v309*(self.scalar_static_f64[107]*(if (v267!=0.0){(v264*(v272*(v268*v332)))}else{v332})))))/v367);
+        let v6i=ctx.node_voltage(nodes[2]);
+        let v6l=(sf[185]+(v6i*sf[164]));
+        let v6p=(if (v6l<sf[166]){v0}else{v1});
+        let v6s=(((v6l-sf[165])-v0)).exp();
+        let v6u=(if (v6p!=0.0){(sf[165]+v6s)}else{v6l});
+        let v70=(((if (v6u>sf[168]){v0}else{v1})!=0.0)&&(!(v6p!=0.0)));
+        let v73=(((sf[167]-v6u)-v0)).exp();
+        let v77=((273.15+(if v70{(sf[167]-v73)}else{v6u}))-sf[13]);
+        let v79=(sf[137]+(sf[141]*v77));
+        let v7b=(v0+(v77*v79));
+        let v7c=0.1;
+        let v7f=(if (v7b<0.11){v0}else{v1});
+        let v7g=10.0;
+        let v7k=(((v7g*(v7b-v8))-v0)).exp();
+        let v7o=(sf[107]*(if (v7f!=0.0){(v8+(v7c*v7k))}else{v7b}));
+        let v7r=(ctx.node_voltage(nodes[0])-ctx.node_voltage(nodes[1]));
+        let v7v=(if (sf[169]!=0.0){(v7r/sf[113])}else{v1});
+        let v7y=(if (sf[169]!=0.0){(v7v*sf[170])}else{v1});
+        let v81=((v0+(v7y*v7y))).sqrt();
+        let v86=(if (sf[169]!=0.0){(sf[171]*(v7v).abs())}else{v1});
+        let v8l=(if sb[60]{v0}else{(if (sf[169]!=0.0){((sf[173]+(sf[114]*(if (sf[169]!=0.0){v81}else{v1})))+(sf[115]*(if (sf[169]!=0.0){f64::powf((v0+(v86*(v86*v86))),0.3333333333333333)}else{v1})))}else{v1})});
+        let v8m=(v7o*v8l);
+        let v8n=(v7r/v8m);
+        let v8o=(-v7r);
+        let v8x=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, (sf[163]*v6i));
+        let v90=(if (v6p!=0.0){(sf[164]*v6s)}else{sf[164]});
+        let v94=(if v70{(-(v73*(-v90)))}else{v90});
+        let v98=((v79*v94)+(v77*(sf[141]*v94)));
+        let v9n=(v7y*sf[180]);
+        let v9p=(v7y*sf[181]);
+        let v9r=(2.0*v81);
+        let va7=(v8m*v8m);
+        let va8=((v8m-(v7r*(v7o*(if sb[60]{v1}else{(if (sf[169]!=0.0){(sf[114]*(if (sf[169]!=0.0){((v9n+v9n)/v9r)}else{v1}))}else{v1})}))))/va7);
+        let vac=(((-v8m)-(v7r*(v7o*(if sb[60]{v1}else{(if (sf[169]!=0.0){(sf[114]*(if (sf[169]!=0.0){((v9p+v9p)/v9r)}else{v1}))}else{v1})}))))/va7);
+        let vaf=((-(v7r*(v8l*(sf[107]*(if (v7f!=0.0){(v7c*(v7k*(v7g*v98)))}else{v98})))))/va7);
 
         stamper.stamp_current_node3_local(
             Some(0),
             Some(1),
-            multiplicity * (v311),
+            multiplicity * (v8n),
             0,
-            multiplicity * (v368),
+            multiplicity * (va8),
             1,
-            multiplicity * (v372),
+            multiplicity * (vac),
             2,
-            multiplicity * (v375),
+            multiplicity * (vaf),
         );
         stamper.stamp_current_node1_local(
             Some(2),
             None,
-            multiplicity * ((if (self.scalar_static_f64[164]!=0.0){(self.scalar_static_f64[156]*v234)}else{v1})),
+            multiplicity * ((if (sf[164]!=0.0){(sf[156]*v6i)}else{v1})),
             2,
-            multiplicity * (self.scalar_static_f64[182]),
+            multiplicity * (sf[182]),
         );
         stamper.stamp_current_node3_local(
             Some(2),
             None,
-            multiplicity * ((if (self.scalar_static_f64[164]!=0.0){(v311*v312)}else{v1})),
+            multiplicity * ((if (sf[164]!=0.0){(v8n*v8o)}else{v1})),
             0,
-            multiplicity * ((if (self.scalar_static_f64[164]!=0.0){((v312*v368)+(-v311))}else{v1})),
+            multiplicity * ((if (sf[164]!=0.0){((v8o*va8)+(-v8n))}else{v1})),
             1,
-            multiplicity * ((if (self.scalar_static_f64[164]!=0.0){(v311+(v312*v372))}else{v1})),
+            multiplicity * ((if (sf[164]!=0.0){(v8n+(v8o*vac))}else{v1})),
             2,
-            multiplicity * ((if (self.scalar_static_f64[164]!=0.0){(v312*v375)}else{v1})),
+            multiplicity * ((if (sf[164]!=0.0){(v8o*vaf)}else{v1})),
         );
         stamper.stamp_current_node1_local(
             Some(2),
             None,
-            multiplicity * ((if self.scalar_static_bool[61]{(1000000.0*v234)}else{v1})),
+            multiplicity * ((if sb[61]{(1000000.0*v6i)}else{v1})),
             2,
-            multiplicity * (self.scalar_static_f64[183]),
+            multiplicity * (sf[183]),
         );
         stamper.stamp_current_node1_local(
             Some(2),
             None,
-            multiplicity * ((if (self.scalar_static_f64[164]!=0.0){v321}else{v1})),
+            multiplicity * ((if (sf[164]!=0.0){v8x}else{v1})),
             2,
-            multiplicity * ((if (self.scalar_static_f64[164]!=0.0){(self.scalar_static_f64[163]*ddt_scale)}else{v1})),
+            multiplicity * ((if (sf[164]!=0.0){(sf[163]*ddt_scale)}else{v1})),
         );
         stamper.stamp_current_const_local(
             Some(0),
@@ -158,14 +160,16 @@ impl Instance {
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
         let p = &(*self.params);
         let multiplicity = self.multiplicity;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
         let v1=0.0;
-        let v321=0.0;
+        let v8x=0.0;
 
         stamper.stamp_current_reactive_node1(
             Some(nodes[2]),
             None,
             nodes[2],
-            multiplicity * ((if (self.scalar_static_f64[164]!=0.0){(self.scalar_static_f64[163]*1.0)}else{v1})),
+            multiplicity * ((if (sf[164]!=0.0){(sf[163]*1.0)}else{v1})),
         );
     }
 }

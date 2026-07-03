@@ -4067,16 +4067,16 @@ impl Instance {
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v0=1.0;
         let v1=0.0;
-        let v1385=nv8;
-        let v1403=nv4;
-        let v1757=nv14;
-        let v1761=(if (self.scalar_static_f64[137]!=0.0){(self.scalar_static_f64[90]*(nv1-nv6))}else{v1});
-        let v1764=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[113]*(nv10-v1385))}else{v1});
-        let v1767=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[114]*(nv9-v1385))}else{v1});
-        let v1771=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[112]*(nv3-v1385))}else{v1});
-        let v1773=(if (self.scalar_static_f64[136]!=0.0){(v1403*self.scalar_static_f64[187])}else{v1});
-        let v1775=(if self.scalar_static_bool[29]{(10000.0*v1403)}else{v1});
-        let v1776=(v1403*self.scalar_static_f64[138]);
+        let v12h=nv8;
+        let v12z=nv4;
+        let v1ct=nv14;
+        let v1cx=(if (self.scalar_static_f64[137]!=0.0){(self.scalar_static_f64[90]*(nv1-nv6))}else{v1});
+        let v1d0=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[113]*(nv10-v12h))}else{v1});
+        let v1d3=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[114]*(nv9-v12h))}else{v1});
+        let v1d7=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[112]*(nv3-v12h))}else{v1});
+        let v1d9=(if (self.scalar_static_f64[136]!=0.0){(v12z*self.scalar_static_f64[187])}else{v1});
+        let v1db=(if self.scalar_static_bool[29]{(10000.0*v12z)}else{v1});
+        let v1dc=(v12z*self.scalar_static_f64[138]);
         stamper.stamp_potential_branch_local(
             Some(15),
             None,
@@ -4135,7 +4135,7 @@ impl Instance {
         stamper.stamp_current_node1_local(
             Some(14),
             None,
-            multiplicity * (v1757),
+            multiplicity * (v1ct),
             14,
             multiplicity * (v0),
         );
@@ -4177,7 +4177,7 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(1),
             Some(6),
-            multiplicity * (v1761),
+            multiplicity * (v1cx),
             1,
             multiplicity * (self.scalar_static_f64[140]),
             6,
@@ -4196,7 +4196,7 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(10),
             Some(8),
-            multiplicity * (v1764),
+            multiplicity * (v1d0),
             8,
             multiplicity * (self.scalar_static_f64[143]),
             10,
@@ -4205,7 +4205,7 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(9),
             Some(8),
-            multiplicity * (v1767),
+            multiplicity * (v1d3),
             8,
             multiplicity * (self.scalar_static_f64[146]),
             9,
@@ -4214,7 +4214,7 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(3),
             Some(8),
-            multiplicity * (v1771),
+            multiplicity * (v1d7),
             3,
             multiplicity * (self.scalar_static_f64[149]),
             8,
@@ -4253,14 +4253,14 @@ impl Instance {
         stamper.stamp_current_node1_local(
             Some(4),
             None,
-            multiplicity * (v1773),
+            multiplicity * (v1d9),
             4,
             multiplicity * (self.scalar_static_f64[188]),
         );
         stamper.stamp_current_node1_local(
             Some(4),
             None,
-            multiplicity * (v1775),
+            multiplicity * (v1db),
             4,
             multiplicity * (self.scalar_static_f64[151]),
         );
@@ -4299,11 +4299,11 @@ impl Instance {
             11,
             v1,
         );
-        let v1776_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 17, v1776);
+        let v1dc_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 17, v1dc);
         stamper.stamp_current_node1_local(
             Some(4),
             None,
-            multiplicity * (v1776_ddt),
+            multiplicity * (v1dc_ddt),
             4,
             multiplicity * (((self.scalar_static_f64[138]) * ddt_scale)),
         );
@@ -4455,7 +4455,7 @@ impl Instance {
         let nv4 = ctx.node_voltage(nodes[4]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
-        let v1776=(nv4*self.scalar_static_f64[138]);
+        let v1dc=(nv4*self.scalar_static_f64[138]);
         stamper.stamp_current_reactive_node1(
             Some(nodes[4]),
             None,

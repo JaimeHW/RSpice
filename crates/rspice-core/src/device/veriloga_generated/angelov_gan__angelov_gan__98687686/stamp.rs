@@ -55,26 +55,26 @@ fn eval_ddt<const STATE_COUNT: usize>(
 
 struct CommonStampValues {
     v0: f64, v1: f64, v3: f64, v5: f64, v6: f64, v7: f64, 
-    v8: f64, v9: f64, v11: f64, v13: f64, v32: f64, v35: f64, 
-    v39: f64, v44: f64, v45: f64, v47: f64, v84: f64, v120: bool, 
-    v124: f64, v131: bool, v136: bool, v142: f64, v144: f64, v149: f64, 
-    v155: f64, v170: f64, v179: f64, v184: f64, v194: f64, v202: f64, 
-    v211: f64, v246: f64, v247: f64, v249: f64, v316: f64, v339: f64, 
-    v366: f64, v453: f64, v467: f64, v577: f64, v583: f64, v676: f64, 
-    v681: f64, v719: f64, v735: f64, v786: f64, v792: f64, v802: f64, 
-    v805: f64, v820: f64, v822: f64, v824: f64, v825: f64, v828: f64, 
-    v829: f64, v836: f64, v840: f64, v842: f64, v858: f64, v864: f64, 
-    v870: f64, v875: f64, v883: f64, v884: f64, v897: f64, v921: f64, 
-    v922: f64, v942: f64, v947: f64, v949: f64, v951: f64, v953: f64, 
-    v954: f64, v999: f64, v1000: f64, v1001: f64, v1002: f64, v1003: f64, 
-    v1100: f64, v1101: f64, v1102: f64, v1103: f64, v1104: f64, v1105: f64, 
-    v1106: f64, v1115: f64, v1116: f64, v1117: f64, v1118: f64, v1454: f64, 
-    v1455: f64, v1456: f64, v1457: f64, v1458: f64, v1554: f64, v1555: f64, 
-    v1556: f64, v1557: f64, v1726: f64, v1727: f64, v1728: f64, v1729: f64, 
-    v1730: f64, v2322: f64, v2380: f64, v2531: f64, v2532: f64, v2533: f64, 
-    v2534: f64, v2582: f64, v2583: f64, v2584: f64, v2585: f64, v2615: f64, 
-    v2617: f64, v2618: f64, v2626: f64, v2628: f64, v2630: f64, v2640: f64, 
-    v2649: f64, v2650: f64, v2651: f64, v2652: f64, v2653: f64, v2659: f64, 
+    v8: f64, v9: f64, vb: f64, vd: f64, vw: f64, vz: f64, 
+    v13: f64, v18: f64, v19: f64, v1b: f64, v2c: f64, v3c: bool, 
+    v3g: f64, v3n: bool, v3s: bool, v3y: f64, v40: f64, v45: f64, 
+    v4b: f64, v4q: f64, v4z: f64, v54: f64, v5e: f64, v5m: f64, 
+    v5v: f64, v6u: f64, v6v: f64, v6x: f64, v8s: f64, v9f: f64, 
+    va6: f64, vcl: f64, vcz: f64, vg1: f64, vg7: f64, vis: f64, 
+    vix: f64, vjz: f64, vkf: f64, vlu: f64, vm0: f64, vma: f64, 
+    vmd: f64, vms: f64, vmu: f64, vmw: f64, vmx: f64, vn0: f64, 
+    vn1: f64, vn8: f64, vnc: f64, vne: f64, vnu: f64, vo0: f64, 
+    vo6: f64, vob: f64, voj: f64, vok: f64, vox: f64, vpl: f64, 
+    vpm: f64, vq6: f64, vqb: f64, vqd: f64, vqf: f64, vqh: f64, 
+    vqi: f64, vrr: f64, vrs: f64, vrt: f64, vru: f64, vrv: f64, 
+    vuk: f64, vul: f64, vum: f64, vun: f64, vuo: f64, vup: f64, 
+    vuq: f64, vuz: f64, vv0: f64, vv1: f64, vv2: f64, v14e: f64, 
+    v14f: f64, v14g: f64, v14h: f64, v14i: f64, v176: f64, v177: f64, 
+    v178: f64, v179: f64, v1by: f64, v1bz: f64, v1c0: f64, v1c1: f64, 
+    v1c2: f64, v1si: f64, v1u4: f64, v1yb: f64, v1yc: f64, v1yd: f64, 
+    v1ye: f64, v1zq: f64, v1zr: f64, v1zs: f64, v1zt: f64, v20n: f64, 
+    v20p: f64, v20q: f64, v20y: f64, v210: f64, v212: f64, v21c: f64, 
+    v21l: f64, v21m: f64, v21n: f64, v21o: f64, v21p: f64, v21v: f64, 
 }
 
 impl Instance {
@@ -83,6 +83,8 @@ impl Instance {
         let nodes = self.nodes;
         let branches = self.branches;
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
         let v0=ctx.node_voltage(nodes[12]);
         let v1=ctx.node_voltage(nodes[8]);
         let v2=(v0-v1);
@@ -93,380 +95,380 @@ impl Instance {
         let v7=(v4-v1);
         let v8=ctx.node_voltage(nodes[11]);
         let v9=(v8-v1);
-        let v10=ctx.node_voltage(nodes[4]);
-        let v11=(v10-v1);
-        let v13=0.0;
-        let v32=ctx.node_voltage(nodes[3]);
-        let v35=(if (self.scalar_static_f64[10]!=0.0){(self.scalar_static_f64[218]+(v32).abs())}else{self.scalar_static_f64[218]});
-        let v39=((v35-self.scalar_static_f64[9])).abs();
-        let v44=1.0;
-        let v45=(if ((v39>v13)||self.scalar_static_bool[2]){v44}else{v13});
-        let v47=(v39).abs();
-        let v84=(v44+(v47*self.scalar_static_f64[24]));
-        let v95=(v44+(v39*self.scalar_static_f64[28]));
-        let v120=((v45!=0.0)&&(self.scalar_static_f64[36]!=0.0));
-        let v124=(v44+(self.scalar_static_f64[24]*(v39*v39)));
-        let v131=((v45!=0.0)&&self.scalar_static_bool[8]);
-        let v136=(!(v45!=0.0));
-        let v139=(if v136{self.scalar_static_f64[17]}else{(if (v45!=0.0){(self.scalar_static_f64[17]*(v44+(v47*self.scalar_static_f64[18])))}else{v13})});
-        let v140=(if v136{self.scalar_static_f64[19]}else{(if (v45!=0.0){(self.scalar_static_f64[19]*(v44+(v47*self.scalar_static_f64[20])))}else{v13})});
-        let v141=(if v136{self.scalar_static_f64[21]}else{(if (v45!=0.0){(self.scalar_static_f64[21]*(v44+(v47*self.scalar_static_f64[22])))}else{v13})});
-        let v142=(if v136{self.scalar_static_f64[23]}else{(if (v45!=0.0){(self.scalar_static_f64[23]*v84)}else{v13})});
-        let v144=(if v136{self.scalar_static_f64[38]}else{(if v131{(v84*self.scalar_static_f64[38])}else{(if v120{(v124*self.scalar_static_f64[38])}else{v13})})});
-        let v146=(if v136{self.scalar_static_f64[27]}else{(if (v45!=0.0){(self.scalar_static_f64[27]*v95)}else{v13})});
-        let v147=(if v136{self.scalar_static_f64[29]}else{(if (v45!=0.0){(v95*self.scalar_static_f64[29])}else{v13})});
-        let v149=(if v136{self.scalar_static_f64[32]}else{(if (v45!=0.0){(self.scalar_static_f64[32]+(v39*self.scalar_static_f64[33]))}else{v13})});
-        let v155=0.5;
-        let v164=(v7*self.scalar_static_f64[45]);
-        let v165=(v164).cosh();
-        let v170=1e-12;
-        let v172=(v170+(v165*v165));
-        let v178=(v44+(v47*self.scalar_static_f64[49]));
-        let v179=((self.scalar_static_f64[47]*(v44+(self.scalar_static_f64[48]/v172)))*v178);
-        let v184=(self.scalar_static_f64[50]*(v44+(v47*self.scalar_static_f64[51])));
-        let v189=((v7*self.scalar_static_f64[53])).tanh();
-        let v194=(v6-v149);
-        let v195=(self.scalar_static_f64[54]*v194);
-        let v199=(v44+(v47*self.scalar_static_f64[26]));
-        let v200=((((((if v136{self.scalar_static_f64[25]}else{(if (v45!=0.0){(self.scalar_static_f64[25]+(v39*self.scalar_static_f64[26]))}else{v13})})-self.scalar_static_f64[52])+(self.scalar_static_f64[52]*v189))-(v11*self.scalar_static_f64[46]))-(v194*v195))*v199);
-        let v201=(v2-v200);
-        let v202=(v201*v201);
-        let v207=(v184*v201);
-        let v209=(((v179*v201)+(v202*self.scalar_static_f64[55]))+(v202*v207));
-        let v210=(v209).tanh();
-        let v211=(v44+v210);
-        let v213=(-v209);
-        let v217=((v155*(scalar_limexp(v209)-scalar_limexp(v213)))).tanh();
-        let v227=2.0;
-        let v246=(v5-v200);
-        let v247=(if self.scalar_static_bool[16]{v246}else{v165});
-        let v249=(if self.scalar_static_bool[16]{(v247*v247)}else{v201});
-        let v299=(if self.scalar_static_bool[19]{v201}else{v247});
-        let v301=(if self.scalar_static_bool[19]{(v299*v299)}else{v249});
-        let v304=(v184*v301);
-        let v306=((v299+(self.scalar_static_f64[55]*v301))+(v299*v304));
-        let v308=(if self.scalar_static_bool[19]{(v179*v306)}else{v209});
-        let v310=(-v308);
-        let v314=((v155*(scalar_limexp(v308)-scalar_limexp(v310)))).tanh();
-        let v316=(if self.scalar_static_bool[19]{(v44+v314)}else{(v44+v217)});
-        let v339=(if self.scalar_static_bool[22]{v201}else{v299});
-        let v341=(if self.scalar_static_bool[22]{(v339*v339)}else{v301});
-        let v344=(v184*v341);
-        let v346=((v339+(self.scalar_static_f64[55]*v341))+(v339*v344));
-        let v348=(if self.scalar_static_bool[22]{(v179*v346)}else{v308});
-        let v360=(-v348);
-        let v364=((v155*(scalar_limexp(v348)-scalar_limexp(v360)))).tanh();
-        let v366=(if self.scalar_static_bool[22]{(v44+v364)}else{v316});
-        let v437=(v44+v211);
-        let v450=(v44+v366);
-        let v453=(if self.scalar_static_bool[28]{(self.scalar_static_f64[67]+(v141/v450))}else{(if (self.scalar_static_f64[66]!=0.0){(self.scalar_static_f64[67]+(v141/v437))}else{v13})});
-        let v467=-1.0;
-        let v536=(v7*self.scalar_static_f64[89]);
-        let v537=((v146+(v9*self.scalar_static_f64[88]))+v536);
-        let v538=(v537).tanh();
-        let v539=(v44+v538);
-        let v544=((self.scalar_static_f64[90]+(v7*self.scalar_static_f64[91]))).tanh();
-        let v545=(v44+v544);
-        let v550=((self.scalar_static_f64[92]-(v7*self.scalar_static_f64[93]))).tanh();
-        let v552=((v44+v550)-self.scalar_static_f64[89]);
-        let v556=((v147+(v5*self.scalar_static_f64[94]))-v536);
-        let v557=(v556).tanh();
-        let v558=(v44+v557);
-        let v574=(v139*v539);
-        let v577=(if self.scalar_static_bool[40]{(self.scalar_static_f64[100]+(v545*v574))}else{self.scalar_static_f64[101]});
-        let v583=(if self.scalar_static_bool[40]{(self.scalar_static_f64[102]+(v140*((v552*v558)+self.scalar_static_f64[104])))}else{self.scalar_static_f64[103]});
-        let v588=(if self.scalar_static_bool[43]{(v545-self.scalar_static_f64[89])}else{v545});
-        let v589=(v146+v536);
-        let v590=(v589).cosh();
-        let v591=(if self.scalar_static_bool[43]{v590}else{v13});
-        let v593=(if self.scalar_static_bool[43]{(v591).ln()}else{v13});
-        let v594=(v537).cosh();
-        let v595=(if self.scalar_static_bool[43]{v594}else{v13});
-        let v597=(if self.scalar_static_bool[43]{(v595).ln()}else{v13});
-        let v599=(if self.scalar_static_bool[43]{(v589+v593)}else{v13});
-        let v601=((v537+v597)-v599);
-        let v604=(v9*self.scalar_static_f64[104]);
-        let v607=(v9*self.scalar_static_f64[100]);
-        let v610=(v147-v536);
-        let v611=(v610).cosh();
-        let v612=(if self.scalar_static_bool[43]{v611}else{v591});
-        let v614=(if self.scalar_static_bool[43]{(v612).ln()}else{v13});
-        let v615=(v556).cosh();
-        let v616=(if self.scalar_static_bool[43]{v615}else{v595});
-        let v618=(if self.scalar_static_bool[43]{(v616).ln()}else{v13});
-        let v620=(if self.scalar_static_bool[43]{(v610+v614)}else{v13});
-        let v622=((v556+v618)-v620);
-        let v625=(v5*self.scalar_static_f64[104]);
-        let v628=(v5*self.scalar_static_f64[102]);
-        let v639=(v9/self.scalar_static_f64[105]);
-        let v641=(if self.scalar_static_bool[46]{(v639-v44)}else{v13});
-        let v644=(v641*v641);
-        let v645=(self.scalar_static_f64[107]+v644);
-        let v647=f64::powf(v645,self.scalar_static_f64[108]);
-        let v651=(self.scalar_static_f64[107]+(v644*self.scalar_static_f64[110]));
-        let v657=((v146+(self.scalar_static_f64[88]*(v9+v536)))).tanh();
-        let v660=(if self.scalar_static_bool[46]{v545}else{v588});
-        let v662=(v550+self.scalar_static_f64[111]);
-        let v663=(if self.scalar_static_bool[46]{v662}else{v552});
-        let v668=((v147+(self.scalar_static_f64[94]*(v5+(v7*self.scalar_static_f64[111]))))).tanh();
-        let v670=(if self.scalar_static_bool[46]{(v44+v668)}else{v558});
-        let v674=(v139*((if self.scalar_static_bool[46]{(v44+v657)}else{v539})+((if self.scalar_static_bool[46]{(v647*v651)}else{v13})*self.scalar_static_f64[112])));
-        let v676=(self.scalar_static_f64[100]+(v660*v674));
-        let v681=(self.scalar_static_f64[102]+(v140*(self.scalar_static_f64[104]+(v663*v670))));
-        let v686=(if self.scalar_static_bool[49]{v590}else{v612});
-        let v689=(if self.scalar_static_bool[49]{v594}else{v616});
-        let v694=(self.scalar_static_f64[112]*(v9+self.scalar_static_f64[105]));
-        let v695=(v467+v639);
-        let v697=(self.scalar_static_f64[107]+f64::powf(v695,v227));
-        let v699=f64::powf(v697,self.scalar_static_f64[114]);
-        let v712=(((if self.scalar_static_bool[49]{(v694*v699)}else{v13})+((v537+(if self.scalar_static_bool[49]{(v689).ln()}else{v597}))-(if self.scalar_static_bool[49]{(v589+(if self.scalar_static_bool[49]{(v686).ln()}else{v593}))}else{v599})))-self.scalar_static_f64[119]);
-        let v713=(v544+self.scalar_static_f64[111]);
-        let v719=(if self.scalar_static_bool[49]{(v607+(v139*(v604+((v712*v713)/self.scalar_static_f64[88]))))}else{(if self.scalar_static_bool[43]{((v139*(((v588*v601)/self.scalar_static_f64[88])+v604))+v607)}else{v13})});
-        let v720=(if self.scalar_static_bool[49]{v611}else{v686});
-        let v723=(if self.scalar_static_bool[49]{v615}else{v689});
-        let v729=((v556+(if self.scalar_static_bool[49]{(v723).ln()}else{v618}))-(if self.scalar_static_bool[49]{(v610+(if self.scalar_static_bool[49]{(v720).ln()}else{v614}))}else{v620}));
-        let v735=(if self.scalar_static_bool[49]{(v628+(v140*(v625+((v662*v729)/self.scalar_static_f64[94]))))}else{(if self.scalar_static_bool[43]{((v140*(((v552*v622)/self.scalar_static_f64[94])+v625))+v628)}else{v13})});
-        let v786=(if self.scalar_static_bool[67]{((v139*((v35*5.5226012e-23)*self.scalar_static_f64[140]))*self.scalar_static_f64[142])}else{v13});
-        let v792=3.141592653589793;
-        let v802=(self.scalar_static_f64[144]*ctx.node_voltage(nodes[15]));
-        let v805=(self.scalar_static_f64[145]*ctx.branch_current(branches[0]));
-        let v820=(self.scalar_static_f64[146]*(ctx.node_voltage(nodes[7])-v4));
-        let v822=(v7*self.scalar_static_f64[147]);
-        let v824=(ctx.node_voltage(nodes[6])-v10);
-        let v825=(v142*v824);
-        let v827=ctx.branch_current(branches[1]);
-        let v828=(v453*v827);
-        let v829=(self.scalar_static_f64[121]*v827);
-        let v836=(v2*v144);
-        let v840=ctx.node_voltage(nodes[14]);
-        let v842=(self.scalar_static_f64[148]*(v8-v840));
-        let v858=(self.scalar_static_f64[149]*ctx.branch_current(branches[10]));
-        let v864=(self.scalar_static_f64[150]*ctx.branch_current(branches[14]));
-        let v870=(self.scalar_static_f64[151]*ctx.branch_current(branches[18]));
-        let v875=ctx.node_voltage(nodes[17]);
-        let v883=(-(if self.scalar_static_bool[67]{(v786*v792)}else{v13}));
-        let v884=(v875*v883);
-        let v897=(v32*self.scalar_static_f64[152]);
-        let v904=(v164).sinh();
-        let v905=(self.scalar_static_f64[45]*v904);
-        let v906=(self.scalar_static_f64[153]*v904);
-        let v908=(v165*v905);
-        let v910=(v165*v906);
-        let v914=(v172*v172);
-        let v921=(v178*(self.scalar_static_f64[47]*((-(self.scalar_static_f64[48]*(v908+v908)))/v914)));
-        let v922=(v178*(self.scalar_static_f64[47]*((-(self.scalar_static_f64[48]*(v910+v910)))/v914)));
-        let v925=(v44-(v189*v189));
-        let v939=(v199*((self.scalar_static_f64[52]*(self.scalar_static_f64[53]*v925))-(v195+v195)));
-        let v940=(v199*((self.scalar_static_f64[52]*(self.scalar_static_f64[155]*v925))-self.scalar_static_f64[154]));
-        let v941=(v199*(-((-v195)+(v194*self.scalar_static_f64[156]))));
-        let v942=(-(v199*self.scalar_static_f64[154]));
-        let v943=(-v939);
-        let v944=(v467-v940);
-        let v945=(-v941);
-        let v946=(v201*v942);
-        let v947=(v946+v946);
-        let v948=(v201*v943);
-        let v949=(v948+v948);
-        let v950=(v201*v944);
-        let v951=(v950+v950);
-        let v952=(v201*v945);
-        let v953=(v952+v952);
-        let v954=(v201+v201);
-        let v992=(((v179*v942)+(self.scalar_static_f64[55]*v947))+((v207*v947)+(v202*(v184*v942))));
-        let v993=((((v201*v921)+(v179*v943))+(self.scalar_static_f64[55]*v949))+((v207*v949)+(v202*(v184*v943))));
-        let v994=((((v201*v922)+(v179*v944))+(self.scalar_static_f64[55]*v951))+((v207*v951)+(v202*(v184*v944))));
-        let v995=(((v179*v945)+(self.scalar_static_f64[55]*v953))+((v207*v953)+(v202*(v184*v945))));
-        let v996=((v179+(self.scalar_static_f64[55]*v954))+((v207*v954)+(v184*v202)));
-        let v998=(v44-(v210*v210));
-        let v999=(v992*v998);
-        let v1000=(v993*v998);
-        let v1001=(v994*v998);
-        let v1002=(v995*v998);
-        let v1003=(v996*v998);
-        let v1004=scalar_limexp_derivative(v209);
-        let v1015=scalar_limexp_derivative(v213);
-        let v1032=(v44-(v217*v217));
-        let v1100=(v467-v939);
-        let v1101=(-v940);
-        let v1102=(v44-v941);
-        let v1103=(if self.scalar_static_bool[16]{v942}else{v13});
-        let v1104=(if self.scalar_static_bool[16]{v1100}else{v905});
-        let v1105=(if self.scalar_static_bool[16]{v1101}else{v906});
-        let v1106=(if self.scalar_static_bool[16]{v1102}else{v13});
-        let v1107=(v247*v1103);
-        let v1109=(v247*v1104);
-        let v1111=(v247*v1105);
-        let v1113=(v247*v1106);
-        let v1115=(if self.scalar_static_bool[16]{(v1107+v1107)}else{v942});
-        let v1116=(if self.scalar_static_bool[16]{(v1109+v1109)}else{v943});
-        let v1117=(if self.scalar_static_bool[16]{(v1111+v1111)}else{v944});
-        let v1118=(if self.scalar_static_bool[16]{(v1113+v1113)}else{v945});
-        let v1351=(if self.scalar_static_bool[19]{v942}else{v1103});
-        let v1352=(if self.scalar_static_bool[19]{v943}else{v1104});
-        let v1353=(if self.scalar_static_bool[19]{v944}else{v1105});
-        let v1354=(if self.scalar_static_bool[19]{v945}else{v1106});
-        let v1356=(v299*v1351);
-        let v1358=(v299*v1352);
-        let v1360=(v299*v1353);
-        let v1362=(v299*v1354);
-        let v1364=(v299*self.scalar_static_f64[161]);
-        let v1366=(if self.scalar_static_bool[19]{(v1356+v1356)}else{v1115});
-        let v1367=(if self.scalar_static_bool[19]{(v1358+v1358)}else{v1116});
-        let v1368=(if self.scalar_static_bool[19]{(v1360+v1360)}else{v1117});
-        let v1369=(if self.scalar_static_bool[19]{(v1362+v1362)}else{v1118});
-        let v1370=(if self.scalar_static_bool[19]{(v1364+v1364)}else{self.scalar_static_f64[158]});
-        let v1415=(if self.scalar_static_bool[19]{(v179*((v1351+(self.scalar_static_f64[55]*v1366))+((v304*v1351)+(v299*(v184*v1366)))))}else{v992});
-        let v1416=(if self.scalar_static_bool[19]{((v306*v921)+(v179*((v1352+(self.scalar_static_f64[55]*v1367))+((v304*v1352)+(v299*(v184*v1367))))))}else{v993});
-        let v1417=(if self.scalar_static_bool[19]{((v306*v922)+(v179*((v1353+(self.scalar_static_f64[55]*v1368))+((v304*v1353)+(v299*(v184*v1368))))))}else{v994});
-        let v1418=(if self.scalar_static_bool[19]{(v179*((v1354+(self.scalar_static_f64[55]*v1369))+((v304*v1354)+(v299*(v184*v1369)))))}else{v995});
-        let v1419=(if self.scalar_static_bool[19]{(v179*((self.scalar_static_f64[161]+(self.scalar_static_f64[55]*v1370))+((v304*self.scalar_static_f64[161])+(v299*(v184*v1370)))))}else{v996});
-        let v1420=scalar_limexp_derivative(v308);
-        let v1431=scalar_limexp_derivative(v310);
-        let v1448=(v44-(v314*v314));
-        let v1454=(if self.scalar_static_bool[19]{((v155*((v1415*v1420)-((-v1415)*v1431)))*v1448)}else{((v155*((v992*v1004)-((-v992)*v1015)))*v1032)});
-        let v1455=(if self.scalar_static_bool[19]{((v155*((v1416*v1420)-((-v1416)*v1431)))*v1448)}else{((v155*((v993*v1004)-((-v993)*v1015)))*v1032)});
-        let v1456=(if self.scalar_static_bool[19]{((v155*((v1417*v1420)-((-v1417)*v1431)))*v1448)}else{((v155*((v994*v1004)-((-v994)*v1015)))*v1032)});
-        let v1457=(if self.scalar_static_bool[19]{((v155*((v1418*v1420)-((-v1418)*v1431)))*v1448)}else{((v155*((v995*v1004)-((-v995)*v1015)))*v1032)});
-        let v1458=(if self.scalar_static_bool[19]{((v155*((v1419*v1420)-((-v1419)*v1431)))*v1448)}else{((v155*((v996*v1004)-((-v996)*v1015)))*v1032)});
-        let v1554=(if self.scalar_static_bool[22]{v942}else{v1351});
-        let v1555=(if self.scalar_static_bool[22]{v943}else{v1352});
-        let v1556=(if self.scalar_static_bool[22]{v944}else{v1353});
-        let v1557=(if self.scalar_static_bool[22]{v945}else{v1354});
-        let v1559=(v339*v1554);
-        let v1561=(v339*v1555);
-        let v1563=(v339*v1556);
-        let v1565=(v339*v1557);
-        let v1567=(v339*self.scalar_static_f64[162]);
-        let v1569=(if self.scalar_static_bool[22]{(v1559+v1559)}else{v1366});
-        let v1570=(if self.scalar_static_bool[22]{(v1561+v1561)}else{v1367});
-        let v1571=(if self.scalar_static_bool[22]{(v1563+v1563)}else{v1368});
-        let v1572=(if self.scalar_static_bool[22]{(v1565+v1565)}else{v1369});
-        let v1573=(if self.scalar_static_bool[22]{(v1567+v1567)}else{v1370});
-        let v1618=(if self.scalar_static_bool[22]{(v179*((v1554+(self.scalar_static_f64[55]*v1569))+((v344*v1554)+(v339*(v184*v1569)))))}else{v1415});
-        let v1619=(if self.scalar_static_bool[22]{((v346*v921)+(v179*((v1555+(self.scalar_static_f64[55]*v1570))+((v344*v1555)+(v339*(v184*v1570))))))}else{v1416});
-        let v1620=(if self.scalar_static_bool[22]{((v346*v922)+(v179*((v1556+(self.scalar_static_f64[55]*v1571))+((v344*v1556)+(v339*(v184*v1571))))))}else{v1417});
-        let v1621=(if self.scalar_static_bool[22]{(v179*((v1557+(self.scalar_static_f64[55]*v1572))+((v344*v1557)+(v339*(v184*v1572)))))}else{v1418});
-        let v1622=(if self.scalar_static_bool[22]{(v179*((self.scalar_static_f64[162]+(self.scalar_static_f64[55]*v1573))+((v344*self.scalar_static_f64[162])+(v339*(v184*v1573)))))}else{v1419});
-        let v1692=scalar_limexp_derivative(v348);
-        let v1703=scalar_limexp_derivative(v360);
-        let v1720=(v44-(v364*v364));
-        let v1726=(if self.scalar_static_bool[22]{((v155*((v1618*v1692)-((-v1618)*v1703)))*v1720)}else{v1454});
-        let v1727=(if self.scalar_static_bool[22]{((v155*((v1619*v1692)-((-v1619)*v1703)))*v1720)}else{v1455});
-        let v1728=(if self.scalar_static_bool[22]{((v155*((v1620*v1692)-((-v1620)*v1703)))*v1720)}else{v1456});
-        let v1729=(if self.scalar_static_bool[22]{((v155*((v1621*v1692)-((-v1621)*v1703)))*v1720)}else{v1457});
-        let v1730=(if self.scalar_static_bool[22]{((v155*((v1622*v1692)-((-v1622)*v1703)))*v1720)}else{v1458});
-        let v2083=(v437*v437);
-        let v2114=(v450*v450);
-        let v2223=(v44-(v538*v538));
-        let v2224=(self.scalar_static_f64[89]*v2223);
-        let v2225=(self.scalar_static_f64[177]*v2223);
-        let v2226=(self.scalar_static_f64[88]*v2223);
-        let v2229=(v44-(v544*v544));
-        let v2230=(self.scalar_static_f64[91]*v2229);
-        let v2231=(self.scalar_static_f64[178]*v2229);
-        let v2234=(v44-(v550*v550));
-        let v2235=(self.scalar_static_f64[179]*v2234);
-        let v2236=(self.scalar_static_f64[93]*v2234);
-        let v2240=(v44-(v557*v557));
-        let v2241=(self.scalar_static_f64[181]*v2240);
-        let v2242=(self.scalar_static_f64[89]*v2240);
-        let v2243=(self.scalar_static_f64[94]*v2240);
-        let v2270=(v589).sinh();
-        let v2271=(self.scalar_static_f64[89]*v2270);
-        let v2272=(self.scalar_static_f64[176]*v2270);
-        let v2273=(if self.scalar_static_bool[43]{v2271}else{v13});
-        let v2274=(if self.scalar_static_bool[43]{v2272}else{v13});
-        let v2277=(if self.scalar_static_bool[43]{(v2273/v591)}else{v13});
-        let v2278=(if self.scalar_static_bool[43]{(v2274/v591)}else{v13});
-        let v2279=(v537).sinh();
-        let v2280=(self.scalar_static_f64[89]*v2279);
-        let v2281=(self.scalar_static_f64[177]*v2279);
-        let v2282=(self.scalar_static_f64[88]*v2279);
-        let v2283=(if self.scalar_static_bool[43]{v2280}else{v13});
-        let v2284=(if self.scalar_static_bool[43]{v2281}else{v13});
-        let v2285=(if self.scalar_static_bool[43]{v2282}else{v13});
-        let v2289=(if self.scalar_static_bool[43]{(v2283/v595)}else{v13});
-        let v2290=(if self.scalar_static_bool[43]{(v2284/v595)}else{v13});
-        let v2291=(if self.scalar_static_bool[43]{(v2285/v595)}else{v13});
-        let v2294=(if self.scalar_static_bool[43]{(self.scalar_static_f64[89]+v2277)}else{v13});
-        let v2295=(if self.scalar_static_bool[43]{(self.scalar_static_f64[176]+v2278)}else{v13});
-        let v2322=(if self.scalar_static_bool[43]{(self.scalar_static_f64[100]+(v139*(self.scalar_static_f64[104]+((v588*(self.scalar_static_f64[88]+v2291))/self.scalar_static_f64[88]))))}else{v13});
-        let v2323=(v610).sinh();
-        let v2324=(self.scalar_static_f64[176]*v2323);
-        let v2325=(self.scalar_static_f64[89]*v2323);
-        let v2326=(if self.scalar_static_bool[43]{v2324}else{v2273});
-        let v2327=(if self.scalar_static_bool[43]{v2325}else{v2274});
-        let v2330=(if self.scalar_static_bool[43]{(v2326/v612)}else{v13});
-        let v2331=(if self.scalar_static_bool[43]{(v2327/v612)}else{v13});
-        let v2332=(v556).sinh();
-        let v2333=(self.scalar_static_f64[181]*v2332);
-        let v2334=(self.scalar_static_f64[89]*v2332);
-        let v2335=(self.scalar_static_f64[94]*v2332);
-        let v2336=(if self.scalar_static_bool[43]{v2333}else{v2283});
-        let v2337=(if self.scalar_static_bool[43]{v2334}else{v2284});
-        let v2338=(if self.scalar_static_bool[43]{v2335}else{v13});
-        let v2339=(if self.scalar_static_bool[43]{v13}else{v2285});
-        let v2344=(if self.scalar_static_bool[43]{(v2336/v616)}else{v13});
-        let v2345=(if self.scalar_static_bool[43]{(v2337/v616)}else{v13});
-        let v2346=(if self.scalar_static_bool[43]{(v2338/v616)}else{v13});
-        let v2347=(if self.scalar_static_bool[43]{(v2339/v616)}else{v13});
-        let v2350=(if self.scalar_static_bool[43]{(self.scalar_static_f64[176]+v2330)}else{v13});
-        let v2351=(if self.scalar_static_bool[43]{(self.scalar_static_f64[89]+v2331)}else{v13});
-        let v2380=(if self.scalar_static_bool[43]{(self.scalar_static_f64[102]+(v140*(self.scalar_static_f64[104]+((v552*(self.scalar_static_f64[94]+v2346))/self.scalar_static_f64[94]))))}else{v13});
-        let v2392=(v641*self.scalar_static_f64[187]);
-        let v2393=(v2392+v2392);
-        let v2394=(v641*self.scalar_static_f64[188]);
-        let v2395=(v2394+v2394);
-        let v2398=(self.scalar_static_f64[108]*f64::powf(v645,self.scalar_static_f64[189]));
-        let v2415=(v44-(v657*v657));
-        let v2427=(v44-(v668*v668));
-        let v2464=(if self.scalar_static_bool[49]{v2271}else{v2326});
-        let v2465=(if self.scalar_static_bool[49]{v2272}else{v2327});
-        let v2470=(if self.scalar_static_bool[49]{v2280}else{v2336});
-        let v2471=(if self.scalar_static_bool[49]{v2281}else{v2337});
-        let v2472=(if self.scalar_static_bool[49]{v13}else{v2338});
-        let v2473=(if self.scalar_static_bool[49]{v2282}else{v2339});
-        let v2484=(v227*f64::powf(v695,v44));
-        let v2489=(self.scalar_static_f64[114]*f64::powf(v697,self.scalar_static_f64[198]));
-        let v2531=(if self.scalar_static_bool[49]{(v139*(((v713*((self.scalar_static_f64[89]+(if self.scalar_static_bool[49]{(v2470/v689)}else{v2289}))-(if self.scalar_static_bool[49]{(self.scalar_static_f64[89]+(if self.scalar_static_bool[49]{(v2464/v686)}else{v2277}))}else{v2294})))+(v712*v2230))/self.scalar_static_f64[88]))}else{(if self.scalar_static_bool[43]{(v139*(((v601*v2230)+(v588*((self.scalar_static_f64[89]+v2289)-v2294)))/self.scalar_static_f64[88]))}else{v13})});
-        let v2532=(if self.scalar_static_bool[49]{(self.scalar_static_f64[183]+(v139*(self.scalar_static_f64[182]+(((v713*((if self.scalar_static_bool[49]{((v699*self.scalar_static_f64[197])+(v694*((self.scalar_static_f64[185]*v2484)*v2489)))}else{v13})+((self.scalar_static_f64[177]+(if self.scalar_static_bool[49]{(v2471/v689)}else{v2290}))-(if self.scalar_static_bool[49]{(self.scalar_static_f64[176]+(if self.scalar_static_bool[49]{(v2465/v686)}else{v2278}))}else{v2295}))))+(v712*v2231))/self.scalar_static_f64[88]))))}else{(if self.scalar_static_bool[43]{((v139*((((v601*v2231)+(v588*((self.scalar_static_f64[177]+v2290)-v2295)))/self.scalar_static_f64[88])+self.scalar_static_f64[182]))+self.scalar_static_f64[183])}else{v13})});
-        let v2533=(if self.scalar_static_bool[49]{(v139*((v713*(if self.scalar_static_bool[49]{(v2472/v689)}else{v13}))/self.scalar_static_f64[88]))}else{v13});
-        let v2534=(if self.scalar_static_bool[49]{(self.scalar_static_f64[100]+(v139*(self.scalar_static_f64[104]+((v713*((if self.scalar_static_bool[49]{((self.scalar_static_f64[112]*v699)+(v694*((self.scalar_static_f64[186]*v2484)*v2489)))}else{v13})+(self.scalar_static_f64[88]+(if self.scalar_static_bool[49]{(v2473/v689)}else{v2291}))))/self.scalar_static_f64[88]))))}else{v2322});
-        let v2582=(if self.scalar_static_bool[49]{(self.scalar_static_f64[184]+(v140*(self.scalar_static_f64[182]+(((v729*v2235)+(v662*((self.scalar_static_f64[181]+(if self.scalar_static_bool[49]{((if self.scalar_static_bool[49]{v2333}else{v2470})/v723)}else{v2344}))-(if self.scalar_static_bool[49]{(self.scalar_static_f64[176]+(if self.scalar_static_bool[49]{((if self.scalar_static_bool[49]{v2324}else{v2464})/v720)}else{v2330}))}else{v2350}))))/self.scalar_static_f64[94]))))}else{(if self.scalar_static_bool[43]{((v140*(self.scalar_static_f64[182]+(((v622*v2235)+(v552*((self.scalar_static_f64[181]+v2344)-v2350)))/self.scalar_static_f64[94])))+self.scalar_static_f64[184])}else{v13})});
-        let v2583=(if self.scalar_static_bool[49]{(v140*(((v729*v2236)+(v662*((self.scalar_static_f64[89]+(if self.scalar_static_bool[49]{((if self.scalar_static_bool[49]{v2334}else{v2471})/v723)}else{v2345}))-(if self.scalar_static_bool[49]{(self.scalar_static_f64[89]+(if self.scalar_static_bool[49]{((if self.scalar_static_bool[49]{v2325}else{v2465})/v720)}else{v2331}))}else{v2351}))))/self.scalar_static_f64[94]))}else{(if self.scalar_static_bool[43]{(v140*(((v622*v2236)+(v552*((self.scalar_static_f64[89]+v2345)-v2351)))/self.scalar_static_f64[94]))}else{v13})});
-        let v2584=(if self.scalar_static_bool[49]{(self.scalar_static_f64[102]+(v140*(self.scalar_static_f64[104]+((v662*(self.scalar_static_f64[94]+(if self.scalar_static_bool[49]{((if self.scalar_static_bool[49]{v2335}else{v2472})/v723)}else{v2346})))/self.scalar_static_f64[94]))))}else{v2380});
-        let v2585=(if self.scalar_static_bool[49]{(v140*((v662*(if self.scalar_static_bool[49]{((if self.scalar_static_bool[49]{v13}else{v2473})/v723)}else{v2347}))/self.scalar_static_f64[94]))}else{(if self.scalar_static_bool[43]{(v140*((v552*v2347)/self.scalar_static_f64[94]))}else{v13})});
-        let v2615=(v5*(if self.scalar_static_bool[49]{v13}else{(if self.scalar_static_bool[46]{(v140*((v670*v2235)+(v663*(if self.scalar_static_bool[46]{(self.scalar_static_f64[195]*v2427)}else{v2241}))))}else{(if self.scalar_static_bool[43]{v13}else{(if self.scalar_static_bool[40]{(v140*((v558*v2235)+(v552*v2241)))}else{v13})})})}));
-        let v2617=(v5*(if self.scalar_static_bool[49]{v13}else{(if self.scalar_static_bool[46]{(v140*((v670*v2236)+(v663*(if self.scalar_static_bool[46]{(self.scalar_static_f64[196]*v2427)}else{v2242}))))}else{(if self.scalar_static_bool[43]{v13}else{(if self.scalar_static_bool[40]{(v140*((v558*v2236)+(v552*v2242)))}else{v13})})})}));
-        let v2618=(v5*(if self.scalar_static_bool[49]{v13}else{(if self.scalar_static_bool[46]{(v140*(v663*(if self.scalar_static_bool[46]{(self.scalar_static_f64[94]*v2427)}else{v2243})))}else{(if self.scalar_static_bool[43]{v13}else{(if self.scalar_static_bool[40]{(v140*(v552*v2243))}else{v13})})})}));
-        let v2626=(v9*(if self.scalar_static_bool[49]{v13}else{(if self.scalar_static_bool[46]{((v674*v2230)+(v660*(v139*(if self.scalar_static_bool[46]{(self.scalar_static_f64[191]*v2415)}else{v2224}))))}else{(if self.scalar_static_bool[43]{v13}else{(if self.scalar_static_bool[40]{((v574*v2230)+(v545*(v139*v2224)))}else{v13})})})}));
-        let v2628=(v9*(if self.scalar_static_bool[49]{v13}else{(if self.scalar_static_bool[46]{((v674*v2231)+(v660*(v139*((if self.scalar_static_bool[46]{(self.scalar_static_f64[192]*v2415)}else{v2225})+(self.scalar_static_f64[112]*(if self.scalar_static_bool[46]{((v651*(v2393*v2398))+(v647*(self.scalar_static_f64[110]*v2393)))}else{v13}))))))}else{(if self.scalar_static_bool[43]{v13}else{(if self.scalar_static_bool[40]{((v574*v2231)+(v545*(v139*v2225)))}else{v13})})})}));
-        let v2630=(v9*(if self.scalar_static_bool[49]{v13}else{(if self.scalar_static_bool[46]{(v660*(v139*((if self.scalar_static_bool[46]{(self.scalar_static_f64[88]*v2415)}else{v2226})+(self.scalar_static_f64[112]*(if self.scalar_static_bool[46]{((v651*(v2395*v2398))+(v647*(self.scalar_static_f64[110]*v2395)))}else{v13})))))}else{(if self.scalar_static_bool[43]{v13}else{(if self.scalar_static_bool[40]{(v545*(v139*v2226))}else{v13})})})}));
-        let v2640=(-v142);
-        let v2649=(if (self.scalar_static_f64[122]!=0.0){(v827*(if self.scalar_static_bool[28]{((-(v141*v1726))/v2114)}else{(if (self.scalar_static_f64[66]!=0.0){((-(v141*v999))/v2083)}else{v13})}))}else{v13});
-        let v2650=(if (self.scalar_static_f64[122]!=0.0){(v827*(if self.scalar_static_bool[28]{((-(v141*v1727))/v2114)}else{(if (self.scalar_static_f64[66]!=0.0){((-(v141*v1000))/v2083)}else{v13})}))}else{v13});
-        let v2651=(if (self.scalar_static_f64[122]!=0.0){(v827*(if self.scalar_static_bool[28]{((-(v141*v1728))/v2114)}else{(if (self.scalar_static_f64[66]!=0.0){((-(v141*v1001))/v2083)}else{v13})}))}else{v13});
-        let v2652=(if (self.scalar_static_f64[122]!=0.0){(v827*(if self.scalar_static_bool[28]{((-(v141*v1729))/v2114)}else{(if (self.scalar_static_f64[66]!=0.0){((-(v141*v1002))/v2083)}else{v13})}))}else{v13});
-        let v2653=(if (self.scalar_static_f64[122]!=0.0){(v827*(if self.scalar_static_bool[28]{((-(v141*v1730))/v2114)}else{(if (self.scalar_static_f64[66]!=0.0){((-(v141*v1003))/v2083)}else{v13})}))}else{v13});
-        let v2659=(-v144);
+        let va=ctx.node_voltage(nodes[4]);
+        let vb=(va-v1);
+        let vd=0.0;
+        let vw=ctx.node_voltage(nodes[3]);
+        let vz=(if (sf[10]!=0.0){(sf[218]+(vw).abs())}else{sf[218]});
+        let v13=((vz-sf[9])).abs();
+        let v18=1.0;
+        let v19=(if ((v13>vd)||sb[2]){v18}else{vd});
+        let v1b=(v13).abs();
+        let v2c=(v18+(v1b*sf[24]));
+        let v2n=(v18+(v13*sf[28]));
+        let v3c=((v19!=0.0)&&(sf[36]!=0.0));
+        let v3g=(v18+(sf[24]*(v13*v13)));
+        let v3n=((v19!=0.0)&&sb[8]);
+        let v3s=(!(v19!=0.0));
+        let v3v=(if v3s{sf[17]}else{(if (v19!=0.0){(sf[17]*(v18+(v1b*sf[18])))}else{vd})});
+        let v3w=(if v3s{sf[19]}else{(if (v19!=0.0){(sf[19]*(v18+(v1b*sf[20])))}else{vd})});
+        let v3x=(if v3s{sf[21]}else{(if (v19!=0.0){(sf[21]*(v18+(v1b*sf[22])))}else{vd})});
+        let v3y=(if v3s{sf[23]}else{(if (v19!=0.0){(sf[23]*v2c)}else{vd})});
+        let v40=(if v3s{sf[38]}else{(if v3n{(v2c*sf[38])}else{(if v3c{(v3g*sf[38])}else{vd})})});
+        let v42=(if v3s{sf[27]}else{(if (v19!=0.0){(sf[27]*v2n)}else{vd})});
+        let v43=(if v3s{sf[29]}else{(if (v19!=0.0){(v2n*sf[29])}else{vd})});
+        let v45=(if v3s{sf[32]}else{(if (v19!=0.0){(sf[32]+(v13*sf[33]))}else{vd})});
+        let v4b=0.5;
+        let v4k=(v7*sf[45]);
+        let v4l=(v4k).cosh();
+        let v4q=1e-12;
+        let v4s=(v4q+(v4l*v4l));
+        let v4y=(v18+(v1b*sf[49]));
+        let v4z=((sf[47]*(v18+(sf[48]/v4s)))*v4y);
+        let v54=(sf[50]*(v18+(v1b*sf[51])));
+        let v59=((v7*sf[53])).tanh();
+        let v5e=(v6-v45);
+        let v5f=(sf[54]*v5e);
+        let v5j=(v18+(v1b*sf[26]));
+        let v5k=((((((if v3s{sf[25]}else{(if (v19!=0.0){(sf[25]+(v13*sf[26]))}else{vd})})-sf[52])+(sf[52]*v59))-(vb*sf[46]))-(v5e*v5f))*v5j);
+        let v5l=(v2-v5k);
+        let v5m=(v5l*v5l);
+        let v5r=(v54*v5l);
+        let v5t=(((v4z*v5l)+(v5m*sf[55]))+(v5m*v5r));
+        let v5u=(v5t).tanh();
+        let v5v=(v18+v5u);
+        let v5x=(-v5t);
+        let v61=((v4b*(scalar_limexp(v5t)-scalar_limexp(v5x)))).tanh();
+        let v6b=2.0;
+        let v6u=(v5-v5k);
+        let v6v=(if sb[16]{v6u}else{v4l});
+        let v6x=(if sb[16]{(v6v*v6v)}else{v5l});
+        let v8b=(if sb[19]{v5l}else{v6v});
+        let v8d=(if sb[19]{(v8b*v8b)}else{v6x});
+        let v8g=(v54*v8d);
+        let v8i=((v8b+(sf[55]*v8d))+(v8b*v8g));
+        let v8k=(if sb[19]{(v4z*v8i)}else{v5t});
+        let v8m=(-v8k);
+        let v8q=((v4b*(scalar_limexp(v8k)-scalar_limexp(v8m)))).tanh();
+        let v8s=(if sb[19]{(v18+v8q)}else{(v18+v61)});
+        let v9f=(if sb[22]{v5l}else{v8b});
+        let v9h=(if sb[22]{(v9f*v9f)}else{v8d});
+        let v9k=(v54*v9h);
+        let v9m=((v9f+(sf[55]*v9h))+(v9f*v9k));
+        let v9o=(if sb[22]{(v4z*v9m)}else{v8k});
+        let va0=(-v9o);
+        let va4=((v4b*(scalar_limexp(v9o)-scalar_limexp(va0)))).tanh();
+        let va6=(if sb[22]{(v18+va4)}else{v8s});
+        let vc5=(v18+v5v);
+        let vci=(v18+va6);
+        let vcl=(if sb[28]{(sf[67]+(v3x/vci))}else{(if (sf[66]!=0.0){(sf[67]+(v3x/vc5))}else{vd})});
+        let vcz=-1.0;
+        let vew=(v7*sf[89]);
+        let vex=((v42+(v9*sf[88]))+vew);
+        let vey=(vex).tanh();
+        let vez=(v18+vey);
+        let vf4=((sf[90]+(v7*sf[91]))).tanh();
+        let vf5=(v18+vf4);
+        let vfa=((sf[92]-(v7*sf[93]))).tanh();
+        let vfc=((v18+vfa)-sf[89]);
+        let vfg=((v43+(v5*sf[94]))-vew);
+        let vfh=(vfg).tanh();
+        let vfi=(v18+vfh);
+        let vfy=(v3v*vez);
+        let vg1=(if sb[40]{(sf[100]+(vf5*vfy))}else{sf[101]});
+        let vg7=(if sb[40]{(sf[102]+(v3w*((vfc*vfi)+sf[104])))}else{sf[103]});
+        let vgc=(if sb[43]{(vf5-sf[89])}else{vf5});
+        let vgd=(v42+vew);
+        let vge=(vgd).cosh();
+        let vgf=(if sb[43]{vge}else{vd});
+        let vgh=(if sb[43]{(vgf).ln()}else{vd});
+        let vgi=(vex).cosh();
+        let vgj=(if sb[43]{vgi}else{vd});
+        let vgl=(if sb[43]{(vgj).ln()}else{vd});
+        let vgn=(if sb[43]{(vgd+vgh)}else{vd});
+        let vgp=((vex+vgl)-vgn);
+        let vgs=(v9*sf[104]);
+        let vgv=(v9*sf[100]);
+        let vgy=(v43-vew);
+        let vgz=(vgy).cosh();
+        let vh0=(if sb[43]{vgz}else{vgf});
+        let vh2=(if sb[43]{(vh0).ln()}else{vd});
+        let vh3=(vfg).cosh();
+        let vh4=(if sb[43]{vh3}else{vgj});
+        let vh6=(if sb[43]{(vh4).ln()}else{vd});
+        let vh8=(if sb[43]{(vgy+vh2)}else{vd});
+        let vha=((vfg+vh6)-vh8);
+        let vhd=(v5*sf[104]);
+        let vhg=(v5*sf[102]);
+        let vhr=(v9/sf[105]);
+        let vht=(if sb[46]{(vhr-v18)}else{vd});
+        let vhw=(vht*vht);
+        let vhx=(sf[107]+vhw);
+        let vhz=f64::powf(vhx,sf[108]);
+        let vi3=(sf[107]+(vhw*sf[110]));
+        let vi9=((v42+(sf[88]*(v9+vew)))).tanh();
+        let vic=(if sb[46]{vf5}else{vgc});
+        let vie=(vfa+sf[111]);
+        let vif=(if sb[46]{vie}else{vfc});
+        let vik=((v43+(sf[94]*(v5+(v7*sf[111]))))).tanh();
+        let vim=(if sb[46]{(v18+vik)}else{vfi});
+        let viq=(v3v*((if sb[46]{(v18+vi9)}else{vez})+((if sb[46]{(vhz*vi3)}else{vd})*sf[112])));
+        let vis=(sf[100]+(vic*viq));
+        let vix=(sf[102]+(v3w*(sf[104]+(vif*vim))));
+        let vj2=(if sb[49]{vge}else{vh0});
+        let vj5=(if sb[49]{vgi}else{vh4});
+        let vja=(sf[112]*(v9+sf[105]));
+        let vjb=(vcz+vhr);
+        let vjd=(sf[107]+f64::powf(vjb,v6b));
+        let vjf=f64::powf(vjd,sf[114]);
+        let vjs=(((if sb[49]{(vja*vjf)}else{vd})+((vex+(if sb[49]{(vj5).ln()}else{vgl}))-(if sb[49]{(vgd+(if sb[49]{(vj2).ln()}else{vgh}))}else{vgn})))-sf[119]);
+        let vjt=(vf4+sf[111]);
+        let vjz=(if sb[49]{(vgv+(v3v*(vgs+((vjs*vjt)/sf[88]))))}else{(if sb[43]{((v3v*(((vgc*vgp)/sf[88])+vgs))+vgv)}else{vd})});
+        let vk0=(if sb[49]{vgz}else{vj2});
+        let vk3=(if sb[49]{vh3}else{vj5});
+        let vk9=((vfg+(if sb[49]{(vk3).ln()}else{vh6}))-(if sb[49]{(vgy+(if sb[49]{(vk0).ln()}else{vh2}))}else{vh8}));
+        let vkf=(if sb[49]{(vhg+(v3w*(vhd+((vie*vk9)/sf[94]))))}else{(if sb[43]{((v3w*(((vfc*vha)/sf[94])+vhd))+vhg)}else{vd})});
+        let vlu=(if sb[67]{((v3v*((vz*5.5226012e-23)*sf[140]))*sf[142])}else{vd});
+        let vm0=3.141592653589793;
+        let vma=(sf[144]*ctx.node_voltage(nodes[15]));
+        let vmd=(sf[145]*ctx.branch_current(branches[0]));
+        let vms=(sf[146]*(ctx.node_voltage(nodes[7])-v4));
+        let vmu=(v7*sf[147]);
+        let vmw=(ctx.node_voltage(nodes[6])-va);
+        let vmx=(v3y*vmw);
+        let vmz=ctx.branch_current(branches[1]);
+        let vn0=(vcl*vmz);
+        let vn1=(sf[121]*vmz);
+        let vn8=(v2*v40);
+        let vnc=ctx.node_voltage(nodes[14]);
+        let vne=(sf[148]*(v8-vnc));
+        let vnu=(sf[149]*ctx.branch_current(branches[10]));
+        let vo0=(sf[150]*ctx.branch_current(branches[14]));
+        let vo6=(sf[151]*ctx.branch_current(branches[18]));
+        let vob=ctx.node_voltage(nodes[17]);
+        let voj=(-(if sb[67]{(vlu*vm0)}else{vd}));
+        let vok=(vob*voj);
+        let vox=(vw*sf[152]);
+        let vp4=(v4k).sinh();
+        let vp5=(sf[45]*vp4);
+        let vp6=(sf[153]*vp4);
+        let vp8=(v4l*vp5);
+        let vpa=(v4l*vp6);
+        let vpe=(v4s*v4s);
+        let vpl=(v4y*(sf[47]*((-(sf[48]*(vp8+vp8)))/vpe)));
+        let vpm=(v4y*(sf[47]*((-(sf[48]*(vpa+vpa)))/vpe)));
+        let vpp=(v18-(v59*v59));
+        let vq3=(v5j*((sf[52]*(sf[53]*vpp))-(v5f+v5f)));
+        let vq4=(v5j*((sf[52]*(sf[155]*vpp))-sf[154]));
+        let vq5=(v5j*(-((-v5f)+(v5e*sf[156]))));
+        let vq6=(-(v5j*sf[154]));
+        let vq7=(-vq3);
+        let vq8=(vcz-vq4);
+        let vq9=(-vq5);
+        let vqa=(v5l*vq6);
+        let vqb=(vqa+vqa);
+        let vqc=(v5l*vq7);
+        let vqd=(vqc+vqc);
+        let vqe=(v5l*vq8);
+        let vqf=(vqe+vqe);
+        let vqg=(v5l*vq9);
+        let vqh=(vqg+vqg);
+        let vqi=(v5l+v5l);
+        let vrk=(((v4z*vq6)+(sf[55]*vqb))+((v5r*vqb)+(v5m*(v54*vq6))));
+        let vrl=((((v5l*vpl)+(v4z*vq7))+(sf[55]*vqd))+((v5r*vqd)+(v5m*(v54*vq7))));
+        let vrm=((((v5l*vpm)+(v4z*vq8))+(sf[55]*vqf))+((v5r*vqf)+(v5m*(v54*vq8))));
+        let vrn=(((v4z*vq9)+(sf[55]*vqh))+((v5r*vqh)+(v5m*(v54*vq9))));
+        let vro=((v4z+(sf[55]*vqi))+((v5r*vqi)+(v54*v5m)));
+        let vrq=(v18-(v5u*v5u));
+        let vrr=(vrk*vrq);
+        let vrs=(vrl*vrq);
+        let vrt=(vrm*vrq);
+        let vru=(vrn*vrq);
+        let vrv=(vro*vrq);
+        let vrw=scalar_limexp_derivative(v5t);
+        let vs7=scalar_limexp_derivative(v5x);
+        let vso=(v18-(v61*v61));
+        let vuk=(vcz-vq3);
+        let vul=(-vq4);
+        let vum=(v18-vq5);
+        let vun=(if sb[16]{vq6}else{vd});
+        let vuo=(if sb[16]{vuk}else{vp5});
+        let vup=(if sb[16]{vul}else{vp6});
+        let vuq=(if sb[16]{vum}else{vd});
+        let vur=(v6v*vun);
+        let vut=(v6v*vuo);
+        let vuv=(v6v*vup);
+        let vux=(v6v*vuq);
+        let vuz=(if sb[16]{(vur+vur)}else{vq6});
+        let vv0=(if sb[16]{(vut+vut)}else{vq7});
+        let vv1=(if sb[16]{(vuv+vuv)}else{vq8});
+        let vv2=(if sb[16]{(vux+vux)}else{vq9});
+        let v11j=(if sb[19]{vq6}else{vun});
+        let v11k=(if sb[19]{vq7}else{vuo});
+        let v11l=(if sb[19]{vq8}else{vup});
+        let v11m=(if sb[19]{vq9}else{vuq});
+        let v11o=(v8b*v11j);
+        let v11q=(v8b*v11k);
+        let v11s=(v8b*v11l);
+        let v11u=(v8b*v11m);
+        let v11w=(v8b*sf[161]);
+        let v11y=(if sb[19]{(v11o+v11o)}else{vuz});
+        let v11z=(if sb[19]{(v11q+v11q)}else{vv0});
+        let v120=(if sb[19]{(v11s+v11s)}else{vv1});
+        let v121=(if sb[19]{(v11u+v11u)}else{vv2});
+        let v122=(if sb[19]{(v11w+v11w)}else{sf[158]});
+        let v13b=(if sb[19]{(v4z*((v11j+(sf[55]*v11y))+((v8g*v11j)+(v8b*(v54*v11y)))))}else{vrk});
+        let v13c=(if sb[19]{((v8i*vpl)+(v4z*((v11k+(sf[55]*v11z))+((v8g*v11k)+(v8b*(v54*v11z))))))}else{vrl});
+        let v13d=(if sb[19]{((v8i*vpm)+(v4z*((v11l+(sf[55]*v120))+((v8g*v11l)+(v8b*(v54*v120))))))}else{vrm});
+        let v13e=(if sb[19]{(v4z*((v11m+(sf[55]*v121))+((v8g*v11m)+(v8b*(v54*v121)))))}else{vrn});
+        let v13f=(if sb[19]{(v4z*((sf[161]+(sf[55]*v122))+((v8g*sf[161])+(v8b*(v54*v122)))))}else{vro});
+        let v13g=scalar_limexp_derivative(v8k);
+        let v13r=scalar_limexp_derivative(v8m);
+        let v148=(v18-(v8q*v8q));
+        let v14e=(if sb[19]{((v4b*((v13b*v13g)-((-v13b)*v13r)))*v148)}else{((v4b*((vrk*vrw)-((-vrk)*vs7)))*vso)});
+        let v14f=(if sb[19]{((v4b*((v13c*v13g)-((-v13c)*v13r)))*v148)}else{((v4b*((vrl*vrw)-((-vrl)*vs7)))*vso)});
+        let v14g=(if sb[19]{((v4b*((v13d*v13g)-((-v13d)*v13r)))*v148)}else{((v4b*((vrm*vrw)-((-vrm)*vs7)))*vso)});
+        let v14h=(if sb[19]{((v4b*((v13e*v13g)-((-v13e)*v13r)))*v148)}else{((v4b*((vrn*vrw)-((-vrn)*vs7)))*vso)});
+        let v14i=(if sb[19]{((v4b*((v13f*v13g)-((-v13f)*v13r)))*v148)}else{((v4b*((vro*vrw)-((-vro)*vs7)))*vso)});
+        let v176=(if sb[22]{vq6}else{v11j});
+        let v177=(if sb[22]{vq7}else{v11k});
+        let v178=(if sb[22]{vq8}else{v11l});
+        let v179=(if sb[22]{vq9}else{v11m});
+        let v17b=(v9f*v176);
+        let v17d=(v9f*v177);
+        let v17f=(v9f*v178);
+        let v17h=(v9f*v179);
+        let v17j=(v9f*sf[162]);
+        let v17l=(if sb[22]{(v17b+v17b)}else{v11y});
+        let v17m=(if sb[22]{(v17d+v17d)}else{v11z});
+        let v17n=(if sb[22]{(v17f+v17f)}else{v120});
+        let v17o=(if sb[22]{(v17h+v17h)}else{v121});
+        let v17p=(if sb[22]{(v17j+v17j)}else{v122});
+        let v18y=(if sb[22]{(v4z*((v176+(sf[55]*v17l))+((v9k*v176)+(v9f*(v54*v17l)))))}else{v13b});
+        let v18z=(if sb[22]{((v9m*vpl)+(v4z*((v177+(sf[55]*v17m))+((v9k*v177)+(v9f*(v54*v17m))))))}else{v13c});
+        let v190=(if sb[22]{((v9m*vpm)+(v4z*((v178+(sf[55]*v17n))+((v9k*v178)+(v9f*(v54*v17n))))))}else{v13d});
+        let v191=(if sb[22]{(v4z*((v179+(sf[55]*v17o))+((v9k*v179)+(v9f*(v54*v17o)))))}else{v13e});
+        let v192=(if sb[22]{(v4z*((sf[162]+(sf[55]*v17p))+((v9k*sf[162])+(v9f*(v54*v17p)))))}else{v13f});
+        let v1b0=scalar_limexp_derivative(v9o);
+        let v1bb=scalar_limexp_derivative(va0);
+        let v1bs=(v18-(va4*va4));
+        let v1by=(if sb[22]{((v4b*((v18y*v1b0)-((-v18y)*v1bb)))*v1bs)}else{v14e});
+        let v1bz=(if sb[22]{((v4b*((v18z*v1b0)-((-v18z)*v1bb)))*v1bs)}else{v14f});
+        let v1c0=(if sb[22]{((v4b*((v190*v1b0)-((-v190)*v1bb)))*v1bs)}else{v14g});
+        let v1c1=(if sb[22]{((v4b*((v191*v1b0)-((-v191)*v1bb)))*v1bs)}else{v14h});
+        let v1c2=(if sb[22]{((v4b*((v192*v1b0)-((-v192)*v1bb)))*v1bs)}else{v14i});
+        let v1lv=(vc5*vc5);
+        let v1mq=(vci*vci);
+        let v1pr=(v18-(vey*vey));
+        let v1ps=(sf[89]*v1pr);
+        let v1pt=(sf[177]*v1pr);
+        let v1pu=(sf[88]*v1pr);
+        let v1px=(v18-(vf4*vf4));
+        let v1py=(sf[91]*v1px);
+        let v1pz=(sf[178]*v1px);
+        let v1q2=(v18-(vfa*vfa));
+        let v1q3=(sf[179]*v1q2);
+        let v1q4=(sf[93]*v1q2);
+        let v1q8=(v18-(vfh*vfh));
+        let v1q9=(sf[181]*v1q8);
+        let v1qa=(sf[89]*v1q8);
+        let v1qb=(sf[94]*v1q8);
+        let v1r2=(vgd).sinh();
+        let v1r3=(sf[89]*v1r2);
+        let v1r4=(sf[176]*v1r2);
+        let v1r5=(if sb[43]{v1r3}else{vd});
+        let v1r6=(if sb[43]{v1r4}else{vd});
+        let v1r9=(if sb[43]{(v1r5/vgf)}else{vd});
+        let v1ra=(if sb[43]{(v1r6/vgf)}else{vd});
+        let v1rb=(vex).sinh();
+        let v1rc=(sf[89]*v1rb);
+        let v1rd=(sf[177]*v1rb);
+        let v1re=(sf[88]*v1rb);
+        let v1rf=(if sb[43]{v1rc}else{vd});
+        let v1rg=(if sb[43]{v1rd}else{vd});
+        let v1rh=(if sb[43]{v1re}else{vd});
+        let v1rl=(if sb[43]{(v1rf/vgj)}else{vd});
+        let v1rm=(if sb[43]{(v1rg/vgj)}else{vd});
+        let v1rn=(if sb[43]{(v1rh/vgj)}else{vd});
+        let v1rq=(if sb[43]{(sf[89]+v1r9)}else{vd});
+        let v1rr=(if sb[43]{(sf[176]+v1ra)}else{vd});
+        let v1si=(if sb[43]{(sf[100]+(v3v*(sf[104]+((vgc*(sf[88]+v1rn))/sf[88]))))}else{vd});
+        let v1sj=(vgy).sinh();
+        let v1sk=(sf[176]*v1sj);
+        let v1sl=(sf[89]*v1sj);
+        let v1sm=(if sb[43]{v1sk}else{v1r5});
+        let v1sn=(if sb[43]{v1sl}else{v1r6});
+        let v1sq=(if sb[43]{(v1sm/vh0)}else{vd});
+        let v1sr=(if sb[43]{(v1sn/vh0)}else{vd});
+        let v1ss=(vfg).sinh();
+        let v1st=(sf[181]*v1ss);
+        let v1su=(sf[89]*v1ss);
+        let v1sv=(sf[94]*v1ss);
+        let v1sw=(if sb[43]{v1st}else{v1rf});
+        let v1sx=(if sb[43]{v1su}else{v1rg});
+        let v1sy=(if sb[43]{v1sv}else{vd});
+        let v1sz=(if sb[43]{vd}else{v1rh});
+        let v1t4=(if sb[43]{(v1sw/vh4)}else{vd});
+        let v1t5=(if sb[43]{(v1sx/vh4)}else{vd});
+        let v1t6=(if sb[43]{(v1sy/vh4)}else{vd});
+        let v1t7=(if sb[43]{(v1sz/vh4)}else{vd});
+        let v1ta=(if sb[43]{(sf[176]+v1sq)}else{vd});
+        let v1tb=(if sb[43]{(sf[89]+v1sr)}else{vd});
+        let v1u4=(if sb[43]{(sf[102]+(v3w*(sf[104]+((vfc*(sf[94]+v1t6))/sf[94]))))}else{vd});
+        let v1ug=(vht*sf[187]);
+        let v1uh=(v1ug+v1ug);
+        let v1ui=(vht*sf[188]);
+        let v1uj=(v1ui+v1ui);
+        let v1um=(sf[108]*f64::powf(vhx,sf[189]));
+        let v1v3=(v18-(vi9*vi9));
+        let v1vf=(v18-(vik*vik));
+        let v1wg=(if sb[49]{v1r3}else{v1sm});
+        let v1wh=(if sb[49]{v1r4}else{v1sn});
+        let v1wm=(if sb[49]{v1rc}else{v1sw});
+        let v1wn=(if sb[49]{v1rd}else{v1sx});
+        let v1wo=(if sb[49]{vd}else{v1sy});
+        let v1wp=(if sb[49]{v1re}else{v1sz});
+        let v1x0=(v6b*f64::powf(vjb,v18));
+        let v1x5=(sf[114]*f64::powf(vjd,sf[198]));
+        let v1yb=(if sb[49]{(v3v*(((vjt*((sf[89]+(if sb[49]{(v1wm/vj5)}else{v1rl}))-(if sb[49]{(sf[89]+(if sb[49]{(v1wg/vj2)}else{v1r9}))}else{v1rq})))+(vjs*v1py))/sf[88]))}else{(if sb[43]{(v3v*(((vgp*v1py)+(vgc*((sf[89]+v1rl)-v1rq)))/sf[88]))}else{vd})});
+        let v1yc=(if sb[49]{(sf[183]+(v3v*(sf[182]+(((vjt*((if sb[49]{((vjf*sf[197])+(vja*((sf[185]*v1x0)*v1x5)))}else{vd})+((sf[177]+(if sb[49]{(v1wn/vj5)}else{v1rm}))-(if sb[49]{(sf[176]+(if sb[49]{(v1wh/vj2)}else{v1ra}))}else{v1rr}))))+(vjs*v1pz))/sf[88]))))}else{(if sb[43]{((v3v*((((vgp*v1pz)+(vgc*((sf[177]+v1rm)-v1rr)))/sf[88])+sf[182]))+sf[183])}else{vd})});
+        let v1yd=(if sb[49]{(v3v*((vjt*(if sb[49]{(v1wo/vj5)}else{vd}))/sf[88]))}else{vd});
+        let v1ye=(if sb[49]{(sf[100]+(v3v*(sf[104]+((vjt*((if sb[49]{((sf[112]*vjf)+(vja*((sf[186]*v1x0)*v1x5)))}else{vd})+(sf[88]+(if sb[49]{(v1wp/vj5)}else{v1rn}))))/sf[88]))))}else{v1si});
+        let v1zq=(if sb[49]{(sf[184]+(v3w*(sf[182]+(((vk9*v1q3)+(vie*((sf[181]+(if sb[49]{((if sb[49]{v1st}else{v1wm})/vk3)}else{v1t4}))-(if sb[49]{(sf[176]+(if sb[49]{((if sb[49]{v1sk}else{v1wg})/vk0)}else{v1sq}))}else{v1ta}))))/sf[94]))))}else{(if sb[43]{((v3w*(sf[182]+(((vha*v1q3)+(vfc*((sf[181]+v1t4)-v1ta)))/sf[94])))+sf[184])}else{vd})});
+        let v1zr=(if sb[49]{(v3w*(((vk9*v1q4)+(vie*((sf[89]+(if sb[49]{((if sb[49]{v1su}else{v1wn})/vk3)}else{v1t5}))-(if sb[49]{(sf[89]+(if sb[49]{((if sb[49]{v1sl}else{v1wh})/vk0)}else{v1sr}))}else{v1tb}))))/sf[94]))}else{(if sb[43]{(v3w*(((vha*v1q4)+(vfc*((sf[89]+v1t5)-v1tb)))/sf[94]))}else{vd})});
+        let v1zs=(if sb[49]{(sf[102]+(v3w*(sf[104]+((vie*(sf[94]+(if sb[49]{((if sb[49]{v1sv}else{v1wo})/vk3)}else{v1t6})))/sf[94]))))}else{v1u4});
+        let v1zt=(if sb[49]{(v3w*((vie*(if sb[49]{((if sb[49]{vd}else{v1wp})/vk3)}else{v1t7}))/sf[94]))}else{(if sb[43]{(v3w*((vfc*v1t7)/sf[94]))}else{vd})});
+        let v20n=(v5*(if sb[49]{vd}else{(if sb[46]{(v3w*((vim*v1q3)+(vif*(if sb[46]{(sf[195]*v1vf)}else{v1q9}))))}else{(if sb[43]{vd}else{(if sb[40]{(v3w*((vfi*v1q3)+(vfc*v1q9)))}else{vd})})})}));
+        let v20p=(v5*(if sb[49]{vd}else{(if sb[46]{(v3w*((vim*v1q4)+(vif*(if sb[46]{(sf[196]*v1vf)}else{v1qa}))))}else{(if sb[43]{vd}else{(if sb[40]{(v3w*((vfi*v1q4)+(vfc*v1qa)))}else{vd})})})}));
+        let v20q=(v5*(if sb[49]{vd}else{(if sb[46]{(v3w*(vif*(if sb[46]{(sf[94]*v1vf)}else{v1qb})))}else{(if sb[43]{vd}else{(if sb[40]{(v3w*(vfc*v1qb))}else{vd})})})}));
+        let v20y=(v9*(if sb[49]{vd}else{(if sb[46]{((viq*v1py)+(vic*(v3v*(if sb[46]{(sf[191]*v1v3)}else{v1ps}))))}else{(if sb[43]{vd}else{(if sb[40]{((vfy*v1py)+(vf5*(v3v*v1ps)))}else{vd})})})}));
+        let v210=(v9*(if sb[49]{vd}else{(if sb[46]{((viq*v1pz)+(vic*(v3v*((if sb[46]{(sf[192]*v1v3)}else{v1pt})+(sf[112]*(if sb[46]{((vi3*(v1uh*v1um))+(vhz*(sf[110]*v1uh)))}else{vd}))))))}else{(if sb[43]{vd}else{(if sb[40]{((vfy*v1pz)+(vf5*(v3v*v1pt)))}else{vd})})})}));
+        let v212=(v9*(if sb[49]{vd}else{(if sb[46]{(vic*(v3v*((if sb[46]{(sf[88]*v1v3)}else{v1pu})+(sf[112]*(if sb[46]{((vi3*(v1uj*v1um))+(vhz*(sf[110]*v1uj)))}else{vd})))))}else{(if sb[43]{vd}else{(if sb[40]{(vf5*(v3v*v1pu))}else{vd})})})}));
+        let v21c=(-v3y);
+        let v21l=(if (sf[122]!=0.0){(vmz*(if sb[28]{((-(v3x*v1by))/v1mq)}else{(if (sf[66]!=0.0){((-(v3x*vrr))/v1lv)}else{vd})}))}else{vd});
+        let v21m=(if (sf[122]!=0.0){(vmz*(if sb[28]{((-(v3x*v1bz))/v1mq)}else{(if (sf[66]!=0.0){((-(v3x*vrs))/v1lv)}else{vd})}))}else{vd});
+        let v21n=(if (sf[122]!=0.0){(vmz*(if sb[28]{((-(v3x*v1c0))/v1mq)}else{(if (sf[66]!=0.0){((-(v3x*vrt))/v1lv)}else{vd})}))}else{vd});
+        let v21o=(if (sf[122]!=0.0){(vmz*(if sb[28]{((-(v3x*v1c1))/v1mq)}else{(if (sf[66]!=0.0){((-(v3x*vru))/v1lv)}else{vd})}))}else{vd});
+        let v21p=(if (sf[122]!=0.0){(vmz*(if sb[28]{((-(v3x*v1c2))/v1mq)}else{(if (sf[66]!=0.0){((-(v3x*vrv))/v1lv)}else{vd})}))}else{vd});
+        let v21v=(-v40);
 
         CommonStampValues {
             v0, v1, v3, v5, v6, v7, v8, v9, 
-            v11, v13, v32, v35, v39, v44, v45, v47, 
-            v84, v120, v124, v131, v136, v142, v144, v149, 
-            v155, v170, v179, v184, v194, v202, v211, v246, 
-            v247, v249, v316, v339, v366, v453, v467, v577, 
-            v583, v676, v681, v719, v735, v786, v792, v802, 
-            v805, v820, v822, v824, v825, v828, v829, v836, 
-            v840, v842, v858, v864, v870, v875, v883, v884, 
-            v897, v921, v922, v942, v947, v949, v951, v953, 
-            v954, v999, v1000, v1001, v1002, v1003, v1100, v1101, 
-            v1102, v1103, v1104, v1105, v1106, v1115, v1116, v1117, 
-            v1118, v1454, v1455, v1456, v1457, v1458, v1554, v1555, 
-            v1556, v1557, v1726, v1727, v1728, v1729, v1730, v2322, 
-            v2380, v2531, v2532, v2533, v2534, v2582, v2583, v2584, 
-            v2585, v2615, v2617, v2618, v2626, v2628, v2630, v2640, 
-            v2649, v2650, v2651, v2652, v2653, v2659, 
+            vb, vd, vw, vz, v13, v18, v19, v1b, 
+            v2c, v3c, v3g, v3n, v3s, v3y, v40, v45, 
+            v4b, v4q, v4z, v54, v5e, v5m, v5v, v6u, 
+            v6v, v6x, v8s, v9f, va6, vcl, vcz, vg1, 
+            vg7, vis, vix, vjz, vkf, vlu, vm0, vma, 
+            vmd, vms, vmu, vmw, vmx, vn0, vn1, vn8, 
+            vnc, vne, vnu, vo0, vo6, vob, voj, vok, 
+            vox, vpl, vpm, vq6, vqb, vqd, vqf, vqh, 
+            vqi, vrr, vrs, vrt, vru, vrv, vuk, vul, 
+            vum, vun, vuo, vup, vuq, vuz, vv0, vv1, 
+            vv2, v14e, v14f, v14g, v14h, v14i, v176, v177, 
+            v178, v179, v1by, v1bz, v1c0, v1c1, v1c2, v1si, 
+            v1u4, v1yb, v1yc, v1yd, v1ye, v1zq, v1zr, v1zs, 
+            v1zt, v20n, v20p, v20q, v20y, v210, v212, v21c, 
+            v21l, v21m, v21n, v21o, v21p, v21v, 
         }
     }
 
@@ -487,289 +489,308 @@ impl Instance {
         let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
         let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let common=self.eval_common_stamp_values(ctx);
-        let v12=ctx.node_voltage(nodes[16]);
-        let v50=(self.scalar_static_f64[11]*(common.v44+(self.scalar_static_f64[12]*common.v47)));
-        let v137=(if common.v136{self.scalar_static_f64[13]}else{(if (common.v45!=0.0){(self.scalar_static_f64[13]*(common.v44+(common.v47*self.scalar_static_f64[14])))}else{common.v13})});
-        let v138=(if common.v136{self.scalar_static_f64[15]}else{(if (common.v45!=0.0){(self.scalar_static_f64[15]*(common.v44+(common.v47*self.scalar_static_f64[16])))}else{common.v13})});
-        let v143=(if common.v136{self.scalar_static_f64[37]}else{(if common.v131{(common.v84*self.scalar_static_f64[37])}else{(if common.v120{(self.scalar_static_f64[37]*common.v124)}else{common.v13})})});
-        let v148=(if common.v136{self.scalar_static_f64[30]}else{(if (common.v45!=0.0){(self.scalar_static_f64[30]+(common.v39*self.scalar_static_f64[31]))}else{common.v13})});
-        let v162=(if self.scalar_static_bool[11]{self.scalar_static_f64[44]}else{(if (self.scalar_static_f64[41]!=0.0){(self.scalar_static_f64[43]/(common.v35*8.617333262145179e-5))}else{common.v13})});
-        let v221=(self.scalar_static_f64[56]+(self.scalar_static_f64[53]*common.v211));
-        let v223=((common.v7*v221)).tanh();
-        let v234=(v137*common.v211);
-        let v235=(v223*v234);
-        let v241=((common.v44+(common.v7*self.scalar_static_f64[62]))+(v138*scalar_limexp(common.v194)));
-        let v251=(if self.scalar_static_bool[16]{(common.v247*common.v249)}else{common.v202});
-        let v257=(if self.scalar_static_bool[16]{(((common.v179*common.v247)+(self.scalar_static_f64[55]*common.v249))+(common.v184*v251))}else{common.v13});
-        let v258=(v257).tanh();
-        let v260=(if self.scalar_static_bool[16]{(common.v44+v258)}else{common.v13});
-        let v263=(if self.scalar_static_bool[16]{(self.scalar_static_f64[56]+(self.scalar_static_f64[53]*v260))}else{common.v13});
-        let v266=(self.scalar_static_f64[62]+(common.v211*self.scalar_static_f64[63]));
-        let v267=(if self.scalar_static_bool[16]{v266}else{common.v13});
-        let v268=(common.v44+v223);
-        let v269=(v234*v268);
-        let v274=(self.scalar_static_f64[64]*(common.v7-common.v149));
-        let v276=(v138*scalar_limexp(v274));
-        let v277=((common.v44+(common.v7*v267))+v276);
-        let v279=(if self.scalar_static_bool[16]{(v269*v277)}else{common.v13});
-        let v282=(if self.scalar_static_bool[16]{(self.scalar_static_f64[62]+(v260*self.scalar_static_f64[63]))}else{common.v13});
-        let v284=((common.v7*v263)).tanh();
-        let v286=(v137*v260);
-        let v287=(common.v44-(if self.scalar_static_bool[16]{v284}else{common.v13}));
-        let v288=(v286*v287);
-        let v290=(common.v44-(common.v7*v282));
-        let v292=(if self.scalar_static_bool[16]{(v288*v290)}else{common.v13});
-        let v319=(if self.scalar_static_bool[19]{(self.scalar_static_f64[56]+(self.scalar_static_f64[53]*common.v316))}else{common.v13});
-        let v321=((common.v7*v319)).tanh();
-        let v322=(if self.scalar_static_bool[19]{v321}else{common.v13});
-        let v325=(if self.scalar_static_bool[19]{(self.scalar_static_f64[62]+(self.scalar_static_f64[63]*common.v316))}else{v267});
-        let v326=(v137*common.v316);
-        let v327=(v322*v326);
-        let v330=(common.v194*self.scalar_static_f64[64]);
-        let v333=((common.v44+(common.v7*v325))+(v138*scalar_limexp(v330)));
-        let v349=(if self.scalar_static_bool[22]{common.v246}else{v251});
-        let v351=(if self.scalar_static_bool[22]{(v349*v349)}else{common.v13});
-        let v354=(common.v184*v349);
-        let v356=((v349+(self.scalar_static_f64[55]*v351))+(v351*v354));
-        let v358=(if self.scalar_static_bool[22]{(common.v179*v356)}else{v257});
-        let v368=(-v358);
-        let v372=((common.v155*(scalar_limexp(v358)-scalar_limexp(v368)))).tanh();
-        let v374=(if self.scalar_static_bool[22]{(common.v44+v372)}else{common.v13});
-        let v376=(self.scalar_static_f64[56]+(self.scalar_static_f64[53]*common.v366));
-        let v377=(if self.scalar_static_bool[22]{v376}else{v319});
-        let v380=(if self.scalar_static_bool[22]{(self.scalar_static_f64[56]+(self.scalar_static_f64[53]*v374))}else{common.v13});
-        let v382=((common.v7*v377)).tanh();
-        let v383=(if self.scalar_static_bool[22]{v382}else{v322});
-        let v385=((common.v7*v380)).tanh();
-        let v389=(if self.scalar_static_bool[22]{(self.scalar_static_f64[62]+(self.scalar_static_f64[63]*v374))}else{common.v13});
-        let v392=(if self.scalar_static_bool[22]{(self.scalar_static_f64[62]+(self.scalar_static_f64[63]*common.v366))}else{common.v13});
-        let v393=(v137*common.v366);
-        let v394=(common.v44+v383);
-        let v395=(v393*v394);
-        let v398=(v276+(common.v44+(common.v7*v392)));
-        let v401=(v137*v374);
-        let v402=(common.v44-(if self.scalar_static_bool[22]{v385}else{common.v13}));
-        let v403=(v401*v402);
-        let v405=(common.v44-(common.v7*v389));
-        let v414=(if self.scalar_static_bool[25]{v266}else{v325});
-        let v415=(if self.scalar_static_bool[25]{v376}else{v377});
-        let v417=((common.v7*v415)).tanh();
-        let v420=((common.v11*v415)).tanh();
-        let v424=((if self.scalar_static_bool[25]{v417}else{v383})+((if self.scalar_static_bool[25]{v420}else{common.v13})*self.scalar_static_f64[65]));
-        let v425=(v234*v424);
-        let v427=(common.v7+(common.v11*self.scalar_static_f64[65]));
-        let v430=(v276+(common.v44+(v414*v427)));
-        let v432=(if self.scalar_static_bool[25]{(v425*v430)}else{(if self.scalar_static_bool[22]{(common.v155*((if self.scalar_static_bool[22]{(v395*v398)}else{v279})-(if self.scalar_static_bool[22]{(v403*v405)}else{v292})))}else{(if self.scalar_static_bool[19]{(v327*v333)}else{(if self.scalar_static_bool[16]{(common.v155*(v279-v292))}else{(if (self.scalar_static_f64[57]!=0.0){(v235*v241)}else{common.v13})})})})});
-        let v443=(common.v211*self.scalar_static_f64[69]);
-        let v454=(common.v366*self.scalar_static_f64[69]);
-        let v461=(common.v44+(common.v47*self.scalar_static_f64[71]));
-        let v462=((if self.scalar_static_bool[28]{(self.scalar_static_f64[70]+v454)}else{(if (self.scalar_static_f64[66]!=0.0){(v443+self.scalar_static_f64[70])}else{common.v13})})*v461);
-        let v463=((if self.scalar_static_bool[28]{(self.scalar_static_f64[68]+v454)}else{(if (self.scalar_static_f64[66]!=0.0){(self.scalar_static_f64[68]+v443)}else{common.v13})})*v461);
-        let v473=(common.v9-v148);
-        let v477=((-common.v9)-self.scalar_static_f64[74]);
-        let v479=(common.v5-v148);
-        let v482=(common.v6-self.scalar_static_f64[75]);
-        let v488=(if self.scalar_static_bool[30]{scalar_limexp((v148*(-v162)))}else{(if (self.scalar_static_f64[73]!=0.0){scalar_limexp((v162*((-v148)).tanh()))}else{common.v339})});
-        let v500=(v473).tanh();
-        let v502=(v479).tanh();
-        let v510=(self.scalar_static_f64[76]*(if self.scalar_static_bool[30]{v477}else{(if (self.scalar_static_f64[73]!=0.0){v477}else{common.v13})}));
-        let v514=(v162*(if self.scalar_static_bool[34]{v473}else{(if self.scalar_static_bool[32]{v500}else{(if (self.scalar_static_f64[73]!=0.0){v473}else{common.v13})})}));
-        let v522=(self.scalar_static_f64[85]*((scalar_limexp(v514)-((scalar_limexp(v510)-self.scalar_static_f64[80])*self.scalar_static_f64[87]))-v488));
-        let v523=(self.scalar_static_f64[76]*(if self.scalar_static_bool[30]{v482}else{(if (self.scalar_static_f64[73]!=0.0){v482}else{common.v13})}));
-        let v526=(v162*(if self.scalar_static_bool[34]{v479}else{(if self.scalar_static_bool[32]{v502}else{(if (self.scalar_static_f64[73]!=0.0){v479}else{common.v13})})}));
-        let v631=common.v2322;
-        let v633=common.v2380;
-        let v736=common.v2534;
-        let v737=(if self.scalar_static_bool[49]{v736}else{(if self.scalar_static_bool[46]{common.v676}else{(if self.scalar_static_bool[43]{v631}else{common.v577})})});
-        let v738=common.v2584;
-        let v739=(if self.scalar_static_bool[49]{v738}else{(if self.scalar_static_bool[46]{common.v681}else{(if self.scalar_static_bool[43]{v633}else{common.v583})})});
-        let v790=(if self.scalar_static_bool[67]{((common.v44-(common.v786*common.v786))).sqrt()}else{common.v13});
-        let v794=(if self.scalar_static_bool[67]{((-common.v786)*common.v792)}else{common.v13});
-        let v806=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, common.v735);
-        let v808=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, common.v719);
-        let v812=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 5, (common.v5*v739));
-        let v815=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 6, (common.v9*v737));
-        let v830=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, common.v829);
-        let v837=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 10, common.v836);
-        let v846=ctx.node_voltage(nodes[13]);
-        let v859=ctx.branch_current(branches[11]);
-        let v865=ctx.branch_current(branches[15]);
-        let v876=(if self.scalar_static_bool[67]{common.v875}else{common.v13});
-        let v877=ctx.node_voltage(nodes[18]);
-        let v885=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 15, common.v884);
-        let v898=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 16, common.v897);
-        let v1052=(common.v44-(v223*v223));
-        let v1058=(v137*common.v999);
-        let v1059=(v137*common.v1000);
-        let v1060=(v137*common.v1001);
-        let v1061=(v137*common.v1002);
-        let v1062=(v137*common.v1003);
-        let v1063=(v234*((common.v7*(self.scalar_static_f64[53]*common.v999))*v1052));
-        let v1066=(v234*((v221+(common.v7*(self.scalar_static_f64[53]*common.v1000)))*v1052));
-        let v1069=(v234*(((-v221)+(common.v7*(self.scalar_static_f64[53]*common.v1001)))*v1052));
-        let v1072=(v234*((common.v7*(self.scalar_static_f64[53]*common.v1002))*v1052));
-        let v1075=(v234*((common.v7*(self.scalar_static_f64[53]*common.v1003))*v1052));
-        let v1079=scalar_limexp_derivative(common.v194);
-        let v1133=(if self.scalar_static_bool[16]{((common.v249*common.v1103)+(common.v247*common.v1115))}else{common.v947});
-        let v1134=(if self.scalar_static_bool[16]{((common.v249*common.v1104)+(common.v247*common.v1116))}else{common.v949});
-        let v1135=(if self.scalar_static_bool[16]{((common.v249*common.v1105)+(common.v247*common.v1117))}else{common.v951});
-        let v1136=(if self.scalar_static_bool[16]{((common.v249*common.v1106)+(common.v247*common.v1118))}else{common.v953});
-        let v1137=(if self.scalar_static_bool[16]{(common.v247*self.scalar_static_f64[158])}else{common.v954});
-        let v1165=(if self.scalar_static_bool[16]{(((common.v179*common.v1103)+(self.scalar_static_f64[55]*common.v1115))+(common.v184*v1133))}else{common.v13});
-        let v1166=(if self.scalar_static_bool[16]{((((common.v247*common.v921)+(common.v179*common.v1104))+(self.scalar_static_f64[55]*common.v1116))+(common.v184*v1134))}else{common.v13});
-        let v1167=(if self.scalar_static_bool[16]{((((common.v247*common.v922)+(common.v179*common.v1105))+(self.scalar_static_f64[55]*common.v1117))+(common.v184*v1135))}else{common.v13});
-        let v1168=(if self.scalar_static_bool[16]{(((common.v179*common.v1106)+(self.scalar_static_f64[55]*common.v1118))+(common.v184*v1136))}else{common.v13});
-        let v1169=(if self.scalar_static_bool[16]{(self.scalar_static_f64[159]+(common.v184*v1137))}else{common.v13});
-        let v1171=(common.v44-(v258*v258));
-        let v1177=(if self.scalar_static_bool[16]{(v1165*v1171)}else{common.v13});
-        let v1178=(if self.scalar_static_bool[16]{(v1166*v1171)}else{common.v13});
-        let v1179=(if self.scalar_static_bool[16]{(v1167*v1171)}else{common.v13});
-        let v1180=(if self.scalar_static_bool[16]{(v1168*v1171)}else{common.v13});
-        let v1181=(if self.scalar_static_bool[16]{(v1169*v1171)}else{common.v13});
-        let v1192=(self.scalar_static_f64[63]*common.v999);
-        let v1193=(self.scalar_static_f64[63]*common.v1000);
-        let v1194=(self.scalar_static_f64[63]*common.v1001);
-        let v1195=(self.scalar_static_f64[63]*common.v1002);
-        let v1196=(self.scalar_static_f64[63]*common.v1003);
-        let v1197=(if self.scalar_static_bool[16]{v1192}else{common.v13});
-        let v1198=(if self.scalar_static_bool[16]{v1193}else{common.v13});
-        let v1199=(if self.scalar_static_bool[16]{v1194}else{common.v13});
-        let v1200=(if self.scalar_static_bool[16]{v1195}else{common.v13});
-        let v1201=(if self.scalar_static_bool[16]{v1196}else{common.v13});
-        let v1221=scalar_limexp_derivative(v274);
-        let v1224=(v138*(self.scalar_static_f64[64]*v1221));
-        let v1225=(v138*(self.scalar_static_f64[160]*v1221));
-        let v1243=(if self.scalar_static_bool[16]{((v277*(v1063+(v268*v1058)))+(v269*(common.v7*v1197)))}else{common.v13});
-        let v1244=(if self.scalar_static_bool[16]{((v277*(v1066+(v268*v1059)))+(v269*((v267+(common.v7*v1198))+v1224)))}else{common.v13});
-        let v1245=(if self.scalar_static_bool[16]{((v277*(v1069+(v268*v1060)))+(v269*(((-v267)+(common.v7*v1199))+v1225)))}else{common.v13});
-        let v1246=(if self.scalar_static_bool[16]{((v277*(v1072+(v268*v1061)))+(v269*(common.v7*v1200)))}else{common.v13});
-        let v1247=(if self.scalar_static_bool[16]{((v277*(v1075+(v268*v1062)))+(v269*(common.v7*v1201)))}else{common.v13});
-        let v1267=(common.v44-(v284*v284));
-        let v1331=(if self.scalar_static_bool[16]{((v290*((v287*(v137*v1177))+(v286*(-(if self.scalar_static_bool[16]{((common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[53]*v1177)}else{common.v13}))*v1267)}else{common.v13})))))+(v288*(-(common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[63]*v1177)}else{common.v13})))))}else{common.v13});
-        let v1332=(if self.scalar_static_bool[16]{((v290*((v287*(v137*v1178))+(v286*(-(if self.scalar_static_bool[16]{((v263+(common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[53]*v1178)}else{common.v13})))*v1267)}else{common.v13})))))+(v288*(-(v282+(common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[63]*v1178)}else{common.v13}))))))}else{common.v13});
-        let v1333=(if self.scalar_static_bool[16]{((v290*((v287*(v137*v1179))+(v286*(-(if self.scalar_static_bool[16]{(((-v263)+(common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[53]*v1179)}else{common.v13})))*v1267)}else{common.v13})))))+(v288*(-((-v282)+(common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[63]*v1179)}else{common.v13}))))))}else{common.v13});
-        let v1334=(if self.scalar_static_bool[16]{((v290*((v287*(v137*v1180))+(v286*(-(if self.scalar_static_bool[16]{((common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[53]*v1180)}else{common.v13}))*v1267)}else{common.v13})))))+(v288*(-(common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[63]*v1180)}else{common.v13})))))}else{common.v13});
-        let v1335=(if self.scalar_static_bool[16]{((v290*((v287*(v137*v1181))+(v286*(-(if self.scalar_static_bool[16]{((common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[53]*v1181)}else{common.v13}))*v1267)}else{common.v13})))))+(v288*(-(common.v7*(if self.scalar_static_bool[16]{(self.scalar_static_f64[63]*v1181)}else{common.v13})))))}else{common.v13});
-        let v1464=(if self.scalar_static_bool[19]{(self.scalar_static_f64[53]*common.v1454)}else{common.v13});
-        let v1465=(if self.scalar_static_bool[19]{(self.scalar_static_f64[53]*common.v1455)}else{common.v13});
-        let v1466=(if self.scalar_static_bool[19]{(self.scalar_static_f64[53]*common.v1456)}else{common.v13});
-        let v1467=(if self.scalar_static_bool[19]{(self.scalar_static_f64[53]*common.v1457)}else{common.v13});
-        let v1468=(if self.scalar_static_bool[19]{(self.scalar_static_f64[53]*common.v1458)}else{common.v13});
-        let v1478=(common.v44-(v321*v321));
-        let v1484=(if self.scalar_static_bool[19]{((common.v7*v1464)*v1478)}else{common.v13});
-        let v1485=(if self.scalar_static_bool[19]{((v319+(common.v7*v1465))*v1478)}else{common.v13});
-        let v1486=(if self.scalar_static_bool[19]{(((-v319)+(common.v7*v1466))*v1478)}else{common.v13});
-        let v1487=(if self.scalar_static_bool[19]{((common.v7*v1467)*v1478)}else{common.v13});
-        let v1488=(if self.scalar_static_bool[19]{((common.v7*v1468)*v1478)}else{common.v13});
-        let v1494=(if self.scalar_static_bool[19]{(self.scalar_static_f64[63]*common.v1454)}else{v1197});
-        let v1495=(if self.scalar_static_bool[19]{(self.scalar_static_f64[63]*common.v1455)}else{v1198});
-        let v1496=(if self.scalar_static_bool[19]{(self.scalar_static_f64[63]*common.v1456)}else{v1199});
-        let v1497=(if self.scalar_static_bool[19]{(self.scalar_static_f64[63]*common.v1457)}else{v1200});
-        let v1498=(if self.scalar_static_bool[19]{(self.scalar_static_f64[63]*common.v1458)}else{v1201});
-        let v1527=scalar_limexp_derivative(v330);
-        let v1623=(if self.scalar_static_bool[22]{common.v942}else{v1133});
-        let v1624=(if self.scalar_static_bool[22]{common.v1100}else{v1134});
-        let v1625=(if self.scalar_static_bool[22]{common.v1101}else{v1135});
-        let v1626=(if self.scalar_static_bool[22]{common.v1102}else{v1136});
-        let v1627=(if self.scalar_static_bool[22]{common.v13}else{v1137});
-        let v1628=(v349*v1623);
-        let v1630=(v349*v1624);
-        let v1632=(v349*v1625);
-        let v1634=(v349*v1626);
-        let v1636=(v349*v1627);
-        let v1638=(if self.scalar_static_bool[22]{(v1628+v1628)}else{common.v13});
-        let v1639=(if self.scalar_static_bool[22]{(v1630+v1630)}else{common.v13});
-        let v1640=(if self.scalar_static_bool[22]{(v1632+v1632)}else{common.v13});
-        let v1641=(if self.scalar_static_bool[22]{(v1634+v1634)}else{common.v13});
-        let v1642=(if self.scalar_static_bool[22]{(v1636+v1636)}else{common.v13});
-        let v1687=(if self.scalar_static_bool[22]{(common.v179*((v1623+(self.scalar_static_f64[55]*v1638))+((v354*v1638)+(v351*(common.v184*v1623)))))}else{v1165});
-        let v1688=(if self.scalar_static_bool[22]{((v356*common.v921)+(common.v179*((v1624+(self.scalar_static_f64[55]*v1639))+((v354*v1639)+(v351*(common.v184*v1624))))))}else{v1166});
-        let v1689=(if self.scalar_static_bool[22]{((v356*common.v922)+(common.v179*((v1625+(self.scalar_static_f64[55]*v1640))+((v354*v1640)+(v351*(common.v184*v1625))))))}else{v1167});
-        let v1690=(if self.scalar_static_bool[22]{(common.v179*((v1626+(self.scalar_static_f64[55]*v1641))+((v354*v1641)+(v351*(common.v184*v1626)))))}else{v1168});
-        let v1691=(if self.scalar_static_bool[22]{(common.v179*((v1627+(self.scalar_static_f64[55]*v1642))+((v354*v1642)+(v351*(common.v184*v1627)))))}else{v1169});
-        let v1731=scalar_limexp_derivative(v358);
-        let v1742=scalar_limexp_derivative(v368);
-        let v1759=(common.v44-(v372*v372));
-        let v1765=(if self.scalar_static_bool[22]{((common.v155*((v1687*v1731)-((-v1687)*v1742)))*v1759)}else{common.v13});
-        let v1766=(if self.scalar_static_bool[22]{((common.v155*((v1688*v1731)-((-v1688)*v1742)))*v1759)}else{common.v13});
-        let v1767=(if self.scalar_static_bool[22]{((common.v155*((v1689*v1731)-((-v1689)*v1742)))*v1759)}else{common.v13});
-        let v1768=(if self.scalar_static_bool[22]{((common.v155*((v1690*v1731)-((-v1690)*v1742)))*v1759)}else{common.v13});
-        let v1769=(if self.scalar_static_bool[22]{((common.v155*((v1691*v1731)-((-v1691)*v1742)))*v1759)}else{common.v13});
-        let v1770=(self.scalar_static_f64[53]*common.v1726);
-        let v1771=(self.scalar_static_f64[53]*common.v1727);
-        let v1772=(self.scalar_static_f64[53]*common.v1728);
-        let v1773=(self.scalar_static_f64[53]*common.v1729);
-        let v1774=(self.scalar_static_f64[53]*common.v1730);
-        let v1775=(if self.scalar_static_bool[22]{v1770}else{v1464});
-        let v1776=(if self.scalar_static_bool[22]{v1771}else{v1465});
-        let v1777=(if self.scalar_static_bool[22]{v1772}else{v1466});
-        let v1778=(if self.scalar_static_bool[22]{v1773}else{v1467});
-        let v1779=(if self.scalar_static_bool[22]{v1774}else{v1468});
-        let v1799=(common.v44-(v382*v382));
-        let v1805=(if self.scalar_static_bool[22]{((common.v7*v1775)*v1799)}else{v1484});
-        let v1806=(if self.scalar_static_bool[22]{((v377+(common.v7*v1776))*v1799)}else{v1485});
-        let v1807=(if self.scalar_static_bool[22]{(((-v377)+(common.v7*v1777))*v1799)}else{v1486});
-        let v1808=(if self.scalar_static_bool[22]{((common.v7*v1778)*v1799)}else{v1487});
-        let v1809=(if self.scalar_static_bool[22]{((common.v7*v1779)*v1799)}else{v1488});
-        let v1819=(common.v44-(v385*v385));
-        let v1969=(if self.scalar_static_bool[22]{(common.v155*((if self.scalar_static_bool[22]{((v398*((v394*(v137*common.v1727))+(v393*v1806)))+(v395*(v1224+(v392+(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*common.v1727)}else{common.v13}))))))}else{v1244})-(if self.scalar_static_bool[22]{((v405*((v402*(v137*v1766))+(v401*(-(if self.scalar_static_bool[22]{((v380+(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[53]*v1766)}else{common.v13})))*v1819)}else{common.v13})))))+(v403*(-(v389+(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*v1766)}else{common.v13}))))))}else{v1332})))}else{(if self.scalar_static_bool[19]{((v333*((v326*v1485)+(v322*(v137*common.v1455))))+(v327*((v325+(common.v7*v1495))+(v138*(self.scalar_static_f64[64]*v1527)))))}else{(if self.scalar_static_bool[16]{(common.v155*(v1244-v1332))}else{(if (self.scalar_static_f64[57]!=0.0){((v241*(v1066+(v223*v1059)))+(v235*(self.scalar_static_f64[62]+(v138*v1079))))}else{common.v13})})})});
-        let v1978=(if self.scalar_static_bool[25]{v1770}else{v1775});
-        let v1979=(if self.scalar_static_bool[25]{v1771}else{v1776});
-        let v1980=(if self.scalar_static_bool[25]{v1772}else{v1777});
-        let v1981=(if self.scalar_static_bool[25]{v1773}else{v1778});
-        let v1982=(if self.scalar_static_bool[25]{v1774}else{v1779});
-        let v1986=(-v415);
-        let v1992=(common.v44-(v417*v417));
-        let v2011=(common.v44-(v420*v420));
-        let v2076=(if self.scalar_static_bool[25]{((v430*((v424*v1058)+(v234*((if self.scalar_static_bool[25]{((common.v7*v1978)*v1992)}else{v1805})+(self.scalar_static_f64[65]*(if self.scalar_static_bool[25]{((v415+(common.v11*v1978))*v2011)}else{common.v13}))))))+(v425*((v427*(if self.scalar_static_bool[25]{v1192}else{v1494}))+(v414*self.scalar_static_f64[65]))))}else{(if self.scalar_static_bool[22]{(common.v155*((if self.scalar_static_bool[22]{((v398*((v394*(v137*common.v1726))+(v393*v1805)))+(v395*(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*common.v1726)}else{common.v13}))))}else{v1243})-(if self.scalar_static_bool[22]{((v405*((v402*(v137*v1765))+(v401*(-(if self.scalar_static_bool[22]{((common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[53]*v1765)}else{common.v13}))*v1819)}else{common.v13})))))+(v403*(-(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*v1765)}else{common.v13})))))}else{v1331})))}else{(if self.scalar_static_bool[19]{((v333*((v326*v1484)+(v322*(v137*common.v1454))))+(v327*(common.v7*v1494)))}else{(if self.scalar_static_bool[16]{(common.v155*(v1243-v1331))}else{(if (self.scalar_static_f64[57]!=0.0){(v241*(v1063+(v223*v1058)))}else{common.v13})})})})});
-        let v2078=(if self.scalar_static_bool[25]{((v430*((v424*v1060)+(v234*((if self.scalar_static_bool[25]{((v1986+(common.v7*v1980))*v1992)}else{v1807})+(self.scalar_static_f64[65]*(if self.scalar_static_bool[25]{((v1986+(common.v11*v1980))*v2011)}else{common.v13}))))))+(v425*(v1225+((v427*(if self.scalar_static_bool[25]{v1194}else{v1496}))+(v414*self.scalar_static_f64[164])))))}else{(if self.scalar_static_bool[22]{(common.v155*((if self.scalar_static_bool[22]{((v398*((v394*(v137*common.v1728))+(v393*v1807)))+(v395*(v1225+((-v392)+(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*common.v1728)}else{common.v13}))))))}else{v1245})-(if self.scalar_static_bool[22]{((v405*((v402*(v137*v1767))+(v401*(-(if self.scalar_static_bool[22]{(((-v380)+(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[53]*v1767)}else{common.v13})))*v1819)}else{common.v13})))))+(v403*(-((-v389)+(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*v1767)}else{common.v13}))))))}else{v1333})))}else{(if self.scalar_static_bool[19]{((v333*((v326*v1486)+(v322*(v137*common.v1456))))+(v327*((-v325)+(common.v7*v1496))))}else{(if self.scalar_static_bool[16]{(common.v155*(v1245-v1333))}else{(if (self.scalar_static_f64[57]!=0.0){((v241*(v1069+(v223*v1060)))+(v235*self.scalar_static_f64[157]))}else{common.v13})})})})});
-        let v2079=(if self.scalar_static_bool[25]{((v430*((v424*v1061)+(v234*((if self.scalar_static_bool[25]{((common.v7*v1981)*v1992)}else{v1808})+(self.scalar_static_f64[65]*(if self.scalar_static_bool[25]{((common.v11*v1981)*v2011)}else{common.v13}))))))+(v425*(v427*(if self.scalar_static_bool[25]{v1195}else{v1497}))))}else{(if self.scalar_static_bool[22]{(common.v155*((if self.scalar_static_bool[22]{((v398*((v394*(v137*common.v1729))+(v393*v1808)))+(v395*(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*common.v1729)}else{common.v13}))))}else{v1246})-(if self.scalar_static_bool[22]{((v405*((v402*(v137*v1768))+(v401*(-(if self.scalar_static_bool[22]{((common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[53]*v1768)}else{common.v13}))*v1819)}else{common.v13})))))+(v403*(-(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*v1768)}else{common.v13})))))}else{v1334})))}else{(if self.scalar_static_bool[19]{((v333*((v326*v1487)+(v322*(v137*common.v1457))))+(v327*((common.v7*v1497)+(v138*(self.scalar_static_f64[160]*v1527)))))}else{(if self.scalar_static_bool[16]{(common.v155*(v1246-v1334))}else{(if (self.scalar_static_f64[57]!=0.0){((v241*(v1072+(v223*v1061)))+(v235*(v138*(-v1079))))}else{common.v13})})})})});
-        let v2080=(if self.scalar_static_bool[25]{((v430*((v424*v1062)+(v234*((if self.scalar_static_bool[25]{((common.v7*v1982)*v1992)}else{v1809})+(self.scalar_static_f64[65]*(if self.scalar_static_bool[25]{((common.v11*v1982)*v2011)}else{common.v13}))))))+(v425*(v427*(if self.scalar_static_bool[25]{v1196}else{v1498}))))}else{(if self.scalar_static_bool[22]{(common.v155*((if self.scalar_static_bool[22]{((v398*((v394*(v137*common.v1730))+(v393*v1809)))+(v395*(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*common.v1730)}else{common.v13}))))}else{v1247})-(if self.scalar_static_bool[22]{((v405*((v402*(v137*v1769))+(v401*(-(if self.scalar_static_bool[22]{((common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[53]*v1769)}else{common.v13}))*v1819)}else{common.v13})))))+(v403*(-(common.v7*(if self.scalar_static_bool[22]{(self.scalar_static_f64[63]*v1769)}else{common.v13})))))}else{v1335})))}else{(if self.scalar_static_bool[19]{((v333*((v326*v1488)+(v322*(v137*common.v1458))))+(v327*(common.v7*v1498)))}else{(if self.scalar_static_bool[16]{(common.v155*(v1247-v1335))}else{(if (self.scalar_static_f64[57]!=0.0){(v241*(v1075+(v223*v1062)))}else{common.v13})})})})});
-        let v2143=(v461*(if self.scalar_static_bool[28]{(self.scalar_static_f64[69]*common.v1726)}else{(if (self.scalar_static_f64[66]!=0.0){(self.scalar_static_f64[69]*common.v999)}else{common.v13})}));
-        let v2144=(v461*(if self.scalar_static_bool[28]{(self.scalar_static_f64[69]*common.v1727)}else{(if (self.scalar_static_f64[66]!=0.0){(self.scalar_static_f64[69]*common.v1000)}else{common.v13})}));
-        let v2145=(v461*(if self.scalar_static_bool[28]{(self.scalar_static_f64[69]*common.v1728)}else{(if (self.scalar_static_f64[66]!=0.0){(self.scalar_static_f64[69]*common.v1001)}else{common.v13})}));
-        let v2146=(v461*(if self.scalar_static_bool[28]{(self.scalar_static_f64[69]*common.v1729)}else{(if (self.scalar_static_f64[66]!=0.0){(self.scalar_static_f64[69]*common.v1002)}else{common.v13})}));
-        let v2147=(v461*(if self.scalar_static_bool[28]{(self.scalar_static_f64[69]*common.v1730)}else{(if (self.scalar_static_f64[66]!=0.0){(self.scalar_static_f64[69]*common.v1003)}else{common.v13})}));
-        let v2156=(if self.scalar_static_bool[30]{common.v13}else{(if (self.scalar_static_f64[73]!=0.0){common.v13}else{common.v1555})});
-        let v2157=(if self.scalar_static_bool[30]{common.v13}else{(if (self.scalar_static_f64[73]!=0.0){common.v13}else{common.v1556})});
-        let v2158=(if self.scalar_static_bool[30]{common.v13}else{(if (self.scalar_static_f64[73]!=0.0){common.v13}else{common.v1557})});
-        let v2161=(common.v44-(v500*v500));
-        let v2166=(common.v44-(v502*v502));
-        let v2178=scalar_limexp_derivative(v510);
-        let v2183=scalar_limexp_derivative(v514);
-        let v2195=(self.scalar_static_f64[85]*(-(if self.scalar_static_bool[30]{common.v13}else{(if (self.scalar_static_f64[73]!=0.0){common.v13}else{common.v1554})})));
-        let v2201=scalar_limexp_derivative(v523);
-        let v2206=scalar_limexp_derivative(v526);
-        let v2597=ddt_scale;
-        let v2641=-1e-12;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
+        let CommonStampValues {
+            v0, v1, v3, v5, v6, v7, v8, v9, 
+            vb, vd, vw, vz, v13, v18, v19, v1b, 
+            v2c, v3c, v3g, v3n, v3s, v3y, v40, v45, 
+            v4b, v4q, v4z, v54, v5e, v5m, v5v, v6u, 
+            v6v, v6x, v8s, v9f, va6, vcl, vcz, vg1, 
+            vg7, vis, vix, vjz, vkf, vlu, vm0, vma, 
+            vmd, vms, vmu, vmw, vmx, vn0, vn1, vn8, 
+            vnc, vne, vnu, vo0, vo6, vob, voj, vok, 
+            vox, vpl, vpm, vq6, vqb, vqd, vqf, vqh, 
+            vqi, vrr, vrs, vrt, vru, vrv, vuk, vul, 
+            vum, vun, vuo, vup, vuq, vuz, vv0, vv1, 
+            vv2, v14e, v14f, v14g, v14h, v14i, v176, v177, 
+            v178, v179, v1by, v1bz, v1c0, v1c1, v1c2, v1si, 
+            v1u4, v1yb, v1yc, v1yd, v1ye, v1zq, v1zr, v1zs, 
+            v1zt, v20n, v20p, v20q, v20y, v210, v212, v21c, 
+            v21l, v21m, v21n, v21o, v21p, v21v, 
+        }=self.eval_common_stamp_values(ctx);
+        let vc=ctx.node_voltage(nodes[16]);
+        let v1e=(sf[11]*(v18+(sf[12]*v1b)));
+        let v3t=(if v3s{sf[13]}else{(if (v19!=0.0){(sf[13]*(v18+(v1b*sf[14])))}else{vd})});
+        let v3u=(if v3s{sf[15]}else{(if (v19!=0.0){(sf[15]*(v18+(v1b*sf[16])))}else{vd})});
+        let v3z=(if v3s{sf[37]}else{(if v3n{(v2c*sf[37])}else{(if v3c{(sf[37]*v3g)}else{vd})})});
+        let v44=(if v3s{sf[30]}else{(if (v19!=0.0){(sf[30]+(v13*sf[31]))}else{vd})});
+        let v4i=(if sb[11]{sf[44]}else{(if (sf[41]!=0.0){(sf[43]/(vz*8.617333262145179e-5))}else{vd})});
+        let v65=(sf[56]+(sf[53]*v5v));
+        let v67=((v7*v65)).tanh();
+        let v6i=(v3t*v5v);
+        let v6j=(v67*v6i);
+        let v6p=((v18+(v7*sf[62]))+(v3u*scalar_limexp(v5e)));
+        let v6z=(if sb[16]{(v6v*v6x)}else{v5m});
+        let v75=(if sb[16]{(((v4z*v6v)+(sf[55]*v6x))+(v54*v6z))}else{vd});
+        let v76=(v75).tanh();
+        let v78=(if sb[16]{(v18+v76)}else{vd});
+        let v7b=(if sb[16]{(sf[56]+(sf[53]*v78))}else{vd});
+        let v7e=(sf[62]+(v5v*sf[63]));
+        let v7f=(if sb[16]{v7e}else{vd});
+        let v7g=(v18+v67);
+        let v7h=(v6i*v7g);
+        let v7m=(sf[64]*(v7-v45));
+        let v7o=(v3u*scalar_limexp(v7m));
+        let v7p=((v18+(v7*v7f))+v7o);
+        let v7r=(if sb[16]{(v7h*v7p)}else{vd});
+        let v7u=(if sb[16]{(sf[62]+(v78*sf[63]))}else{vd});
+        let v7w=((v7*v7b)).tanh();
+        let v7y=(v3t*v78);
+        let v7z=(v18-(if sb[16]{v7w}else{vd}));
+        let v80=(v7y*v7z);
+        let v82=(v18-(v7*v7u));
+        let v84=(if sb[16]{(v80*v82)}else{vd});
+        let v8v=(if sb[19]{(sf[56]+(sf[53]*v8s))}else{vd});
+        let v8x=((v7*v8v)).tanh();
+        let v8y=(if sb[19]{v8x}else{vd});
+        let v91=(if sb[19]{(sf[62]+(sf[63]*v8s))}else{v7f});
+        let v92=(v3t*v8s);
+        let v93=(v8y*v92);
+        let v96=(v5e*sf[64]);
+        let v99=((v18+(v7*v91))+(v3u*scalar_limexp(v96)));
+        let v9p=(if sb[22]{v6u}else{v6z});
+        let v9r=(if sb[22]{(v9p*v9p)}else{vd});
+        let v9u=(v54*v9p);
+        let v9w=((v9p+(sf[55]*v9r))+(v9r*v9u));
+        let v9y=(if sb[22]{(v4z*v9w)}else{v75});
+        let va8=(-v9y);
+        let vac=((v4b*(scalar_limexp(v9y)-scalar_limexp(va8)))).tanh();
+        let vae=(if sb[22]{(v18+vac)}else{vd});
+        let vag=(sf[56]+(sf[53]*va6));
+        let vah=(if sb[22]{vag}else{v8v});
+        let vak=(if sb[22]{(sf[56]+(sf[53]*vae))}else{vd});
+        let vam=((v7*vah)).tanh();
+        let van=(if sb[22]{vam}else{v8y});
+        let vap=((v7*vak)).tanh();
+        let vat=(if sb[22]{(sf[62]+(sf[63]*vae))}else{vd});
+        let vaw=(if sb[22]{(sf[62]+(sf[63]*va6))}else{vd});
+        let vax=(v3t*va6);
+        let vay=(v18+van);
+        let vaz=(vax*vay);
+        let vb2=(v7o+(v18+(v7*vaw)));
+        let vb5=(v3t*vae);
+        let vb6=(v18-(if sb[22]{vap}else{vd}));
+        let vb7=(vb5*vb6);
+        let vb9=(v18-(v7*vat));
+        let vbi=(if sb[25]{v7e}else{v91});
+        let vbj=(if sb[25]{vag}else{vah});
+        let vbl=((v7*vbj)).tanh();
+        let vbo=((vb*vbj)).tanh();
+        let vbs=((if sb[25]{vbl}else{van})+((if sb[25]{vbo}else{vd})*sf[65]));
+        let vbt=(v6i*vbs);
+        let vbv=(v7+(vb*sf[65]));
+        let vby=(v7o+(v18+(vbi*vbv)));
+        let vc0=(if sb[25]{(vbt*vby)}else{(if sb[22]{(v4b*((if sb[22]{(vaz*vb2)}else{v7r})-(if sb[22]{(vb7*vb9)}else{v84})))}else{(if sb[19]{(v93*v99)}else{(if sb[16]{(v4b*(v7r-v84))}else{(if (sf[57]!=0.0){(v6j*v6p)}else{vd})})})})});
+        let vcb=(v5v*sf[69]);
+        let vcm=(va6*sf[69]);
+        let vct=(v18+(v1b*sf[71]));
+        let vcu=((if sb[28]{(sf[70]+vcm)}else{(if (sf[66]!=0.0){(vcb+sf[70])}else{vd})})*vct);
+        let vcv=((if sb[28]{(sf[68]+vcm)}else{(if (sf[66]!=0.0){(sf[68]+vcb)}else{vd})})*vct);
+        let vd5=(v9-v44);
+        let vd9=((-v9)-sf[74]);
+        let vdb=(v5-v44);
+        let vde=(v6-sf[75]);
+        let vdk=(if sb[30]{scalar_limexp((v44*(-v4i)))}else{(if (sf[73]!=0.0){scalar_limexp((v4i*((-v44)).tanh()))}else{v9f})});
+        let vdw=(vd5).tanh();
+        let vdy=(vdb).tanh();
+        let ve6=(sf[76]*(if sb[30]{vd9}else{(if (sf[73]!=0.0){vd9}else{vd})}));
+        let vea=(v4i*(if sb[34]{vd5}else{(if sb[32]{vdw}else{(if (sf[73]!=0.0){vd5}else{vd})})}));
+        let vei=(sf[85]*((scalar_limexp(vea)-((scalar_limexp(ve6)-sf[80])*sf[87]))-vdk));
+        let vej=(sf[76]*(if sb[30]{vde}else{(if (sf[73]!=0.0){vde}else{vd})}));
+        let vem=(v4i*(if sb[34]{vdb}else{(if sb[32]{vdy}else{(if (sf[73]!=0.0){vdb}else{vd})})}));
+        let vhj=v1si;
+        let vhl=v1u4;
+        let vkg=v1ye;
+        let vkh=(if sb[49]{vkg}else{(if sb[46]{vis}else{(if sb[43]{vhj}else{vg1})})});
+        let vki=v1zs;
+        let vkj=(if sb[49]{vki}else{(if sb[46]{vix}else{(if sb[43]{vhl}else{vg7})})});
+        let vly=(if sb[67]{((v18-(vlu*vlu))).sqrt()}else{vd});
+        let vm2=(if sb[67]{((-vlu)*vm0)}else{vd});
+        let vme=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, vkf);
+        let vmg=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, vjz);
+        let vmk=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 5, (v5*vkj));
+        let vmn=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 6, (v9*vkh));
+        let vn2=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, vn1);
+        let vn9=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 10, vn8);
+        let vni=ctx.node_voltage(nodes[13]);
+        let vnv=ctx.branch_current(branches[11]);
+        let vo1=ctx.branch_current(branches[15]);
+        let voc=(if sb[67]{vob}else{vd});
+        let vod=ctx.node_voltage(nodes[18]);
+        let vol=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 15, vok);
+        let voy=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 16, vox);
+        let vt8=(v18-(v67*v67));
+        let vte=(v3t*vrr);
+        let vtf=(v3t*vrs);
+        let vtg=(v3t*vrt);
+        let vth=(v3t*vru);
+        let vti=(v3t*vrv);
+        let vtj=(v6i*((v7*(sf[53]*vrr))*vt8));
+        let vtm=(v6i*((v65+(v7*(sf[53]*vrs)))*vt8));
+        let vtp=(v6i*(((-v65)+(v7*(sf[53]*vrt)))*vt8));
+        let vts=(v6i*((v7*(sf[53]*vru))*vt8));
+        let vtv=(v6i*((v7*(sf[53]*vrv))*vt8));
+        let vtz=scalar_limexp_derivative(v5e);
+        let vvh=(if sb[16]{((v6x*vun)+(v6v*vuz))}else{vqb});
+        let vvi=(if sb[16]{((v6x*vuo)+(v6v*vv0))}else{vqd});
+        let vvj=(if sb[16]{((v6x*vup)+(v6v*vv1))}else{vqf});
+        let vvk=(if sb[16]{((v6x*vuq)+(v6v*vv2))}else{vqh});
+        let vvl=(if sb[16]{(v6v*sf[158])}else{vqi});
+        let vwd=(if sb[16]{(((v4z*vun)+(sf[55]*vuz))+(v54*vvh))}else{vd});
+        let vwe=(if sb[16]{((((v6v*vpl)+(v4z*vuo))+(sf[55]*vv0))+(v54*vvi))}else{vd});
+        let vwf=(if sb[16]{((((v6v*vpm)+(v4z*vup))+(sf[55]*vv1))+(v54*vvj))}else{vd});
+        let vwg=(if sb[16]{(((v4z*vuq)+(sf[55]*vv2))+(v54*vvk))}else{vd});
+        let vwh=(if sb[16]{(sf[159]+(v54*vvl))}else{vd});
+        let vwj=(v18-(v76*v76));
+        let vwp=(if sb[16]{(vwd*vwj)}else{vd});
+        let vwq=(if sb[16]{(vwe*vwj)}else{vd});
+        let vwr=(if sb[16]{(vwf*vwj)}else{vd});
+        let vws=(if sb[16]{(vwg*vwj)}else{vd});
+        let vwt=(if sb[16]{(vwh*vwj)}else{vd});
+        let vx4=(sf[63]*vrr);
+        let vx5=(sf[63]*vrs);
+        let vx6=(sf[63]*vrt);
+        let vx7=(sf[63]*vru);
+        let vx8=(sf[63]*vrv);
+        let vx9=(if sb[16]{vx4}else{vd});
+        let vxa=(if sb[16]{vx5}else{vd});
+        let vxb=(if sb[16]{vx6}else{vd});
+        let vxc=(if sb[16]{vx7}else{vd});
+        let vxd=(if sb[16]{vx8}else{vd});
+        let vxx=scalar_limexp_derivative(v7m);
+        let vy0=(v3u*(sf[64]*vxx));
+        let vy1=(v3u*(sf[160]*vxx));
+        let vyj=(if sb[16]{((v7p*(vtj+(v7g*vte)))+(v7h*(v7*vx9)))}else{vd});
+        let vyk=(if sb[16]{((v7p*(vtm+(v7g*vtf)))+(v7h*((v7f+(v7*vxa))+vy0)))}else{vd});
+        let vyl=(if sb[16]{((v7p*(vtp+(v7g*vtg)))+(v7h*(((-v7f)+(v7*vxb))+vy1)))}else{vd});
+        let vym=(if sb[16]{((v7p*(vts+(v7g*vth)))+(v7h*(v7*vxc)))}else{vd});
+        let vyn=(if sb[16]{((v7p*(vtv+(v7g*vti)))+(v7h*(v7*vxd)))}else{vd});
+        let vz7=(v18-(v7w*v7w));
+        let v10z=(if sb[16]{((v82*((v7z*(v3t*vwp))+(v7y*(-(if sb[16]{((v7*(if sb[16]{(sf[53]*vwp)}else{vd}))*vz7)}else{vd})))))+(v80*(-(v7*(if sb[16]{(sf[63]*vwp)}else{vd})))))}else{vd});
+        let v110=(if sb[16]{((v82*((v7z*(v3t*vwq))+(v7y*(-(if sb[16]{((v7b+(v7*(if sb[16]{(sf[53]*vwq)}else{vd})))*vz7)}else{vd})))))+(v80*(-(v7u+(v7*(if sb[16]{(sf[63]*vwq)}else{vd}))))))}else{vd});
+        let v111=(if sb[16]{((v82*((v7z*(v3t*vwr))+(v7y*(-(if sb[16]{(((-v7b)+(v7*(if sb[16]{(sf[53]*vwr)}else{vd})))*vz7)}else{vd})))))+(v80*(-((-v7u)+(v7*(if sb[16]{(sf[63]*vwr)}else{vd}))))))}else{vd});
+        let v112=(if sb[16]{((v82*((v7z*(v3t*vws))+(v7y*(-(if sb[16]{((v7*(if sb[16]{(sf[53]*vws)}else{vd}))*vz7)}else{vd})))))+(v80*(-(v7*(if sb[16]{(sf[63]*vws)}else{vd})))))}else{vd});
+        let v113=(if sb[16]{((v82*((v7z*(v3t*vwt))+(v7y*(-(if sb[16]{((v7*(if sb[16]{(sf[53]*vwt)}else{vd}))*vz7)}else{vd})))))+(v80*(-(v7*(if sb[16]{(sf[63]*vwt)}else{vd})))))}else{vd});
+        let v14o=(if sb[19]{(sf[53]*v14e)}else{vd});
+        let v14p=(if sb[19]{(sf[53]*v14f)}else{vd});
+        let v14q=(if sb[19]{(sf[53]*v14g)}else{vd});
+        let v14r=(if sb[19]{(sf[53]*v14h)}else{vd});
+        let v14s=(if sb[19]{(sf[53]*v14i)}else{vd});
+        let v152=(v18-(v8x*v8x));
+        let v158=(if sb[19]{((v7*v14o)*v152)}else{vd});
+        let v159=(if sb[19]{((v8v+(v7*v14p))*v152)}else{vd});
+        let v15a=(if sb[19]{(((-v8v)+(v7*v14q))*v152)}else{vd});
+        let v15b=(if sb[19]{((v7*v14r)*v152)}else{vd});
+        let v15c=(if sb[19]{((v7*v14s)*v152)}else{vd});
+        let v15i=(if sb[19]{(sf[63]*v14e)}else{vx9});
+        let v15j=(if sb[19]{(sf[63]*v14f)}else{vxa});
+        let v15k=(if sb[19]{(sf[63]*v14g)}else{vxb});
+        let v15l=(if sb[19]{(sf[63]*v14h)}else{vxc});
+        let v15m=(if sb[19]{(sf[63]*v14i)}else{vxd});
+        let v16f=scalar_limexp_derivative(v96);
+        let v193=(if sb[22]{vq6}else{vvh});
+        let v194=(if sb[22]{vuk}else{vvi});
+        let v195=(if sb[22]{vul}else{vvj});
+        let v196=(if sb[22]{vum}else{vvk});
+        let v197=(if sb[22]{vd}else{vvl});
+        let v198=(v9p*v193);
+        let v19a=(v9p*v194);
+        let v19c=(v9p*v195);
+        let v19e=(v9p*v196);
+        let v19g=(v9p*v197);
+        let v19i=(if sb[22]{(v198+v198)}else{vd});
+        let v19j=(if sb[22]{(v19a+v19a)}else{vd});
+        let v19k=(if sb[22]{(v19c+v19c)}else{vd});
+        let v19l=(if sb[22]{(v19e+v19e)}else{vd});
+        let v19m=(if sb[22]{(v19g+v19g)}else{vd});
+        let v1av=(if sb[22]{(v4z*((v193+(sf[55]*v19i))+((v9u*v19i)+(v9r*(v54*v193)))))}else{vwd});
+        let v1aw=(if sb[22]{((v9w*vpl)+(v4z*((v194+(sf[55]*v19j))+((v9u*v19j)+(v9r*(v54*v194))))))}else{vwe});
+        let v1ax=(if sb[22]{((v9w*vpm)+(v4z*((v195+(sf[55]*v19k))+((v9u*v19k)+(v9r*(v54*v195))))))}else{vwf});
+        let v1ay=(if sb[22]{(v4z*((v196+(sf[55]*v19l))+((v9u*v19l)+(v9r*(v54*v196)))))}else{vwg});
+        let v1az=(if sb[22]{(v4z*((v197+(sf[55]*v19m))+((v9u*v19m)+(v9r*(v54*v197)))))}else{vwh});
+        let v1c3=scalar_limexp_derivative(v9y);
+        let v1ce=scalar_limexp_derivative(va8);
+        let v1cv=(v18-(vac*vac));
+        let v1d1=(if sb[22]{((v4b*((v1av*v1c3)-((-v1av)*v1ce)))*v1cv)}else{vd});
+        let v1d2=(if sb[22]{((v4b*((v1aw*v1c3)-((-v1aw)*v1ce)))*v1cv)}else{vd});
+        let v1d3=(if sb[22]{((v4b*((v1ax*v1c3)-((-v1ax)*v1ce)))*v1cv)}else{vd});
+        let v1d4=(if sb[22]{((v4b*((v1ay*v1c3)-((-v1ay)*v1ce)))*v1cv)}else{vd});
+        let v1d5=(if sb[22]{((v4b*((v1az*v1c3)-((-v1az)*v1ce)))*v1cv)}else{vd});
+        let v1d6=(sf[53]*v1by);
+        let v1d7=(sf[53]*v1bz);
+        let v1d8=(sf[53]*v1c0);
+        let v1d9=(sf[53]*v1c1);
+        let v1da=(sf[53]*v1c2);
+        let v1db=(if sb[22]{v1d6}else{v14o});
+        let v1dc=(if sb[22]{v1d7}else{v14p});
+        let v1dd=(if sb[22]{v1d8}else{v14q});
+        let v1de=(if sb[22]{v1d9}else{v14r});
+        let v1df=(if sb[22]{v1da}else{v14s});
+        let v1dz=(v18-(vam*vam));
+        let v1e5=(if sb[22]{((v7*v1db)*v1dz)}else{v158});
+        let v1e6=(if sb[22]{((vah+(v7*v1dc))*v1dz)}else{v159});
+        let v1e7=(if sb[22]{(((-vah)+(v7*v1dd))*v1dz)}else{v15a});
+        let v1e8=(if sb[22]{((v7*v1de)*v1dz)}else{v15b});
+        let v1e9=(if sb[22]{((v7*v1df)*v1dz)}else{v15c});
+        let v1ej=(v18-(vap*vap));
+        let v1ip=(if sb[22]{(v4b*((if sb[22]{((vb2*((vay*(v3t*v1bz))+(vax*v1e6)))+(vaz*(vy0+(vaw+(v7*(if sb[22]{(sf[63]*v1bz)}else{vd}))))))}else{vyk})-(if sb[22]{((vb9*((vb6*(v3t*v1d2))+(vb5*(-(if sb[22]{((vak+(v7*(if sb[22]{(sf[53]*v1d2)}else{vd})))*v1ej)}else{vd})))))+(vb7*(-(vat+(v7*(if sb[22]{(sf[63]*v1d2)}else{vd}))))))}else{v110})))}else{(if sb[19]{((v99*((v92*v159)+(v8y*(v3t*v14f))))+(v93*((v91+(v7*v15j))+(v3u*(sf[64]*v16f)))))}else{(if sb[16]{(v4b*(vyk-v110))}else{(if (sf[57]!=0.0){((v6p*(vtm+(v67*vtf)))+(v6j*(sf[62]+(v3u*vtz))))}else{vd})})})});
+        let v1iy=(if sb[25]{v1d6}else{v1db});
+        let v1iz=(if sb[25]{v1d7}else{v1dc});
+        let v1j0=(if sb[25]{v1d8}else{v1dd});
+        let v1j1=(if sb[25]{v1d9}else{v1de});
+        let v1j2=(if sb[25]{v1da}else{v1df});
+        let v1j6=(-vbj);
+        let v1jc=(v18-(vbl*vbl));
+        let v1jv=(v18-(vbo*vbo));
+        let v1lo=(if sb[25]{((vby*((vbs*vte)+(v6i*((if sb[25]{((v7*v1iy)*v1jc)}else{v1e5})+(sf[65]*(if sb[25]{((vbj+(vb*v1iy))*v1jv)}else{vd}))))))+(vbt*((vbv*(if sb[25]{vx4}else{v15i}))+(vbi*sf[65]))))}else{(if sb[22]{(v4b*((if sb[22]{((vb2*((vay*(v3t*v1by))+(vax*v1e5)))+(vaz*(v7*(if sb[22]{(sf[63]*v1by)}else{vd}))))}else{vyj})-(if sb[22]{((vb9*((vb6*(v3t*v1d1))+(vb5*(-(if sb[22]{((v7*(if sb[22]{(sf[53]*v1d1)}else{vd}))*v1ej)}else{vd})))))+(vb7*(-(v7*(if sb[22]{(sf[63]*v1d1)}else{vd})))))}else{v10z})))}else{(if sb[19]{((v99*((v92*v158)+(v8y*(v3t*v14e))))+(v93*(v7*v15i)))}else{(if sb[16]{(v4b*(vyj-v10z))}else{(if (sf[57]!=0.0){(v6p*(vtj+(v67*vte)))}else{vd})})})})});
+        let v1lq=(if sb[25]{((vby*((vbs*vtg)+(v6i*((if sb[25]{((v1j6+(v7*v1j0))*v1jc)}else{v1e7})+(sf[65]*(if sb[25]{((v1j6+(vb*v1j0))*v1jv)}else{vd}))))))+(vbt*(vy1+((vbv*(if sb[25]{vx6}else{v15k}))+(vbi*sf[164])))))}else{(if sb[22]{(v4b*((if sb[22]{((vb2*((vay*(v3t*v1c0))+(vax*v1e7)))+(vaz*(vy1+((-vaw)+(v7*(if sb[22]{(sf[63]*v1c0)}else{vd}))))))}else{vyl})-(if sb[22]{((vb9*((vb6*(v3t*v1d3))+(vb5*(-(if sb[22]{(((-vak)+(v7*(if sb[22]{(sf[53]*v1d3)}else{vd})))*v1ej)}else{vd})))))+(vb7*(-((-vat)+(v7*(if sb[22]{(sf[63]*v1d3)}else{vd}))))))}else{v111})))}else{(if sb[19]{((v99*((v92*v15a)+(v8y*(v3t*v14g))))+(v93*((-v91)+(v7*v15k))))}else{(if sb[16]{(v4b*(vyl-v111))}else{(if (sf[57]!=0.0){((v6p*(vtp+(v67*vtg)))+(v6j*sf[157]))}else{vd})})})})});
+        let v1lr=(if sb[25]{((vby*((vbs*vth)+(v6i*((if sb[25]{((v7*v1j1)*v1jc)}else{v1e8})+(sf[65]*(if sb[25]{((vb*v1j1)*v1jv)}else{vd}))))))+(vbt*(vbv*(if sb[25]{vx7}else{v15l}))))}else{(if sb[22]{(v4b*((if sb[22]{((vb2*((vay*(v3t*v1c1))+(vax*v1e8)))+(vaz*(v7*(if sb[22]{(sf[63]*v1c1)}else{vd}))))}else{vym})-(if sb[22]{((vb9*((vb6*(v3t*v1d4))+(vb5*(-(if sb[22]{((v7*(if sb[22]{(sf[53]*v1d4)}else{vd}))*v1ej)}else{vd})))))+(vb7*(-(v7*(if sb[22]{(sf[63]*v1d4)}else{vd})))))}else{v112})))}else{(if sb[19]{((v99*((v92*v15b)+(v8y*(v3t*v14h))))+(v93*((v7*v15l)+(v3u*(sf[160]*v16f)))))}else{(if sb[16]{(v4b*(vym-v112))}else{(if (sf[57]!=0.0){((v6p*(vts+(v67*vth)))+(v6j*(v3u*(-vtz))))}else{vd})})})})});
+        let v1ls=(if sb[25]{((vby*((vbs*vti)+(v6i*((if sb[25]{((v7*v1j2)*v1jc)}else{v1e9})+(sf[65]*(if sb[25]{((vb*v1j2)*v1jv)}else{vd}))))))+(vbt*(vbv*(if sb[25]{vx8}else{v15m}))))}else{(if sb[22]{(v4b*((if sb[22]{((vb2*((vay*(v3t*v1c2))+(vax*v1e9)))+(vaz*(v7*(if sb[22]{(sf[63]*v1c2)}else{vd}))))}else{vyn})-(if sb[22]{((vb9*((vb6*(v3t*v1d5))+(vb5*(-(if sb[22]{((v7*(if sb[22]{(sf[53]*v1d5)}else{vd}))*v1ej)}else{vd})))))+(vb7*(-(v7*(if sb[22]{(sf[63]*v1d5)}else{vd})))))}else{v113})))}else{(if sb[19]{((v99*((v92*v15c)+(v8y*(v3t*v14i))))+(v93*(v7*v15m)))}else{(if sb[16]{(v4b*(vyn-v113))}else{(if (sf[57]!=0.0){(v6p*(vtv+(v67*vti)))}else{vd})})})})});
+        let v1nj=(vct*(if sb[28]{(sf[69]*v1by)}else{(if (sf[66]!=0.0){(sf[69]*vrr)}else{vd})}));
+        let v1nk=(vct*(if sb[28]{(sf[69]*v1bz)}else{(if (sf[66]!=0.0){(sf[69]*vrs)}else{vd})}));
+        let v1nl=(vct*(if sb[28]{(sf[69]*v1c0)}else{(if (sf[66]!=0.0){(sf[69]*vrt)}else{vd})}));
+        let v1nm=(vct*(if sb[28]{(sf[69]*v1c1)}else{(if (sf[66]!=0.0){(sf[69]*vru)}else{vd})}));
+        let v1nn=(vct*(if sb[28]{(sf[69]*v1c2)}else{(if (sf[66]!=0.0){(sf[69]*vrv)}else{vd})}));
+        let v1nw=(if sb[30]{vd}else{(if (sf[73]!=0.0){vd}else{v177})});
+        let v1nx=(if sb[30]{vd}else{(if (sf[73]!=0.0){vd}else{v178})});
+        let v1ny=(if sb[30]{vd}else{(if (sf[73]!=0.0){vd}else{v179})});
+        let v1o1=(v18-(vdw*vdw));
+        let v1o6=(v18-(vdy*vdy));
+        let v1oi=scalar_limexp_derivative(ve6);
+        let v1on=scalar_limexp_derivative(vea);
+        let v1oz=(sf[85]*(-(if sb[30]{vd}else{(if (sf[73]!=0.0){vd}else{v176})})));
+        let v1p5=scalar_limexp_derivative(vej);
+        let v1pa=scalar_limexp_derivative(vem);
+        let v205=ddt_scale;
+        let v21d=-1e-12;
 
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(15),
             None,
-            multiplicity * ((-v432)),
+            multiplicity * ((-vc0)),
             [4, 5, 8, 10, 12],
-            [(-v2076), (-(if self.scalar_static_bool[25]{((v430*((v424*v1059)+(v234*((if self.scalar_static_bool[25]{((v415+(common.v7*v1979))*v1992)}else{v1806})+(self.scalar_static_f64[65]*(if self.scalar_static_bool[25]{((common.v11*v1979)*v2011)}else{common.v13}))))))+(v425*(v1224+(v414+(v427*(if self.scalar_static_bool[25]{v1193}else{v1495}))))))}else{v1969})), (-v2078), (-v2079), (-v2080)],
+            [(-v1lo), (-(if sb[25]{((vby*((vbs*vtf)+(v6i*((if sb[25]{((vbj+(v7*v1iz))*v1jc)}else{v1e6})+(sf[65]*(if sb[25]{((vb*v1iz)*v1jv)}else{vd}))))))+(vbt*(vy0+(vbi+(vbv*(if sb[25]{vx5}else{v15j}))))))}else{v1ip})), (-v1lq), (-v1lr), (-v1ls)],
             [],
             [],
             multiplicity,
         );
-        let v802_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, common.v802);
+        let vma_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, vma);
         stamper.stamp_current_node1_local(
             Some(15),
             None,
-            multiplicity * (v802_ddt),
+            multiplicity * (vma_ddt),
             15,
-            multiplicity * (((self.scalar_static_f64[144]) * ddt_scale)),
+            multiplicity * (((sf[144]) * ddt_scale)),
         );
         stamper.stamp_current_node1_local(
             Some(16),
             None,
-            multiplicity * (v12),
+            multiplicity * (vc),
             16,
-            multiplicity * (common.v44),
+            multiplicity * (v18),
         );
-        let v805_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, common.v805);
+        let vmd_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, vmd);
         stamper.stamp_potential_branch_local(
             Some(15),
             Some(16),
@@ -778,23 +799,23 @@ impl Instance {
         );
         stamper.stamp_potential_branch1_local(
             0,
-            v805_ddt,
+            vmd_ddt,
             0,
-            ((self.scalar_static_f64[145]) * ddt_scale),
+            ((sf[145]) * ddt_scale),
         );
         stamper.stamp_current_node1_local(
             Some(5),
             Some(8),
-            multiplicity * (v12),
+            multiplicity * (vc),
             16,
-            multiplicity * (common.v44),
+            multiplicity * (v18),
         );
         stamper.stamp_current_sparse_local::<6, 0>(
             Some(11),
             Some(8),
-            multiplicity * (v522),
+            multiplicity * (vei),
             [4, 5, 8, 10, 11, 12],
-            [v2195, (self.scalar_static_f64[85]*(-v2156)), (self.scalar_static_f64[85]*((((v162*(if self.scalar_static_bool[34]{common.v467}else{(if self.scalar_static_bool[32]{(-v2161)}else{self.scalar_static_f64[166]})}))*v2183)-(self.scalar_static_f64[87]*(self.scalar_static_f64[171]*v2178)))-v2157)), (self.scalar_static_f64[85]*(-v2158)), (self.scalar_static_f64[85]*(((v162*(if self.scalar_static_bool[34]{common.v44}else{(if self.scalar_static_bool[32]{v2161}else{self.scalar_static_f64[167]})}))*v2183)-(self.scalar_static_f64[87]*(self.scalar_static_f64[172]*v2178)))), self.scalar_static_f64[174]],
+            [v1oz, (sf[85]*(-v1nw)), (sf[85]*((((v4i*(if sb[34]{vcz}else{(if sb[32]{(-v1o1)}else{sf[166]})}))*v1on)-(sf[87]*(sf[171]*v1oi)))-v1nx)), (sf[85]*(-v1ny)), (sf[85]*(((v4i*(if sb[34]{v18}else{(if sb[32]{v1o1}else{sf[167]})}))*v1on)-(sf[87]*(sf[172]*v1oi)))), sf[174]],
             [],
             [],
             multiplicity,
@@ -802,9 +823,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<5, 0>(
             Some(10),
             Some(5),
-            multiplicity * ((self.scalar_static_f64[85]*((scalar_limexp(v526)-(self.scalar_static_f64[87]*(scalar_limexp(v523)-self.scalar_static_f64[83])))-v488))),
+            multiplicity * ((sf[85]*((scalar_limexp(vem)-(sf[87]*(scalar_limexp(vej)-sf[83])))-vdk))),
             [4, 5, 8, 10, 12],
-            [v2195, (self.scalar_static_f64[85]*((((v162*(if self.scalar_static_bool[34]{common.v467}else{(if self.scalar_static_bool[32]{(-v2166)}else{self.scalar_static_f64[166]})}))*v2206)-(self.scalar_static_f64[87]*(self.scalar_static_f64[171]*v2201)))-v2156)), (self.scalar_static_f64[85]*(-v2157)), (self.scalar_static_f64[85]*((((v162*(if self.scalar_static_bool[34]{common.v44}else{(if self.scalar_static_bool[32]{v2166}else{self.scalar_static_f64[167]})}))*v2206)-(self.scalar_static_f64[87]*(self.scalar_static_f64[172]*v2201)))-v2158)), self.scalar_static_f64[174]],
+            [v1oz, (sf[85]*((((v4i*(if sb[34]{vcz}else{(if sb[32]{(-v1o6)}else{sf[166]})}))*v1pa)-(sf[87]*(sf[171]*v1p5)))-v1nw)), (sf[85]*(-v1nx)), (sf[85]*((((v4i*(if sb[34]{v18}else{(if sb[32]{v1o6}else{sf[167]})}))*v1pa)-(sf[87]*(sf[172]*v1p5)))-v1ny)), sf[174]],
             [],
             [],
             multiplicity,
@@ -812,9 +833,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(10),
             Some(5),
-            multiplicity * ((if (self.scalar_static_f64[120]!=0.0){v806}else{common.v13})),
+            multiplicity * ((if (sf[120]!=0.0){vme}else{vd})),
             [5, 8, 10, 11],
-            [(if (self.scalar_static_f64[120]!=0.0){(common.v2582*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2583*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2584*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2585*v2597)}else{common.v13})],
+            [(if (sf[120]!=0.0){(v1zq*v205)}else{vd}), (if (sf[120]!=0.0){(v1zr*v205)}else{vd}), (if (sf[120]!=0.0){(v1zs*v205)}else{vd}), (if (sf[120]!=0.0){(v1zt*v205)}else{vd})],
             [],
             [],
             multiplicity,
@@ -822,9 +843,9 @@ impl Instance {
         stamper.stamp_current_sparse_local::<4, 0>(
             Some(11),
             Some(8),
-            multiplicity * ((if (self.scalar_static_f64[120]!=0.0){v808}else{common.v13})),
+            multiplicity * ((if (sf[120]!=0.0){vmg}else{vd})),
             [5, 8, 10, 11],
-            [(if (self.scalar_static_f64[120]!=0.0){(common.v2531*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2532*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2533*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2534*v2597)}else{common.v13})],
+            [(if (sf[120]!=0.0){(v1yb*v205)}else{vd}), (if (sf[120]!=0.0){(v1yc*v205)}else{vd}), (if (sf[120]!=0.0){(v1yd*v205)}else{vd}), (if (sf[120]!=0.0){(v1ye*v205)}else{vd})],
             [],
             [],
             multiplicity,
@@ -832,63 +853,63 @@ impl Instance {
         stamper.stamp_current_node3_local(
             Some(10),
             Some(5),
-            multiplicity * ((if self.scalar_static_bool[69]{v812}else{common.v13})),
+            multiplicity * ((if sb[69]{vmk}else{vd})),
             5,
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*((-v739)+common.v2615))}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*((-vkj)+v20n))}else{vd})),
             8,
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*common.v2617)}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*v20p)}else{vd})),
             10,
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*(v739+common.v2618))}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*(vkj+v20q))}else{vd})),
         );
         stamper.stamp_current_node3_local(
             Some(11),
             Some(8),
-            multiplicity * ((if self.scalar_static_bool[69]{v815}else{common.v13})),
+            multiplicity * ((if sb[69]{vmn}else{vd})),
             5,
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*common.v2626)}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*v20y)}else{vd})),
             8,
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*((-v737)+common.v2628))}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*((-vkh)+v210))}else{vd})),
             11,
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*(v737+common.v2630))}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*(vkh+v212))}else{vd})),
         );
-        let v820_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 7, common.v820);
+        let vms_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 7, vms);
         stamper.stamp_current_node2_local(
             Some(7),
             Some(5),
-            multiplicity * (v820_ddt),
+            multiplicity * (vms_ddt),
             5,
-            multiplicity * (((self.scalar_static_f64[199]) * ddt_scale)),
+            multiplicity * (((sf[199]) * ddt_scale)),
             7,
-            multiplicity * (((self.scalar_static_f64[146]) * ddt_scale)),
+            multiplicity * (((sf[146]) * ddt_scale)),
         );
-        let v822_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 8, common.v822);
+        let vmu_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 8, vmu);
         stamper.stamp_current_node2_local(
             Some(5),
             Some(8),
-            multiplicity * (v822_ddt),
+            multiplicity * (vmu_ddt),
             5,
-            multiplicity * (((self.scalar_static_f64[147]) * ddt_scale)),
+            multiplicity * (((sf[147]) * ddt_scale)),
             8,
-            multiplicity * (((self.scalar_static_f64[200]) * ddt_scale)),
+            multiplicity * (((sf[200]) * ddt_scale)),
         );
-        let v825_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 9, common.v825);
+        let vmx_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 9, vmx);
         stamper.stamp_current_node2_local(
             Some(6),
             Some(4),
-            multiplicity * (v825_ddt),
+            multiplicity * (vmx_ddt),
             4,
-            multiplicity * (((common.v2640) * ddt_scale)),
+            multiplicity * (((v21c) * ddt_scale)),
             6,
-            multiplicity * (((common.v142) * ddt_scale)),
+            multiplicity * (((v3y) * ddt_scale)),
         );
         stamper.stamp_current_node2_local(
             Some(6),
             Some(4),
-            multiplicity * ((common.v170*common.v824)),
+            multiplicity * ((v4q*vmw)),
             4,
-            multiplicity * (v2641),
+            multiplicity * (v21d),
             6,
-            multiplicity * (common.v170),
+            multiplicity * (v4q),
         );
         stamper.stamp_potential_branch_local(
             Some(4),
@@ -898,11 +919,11 @@ impl Instance {
         );
         stamper.stamp_potential_sparse_local::<5, 1>(
             1,
-            (if (self.scalar_static_f64[122]!=0.0){(common.v828+v830)}else{common.v13}),
+            (if (sf[122]!=0.0){(vn0+vn2)}else{vd}),
             [4, 5, 8, 10, 12],
-            [common.v2649, common.v2650, common.v2651, common.v2652, common.v2653],
+            [v21l, v21m, v21n, v21o, v21p],
             [1],
-            [(if (self.scalar_static_f64[122]!=0.0){(common.v453+(self.scalar_static_f64[121]*v2597))}else{common.v13})],
+            [(if (sf[122]!=0.0){(vcl+(sf[121]*v205))}else{vd})],
         );
         stamper.stamp_potential_branch_local(
             Some(4),
@@ -912,25 +933,25 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             2,
-            common.v13,
+            vd,
         );
         stamper.stamp_current_node2_local(
             Some(11),
             Some(12),
-            multiplicity * ((if (self.scalar_static_f64[123]!=0.0){((common.v8-common.v0)/v143)}else{common.v13})),
+            multiplicity * ((if (sf[123]!=0.0){((v8-v0)/v3z)}else{vd})),
             11,
-            multiplicity * ((if (self.scalar_static_f64[123]!=0.0){(common.v44/v143)}else{common.v13})),
+            multiplicity * ((if (sf[123]!=0.0){(v18/v3z)}else{vd})),
             12,
-            multiplicity * ((if (self.scalar_static_f64[123]!=0.0){(common.v467/v143)}else{common.v13})),
+            multiplicity * ((if (sf[123]!=0.0){(vcz/v3z)}else{vd})),
         );
         stamper.stamp_current_node2_local(
             Some(12),
             Some(8),
-            multiplicity * ((if (self.scalar_static_f64[123]!=0.0){v837}else{common.v13})),
+            multiplicity * ((if (sf[123]!=0.0){vn9}else{vd})),
             8,
-            multiplicity * ((if (self.scalar_static_f64[123]!=0.0){(v2597*common.v2659)}else{common.v13})),
+            multiplicity * ((if (sf[123]!=0.0){(v205*v21v)}else{vd})),
             12,
-            multiplicity * ((if (self.scalar_static_f64[123]!=0.0){(common.v144*v2597)}else{common.v13})),
+            multiplicity * ((if (sf[123]!=0.0){(v40*v205)}else{vd})),
         );
         stamper.stamp_potential_branch_local(
             Some(11),
@@ -940,26 +961,26 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             3,
-            common.v13,
+            vd,
         );
-        let v842_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 11, common.v842);
+        let vne_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 11, vne);
         stamper.stamp_current_node2_local(
             Some(11),
             Some(14),
-            multiplicity * (v842_ddt),
+            multiplicity * (vne_ddt),
             11,
-            multiplicity * (((self.scalar_static_f64[148]) * ddt_scale)),
+            multiplicity * (((sf[148]) * ddt_scale)),
             14,
-            multiplicity * (((self.scalar_static_f64[201]) * ddt_scale)),
+            multiplicity * (((sf[201]) * ddt_scale)),
         );
         stamper.stamp_current_node2_local(
             Some(14),
             Some(8),
-            multiplicity * ((if (self.scalar_static_f64[125]!=0.0){((common.v840-common.v1)/self.scalar_static_f64[124])}else{common.v13})),
+            multiplicity * ((if (sf[125]!=0.0){((vnc-v1)/sf[124])}else{vd})),
             8,
-            multiplicity * (self.scalar_static_f64[204]),
+            multiplicity * (sf[204]),
             14,
-            multiplicity * (self.scalar_static_f64[205]),
+            multiplicity * (sf[205]),
         );
         stamper.stamp_potential_branch_local(
             Some(14),
@@ -969,16 +990,16 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             4,
-            common.v13,
+            vd,
         );
         stamper.stamp_current_node2_local(
             Some(13),
             Some(10),
-            multiplicity * ((if (self.scalar_static_f64[127]!=0.0){((v846-common.v3)/self.scalar_static_f64[126])}else{common.v13})),
+            multiplicity * ((if (sf[127]!=0.0){((vni-v3)/sf[126])}else{vd})),
             10,
-            multiplicity * (self.scalar_static_f64[208]),
+            multiplicity * (sf[208]),
             13,
-            multiplicity * (self.scalar_static_f64[209]),
+            multiplicity * (sf[209]),
         );
         stamper.stamp_potential_branch_local(
             Some(13),
@@ -988,21 +1009,21 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             5,
-            common.v13,
+            vd,
         );
         stamper.stamp_current_const_local(
             Some(13),
             Some(10),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_node2_local(
             Some(13),
             Some(11),
-            multiplicity * ((if (self.scalar_static_f64[129]!=0.0){((v846-common.v8)/self.scalar_static_f64[128])}else{common.v13})),
+            multiplicity * ((if (sf[129]!=0.0){((vni-v8)/sf[128])}else{vd})),
             11,
-            multiplicity * (self.scalar_static_f64[212]),
+            multiplicity * (sf[212]),
             13,
-            multiplicity * (self.scalar_static_f64[213]),
+            multiplicity * (sf[213]),
         );
         stamper.stamp_potential_branch_local(
             Some(13),
@@ -1012,7 +1033,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             6,
-            common.v13,
+            vd,
         );
         stamper.stamp_potential_branch_local(
             Some(7),
@@ -1022,9 +1043,9 @@ impl Instance {
         );
         stamper.stamp_potential_branch1_local(
             7,
-            (if (self.scalar_static_f64[131]!=0.0){(self.scalar_static_f64[130]*ctx.branch_current(branches[7]))}else{common.v13}),
+            (if (sf[131]!=0.0){(sf[130]*ctx.branch_current(branches[7]))}else{vd}),
             7,
-            self.scalar_static_f64[214],
+            sf[214],
         );
         stamper.stamp_potential_branch_local(
             Some(7),
@@ -1034,7 +1055,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             8,
-            common.v13,
+            vd,
         );
         stamper.stamp_potential_branch_local(
             Some(7),
@@ -1044,9 +1065,9 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             9,
-            common.v13,
+            vd,
         );
-        let v858_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 12, common.v858);
+        let vnu_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 12, vnu);
         stamper.stamp_potential_branch_local(
             Some(1),
             Some(7),
@@ -1055,9 +1076,9 @@ impl Instance {
         );
         stamper.stamp_potential_branch1_local(
             10,
-            v858_ddt,
+            vnu_ddt,
             10,
-            ((self.scalar_static_f64[149]) * ddt_scale),
+            ((sf[149]) * ddt_scale),
         );
         stamper.stamp_potential_branch_local(
             Some(8),
@@ -1067,11 +1088,11 @@ impl Instance {
         );
         stamper.stamp_potential_sparse_local::<5, 1>(
             11,
-            (if (self.scalar_static_f64[132]!=0.0){(v462*v859)}else{common.v13}),
+            (if (sf[132]!=0.0){(vcu*vnv)}else{vd}),
             [4, 5, 8, 10, 12],
-            [(if (self.scalar_static_f64[132]!=0.0){(v859*v2143)}else{common.v13}), (if (self.scalar_static_f64[132]!=0.0){(v859*v2144)}else{common.v13}), (if (self.scalar_static_f64[132]!=0.0){(v859*v2145)}else{common.v13}), (if (self.scalar_static_f64[132]!=0.0){(v859*v2146)}else{common.v13}), (if (self.scalar_static_f64[132]!=0.0){(v859*v2147)}else{common.v13})],
+            [(if (sf[132]!=0.0){(vnv*v1nj)}else{vd}), (if (sf[132]!=0.0){(vnv*v1nk)}else{vd}), (if (sf[132]!=0.0){(vnv*v1nl)}else{vd}), (if (sf[132]!=0.0){(vnv*v1nm)}else{vd}), (if (sf[132]!=0.0){(vnv*v1nn)}else{vd})],
             [11],
-            [(if (self.scalar_static_f64[132]!=0.0){v462}else{common.v13})],
+            [(if (sf[132]!=0.0){vcu}else{vd})],
         );
         stamper.stamp_potential_branch_local(
             Some(8),
@@ -1081,7 +1102,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             12,
-            common.v13,
+            vd,
         );
         stamper.stamp_potential_branch_local(
             Some(8),
@@ -1091,9 +1112,9 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             13,
-            common.v13,
+            vd,
         );
-        let v864_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 13, common.v864);
+        let vo0_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 13, vo0);
         stamper.stamp_potential_branch_local(
             Some(9),
             Some(2),
@@ -1102,9 +1123,9 @@ impl Instance {
         );
         stamper.stamp_potential_branch1_local(
             14,
-            v864_ddt,
+            vo0_ddt,
             14,
-            ((self.scalar_static_f64[150]) * ddt_scale),
+            ((sf[150]) * ddt_scale),
         );
         stamper.stamp_potential_branch_local(
             Some(5),
@@ -1114,11 +1135,11 @@ impl Instance {
         );
         stamper.stamp_potential_sparse_local::<5, 1>(
             15,
-            (if (self.scalar_static_f64[133]!=0.0){(v463*v865)}else{common.v13}),
+            (if (sf[133]!=0.0){(vcv*vo1)}else{vd}),
             [4, 5, 8, 10, 12],
-            [(if (self.scalar_static_f64[133]!=0.0){(v865*v2143)}else{common.v13}), (if (self.scalar_static_f64[133]!=0.0){(v865*v2144)}else{common.v13}), (if (self.scalar_static_f64[133]!=0.0){(v865*v2145)}else{common.v13}), (if (self.scalar_static_f64[133]!=0.0){(v865*v2146)}else{common.v13}), (if (self.scalar_static_f64[133]!=0.0){(v865*v2147)}else{common.v13})],
+            [(if (sf[133]!=0.0){(vo1*v1nj)}else{vd}), (if (sf[133]!=0.0){(vo1*v1nk)}else{vd}), (if (sf[133]!=0.0){(vo1*v1nl)}else{vd}), (if (sf[133]!=0.0){(vo1*v1nm)}else{vd}), (if (sf[133]!=0.0){(vo1*v1nn)}else{vd})],
             [15],
-            [(if (self.scalar_static_f64[133]!=0.0){v463}else{common.v13})],
+            [(if (sf[133]!=0.0){vcv}else{vd})],
         );
         stamper.stamp_potential_branch_local(
             Some(5),
@@ -1128,7 +1149,7 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             16,
-            common.v13,
+            vd,
         );
         stamper.stamp_potential_branch_local(
             Some(5),
@@ -1138,9 +1159,9 @@ impl Instance {
         );
         stamper.stamp_potential_const_local(
             17,
-            common.v13,
+            vd,
         );
-        let v870_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 14, common.v870);
+        let vo6_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 14, vo6);
         stamper.stamp_potential_branch_local(
             Some(6),
             Some(0),
@@ -1149,9 +1170,9 @@ impl Instance {
         );
         stamper.stamp_potential_branch1_local(
             18,
-            v870_ddt,
+            vo6_ddt,
             18,
-            ((self.scalar_static_f64[151]) * ddt_scale),
+            ((sf[151]) * ddt_scale),
         );
         stamper.stamp_current_const_local(
             Some(0),
@@ -1161,153 +1182,153 @@ impl Instance {
         stamper.stamp_current_const_local(
             Some(14),
             Some(2),
-            multiplicity * (common.v170),
+            multiplicity * (v4q),
         );
         stamper.stamp_current_node2_local(
             Some(12),
             Some(2),
-            multiplicity * ((common.v170*(common.v0-ctx.node_voltage(nodes[2])))),
+            multiplicity * ((v4q*(v0-ctx.node_voltage(nodes[2])))),
             2,
-            multiplicity * (v2641),
+            multiplicity * (v21d),
             12,
-            multiplicity * (common.v170),
+            multiplicity * (v4q),
         );
         stamper.stamp_current_const_local(
             Some(5),
             Some(8),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(5),
             Some(8),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(17),
             None,
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_node1_local(
             Some(17),
             None,
-            multiplicity * (v876),
+            multiplicity * (voc),
             17,
-            multiplicity * (self.scalar_static_f64[215]),
+            multiplicity * (sf[215]),
         );
         stamper.stamp_current_const_local(
             Some(18),
             None,
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_node1_local(
             Some(18),
             None,
-            multiplicity * ((if self.scalar_static_bool[67]{v877}else{common.v13})),
+            multiplicity * ((if sb[67]{vod}else{vd})),
             18,
-            multiplicity * (self.scalar_static_f64[215]),
+            multiplicity * (sf[215]),
         );
         stamper.stamp_current_node1_local(
             Some(7),
             Some(8),
-            multiplicity * (v876),
+            multiplicity * (voc),
             17,
-            multiplicity * (self.scalar_static_f64[215]),
+            multiplicity * (sf[215]),
         );
         stamper.stamp_current_node2_local(
             Some(7),
             Some(5),
-            multiplicity * ((if self.scalar_static_bool[67]{((v794*common.v875)+(v790*v877))}else{common.v13})),
+            multiplicity * ((if sb[67]{((vm2*vob)+(vly*vod))}else{vd})),
             17,
-            multiplicity * ((if self.scalar_static_bool[67]{v794}else{common.v13})),
+            multiplicity * ((if sb[67]{vm2}else{vd})),
             18,
-            multiplicity * ((if self.scalar_static_bool[67]{v790}else{common.v13})),
+            multiplicity * ((if sb[67]{vly}else{vd})),
         );
         stamper.stamp_current_node1_local(
             Some(7),
             Some(5),
-            multiplicity * ((if self.scalar_static_bool[67]{v885}else{common.v13})),
+            multiplicity * ((if sb[67]{vol}else{vd})),
             17,
-            multiplicity * ((if self.scalar_static_bool[67]{(common.v883*v2597)}else{common.v13})),
+            multiplicity * ((if sb[67]{(voj*v205)}else{vd})),
         );
         stamper.stamp_current_const_local(
             Some(5),
             Some(8),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(7),
             Some(8),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(5),
             Some(8),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(5),
             Some(8),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_node1_local(
             Some(17),
             None,
-            multiplicity * (common.v875),
+            multiplicity * (vob),
             17,
-            multiplicity * (common.v44),
+            multiplicity * (v18),
         );
         stamper.stamp_current_node1_local(
             Some(18),
             None,
-            multiplicity * (v877),
+            multiplicity * (vod),
             18,
-            multiplicity * (common.v44),
+            multiplicity * (v18),
         );
         stamper.stamp_current_const_local(
             Some(11),
             Some(8),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(10),
             Some(5),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(11),
             Some(8),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(10),
             Some(5),
-            multiplicity * (common.v13),
+            multiplicity * (vd),
         );
         stamper.stamp_current_const_local(
             Some(3),
             None,
-            multiplicity * ((if (self.scalar_static_f64[143]!=0.0){(-(((common.v7*v432)).abs()+((common.v9*v522)).abs()))}else{common.v13})),
+            multiplicity * ((if (sf[143]!=0.0){(-(((v7*vc0)).abs()+((v9*vei)).abs()))}else{vd})),
         );
         stamper.stamp_current_node1_local(
             Some(3),
             None,
-            multiplicity * ((if (self.scalar_static_f64[143]!=0.0){(common.v32/v50)}else{common.v13})),
+            multiplicity * ((if (sf[143]!=0.0){(vw/v1e)}else{vd})),
             3,
-            multiplicity * ((if (self.scalar_static_f64[143]!=0.0){(common.v44/v50)}else{common.v13})),
+            multiplicity * ((if (sf[143]!=0.0){(v18/v1e)}else{vd})),
         );
         stamper.stamp_current_node1_local(
             Some(3),
             None,
-            multiplicity * ((if (self.scalar_static_f64[143]!=0.0){v898}else{common.v13})),
+            multiplicity * ((if (sf[143]!=0.0){voy}else{vd})),
             3,
-            multiplicity * ((if (self.scalar_static_f64[143]!=0.0){(self.scalar_static_f64[152]*v2597)}else{common.v13})),
+            multiplicity * ((if (sf[143]!=0.0){(sf[152]*v205)}else{vd})),
         );
         stamper.stamp_current_node1_local(
             Some(3),
             None,
-            multiplicity * ((if self.scalar_static_bool[70]{(common.v32*common.v170)}else{common.v13})),
+            multiplicity * ((if sb[70]{(vw*v4q)}else{vd})),
             3,
-            multiplicity * (self.scalar_static_f64[216]),
+            multiplicity * (sf[216]),
         );
     }
 
@@ -1317,40 +1338,59 @@ impl Instance {
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
         let p = &(*self.params);
         let multiplicity = self.multiplicity;
-        let common=self.eval_common_stamp_values(ctx);
-        let v631=common.v2322;
-        let v633=common.v2380;
-        let v736=common.v2534;
-        let v737=(if self.scalar_static_bool[49]{v736}else{(if self.scalar_static_bool[46]{common.v676}else{(if self.scalar_static_bool[43]{v631}else{common.v577})})});
-        let v738=common.v2584;
-        let v739=(if self.scalar_static_bool[49]{v738}else{(if self.scalar_static_bool[46]{common.v681}else{(if self.scalar_static_bool[43]{v633}else{common.v583})})});
-        let v806=0.0;
-        let v808=0.0;
-        let v812=0.0;
-        let v815=0.0;
-        let v830=0.0;
-        let v837=0.0;
-        let v885=0.0;
-        let v898=0.0;
-        let v2597=1.0;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
+        let CommonStampValues {
+            v0, v1, v3, v5, v6, v7, v8, v9, 
+            vb, vd, vw, vz, v13, v18, v19, v1b, 
+            v2c, v3c, v3g, v3n, v3s, v3y, v40, v45, 
+            v4b, v4q, v4z, v54, v5e, v5m, v5v, v6u, 
+            v6v, v6x, v8s, v9f, va6, vcl, vcz, vg1, 
+            vg7, vis, vix, vjz, vkf, vlu, vm0, vma, 
+            vmd, vms, vmu, vmw, vmx, vn0, vn1, vn8, 
+            vnc, vne, vnu, vo0, vo6, vob, voj, vok, 
+            vox, vpl, vpm, vq6, vqb, vqd, vqf, vqh, 
+            vqi, vrr, vrs, vrt, vru, vrv, vuk, vul, 
+            vum, vun, vuo, vup, vuq, vuz, vv0, vv1, 
+            vv2, v14e, v14f, v14g, v14h, v14i, v176, v177, 
+            v178, v179, v1by, v1bz, v1c0, v1c1, v1c2, v1si, 
+            v1u4, v1yb, v1yc, v1yd, v1ye, v1zq, v1zr, v1zs, 
+            v1zt, v20n, v20p, v20q, v20y, v210, v212, v21c, 
+            v21l, v21m, v21n, v21o, v21p, v21v, 
+        }=self.eval_common_stamp_values(ctx);
+        let vhj=v1si;
+        let vhl=v1u4;
+        let vkg=v1ye;
+        let vkh=(if sb[49]{vkg}else{(if sb[46]{vis}else{(if sb[43]{vhj}else{vg1})})});
+        let vki=v1zs;
+        let vkj=(if sb[49]{vki}else{(if sb[46]{vix}else{(if sb[43]{vhl}else{vg7})})});
+        let vme=0.0;
+        let vmg=0.0;
+        let vmk=0.0;
+        let vmn=0.0;
+        let vn2=0.0;
+        let vn9=0.0;
+        let vol=0.0;
+        let voy=0.0;
+        let v205=1.0;
 
         stamper.stamp_current_reactive_node1(
             Some(nodes[15]),
             None,
             nodes[15],
-            multiplicity * (self.scalar_static_f64[144]),
+            multiplicity * (sf[144]),
         );
         stamper.stamp_current_reactive_branch1(
             Some(nodes[15]),
             Some(nodes[16]),
             branches[0],
-            multiplicity * (self.scalar_static_f64[145]),
+            multiplicity * (sf[145]),
         );
         stamper.stamp_current_reactive_dense(
             Some(nodes[10]),
             Some(nodes[5]),
             &[nodes[5], nodes[8], nodes[10], nodes[11]],
-            &[(if (self.scalar_static_f64[120]!=0.0){(common.v2582*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2583*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2584*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2585*v2597)}else{common.v13})],
+            &[(if (sf[120]!=0.0){(v1zq*v205)}else{vd}), (if (sf[120]!=0.0){(v1zr*v205)}else{vd}), (if (sf[120]!=0.0){(v1zs*v205)}else{vd}), (if (sf[120]!=0.0){(v1zt*v205)}else{vd})],
             &[],
             &[],
             multiplicity,
@@ -1359,7 +1399,7 @@ impl Instance {
             Some(nodes[11]),
             Some(nodes[8]),
             &[nodes[5], nodes[8], nodes[10], nodes[11]],
-            &[(if (self.scalar_static_f64[120]!=0.0){(common.v2531*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2532*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2533*v2597)}else{common.v13}), (if (self.scalar_static_f64[120]!=0.0){(common.v2534*v2597)}else{common.v13})],
+            &[(if (sf[120]!=0.0){(v1yb*v205)}else{vd}), (if (sf[120]!=0.0){(v1yc*v205)}else{vd}), (if (sf[120]!=0.0){(v1yd*v205)}else{vd}), (if (sf[120]!=0.0){(v1ye*v205)}else{vd})],
             &[],
             &[],
             multiplicity,
@@ -1368,100 +1408,100 @@ impl Instance {
             Some(nodes[10]),
             Some(nodes[5]),
             nodes[5],
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*((-v739)+common.v2615))}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*((-vkj)+v20n))}else{vd})),
             nodes[8],
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*common.v2617)}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*v20p)}else{vd})),
             nodes[10],
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*(v739+common.v2618))}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*(vkj+v20q))}else{vd})),
         );
         stamper.stamp_current_reactive_node3(
             Some(nodes[11]),
             Some(nodes[8]),
             nodes[5],
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*common.v2626)}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*v20y)}else{vd})),
             nodes[8],
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*((-v737)+common.v2628))}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*((-vkh)+v210))}else{vd})),
             nodes[11],
-            multiplicity * ((if self.scalar_static_bool[69]{(v2597*(v737+common.v2630))}else{common.v13})),
+            multiplicity * ((if sb[69]{(v205*(vkh+v212))}else{vd})),
         );
         stamper.stamp_current_reactive_node2(
             Some(nodes[7]),
             Some(nodes[5]),
             nodes[5],
-            multiplicity * (self.scalar_static_f64[199]),
+            multiplicity * (sf[199]),
             nodes[7],
-            multiplicity * (self.scalar_static_f64[146]),
+            multiplicity * (sf[146]),
         );
         stamper.stamp_current_reactive_node2(
             Some(nodes[5]),
             Some(nodes[8]),
             nodes[5],
-            multiplicity * (self.scalar_static_f64[147]),
+            multiplicity * (sf[147]),
             nodes[8],
-            multiplicity * (self.scalar_static_f64[200]),
+            multiplicity * (sf[200]),
         );
         stamper.stamp_current_reactive_node2(
             Some(nodes[6]),
             Some(nodes[4]),
             nodes[4],
-            multiplicity * (common.v2640),
+            multiplicity * (v21c),
             nodes[6],
-            multiplicity * (common.v142),
+            multiplicity * (v3y),
         );
         stamper.stamp_current_reactive_dense(
             Some(nodes[4]),
             Some(nodes[8]),
             &[nodes[4], nodes[5], nodes[8], nodes[10], nodes[12]],
-            &[common.v2649, common.v2650, common.v2651, common.v2652, common.v2653],
+            &[v21l, v21m, v21n, v21o, v21p],
             &[branches[1]],
-            &[(if (self.scalar_static_f64[122]!=0.0){(common.v453+(self.scalar_static_f64[121]*v2597))}else{common.v13})],
+            &[(if (sf[122]!=0.0){(vcl+(sf[121]*v205))}else{vd})],
             multiplicity,
         );
         stamper.stamp_current_reactive_node2(
             Some(nodes[12]),
             Some(nodes[8]),
             nodes[8],
-            multiplicity * ((if (self.scalar_static_f64[123]!=0.0){(v2597*common.v2659)}else{common.v13})),
+            multiplicity * ((if (sf[123]!=0.0){(v205*v21v)}else{vd})),
             nodes[12],
-            multiplicity * ((if (self.scalar_static_f64[123]!=0.0){(common.v144*v2597)}else{common.v13})),
+            multiplicity * ((if (sf[123]!=0.0){(v40*v205)}else{vd})),
         );
         stamper.stamp_current_reactive_node2(
             Some(nodes[11]),
             Some(nodes[14]),
             nodes[11],
-            multiplicity * (self.scalar_static_f64[148]),
+            multiplicity * (sf[148]),
             nodes[14],
-            multiplicity * (self.scalar_static_f64[201]),
+            multiplicity * (sf[201]),
         );
         stamper.stamp_current_reactive_branch1(
             Some(nodes[1]),
             Some(nodes[7]),
             branches[10],
-            multiplicity * (self.scalar_static_f64[149]),
+            multiplicity * (sf[149]),
         );
         stamper.stamp_current_reactive_branch1(
             Some(nodes[9]),
             Some(nodes[2]),
             branches[14],
-            multiplicity * (self.scalar_static_f64[150]),
+            multiplicity * (sf[150]),
         );
         stamper.stamp_current_reactive_branch1(
             Some(nodes[6]),
             Some(nodes[0]),
             branches[18],
-            multiplicity * (self.scalar_static_f64[151]),
+            multiplicity * (sf[151]),
         );
         stamper.stamp_current_reactive_node1(
             Some(nodes[7]),
             Some(nodes[5]),
             nodes[17],
-            multiplicity * ((if self.scalar_static_bool[67]{(common.v883*v2597)}else{common.v13})),
+            multiplicity * ((if sb[67]{(voj*v205)}else{vd})),
         );
         stamper.stamp_current_reactive_node1(
             Some(nodes[3]),
             None,
             nodes[3],
-            multiplicity * ((if (self.scalar_static_f64[143]!=0.0){(self.scalar_static_f64[152]*v2597)}else{common.v13})),
+            multiplicity * ((if (sf[143]!=0.0){(sf[152]*v205)}else{vd})),
         );
     }
 }
