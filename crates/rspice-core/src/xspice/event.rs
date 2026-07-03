@@ -226,11 +226,12 @@ impl EventQueue {
         driver_index: usize,
         value: DigitalValue,
     ) {
-        if delay < 0.0 {
+        let event_time = current_time + delay;
+        if !event_time.is_finite() || event_time < 0.0 {
             return;
         }
         let event = Event::new_with_driver_index(
-            current_time + delay,
+            event_time,
             node_id,
             port_name,
             instance,
@@ -720,6 +721,19 @@ mod tests {
         let stats = queue.stats();
         assert_eq!(stats.processed, 1);
         assert_eq!(stats.last_event_time, 1.0e-9);
+    }
+
+    #[test]
+    fn delayed_digital_event_can_target_earlier_time_in_current_step() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule_delayed(4.0e-9, -1.5e-9, 1, "out", "driver", DigitalValue::one());
+
+        let events = queue.pop_events_at(4.0e-9);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].time, 2.5e-9);
+        let stats = queue.stats();
+        assert_eq!(stats.last_event_time, 2.5e-9);
     }
 
     #[test]

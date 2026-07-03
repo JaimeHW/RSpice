@@ -63,6 +63,63 @@ fn adc_bridge_state(input: Value, _previous: i64, in_low: Value, in_high: Value)
     }
 }
 
+fn adc_bridge_crossing_time(
+    previous_input: Value,
+    input: Value,
+    previous_state: i64,
+    new_state: i64,
+    start_time: Value,
+    end_time: Value,
+    in_low: Value,
+    in_high: Value,
+) -> Option<Value> {
+    if previous_state == ADC_UNINITIALIZED_STATE
+        || previous_state == new_state
+        || previous_state != 1
+        || new_state != -1
+        || !previous_input.is_finite()
+        || !input.is_finite()
+        || !start_time.is_finite()
+        || !end_time.is_finite()
+        || end_time <= start_time
+        || input >= previous_input
+        || (input - previous_input).abs() <= Value::EPSILON
+    {
+        return None;
+    }
+
+    let mut lo = 0.0;
+    let mut hi = 1.0;
+    for _ in 0..64 {
+        let mid = (lo + hi) * 0.5;
+        let probe = previous_input + (input - previous_input) * mid;
+        if adc_bridge_state(probe, previous_state, in_low, in_high) == new_state {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(start_time + (end_time - start_time) * hi)
+}
+
+fn adc_bridge_delay_for_transition(
+    time: Value,
+    previous_state: i64,
+    new_state: i64,
+    rise_delay: Value,
+    fall_delay: Value,
+) -> Value {
+    if time == 0.0 {
+        0.0
+    } else {
+        match new_state {
+            1 => rise_delay,
+            -1 if previous_state == 0 => rise_delay,
+            _ => fall_delay,
+        }
+    }
+}
+
 /// Analog to digital converter bridge
 #[derive(Debug, Default)]
 pub struct AdcBridge;
@@ -122,6 +179,7 @@ impl CodeModel for AdcBridge {
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         let width = bridge_vector_width(ctx, "adc_bridge")?;
         ctx.allocate_int_states(width);
+        ctx.allocate_states(width);
         for index in 0..width {
             ctx.set_int_state(index, ADC_UNINITIALIZED_STATE);
         }
@@ -147,19 +205,31 @@ impl CodeModel for AdcBridge {
                     1 => DigitalValue::one(),
                     _ => DigitalValue::unknown(),
                 };
-                let delay = if ctx.time == 0.0 {
-                    0.0
+                let edge_time = if ctx.is_transient() && ctx.time_prev > 0.0 {
+                    adc_bridge_crossing_time(
+                        ctx.state_prev(index),
+                        v_in,
+                        prev,
+                        new_state,
+                        ctx.time_prev,
+                        ctx.time,
+                        in_low,
+                        in_high,
+                    )
+                    .unwrap_or(ctx.time)
                 } else {
-                    match new_state {
-                        1 => rise_delay,
-                        -1 if prev == 0 => rise_delay,
-                        _ => fall_delay,
-                    }
+                    ctx.time
                 };
+                let delay = edge_time
+                    + adc_bridge_delay_for_transition(
+                        ctx.time, prev, new_state, rise_delay, fall_delay,
+                    )
+                    - ctx.time;
                 ctx.set_output_digital_vector_element("out", index, val, delay);
             }
             if commit_outputs {
                 ctx.set_int_state(index, new_state);
+                ctx.set_state(index, v_in);
             }
         }
         Ok(())
@@ -1660,6 +1730,54 @@ mod tests {
         assert_eq!(events[0].delay, 0.0);
         assert_eq!(events[0].values[0], DigitalValue::unknown());
         assert_eq!(ctx.int_state(0), -1);
+    }
+
+    #[test]
+    fn adc_bridge_recovers_threshold_event_time_inside_accepted_step() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 1);
+        ctx.set_port_width("out", 1);
+        ctx.set_param("in_low", 0.1);
+        ctx.set_param("in_high", 0.9);
+        ctx.set_param("rise_delay", 1.0e-9);
+        ctx.set_param("fall_delay", 1.0e-9);
+        ctx.init_output_vector("out", PortType::Digital, 1);
+        ctx.analysis = AnalysisType::Transient;
+        ctx.call_type = CallType::TransientAnalysis;
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+
+        AdcBridge.init(&mut ctx).expect("adc_bridge initializes");
+
+        ctx.time = 0.0;
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(1.0)]));
+        AdcBridge.evaluate(&mut ctx).expect("records initial high");
+        ctx.take_pending_events();
+        ctx.advance_state();
+
+        ctx.time = 1.0e-9;
+        ctx.timestep = 1.0e-9;
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(1.0)]));
+        AdcBridge
+            .evaluate(&mut ctx)
+            .expect("records first accepted transient sample");
+        ctx.advance_state();
+
+        ctx.time = 5.0e-9;
+        ctx.timestep = 4.0e-9;
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(0.7)]));
+        AdcBridge
+            .evaluate(&mut ctx)
+            .expect("recovers high-to-unknown threshold crossing");
+
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values[0], DigitalValue::unknown());
+        let expected_delay = 1.0e-9 + (4.0e-9 * (1.0 - 0.9) / (1.0 - 0.7)) + 1.0e-9 - 5.0e-9;
+        assert!(
+            (events[0].delay - expected_delay).abs() <= 1.0e-21,
+            "adc_bridge should schedule from recovered threshold time, got {}",
+            events[0].delay
+        );
     }
 
     #[test]
