@@ -146,6 +146,63 @@ fn xspice_event_node_summary(digital_nodes: &[NodeId], real_nodes: &[NodeId]) ->
     }
 }
 
+fn extend_xspice_event_nodes(target: &mut Vec<NodeId>, source: &[NodeId]) {
+    if source.is_empty() {
+        return;
+    }
+    target.extend_from_slice(source);
+    target.sort_unstable();
+    target.dedup();
+}
+
+fn xspice_connection_uses_digital_node(
+    connection: &crate::xspice::PortConnection,
+    changed_nodes: &[NodeId],
+) -> bool {
+    match connection {
+        crate::xspice::PortConnection::Digital(node)
+        | crate::xspice::PortConnection::DigitalInverted(node) => changed_nodes.contains(node),
+        crate::xspice::PortConnection::DigitalVector(nodes) => {
+            nodes.iter().any(|node| changed_nodes.contains(node))
+        }
+        crate::xspice::PortConnection::DigitalVectorMapped(nodes) => nodes
+            .iter()
+            .any(|connection| changed_nodes.contains(&connection.node)),
+        _ => false,
+    }
+}
+
+fn xspice_connection_uses_real_node(
+    connection: &crate::xspice::PortConnection,
+    changed_nodes: &[NodeId],
+) -> bool {
+    match connection {
+        crate::xspice::PortConnection::Real(node) => changed_nodes.contains(node),
+        crate::xspice::PortConnection::RealVector(nodes) => {
+            nodes.iter().any(|node| changed_nodes.contains(node))
+        }
+        _ => false,
+    }
+}
+
+fn xspice_instance_depends_on_event_nodes(
+    instance: &crate::xspice::XspiceInstance,
+    changed_digital_nodes: &[NodeId],
+    changed_real_nodes: &[NodeId],
+) -> bool {
+    instance
+        .ports()
+        .iter()
+        .zip(instance.connections())
+        .any(|(port, connection)| {
+            matches!(
+                port.direction,
+                crate::xspice::PortDirection::In | crate::xspice::PortDirection::InOut
+            ) && (xspice_connection_uses_digital_node(connection, changed_digital_nodes)
+                || xspice_connection_uses_real_node(connection, changed_real_nodes))
+        })
+}
+
 impl CircuitData {
     //=========================================================================
     // XSPICE Code Model Interface
@@ -343,6 +400,8 @@ impl CircuitData {
         };
         let num_nodes = self.num_nodes;
         let event_loads = &self.xspice_event_loads;
+        let mut dispatch_digital_nodes = Vec::new();
+        let mut dispatch_real_nodes = Vec::new();
 
         for pass in 0..max_event_passes {
             let digital_values = &mut self.xspice_digital_values;
@@ -354,6 +413,8 @@ impl CircuitData {
             let event_queue = &mut self.xspice_event_queue;
             let touched_digital_nodes = &mut self.xspice_touched_digital_nodes;
             let touched_real_nodes = &mut self.xspice_touched_real_nodes;
+            let mut next_dispatch_digital_nodes = Vec::new();
+            let mut next_dispatch_real_nodes = Vec::new();
             let mut changed = apply_xspice_events_at_or_before(
                 digital_values,
                 digital_drivers,
@@ -366,8 +427,20 @@ impl CircuitData {
                 touched_real_nodes,
                 time,
             );
+            extend_xspice_event_nodes(&mut dispatch_digital_nodes, touched_digital_nodes);
+            extend_xspice_event_nodes(&mut dispatch_real_nodes, touched_real_nodes);
 
             for instance in &mut self.xspice_instances {
+                if pass > 0
+                    && !xspice_instance_depends_on_event_nodes(
+                        instance,
+                        &dispatch_digital_nodes,
+                        &dispatch_real_nodes,
+                    )
+                {
+                    continue;
+                }
+
                 if let Err(e) = instance.update_inputs(
                     solution,
                     num_nodes,
@@ -394,7 +467,7 @@ impl CircuitData {
                 }
 
                 instance.schedule_events(event_queue, time);
-                changed |= apply_xspice_events_at_or_before(
+                let instance_changed = apply_xspice_events_at_or_before(
                     digital_values,
                     digital_drivers,
                     digital_event_times,
@@ -406,6 +479,14 @@ impl CircuitData {
                     touched_real_nodes,
                     time,
                 );
+                if instance_changed {
+                    changed = true;
+                    extend_xspice_event_nodes(
+                        &mut next_dispatch_digital_nodes,
+                        touched_digital_nodes,
+                    );
+                    extend_xspice_event_nodes(&mut next_dispatch_real_nodes, touched_real_nodes);
+                }
             }
 
             if !changed {
@@ -413,10 +494,18 @@ impl CircuitData {
             }
 
             if pass + 1 == max_event_passes {
-                let unsettled = xspice_event_node_summary(
-                    touched_digital_nodes.as_slice(),
-                    touched_real_nodes.as_slice(),
-                );
+                let summary_digital_nodes = if next_dispatch_digital_nodes.is_empty() {
+                    dispatch_digital_nodes.as_slice()
+                } else {
+                    next_dispatch_digital_nodes.as_slice()
+                };
+                let summary_real_nodes = if next_dispatch_real_nodes.is_empty() {
+                    dispatch_real_nodes.as_slice()
+                } else {
+                    next_dispatch_real_nodes.as_slice()
+                };
+                let unsettled =
+                    xspice_event_node_summary(summary_digital_nodes, summary_real_nodes);
                 let message = format!(
                     "XSPICE event network did not settle at time {time:e} after {max_event_passes} passes ({unsettled})"
                 );
@@ -425,6 +514,8 @@ impl CircuitData {
                 }
                 return Err(crate::xspice::CmError::EvaluationError(message));
             }
+            dispatch_digital_nodes = next_dispatch_digital_nodes;
+            dispatch_real_nodes = next_dispatch_real_nodes;
         }
         Ok(())
     }
@@ -2017,6 +2108,10 @@ mod tests {
 
     struct FeedbackInverterModel;
 
+    struct EventOutputProbeModel {
+        calls: Arc<Mutex<usize>>,
+    }
+
     struct PhaseProbeModel {
         seen_phases: Arc<Mutex<Vec<EvaluationPhase>>>,
     }
@@ -2052,6 +2147,12 @@ mod tests {
     impl PhaseProbeModel {
         fn new(seen_phases: Arc<Mutex<Vec<EvaluationPhase>>>) -> Self {
             Self { seen_phases }
+        }
+    }
+
+    impl EventOutputProbeModel {
+        fn new(calls: Arc<Mutex<usize>>) -> Self {
+            Self { calls }
         }
     }
 
@@ -2128,6 +2229,35 @@ mod tests {
         fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
             let value = ctx.input_digital("in").unwrap_or_default().invert();
             ctx.set_output_digital("out", value, 0.0);
+            Ok(())
+        }
+    }
+
+    impl CodeModel for EventOutputProbeModel {
+        fn name(&self) -> &str {
+            "event_output_probe_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            use std::sync::OnceLock;
+            static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+            PORTS.get_or_init(|| vec![PortSpec::output("out", PortType::Digital)])
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            *self
+                .calls
+                .lock()
+                .expect("event output probe lock must not be poisoned") += 1;
+            ctx.set_output_digital("out", DigitalValue::one(), 0.0);
             Ok(())
         }
     }
@@ -2211,6 +2341,19 @@ mod tests {
             &[],
         )
         .expect("feedback inverter instance should construct")
+    }
+
+    fn event_output_probe_instance(calls: Arc<Mutex<usize>>) -> XspiceInstance {
+        XspiceInstance::new(
+            "Aprobe",
+            Arc::new(EventOutputProbeModel::new(calls)),
+            vec![PortConnection::Digital(1)],
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("event output probe instance should construct")
     }
 
     fn phase_probe_instance(seen_phases: Arc<Mutex<Vec<EvaluationPhase>>>) -> XspiceInstance {
@@ -2298,6 +2441,26 @@ mod tests {
 
         assert!(err.contains("XSPICE event network did not settle"));
         assert!(err.contains("2 passes"));
+    }
+
+    #[test]
+    fn event_scheduler_does_not_refire_output_only_models_after_own_output_change() {
+        let calls = Arc::new(Mutex::new(0usize));
+        let mut circuit = CircuitData::new();
+        circuit.get_or_create_node("out");
+        circuit.add_xspice_instance(event_output_probe_instance(Arc::clone(&calls)));
+
+        circuit
+            .try_evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient)
+            .expect("output-only event model should settle after seeding its output");
+
+        assert_eq!(
+            *calls
+                .lock()
+                .expect("event output probe lock must not be poisoned"),
+            1,
+            "output-only event model must not be re-fired by its own output node"
+        );
     }
 
     #[test]
