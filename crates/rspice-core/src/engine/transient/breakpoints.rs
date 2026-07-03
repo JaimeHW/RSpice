@@ -75,12 +75,13 @@ impl Engine {
         spec: &crate::netlist::SourceSpec,
         tstop: Value,
         tstep_hint: Value,
+        dialect: crate::engine::SpiceDialect,
     ) {
         use crate::netlist::SourceSpec;
 
         match spec {
             SourceSpec::RfPort { inner, .. } => {
-                Self::add_source_spec_breakpoints(breakpoints, inner, tstop, tstep_hint);
+                Self::add_source_spec_breakpoints(breakpoints, inner, tstop, tstep_hint, dialect);
             }
             // TRNOISE breakpoints come from its expanded PWL sample train;
             // the unexpanded spec itself schedules none.
@@ -90,7 +91,13 @@ impl Engine {
             | SourceSpec::TrNoise { .. } => {}
             SourceSpec::DcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
-                Self::add_source_spec_breakpoints(breakpoints, transient, tstop, tstep_hint);
+                Self::add_source_spec_breakpoints(
+                    breakpoints,
+                    transient,
+                    tstop,
+                    tstep_hint,
+                    dialect,
+                );
             }
             SourceSpec::Pulse {
                 delay,
@@ -114,6 +121,7 @@ impl Engine {
                         *width_defaults_to_zero,
                         tstep_hint.max(1e-18),
                         tstop.max(1e-18),
+                        dialect,
                     );
 
                 let per_valid = per.is_finite() && per > 0.0;
@@ -369,6 +377,7 @@ impl Engine {
         circuit: &crate::circuit::Circuit,
         tstop: Value,
         tstep_hint: Value,
+        dialect: crate::engine::SpiceDialect,
         breakpoints: &mut BreakpointManager,
     ) {
         for spec in circuit
@@ -378,7 +387,7 @@ impl Engine {
             .chain(circuit.current_sources.source_specs.iter())
             .filter_map(|spec| spec.as_ref())
         {
-            Self::add_source_spec_breakpoints(breakpoints, spec, tstop, tstep_hint);
+            Self::add_source_spec_breakpoints(breakpoints, spec, tstop, tstep_hint, dialect);
         }
 
         for switch in &circuit.generic_switches {
@@ -620,7 +629,13 @@ mod tests {
             phase: 0.0,
         };
 
-        Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 100.0e-9, 1.0e-9);
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            100.0e-9,
+            1.0e-9,
+            crate::engine::SpiceDialect::BestAvailable,
+        );
 
         assert_delays_close(breakpoints.times(), &[10.0e-9]);
     }
@@ -640,13 +655,48 @@ mod tests {
             width_defaults_to_zero: true,
         };
 
-        Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 20.0e-9, 0.5e-9);
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            20.0e-9,
+            0.5e-9,
+            crate::engine::SpiceDialect::BestAvailable,
+        );
 
         assert_delays_close(
             breakpoints.times(),
             &[
                 1.0e-9, 3.0e-9, 6.0e-9, 8.0e-9, 11.0e-9, 13.0e-9, 16.0e-9, 18.0e-9,
             ],
+        );
+    }
+
+    #[test]
+    fn xyce_pulse_omitted_period_breakpoints_use_transient_stop_default() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 10.0e-6,
+            rise: 1.0e-6,
+            fall: 1.0e-6,
+            width: 100.0e-3,
+            period: Value::NAN,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            400.0e-3,
+            0.5e-6,
+            crate::engine::SpiceDialect::Xyce,
+        );
+
+        assert_delays_close(
+            breakpoints.times(),
+            &[10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3],
         );
     }
 
@@ -665,7 +715,13 @@ mod tests {
             width_defaults_to_zero: false,
         };
 
-        Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 1.0e-3, 2.0e-5);
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            1.0e-3,
+            2.0e-5,
+            crate::engine::SpiceDialect::BestAvailable,
+        );
 
         assert_delays_close(breakpoints.times(), &[8.75e-4, 8.85e-4]);
     }
@@ -735,7 +791,13 @@ mod tests {
         circuit.add_xspice_instance(instance);
 
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
-        Engine::collect_transient_source_breakpoints(&circuit, 2.5e-9, 1.0e-9, &mut breakpoints);
+        Engine::collect_transient_source_breakpoints(
+            &circuit,
+            2.5e-9,
+            1.0e-9,
+            crate::engine::SpiceDialect::BestAvailable,
+            &mut breakpoints,
+        );
 
         assert_delays_close(
             breakpoints.times(),

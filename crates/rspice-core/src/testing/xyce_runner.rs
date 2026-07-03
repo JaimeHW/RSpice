@@ -4578,6 +4578,7 @@ impl XyceTestRunner {
                         *width_defaults_to_zero,
                         tstep_hint,
                         tran.stop.max(f64::MIN_POSITIVE),
+                        SpiceDialect::Xyce,
                     );
                 [
                     Self::positive_duration_step(
@@ -8976,7 +8977,15 @@ impl XyceTestRunner {
             None
         })?;
         let (tstep, tstop) = Self::transient_result_source_context(result);
-        Some(crate::circuit::VoltageSources::evaluate_source_spec_at_time(spec, time, tstep, tstop))
+        Some(
+            crate::circuit::VoltageSources::evaluate_source_spec_at_time_with_dialect(
+                spec,
+                time,
+                tstep,
+                tstop,
+                SpiceDialect::Xyce,
+            ),
+        )
     }
 
     fn transient_result_source_context(result: &TransientResult) -> (Value, Value) {

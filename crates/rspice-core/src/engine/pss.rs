@@ -1037,7 +1037,13 @@ impl Engine {
         // stepping across; without this, hard-edged drives shift the PSS
         // orbit by up to one LTE-sized step per edge.
         let mut breakpoints = BreakpointManager::new();
-        Self::collect_transient_source_breakpoints(circuit, tstop, max_step, &mut breakpoints);
+        Self::collect_transient_source_breakpoints(
+            circuit,
+            tstop,
+            max_step,
+            self.config.spice_dialect,
+            &mut breakpoints,
+        );
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
         let mut trapgear = TrapGearController::new();
