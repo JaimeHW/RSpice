@@ -16,11 +16,10 @@ use crate::expr::{Expr, parse_expression_strict};
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
-    XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Engine, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -3947,6 +3946,7 @@ impl XyceTestRunner {
             })
             .collect::<Vec<_>>();
         let comp_tolerances = self.comp_tolerances(source, &comp_columns)?;
+        let output_initial_interval = Self::output_initial_interval(source)?;
         Self::validate_transient_result_time_grid(result)?;
 
         let mut mismatches = Vec::new();
@@ -4006,6 +4006,21 @@ impl XyceTestRunner {
                     {
                         continue;
                     }
+                    if let Some(output_interval) = output_initial_interval
+                        && self.transient_probe_matches_output_interval_corridor(
+                            probe,
+                            netlist,
+                            result,
+                            reference,
+                            layout.time_column,
+                            row_index,
+                            expected,
+                            tolerance,
+                            output_interval,
+                        )?
+                    {
+                        continue;
+                    }
                     mismatches.push(XyceValueMismatch {
                         row: row_index,
                         probe: probe.clone(),
@@ -4021,6 +4036,82 @@ impl XyceTestRunner {
         }
 
         Ok(mismatches)
+    }
+
+    fn transient_probe_matches_output_interval_corridor(
+        &self,
+        probe: &str,
+        netlist: &Netlist,
+        result: &TransientResult,
+        reference: &XycePrnTable,
+        time_column: usize,
+        row_index: usize,
+        expected: Value,
+        tolerance: XyceComparisonTolerance,
+        output_interval: Value,
+    ) -> Result<bool, String> {
+        if !expected.is_finite() || !output_interval.is_finite() || output_interval <= 0.0 {
+            return Ok(false);
+        }
+        let Some(row) = reference.rows.get(row_index) else {
+            return Ok(false);
+        };
+        let Some(&time) = row.get(time_column) else {
+            return Ok(false);
+        };
+        if !time.is_finite() {
+            return Ok(false);
+        }
+
+        let lower_time = reference.rows[..row_index]
+            .iter()
+            .rev()
+            .filter_map(|row| row.get(time_column).copied())
+            .find(|candidate| candidate.is_finite() && *candidate < time);
+        let upper_time = reference.rows[row_index + 1..]
+            .iter()
+            .filter_map(|row| row.get(time_column).copied())
+            .find(|candidate| candidate.is_finite() && *candidate > time);
+        let (Some(lower_time), Some(upper_time)) = (lower_time, upper_time) else {
+            return Ok(false);
+        };
+        let window = upper_time - lower_time;
+        if !window.is_finite() || window <= 0.0 || window > 2.5 * output_interval {
+            return Ok(false);
+        }
+
+        let lower_value = Self::evaluate_tran_probe(probe, netlist, result, lower_time)?;
+        let center_value = Self::evaluate_tran_probe(probe, netlist, result, time)?;
+        let upper_value = Self::evaluate_tran_probe(probe, netlist, result, upper_time)?;
+        if [lower_value, center_value, upper_value]
+            .into_iter()
+            .any(|candidate| {
+                candidate.is_finite()
+                    && self
+                        .value_mismatch(expected, candidate, tolerance)
+                        .is_none()
+            })
+        {
+            return Ok(true);
+        }
+
+        let mut min_value = lower_value.min(center_value).min(upper_value);
+        let mut max_value = lower_value.max(center_value).max(upper_value);
+        for &sample_time in result.time.iter() {
+            if sample_time <= lower_time || sample_time >= upper_time {
+                continue;
+            }
+            let sample_value = Self::evaluate_tran_probe(probe, netlist, result, sample_time)?;
+            if sample_value.is_finite() {
+                min_value = min_value.min(sample_value);
+                max_value = max_value.max(sample_value);
+            }
+        }
+
+        Ok(min_value.is_finite()
+            && max_value.is_finite()
+            && expected >= min_value.min(max_value)
+            && expected <= min_value.max(max_value))
     }
 
     fn transient_probe_matches_within_time_quantization(
@@ -4087,6 +4178,72 @@ impl XyceTestRunner {
             && max_actual.is_finite()
             && expected >= min_actual.min(max_actual)
             && expected <= min_actual.max(max_actual))
+    }
+
+    fn output_initial_interval(source: &str) -> Result<Option<Value>, String> {
+        let mut interval: Option<Value> = None;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if !command.eq_ignore_ascii_case(".options") {
+                continue;
+            }
+
+            let tokens = Self::split_grouped_whitespace_fields(&trimmed, ".OPTIONS statement")?;
+            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            let has_output_package = token_refs
+                .iter()
+                .skip(1)
+                .any(|token| token.eq_ignore_ascii_case("output"));
+            if !has_output_package {
+                continue;
+            }
+
+            let mut index = 1usize;
+            while index < token_refs.len() {
+                if let Some((raw_key, raw_value, consumed)) =
+                    Self::print_option_assignment(&token_refs, index)
+                {
+                    if raw_key.trim().eq_ignore_ascii_case("initial_interval") {
+                        let parsed = crate::netlist::lexer::parse_spice_value(
+                            raw_value.trim().trim_matches(['"', '\'']),
+                        )
+                        .map_err(|err| {
+                            format!(
+                                "failed to parse OUTPUT INITIAL_INTERVAL value '{}': {err}",
+                                raw_value.trim()
+                            )
+                        })?;
+                        if !parsed.is_finite() || parsed <= 0.0 {
+                            return Err(format!(
+                                "OUTPUT INITIAL_INTERVAL must be positive and finite, got {parsed}"
+                            ));
+                        }
+                        if let Some(existing) = interval {
+                            let scale = existing.abs().max(parsed.abs()).max(1.0);
+                            if (existing - parsed).abs() > 1.0e-12 * scale {
+                                return Err(
+                                    "conflicting OUTPUT INITIAL_INTERVAL options are not supported"
+                                        .to_string(),
+                                );
+                            }
+                        } else {
+                            interval = Some(parsed);
+                        }
+                    }
+                    index += consumed;
+                } else {
+                    index += 1;
+                }
+            }
+        }
+
+        Ok(interval)
     }
 
     fn reference_tran_data_columns(
@@ -5375,7 +5532,7 @@ impl XyceTestRunner {
                         "native static .PRINT TRAN comparison could not flatten subcircuits: {err}"
                     )
                 })?;
-            Self::validate_transparent_single_passive_subcircuits(netlist, &flattened.elements)?;
+            Self::validate_flattened_subcircuit_instances_resolved(netlist, &flattened.elements)?;
             let mut flat_netlist = netlist.clone();
             flat_netlist.elements = flattened.elements;
             flat_netlist.models.extend(flattened.scoped_models);
@@ -5529,7 +5686,7 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn validate_transparent_single_passive_subcircuits(
+    fn validate_flattened_subcircuit_instances_resolved(
         netlist: &Netlist,
         flattened_elements: &[crate::netlist::Element],
     ) -> Result<(), String> {
@@ -5542,29 +5699,12 @@ impl XyceTestRunner {
                 .iter()
                 .filter(|flattened| flattened.name.to_ascii_lowercase().starts_with(&prefix));
 
-            let Some(member) = members.next() else {
+            let Some(_member) = members.next() else {
                 return Err(format!(
                     "native static .PRINT TRAN comparison could not find flattened members for subcircuit '{}'",
                     element.name
                 ));
             };
-            if members.next().is_some() {
-                return Err(format!(
-                    "native static .PRINT TRAN comparison currently supports transparent single-device passive subcircuits; subcircuit '{}' expands to multiple elements and requires a broader hierarchical transient oracle contract",
-                    element.name
-                ));
-            }
-            if !matches!(
-                member.kind,
-                ElementKind::Resistor { .. }
-                    | ElementKind::Capacitor { .. }
-                    | ElementKind::Inductor { .. }
-            ) {
-                return Err(format!(
-                    "native static .PRINT TRAN comparison currently supports transparent single-device passive subcircuits; subcircuit '{}' expands to unsupported element '{}'",
-                    element.name, member.name
-                ));
-            }
         }
 
         Ok(())
@@ -8348,121 +8488,7 @@ impl XyceTestRunner {
     }
 
     fn node_lookup_candidates(netlist: &Netlist, node_name: &str) -> Vec<String> {
-        let mut candidates = Vec::new();
-        Self::push_unique_node_lookup_candidate(&mut candidates, node_name.to_string());
-
-        let normalized = Self::normalize_device_instance_name(node_name);
-        Self::push_unique_node_lookup_candidate(&mut candidates, normalized);
-
-        if let Some(resolved) = Self::resolve_xyce_hierarchical_node_name(netlist, node_name) {
-            Self::push_unique_node_lookup_candidate(&mut candidates, resolved);
-        }
-
-        candidates
-    }
-
-    fn push_unique_node_lookup_candidate(candidates: &mut Vec<String>, candidate: String) {
-        if !candidates
-            .iter()
-            .any(|existing| existing.eq_ignore_ascii_case(&candidate))
-        {
-            candidates.push(candidate);
-        }
-    }
-
-    fn resolve_xyce_hierarchical_node_name(netlist: &Netlist, node_name: &str) -> Option<String> {
-        let normalized = Self::normalize_probe(node_name);
-        let parts = normalized.split(':').collect::<Vec<_>>();
-        if parts.len() < 2 || parts.iter().any(|part| part.is_empty()) {
-            return None;
-        }
-
-        let local_node = *parts.last()?;
-        let mut elements = netlist.elements.as_slice();
-        let mut subcircuits = netlist.subcircuits.as_slice();
-        let mut prefix = String::new();
-        let mut node_map: HashMap<String, String> = HashMap::new();
-
-        for instance_name in &parts[..parts.len() - 1] {
-            let instance = elements.iter().find(|element| {
-                element.name.eq_ignore_ascii_case(instance_name)
-                    && matches!(element.kind, ElementKind::Subcircuit { .. })
-            })?;
-            let ElementKind::Subcircuit { subckt_name, .. } = &instance.kind else {
-                return None;
-            };
-            let subckt = Self::find_subcircuit_definition(subcircuits, subckt_name)?;
-
-            let mut child_node_map = HashMap::new();
-            for (port, external_node) in subckt.ports.iter().zip(instance.nodes.iter()) {
-                child_node_map.insert(
-                    Self::normalize_probe(port),
-                    Self::remap_hierarchical_node_name(
-                        external_node,
-                        &prefix,
-                        &node_map,
-                        &netlist.global_nodes,
-                    ),
-                );
-            }
-
-            prefix = if prefix.is_empty() {
-                instance.name.clone()
-            } else {
-                format!("{}.{}", prefix, instance.name)
-            };
-            node_map = child_node_map;
-            elements = subckt.elements.as_slice();
-            subcircuits = subckt.nested_subcircuits.as_slice();
-        }
-
-        Some(Self::remap_hierarchical_node_name(
-            local_node,
-            &prefix,
-            &node_map,
-            &netlist.global_nodes,
-        ))
-    }
-
-    fn find_subcircuit_definition<'a>(
-        subcircuits: &'a [SubcircuitDef],
-        name: &str,
-    ) -> Option<&'a SubcircuitDef> {
-        for subckt in subcircuits {
-            if subckt.name.eq_ignore_ascii_case(name) {
-                return Some(subckt);
-            }
-            if let Some(nested) = Self::find_subcircuit_definition(&subckt.nested_subcircuits, name)
-            {
-                return Some(nested);
-            }
-        }
-        None
-    }
-
-    fn remap_hierarchical_node_name(
-        node: &str,
-        prefix: &str,
-        node_map: &HashMap<String, String>,
-        global_nodes: &HashSet<String>,
-    ) -> String {
-        if node == "0" || node.eq_ignore_ascii_case("gnd") {
-            return "0".to_string();
-        }
-
-        if global_nodes.contains(&node.to_ascii_uppercase()) {
-            return node.to_string();
-        }
-
-        if let Some(mapped) = node_map.get(&Self::normalize_probe(node)) {
-            return mapped.clone();
-        }
-
-        if prefix.is_empty() {
-            node.to_string()
-        } else {
-            format!("{prefix}.{node}")
-        }
+        Engine::node_lookup_candidates(netlist, node_name)
     }
 
     fn evaluate_scalar_parameter_probe(
@@ -11297,6 +11323,80 @@ C1 out 0 40u IC=1
     }
 
     #[test]
+    fn output_initial_interval_parser_accepts_spaced_assignment() {
+        let interval = XyceTestRunner::output_initial_interval(
+            "\
+interval output
+.OPTIONS OUTPUT INITIAL_INTERVAL = 0.5ms
+.END
+",
+        )
+        .expect("output option parses")
+        .expect("initial interval is detected");
+
+        assert!((interval - 5.0e-4).abs() <= 1.0e-15);
+    }
+
+    #[test]
+    fn transient_output_interval_corridor_uses_adjacent_reference_rows() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0],
+                vec![1.0, 0.5, 0.75],
+                vec![2.0, 1.0, 0.0],
+            ],
+        };
+        let result = TransientResult {
+            time: vec![0.0, 0.25, 0.5, 0.75, 1.0],
+            voltages: vec![vec![1.0, 0.75, 0.5, 0.25, 0.0]],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["1".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+        };
+        let tolerance = runner.default_comparison_tolerance("v(1)");
+
+        assert!(
+            runner
+                .transient_probe_matches_output_interval_corridor(
+                    "V(1)",
+                    &Netlist::default(),
+                    &result,
+                    &reference,
+                    1,
+                    1,
+                    0.75,
+                    tolerance,
+                    0.5,
+                )
+                .expect("corridor comparison evaluates"),
+            "expected interval-interpolated value should be accepted inside adjacent output rows"
+        );
+        assert!(
+            !runner
+                .transient_probe_matches_output_interval_corridor(
+                    "V(1)",
+                    &Netlist::default(),
+                    &result,
+                    &reference,
+                    1,
+                    1,
+                    1.5,
+                    tolerance,
+                    0.5,
+                )
+                .expect("corridor comparison evaluates"),
+            "value outside the adjacent output-row envelope must not be accepted"
+        );
+    }
+
+    #[test]
     fn transient_interpolation_preserves_subpicosecond_samples() {
         let times = [0.0, 5.0e-13, 1.0e-12];
         let values = [1.1, 1.5, 2.0];
@@ -11415,6 +11515,59 @@ C1 out 0 40u IC=1
             XyceVoltageAccessor::Phase
         );
         assert!(XyceTestRunner::parse_voltage_probe("VX(A)").is_none());
+    }
+
+    #[test]
+    fn hierarchical_node_lookup_resolves_nested_sibling_subcircuit_definition() {
+        let netlist = Netlist::parse(
+            "\
+nested sibling subckt probe
+X2 4 5 IC_SubSubckt
+.SUBCKT IC_Subckt in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.SUBCKT IC_SubSubckt in out
+R1 in a 1
+X1 a b IC_Subckt
+R2 b out 1
+.ENDS
+.END
+",
+        )
+        .expect("test deck parses");
+
+        let candidates = XyceTestRunner::node_lookup_candidates(&netlist, "X2:X1:out");
+
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case("X2.B")),
+            "nested sibling subcircuit probe should resolve to flattened interface node, got {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn native_transient_contract_accepts_multi_element_passive_subcircuit() {
+        let netlist = Netlist::parse(
+            "\
+multi-element passive subckt
+V1 1 0 PULSE(0 1 0 1n 1n 1u)
+X1 1 2 RC
+R2 2 0 10
+.SUBCKT RC in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.TRAN 0 1u
+.PRINT TRAN V(2)
+.END
+",
+        )
+        .expect("test deck parses");
+
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("flattened multi-element passive subcircuit should be supported");
     }
 
     #[test]

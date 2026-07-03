@@ -811,6 +811,12 @@ impl<'a> Flattener<'a> {
         if let Some(mapped) = node_map.get(node) {
             return mapped.clone();
         }
+        if let Some((_, mapped)) = node_map
+            .iter()
+            .find(|(port, _)| port.eq_ignore_ascii_case(node))
+        {
+            return mapped.clone();
+        }
 
         // Internal node - prefix with instance path
         if prefix.is_empty() {
@@ -2666,4 +2672,48 @@ fn remap_probe_node(
 fn is_simple_probe_name(s: &str) -> bool {
     s.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn behavioral_voltage_probe_remaps_subcircuit_port_case_insensitively() {
+        let netlist = Netlist::parse(
+            "\
+behavioral port remap
+X1 5 ABM_SUB
+.SUBCKT ABM_SUB IN_1
+E1 out 0 VALUE={V(in_1)}
+R1 out 0 1k
+.ENDS
+.END
+",
+        )
+        .expect("deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist).expect("netlist flattens");
+        let expression = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::BehavioralVoltage { expression, .. }
+                    if element.name.eq_ignore_ascii_case("X1.E1") =>
+                {
+                    Some(expression.as_str())
+                }
+                _ => None,
+            })
+            .expect("flattened behavioral source exists");
+
+        assert!(
+            expression.contains("V(5)"),
+            "subcircuit port probe should map to instance connection, got {expression}"
+        );
+        assert!(
+            !expression.to_ascii_lowercase().contains("x1.in_1"),
+            "subcircuit port probe must not be prefixed as an internal node: {expression}"
+        );
+    }
 }

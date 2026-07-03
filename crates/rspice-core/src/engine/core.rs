@@ -3,7 +3,9 @@
 use super::{
     SimulationConfig, SimulationConfigOverrides, SimulationError, resolve_simulation_config,
 };
+use crate::netlist::{ElementKind, SubcircuitDef};
 use crate::{Netlist, Value};
+use std::collections::{HashMap, HashSet};
 /// Main simulation engine
 pub struct Engine {
     pub(crate) config: SimulationConfig,
@@ -171,6 +173,214 @@ impl Engine {
         Self::ensure_supported_b3soi_dynamic_charges(circuit, "Transient")?;
         Self::ensure_supported_ekv3_dynamic_charges(circuit, "Transient")
     }
+
+    pub(crate) fn node_lookup_candidates(netlist: &Netlist, node_name: &str) -> Vec<String> {
+        let mut candidates = Vec::new();
+        Self::push_unique_node_lookup_candidate(&mut candidates, node_name.to_string());
+
+        let normalized = Self::normalize_hierarchical_node_name(node_name).replace(':', ".");
+        Self::push_unique_node_lookup_candidate(&mut candidates, normalized);
+
+        if let Some(resolved) = Self::resolve_hierarchical_node_name(netlist, node_name) {
+            Self::push_unique_node_lookup_candidate(&mut candidates, resolved);
+        }
+
+        candidates
+    }
+
+    pub(crate) fn resolve_hierarchical_node_name(
+        netlist: &Netlist,
+        node_name: &str,
+    ) -> Option<String> {
+        let normalized = Self::normalize_hierarchical_node_name(node_name);
+        let parts = normalized.split(':').collect::<Vec<_>>();
+        if parts.len() < 2 || parts.iter().any(|part| part.is_empty()) {
+            return None;
+        }
+
+        let local_node = *parts.last()?;
+        let mut elements = netlist.elements.as_slice();
+        let root_subcircuits = netlist.subcircuits.as_slice();
+        let mut subcircuits = root_subcircuits;
+        let mut prefix = String::new();
+        let mut node_map: HashMap<String, String> = HashMap::new();
+
+        for instance_name in &parts[..parts.len() - 1] {
+            let instance = elements.iter().find(|element| {
+                element.name.eq_ignore_ascii_case(instance_name)
+                    && matches!(element.kind, ElementKind::Subcircuit { .. })
+            })?;
+            let ElementKind::Subcircuit { subckt_name, .. } = &instance.kind else {
+                return None;
+            };
+            let subckt = Self::find_subcircuit_definition(subcircuits, subckt_name)
+                .or_else(|| Self::find_subcircuit_definition(root_subcircuits, subckt_name))?;
+
+            let mut child_node_map = HashMap::new();
+            for (port, external_node) in subckt.ports.iter().zip(instance.nodes.iter()) {
+                child_node_map.insert(
+                    Self::normalize_hierarchical_node_name(port),
+                    Self::remap_hierarchical_node_name(
+                        external_node,
+                        &prefix,
+                        &node_map,
+                        &netlist.global_nodes,
+                    ),
+                );
+            }
+
+            prefix = if prefix.is_empty() {
+                instance.name.clone()
+            } else {
+                format!("{}.{}", prefix, instance.name)
+            };
+            node_map = child_node_map;
+            elements = subckt.elements.as_slice();
+            subcircuits = subckt.nested_subcircuits.as_slice();
+        }
+
+        Some(Self::remap_hierarchical_node_name(
+            local_node,
+            &prefix,
+            &node_map,
+            &netlist.global_nodes,
+        ))
+    }
+
+    fn startup_node_id(
+        netlist: &Netlist,
+        circuit: &crate::CircuitData,
+        node_name: &str,
+    ) -> Option<usize> {
+        Self::node_lookup_candidates(netlist, node_name)
+            .into_iter()
+            .find_map(|candidate| circuit.get_node_by_name(&candidate))
+    }
+
+    fn push_unique_node_lookup_candidate(candidates: &mut Vec<String>, candidate: String) {
+        if !candidates
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&candidate))
+        {
+            candidates.push(candidate);
+        }
+    }
+
+    fn normalize_hierarchical_node_name(node_name: &str) -> String {
+        node_name
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase()
+    }
+
+    fn find_subcircuit_definition<'a>(
+        subcircuits: &'a [SubcircuitDef],
+        name: &str,
+    ) -> Option<&'a SubcircuitDef> {
+        for subckt in subcircuits {
+            if subckt.name.eq_ignore_ascii_case(name) {
+                return Some(subckt);
+            }
+            if let Some(nested) = Self::find_subcircuit_definition(&subckt.nested_subcircuits, name)
+            {
+                return Some(nested);
+            }
+        }
+        None
+    }
+
+    fn remap_hierarchical_node_name(
+        node: &str,
+        prefix: &str,
+        node_map: &HashMap<String, String>,
+        global_nodes: &HashSet<String>,
+    ) -> String {
+        if node == "0" || node.eq_ignore_ascii_case("gnd") {
+            return "0".to_string();
+        }
+
+        if global_nodes.contains(&node.to_ascii_uppercase()) {
+            return node.to_string();
+        }
+
+        if let Some(mapped) = node_map.get(&Self::normalize_hierarchical_node_name(node)) {
+            return mapped.clone();
+        }
+
+        if prefix.is_empty() {
+            node.to_string()
+        } else {
+            format!("{prefix}.{node}")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hierarchical_node_lookup_resolves_nested_subcircuit_port() {
+        let netlist = Netlist::parse(
+            "\
+nested hierarchical lookup
+X2 4 5 IC_SubSubckt
+.SUBCKT IC_Subckt in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.SUBCKT IC_SubSubckt in out
+R1 in a 1
+X1 a b IC_Subckt
+R2 b out 1
+.ENDS
+.END
+",
+        )
+        .expect("test deck parses");
+
+        let resolved = Engine::resolve_hierarchical_node_name(&netlist, "X2:X1:out")
+            .expect("hierarchical node resolves");
+
+        assert_eq!(resolved.to_ascii_lowercase(), "x2.b");
+    }
+
+    #[test]
+    fn hierarchical_startup_directives_apply_to_flattened_node_ids() {
+        let netlist = Netlist::parse(
+            "\
+hierarchical startup directives
+V1 1 0 0
+X2 1 2 IC_SubSubckt
+RLOAD 2 0 1k
+.NODESET V(X2:X1:out)=0.1
+.IC V(X2:X1:out)=0.25
+.SUBCKT IC_Subckt in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.SUBCKT IC_SubSubckt in out
+R1 in a 1
+X1 a b IC_Subckt
+R2 b out 1
+.ENDS
+.END
+",
+        )
+        .expect("test deck parses");
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let flattened_node = circuit
+            .get_node_by_name("X2.B")
+            .expect("flattened internal node exists");
+
+        let ic_hints = engine.collect_initial_condition_hints(&netlist, &circuit);
+        assert_eq!(ic_hints, vec![(flattened_node, 0.25)]);
+
+        let voltage_hints = engine.collect_node_voltage_hints(&netlist, &circuit);
+        assert_eq!(voltage_hints, vec![(flattened_node, 0.25)]);
+    }
 }
 
 impl Default for Engine {
@@ -220,7 +430,7 @@ impl Engine {
             if !nodeset.voltage.is_finite() {
                 continue;
             }
-            if let Some(node_id) = circuit.get_node_by_name(&nodeset.node)
+            if let Some(node_id) = Self::startup_node_id(netlist, circuit, &nodeset.node)
                 && node_id > 0
                 && node_id <= circuit.num_nodes()
             {
@@ -236,7 +446,7 @@ impl Engine {
             if !ic.voltage.is_finite() {
                 continue;
             }
-            if let Some(node_id) = circuit.get_node_by_name(&ic.node)
+            if let Some(node_id) = Self::startup_node_id(netlist, circuit, &ic.node)
                 && node_id > 0
                 && node_id <= circuit.num_nodes()
             {
@@ -267,7 +477,7 @@ impl Engine {
                 if !ic.voltage.is_finite() {
                     return None;
                 }
-                let node_id = circuit.get_node_by_name(&ic.node)?;
+                let node_id = Self::startup_node_id(netlist, circuit, &ic.node)?;
                 if node_id == 0 || node_id > circuit.num_nodes() {
                     return None;
                 }

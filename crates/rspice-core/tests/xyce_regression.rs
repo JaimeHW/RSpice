@@ -697,6 +697,60 @@ fn test_xyce_output_initial_interval_transient_wrapper_case_runs_natively() {
 }
 
 #[test]
+fn test_xyce_hierarchical_passive_transient_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let relative = "Netlists/Certification_Tests/BUG_1962/ic.cir";
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native hierarchical passive transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
+fn test_xyce_scoped_ic_hierarchical_passive_transient_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let relative = "Netlists/Certification_Tests/BUG_1962/ic2.cir";
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native scoped-IC hierarchical passive transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
+fn test_xyce_hierarchical_print_alias_transient_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let relative = "Netlists/Certification_Tests/BUG_1962/print.cir";
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native hierarchical print-alias transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+}
+
+#[test]
 fn test_xyce_mixed_device_param_source_step_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
