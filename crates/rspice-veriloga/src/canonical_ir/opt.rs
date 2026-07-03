@@ -32,6 +32,7 @@ const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES: usize = 8;
 const MAX_SELECTIVE_ASSIGNMENT_DEPENDENCY_EXPR_NODES: usize = 256;
 const MAX_SELECTIVE_ASSIGNMENT_DEPENDENCY_VARIABLES: usize = 64;
 const MAX_SELECTIVE_ASSIGNMENT_BROAD_DEPENDENCY_VARIABLES: usize = 256;
+const MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS: usize = 4;
 const MAX_SELECTIVE_ASSIGNMENT_HISTORY_SNAPSHOT_EXPRESSIONS: usize = 100_000;
 const MAX_SELECTIVE_ASSIGNMENT_HISTORY_SNAPSHOT_STATEMENTS: usize = 7_000;
 const MAX_SELECTIVE_ASSIGNMENT_HISTORY_TARGETS: usize = 2_048;
@@ -56,6 +57,12 @@ fn opt_phase_trace_enabled() -> bool {
 
 fn opt_statement_trace_enabled() -> bool {
     std::env::var_os("RSPICE_VERILOGA_OPT_STATEMENT_TRACE").is_some()
+}
+
+fn opt_assignment_value_trace_filter() -> Option<String> {
+    std::env::var("RSPICE_VERILOGA_OPT_ASSIGNMENT_VALUE_TRACE")
+        .ok()
+        .filter(|filter| !filter.trim().is_empty())
 }
 
 fn opt_runtime_loop_trace_enabled() -> bool {
@@ -1239,7 +1246,42 @@ impl<'a> ScalarGraphBuilder<'a> {
             None
         };
         self.variable_values.insert(assignment.target, value);
+        self.trace_assignment_value(assignment, value, records_history);
         self.expression_values.clear();
+    }
+
+    fn trace_assignment_value(
+        &self,
+        assignment: &HirAssignment,
+        value: Option<ValueId>,
+        records_history: bool,
+    ) {
+        let Some(filter) = opt_assignment_value_trace_filter() else {
+            return;
+        };
+        let matched = filter
+            .split(',')
+            .map(str::trim)
+            .any(|filter| !filter.is_empty() && assignment.target_name.contains(filter));
+        if !matched {
+            return;
+        }
+        let history_entries = self
+            .variable_assignment_history
+            .get(&assignment.target)
+            .map(Vec::len)
+            .unwrap_or(0);
+        eprintln!(
+            "OptIR {}: assignment value target={} expr={} value={:?} records_history={} history_entries={} steps={} exhausted={}",
+            self.mir.module_name,
+            assignment.target_name,
+            assignment.expr.id.index(),
+            value,
+            records_history,
+            history_entries,
+            self.history_reconstruction_steps,
+            self.history_reconstruction_budget_exhausted
+        );
     }
 
     fn should_record_assignment_history(&mut self, assignment: &HirAssignment) -> bool {
@@ -3942,6 +3984,14 @@ impl<'a> ScalarGraphBuilder<'a> {
         if limit > MAX_SCALAR_GUARD_HISTORY_RECONSTRUCTION_ENTRIES {
             return None;
         }
+        if self.history_reconstruction_budget_exhausted {
+            let cache_key = self.assignment_history_prefix_cache_key(variable, limit);
+            return self
+                .assignment_history_prefix_cache
+                .get(&cache_key)
+                .copied()
+                .flatten();
+        }
         if self.trace_history_variable(variable) {
             eprintln!(
                 "OptIR {}: replay full history variable={} id={} entries={} steps={}",
@@ -4325,9 +4375,6 @@ impl<'a> ScalarGraphBuilder<'a> {
         &mut self,
         variable: VariableId,
     ) -> Option<ValueId> {
-        if self.history_reconstruction_budget_exhausted {
-            return None;
-        }
         let limit = self.variable_assignment_history.get(&variable)?.len();
         if self.trace_history_variable(variable) {
             eprintln!(
@@ -7203,7 +7250,11 @@ fn selective_assignment_history_targets(
             }
             let mut dependencies: Vec<_> = dependencies.into_iter().collect();
             dependencies.retain(|(dependency, _)| {
-                selective_assignment_history_target_variable(&variable_names_by_id, *dependency)
+                selective_assignment_history_dependency_variable(
+                    &variable_names_by_id,
+                    &assignments_by_target,
+                    *dependency,
+                )
             });
             sort_selective_assignment_dependencies(&mut dependencies);
             dependencies
@@ -7299,10 +7350,39 @@ fn selective_assignment_history_target_variable(
         .is_none_or(|name| selective_assignment_history_target_name(name))
 }
 
+fn selective_assignment_history_dependency_variable(
+    variable_names_by_id: &HashMap<VariableId, &str>,
+    assignments_by_target: &HashMap<VariableId, Vec<&HirAssignment>>,
+    variable: VariableId,
+) -> bool {
+    if !selective_assignment_history_target_variable(variable_names_by_id, variable) {
+        return false;
+    }
+    let Some(name) = variable_names_by_id.get(&variable).copied() else {
+        return true;
+    };
+    let assignment_count = assignments_by_target
+        .get(&variable)
+        .map(Vec::len)
+        .unwrap_or(0);
+    !high_churn_scratch_history_variable(name, assignment_count)
+}
+
 fn selective_assignment_history_target_name(name: &str) -> bool {
     // Generated guards are normally available as current scalar values and can be
     // snapshotted by history entries without spending selective history targets.
     !name.starts_with("__guard")
+}
+
+fn high_churn_scratch_history_variable(name: &str, assignment_count: usize) -> bool {
+    assignment_count > MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS && numbered_temp_name(name, "T")
+}
+
+fn numbered_temp_name(name: &str, prefix: &str) -> bool {
+    let Some(suffix) = name.strip_prefix(prefix) else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn select_selective_assignment_history_targets<F>(
@@ -8940,7 +9020,8 @@ fn validate_schedule_ops(
 mod tests {
     use super::*;
     use crate::canonical_ir::{
-        ContributionId, HirExprRef, HirExpression, MirBranchRef, SourceSpanRef,
+        ContributionId, HirExprRef, HirExpression, HirVariable, MirBranchRef, ModuleId,
+        SourceSpanRef,
     };
 
     fn test_span() -> SourceSpanRef {
@@ -8992,6 +9073,37 @@ mod tests {
             expr,
             value_snapshots: Vec::new(),
             snapshots: Vec::new(),
+        }
+    }
+
+    fn test_hir_variables(variables: Vec<(&str, CanonicalValueType)>) -> HirModel {
+        HirModel {
+            module_id: ModuleId::new(0),
+            module_name: "test".into(),
+            schema_version: 0,
+            source_package: SmolStr::new("test"),
+            source_digest: SmolStr::new("test"),
+            compiler_version: SmolStr::new("test"),
+            feature_flags: Vec::new(),
+            ports: Vec::new(),
+            parameters: Vec::new(),
+            variables: variables
+                .into_iter()
+                .enumerate()
+                .map(|(id, (name, value_type))| HirVariable {
+                    id: VariableId::from(id),
+                    name: name.into(),
+                    value_type,
+                    is_state: false,
+                })
+                .collect(),
+            arrays: Vec::new(),
+            branches: Vec::new(),
+            contributions: Vec::new(),
+            statements: Vec::new(),
+            expressions: Vec::new(),
+            internal_nodes: Vec::new(),
+            ground_nodes: Vec::new(),
         }
     }
 
@@ -9087,6 +9199,30 @@ mod tests {
     }
 
     #[test]
+    fn high_churn_numbered_temporaries_are_not_selective_history_dependencies() {
+        assert!(high_churn_scratch_history_variable(
+            "T1",
+            MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS + 1
+        ));
+        assert!(high_churn_scratch_history_variable(
+            "T12",
+            MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS + 1
+        ));
+        assert!(!high_churn_scratch_history_variable(
+            "T1",
+            MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS
+        ));
+        assert!(!high_churn_scratch_history_variable(
+            "T1w",
+            MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS + 1
+        ));
+        assert!(!high_churn_scratch_history_variable(
+            "Ids",
+            MAX_SELECTIVE_SCRATCH_HISTORY_ASSIGNMENTS + 1
+        ));
+    }
+
+    #[test]
     fn recent_assignment_history_prefix_caches_stable_failure() {
         let expr = ExprId::from(0);
         let mir = test_mir(vec![HirExpression {
@@ -9142,6 +9278,145 @@ mod tests {
                 .contains_key(&cache_key)
         );
         assert!(builder.expression_lowering_stack_cycle_rejected);
+    }
+
+    #[test]
+    fn full_assignment_history_replay_stops_after_budget_exhaustion() {
+        let expr = ExprId::from(0);
+        let mir = test_mir(vec![HirExpression {
+            id: expr,
+            kind: HirExprKind::Number {
+                value: 1.0,
+                raw: "1.0".into(),
+            },
+            span: test_span(),
+        }]);
+        let variable = VariableId::from(0);
+        let mut builder = ScalarGraphBuilder::new(None, &mir);
+        builder
+            .variable_assignment_history
+            .insert(variable, vec![test_assignment_history_entry(expr)]);
+        builder.history_reconstruction_steps = builder.history_reconstruction_step_limit;
+        builder.history_reconstruction_budget_exhausted = true;
+
+        assert_eq!(builder.lower_assignment_history_value(variable), None);
+        assert_eq!(
+            builder.history_reconstruction_steps,
+            builder.history_reconstruction_step_limit
+        );
+
+        let cached = builder.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+        let cache_key = builder.assignment_history_prefix_cache_key(variable, 1);
+        builder
+            .assignment_history_prefix_cache
+            .insert(cache_key, Some(cached));
+
+        assert_eq!(
+            builder.lower_assignment_history_value(variable),
+            Some(cached)
+        );
+    }
+
+    #[test]
+    fn complementary_assignment_history_replays_after_budget_exhaustion() {
+        let cond_expr = ExprId::from(0);
+        let target_expr = ExprId::from(1);
+        let first_value_expr = ExprId::from(2);
+        let first_update_expr = ExprId::from(3);
+        let inverted_cond_expr = ExprId::from(4);
+        let second_value_expr = ExprId::from(5);
+        let second_update_expr = ExprId::from(6);
+        let mir = test_mir(vec![
+            HirExpression {
+                id: cond_expr,
+                kind: HirExprKind::Identifier {
+                    name: "cond".into(),
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: target_expr,
+                kind: HirExprKind::Identifier { name: "x".into() },
+                span: test_span(),
+            },
+            HirExpression {
+                id: first_value_expr,
+                kind: HirExprKind::Number {
+                    value: 1.0,
+                    raw: "1.0".into(),
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: first_update_expr,
+                kind: HirExprKind::Conditional {
+                    condition: cond_expr,
+                    then_expr: first_value_expr,
+                    else_expr: target_expr,
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: inverted_cond_expr,
+                kind: HirExprKind::Unary {
+                    op: "Not".into(),
+                    operand: cond_expr,
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: second_value_expr,
+                kind: HirExprKind::Number {
+                    value: 2.0,
+                    raw: "2.0".into(),
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: second_update_expr,
+                kind: HirExprKind::Conditional {
+                    condition: inverted_cond_expr,
+                    then_expr: second_value_expr,
+                    else_expr: target_expr,
+                },
+                span: test_span(),
+            },
+        ]);
+        let hir = test_hir_variables(vec![
+            ("x", CanonicalValueType::Real),
+            ("cond", CanonicalValueType::Boolean),
+        ]);
+        let target = VariableId::from(0);
+        let condition = VariableId::from(1);
+        let mut builder = ScalarGraphBuilder::new(Some(&hir), &mir);
+        let condition_value =
+            builder.push_value(OptValueType::Boolean, OptValueKind::BooleanConstant(true));
+        builder
+            .variable_values
+            .insert(condition, Some(condition_value));
+        builder.variable_values.insert(target, None);
+        builder.variable_assignment_history.insert(
+            target,
+            vec![
+                test_assignment_history_entry(first_update_expr),
+                test_assignment_history_entry(second_update_expr),
+            ],
+        );
+        builder.history_reconstruction_steps = builder.history_reconstruction_step_limit;
+        builder.history_reconstruction_budget_exhausted = true;
+
+        let value = builder
+            .lower_complementary_assignment_history_value(target)
+            .expect("complementary pair should replay from current snapshots");
+
+        assert_eq!(
+            builder.history_reconstruction_steps,
+            builder.history_reconstruction_step_limit
+        );
+        assert!(matches!(
+            &builder.values[usize::from(value)].kind,
+            OptValueKind::RealConstant(value) if *value == 1.0
+        ));
     }
 
     #[test]
