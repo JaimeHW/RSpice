@@ -210,18 +210,20 @@ impl Engine {
 
         // B3SOIDD (BSIMSOI level 56) stamps.
         // 5-terminal SOI device (drain, gate, source, back-gate E, body) plus
-        // the optional self-heating temperature node. The DC load couples
-        // body/junction/thermal rows and the CAPMOD=3 charge companion couples
-        // every terminal, so reserve the full active block.
+        // the external body-contact `p` for nonideal body ties and the optional
+        // self-heating temperature node. The DC load couples
+        // body/junction/body-contact/thermal rows and the CAPMOD=3 charge
+        // companion couples every terminal, so reserve the full active block.
         for dev in &circuit.b3soi.devices {
             let d = dev.node_drain;
             let g = dev.node_gate;
             let s = dev.node_source;
             let e = dev.node_e;
             let b = dev.node_body;
+            let p = dev.node_p;
             let t = dev.node_temp;
-            for &row in &[d, g, s, e, b, t] {
-                for &col in &[d, g, s, e, b, t] {
+            for &row in &[d, g, s, e, b, p, t] {
+                for &col in &[d, g, s, e, b, p, t] {
                     if row > 0 && col > 0 {
                         triplets.push((row - 1, col - 1, 0.0));
                     }
