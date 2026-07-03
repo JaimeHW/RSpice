@@ -19,6 +19,23 @@ pub(in crate::engine::builder) enum NativeXtradevReactiveModel {
     },
 }
 
+fn unknown_xspice_model_error(model_name: &str, alias: Option<(&str, &str)>) -> SimulationError {
+    let subject = match alias {
+        Some((alias_name, model_type)) => format!(
+            "Unknown XSPICE model '{model_name}' (alias '{alias_name}' resolves to \
+             unregistered code model '{model_type}')"
+        ),
+        None => format!("Unknown XSPICE model '{model_name}'"),
+    };
+    SimulationError::Circuit(format!(
+        "{subject}. RSpice registers the ngspice-46 built-in XSPICE catalog \
+         in-process; standard built-in .cm bundle directives ({}) are accepted \
+         as compatibility no-ops, but arbitrary external .cm/MIF code-model \
+         libraries are not loaded.",
+        crate::xspice::CodeModelRegistry::builtin_codemodel_library_names().join(", ")
+    ))
+}
+
 fn merge_numeric_params(base: &[(String, f64)], overrides: &[(String, f64)]) -> Vec<(String, f64)> {
     let mut merged = base.to_vec();
 
@@ -1096,15 +1113,13 @@ pub(in crate::engine::builder) fn resolve_xspice_model_instance(
         }
     }
 
-    let model_def = model_def.ok_or_else(|| {
-        SimulationError::Circuit(format!("Unknown XSPICE model '{}'", model_name))
-    })?;
+    let model_def = model_def.ok_or_else(|| unknown_xspice_model_error(model_name, None))?;
 
     let code_model = registry.get(&model_def.model_type).ok_or_else(|| {
-        SimulationError::Circuit(format!(
-            "Unknown XSPICE model '{}' (alias '{}' resolves to unregistered code model '{}')",
-            model_name, model_def.name, model_def.model_type
-        ))
+        unknown_xspice_model_error(
+            model_name,
+            Some((model_def.name.as_str(), model_def.model_type.as_str())),
+        )
     })?;
 
     reject_scalar_params_for_vector_specs(code_model.as_ref(), &model_def.params)?;
@@ -1273,6 +1288,77 @@ mod tests {
         fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn xspice_resolver_unknown_direct_model_names_dynamic_loader_boundary() {
+        let netlist = Netlist::parse(
+            "xspice unknown direct model\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        let registry = crate::xspice::CodeModelRegistry::new();
+
+        let err = match resolve_xspice_model_instance(
+            &netlist,
+            &registry,
+            "custom_gate",
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+        ) {
+            Ok(_) => panic!("unknown XSPICE model must be rejected"),
+            Err(err) => err,
+        };
+        let message = err.to_string();
+        assert!(
+            message.contains("custom_gate")
+                && message
+                    .contains("arbitrary external .cm/MIF code-model libraries are not loaded")
+                && message.contains("analog.cm"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn xspice_resolver_unknown_alias_model_names_dynamic_loader_boundary() {
+        let netlist = Netlist::parse(
+            "xspice unknown alias model\n\
+             .model ext custom_gate (delay=1n)\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        let registry = crate::xspice::CodeModelRegistry::new();
+
+        let err = match resolve_xspice_model_instance(
+            &netlist,
+            &registry,
+            "ext",
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+        ) {
+            Ok(_) => panic!("alias resolving to unknown XSPICE model must be rejected"),
+            Err(err) => err,
+        };
+        let message = err.to_string();
+        assert!(
+            message.contains("alias 'ext'")
+                && message.contains("custom_gate")
+                && message
+                    .contains("arbitrary external .cm/MIF code-model libraries are not loaded"),
+            "unexpected error: {message}"
+        );
     }
 
     #[test]
