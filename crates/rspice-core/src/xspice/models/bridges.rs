@@ -75,14 +75,11 @@ fn adc_bridge_crossing_time(
 ) -> Option<Value> {
     if previous_state == ADC_UNINITIALIZED_STATE
         || previous_state == new_state
-        || previous_state != 1
-        || new_state != -1
         || !previous_input.is_finite()
         || !input.is_finite()
         || !start_time.is_finite()
         || !end_time.is_finite()
         || end_time <= start_time
-        || input >= previous_input
         || (input - previous_input).abs() <= Value::EPSILON
     {
         return None;
@@ -1239,31 +1236,35 @@ impl CodeModel for DacBridge {
                 continue;
             }
 
-            let accepted_output = ctx.state_prev(base);
             let accepted_target = ctx.state_prev(base + 1);
             let accepted_start_time = ctx.state_prev(base + 2);
             let accepted_start_value = ctx.state_prev(base + 3);
-            let first_transient_point = ctx.time <= ctx.timestep.max(0.0) + 1e-18
-                && (accepted_output - out_undef).abs() <= 1e-12;
+            let initial_uncommitted_state = accepted_start_time == 0.0
+                && (accepted_start_value - out_undef).abs() <= 1e-12
+                && (accepted_target - out_undef).abs() <= 1e-12;
+            let first_transient_point = ctx.time == 0.0;
 
             let (transition_target, transition_start_time, transition_start_value) =
                 if first_transient_point {
                     (v_target, ctx.time, v_target)
                 } else if (v_target - accepted_target).abs() > 1e-12 {
-                    let event_time = ctx
-                        .input_digital_vector_event_time("in", index)
-                        .unwrap_or(ctx.time);
-                    let start_value = dac_bridge_ramp_value(
-                        event_time,
-                        accepted_start_time,
-                        accepted_start_value,
-                        accepted_target,
-                        out_low,
-                        out_high,
-                        t_rise,
-                        t_fall,
-                    );
-                    (v_target, event_time, start_value)
+                    let event_time = ctx.input_digital_vector_event_time("in", index);
+                    if initial_uncommitted_state && event_time.is_none_or(|time| time <= 0.0) {
+                        (v_target, ctx.time, v_target)
+                    } else {
+                        let event_time = event_time.unwrap_or(ctx.time);
+                        let start_value = dac_bridge_ramp_value(
+                            event_time,
+                            accepted_start_time,
+                            accepted_start_value,
+                            accepted_target,
+                            out_low,
+                            out_high,
+                            t_rise,
+                            t_fall,
+                        );
+                        (v_target, event_time, start_value)
+                    }
                 } else {
                     (accepted_target, accepted_start_time, accepted_start_value)
                 };
@@ -1776,6 +1777,54 @@ mod tests {
         assert!(
             (events[0].delay - expected_delay).abs() <= 1.0e-21,
             "adc_bridge should schedule from recovered threshold time, got {}",
+            events[0].delay
+        );
+    }
+
+    #[test]
+    fn adc_bridge_recovers_low_to_high_event_time_inside_accepted_step() {
+        let mut ctx = CmContext::new();
+        ctx.set_port_width("in", 1);
+        ctx.set_port_width("out", 1);
+        ctx.set_param("in_low", 0.1);
+        ctx.set_param("in_high", 0.9);
+        ctx.set_param("rise_delay", 1.0e-9);
+        ctx.set_param("fall_delay", 1.0e-9);
+        ctx.init_output_vector("out", PortType::Digital, 1);
+        ctx.analysis = AnalysisType::Transient;
+        ctx.call_type = CallType::TransientAnalysis;
+        ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
+
+        AdcBridge.init(&mut ctx).expect("adc_bridge initializes");
+
+        ctx.time = 0.0;
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(0.0)]));
+        AdcBridge.evaluate(&mut ctx).expect("records initial low");
+        ctx.take_pending_events();
+        ctx.advance_state();
+
+        ctx.time = 1.0e-9;
+        ctx.timestep = 1.0e-9;
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(0.0)]));
+        AdcBridge
+            .evaluate(&mut ctx)
+            .expect("records first accepted transient sample");
+        ctx.advance_state();
+
+        ctx.time = 5.0e-9;
+        ctx.timestep = 4.0e-9;
+        ctx.set_input("in", InputValue::AnalogVector(vec![AnalogValue::new(1.0)]));
+        AdcBridge
+            .evaluate(&mut ctx)
+            .expect("recovers low-to-high threshold crossing");
+
+        let events = ctx.take_pending_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].values[0], DigitalValue::one());
+        let expected_delay = 1.0e-9 + (4.0e-9 * 0.9) + 1.0e-9 - 5.0e-9;
+        assert!(
+            (events[0].delay - expected_delay).abs() <= 1.0e-21,
+            "adc_bridge should schedule low-to-high output from recovered threshold time, got {}",
             events[0].delay
         );
     }
