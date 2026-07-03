@@ -3729,21 +3729,21 @@ mod tests {
         let grid = [
             0.0,
             4.5,
-            4.50000000000775024,
-            4.50000000001000000,
-            4.50000000001000000 + 2.0 * Value::EPSILON,
+            4.500_000_000_007_75,
+            4.500_000_000_01,
+            4.500_000_000_01 + 2.0 * Value::EPSILON,
             f64::NAN,
         ];
 
         let normalized = Engine::normalized_locked_time_grid(&grid, 0.0);
 
         assert!(normalized.contains(&4.5));
-        assert!(normalized.contains(&4.50000000000775024));
-        assert!(normalized.contains(&4.50000000001000000));
+        assert!(normalized.contains(&4.500_000_000_007_75));
+        assert!(normalized.contains(&4.500_000_000_01));
         assert_eq!(
             normalized
                 .iter()
-                .filter(|&&time| (time - 4.50000000001000000).abs() < 1.0e-14)
+                .filter(|&&time| (time - 4.500_000_000_01).abs() < 1.0e-14)
                 .count(),
             1,
             "ulp-scale duplicates should still be folded: {normalized:?}"

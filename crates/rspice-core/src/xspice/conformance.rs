@@ -1195,7 +1195,6 @@ fn xspice_source_has_line(source: &str, target: &str) -> bool {
 fn xspice_source_has_print_or_plot(source: &str) -> bool {
     source.lines().any(|line| {
         let directive = strip_inline_comment(line)
-            .trim()
             .split_whitespace()
             .next()
             .unwrap_or_default()

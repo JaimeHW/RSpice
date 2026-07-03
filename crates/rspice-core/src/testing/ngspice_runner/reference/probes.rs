@@ -94,7 +94,7 @@ impl TestRunner {
             .or_else(|| {
                 let (_, branch) = normalized.split_once('#')?;
                 (branch.starts_with("ibranch_") || branch.starts_with("branch_"))
-                    .then(|| normalized)
+                    .then_some(normalized)
             })
     }
 

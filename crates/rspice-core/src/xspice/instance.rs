@@ -3272,7 +3272,7 @@ mod tests {
         )
         .expect("optional empty vector default should not trigger supplied-value bounds");
 
-        assert_eq!(instance.real_vector_param("points").unwrap(), &[]);
+        assert!(instance.real_vector_param("points").unwrap().is_empty());
     }
 
     #[test]
