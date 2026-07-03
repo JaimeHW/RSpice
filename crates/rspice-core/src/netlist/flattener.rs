@@ -687,9 +687,11 @@ impl<'a> Flattener<'a> {
             },
             ElementKind::Vcvs {
                 gain,
+                gain_expr,
                 control_nodes,
             } => ElementKind::Vcvs {
                 gain: *gain,
+                gain_expr: gain_expr.clone(),
                 control_nodes: (
                     self.remap_node(&control_nodes.0, prefix, node_map),
                     self.remap_node(&control_nodes.1, prefix, node_map),
@@ -697,9 +699,11 @@ impl<'a> Flattener<'a> {
             },
             ElementKind::Vccs {
                 transconductance,
+                transconductance_expr,
                 control_nodes,
             } => ElementKind::Vccs {
                 transconductance: *transconductance,
+                transconductance_expr: transconductance_expr.clone(),
                 control_nodes: (
                     self.remap_node(&control_nodes.0, prefix, node_map),
                     self.remap_node(&control_nodes.1, prefix, node_map),
@@ -707,22 +711,26 @@ impl<'a> Flattener<'a> {
             },
             ElementKind::Cccs {
                 gain,
+                gain_expr,
                 control_element,
             } => {
                 // Remap control element name with prefix (like element names)
                 let new_ctrl = Self::remap_local_element_reference(control_element, prefix);
                 ElementKind::Cccs {
                     gain: *gain,
+                    gain_expr: gain_expr.clone(),
                     control_element: new_ctrl,
                 }
             }
             ElementKind::Ccvs {
                 transresistance,
+                transresistance_expr,
                 control_element,
             } => {
                 let new_ctrl = Self::remap_local_element_reference(control_element, prefix);
                 ElementKind::Ccvs {
                     transresistance: *transresistance,
+                    transresistance_expr: transresistance_expr.clone(),
                     control_element: new_ctrl,
                 }
             }
@@ -1259,30 +1267,46 @@ impl<'a> Flattener<'a> {
             // Controlled sources
             ElementKind::Vcvs {
                 gain,
+                gain_expr,
                 control_nodes,
             } => ElementKind::Vcvs {
-                gain: *gain,
+                gain: self.resolve_optional_value_expr(*gain, gain_expr, scope)?,
+                gain_expr: None,
                 control_nodes: control_nodes.clone(),
             },
             ElementKind::Vccs {
                 transconductance,
+                transconductance_expr,
                 control_nodes,
             } => ElementKind::Vccs {
-                transconductance: *transconductance,
+                transconductance: self.resolve_optional_value_expr(
+                    *transconductance,
+                    transconductance_expr,
+                    scope,
+                )?,
+                transconductance_expr: None,
                 control_nodes: control_nodes.clone(),
             },
             ElementKind::Cccs {
                 gain,
+                gain_expr,
                 control_element,
             } => ElementKind::Cccs {
-                gain: *gain,
+                gain: self.resolve_optional_value_expr(*gain, gain_expr, scope)?,
+                gain_expr: None,
                 control_element: control_element.clone(),
             },
             ElementKind::Ccvs {
                 transresistance,
+                transresistance_expr,
                 control_element,
             } => ElementKind::Ccvs {
-                transresistance: *transresistance,
+                transresistance: self.resolve_optional_value_expr(
+                    *transresistance,
+                    transresistance_expr,
+                    scope,
+                )?,
+                transresistance_expr: None,
                 control_element: control_element.clone(),
             },
             ElementKind::VSwitch {

@@ -7816,6 +7816,55 @@ mod tests {
     }
 
     #[test]
+    fn subckt_controlled_source_gain_params_resolve_at_flattening() {
+        let netlist = Netlist::parse(
+            "subckt controlled source parameter gain scope\n\
+             X1 PP 0 SP 0 IdealXfmr PARAMS: TurnsRat=2\n\
+             .subckt IdealXfmr PP PN SP SN PARAMS: TurnsRat=1\n\
+             Es SP SN PP PN {TurnsRat}\n\
+             Fp PN PP Es {TurnsRat}\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("subcircuit controlled-source deck parses");
+
+        let flattened =
+            flatten_netlist_with_models(&netlist).expect("controlled source deck flattens");
+        let es_gain = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Vcvs {
+                    gain, gain_expr, ..
+                } if element.name == "X1.ES" => {
+                    assert!(gain_expr.is_none(), "flattening must resolve E gain");
+                    Some(*gain)
+                }
+                _ => None,
+            })
+            .expect("flattened VCVS exists");
+        let fp_gain = flattened
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                ElementKind::Cccs {
+                    gain,
+                    gain_expr,
+                    control_element,
+                } if element.name == "X1.FP" => {
+                    assert!(gain_expr.is_none(), "flattening must resolve F gain");
+                    assert_eq!(control_element, "X1.ES");
+                    Some(*gain)
+                }
+                _ => None,
+            })
+            .expect("flattened CCCS exists");
+
+        assert_eq!(es_gain, 2.0);
+        assert_eq!(fp_gain, 2.0);
+    }
+
+    #[test]
     fn xyce_special_character_function_names_parse_and_evaluate() {
         let netlist = Netlist::parse(
             "xyce special character function names\n\

@@ -258,9 +258,11 @@ impl NodeUnion {
             },
             ElementKind::Vcvs {
                 gain,
+                gain_expr,
                 control_nodes,
             } => ElementKind::Vcvs {
                 gain,
+                gain_expr,
                 control_nodes: (
                     self.remap_node(&control_nodes.0),
                     self.remap_node(&control_nodes.1),
@@ -268,9 +270,11 @@ impl NodeUnion {
             },
             ElementKind::Vccs {
                 transconductance,
+                transconductance_expr,
                 control_nodes,
             } => ElementKind::Vccs {
                 transconductance,
+                transconductance_expr,
                 control_nodes: (
                     self.remap_node(&control_nodes.0),
                     self.remap_node(&control_nodes.1),

@@ -560,17 +560,25 @@ impl Engine {
             ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
                 Self::set_source_step_value(spec, param_upper.as_deref(), value)
             }
-            ElementKind::Vcvs { gain, .. } | ElementKind::Cccs { gain, .. } => {
+            ElementKind::Vcvs {
+                gain, gain_expr, ..
+            }
+            | ElementKind::Cccs {
+                gain, gain_expr, ..
+            } => {
                 if !matches_param(&["GAIN", "VALUE"]) {
                     return Err(SimulationError::Circuit(
                         "Unsupported controlled-source step parameter; use GAIN".to_string(),
                     ));
                 }
                 *gain = value;
+                *gain_expr = None;
                 Ok(())
             }
             ElementKind::Vccs {
-                transconductance, ..
+                transconductance,
+                transconductance_expr,
+                ..
             } => {
                 if !matches_param(&["GM", "TRANSCONDUCTANCE", "VALUE"]) {
                     return Err(SimulationError::Circuit(
@@ -578,10 +586,13 @@ impl Engine {
                     ));
                 }
                 *transconductance = value;
+                *transconductance_expr = None;
                 Ok(())
             }
             ElementKind::Ccvs {
-                transresistance, ..
+                transresistance,
+                transresistance_expr,
+                ..
             } => {
                 if !matches_param(&["RM", "TRANSRESISTANCE", "VALUE"]) {
                     return Err(SimulationError::Circuit(
@@ -589,6 +600,7 @@ impl Engine {
                     ));
                 }
                 *transresistance = value;
+                *transresistance_expr = None;
                 Ok(())
             }
             ElementKind::Coupling { coefficient, .. } => {

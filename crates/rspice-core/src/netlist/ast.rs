@@ -297,24 +297,36 @@ pub enum ElementKind {
     /// Voltage-controlled voltage source: E1 n+ n- nc+ nc- gain
     Vcvs {
         gain: Value,
+        /// Gain expression captured inside subcircuits and resolved when the
+        /// instance parameter scope is known.
+        gain_expr: Option<String>,
         control_nodes: (String, String),
     },
 
     /// Current-controlled current source: F1 n+ n- Vname gain
     Cccs {
         gain: Value,
+        /// Gain expression captured inside subcircuits and resolved when the
+        /// instance parameter scope is known.
+        gain_expr: Option<String>,
         control_element: String,
     },
 
     /// Voltage-controlled current source: G1 n+ n- nc+ nc- gm
     Vccs {
         transconductance: Value,
+        /// Transconductance expression captured inside subcircuits and resolved
+        /// when the instance parameter scope is known.
+        transconductance_expr: Option<String>,
         control_nodes: (String, String),
     },
 
     /// Current-controlled voltage source: H1 n+ n- Vname rm
     Ccvs {
         transresistance: Value,
+        /// Transresistance expression captured inside subcircuits and resolved
+        /// when the instance parameter scope is known.
+        transresistance_expr: Option<String>,
         control_element: String,
     },
 

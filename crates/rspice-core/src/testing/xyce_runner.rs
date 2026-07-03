@@ -5602,6 +5602,7 @@ impl XyceTestRunner {
                 ElementKind::Cccs {
                     gain,
                     control_element,
+                    ..
                 } => {
                     Self::validate_finite_controlled_source_gain(
                         "CCCS",
@@ -5619,6 +5620,7 @@ impl XyceTestRunner {
                 ElementKind::Ccvs {
                     transresistance,
                     control_element,
+                    ..
                 } => {
                     Self::validate_finite_controlled_source_gain(
                         "CCVS",

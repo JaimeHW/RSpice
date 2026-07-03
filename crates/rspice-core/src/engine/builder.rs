@@ -4548,6 +4548,7 @@ impl Engine {
                 ElementKind::Vcvs {
                     gain,
                     control_nodes,
+                    ..
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -4561,6 +4562,7 @@ impl Engine {
                 ElementKind::Vccs {
                     transconductance,
                     control_nodes,
+                    ..
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -4573,6 +4575,7 @@ impl Engine {
                 ElementKind::Cccs {
                     gain,
                     control_element,
+                    ..
                 } => {
                     // CCCS needs the branch of a controlling voltage source
                     // Register for deferred resolution after all elements are added
@@ -4586,6 +4589,7 @@ impl Engine {
                 ElementKind::Ccvs {
                     transresistance,
                     control_element,
+                    ..
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);

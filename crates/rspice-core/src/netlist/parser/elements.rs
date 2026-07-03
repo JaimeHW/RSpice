@@ -4784,6 +4784,7 @@ fn parse_voltage_controlled_source(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     is_voltage_output: bool,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -4906,15 +4907,23 @@ fn parse_voltage_controlled_source(
 
             let ctrl_pos = expect_node(stream, line_num)?;
             let ctrl_neg = expect_node(stream, line_num)?;
-            let gain = expect_value(stream, line_num, params)?;
+            let (gain, gain_expr) = expect_deferrable_controlled_source_value(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+            )?;
             let kind = if is_voltage_output {
                 ElementKind::Vcvs {
                     gain,
+                    gain_expr,
                     control_nodes: (ctrl_pos, ctrl_neg),
                 }
             } else {
                 ElementKind::Vccs {
                     transconductance: gain,
+                    transconductance_expr: gain_expr,
                     control_nodes: (ctrl_pos, ctrl_neg),
                 }
             };
@@ -5055,6 +5064,7 @@ fn parse_current_controlled_source(
     elements: &mut Vec<Element>,
     params: &ParamContext,
     is_voltage_output: bool,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
@@ -5115,15 +5125,23 @@ fn parse_current_controlled_source(
         }
         None => {
             let control_element = expect_ident(stream, line_num)?;
-            let gain = expect_value(stream, line_num, params)?;
+            let (gain, gain_expr) = expect_deferrable_controlled_source_value(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+            )?;
             let kind = if is_voltage_output {
                 ElementKind::Ccvs {
                     transresistance: gain,
+                    transresistance_expr: gain_expr,
                     control_element,
                 }
             } else {
                 ElementKind::Cccs {
                     gain,
+                    gain_expr,
                     control_element,
                 }
             };
@@ -5139,13 +5157,48 @@ fn parse_current_controlled_source(
     Ok(())
 }
 
+fn expect_deferrable_controlled_source_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+    element_label: &str,
+) -> Result<(Value, Option<String>), ParseError> {
+    if !defer_simple_param_refs {
+        return expect_value(stream, line_num, params).map(|value| (value, None));
+    }
+
+    match take_deferrable_value(stream, params, true) {
+        Some(DeferrableValue::Resolved(value)) => Ok((value, None)),
+        Some(DeferrableValue::Deferred(expr)) => {
+            let value = eval_expression(&expr, params).unwrap_or(Value::NAN);
+            Ok((value, Some(expr)))
+        }
+        None => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{} requires a numeric gain or parameter expression",
+                element_label
+            ),
+        }),
+    }
+}
+
 pub(super) fn parse_vcvs(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    parse_voltage_controlled_source(stream, line_num, elements, params, true)
+    parse_voltage_controlled_source(
+        stream,
+        line_num,
+        elements,
+        params,
+        true,
+        defer_simple_param_refs,
+    )
 }
 
 pub(super) fn parse_cccs(
@@ -5153,8 +5206,16 @@ pub(super) fn parse_cccs(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    parse_current_controlled_source(stream, line_num, elements, params, false)
+    parse_current_controlled_source(
+        stream,
+        line_num,
+        elements,
+        params,
+        false,
+        defer_simple_param_refs,
+    )
 }
 
 pub(super) fn parse_vccs(
@@ -5162,8 +5223,16 @@ pub(super) fn parse_vccs(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    parse_voltage_controlled_source(stream, line_num, elements, params, false)
+    parse_voltage_controlled_source(
+        stream,
+        line_num,
+        elements,
+        params,
+        false,
+        defer_simple_param_refs,
+    )
 }
 
 pub(super) fn parse_ccvs(
@@ -5171,8 +5240,16 @@ pub(super) fn parse_ccvs(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
-    parse_current_controlled_source(stream, line_num, elements, params, true)
+    parse_current_controlled_source(
+        stream,
+        line_num,
+        elements,
+        params,
+        true,
+        defer_simple_param_refs,
+    )
 }
 
 pub(super) fn parse_behavioral(
