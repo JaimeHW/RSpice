@@ -322,9 +322,11 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/POLY/oneVarFourthOrd.cir",
         "Netlists/POLY/poly.cir",
         "Netlists/POLY/twoVarThirdOrd.cir",
+        "Netlists/REDUND_REMOVE/exprGnd.cir",
         "Netlists/RESISTOR_TD/temp_dep_2.cir",
         "Netlists/SUBCKT/subckt_h0.cir",
         "Netlists/SUBCKT/subckt_h0_hs.cir",
+        "Netlists/SUBCKT/subckt_i1.cir",
         "Netlists/SUBCKT/subckt_i2.cir",
         "Netlists/SUBCKT/subckt_i3.cir",
         "Netlists/SUBCKT/subckt_i3_hs.cir",
@@ -2615,6 +2617,10 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
         ("Netlists/SUBCKT/subckt_b.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_b0.cir", "subckt_family_baseline"),
         ("Netlists/SUBCKT/subckt_b1.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_b2.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_b3.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_f0.cir", "subckt_family_baseline"),
+        ("Netlists/SUBCKT/subckt_f1.cir", "subckt_family_wrapper"),
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
