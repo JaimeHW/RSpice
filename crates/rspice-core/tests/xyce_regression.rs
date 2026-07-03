@@ -528,6 +528,46 @@ fn test_xyce_bug_307_311_native_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_mid_certification_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/Certification_Tests/BUG_338_SON/bug_338.cir",
+            "wrapper_static_prn_tran",
+            true,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_427_SON/bug_427.cir",
+            "static_prn_tran",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper manifest provenance should match the promoted contract"
+        );
+
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce certification transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the expected transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_bug_229_native_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -1680,8 +1720,10 @@ fn test_xyce_certification_static_dc_cases_run() {
         "Netlists/Certification_Tests/BUG_21_SON/func_param.cir",
         "Netlists/Certification_Tests/BUG_250/bug_250.cir",
         "Netlists/Certification_Tests/BUG_264_SON/bug_264.cir",
+        "Netlists/Certification_Tests/BUG_428/bug428.cir",
         "Netlists/Certification_Tests/BUG_606_SON/global_params.cir",
         "Netlists/Certification_Tests/BUG_606_SON/global_params_dev_options.cir",
+        "Netlists/Certification_Tests/BUG_913_SON/bug913son.cir",
         "Netlists/Certification_Tests/BUG_1113_SON/bug_1113_SON.cir",
         "Netlists/Certification_Tests/BUG_1203_SON/default_temp.cir",
         "Netlists/Certification_Tests/BUG_1203_SON/device_options.cir",
