@@ -551,6 +551,33 @@ fn test_xyce_bug_229_native_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_bug_1301_wrapper_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/BUG_1301/rlc_tranline.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native wrapper-origin RLC transmission-line transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_static_prn_tran",
+        "{relative} should report the wrapper-origin transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_generic_wrapper_transient_guardrails_stay_unsupported() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
