@@ -1562,6 +1562,29 @@ fn test_xyce_sandler_op_amp_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_bug_1302_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_1302/bug_1302.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce certification transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_certification_static_dc_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -1577,6 +1600,11 @@ fn test_xyce_certification_static_dc_cases_run() {
         "Netlists/Certification_Tests/BUG_1113_SON/bug_1113_SON.cir",
         "Netlists/Certification_Tests/BUG_1203_SON/default_temp.cir",
         "Netlists/Certification_Tests/BUG_1203_SON/device_options.cir",
+        "Netlists/Certification_Tests/BUG_1377/test1.X.cir",
+        "Netlists/Certification_Tests/BUG_1460/bug_1460.cir",
+        "Netlists/Certification_Tests/BUG_159/bug_159_1.cir",
+        "Netlists/Certification_Tests/BUG_159/bug_159_2.cir",
+        "Netlists/Certification_Tests/BUG_1770/HBT_IV_nosweep.cir",
         "Netlists/Certification_Tests/ISSUE_235/issue235.cir",
     ] {
         let result = runner.run_test(root.join(relative));
