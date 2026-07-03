@@ -1099,6 +1099,30 @@ fn test_ngspice_filters_suite() {
 }
 
 #[test]
+fn test_ngspice_filters_lowpass_focus() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+    let relative = "filters/lowpass.cir";
+
+    let result = runner.run_test(&tests_dir.join(relative));
+
+    assert!(
+        result.passed,
+        "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+        result.error, result.mismatches
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "Focused ngspice {relative} deck should match its oracle"
+    );
+    assert_eq!(
+        result.analysis_type.as_deref(),
+        Some("DC OP + AC"),
+        "Focused ngspice {relative} deck should report the expected analysis type"
+    );
+}
+
+#[test]
 fn test_ngspice_transient_suite() {
     let runner = TestRunner::new(get_tests_dir(), suite_config("transient"));
     let stats = run_and_report(&runner, "transient");
@@ -1120,6 +1144,30 @@ fn test_ngspice_transmission_suite() {
         stats.total,
         stats.pass_rate()
     );
+}
+
+#[test]
+fn test_ngspice_transmission_coupled_line_focus() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), suite_config("transmission"));
+
+    for relative in ["transmission/cpl3_4_line.cir", "transmission/cpl_ibm2.cir"] {
+        let result = runner.run_test(&tests_dir.join(relative));
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some("Transient"),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
 }
 
 #[test]
@@ -1179,6 +1227,30 @@ fn test_ngspice_jfet_suite() {
 }
 
 #[test]
+fn test_ngspice_jfet_vds_vgs_focus() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+    let relative = "jfet/jfet_vds-vgs.cir";
+
+    let result = runner.run_test(&tests_dir.join(relative));
+
+    assert!(
+        result.passed,
+        "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+        result.error, result.mismatches
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "Focused ngspice {relative} deck should match its oracle"
+    );
+    assert_eq!(
+        result.analysis_type.as_deref(),
+        Some("DC OP + DC Sweep"),
+        "Focused ngspice {relative} deck should report the expected analysis type"
+    );
+}
+
+#[test]
 fn test_ngspice_mos6_suite() {
     let runner = TestRunner::new(get_tests_dir(), suite_config("mos6"));
     let stats = run_and_report(&runner, "mos6");
@@ -1187,6 +1259,30 @@ fn test_ngspice_mos6_suite() {
         "MOS6: {} tests, {:.1}% pass rate",
         stats.total,
         stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_mos6_simpleinv_focus() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), suite_config("mos6"));
+    let relative = "mos6/simpleinv.cir";
+
+    let result = runner.run_test(&tests_dir.join(relative));
+
+    assert!(
+        result.passed,
+        "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+        result.error, result.mismatches
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "Focused ngspice {relative} deck should match its oracle"
+    );
+    assert_eq!(
+        result.analysis_type.as_deref(),
+        Some("Transient"),
+        "Focused ngspice {relative} deck should report the expected analysis type"
     );
 }
 
