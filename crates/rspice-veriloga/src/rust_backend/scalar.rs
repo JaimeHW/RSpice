@@ -21,6 +21,7 @@ const SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE: usize = 1024;
 const MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_INLINE_EXPR_COST: usize = 128;
+const MAX_COMPACT_LET_LINE_BYTES: usize = 512;
 const MIN_SHARED_STAMP_LIVE_VALUES: usize = 1024;
 const MIN_ALIASED_SCALAR_STATIC_CACHE_VALUES: usize = 64;
 const MIN_LOCAL_SHARED_STAMP_VALUES: usize = 64;
@@ -213,6 +214,45 @@ struct ValueEmitContext<'a> {
     runtime_loop_values: HashMap<(u32, u32), String>,
     runtime_loop_derivatives: HashMap<(u32, u32, DerivativeLane), String>,
     external_value_refs: HashMap<ValueId, String>,
+}
+
+struct CompactLetEmitter {
+    indent: &'static str,
+    line: String,
+}
+
+impl CompactLetEmitter {
+    fn new(indent: &'static str) -> Self {
+        Self {
+            indent,
+            line: String::new(),
+        }
+    }
+
+    fn push(&mut self, out: &mut String, name: &str, expr: &str) {
+        let statement = format!("let {name}={expr};");
+        if self.line.is_empty() {
+            self.line.push_str(self.indent);
+            self.line.push_str(&statement);
+            return;
+        }
+        if self.line.len().saturating_add(statement.len()) > MAX_COMPACT_LET_LINE_BYTES {
+            self.flush(out);
+            self.line.push_str(self.indent);
+            self.line.push_str(&statement);
+        } else {
+            self.line.push_str(&statement);
+        }
+    }
+
+    fn flush(&mut self, out: &mut String) {
+        if self.line.is_empty() {
+            return;
+        }
+        out.push_str(&self.line);
+        out.push('\n');
+        self.line.clear();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1680,6 +1720,7 @@ fn emit_live_values(
     let values = ordered_live_values(artifact, live, static_cache)?;
     let mut emitted_runtime_loops = HashSet::new();
     let mut source_budget_check_countdown = 1024usize;
+    let mut let_emitter = CompactLetEmitter::new("        ");
     for value_id in values {
         if context.external_value_refs.contains_key(&value_id) {
             continue;
@@ -1694,6 +1735,7 @@ fn emit_live_values(
             .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
         if let Some(loop_id) = runtime_loop_result_id(&value.kind) {
             if emitted_runtime_loops.insert(loop_id) {
+                let_emitter.flush(out);
                 emit_runtime_loop(artifact, parameter_fields, loop_id, live, context, out)?;
                 if enforce_source_budget {
                     reject_oversized_scalar_stamp_source_bytes_so_far(artifact, out)?;
@@ -1709,15 +1751,17 @@ fn emit_live_values(
             continue;
         }
         let expr = emit_value_expr(artifact, parameter_fields, value, context)?;
-        out.push_str(&format!("        let {}={};\n", value_name(value.id), expr));
+        let_emitter.push(out, &value_name(value.id), &expr);
         if enforce_source_budget {
             source_budget_check_countdown = source_budget_check_countdown.saturating_sub(1);
             if source_budget_check_countdown == 0 {
+                let_emitter.flush(out);
                 reject_oversized_scalar_stamp_source_bytes_so_far(artifact, out)?;
                 source_budget_check_countdown = 1024;
             }
         }
     }
+    let_emitter.flush(out);
     if !live.is_empty() {
         out.push('\n');
     }
