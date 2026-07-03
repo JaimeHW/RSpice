@@ -14460,6 +14460,7 @@ fn generate_stamp_file(
                 .static_cache,
             ddt_slots,
             plan,
+            false,
             &mut out,
         )?;
     }

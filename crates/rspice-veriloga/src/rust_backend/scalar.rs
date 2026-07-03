@@ -451,6 +451,7 @@ fn generate_stamp_file(
             static_cache,
             ddt_slots,
             plan,
+            true,
             &mut out,
         )?;
     }
@@ -544,6 +545,7 @@ fn generate_stamp_file(
         &stamp_emit_live,
         static_cache,
         &stamp_context,
+        true,
         &mut out,
     )?;
 
@@ -553,8 +555,10 @@ fn generate_stamp_file(
         &roots,
         &stamp_context,
         Some(ddt_slots),
+        true,
         &mut out,
     )?;
+    reject_oversized_scalar_stamp_source_bytes_so_far(artifact, &out)?;
 
     out.push_str("    }\n\n");
     if reactive_roots.is_empty() {
@@ -614,6 +618,7 @@ fn generate_stamp_file(
             &reactive_emit_live,
             static_cache,
             &reactive_context,
+            true,
             &mut out,
         )?;
         emit_current_reactive_stamps_with_context(
@@ -621,8 +626,10 @@ fn generate_stamp_file(
             parameter_fields,
             &reactive_roots,
             &reactive_context,
+            true,
             &mut out,
         )?;
+        reject_oversized_scalar_stamp_source_bytes_so_far(artifact, &out)?;
         out.push_str("    }\n");
     }
     out.push_str("}\n");
@@ -646,6 +653,24 @@ fn reject_oversized_scalar_stamp_source(
         artifact,
         format!(
             "pure scalar stamp source has {source_bytes} bytes and {source_lines} lines; current scalar source budget is {MAX_SCALAR_STAMP_SOURCE_BYTES} bytes and {MAX_SCALAR_STAMP_SOURCE_LINES} lines"
+        ),
+    ))
+}
+
+fn reject_oversized_scalar_stamp_source_bytes_so_far(
+    artifact: &CanonicalIrArtifact,
+    source: &str,
+) -> Result<(), RustBackendError> {
+    let source_bytes = source.len();
+    if source_bytes <= MAX_SCALAR_STAMP_SOURCE_BYTES {
+        return Ok(());
+    }
+
+    let source_lines = source.lines().count();
+    Err(unsupported(
+        artifact,
+        format!(
+            "pure scalar stamp source exceeded byte budget after {source_bytes} bytes and {source_lines} lines; current scalar source budget is {MAX_SCALAR_STAMP_SOURCE_BYTES} bytes and {MAX_SCALAR_STAMP_SOURCE_LINES} lines"
         ),
     ))
 }
@@ -1017,6 +1042,7 @@ pub(super) fn emit_shared_stamp_values_method(
     static_cache: &ScalarStaticCache,
     ddt_slots: &DdtSlots,
     plan: &SharedStampValuesPlan,
+    enforce_source_budget: bool,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let inline_values = shared_stamp_inline_values(artifact, static_cache, plan)?;
@@ -1068,6 +1094,7 @@ pub(super) fn emit_shared_stamp_values_method(
         &plan.live,
         static_cache,
         &context,
+        enforce_source_budget,
         out,
     )?;
     out.push_str("        CommonStampValues {\n");
@@ -1616,6 +1643,7 @@ pub(super) fn emit_static_current_values_with_shared_plan(
         &stamp_emit_live,
         static_cache,
         &stamp_context,
+        false,
         out,
     )?;
     Ok(())
@@ -1627,10 +1655,12 @@ fn emit_live_values(
     live: &HashSet<ValueId>,
     static_cache: &ScalarStaticCache,
     context: &ValueEmitContext<'_>,
+    enforce_source_budget: bool,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let values = ordered_live_values(artifact, live, static_cache)?;
     let mut emitted_runtime_loops = HashSet::new();
+    let mut source_budget_check_countdown = 1024usize;
     for value_id in values {
         if context.external_value_refs.contains_key(&value_id) {
             continue;
@@ -1646,6 +1676,9 @@ fn emit_live_values(
         if let Some(loop_id) = runtime_loop_result_id(&value.kind) {
             if emitted_runtime_loops.insert(loop_id) {
                 emit_runtime_loop(artifact, parameter_fields, loop_id, live, context, out)?;
+                if enforce_source_budget {
+                    reject_oversized_scalar_stamp_source_bytes_so_far(artifact, out)?;
+                }
             }
             continue;
         }
@@ -1658,9 +1691,19 @@ fn emit_live_values(
         }
         let expr = emit_value_expr(artifact, parameter_fields, value, context)?;
         out.push_str(&format!("        let {}={};\n", value_name(value.id), expr));
+        if enforce_source_budget {
+            source_budget_check_countdown = source_budget_check_countdown.saturating_sub(1);
+            if source_budget_check_countdown == 0 {
+                reject_oversized_scalar_stamp_source_bytes_so_far(artifact, out)?;
+                source_budget_check_countdown = 1024;
+            }
+        }
     }
     if !live.is_empty() {
         out.push('\n');
+    }
+    if enforce_source_budget {
+        reject_oversized_scalar_stamp_source_bytes_so_far(artifact, out)?;
     }
     Ok(())
 }
@@ -1679,7 +1722,15 @@ pub(super) fn emit_static_current_stamps_with_shared_plan(
     if let Some(plan) = shared_plan {
         context.external_value_refs = plan.refs.clone();
     }
-    emit_current_stamps(artifact, parameter_fields, roots, &context, None, out)
+    emit_current_stamps(
+        artifact,
+        parameter_fields,
+        roots,
+        &context,
+        None,
+        false,
+        out,
+    )
 }
 
 pub(super) fn emit_ddt_current_stamps_with_shared_plan(
@@ -1707,6 +1758,7 @@ pub(super) fn emit_ddt_current_stamps_with_shared_plan(
         roots,
         &context,
         Some(ddt_slots),
+        false,
         out,
     )
 }
@@ -1717,6 +1769,7 @@ fn emit_current_stamps(
     roots: &HashMap<EquationId, ValueId>,
     context: &ValueEmitContext<'_>,
     ddt_slots: Option<&DdtSlots>,
+    enforce_source_budget: bool,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     for equation in &artifact.mir.equations {
@@ -1750,6 +1803,9 @@ fn emit_current_stamps(
                 return Err(unsupported(artifact, "indirect contributions"));
             }
         }
+        if enforce_source_budget {
+            reject_oversized_scalar_stamp_source_bytes_so_far(artifact, out)?;
+        }
     }
     Ok(())
 }
@@ -1772,7 +1828,14 @@ pub(super) fn emit_current_reactive_stamps_with_shared_plan(
     if let Some(plan) = shared_plan {
         context.external_value_refs = plan.refs.clone();
     }
-    emit_current_reactive_stamps_with_context(artifact, parameter_fields, roots, &context, out)
+    emit_current_reactive_stamps_with_context(
+        artifact,
+        parameter_fields,
+        roots,
+        &context,
+        false,
+        out,
+    )
 }
 
 fn emit_current_reactive_stamps_with_context(
@@ -1780,6 +1843,7 @@ fn emit_current_reactive_stamps_with_context(
     parameter_fields: &HashMap<String, String>,
     roots: &HashMap<EquationId, ValueId>,
     context: &ValueEmitContext<'_>,
+    enforce_source_budget: bool,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     for equation in &artifact.mir.equations {
@@ -1787,6 +1851,9 @@ fn emit_current_reactive_stamps_with_context(
             continue;
         };
         emit_current_reactive_stamp(artifact, parameter_fields, equation, root, context, out)?;
+        if enforce_source_budget {
+            reject_oversized_scalar_stamp_source_bytes_so_far(artifact, out)?;
+        }
     }
     Ok(())
 }
