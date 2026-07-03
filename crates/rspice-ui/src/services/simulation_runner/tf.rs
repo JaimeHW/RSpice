@@ -322,6 +322,7 @@ fn infer_tf_run_config(
 
 fn source_dc_bias(spec: &SourceSpec) -> Value {
     match spec {
+        SourceSpec::RfPort { inner, .. } => source_dc_bias(inner),
         SourceSpec::Dc(v) => *v,
         SourceSpec::Ac { .. } => 0.0,
         SourceSpec::DcAc { dc_value, .. } => *dc_value,
@@ -449,4 +450,30 @@ fn inject_tf_output_test_source(
         nodes: vec![output_node.to_string(), output_ref.to_string()],
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::netlist::SourceRfPort;
+
+    #[test]
+    fn rf_port_sources_preserve_inner_dc_bias() {
+        let spec = SourceSpec::RfPort {
+            inner: Box::new(SourceSpec::DcAc {
+                dc_value: 2.5,
+                ac_magnitude: 1.0,
+                ac_phase: 0.0,
+            }),
+            port: SourceRfPort {
+                portnum: 1,
+                z0: 50.0,
+                power: None,
+                frequency: None,
+                phase: None,
+            },
+        };
+
+        assert_eq!(source_dc_bias(&spec), 2.5);
+    }
 }
