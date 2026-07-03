@@ -1585,6 +1585,32 @@ mod tests {
     }
 
     #[test]
+    fn dot_codemodel_builtin_bundle_is_compatibility_noop() {
+        Netlist::parse(
+            "dot xspice builtin codemodel loader\n\
+             .codemodel /usr/lib/ngspice/analog.cm digital.cm\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .end\n",
+        )
+        .expect("standard ngspice built-in .cm bundle directives are no-ops");
+    }
+
+    #[test]
+    fn control_block_codemodel_builtin_bundle_is_compatibility_noop() {
+        Netlist::parse(
+            "control xspice builtin codemodel loader\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             codemodel \"C:\\ngspice\\lib\\xtradev.cm\" ./xtraevt.cm\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect("control codemodel accepts standard built-in .cm bundles");
+    }
+
+    #[test]
     fn control_block_auto_bridge_template_set_promotes_option() {
         let netlist = Netlist::parse(
             "control xspice auto bridge template\n\

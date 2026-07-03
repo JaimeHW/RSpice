@@ -131,6 +131,16 @@ const BUILTIN_MODEL_NAMES: &[&str] = &[
     "zener",
 ];
 
+const BUILTIN_CODEMODEL_LIBRARY_NAMES: &[&str] = &[
+    "analog.cm",
+    "digital.cm",
+    "spice2poly.cm",
+    "table.cm",
+    "tlines.cm",
+    "xtradev.cm",
+    "xtraevt.cm",
+];
+
 impl CodeModelRegistry {
     /// Create a new empty registry
     pub fn new() -> Self {
@@ -149,9 +159,36 @@ impl CodeModelRegistry {
         BUILTIN_MODEL_NAMES
     }
 
+    /// Get the standard ngspice-46 `.cm` bundles whose models are compiled in.
+    pub fn builtin_codemodel_library_names() -> &'static [&'static str] {
+        BUILTIN_CODEMODEL_LIBRARY_NAMES
+    }
+
     /// Check whether a name belongs to a built-in code model.
     pub fn is_builtin_model_name(name: &str) -> bool {
         BUILTIN_MODEL_NAMES
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(name))
+    }
+
+    /// Check whether an ngspice `.codemodel` path names a built-in bundle.
+    ///
+    /// RSpice compiles the ngspice-46 XSPICE models into the binary instead of
+    /// loading their generated `.cm` shared libraries. Netlists may still carry
+    /// `codemodel .../analog.cm` style directives from ngspice startup files;
+    /// those are compatibility no-ops when the basename is one of the official
+    /// bundles listed above.
+    pub fn is_builtin_codemodel_library_path(path: &str) -> bool {
+        let trimmed = path
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim_matches(|ch| matches!(ch, ';' | ','));
+        let normalized = trimmed.replace('\\', "/");
+        let Some(name) = normalized.rsplit('/').next() else {
+            return false;
+        };
+        Self::builtin_codemodel_library_names()
             .iter()
             .any(|candidate| candidate.eq_ignore_ascii_case(name))
     }
@@ -462,6 +499,32 @@ mod tests {
         assert_eq!(registered, catalog);
         assert!(CodeModelRegistry::is_builtin_model_name("DAC_BRIDGE"));
         assert!(!CodeModelRegistry::is_builtin_model_name("d_rom"));
+    }
+
+    #[test]
+    fn built_in_codemodel_library_paths_match_ngspice_46_icm_bundles() {
+        assert_eq!(
+            CodeModelRegistry::builtin_codemodel_library_names(),
+            [
+                "analog.cm",
+                "digital.cm",
+                "spice2poly.cm",
+                "table.cm",
+                "tlines.cm",
+                "xtradev.cm",
+                "xtraevt.cm",
+            ]
+        );
+
+        assert!(CodeModelRegistry::is_builtin_codemodel_library_path(
+            "/usr/lib/ngspice/analog.cm"
+        ));
+        assert!(CodeModelRegistry::is_builtin_codemodel_library_path(
+            r"C:\ngspice\lib\DIGITAL.CM"
+        ));
+        assert!(!CodeModelRegistry::is_builtin_codemodel_library_path(
+            "./custom.cm"
+        ));
     }
 
     #[test]

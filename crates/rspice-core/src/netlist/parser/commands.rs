@@ -158,7 +158,7 @@ pub(super) fn parse_command(
             parse_rspice_auto_bridge_family_command(stream, line_num, params, options)?;
         }
         ".CODEMODEL" | ".RSPICE_UNSUPPORTED_CODEMODEL" => {
-            return Err(unsupported_xspice_codemodel_command(stream, line_num, &cmd));
+            parse_xspice_codemodel_command(stream, line_num, &cmd)?;
         }
         ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
             parse_param_statement(stream, line_num, params, deferred_body_params)?;
@@ -290,38 +290,124 @@ pub(super) fn parse_command(
     Ok(())
 }
 
-fn unsupported_xspice_codemodel_command(
+fn parse_xspice_codemodel_command(
     stream: &mut TokenStream,
     line_num: usize,
     command: &str,
+) -> Result<(), ParseError> {
+    let requested = collect_codemodel_library_args(stream);
+    let unsupported = requested
+        .iter()
+        .filter(|path| !crate::xspice::CodeModelRegistry::is_builtin_codemodel_library_path(path))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if !requested.is_empty() && unsupported.is_empty() {
+        log::debug!(
+            "{command} accepted as a compatibility no-op for built-in ngspice-46 XSPICE bundle(s): {}",
+            requested.join(" ")
+        );
+        return Ok(());
+    }
+
+    Err(unsupported_xspice_codemodel_command(
+        line_num,
+        command,
+        &requested,
+        &unsupported,
+    ))
+}
+
+fn unsupported_xspice_codemodel_command(
+    line_num: usize,
+    command: &str,
+    requested: &[String],
+    unsupported: &[String],
 ) -> ParseError {
-    let requested = collect_unconsumed_command_text(stream);
     let target = if requested.is_empty() {
         "no external code-model library path was provided".to_string()
+    } else if unsupported.is_empty() {
+        format!(
+            "requested external code-model library path(s): {}",
+            requested.join(" ")
+        )
     } else {
-        format!("requested external code-model library path(s): {requested}")
+        format!(
+            "unsupported external code-model library path(s): {}; requested path(s): {}",
+            unsupported.join(" "),
+            requested.join(" ")
+        )
     };
     ParseError::Syntax {
         line: line_num,
         message: format!(
             "{command} is an ngspice dynamic XSPICE code-model loader command, \
              but RSpice does not yet load arbitrary .cm/MIF libraries; {target}. \
-             Built-in ngspice-46 XSPICE models are supported without codemodel."
+             Standard ngspice-46 built-in bundle names ({}) are accepted as compatibility no-ops \
+             because those XSPICE models are compiled into RSpice.",
+            crate::xspice::CodeModelRegistry::builtin_codemodel_library_names().join(", ")
         ),
     }
 }
 
-fn collect_unconsumed_command_text(stream: &mut TokenStream) -> String {
-    let mut parts = Vec::new();
+fn collect_codemodel_library_args(stream: &mut TokenStream) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+
     while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         let token = stream.advance();
-        if token.lexeme.is_empty() {
-            parts.push(token.kind.to_string());
+        if matches!(token.kind, TokenKind::Comma) {
+            flush_codemodel_library_arg(&mut current, &mut args);
+            continue;
+        }
+
+        let piece = match &token.kind {
+            TokenKind::StringLit(value) => {
+                if token.lexeme.is_empty() {
+                    value.as_str()
+                } else {
+                    token.lexeme.as_str()
+                }
+            }
+            _ if !token.lexeme.is_empty() => token.lexeme.as_str(),
+            _ => {
+                current.push_str(&token.kind.to_string());
+                if codemodel_arg_complete(&current) {
+                    flush_codemodel_library_arg(&mut current, &mut args);
+                }
+                continue;
+            }
+        };
+
+        if matches!(token.kind, TokenKind::StringLit(_)) {
+            flush_codemodel_library_arg(&mut current, &mut args);
+            args.push(piece.to_string());
         } else {
-            parts.push(token.lexeme.clone());
+            current.push_str(piece);
+            if codemodel_arg_complete(&current) {
+                flush_codemodel_library_arg(&mut current, &mut args);
+            }
         }
     }
-    parts.join(" ")
+
+    flush_codemodel_library_arg(&mut current, &mut args);
+    args
+}
+
+fn codemodel_arg_complete(arg: &str) -> bool {
+    arg.trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_ascii_lowercase()
+        .ends_with(".cm")
+}
+
+fn flush_codemodel_library_arg(current: &mut String, args: &mut Vec<String>) {
+    let arg = current.trim();
+    if !arg.is_empty() {
+        args.push(arg.to_string());
+    }
+    current.clear();
 }
 
 fn reject_unconsumed_command_tokens(
