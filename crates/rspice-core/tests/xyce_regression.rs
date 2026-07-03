@@ -620,6 +620,29 @@ fn test_xyce_bug_1301_wrapper_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_tl1x_mpi_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/TL1X/TL1X_mpi.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce TL1X transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_generic_wrapper_transient_guardrails_stay_unsupported() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
@@ -2693,6 +2716,10 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
         ("Netlists/SUBCKT/subckt_b3.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_f0.cir", "subckt_family_baseline"),
         ("Netlists/SUBCKT/subckt_f1.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_k0.cir", "subckt_family_baseline"),
+        ("Netlists/SUBCKT/subckt_k1.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_k2.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_k3.cir", "subckt_family_wrapper"),
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(
@@ -2702,6 +2729,33 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
         assert_eq!(
             result.contract, expected_contract,
             "{relative} should not fall back to standalone static .prn comparison"
+        );
+    }
+}
+
+#[test]
+fn test_xyce_subckt_j_family_transient_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/SUBCKT/subckt_j1.cir",
+        "Netlists/SUBCKT/subckt_j1_dup.cir",
+        "Netlists/SUBCKT/subckt_j1_hs.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce SUBCKT transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
         );
     }
 }
