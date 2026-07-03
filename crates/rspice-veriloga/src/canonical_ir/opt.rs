@@ -17,6 +17,7 @@ const MAX_SCALAR_CURRENT_PATH_HISTORY_SCAN_ENTRIES: usize = 512;
 const MAX_SCALAR_CURRENT_PATH_HISTORY_DEPTH: usize = 5;
 const MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_DEPTH: usize = 1;
 const MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_ENTRIES: usize = 4;
+const MAX_SCALAR_EXHAUSTED_HISTORY_REPLAY_ENTRIES: usize = 2;
 const MAX_SCALAR_CURRENT_PATH_SELF_UPDATE_CASCADE_SCAN_ENTRIES: usize = 128;
 const MAX_SCALAR_CURRENT_PATH_SELF_UPDATE_CASCADE_TERMS: usize = 12;
 const MAX_SCALAR_CURRENT_PATH_SELF_UPDATE_CASCADE_ATOMS: usize = 12;
@@ -607,6 +608,7 @@ struct ScalarGraphBuilder<'a> {
     branch_current_values: HashMap<String, ValueId>,
     branch_flow_context: Option<BranchUnknownId>,
     lower_failure_trace_equation: Option<EquationId>,
+    lowering_equation: bool,
     conditional_path_stack: Vec<ConditionalPathPredicate>,
     track_assignment_history: bool,
     selective_assignment_history_targets: HashSet<VariableId>,
@@ -924,6 +926,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             branch_current_values: HashMap::new(),
             branch_flow_context: None,
             lower_failure_trace_equation: None,
+            lowering_equation: false,
             conditional_path_stack: Vec::new(),
             track_assignment_history,
             selective_assignment_history_targets,
@@ -2799,8 +2802,10 @@ impl<'a> ScalarGraphBuilder<'a> {
         let previous_context = self.branch_flow_context;
         let previous_state_operator_depth = self.potential_equation_state_operator_depth;
         let previous_lower_failure_trace_equation = self.lower_failure_trace_equation;
+        let previous_lowering_equation = self.lowering_equation;
         self.branch_flow_context = self.equation_branch_unknown(equation);
         self.lower_failure_trace_equation = Some(equation.id);
+        self.lowering_equation = true;
         if equation.kind == MirEquationKind::Potential {
             self.potential_equation_state_operator_depth += 1;
         }
@@ -2808,6 +2813,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         self.potential_equation_state_operator_depth = previous_state_operator_depth;
         self.branch_flow_context = previous_context;
         self.lower_failure_trace_equation = previous_lower_failure_trace_equation;
+        self.lowering_equation = previous_lowering_equation;
         self.expression_values.clear();
         lowered
     }
@@ -4392,15 +4398,19 @@ impl<'a> ScalarGraphBuilder<'a> {
         {
             return cached;
         }
-        if self.history_reconstruction_budget_exhausted {
+        if self.history_reconstruction_budget_exhausted && !self.allow_exhausted_history_replay() {
+            return None;
+        }
+        let entries = self
+            .variable_assignment_history
+            .get(&variable)
+            .map(Vec::len)?;
+        if self.history_reconstruction_budget_exhausted
+            && entries > MAX_SCALAR_EXHAUSTED_HISTORY_REPLAY_ENTRIES
+        {
             return None;
         }
         if self.trace_history_variable(variable) {
-            let entries = self
-                .variable_assignment_history
-                .get(&variable)
-                .map(Vec::len)
-                .unwrap_or_default();
             eprintln!(
                 "OptIR {}: replay recent history variable={} id={} entries={} steps={}",
                 self.mir.module_name,
@@ -4411,7 +4421,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             );
         }
         let lowered = self.lower_recent_assignment_history_value_uncached(variable);
-        if lowered.is_some() || !self.history_reconstruction_budget_exhausted {
+        if lowered.is_some()
+            || !self.history_reconstruction_budget_exhausted
+            || (self.allow_exhausted_history_replay()
+                && entries <= MAX_SCALAR_EXHAUSTED_HISTORY_REPLAY_ENTRIES)
+        {
             self.recent_assignment_history_cache
                 .insert(cache_key, lowered);
         }
@@ -4679,26 +4693,26 @@ impl<'a> ScalarGraphBuilder<'a> {
         if let Some(cached) = self.current_path_history_cache.get(&cache_key).copied() {
             return cached;
         }
-        if self.history_reconstruction_budget_exhausted {
+        if self.history_reconstruction_budget_exhausted && !self.allow_exhausted_history_replay() {
+            return None;
+        }
+        let history = self.variable_assignment_history.get(&variable)?.clone();
+        if self.history_reconstruction_budget_exhausted
+            && !self.exhausted_budget_current_path_history_replay(history.len())
+        {
             return None;
         }
         if self.trace_history_variable(variable) {
-            let entries = self
-                .variable_assignment_history
-                .get(&variable)
-                .map(Vec::len)
-                .unwrap_or_default();
             eprintln!(
                 "OptIR {}: replay current-path history variable={} id={} entries={} path={} steps={}",
                 self.mir.module_name,
                 self.variable_name(variable),
                 variable.index(),
-                entries,
+                history.len(),
                 self.conditional_path_stack.len(),
                 self.history_reconstruction_steps
             );
         }
-        let history = self.variable_assignment_history.get(&variable)?.clone();
         self.consume_current_path_history_reconstruction_step(history.len())?;
         let known = self.lower_known_assignment_history_for_current_path(variable, &history);
         let lowered = if known.crossed_unknown_guard {
@@ -4727,7 +4741,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                     self.lower_recent_assignment_history_for_current_path(variable, &history)
                 })
         };
-        if lowered.is_some() || !self.history_reconstruction_budget_exhausted {
+        if lowered.is_some()
+            || !self.history_reconstruction_budget_exhausted
+            || (self.allow_exhausted_history_replay()
+                && self.exhausted_budget_current_path_history_replay(history.len()))
+        {
             self.current_path_history_cache.insert(cache_key, lowered);
         }
         lowered
@@ -4751,13 +4769,25 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn consume_current_path_history_reconstruction_step(&mut self, entries: usize) -> Option<()> {
-        if entries <= MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_ENTRIES
-            && self.conditional_path_stack.len() <= MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_DEPTH
-        {
+        if self.cheap_current_path_history_replay(entries) {
             Some(())
         } else {
             self.consume_history_reconstruction_step()
         }
+    }
+
+    fn cheap_current_path_history_replay(&self, entries: usize) -> bool {
+        entries <= MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_ENTRIES
+            && self.conditional_path_stack.len() <= MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_DEPTH
+    }
+
+    fn exhausted_budget_current_path_history_replay(&self, entries: usize) -> bool {
+        entries <= MAX_SCALAR_EXHAUSTED_HISTORY_REPLAY_ENTRIES
+            && self.conditional_path_stack.len() <= MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_DEPTH
+    }
+
+    fn allow_exhausted_history_replay(&self) -> bool {
+        self.lowering_equation
     }
 
     fn reset_history_reconstruction_budget(&mut self) {
