@@ -23,7 +23,7 @@ use crate::circuit::Circuit;
 use crate::netlist::{ElementKind, Netlist};
 
 /// Format version written to and required from checkpoint files.
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 
 /// Snapshot of transient-integration state at an accepted time point.
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +45,7 @@ pub struct TransientCheckpoint {
     ind_i_prev_prev: Vec<Value>,
     ind_v_prev: Vec<Value>,
     xspice_instances: Vec<String>,
+    xspice_resume_blockers: Vec<String>,
 }
 
 /// Stable fingerprint of the netlist identity (FNV-1a over the source text
@@ -89,11 +90,18 @@ impl TransientCheckpoint {
                  semantics); prefer unsegmented runs for delay-dominated decks"
             );
         }
-        if !circuit.xspice_instances.is_empty() {
+        let xspice_instances: Vec<String> = circuit
+            .xspice_instances
+            .iter()
+            .map(|instance| format!("{}({})", instance.name, instance.model_name()))
+            .collect();
+        let xspice_resume_blockers = circuit.xspice_checkpoint_resume_blockers();
+        if !xspice_resume_blockers.is_empty() {
             log::warn!(
                 "transient checkpoint at t={time:.6e}: XSPICE code-model \
-                 context/resources are not serialized; this checkpoint will be \
-                 refused for resume"
+                 state is not fully serialized; this checkpoint will be refused \
+                 for resume: {}",
+                xspice_resume_blockers.join("; ")
             );
         }
 
@@ -109,11 +117,8 @@ impl TransientCheckpoint {
             ind_i_prev: circuit.inductors.i_prev.clone(),
             ind_i_prev_prev: circuit.inductors.i_prev_prev.clone(),
             ind_v_prev: circuit.inductors.v_prev.clone(),
-            xspice_instances: circuit
-                .xspice_instances
-                .iter()
-                .map(|instance| format!("{}({})", instance.name, instance.model_name()))
-                .collect(),
+            xspice_instances,
+            xspice_resume_blockers,
         }
     }
 
@@ -164,20 +169,20 @@ impl TransientCheckpoint {
                 self.netlist_fingerprint, fingerprint
             ));
         }
-        if !self.xspice_instances.is_empty() || netlist_has_xspice(netlist) {
-            let detail = if self.xspice_instances.is_empty() {
-                "the target netlist contains XSPICE code-model instances".to_string()
-            } else {
-                format!(
-                    "checkpoint contains XSPICE instance(s): {}",
-                    self.xspice_instances.join(", ")
-                )
-            };
+        if !self.xspice_resume_blockers.is_empty() {
             return Err(format!(
-                "transient checkpoint resume does not yet serialize XSPICE \
-                 code-model context, pending events, or external runtime resources; \
-                 {detail}. Run XSPICE transient decks unsegmented."
+                "transient checkpoint resume cannot restore unsupported XSPICE \
+                 state: {}. Run XSPICE transient decks unsegmented.",
+                self.xspice_resume_blockers.join("; ")
             ));
+        }
+        if self.xspice_instances.is_empty() && netlist_has_xspice(netlist) {
+            return Err(
+                "transient checkpoint resume cannot verify XSPICE state for this \
+                 legacy checkpoint format; the target netlist contains XSPICE \
+                 code-model instances. Run XSPICE transient decks unsegmented."
+                    .to_string(),
+            );
         }
         Ok(())
     }
@@ -226,6 +231,14 @@ impl TransientCheckpoint {
             out.push_str(instance);
             out.push('\n');
         }
+        out.push_str(&format!(
+            "xspice_blockers {}\n",
+            self.xspice_resume_blockers.len()
+        ));
+        for blocker in &self.xspice_resume_blockers {
+            out.push_str(blocker);
+            out.push('\n');
+        }
         out
     }
 
@@ -238,7 +251,7 @@ impl TransientCheckpoint {
             .strip_prefix("RSPICE-CHECKPOINT ")
             .and_then(|v| v.trim().parse().ok())
             .ok_or_else(|| format!("not a checkpoint file (header: '{header}')"))?;
-        if !matches!(version, 1 | FORMAT_VERSION) {
+        if !(1..=FORMAT_VERSION).contains(&version) {
             return Err(format!(
                 "unsupported checkpoint version {version} (this build reads {FORMAT_VERSION})"
             ));
@@ -315,6 +328,34 @@ impl TransientCheckpoint {
         } else {
             Vec::new()
         };
+        let mut xspice_resume_blockers = if version >= 3 {
+            let header = lines
+                .next()
+                .ok_or_else(|| "missing 'xspice_blockers' section".to_string())?;
+            let count: usize = header
+                .strip_prefix("xspice_blockers")
+                .map(str::trim)
+                .and_then(|value| value.parse().ok())
+                .ok_or_else(|| format!("malformed 'xspice_blockers' header: '{header}'"))?;
+            let mut blockers = Vec::with_capacity(count);
+            for row in 0..count {
+                let line = lines
+                    .next()
+                    .ok_or_else(|| format!("'xspice_blockers' truncated at row {row}"))?;
+                if line.trim().is_empty() {
+                    return Err(format!("'xspice_blockers' row {row} is empty"));
+                }
+                blockers.push(line.trim().to_string());
+            }
+            blockers
+        } else {
+            Vec::new()
+        };
+        if version == 2 && !xspice_instances.is_empty() {
+            xspice_resume_blockers.extend(xspice_instances.iter().map(|instance| {
+                format!("{instance}: legacy checkpoint did not record model checkpoint support")
+            }));
+        }
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -334,6 +375,7 @@ impl TransientCheckpoint {
             ind_i_prev_prev: ind_iter.next().unwrap(),
             ind_v_prev: ind_iter.next().unwrap(),
             xspice_instances,
+            xspice_resume_blockers,
         })
     }
 
@@ -376,6 +418,7 @@ mod tests {
             ind_i_prev_prev: vec![6.5e-3],
             ind_v_prev: vec![0.02],
             xspice_instances: Vec::new(),
+            xspice_resume_blockers: Vec::new(),
         }
     }
 
@@ -394,11 +437,37 @@ mod tests {
     fn version_one_checkpoint_files_still_load_without_xspice_state() {
         let version_one = sample()
             .to_text()
-            .replace("RSPICE-CHECKPOINT 2", "RSPICE-CHECKPOINT 1")
-            .replace("xspice 0\n", "");
+            .replace("RSPICE-CHECKPOINT 3", "RSPICE-CHECKPOINT 1")
+            .replace("xspice 0\nxspice_blockers 0\n", "");
         let restored = TransientCheckpoint::from_text(&version_one)
             .expect("v1 checkpoint without XSPICE section still loads");
         assert!(restored.xspice_instances.is_empty());
+        assert!(restored.xspice_resume_blockers.is_empty());
+    }
+
+    #[test]
+    fn xspice_blockers_round_trip_and_legacy_v2_refuses_resume() {
+        let mut original = sample();
+        original.xspice_instances = vec!["a1(gain)".to_string()];
+        original.xspice_resume_blockers = vec!["a1(gain): model owns pending state".to_string()];
+        let restored = TransientCheckpoint::from_text(&original.to_text()).unwrap();
+        assert_eq!(original, restored);
+
+        let version_two = original
+            .to_text()
+            .replace("RSPICE-CHECKPOINT 3", "RSPICE-CHECKPOINT 2")
+            .replace(
+                "xspice_blockers 1\na1(gain): model owns pending state\n",
+                "",
+            );
+        let restored = TransientCheckpoint::from_text(&version_two)
+            .expect("v2 checkpoint with XSPICE instance list still loads");
+        assert_eq!(restored.xspice_instances, vec!["a1(gain)"]);
+        assert!(
+            restored.xspice_resume_blockers[0].contains("legacy checkpoint"),
+            "legacy v2 checkpoints must remain blocked, got {:?}",
+            restored.xspice_resume_blockers
+        );
     }
 
     #[test]

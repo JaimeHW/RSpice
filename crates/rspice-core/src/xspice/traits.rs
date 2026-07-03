@@ -623,6 +623,31 @@ impl ParamSpec {
 // Code Model Trait
 //=============================================================================
 
+/// Whether a code-model instance can be safely resumed from a transient
+/// checkpoint without serializing additional model-owned state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum XspiceCheckpointSupport {
+    /// The model has no hidden mutable state beyond parameters and the
+    /// accepted MNA solution, so rebuilding and re-evaluating it is sufficient.
+    Stateless,
+    /// The model owns state that is not yet represented in checkpoint files.
+    Unsupported { reason: String },
+}
+
+impl XspiceCheckpointSupport {
+    /// Build an unsupported checkpoint capability with a clear reason.
+    pub fn unsupported(reason: impl Into<String>) -> Self {
+        Self::Unsupported {
+            reason: reason.into(),
+        }
+    }
+
+    /// Whether checkpoint resume can proceed for this capability.
+    pub fn is_supported(&self) -> bool {
+        matches!(self, Self::Stateless)
+    }
+}
+
 /// The main trait for XSPICE code models
 ///
 /// All code models (built-in and external) implement this trait.
@@ -683,6 +708,18 @@ pub trait CodeModel: Send + Sync {
     /// regions that can switch during a Newton step must keep the default.
     fn has_memoryless_linear_transient_stamp(&self) -> bool {
         false
+    }
+
+    /// Whether this model can participate in transient checkpoint resume.
+    ///
+    /// Stateful models, event-driven models, file/table models, and external
+    /// runtime models must keep the default until their owned state is added to
+    /// the checkpoint format. Pure memoryless analog models may opt into
+    /// `Stateless`.
+    fn checkpoint_support(&self, _ctx: &super::CmContext) -> XspiceCheckpointSupport {
+        XspiceCheckpointSupport::unsupported(
+            "model has not declared checkpoint-safe stateless behavior",
+        )
     }
 
     /// Initialize instance state

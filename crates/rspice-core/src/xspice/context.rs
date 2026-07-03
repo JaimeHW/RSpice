@@ -1961,6 +1961,53 @@ impl CmContext {
         Arc::get_mut(resource).and_then(|resource| resource.downcast_mut::<T>())
     }
 
+    /// Summary of runtime-only state that is not serialized in transient
+    /// checkpoint files.
+    pub(crate) fn checkpoint_runtime_state_summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if !self.state.is_empty() || !self.state_prev.is_empty() {
+            parts.push(format!("{} real state value(s)", self.state.len()));
+        }
+        if !self.int_state.is_empty() {
+            parts.push(format!("{} integer state value(s)", self.int_state.len()));
+        }
+        if !self.transient_histories.is_empty() {
+            parts.push(format!(
+                "{} transient history buffer(s)",
+                self.transient_histories.len()
+            ));
+        }
+        if !self.resources.values.is_empty() {
+            parts.push(format!("{} host resource(s)", self.resources.values.len()));
+        }
+        if !self.pending_events.is_empty() {
+            parts.push(format!(
+                "{} pending digital event(s)",
+                self.pending_events.len()
+            ));
+        }
+        if !self.pending_real_events.is_empty() {
+            parts.push(format!(
+                "{} pending real event(s)",
+                self.pending_real_events.len()
+            ));
+        }
+        if !self.inertial_outputs.is_empty() {
+            parts.push(format!(
+                "{} inertial output state(s)",
+                self.inertial_outputs.len()
+            ));
+        }
+        if !self.requested_breakpoints.is_empty() {
+            parts.push(format!(
+                "{} requested breakpoint(s)",
+                self.requested_breakpoints.len()
+            ));
+        }
+
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+
     //-------------------------------------------------------------------------
     // State Variable Access
     //-------------------------------------------------------------------------

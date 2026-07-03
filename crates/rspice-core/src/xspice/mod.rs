@@ -72,4 +72,5 @@ pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection,
 pub use registry::CodeModelRegistry;
 pub use traits::{
     CmError, CmResult, CodeModel, ParamSpec, ParamType, PortDirection, PortSpec, PortType,
+    XspiceCheckpointSupport,
 };

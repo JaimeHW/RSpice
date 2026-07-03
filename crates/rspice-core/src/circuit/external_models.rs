@@ -1725,6 +1725,14 @@ impl CircuitData {
             .all(|inst| inst.is_converged(tolerance))
     }
 
+    /// XSPICE instance-level reasons that prevent transient checkpoint resume.
+    pub(crate) fn xspice_checkpoint_resume_blockers(&self) -> Vec<String> {
+        self.xspice_instances
+            .iter()
+            .filter_map(|instance| instance.checkpoint_resume_blocker())
+            .collect()
+    }
+
     /// Zero-based node-voltage entries excluded from generic transient LTE
     /// because an XSPICE model owns explicit step-history semantics there.
     pub(crate) fn xspice_transient_voltage_lte_excluded_nodes(&self) -> Vec<usize> {

@@ -6,7 +6,7 @@
 use super::context::{AnalogValue, PendingDigitalEvent, PendingRealEvent};
 use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EvaluationPhase,
-    EventQueue, ParamSpec, ParamType, PortSpec, PortType,
+    EventQueue, ParamSpec, ParamType, PortSpec, PortType, XspiceCheckpointSupport,
 };
 use crate::{Complex64, Value};
 use std::any::Any;
@@ -16,6 +16,10 @@ use std::sync::Arc;
 
 fn canonical_param_key(name: &str) -> String {
     name.to_ascii_lowercase()
+}
+
+fn sanitize_checkpoint_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn validate_numeric_param(spec: &ParamSpec, value: Value) -> CmResult<()> {
@@ -1171,6 +1175,32 @@ impl XspiceInstance {
     /// Get the model name
     pub fn model_name(&self) -> &str {
         self.model.name()
+    }
+
+    /// Whether this instance can be resumed from a transient checkpoint.
+    pub fn checkpoint_support(&self) -> XspiceCheckpointSupport {
+        if self.ports.iter().any(port_declares_event_type) {
+            return XspiceCheckpointSupport::unsupported(
+                "event node values, drivers, event times, and pending events are not serialized",
+            );
+        }
+        if let Some(summary) = self.context.checkpoint_runtime_state_summary() {
+            return XspiceCheckpointSupport::unsupported(format!(
+                "context contains non-serialized runtime state ({summary})"
+            ));
+        }
+        self.model.checkpoint_support(&self.context)
+    }
+
+    /// Human-readable checkpoint resume blocker, when this instance is unsafe.
+    pub(crate) fn checkpoint_resume_blocker(&self) -> Option<String> {
+        match self.checkpoint_support() {
+            XspiceCheckpointSupport::Stateless => None,
+            XspiceCheckpointSupport::Unsupported { reason } => {
+                let reason = sanitize_checkpoint_text(&reason);
+                Some(format!("{}({}): {reason}", self.name, self.model_name()))
+            }
+        }
     }
 
     /// Whether this instance needs global conservative Newton damping.
