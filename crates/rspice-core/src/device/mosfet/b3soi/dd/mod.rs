@@ -1379,6 +1379,7 @@ mod tests {
             body_squares: 0.0,
             rth0: 0.006,
             cth0: 0.0,
+            nseg: 1.0,
         }
     }
 
@@ -1835,6 +1836,37 @@ mod tests {
         assert!(sized.rds0 >= 0.0);
         // jbjt etc. must be positive saturation densities.
         assert!(sized.jbjt > 0.0 && sized.jrec > 0.0 && sized.jdif > 0.0);
+    }
+
+    #[test]
+    fn temp_setup_uses_xyce_self_heating_width_and_segments() {
+        let mut params = n1_params();
+        params.insert("LINT".into(), 0.0);
+        params.insert("WINT".into(), 0.0);
+        params.insert("WTH0".into(), 2.0e-6);
+
+        let model = B3SoiDdModel::from_params(&params, false, 300.15);
+        let geometry = B3SoiDdGeometry {
+            rth0: 0.006,
+            cth0: 1.0e-5,
+            nseg: 2.0,
+            ..geom()
+        };
+        let sized = B3SoiDdSized::new(&model, &geometry, 300.15).expect("sized");
+        let thermal_width = sized.weff + model.wth0;
+        let expected_rth = geometry.rth0 / thermal_width * geometry.nseg;
+        let expected_cth = geometry.cth0 * thermal_width / geometry.nseg;
+
+        assert!(
+            (sized.rth - expected_rth).abs() <= expected_rth.abs() * 1.0e-14,
+            "rth={} expected={expected_rth}",
+            sized.rth
+        );
+        assert!(
+            (sized.cth - expected_cth).abs() <= expected_cth.abs() * 1.0e-14,
+            "cth={} expected={expected_cth}",
+            sized.cth
+        );
     }
 
     /// The floating-body DC equilibrium must rise into forward bias as the gate

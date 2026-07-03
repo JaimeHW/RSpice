@@ -207,6 +207,7 @@ pub struct B3SoiDdGeometry {
     pub body_squares: Value,
     pub rth0: Value,
     pub cth0: Value,
+    pub nseg: Value,
 }
 
 impl B3SoiDdSized {
@@ -401,8 +402,10 @@ impl B3SoiDdSized {
         p.ubtemp = p.ub;
         p.uctemp = p.uc;
         p.rds0denom = (p.weff * 1e6).powf(p.wr);
-        p.rth = geom.rth0 * (m.tbox / m.tsi).sqrt() / p.weff;
-        p.cth = geom.cth0 * m.tsi;
+        let nseg = geom.nseg.max(1.0e-30);
+        let thermal_width = (p.weff + m.wth0).max(1.0e-30);
+        p.rth = geom.rth0 / thermal_width * nseg;
+        p.cth = geom.cth0 * thermal_width / nseg;
         p.rbody = m.rbody * p.weff / p.leff;
         let gate_length = geom.l - m.xgl;
         let gate_resistance = m.rshg * (m.xgw + p.weff / (3.0 * m.ngcon)) / (m.ngcon * gate_length);

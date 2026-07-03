@@ -14,7 +14,7 @@ impl Engine {
     ///
     /// Positive `RSH * NRD/NRS` allocates drain/source prime nodes connected by
     /// ordinary linear resistors. Positive `RTH0` with `SHMOD=1` allocates the
-    /// ngspice self-heating temperature-rise node.
+    /// BSIMSOI self-heating temperature-rise node.
     pub(super) fn build_b3soi_dd(
         circuit: &mut CircuitData,
         element: &crate::netlist::Element,
@@ -81,12 +81,9 @@ impl Engine {
             drain_perimeter: instance_param(instance_params, &["PD"]).unwrap_or(0.0),
             source_perimeter: instance_param(instance_params, &["PS"]).unwrap_or(0.0),
             body_squares: instance_param(instance_params, &["NRB"]).unwrap_or(0.0),
-            rth0: instance_param(instance_params, &["RTH0"])
-                .or_else(|| params_map.get("RTH0").copied())
-                .unwrap_or(0.0),
-            cth0: instance_param(instance_params, &["CTH0"])
-                .or_else(|| params_map.get("CTH0").copied())
-                .unwrap_or(0.0),
+            rth0: instance_param(instance_params, &["RTH0"]).unwrap_or(model.rth0),
+            cth0: instance_param(instance_params, &["CTH0"]).unwrap_or(model.cth0),
+            nseg: instance_param(instance_params, &["NSEG"]).unwrap_or(1.0),
         };
 
         let node_gate = match model.rgate_mod {
