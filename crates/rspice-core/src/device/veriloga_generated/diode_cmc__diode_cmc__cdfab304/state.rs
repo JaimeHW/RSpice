@@ -513,9 +513,9 @@ impl Instance {
         self.scalar_static_f64[0]=p.p6;
         self.scalar_static_bool[0]=(self.scalar_static_f64[0]> -250.0);
         self.scalar_static_f64[1]=(if self.scalar_static_bool[0]{self.scalar_static_f64[0]}else{-250.0});
-        self.scalar_static_f64[2]=if param_given[6] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[2]=if param_given[6]{1.0}else{0.0};
         self.scalar_static_bool[1]=(!(self.scalar_static_f64[2]!=0.0));
-        self.scalar_static_f64[3]=if param_given[96] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[3]=if param_given[96]{1.0}else{0.0};
         self.scalar_static_bool[2]=(self.scalar_static_bool[1]&&(self.scalar_static_f64[3]!=0.0));
         self.scalar_static_f64[4]=(if self.scalar_static_bool[2]{1.0}else{0.0});
         self.scalar_static_f64[5]=p.p96;

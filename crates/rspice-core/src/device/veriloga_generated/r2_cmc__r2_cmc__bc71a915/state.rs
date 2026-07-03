@@ -416,12 +416,12 @@ impl Instance {
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
         let param_given = self.param_given.as_ref();
-        self.scalar_static_f64[0]=if param_given[9] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[0]=if param_given[9]{1.0}else{0.0};
         self.scalar_static_f64[1]=p.p9;
         self.scalar_static_f64[2]=(if (self.scalar_static_f64[0]!=0.0){self.scalar_static_f64[1]}else{0.0});
         self.scalar_static_bool[0]=(!(self.scalar_static_f64[0]!=0.0));
         self.scalar_static_f64[3]=(if self.scalar_static_bool[0]{1.0}else{self.scalar_static_f64[2]});
-        self.scalar_static_f64[4]=if param_given[10] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[4]=if param_given[10]{1.0}else{0.0};
         self.scalar_static_f64[5]=p.p10;
         self.scalar_static_f64[6]=(0.01*self.scalar_static_f64[5]);
         self.scalar_static_f64[7]=(1.0-self.scalar_static_f64[6]);
@@ -452,10 +452,10 @@ impl Instance {
         self.scalar_static_bool[6]=(!(self.scalar_static_f64[24]!=0.0));
         self.scalar_static_bool[7]=(self.scalar_static_bool[4]&&self.scalar_static_bool[6]);
         self.scalar_static_f64[27]=(if self.scalar_static_bool[7]{0.0}else{self.scalar_static_f64[26]});
-        self.scalar_static_f64[28]=if param_given[1] { 1.0 } else { 0.0 };
-        self.scalar_static_f64[29]=if param_given[2] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[28]=if param_given[1]{1.0}else{0.0};
+        self.scalar_static_f64[29]=if param_given[2]{1.0}else{0.0};
         self.scalar_static_bool[8]=((self.scalar_static_f64[28]!=0.0)&&(self.scalar_static_f64[29]!=0.0));
-        self.scalar_static_f64[30]=if param_given[0] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[30]=if param_given[0]{1.0}else{0.0};
         self.scalar_static_bool[9]=(!(self.scalar_static_f64[30]!=0.0));
         self.scalar_static_bool[10]=(self.scalar_static_bool[8]&&self.scalar_static_bool[9]);
         self.scalar_static_f64[31]=(if self.scalar_static_bool[10]{1.0}else{0.0});

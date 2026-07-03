@@ -41,12 +41,7 @@ fn eval_ddt<const STATE_COUNT: usize>(
         derivative_current[slot] = result;
         result
     } else {
-        current[slot] = value;
-        previous[slot] = value;
-        older[slot] = value;
-        derivative_current[slot] = 0.0;
-        derivative_previous[slot] = 0.0;
-        initialized[slot] = true;
+        current[slot] = value;previous[slot] = value;older[slot] = value;derivative_current[slot] = 0.0;derivative_previous[slot] = 0.0;initialized[slot] = true;
         0.0
     }
 }
@@ -78,8 +73,7 @@ fn eval_idt<const STATE_COUNT: usize>(
     };
     current[slot] = current_value;
     if !ddt_active {
-        previous[slot] = current_value;
-        initialized[slot] = true;
+        previous[slot] = current_value;initialized[slot] = true;
     }
     current_value
 }
@@ -1795,57 +1789,7 @@ pub(crate) struct StampLocals {
 }
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
-        let p = Box::as_ref(&self.params);
-        let nodes = &(*self).nodes;
-        let branches = &(*self).branches;
-        let param_given = self.param_given.as_ref();
-        let multiplicity = (*self).multiplicity;
-        let timestep = (*self).timestep;
-        let ddt_state_current = self.ddt_state_current.as_mut();
-        let ddt_state_previous = self.ddt_state_previous.as_mut();
-        let ddt_state_older = self.ddt_state_older.as_mut();
-        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
-        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
-        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
-        let ddt_active = self.ddt_coefficients.active;
-        let ddt_scale = self.ddt_coefficients.derivative_scale;
-        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
-        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
-        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let mut locals = StampLocals::default();
-        Self::stamp_transient_block_0(p, param_given, &mut locals);
-        Self::stamp_transient_block_1(p, &mut locals);
-        Self::stamp_transient_block_2(ctx, p, nodes, &mut locals);
-        Self::stamp_transient_block_3(p, &mut locals);
-        Self::stamp_transient_block_4(p, &mut locals);
-        Self::stamp_transient_block_5(p, &mut locals);
-        Self::stamp_transient_block_6(p, &mut locals);
-        Self::stamp_transient_block_7(p, &mut locals);
-        Self::stamp_transient_block_8(p, &mut locals);
-        Self::stamp_transient_block_9(p, &mut locals);
-        Self::stamp_transient_block_10(p, &mut locals);
-        Self::stamp_transient_block_11(p, &mut locals);
-        Self::stamp_transient_block_12(ctx, p, nodes, &mut locals);
-        Self::stamp_transient_block_13(&mut locals);
-        Self::stamp_transient_block_14(&mut locals);
-        Self::stamp_transient_block_15(&mut locals);
-        Self::stamp_transient_block_16(&mut locals);
-        Self::stamp_transient_block_17(&mut locals);
-        Self::stamp_transient_block_18(p, &mut locals);
-        Self::stamp_transient_block_19(p, &mut locals);
-        Self::stamp_transient_block_20(p, &mut locals);
-        Self::stamp_transient_block_21(p, &mut locals);
-        Self::stamp_transient_block_22(p, &mut locals);
-        Self::stamp_transient_block_23(p, &mut locals);
-        Self::stamp_transient_block_24(p, &mut locals);
-        Self::stamp_transient_block_25(p, &mut locals);
-        Self::stamp_transient_block_26(p, &mut locals);
-        Self::stamp_transient_block_27(p, &mut locals);
-        Self::stamp_transient_block_28(p, &mut locals);
-        Self::stamp_transient_block_29(p, &mut locals);
-        Self::stamp_transient_block_30(p, &mut locals);
-        Self::stamp_transient_block_31(ctx, p, nodes, &mut locals);
-        Self::stamp_transient_block_32(p, &mut locals);
+        let p = Box::as_ref(&self.params);let nodes = &(*self).nodes;let branches = &(*self).branches;let param_given = self.param_given.as_ref();let multiplicity = (*self).multiplicity;let timestep = (*self).timestep;let ddt_state_current = self.ddt_state_current.as_mut();let ddt_state_previous = self.ddt_state_previous.as_mut();let ddt_state_older = self.ddt_state_older.as_mut();let ddt_state_initialized = self.ddt_state_initialized.as_mut();let ddt_derivative_current = self.ddt_derivative_current.as_mut();let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();let ddt_active = self.ddt_coefficients.active;let ddt_scale = self.ddt_coefficients.derivative_scale;let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;let mut locals = StampLocals::default();Self::stamp_transient_block_0(p, param_given, &mut locals);Self::stamp_transient_block_1(p, &mut locals);Self::stamp_transient_block_2(ctx, p, nodes, &mut locals);Self::stamp_transient_block_3(p, &mut locals);Self::stamp_transient_block_4(p, &mut locals);Self::stamp_transient_block_5(p, &mut locals);Self::stamp_transient_block_6(p, &mut locals);Self::stamp_transient_block_7(p, &mut locals);Self::stamp_transient_block_8(p, &mut locals);Self::stamp_transient_block_9(p, &mut locals);Self::stamp_transient_block_10(p, &mut locals);Self::stamp_transient_block_11(p, &mut locals);Self::stamp_transient_block_12(ctx, p, nodes, &mut locals);Self::stamp_transient_block_13(&mut locals);Self::stamp_transient_block_14(&mut locals);Self::stamp_transient_block_15(&mut locals);Self::stamp_transient_block_16(&mut locals);Self::stamp_transient_block_17(&mut locals);Self::stamp_transient_block_18(p, &mut locals);Self::stamp_transient_block_19(p, &mut locals);Self::stamp_transient_block_20(p, &mut locals);Self::stamp_transient_block_21(p, &mut locals);Self::stamp_transient_block_22(p, &mut locals);Self::stamp_transient_block_23(p, &mut locals);Self::stamp_transient_block_24(p, &mut locals);Self::stamp_transient_block_25(p, &mut locals);Self::stamp_transient_block_26(p, &mut locals);Self::stamp_transient_block_27(p, &mut locals);Self::stamp_transient_block_28(p, &mut locals);Self::stamp_transient_block_29(p, &mut locals);Self::stamp_transient_block_30(p, &mut locals);Self::stamp_transient_block_31(ctx, p, nodes, &mut locals);Self::stamp_transient_block_32(p, &mut locals);
         stamper.stamp_potential_branch_local(
             Some(12),
             Some(2),
@@ -1893,54 +1837,9 @@ impl Instance {
             None,
             7,
             multiplicity,
-        );
-        Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
-        Self::stamp_transient_equations_block_1(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
+        );Self::stamp_transient_equations_block_0(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);Self::stamp_transient_equations_block_1(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
     }
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
-        let p = Box::as_ref(&self.params);
-        let nodes = &(*self).nodes;
-        let branches = &(*self).branches;
-        let param_given = self.param_given.as_ref();
-        let multiplicity = (*self).multiplicity;
-        let mut locals = StampLocals::default();
-        Self::stamp_reactive_block_0(p, param_given, &mut locals);
-        Self::stamp_reactive_block_1(p, &mut locals);
-        Self::stamp_reactive_block_2(ctx, p, nodes, &mut locals);
-        Self::stamp_reactive_block_3(p, &mut locals);
-        Self::stamp_reactive_block_4(p, &mut locals);
-        Self::stamp_reactive_block_5(p, &mut locals);
-        Self::stamp_reactive_block_6(p, &mut locals);
-        Self::stamp_reactive_block_7(p, &mut locals);
-        Self::stamp_reactive_block_8(p, &mut locals);
-        Self::stamp_reactive_block_9(p, &mut locals);
-        Self::stamp_reactive_block_10(p, &mut locals);
-        Self::stamp_reactive_block_11(p, &mut locals);
-        Self::stamp_reactive_block_12(p, &mut locals);
-        Self::stamp_reactive_block_13(p, &mut locals);
-        Self::stamp_reactive_block_14(p, &mut locals);
-        Self::stamp_reactive_block_15(ctx, p, nodes, &mut locals);
-        Self::stamp_reactive_block_16(&mut locals);
-        Self::stamp_reactive_block_17(&mut locals);
-        Self::stamp_reactive_block_18(&mut locals);
-        Self::stamp_reactive_block_19(&mut locals);
-        Self::stamp_reactive_block_20(&mut locals);
-        Self::stamp_reactive_block_21(p, &mut locals);
-        Self::stamp_reactive_block_22(p, &mut locals);
-        Self::stamp_reactive_block_23(p, &mut locals);
-        Self::stamp_reactive_block_24(p, &mut locals);
-        Self::stamp_reactive_block_25(p, &mut locals);
-        Self::stamp_reactive_block_26(p, &mut locals);
-        Self::stamp_reactive_block_27(p, &mut locals);
-        Self::stamp_reactive_block_28(p, &mut locals);
-        Self::stamp_reactive_block_29(p, &mut locals);
-        Self::stamp_reactive_block_30(p, &mut locals);
-        Self::stamp_reactive_block_31(p, &mut locals);
-        Self::stamp_reactive_block_32(p, &mut locals);
-        Self::stamp_reactive_block_33(p, &mut locals);
-        Self::stamp_reactive_block_34(p, &mut locals);
-        Self::stamp_reactive_block_35(ctx, p, nodes, &mut locals);
-        Self::stamp_reactive_block_36(ctx, p, nodes, &mut locals);
-        Self::stamp_reactive_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, &mut locals);
+        let p = Box::as_ref(&self.params);let nodes = &(*self).nodes;let branches = &(*self).branches;let param_given = self.param_given.as_ref();let multiplicity = (*self).multiplicity;let mut locals = StampLocals::default();Self::stamp_reactive_block_0(p, param_given, &mut locals);Self::stamp_reactive_block_1(p, &mut locals);Self::stamp_reactive_block_2(ctx, p, nodes, &mut locals);Self::stamp_reactive_block_3(p, &mut locals);Self::stamp_reactive_block_4(p, &mut locals);Self::stamp_reactive_block_5(p, &mut locals);Self::stamp_reactive_block_6(p, &mut locals);Self::stamp_reactive_block_7(p, &mut locals);Self::stamp_reactive_block_8(p, &mut locals);Self::stamp_reactive_block_9(p, &mut locals);Self::stamp_reactive_block_10(p, &mut locals);Self::stamp_reactive_block_11(p, &mut locals);Self::stamp_reactive_block_12(p, &mut locals);Self::stamp_reactive_block_13(p, &mut locals);Self::stamp_reactive_block_14(p, &mut locals);Self::stamp_reactive_block_15(ctx, p, nodes, &mut locals);Self::stamp_reactive_block_16(&mut locals);Self::stamp_reactive_block_17(&mut locals);Self::stamp_reactive_block_18(&mut locals);Self::stamp_reactive_block_19(&mut locals);Self::stamp_reactive_block_20(&mut locals);Self::stamp_reactive_block_21(p, &mut locals);Self::stamp_reactive_block_22(p, &mut locals);Self::stamp_reactive_block_23(p, &mut locals);Self::stamp_reactive_block_24(p, &mut locals);Self::stamp_reactive_block_25(p, &mut locals);Self::stamp_reactive_block_26(p, &mut locals);Self::stamp_reactive_block_27(p, &mut locals);Self::stamp_reactive_block_28(p, &mut locals);Self::stamp_reactive_block_29(p, &mut locals);Self::stamp_reactive_block_30(p, &mut locals);Self::stamp_reactive_block_31(p, &mut locals);Self::stamp_reactive_block_32(p, &mut locals);Self::stamp_reactive_block_33(p, &mut locals);Self::stamp_reactive_block_34(p, &mut locals);Self::stamp_reactive_block_35(ctx, p, nodes, &mut locals);Self::stamp_reactive_block_36(ctx, p, nodes, &mut locals);Self::stamp_reactive_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, &mut locals);
     }
 }

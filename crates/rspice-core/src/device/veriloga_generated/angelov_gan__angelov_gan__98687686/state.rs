@@ -501,13 +501,13 @@ impl Instance {
     fn recompute_instance_static(&mut self) {
         let p = &(*self.params);
         let param_given = self.param_given.as_ref();
-        self.scalar_static_f64[0]=if param_given[3] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[0]=if param_given[3]{1.0}else{0.0};
         self.scalar_static_f64[1]=p.p3;
         self.scalar_static_f64[2]=(self.scalar_static_f64[1]+273.15);
         self.scalar_static_f64[3]=(if (self.scalar_static_f64[0]!=0.0){self.scalar_static_f64[2]}else{0.0});
         self.scalar_static_bool[0]=(!(self.scalar_static_f64[0]!=0.0));
         self.scalar_static_f64[4]=p.p2;
-        self.scalar_static_f64[5]=if param_given[100] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[5]=if param_given[100]{1.0}else{0.0};
         self.scalar_static_f64[6]=p.p100;
         self.scalar_static_f64[7]=(273.15+self.scalar_static_f64[6]);
         self.scalar_static_f64[8]=(if (self.scalar_static_f64[5]!=0.0){self.scalar_static_f64[7]}else{0.0});
@@ -549,9 +549,9 @@ impl Instance {
         self.scalar_static_f64[37]=p.p62;
         self.scalar_static_f64[38]=p.p63;
         self.scalar_static_bool[8]=(!(self.scalar_static_f64[36]!=0.0));
-        self.scalar_static_f64[39]=if param_given[43] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[39]=if param_given[43]{1.0}else{0.0};
         self.scalar_static_bool[9]=(!(self.scalar_static_f64[39]!=0.0));
-        self.scalar_static_f64[40]=if param_given[44] { 1.0 } else { 0.0 };
+        self.scalar_static_f64[40]=if param_given[44]{1.0}else{0.0};
         self.scalar_static_bool[10]=(self.scalar_static_bool[9]&&(self.scalar_static_f64[40]!=0.0));
         self.scalar_static_f64[41]=(if self.scalar_static_bool[10]{1.0}else{0.0});
         self.scalar_static_f64[42]=p.p44;
