@@ -1353,6 +1353,10 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperVoltageAccessor);
         }
 
+        if Self::is_native_plain_static_dc_prn_wrapper_candidate(deck_path, source) {
+            return Ok(XyceStaticDcContract::WrapperDefault);
+        }
+
         Err(Self::upstream_wrapper_required_reason().to_string())
     }
 
@@ -1588,6 +1592,73 @@ impl XyceTestRunner {
                 .is_some_and(|probe| probe.accessor != XyceVoltageAccessor::Value)
                 || Self::print_expression_contains_voltage_accessor_call(expression)
         })
+    }
+
+    fn is_native_plain_static_dc_prn_wrapper_candidate(deck_path: &Path, source: &str) -> bool {
+        if Self::validate_plain_static_dc_prn_wrapper_source(source).is_err() {
+            return false;
+        }
+        let Ok(print) = Self::single_dc_print_request(source) else {
+            return false;
+        };
+        let Ok(netlist) = Self::parse_xyce_netlist(source, deck_path) else {
+            return false;
+        };
+        let Ok(dc) = Self::single_dc_sweep(&netlist) else {
+            return false;
+        };
+        if Self::step_commands(&netlist).is_ok_and(|steps| !steps.is_empty()) {
+            return false;
+        }
+        Self::validate_static_dc_contract(&netlist, &dc, &print).is_ok()
+    }
+
+    fn validate_plain_static_dc_prn_wrapper_source(source: &str) -> Result<(), String> {
+        Self::validate_default_prn_wrapper_source(source)?;
+
+        let print = Self::single_dc_print_request(source)?;
+        for probe in &print.probes {
+            let normalized = Self::normalize_probe(probe);
+            if normalized.contains('*') || normalized.starts_with("w(") {
+                return Err(format!(
+                    "wrapper-origin plain static DC contract does not cover wildcard or power-style probe '{probe}'"
+                ));
+            }
+        }
+
+        let mut dc_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if !command.starts_with('.') {
+                continue;
+            }
+            match command.to_ascii_lowercase().as_str() {
+                ".dc" => dc_count += 1,
+                ".print" | ".param" | ".func" | ".end" => {}
+                other => {
+                    return Err(format!(
+                        "wrapper-origin plain static DC contract does not cover {other} directives"
+                    ));
+                }
+            }
+        }
+
+        match dc_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin plain static DC contract requires exactly one .DC statement, found none"
+                    .to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin plain static DC contract requires exactly one .DC statement, found {dc_count}"
+            )),
+        }
     }
 
     fn upstream_wrapper_required_reason() -> &'static str {
@@ -2058,7 +2129,14 @@ impl XyceTestRunner {
     fn dc_print_format_is_prn_compatible(format: &str) -> bool {
         matches!(
             format.to_ascii_lowercase().as_str(),
-            "std" | "tecplot" | "touchstone" | "touchstone2" | "noindex" | "gnuplot" | "splot"
+            "std"
+                | "probe"
+                | "tecplot"
+                | "touchstone"
+                | "touchstone2"
+                | "noindex"
+                | "gnuplot"
+                | "splot"
         )
     }
 
