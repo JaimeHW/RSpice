@@ -346,6 +346,10 @@ fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
         "Netlists/ACtests/RC_simple.cir",
         "Netlists/ACtests/lowpass_old.cir",
         "Netlists/ACtests/reg0.cir",
+        "Netlists/LEAD_CURRENTS/lead_min_ac.cir",
+        "Netlists/LEAD_CURRENTS/lead_bsrc_ac.cir",
+        "Netlists/COMPLEX_NUM/test1.cir",
+        "Netlists/COMPLEX_NUM/test3.cir",
     ] {
         assert!(
             runner.requires_upstream_wrapper(relative),

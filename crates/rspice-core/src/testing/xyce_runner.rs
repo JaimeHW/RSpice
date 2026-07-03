@@ -15,6 +15,7 @@ use crate::engine::{
     TransientResult, extract_dc_value,
 };
 use crate::expr::{Expr, parse_expression_strict};
+use crate::netlist::expr::ComplexValue as ExprComplexValue;
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, FreqVariation, Netlist,
@@ -5663,22 +5664,26 @@ impl XyceTestRunner {
     }
 
     fn print_requests_complex_ac_probe(print: &XycePrintRequest, probe: &str) -> bool {
-        let normalized_probe = Self::normalize_probe(probe);
-        print.probes.iter().any(|requested| {
-            Self::normalize_probe(requested) == normalized_probe
-                && Self::parse_voltage_probe(&normalized_probe)
-                    .is_some_and(|voltage| voltage.accessor == XyceVoltageAccessor::Value)
-                || Self::parse_current_probe(&normalized_probe).is_some()
-                    && Self::normalize_probe(requested) == normalized_probe
-        })
+        let normalized_probe = Self::normalize_ac_expression_probe_key(probe);
+        print
+            .probes
+            .iter()
+            .any(|requested| Self::normalize_ac_expression_probe_key(requested) == normalized_probe)
     }
 
     fn print_requests_scalar_ac_probe(print: &XycePrintRequest, column: &str) -> bool {
         let normalized_column = Self::normalize_probe(column);
-        print
-            .probes
-            .iter()
-            .any(|requested| Self::normalize_probe(requested) == normalized_column)
+        let normalized_expression_column = Self::normalize_ac_expression_probe_key(column);
+        print.probes.iter().any(|requested| {
+            Self::normalize_probe(requested) == normalized_column
+                || Self::normalize_ac_expression_probe_key(requested)
+                    == normalized_expression_column
+        })
+    }
+
+    fn normalize_ac_expression_probe_key(probe: &str) -> String {
+        let expression = Self::print_expression_inner(probe).unwrap_or(probe);
+        Self::normalize_probe(expression)
     }
 
     fn compact_reference_probe_alias(normalized_column: &str) -> Option<&'static str> {
@@ -5996,9 +6001,61 @@ impl XyceTestRunner {
                         *transconductance,
                     )?;
                 }
+                ElementKind::Vcvs { gain, .. } => {
+                    Self::validate_finite_controlled_source_gain(
+                        "VCVS",
+                        &element.name,
+                        "gain",
+                        *gain,
+                    )?;
+                }
+                ElementKind::Cccs {
+                    gain,
+                    control_element,
+                    ..
+                } => {
+                    Self::validate_finite_controlled_source_gain(
+                        "CCCS",
+                        &element.name,
+                        "gain",
+                        *gain,
+                    )?;
+                    Self::validate_current_controlled_source_probe(
+                        &netlist.elements,
+                        "CCCS",
+                        &element.name,
+                        control_element,
+                    )?;
+                }
+                ElementKind::Ccvs {
+                    transresistance,
+                    control_element,
+                    ..
+                } => {
+                    Self::validate_finite_controlled_source_gain(
+                        "CCVS",
+                        &element.name,
+                        "transresistance",
+                        *transresistance,
+                    )?;
+                    Self::validate_current_controlled_source_probe(
+                        &netlist.elements,
+                        "CCVS",
+                        &element.name,
+                        control_element,
+                    )?;
+                }
+                ElementKind::BehavioralVoltage { expression, .. }
+                | ElementKind::BehavioralCurrent { expression, .. } => {
+                    Self::validate_ac_behavioral_expression(
+                        &element.name,
+                        expression,
+                        &netlist.params,
+                    )?;
+                }
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports independent sources, R/L/C passives, mutual inductors, and finite-gain VCCS elements; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, and time-independent behavioral sources; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -6573,6 +6630,32 @@ impl XyceTestRunner {
         Ok(())
     }
 
+    fn validate_ac_behavioral_expression(
+        element_name: &str,
+        expression: &str,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<(), String> {
+        let prepared = prepare_behavioral_expression(expression, params).map_err(|err| {
+            format!(
+                "native static .PRINT AC comparison could not prepare behavioral expression '{}' on element '{}': {err}",
+                expression, element_name
+            )
+        })?;
+        let ast = parse_expression_strict(&prepared).map_err(|err| {
+            format!(
+                "native static .PRINT AC comparison does not yet support behavioral expression '{}' on element '{}': {err}",
+                expression, element_name
+            )
+        })?;
+        if Self::expression_depends_on_ac_runtime_quantity(&ast) {
+            return Err(format!(
+                "native static .PRINT AC comparison does not support behavioral expression '{}' on element '{}' because AC behavioral small-signal linearization has no transient time or frequency-domain expression variable",
+                expression, element_name
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_transient_generic_switch_expression(
         element_name: &str,
         expression: &str,
@@ -6615,6 +6698,26 @@ impl XyceTestRunner {
             | Expr::LookupTable(_)
             | Expr::Time
             | Expr::Frequency
+            | Expr::Temperature => false,
+        }
+    }
+
+    fn expression_depends_on_ac_runtime_quantity(expression: &Expr) -> bool {
+        match expression {
+            Expr::Time | Expr::Frequency => true,
+            Expr::Unary { operand, .. } => Self::expression_depends_on_ac_runtime_quantity(operand),
+            Expr::Binary { left, right, .. } => {
+                Self::expression_depends_on_ac_runtime_quantity(left)
+                    || Self::expression_depends_on_ac_runtime_quantity(right)
+            }
+            Expr::Function { args, .. } => args
+                .iter()
+                .any(Self::expression_depends_on_ac_runtime_quantity),
+            Expr::Const(_)
+            | Expr::StringLiteral(_)
+            | Expr::LookupTable(_)
+            | Expr::NodeVoltage(_)
+            | Expr::BranchCurrent(_)
             | Expr::Temperature => false,
         }
     }
@@ -6667,47 +6770,15 @@ impl XyceTestRunner {
     fn validate_ac_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
-            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+            if Self::braced_expression_is_atomic_ac_probe(&normalized_expression, netlist) {
                 return Self::validate_atomic_ac_probe(&normalized_expression, expression, netlist);
             }
-            if let Some(inner) = Self::ac_db_expression_inner(expression) {
-                return Self::validate_ac_complex_probe(inner, netlist);
-            }
-            if Self::print_expression_contains_probe_reference(expression) {
-                let context = Self::print_eval_context(netlist, None, None);
-                let mut call_value = |call: &str| {
-                    let normalized = Self::normalize_probe(call);
-                    Self::validate_atomic_ac_probe(&normalized, call, netlist)?;
-                    let Some(voltage_probe) = Self::parse_voltage_probe(&normalized) else {
-                        return Err(format!("unsupported .PRINT AC expression probe '{call}'"));
-                    };
-                    voltage_probe.accessor.evaluate_ac_scalar(Complex64::new(1.0, 0.0)).ok_or_else(
-                        || {
-                            format!(
-                                "unsupported .PRINT AC expression probe '{call}'; use VR/VI/VM/VP/VDB or DB(V(...)) for scalar expressions"
-                            )
-                        },
-                    )
-                };
-                Self::evaluate_print_expression_with_probe_calls(
-                    expression,
-                    context,
-                    &mut call_value,
-                )
-                .map_err(|err| {
-                    format!("unsupported .PRINT AC expression '{{{expression}}}': {err}")
-                })?;
-                return Ok(());
-            }
-            let context = Self::print_eval_context(netlist, None, None);
-            crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
-                format!("unsupported .PRINT AC expression '{{{expression}}}': {err}")
-            })?;
-            return Ok(());
+            return Self::validate_ac_expression_probe(expression, netlist);
         }
 
         let normalized = Self::normalize_probe(probe);
         Self::validate_atomic_ac_probe(&normalized, probe, netlist)
+            .or_else(|_| Self::validate_ac_expression_probe(probe, netlist))
     }
 
     fn validate_atomic_ac_probe(
@@ -6735,19 +6806,32 @@ impl XyceTestRunner {
 
     fn validate_ac_complex_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
         let normalized = Self::normalize_probe(probe);
-        let Some(voltage_probe) = Self::parse_voltage_probe(&normalized) else {
-            return Err(format!(
-                "unsupported .PRINT AC dB expression argument '{}'",
-                probe.trim()
-            ));
-        };
-        if voltage_probe.accessor != XyceVoltageAccessor::Value {
-            return Err(format!(
-                ".PRINT AC DB() expects a complex V(...) argument, got '{}'",
-                probe.trim()
-            ));
+        if let Some(voltage_probe) = Self::parse_voltage_probe(&normalized) {
+            if voltage_probe.accessor != XyceVoltageAccessor::Value {
+                return Err(format!(
+                    ".PRINT AC complex expression expects a complex V(...) argument, got '{}'",
+                    probe.trim()
+                ));
+            }
+            return Self::validate_atomic_ac_probe(&normalized, probe, netlist);
         }
-        Self::validate_atomic_ac_probe(&normalized, probe, netlist)
+        if Self::parse_current_probe(&normalized).is_some() {
+            return Self::validate_atomic_ac_probe(&normalized, probe, netlist);
+        }
+        Self::validate_ac_expression_probe(probe, netlist)
+    }
+
+    fn validate_ac_expression_probe(expression: &str, netlist: &Netlist) -> Result<(), String> {
+        let context = Self::print_eval_context(netlist, None, None);
+        let mut call_value = |call: &str| {
+            Self::validate_ac_complex_probe(call, netlist)?;
+            Ok(ExprComplexValue::real(1.0))
+        };
+        let (rewritten, context) =
+            Self::rewrite_ac_print_expression_complex(expression, context, &mut call_value)?;
+        crate::netlist::expr::eval_expression_complex(&rewritten, &context)
+            .map_err(|err| format!("unsupported .PRINT AC expression '{{{expression}}}': {err}"))?;
+        Ok(())
     }
 
     fn validate_atomic_tran_probe(
@@ -7546,24 +7630,15 @@ impl XyceTestRunner {
     ) -> Result<Value, String> {
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
-            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+            if Self::braced_expression_is_atomic_ac_probe(&normalized_expression, netlist) {
                 return Self::evaluate_atomic_ac_probe(&normalized_expression, netlist, result);
             }
-            if let Some(inner) = Self::ac_db_expression_inner(expression) {
-                let value = Self::evaluate_ac_complex_probe(inner, netlist, result)?;
-                return Ok(XyceVoltageAccessor::db(value.norm()));
-            }
-            if Self::print_expression_contains_probe_reference(expression) {
-                return Self::evaluate_ac_probe_expression(expression, netlist, result);
-            }
-            let context = Self::print_eval_context(netlist, None, None);
-            return crate::netlist::expr::eval_expression(expression, &context).map_err(|err| {
-                format!("failed to evaluate .PRINT AC expression '{{{expression}}}': {err}")
-            });
+            return Ok(Self::evaluate_ac_complex_expression(expression, netlist, result)?.re);
         }
 
         let normalized = Self::normalize_probe(probe);
         Self::evaluate_atomic_ac_probe(&normalized, netlist, result)
+            .or_else(|_| Ok(Self::evaluate_ac_complex_expression(probe, netlist, result)?.re))
     }
 
     fn evaluate_atomic_ac_probe(
@@ -7612,23 +7687,26 @@ impl XyceTestRunner {
             return Self::ac_branch_current_named(result, &element_name)
                 .ok_or_else(|| format!("branch '{}' not found in AC result", element_name));
         }
-        Err(format!("unsupported AC complex probe '{}'", probe.trim()))
+        Self::evaluate_ac_complex_expression(probe, netlist, result)
     }
 
-    fn evaluate_ac_probe_expression(
+    fn evaluate_ac_complex_expression(
         expression: &str,
         netlist: &Netlist,
         result: &AcResult,
-    ) -> Result<Value, String> {
+    ) -> Result<Complex64, String> {
         let context = Self::print_eval_context(netlist, None, None);
         let mut call_value = |call: &str| {
-            let normalized = Self::normalize_probe(call);
-            Self::evaluate_atomic_ac_probe(&normalized, netlist, result)
+            let value = Self::evaluate_ac_complex_probe(call, netlist, result)?;
+            Ok(ExprComplexValue::new(value.re, value.im))
         };
-        Self::evaluate_print_expression_with_probe_calls(expression, context, &mut call_value)
-            .map_err(|err| {
+        let (rewritten, context) =
+            Self::rewrite_ac_print_expression_complex(expression, context, &mut call_value)?;
+        let value =
+            crate::netlist::expr::eval_expression_complex(&rewritten, &context).map_err(|err| {
                 format!("failed to evaluate .PRINT AC expression '{{{expression}}}': {err}")
-            })
+            })?;
+        Ok(Complex64::new(value.re, value.im))
     }
 
     fn evaluate_ac_voltage_probe(
@@ -8277,6 +8355,47 @@ impl XyceTestRunner {
         Ok((rewritten, context, placeholder_index))
     }
 
+    fn rewrite_ac_print_expression_complex<F>(
+        expression: &str,
+        mut context: crate::netlist::ParamContext,
+        call_value: &mut F,
+    ) -> Result<(String, crate::netlist::ParamContext), String>
+    where
+        F: FnMut(&str) -> Result<ExprComplexValue, String>,
+    {
+        let expression = Self::print_expression_inner(expression).unwrap_or(expression);
+        let mut rewritten = String::with_capacity(expression.len());
+        let mut index = 0usize;
+        let mut placeholder_index = 0usize;
+
+        while index < expression.len() {
+            if let Some(open_index) = Self::print_probe_call_open_index(expression, index) {
+                let close_index = Self::matching_parenthesis_index(expression, open_index)?;
+                let call = &expression[index..=close_index];
+                let placeholder = format!("__rspice_ac_probe_{placeholder_index}");
+                let value = call_value(call)?;
+                context.set_complex(&placeholder, value);
+                rewritten.push_str(&placeholder);
+                placeholder_index += 1;
+                index = close_index + 1;
+                continue;
+            }
+
+            let ch = expression[index..]
+                .chars()
+                .next()
+                .expect("valid char boundary");
+            match ch {
+                '{' => rewritten.push('('),
+                '}' => rewritten.push(')'),
+                _ => rewritten.push(ch),
+            }
+            index += ch.len_utf8();
+        }
+
+        Ok((rewritten, context))
+    }
+
     fn rewrite_print_device_parameter_tokens_maybe<F>(
         expression: &str,
         mut context: crate::netlist::ParamContext,
@@ -8320,20 +8439,6 @@ impl XyceTestRunner {
             .and_then(|value| value.strip_suffix('}'))
             .map(str::trim)
             .filter(|value| !value.is_empty())
-    }
-
-    fn ac_db_expression_inner(expression: &str) -> Option<&str> {
-        let trimmed = expression.trim();
-        let open_index = trimmed.find('(')?;
-        if !trimmed[..open_index].trim().eq_ignore_ascii_case("db") {
-            return None;
-        }
-        let close_index = Self::matching_parenthesis_index(trimmed, open_index).ok()?;
-        if close_index + 1 != trimmed.len() {
-            return None;
-        }
-        let inner = trimmed[open_index + 1..close_index].trim();
-        (!inner.is_empty()).then_some(inner)
     }
 
     fn print_expression_contains_probe_call(expression: &str) -> bool {
@@ -8401,6 +8506,32 @@ impl XyceTestRunner {
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_power_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+    }
+
+    fn braced_expression_is_atomic_ac_probe(
+        normalized_expression: &str,
+        netlist: &Netlist,
+    ) -> bool {
+        Self::parse_device_parameter_probe(normalized_expression).is_some()
+            || Self::bare_device_parameter_probe_is_atomic_ac_probe(netlist, normalized_expression)
+            || Self::parse_device_operating_point_probe(normalized_expression)
+                .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+            || Self::parse_lead_current_probe(normalized_expression)
+                .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+            || Self::parse_voltage_probe(normalized_expression)
+                .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+            || Self::parse_current_probe(normalized_expression)
+                .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+            || Self::parse_power_probe(normalized_expression)
+                .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+    }
+
+    fn bare_device_parameter_probe_is_atomic_ac_probe(netlist: &Netlist, probe: &str) -> bool {
+        let Some(probe_name) = Self::parse_bare_device_parameter_probe(probe) else {
+            return false;
+        };
+        netlist.params.get_complex(&probe_name).is_none()
+            && Self::bare_device_parameter_probe_is_supported(netlist, &probe_name)
     }
 
     fn probe_call_covers_entire_expression(expression: &str) -> bool {
@@ -11637,7 +11768,14 @@ impl XyceTestRunner {
     fn logical_netlist_lines(source: &str) -> Vec<String> {
         let mut lines: Vec<String> = Vec::new();
         for raw in source.lines() {
-            let line = raw.trim_end();
+            let line = raw
+                .split_once(';')
+                .map(|(head, _)| head)
+                .unwrap_or(raw)
+                .trim_end();
+            if line.trim().is_empty() {
+                continue;
+            }
             if line.trim_start().starts_with('+') {
                 if let Some(previous) = lines.last_mut() {
                     previous.push(' ');
@@ -12909,6 +13047,92 @@ C1 mid out 1u
         .expect("voltage-accessor probe expression evaluates");
 
         assert_eq!(value, 184.25);
+    }
+
+    #[test]
+    fn ac_print_validation_accepts_complex_parameter_expression() {
+        let source = "complex ac expression\n\
+             Isrc 1 0 AC 1 0\n\
+             R1 1 0 1e3\n\
+             C1 1 0 2e-6\n\
+             .param r0={log10(-1)}\n\
+             .param r1={m(r0)}\n\
+             .AC DEC 10 1 1e5\n\
+             .print ac v(1) {r0} {r1}\n\
+             .END\n";
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("test.cir"))
+            .expect("complex AC expression deck parses");
+        let print =
+            XyceTestRunner::single_ac_print_request(source).expect("AC print request parses");
+
+        assert_eq!(
+            print.probes,
+            vec!["v(1)".to_string(), "{r0}".to_string(), "{r1}".to_string()]
+        );
+        XyceTestRunner::validate_ac_probe("{r0}", &netlist)
+            .expect("braced complex parameter expression validates");
+        XyceTestRunner::validate_ac_probe("r0", &netlist)
+            .expect("reference-normalized complex parameter expression validates");
+        XyceTestRunner::validate_ac_probe("{r1}", &netlist)
+            .expect("AC parameter expression wins over same-named resistor");
+    }
+
+    #[test]
+    fn print_request_keeps_continued_probes_after_inline_comments() {
+        let source = "continued print comments\n\
+             .param r0={3.0+2.0J}\n\
+             .param r1={m(r0)}\n\
+             .print ac\n\
+             + v(1)          ; complex voltage\n\
+             + {r0}          ; complex expression\n\
+             + {re(r0)}      ; real projection\n\
+             + {v(1)/r1}     ; expression with probe call\n\
+             .END\n";
+
+        let print =
+            XyceTestRunner::single_ac_print_request(source).expect("AC print request parses");
+
+        assert_eq!(
+            print.probes,
+            vec![
+                "v(1)".to_string(),
+                "{r0}".to_string(),
+                "{re(r0)}".to_string(),
+                "{v(1)/r1}".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn ac_reference_columns_match_braced_complex_print_expression() {
+        let source = "complex ac expression\n\
+             .print ac\n\
+             + v(1)          ; complex voltage\n\
+             + {r0}          ; complex expression\n\
+             + {0.1+r2}      ; complex expression with literal offset\n\
+             .END\n";
+        let print =
+            XyceTestRunner::single_ac_print_request(source).expect("AC print request parses");
+        let reference = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "FREQ".to_string(),
+                "Re(V(1))".to_string(),
+                "Im(V(1))".to_string(),
+                "Re({R0})".to_string(),
+                "Im({R0})".to_string(),
+                "Re({0.1+R2})".to_string(),
+                "Im({0.1+R2})".to_string(),
+            ],
+            rows: Vec::new(),
+        };
+
+        let columns = XyceTestRunner::reference_ac_data_columns(&reference, &print, 2)
+            .expect("complex reference headers map to AC print expressions");
+
+        assert_eq!(columns.len(), 6);
+        assert_eq!(columns[2].probe_name(), "{r0}");
+        assert_eq!(columns[4].probe_name(), "{0.1+r2}");
     }
 
     #[test]
