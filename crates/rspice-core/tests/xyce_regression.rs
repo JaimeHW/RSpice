@@ -415,6 +415,28 @@ fn test_xyce_bug_307_311_wrapper_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_generic_wrapper_transient_guardrails_stay_unsupported() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_61/capacitor.cir",
+        "Netlists/Output/TRAN/tran-prn.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && result.expected_unsupported,
+            "{relative} should stay named unsupported until its wrapper-origin transient contract is implemented, got {result:?}"
+        );
+        assert_eq!(
+            result.contract, "unsupported_xyce_contract",
+            "{relative} should not be promoted by the generic transient wrapper contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_zero_resistance_branch_current_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

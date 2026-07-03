@@ -1656,7 +1656,7 @@ impl XyceTestRunner {
 
         if Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
             || Self::is_native_output_initial_interval_tran_wrapper_candidate(source)
-            || Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
+            || Self::is_native_generic_static_prn_tran_wrapper_candidate(relative_path, source)
         {
             return Some(XyceStaticTranContract::WrapperStatic);
         }
@@ -1673,6 +1673,33 @@ impl XyceTestRunner {
 
     fn is_native_output_initial_interval_tran_wrapper_candidate(source: &str) -> bool {
         Self::validate_native_output_initial_interval_tran_wrapper_contract(source).is_ok()
+    }
+
+    fn is_native_generic_static_prn_tran_wrapper_candidate(
+        relative_path: &str,
+        source: &str,
+    ) -> bool {
+        let normalized_path = Self::normalize_manifest_key(relative_path);
+        if normalized_path.starts_with("netlists/output/") {
+            return false;
+        }
+        if Self::source_enables_constant_time_step_output(source) {
+            return false;
+        }
+        Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
+    }
+
+    fn source_enables_constant_time_step_output(source: &str) -> bool {
+        Self::logical_netlist_lines(source).iter().any(|line| {
+            let normalized = Self::strip_netlist_comment(line)
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            normalized.starts_with(".options")
+                && normalized.contains("timeint")
+                && normalized.contains("conststep")
+        })
     }
 
     fn validate_native_output_initial_interval_tran_wrapper_contract(
