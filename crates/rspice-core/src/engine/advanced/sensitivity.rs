@@ -88,6 +88,11 @@ impl Engine {
 
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit(netlist)?;
+        Self::warn_xspice_mif_analysis_boundary(
+            &circuit,
+            "Sensitivity",
+            "linearized sensitivity reports native element/source derivatives and does not use ngspice MIF DEVsen* hooks",
+        );
         Self::validate_sensitivity_node("output", output_pos, circuit.num_nodes())?;
         if let Some(output_neg) = output_neg {
             Self::validate_sensitivity_node("reference", output_neg, circuit.num_nodes())?;

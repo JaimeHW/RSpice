@@ -157,6 +157,9 @@ pub(super) fn parse_command(
         ".RSPICE_AUTO_BRIDGE_FAMILY" => {
             parse_rspice_auto_bridge_family_command(stream, line_num, params, options)?;
         }
+        ".CODEMODEL" | ".RSPICE_UNSUPPORTED_CODEMODEL" => {
+            return Err(unsupported_xspice_codemodel_command(stream, line_num, &cmd));
+        }
         ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
             parse_param_statement(stream, line_num, params, deferred_body_params)?;
         }
@@ -285,6 +288,40 @@ pub(super) fn parse_command(
     }
 
     Ok(())
+}
+
+fn unsupported_xspice_codemodel_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    command: &str,
+) -> ParseError {
+    let requested = collect_unconsumed_command_text(stream);
+    let target = if requested.is_empty() {
+        "no external code-model library path was provided".to_string()
+    } else {
+        format!("requested external code-model library path(s): {requested}")
+    };
+    ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "{command} is an ngspice dynamic XSPICE code-model loader command, \
+             but RSpice does not yet load arbitrary .cm/MIF libraries; {target}. \
+             Built-in ngspice-46 XSPICE models are supported without codemodel."
+        ),
+    }
+}
+
+fn collect_unconsumed_command_text(stream: &mut TokenStream) -> String {
+    let mut parts = Vec::new();
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let token = stream.advance();
+        if token.lexeme.is_empty() {
+            parts.push(token.kind.to_string());
+        } else {
+            parts.push(token.lexeme.clone());
+        }
+    }
+    parts.join(" ")
 }
 
 fn reject_unconsumed_command_tokens(

@@ -439,6 +439,9 @@ impl Netlist {
             if let Some(command) = Self::promote_control_esave_command(line) {
                 promoted.push(command);
             }
+            if let Some(command) = Self::promote_control_codemodel_command(line) {
+                promoted.push(command);
+            }
             if let Some(command) = Self::promote_control_set_command(line) {
                 promoted.push(command);
             }
@@ -528,6 +531,27 @@ impl Netlist {
             "all" => Some(".options xspice_esave=1".to_string()),
             _ => None,
         }
+    }
+
+    fn promote_control_codemodel_command(line: &str) -> Option<String> {
+        let body = strip_control_inline_comment(line).trim();
+        if body.is_empty() || body.starts_with('*') {
+            return None;
+        }
+
+        let body = body.strip_prefix('.').unwrap_or(body);
+        let mut parts = body.splitn(2, char::is_whitespace);
+        let command = parts.next()?;
+        if !command.eq_ignore_ascii_case("codemodel") {
+            return None;
+        }
+
+        let args = parts.next().unwrap_or("").trim();
+        Some(if args.is_empty() {
+            ".CODEMODEL".to_string()
+        } else {
+            format!(".CODEMODEL {args}")
+        })
     }
 
     fn promote_control_set_command(line: &str) -> Option<String> {
@@ -1523,6 +1547,41 @@ mod tests {
         )
         .expect("control option trtol promotes to .options trtol");
         assert_eq!(option_netlist.options.trtol, Some(1.0));
+    }
+
+    #[test]
+    fn control_block_codemodel_fails_closed() {
+        let err = Netlist::parse(
+            "control xspice codemodel loader\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .control\n\
+             codemodel ./custom.cm\n\
+             .endc\n\
+             .end\n",
+        )
+        .expect_err("dynamic XSPICE codemodel loading must fail closed");
+
+        let message = err.to_string();
+        assert!(message.contains(".CODEMODEL"), "unexpected error: {err}");
+        assert!(message.contains("custom.cm"), "unexpected error: {err}");
+        assert!(message.contains("does not yet load arbitrary .cm/MIF libraries"));
+    }
+
+    #[test]
+    fn dot_codemodel_fails_closed() {
+        let err = Netlist::parse(
+            "dot xspice codemodel loader\n\
+             .codemodel ./custom.cm\n\
+             v1 in 0 dc 1\n\
+             r1 in 0 1k\n\
+             .end\n",
+        )
+        .expect_err("explicit dynamic XSPICE codemodel loading must fail closed");
+
+        let message = err.to_string();
+        assert!(message.contains(".CODEMODEL"), "unexpected error: {err}");
+        assert!(message.contains("custom.cm"), "unexpected error: {err}");
     }
 
     #[test]

@@ -1186,6 +1186,11 @@ impl Engine {
 
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit(netlist)?;
+        Self::warn_xspice_mif_analysis_boundary(
+            &circuit,
+            "Noise",
+            "intrinsic XSPICE device-noise sources are not collected because ngspice MIF code models expose DEVnoise = NULL",
+        );
         Self::ensure_supported_dynamic_charges(&circuit, "Noise")?;
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);

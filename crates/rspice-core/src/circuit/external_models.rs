@@ -75,6 +75,77 @@ fn apply_xspice_events_at_or_before(
     changed
 }
 
+fn xspice_port_declares_event_type(port: &crate::xspice::PortSpec) -> bool {
+    if port.allowed_types.is_empty() {
+        port.default_type.is_event_driven()
+    } else {
+        port.allowed_types
+            .iter()
+            .copied()
+            .any(|port_type| port_type.is_event_driven())
+    }
+}
+
+fn xspice_event_output_width(connection: &crate::xspice::PortConnection) -> usize {
+    match connection {
+        crate::xspice::PortConnection::Digital(_)
+        | crate::xspice::PortConnection::DigitalInverted(_)
+        | crate::xspice::PortConnection::Real(_) => 1,
+        crate::xspice::PortConnection::DigitalVector(nodes)
+        | crate::xspice::PortConnection::RealVector(nodes) => nodes.len(),
+        crate::xspice::PortConnection::DigitalVectorMapped(nodes) => nodes.len(),
+        _ => 0,
+    }
+}
+
+fn xspice_event_output_count(instances: &[crate::xspice::XspiceInstance]) -> usize {
+    instances
+        .iter()
+        .map(|instance| {
+            instance
+                .ports()
+                .iter()
+                .zip(instance.connections())
+                .filter(|(port, _)| {
+                    matches!(
+                        port.direction,
+                        crate::xspice::PortDirection::Out | crate::xspice::PortDirection::InOut
+                    ) && xspice_port_declares_event_type(port)
+                })
+                .map(|(_, connection)| xspice_event_output_width(connection))
+                .sum::<usize>()
+        })
+        .sum()
+}
+
+fn xspice_event_node_summary(digital_nodes: &[NodeId], real_nodes: &[NodeId]) -> String {
+    fn append_nodes(out: &mut String, label: &str, nodes: &[NodeId]) {
+        if nodes.is_empty() {
+            return;
+        }
+        if !out.is_empty() {
+            out.push_str("; ");
+        }
+        out.push_str(label);
+        out.push_str(" nodes ");
+        for (index, node) in nodes.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            out.push_str(&node.to_string());
+        }
+    }
+
+    let mut summary = String::new();
+    append_nodes(&mut summary, "digital", digital_nodes);
+    append_nodes(&mut summary, "real", real_nodes);
+    if summary.is_empty() {
+        "no event nodes changed in the last pass".to_string()
+    } else {
+        summary
+    }
+}
+
 impl CircuitData {
     //=========================================================================
     // XSPICE Code Model Interface
@@ -264,7 +335,9 @@ impl CircuitData {
     ) -> crate::xspice::CmResult<()> {
         let current_source_values = self.current_sources.values_at_time(time);
         let max_event_passes = if self.has_xspice_event_driven_devices() {
-            self.xspice_instances.len().saturating_add(1).max(1)
+            xspice_event_output_count(&self.xspice_instances)
+                .saturating_add(1)
+                .max(1)
         } else {
             1
         };
@@ -340,8 +413,12 @@ impl CircuitData {
             }
 
             if pass + 1 == max_event_passes {
+                let unsettled = xspice_event_node_summary(
+                    touched_digital_nodes.as_slice(),
+                    touched_real_nodes.as_slice(),
+                );
                 let message = format!(
-                    "XSPICE event network did not settle at time {time:e} after {max_event_passes} passes"
+                    "XSPICE event network did not settle at time {time:e} after {max_event_passes} passes ({unsettled})"
                 );
                 if self.xspice_evaluation_error.is_none() {
                     self.xspice_evaluation_error = Some(message.clone());
@@ -1938,7 +2015,7 @@ mod tests {
         params: Vec<ParamSpec>,
     }
 
-    struct OscillatingEventModel;
+    struct FeedbackInverterModel;
 
     struct PhaseProbeModel {
         seen_phases: Arc<Mutex<Vec<EvaluationPhase>>>,
@@ -2024,34 +2101,32 @@ mod tests {
         }
     }
 
-    impl CodeModel for OscillatingEventModel {
+    impl CodeModel for FeedbackInverterModel {
         fn name(&self) -> &str {
-            "oscillating_event_model"
+            "feedback_inverter_model"
         }
 
         fn ports(&self) -> &[PortSpec] {
             use std::sync::OnceLock;
             static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
-            PORTS.get_or_init(|| vec![PortSpec::output("out", PortType::Digital)])
+            PORTS.get_or_init(|| {
+                vec![
+                    PortSpec::input("in", PortType::Digital),
+                    PortSpec::output("out", PortType::Digital),
+                ]
+            })
         }
 
         fn parameters(&self) -> &[ParamSpec] {
             &[]
         }
 
-        fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-            ctx.allocate_int_states(1);
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
             Ok(())
         }
 
         fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
-            let next = 1 - ctx.int_state(0);
-            ctx.set_int_state(0, next);
-            let value = if next == 0 {
-                DigitalValue::zero()
-            } else {
-                DigitalValue::one()
-            };
+            let value = ctx.input_digital("in").unwrap_or_default().invert();
             ctx.set_output_digital("out", value, 0.0);
             Ok(())
         }
@@ -2125,17 +2200,17 @@ mod tests {
         .expect("breakpoint instance should construct")
     }
 
-    fn oscillating_event_instance() -> XspiceInstance {
+    fn feedback_inverter_instance() -> XspiceInstance {
         XspiceInstance::new(
-            "Aosc",
-            Arc::new(OscillatingEventModel),
-            vec![PortConnection::Digital(1)],
+            "Afb",
+            Arc::new(FeedbackInverterModel),
+            vec![PortConnection::Digital(1), PortConnection::Digital(1)],
             &[],
             &[],
             &[],
             &[],
         )
-        .expect("oscillating event instance should construct")
+        .expect("feedback inverter instance should construct")
     }
 
     fn phase_probe_instance(seen_phases: Arc<Mutex<Vec<EvaluationPhase>>>) -> XspiceInstance {
@@ -2206,9 +2281,17 @@ mod tests {
     #[test]
     fn evaluate_xspice_reports_nonsettling_zero_delay_event_network() {
         let mut circuit = CircuitData::new();
-        circuit.add_xspice_instance(oscillating_event_instance());
+        circuit.get_or_create_node("out");
+        circuit.add_xspice_instance(feedback_inverter_instance());
+        assert!(circuit.has_xspice_event_driven_devices());
+        assert_eq!(xspice_event_output_count(&circuit.xspice_instances), 1);
 
-        circuit.evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient);
+        let result =
+            circuit.try_evaluate_xspice_with_analysis(0.0, 1e-9, &[], AnalysisType::Transient);
+        assert!(
+            result.is_err(),
+            "expected event iteration failure, got {result:?}"
+        );
         let err = circuit
             .take_xspice_evaluation_error()
             .expect("non-settling XSPICE event networks must be reported");

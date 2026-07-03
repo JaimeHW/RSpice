@@ -24,6 +24,18 @@ impl Engine {
         }
     }
 
+    pub(in crate::engine::advanced) fn warn_xspice_mif_analysis_boundary(
+        circuit: &CircuitData,
+        analysis: &str,
+        detail: &str,
+    ) {
+        if circuit.has_xspice_devices() {
+            log::warn!(
+                "{analysis} analysis: {detail}; XSPICE code models participate through RSpice's built-in small-signal/runtime adapters, but ngspice-style dynamic MIF analysis hooks are not available"
+            );
+        }
+    }
+
     fn ensure_supported_bsim_ac_nqs_pz_models(
         circuit: &CircuitData,
     ) -> Result<(), SimulationError> {
@@ -259,6 +271,11 @@ impl Engine {
         compute_zeros: bool,
     ) -> Result<PoleZeroResult, SimulationError> {
         let mut circuit = self.build_circuit(netlist)?;
+        Self::warn_xspice_mif_analysis_boundary(
+            &circuit,
+            "Pole-zero",
+            "using the AC linearization path because ngspice MIF code models do not provide DEVpzLoad hooks",
+        );
         Self::ensure_supported_dynamic_charges(&circuit, "Pole-zero")?;
         Self::ensure_supported_bsim_ac_nqs_pz_models(&circuit)?;
         let num_nodes = circuit.num_nodes();
