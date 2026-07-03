@@ -2622,6 +2622,38 @@ fn test_xyce_switch_on_off_family_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_voltage_controlled_source_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract) in [
+        ("Netlists/VCCS/vccs.cir", "static_prn_dc"),
+        ("Netlists/VCCS/vccs_tran.cir", "static_prn_tran"),
+        ("Netlists/VCVS/vcvs.cir", "static_prn_dc"),
+        ("Netlists/VCVS/vcvs_trans.cir", "static_prn_tran"),
+    ] {
+        assert!(
+            !runner.requires_upstream_wrapper(relative),
+            "{relative} should be a native Xyce deck without removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce voltage-controlled source comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, expected_contract,
+            "{relative} should report the expected native .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_cccs_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
