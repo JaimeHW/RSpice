@@ -1,9 +1,9 @@
 use rspice_core::xspice::{
     CmContext, CodeModelRegistry,
     conformance::{
-        IfSpecConformancePolicy, PartialVerificationOptions, audit_ngspice_ifspec_test_coverage,
-        audit_ngspice_ifspec_tree, audit_ngspice_xspice_examples, context_with_model_defaults,
-        verify_model_partials,
+        IfSpecConformancePolicy, PartialVerificationOptions, audit_ngspice_ifspec_event_port_types,
+        audit_ngspice_ifspec_test_coverage, audit_ngspice_ifspec_tree,
+        audit_ngspice_xspice_examples, context_with_model_defaults, verify_model_partials,
     },
 };
 use std::path::{Path, PathBuf};
@@ -144,6 +144,29 @@ fn ngspice46_ifspec_catalog_has_test_coverage_markers() {
         Vec::<String>::new(),
         "XSPICE catalog models without test coverage markers: {:#?}",
         report.uncovered_models
+    );
+}
+
+#[test]
+fn ngspice46_ifspec_catalog_uses_supported_event_port_types() {
+    let Some(ngspice_root) = skip_without_local_ngspice_source() else {
+        return;
+    };
+    let report = audit_ngspice_ifspec_event_port_types(
+        &ngspice_root.join("src").join("xspice").join("icm"),
+        &IfSpecConformancePolicy::ngspice46(),
+    )
+    .expect("ngspice ifspec event port type audit runs");
+
+    assert!(
+        report.checked_models >= 70,
+        "expected the ngspice 46 XSPICE ifspec catalog, checked {} model(s)",
+        report.checked_models
+    );
+    assert!(
+        !report.has_unsupported_event_ports(),
+        "ngspice 46 model(s) require unsupported XSPICE event port types: {:#?}",
+        report.unsupported_event_ports
     );
 }
 

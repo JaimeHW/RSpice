@@ -5,7 +5,9 @@
 //! intentionally reusable by tests, nightly jobs, and developer tooling.
 
 use super::ifspec::{IfSpec, IfSpecDefault, IfSpecParamType, parse_ifspec};
-use super::{CmContext, CmError, CodeModel, CodeModelRegistry, ParamSpec, ParamType, PortSpec};
+use super::{
+    CmContext, CmError, CodeModel, CodeModelRegistry, ParamSpec, ParamType, PortSpec, PortType,
+};
 use crate::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -95,6 +97,27 @@ impl XspiceCatalogCoverageReport {
 
     pub fn has_uncovered_models(&self) -> bool {
         !self.uncovered_models.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XspiceUnsupportedEventPort {
+    pub model: String,
+    pub port: String,
+    pub port_type: PortType,
+    pub source: String,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct XspiceEventPortCatalogReport {
+    pub checked_models: usize,
+    pub unsupported_event_ports: Vec<XspiceUnsupportedEventPort>,
+}
+
+impl XspiceEventPortCatalogReport {
+    pub fn has_unsupported_event_ports(&self) -> bool {
+        !self.unsupported_event_ports.is_empty()
     }
 }
 
@@ -240,6 +263,76 @@ pub fn audit_ngspice_ifspec_test_coverage(
     report.covered_models.sort();
     report.uncovered_models.sort();
     Ok(report)
+}
+
+pub fn audit_ngspice_ifspec_event_port_types(
+    icm_root: &Path,
+    policy: &IfSpecConformancePolicy,
+) -> Result<XspiceEventPortCatalogReport, ConformanceError> {
+    let mut paths = Vec::new();
+    collect_ifspec_paths(icm_root, &mut paths)?;
+    paths.sort();
+
+    let mut report = XspiceEventPortCatalogReport::default();
+    for path in paths {
+        let source = read_to_string(&path)?;
+        let spec = parse_ifspec(&source).map_err(|err| ConformanceError::Parse {
+            path: path.clone(),
+            message: err.to_string(),
+        })?;
+        if policy.should_skip_model(&spec.spice_model_name) {
+            continue;
+        }
+
+        report.checked_models += 1;
+        for port in &spec.ports {
+            push_unsupported_event_port_type(
+                &mut report,
+                &spec.spice_model_name,
+                port,
+                port.default_type,
+                "default",
+                &path,
+            );
+            for allowed_type in &port.allowed_types {
+                push_unsupported_event_port_type(
+                    &mut report,
+                    &spec.spice_model_name,
+                    port,
+                    *allowed_type,
+                    "allowed",
+                    &path,
+                );
+            }
+        }
+    }
+
+    report
+        .unsupported_event_ports
+        .sort_by(|a, b| (&a.model, &a.port, &a.source).cmp(&(&b.model, &b.port, &b.source)));
+    Ok(report)
+}
+
+fn push_unsupported_event_port_type(
+    report: &mut XspiceEventPortCatalogReport,
+    model: &str,
+    port: &super::ifspec::IfSpecPort,
+    port_type: PortType,
+    source: &str,
+    path: &Path,
+) {
+    if !matches!(port_type, PortType::Integer | PortType::UserDefined) {
+        return;
+    }
+    report
+        .unsupported_event_ports
+        .push(XspiceUnsupportedEventPort {
+            model: model.to_string(),
+            port: port.name.clone(),
+            port_type,
+            source: source.to_string(),
+            path: path.to_path_buf(),
+        });
 }
 
 pub fn audit_model_ifspec(
