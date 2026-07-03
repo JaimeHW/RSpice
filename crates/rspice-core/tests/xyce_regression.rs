@@ -251,6 +251,9 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/BJT_PSPICE_NK/bjt_test_nk.cir",
         "Netlists/BINARYOPS/binary_funcs.cir",
         "Netlists/Certification_Tests/BUG_302/DC_comma.cir",
+        "Netlists/Certification_Tests/BUG_302/DC_defaults.cir",
+        "Netlists/Certification_Tests/BUG_302/DC_delimiter_invalid.cir",
+        "Netlists/Certification_Tests/BUG_302/DC_tab.cir",
         "Netlists/Certification_Tests/BUG_28_SON/bug_28_son2.cir",
         "Netlists/Certification_Tests/BUG_1456/bug_1456.cir",
         "Netlists/Certification_Tests/BUG_1602/vbic_3T_et_cf.cir",
@@ -415,6 +418,7 @@ fn test_xyce_transient_delimiter_option_cases_run() {
 
     for relative in [
         "Netlists/Certification_Tests/BUG_302/transient_comma.cir",
+        "Netlists/Certification_Tests/BUG_302/transient_defaults.cir",
         "Netlists/Certification_Tests/BUG_302/transient_tab.cir",
         "Netlists/Certification_Tests/BUG_302/transient_delimiter_invalid.cir",
     ] {
