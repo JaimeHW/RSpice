@@ -2,120 +2,33 @@
 
 use crate::device::veriloga_generated::GeneratedDdtCoefficients;
 
+#[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Parameters {
-    pub p0: f64,
-    pub p1: f64,
-    pub p2: f64,
-    pub p3: f64,
-    pub p4: f64,
-    pub p5: f64,
-    pub p6: f64,
-    pub p7: f64,
-    pub p8: f64,
-    pub p9: f64,
-    pub p10: f64,
-    pub p11: f64,
-    pub p12: f64,
-    pub p13: f64,
-    pub p14: f64,
-    pub p15: f64,
-    pub p16: f64,
-    pub p17: f64,
-    pub p18: f64,
-    pub p19: f64,
-    pub p20: f64,
-    pub p21: f64,
-    pub p22: f64,
-    pub p23: f64,
-    pub p24: f64,
-    pub p25: f64,
-    pub p26: f64,
-    pub p27: f64,
-    pub p28: f64,
-    pub p29: f64,
-    pub p30: f64,
-    pub p31: f64,
-    pub p32: f64,
-    pub p33: f64,
-    pub p34: f64,
-    pub p35: f64,
-    pub p36: f64,
-    pub p37: f64,
-    pub p38: f64,
-    pub p39: f64,
-    pub p40: f64,
-    pub p41: f64,
-    pub p42: f64,
-    pub p43: f64,
-    pub p44: f64,
-    pub p45: f64,
-    pub p46: f64,
-    pub p47: f64,
-}
-
-impl Copy for Parameters {}
-
-impl Clone for Parameters {
-    #[inline]
-    fn clone(&self) -> Self { *self }
+    pub p0: f64, pub p1: f64, pub p2: f64, pub p3: f64, pub p4: f64, pub p5: f64, pub p6: f64, pub p7: f64, 
+    pub p8: f64, pub p9: f64, pub p10: f64, pub p11: f64, pub p12: f64, pub p13: f64, pub p14: f64, pub p15: f64, 
+    pub p16: f64, pub p17: f64, pub p18: f64, pub p19: f64, pub p20: f64, pub p21: f64, pub p22: f64, pub p23: f64, 
+    pub p24: f64, pub p25: f64, pub p26: f64, pub p27: f64, pub p28: f64, pub p29: f64, pub p30: f64, pub p31: f64, 
+    pub p32: f64, pub p33: f64, pub p34: f64, pub p35: f64, pub p36: f64, pub p37: f64, pub p38: f64, pub p39: f64, 
+    pub p40: f64, pub p41: f64, pub p42: f64, pub p43: f64, pub p44: f64, pub p45: f64, pub p46: f64, pub p47: f64, 
 }
 
 impl Parameters {
     fn new_box() -> Box<Self> {
-        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
+        // SAFETY: Parameters is repr(C) and every field is f64; zero bytes are valid 0.0 values, and numeric default chunks are copied into field-order slots.
         let mut boxed = Box::<Self>::new_uninit();
         unsafe {
             let ptr = boxed.as_mut_ptr();
             std::ptr::write_bytes(ptr, 0, 1);
-            let params = &mut *ptr;
-            params.p0 = 1e-6;
-            params.p1 = 2e-6;
-            params.p2 = 7e-6;
-            params.p3 = 0.003;
-            params.p4 = 1.0;
-            params.p5 = 6e-8;
-            params.p6 = 300.0;
-            params.p7 = -5.43;
-            params.p8 = 0.02;
-            params.p9 = -0.01;
-            params.p10 = 0.045;
-            params.p11 = 1e19;
-            params.p12 = 0.3;
-            params.p13 = 1.6e-12;
-            params.p14 = 200000000.0;
-            params.p15 = 8000000.0;
-            params.p16 = 200.0;
-            params.p17 = 1.0;
-            params.p18 = 0.0;
-            params.p19 = 0.0;
-            params.p20 = 1e-9;
-            params.p21 = 0.0;
-            params.p22 = 0.165;
-            params.p23 = 1.0;
-            params.p24 = 0.0;
-            params.p25 = 0.0;
-            params.p26 = 1.0;
-            params.p27 = -1.7;
-            params.p28 = -2.2;
-            params.p29 = 0.5;
-            params.p30 = 1.0;
-            params.p31 = 70.0;
-            params.p32 = 1e-8;
-            params.p33 = 0.0;
-            params.p34 = 1.0;
-            params.p35 = 20.0;
-            params.p36 = 1e-9;
-            params.p37 = 5e17;
-            params.p38 = 0.155;
-            params.p39 = 30000.0;
-            params.p40 = 0.0022;
-            params.p41 = 0.0;
-            params.p42 = 0.0;
-            params.p43 = 0.0022;
-            params.p44 = 0.0;
-            params.p45 = 2.0;
-            params.p46 = 0.0;
-            params.p47 = 1.2;
+            const DEFAULTS_0: [f64; 48] = [
+                1e-6, 2e-6, 7e-6, 0.003, 1.0, 6e-8, 300.0, -5.43,
+                0.02, -0.01, 0.045, 1e19, 0.3, 1.6e-12, 200000000.0, 8000000.0,
+                200.0, 1.0, 0.0, 0.0, 1e-9, 0.0, 0.165, 1.0,
+                0.0, 0.0, 1.0, -1.7, -2.2, 0.5, 1.0, 70.0,
+                1e-8, 0.0, 1.0, 20.0, 1e-9, 5e17, 0.155, 30000.0,
+                0.0022, 0.0, 0.0, 0.0022, 0.0, 2.0, 0.0, 1.2,
+            ];
+            std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (ptr as *mut f64).add(0), 48);
             boxed.assume_init()
         }
     }
@@ -125,6 +38,45 @@ impl Default for Parameters {
     fn default() -> Self {
         *Self::new_box()
     }
+}
+
+#[derive(Copy, Clone)]
+struct ParameterBound {
+    value: f64,
+    label: &'static str,
+}
+
+const PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
+const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
+
+fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
+    let name = PARAMETER_DISPLAY_NAMES[index];
+    let flags = PARAMETER_RANGE_FLAGS[index];
+    validate_finite_parameter(name, value)?;
+    if let Some(min) = PARAMETER_MIN_BOUNDS[index] {
+        if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
+            if value <= min.value {
+                return Err(format!("parameter '{}' must be > {}, got {}", name, min.label, value));
+            }
+        } else if value < min.value {
+            return Err(format!("parameter '{}' must be >= {}, got {}", name, min.label, value));
+        }
+    }
+    if let Some(max) = PARAMETER_MAX_BOUNDS[index] {
+        if flags & PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {
+            if value >= max.value {
+                return Err(format!("parameter '{}' must be < {}, got {}", name, max.label, value));
+            }
+        } else if value > max.value {
+            return Err(format!("parameter '{}' must be <= {}, got {}", name, max.label, value));
+        }
+    }
+    for excluded in PARAMETER_EXCLUDED_BOUNDS[index] {
+        if value == excluded.value {
+            return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
+        }
+    }
+    Ok(())
 }
 
 fn validate_finite_parameter(name: &str, value: f64) -> Result<(), String> {
@@ -169,6 +121,56 @@ fn validate_parameter(
     }
     Ok(())
 }
+const PARAMETER_NAME_LOOKUP: [(&str, usize); 48] = [
+    ("l", 0), ("lard", 1), ("lars", 2), ("w", 3), ("nf", 4), ("x1", 5), ("tnom", 6), ("va", 7), ("eta0", 8), ("etab", 9), ("phin", 10), ("ndep", 11), ("xx", 12), ("gg", 13), ("e0", 14), ("ucrit", 15), 
+    ("aclm", 16), ("delta", 17), ("cit", 18), ("nfactor", 19), ("cdscd", 20), ("cdscb", 21), ("u0", 22), ("ua", 23), ("uc", 24), ("ud", 25), ("eu", 26), ("bex", 27), ("ucex", 28), ("etavsat", 29), ("usc", 30), ("avdsx", 31), 
+    ("lc", 32), ("lambda", 33), ("type", 34), ("rth", 35), ("cth", 36), ("ns0", 37), ("mu0acc", 38), ("vsat0acc", 39), ("rcs", 40), ("ktrs", 41), ("ktrd", 42), ("rcd", 43), ("kth1", 44), ("kth2", 45), ("kth3", 46), ("gsar", 47), 
+    ];
+
+const PARAMETER_DISPLAY_NAMES: [&str; 48] = [
+    "L", "Lard", "Lars", "W", "NF", "x1", "TNOM", "VA", "ETA0", "ETAB", "PHIN", "NDEP", "xx", "gg", "E0", "UCRIT", 
+    "ACLM", "DELTA", "CIT", "NFACTOR", "CDSCD", "CDSCB", "U0", "UA", "UC", "UD", "EU", "BEX", "UCEX", "ETAVSAT", "USC", "AVDSX", 
+    "LC", "LAMBDA", "TYPE", "rth", "cth", "ns0", "mu0acc", "vsat0acc", "Rcs", "ktrs", "ktrd", "Rcd", "kth1", "kth2", "kth3", "gsar", 
+];
+
+const PARAMETER_MIN_BOUNDS: [Option<ParameterBound>; 48] = [
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, 
+    None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 5.0, label: "5.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -1.0, label: "-1.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, None, 
+];
+
+const PARAMETER_MAX_BOUNDS: [Option<ParameterBound>; 48] = [
+    None, None, None, None, None, None, None, None, 
+    None, None, None, None, Some(ParameterBound { value: 1.0, label: "1.0" }), None, None, None, 
+    None, None, None, None, None, None, None, None, 
+    None, None, None, None, None, None, None, Some(ParameterBound { value: 100.0, label: "100.0" }), 
+    None, None, Some(ParameterBound { value: 1.0, label: "1.0" }), None, None, None, None, None, 
+    None, None, None, None, None, None, None, None, 
+];
+
+const PARAMETER_RANGE_FLAGS: [u8; 48] = [
+    3, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 0, 2, 3, 2, 2, 2, 2, 3, 2, 2, 2, 2, 0, 0, 0, 2, 0, 
+    3, 2, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 
+];
+
+const PARAMETER_EXCLUDED_BOUNDS: [&[ParameterBound]; 48] = [
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[ParameterBound { value: 0.0, label: "0.0" }], 
+];
+
+fn parameter_index_for_name(name: &str) -> Option<usize> {
+    PARAMETER_NAME_LOOKUP
+        .iter()
+        .find_map(|(candidate, index)| (*candidate == name).then_some(*index))
+}
+
 fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
     let mut boxed = Box::<[f64; N]>::new_uninit();
     unsafe {
@@ -330,57 +332,30 @@ impl Instance {
     }
 
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
-        match name.to_ascii_lowercase().as_str() {
-            "l" => { validate_parameter("L", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p0 = value; self.mark_param_given(0); self.recompute_instance_static(); Ok(()) }
-            "lard" => { validate_parameter("Lard", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p1 = value; self.mark_param_given(1); self.recompute_instance_static(); Ok(()) }
-            "lars" => { validate_parameter("Lars", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p2 = value; self.mark_param_given(2); self.recompute_instance_static(); Ok(()) }
-            "w" => { validate_parameter("W", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p3 = value; self.mark_param_given(3); self.recompute_instance_static(); Ok(()) }
-            "nf" => { validate_parameter("NF", value, Some((1.0, "1.0")), false, None, true, &[])?; self.params.p4 = value; self.mark_param_given(4); self.recompute_instance_static(); Ok(()) }
-            "x1" => { validate_parameter("x1", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p5 = value; self.mark_param_given(5); self.recompute_instance_static(); Ok(()) }
-            "tnom" => { validate_parameter("TNOM", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p6 = value; self.mark_param_given(6); self.recompute_instance_static(); Ok(()) }
-            "va" => { validate_finite_parameter("VA", value)?; self.params.p7 = value; self.mark_param_given(7); self.recompute_instance_static(); Ok(()) }
-            "eta0" => { validate_finite_parameter("ETA0", value)?; self.params.p8 = value; self.mark_param_given(8); self.recompute_instance_static(); Ok(()) }
-            "etab" => { validate_finite_parameter("ETAB", value)?; self.params.p9 = value; self.mark_param_given(9); self.recompute_instance_static(); Ok(()) }
-            "phin" => { validate_finite_parameter("PHIN", value)?; self.params.p10 = value; self.mark_param_given(10); self.recompute_instance_static(); Ok(()) }
-            "ndep" => { validate_parameter("NDEP", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p11 = value; self.mark_param_given(11); self.recompute_instance_static(); Ok(()) }
-            "xx" => { validate_parameter("xx", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p12 = value; self.mark_param_given(12); self.recompute_instance_static(); Ok(()) }
-            "gg" => { validate_parameter("gg", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p13 = value; self.mark_param_given(13); self.recompute_instance_static(); Ok(()) }
-            "e0" => { validate_parameter("E0", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p14 = value; self.mark_param_given(14); self.recompute_instance_static(); Ok(()) }
-            "ucrit" => { validate_finite_parameter("UCRIT", value)?; self.params.p15 = value; self.mark_param_given(15); self.recompute_instance_static(); Ok(()) }
-            "aclm" => { validate_parameter("ACLM", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p16 = value; self.mark_param_given(16); self.recompute_instance_static(); Ok(()) }
-            "delta" => { validate_parameter("DELTA", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p17 = value; self.mark_param_given(17); self.recompute_instance_static(); Ok(()) }
-            "cit" => { validate_parameter("CIT", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p18 = value; self.mark_param_given(18); self.recompute_instance_static(); Ok(()) }
-            "nfactor" => { validate_parameter("NFACTOR", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p19 = value; self.mark_param_given(19); self.recompute_instance_static(); Ok(()) }
-            "cdscd" => { validate_parameter("CDSCD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p20 = value; self.mark_param_given(20); self.recompute_instance_static(); Ok(()) }
-            "cdscb" => { validate_parameter("CDSCB", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p21 = value; self.mark_param_given(21); self.recompute_instance_static(); Ok(()) }
-            "u0" => { validate_parameter("U0", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); self.recompute_instance_static(); Ok(()) }
-            "ua" => { validate_parameter("UA", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p23 = value; self.mark_param_given(23); self.recompute_instance_static(); Ok(()) }
-            "uc" => { validate_parameter("UC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p24 = value; self.mark_param_given(24); self.recompute_instance_static(); Ok(()) }
-            "ud" => { validate_parameter("UD", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p25 = value; self.mark_param_given(25); self.recompute_instance_static(); Ok(()) }
-            "eu" => { validate_parameter("EU", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p26 = value; self.mark_param_given(26); self.recompute_instance_static(); Ok(()) }
-            "bex" => { validate_finite_parameter("BEX", value)?; self.params.p27 = value; self.mark_param_given(27); self.recompute_instance_static(); Ok(()) }
-            "ucex" => { validate_finite_parameter("UCEX", value)?; self.params.p28 = value; self.mark_param_given(28); self.recompute_instance_static(); Ok(()) }
-            "etavsat" => { validate_finite_parameter("ETAVSAT", value)?; self.params.p29 = value; self.mark_param_given(29); self.recompute_instance_static(); Ok(()) }
-            "usc" => { validate_parameter("USC", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p30 = value; self.mark_param_given(30); self.recompute_instance_static(); Ok(()) }
-            "avdsx" => { validate_parameter("AVDSX", value, Some((5.0, "5.0")), false, Some((100.0, "100.0")), false, &[])?; self.params.p31 = value; self.mark_param_given(31); self.recompute_instance_static(); Ok(()) }
-            "lc" => { validate_parameter("LC", value, Some((0.0, "0.0")), true, None, true, &[])?; self.params.p32 = value; self.mark_param_given(32); self.recompute_instance_static(); Ok(()) }
-            "lambda" => { validate_parameter("LAMBDA", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p33 = value; self.mark_param_given(33); self.recompute_instance_static(); Ok(()) }
-            "type" => { validate_parameter("TYPE", value, Some((-1.0, "-1.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p34 = value; self.mark_param_given(34); self.recompute_instance_static(); Ok(()) }
-            "rth" => { validate_parameter("rth", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p35 = value; self.mark_param_given(35); self.recompute_instance_static(); Ok(()) }
-            "cth" => { validate_parameter("cth", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p36 = value; self.mark_param_given(36); self.recompute_instance_static(); Ok(()) }
-            "ns0" => { validate_parameter("ns0", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p37 = value; self.mark_param_given(37); self.recompute_instance_static(); Ok(()) }
-            "mu0acc" => { validate_parameter("mu0acc", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p38 = value; self.mark_param_given(38); self.recompute_instance_static(); Ok(()) }
-            "vsat0acc" => { validate_parameter("vsat0acc", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p39 = value; self.mark_param_given(39); self.recompute_instance_static(); Ok(()) }
-            "rcs" => { validate_parameter("Rcs", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p40 = value; self.mark_param_given(40); self.recompute_instance_static(); Ok(()) }
-            "ktrs" => { validate_parameter("ktrs", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p41 = value; self.mark_param_given(41); self.recompute_instance_static(); Ok(()) }
-            "ktrd" => { validate_parameter("ktrd", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p42 = value; self.mark_param_given(42); self.recompute_instance_static(); Ok(()) }
-            "rcd" => { validate_parameter("Rcd", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p43 = value; self.mark_param_given(43); self.recompute_instance_static(); Ok(()) }
-            "kth1" => { validate_parameter("kth1", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p44 = value; self.mark_param_given(44); self.recompute_instance_static(); Ok(()) }
-            "kth2" => { validate_parameter("kth2", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p45 = value; self.mark_param_given(45); self.recompute_instance_static(); Ok(()) }
-            "kth3" => { validate_finite_parameter("kth3", value)?; self.params.p46 = value; self.mark_param_given(46); self.recompute_instance_static(); Ok(()) }
-            "gsar" => { validate_parameter("gsar", value, None, true, None, true, &[(0.0, "0.0")])?; self.params.p47 = value; self.mark_param_given(47); self.recompute_instance_static(); Ok(()) }
-            _ => Err(format!("unknown parameter '{}' for generated Verilog-A model 'EPFL_HEMT_10a'", name)),
+        let lower = name.to_ascii_lowercase();
+        let Some(index) = parameter_index_for_name(lower.as_str()) else {
+            return Err(format!("unknown parameter '{}' for generated Verilog-A model 'EPFL_HEMT_10a'", name));
+        };
+        validate_parameter_metadata(index, value)?;
+        self.write_parameter_slot(index, value);
+        self.finish_set_parameter(index);
+        Ok(())
+    }
+
+    #[inline]
+    fn write_parameter_slot(&mut self, index: usize, value: f64) {
+        debug_assert!(index < Self::PARAMETER_COUNT, "generated parameter index out of range");
+        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.
+        unsafe {
+            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;
+            *ptr.add(index) = value;
         }
+    }
+
+    #[inline]
+    fn finish_set_parameter(&mut self, index: usize) {
+        self.mark_param_given(index);
+        self.recompute_instance_static(); 
     }
 
     #[inline]

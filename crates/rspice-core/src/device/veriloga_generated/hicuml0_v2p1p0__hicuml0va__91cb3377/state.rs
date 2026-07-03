@@ -2,252 +2,79 @@
 
 use crate::device::veriloga_generated::GeneratedDdtCoefficients;
 
+#[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Parameters {
-    pub p0: f64,
-    pub p1: f64,
-    pub p2: f64,
-    pub p3: f64,
-    pub p4: f64,
-    pub p5: f64,
-    pub p6: f64,
-    pub p7: f64,
-    pub p8: f64,
-    pub p9: f64,
-    pub p10: f64,
-    pub p11: f64,
-    pub p12: f64,
-    pub p13: f64,
-    pub p14: f64,
-    pub p15: f64,
-    pub p16: f64,
-    pub p17: f64,
-    pub p18: f64,
-    pub p19: f64,
-    pub p20: f64,
-    pub p21: f64,
-    pub p22: f64,
-    pub p23: f64,
-    pub p24: f64,
-    pub p25: f64,
-    pub p26: f64,
-    pub p27: f64,
-    pub p28: f64,
-    pub p29: f64,
-    pub p30: f64,
-    pub p31: f64,
-    pub p32: f64,
-    pub p33: f64,
-    pub p34: f64,
-    pub p35: f64,
-    pub p36: f64,
-    pub p37: f64,
-    pub p38: f64,
-    pub p39: f64,
-    pub p40: f64,
-    pub p41: f64,
-    pub p42: f64,
-    pub p43: f64,
-    pub p44: f64,
-    pub p45: f64,
-    pub p46: f64,
-    pub p47: f64,
-    pub p48: f64,
-    pub p49: f64,
-    pub p50: f64,
-    pub p51: f64,
-    pub p52: f64,
-    pub p53: f64,
-    pub p54: f64,
-    pub p55: f64,
-    pub p56: f64,
-    pub p57: f64,
-    pub p58: f64,
-    pub p59: f64,
-    pub p60: f64,
-    pub p61: f64,
-    pub p62: f64,
-    pub p63: f64,
-    pub p64: f64,
-    pub p65: f64,
-    pub p66: f64,
-    pub p67: f64,
-    pub p68: f64,
-    pub p69: f64,
-    pub p70: f64,
-    pub p71: f64,
-    pub p72: f64,
-    pub p73: f64,
-    pub p74: f64,
-    pub p75: f64,
-    pub p76: f64,
-    pub p77: f64,
-    pub p78: f64,
-    pub p79: f64,
-    pub p80: f64,
-    pub p81: f64,
-    pub p82: f64,
-    pub p83: f64,
-    pub p84: f64,
-    pub p85: f64,
-    pub p86: f64,
-    pub p87: f64,
-    pub p88: f64,
-    pub p89: f64,
-    pub p90: f64,
-    pub p91: f64,
-    pub p92: f64,
-    pub p93: f64,
-    pub p94: f64,
-    pub p95: f64,
-    pub p96: f64,
-    pub p97: f64,
-    pub p98: f64,
-    pub p99: f64,
-    pub p100: f64,
-    pub p101: f64,
-    pub p102: f64,
-    pub p103: f64,
-    pub p104: f64,
-    pub p105: f64,
-    pub p106: f64,
-    pub p107: f64,
-    pub p108: f64,
-    pub p109: f64,
-    pub p110: f64,
-    pub p111: f64,
-}
-
-impl Copy for Parameters {}
-
-impl Clone for Parameters {
-    #[inline]
-    fn clone(&self) -> Self { *self }
+    pub p0: f64, pub p1: f64, pub p2: f64, pub p3: f64, pub p4: f64, pub p5: f64, pub p6: f64, pub p7: f64, 
+    pub p8: f64, pub p9: f64, pub p10: f64, pub p11: f64, pub p12: f64, pub p13: f64, pub p14: f64, pub p15: f64, 
+    pub p16: f64, pub p17: f64, pub p18: f64, pub p19: f64, pub p20: f64, pub p21: f64, pub p22: f64, pub p23: f64, 
+    pub p24: f64, pub p25: f64, pub p26: f64, pub p27: f64, pub p28: f64, pub p29: f64, pub p30: f64, pub p31: f64, 
+    pub p32: f64, pub p33: f64, pub p34: f64, pub p35: f64, pub p36: f64, pub p37: f64, pub p38: f64, pub p39: f64, 
+    pub p40: f64, pub p41: f64, pub p42: f64, pub p43: f64, pub p44: f64, pub p45: f64, pub p46: f64, pub p47: f64, 
+    pub p48: f64, pub p49: f64, pub p50: f64, pub p51: f64, pub p52: f64, pub p53: f64, pub p54: f64, pub p55: f64, 
+    pub p56: f64, pub p57: f64, pub p58: f64, pub p59: f64, pub p60: f64, pub p61: f64, pub p62: f64, pub p63: f64, 
+    pub p64: f64, pub p65: f64, pub p66: f64, pub p67: f64, pub p68: f64, pub p69: f64, pub p70: f64, pub p71: f64, 
+    pub p72: f64, pub p73: f64, pub p74: f64, pub p75: f64, pub p76: f64, pub p77: f64, pub p78: f64, pub p79: f64, 
+    pub p80: f64, pub p81: f64, pub p82: f64, pub p83: f64, pub p84: f64, pub p85: f64, pub p86: f64, pub p87: f64, 
+    pub p88: f64, pub p89: f64, pub p90: f64, pub p91: f64, pub p92: f64, pub p93: f64, pub p94: f64, pub p95: f64, 
+    pub p96: f64, pub p97: f64, pub p98: f64, pub p99: f64, pub p100: f64, pub p101: f64, pub p102: f64, pub p103: f64, 
+    pub p104: f64, pub p105: f64, pub p106: f64, pub p107: f64, pub p108: f64, pub p109: f64, pub p110: f64, pub p111: f64, 
 }
 
 impl Parameters {
     fn new_box() -> Box<Self> {
-        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.
+        // SAFETY: Parameters is repr(C) and every field is f64; zero bytes are valid 0.0 values, and numeric default chunks are copied into field-order slots.
         let mut boxed = Box::<Self>::new_uninit();
         unsafe {
             let ptr = boxed.as_mut_ptr();
             std::ptr::write_bytes(ptr, 0, 1);
-            let params = &mut *ptr;
-            params.p0 = 210.0;
-            params.p1 = 1e-16;
-            params.p2 = 0.0;
-            params.p3 = 1.0;
-            params.p4 = 1.0;
-            params.p5 = 1000000.0;
-            params.p6 = 1000000.0;
-            params.p7 = 0.0;
-            params.p8 = 2.0;
-            params.p9 = 1000000.0;
-            params.p10 = if (params.p0 <= 200.0) { 1.0 } else { 0.0 };
-            validate_parameter("fiqf", params.p10, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-            params.p11 = 1000000.0;
-            params.p12 = 1000000.0;
-            params.p13 = 0.0;
-            params.p14 = 0.0;
-            params.p15 = 1e-18;
-            params.p16 = 1.0;
-            params.p17 = 0.0;
-            params.p18 = 2.0;
-            params.p19 = if (params.p0 <= 200.0) { 0.0 } else { 1e-16 };
-            validate_parameter("ibcs", params.p19, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-            params.p20 = 1.0;
-            params.p21 = 0.0;
-            params.p22 = 0.0;
-            params.p23 = 0.0;
-            params.p24 = 2.5;
-            params.p25 = 1000000.0;
-            params.p26 = 0.0;
-            params.p27 = 0.656;
-            params.p28 = 0.0;
-            params.p29 = 0.0;
-            params.p30 = 0.0;
-            params.p31 = 1.0;
-            params.p32 = 0.0;
-            params.p33 = 1.0;
-            params.p34 = 1e-20;
-            params.p35 = 0.9;
-            params.p36 = 0.5;
-            params.p37 = 2.5;
-            params.p38 = 0.9;
-            params.p39 = 0.5;
-            params.p40 = 2.5;
-            params.p41 = 1e-20;
-            params.p42 = 0.7;
-            params.p43 = 0.333;
-            params.p44 = 100.0;
-            params.p45 = 1e-20;
-            params.p46 = 0.7;
-            params.p47 = 0.333;
-            params.p48 = 100.0;
-            params.p49 = 1.0;
-            params.p50 = 1e-20;
-            params.p51 = 0.3;
-            params.p52 = 0.3;
-            params.p53 = 100.0;
-            params.p54 = 0.0;
-            params.p55 = 0.0;
-            params.p56 = 0.0;
-            params.p57 = 0.0;
-            params.p58 = 1.0;
-            params.p59 = 0.0;
-            params.p60 = 0.1;
-            params.p61 = 150.0;
-            params.p62 = 0.5;
-            params.p63 = 100.0;
-            params.p64 = 0.1;
-            params.p65 = 0.0;
-            params.p66 = 0.001;
-            params.p67 = 2.0;
-            params.p68 = 0.0;
-            params.p69 = 0.0;
-            params.p70 = 0.0;
-            params.p71 = 0.167;
-            params.p72 = 0.333;
-            params.p73 = 0.0;
-            params.p74 = 0.0;
-            params.p75 = 2.0;
-            params.p76 = 1.2;
-            params.p77 = 1.17;
-            params.p78 = 1.17;
-            params.p79 = 1.17;
-            params.p80 = -0.000102377;
-            params.p81 = 3.0;
-            params.p82 = 3.5;
-            params.p83 = 0.0;
-            params.p84 = 1.0;
-            params.p85 = 0.0;
-            params.p86 = 0.0;
-            params.p87 = 0.0;
-            params.p88 = 0.0;
-            params.p89 = 0.0;
-            params.p90 = 0.0;
-            params.p91 = 0.0;
-            params.p92 = 0.0;
-            params.p93 = 0.0;
-            params.p94 = 0.0;
-            params.p95 = 0.0;
-            params.p96 = if (params.p0 <= 200.0) { 1.0 } else { 0.0 };
-            validate_parameter("flteft", params.p96, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
-            params.p97 = -1.0;
-            params.p98 = 0.0;
-            params.p99 = 0.0;
-            params.p100 = 0.0;
-            params.p101 = 0.0;
-            params.p102 = 0.0;
-            params.p103 = 0.0;
-            params.p104 = 0.0;
-            params.p105 = 0.0;
-            params.p106 = 0.0;
-            params.p107 = 0.0;
-            params.p108 = 27.0;
-            params.p109 = 0.0;
-            params.p110 = 1.0;
-            params.p111 = 0.001;
-            validate_parameter("minr", params.p111, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            const DEFAULTS_0: [f64; 10] = [
+                210.0, 1e-16, 0.0, 1.0, 1.0, 1000000.0, 1000000.0, 0.0,
+                2.0, 1000000.0,
+            ];
+            std::ptr::copy_nonoverlapping(DEFAULTS_0.as_ptr(), (ptr as *mut f64).add(0), 10);
+            {
+                let params = &mut *ptr;
+                params.p10 = if (params.p0 <= 200.0) { 1.0 } else { 0.0 };
+                validate_parameter("fiqf", params.p10, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            }
+            const DEFAULTS_1: [f64; 8] = [
+                1000000.0, 1000000.0, 0.0, 0.0, 1e-18, 1.0, 0.0, 2.0,
+            ];
+            std::ptr::copy_nonoverlapping(DEFAULTS_1.as_ptr(), (ptr as *mut f64).add(11), 8);
+            {
+                let params = &mut *ptr;
+                params.p19 = if (params.p0 <= 200.0) { 0.0 } else { 1e-16 };
+                validate_parameter("ibcs", params.p19, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            }
+            const DEFAULTS_2: [f64; 76] = [
+                1.0, 0.0, 0.0, 0.0, 2.5, 1000000.0, 0.0, 0.656,
+                0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1e-20, 0.9,
+                0.5, 2.5, 0.9, 0.5, 2.5, 1e-20, 0.7, 0.333,
+                100.0, 1e-20, 0.7, 0.333, 100.0, 1.0, 1e-20, 0.3,
+                0.3, 100.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+                0.1, 150.0, 0.5, 100.0, 0.1, 0.0, 0.001, 2.0,
+                0.0, 0.0, 0.0, 0.167, 0.333, 0.0, 0.0, 2.0,
+                1.2, 1.17, 1.17, 1.17, -0.000102377, 3.0, 3.5, 0.0,
+                1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 0.0,
+            ];
+            std::ptr::copy_nonoverlapping(DEFAULTS_2.as_ptr(), (ptr as *mut f64).add(20), 76);
+            {
+                let params = &mut *ptr;
+                params.p96 = if (params.p0 <= 200.0) { 1.0 } else { 0.0 };
+                validate_parameter("flteft", params.p96, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            }
+            const DEFAULTS_3: [f64; 14] = [
+                -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0, 27.0, 0.0, 1.0,
+            ];
+            std::ptr::copy_nonoverlapping(DEFAULTS_3.as_ptr(), (ptr as *mut f64).add(97), 14);
+            {
+                let params = &mut *ptr;
+                params.p111 = 0.001;
+                validate_parameter("minr", params.p111, Some((0.0, "0.0")), false, None, true, &[]).expect("generated Verilog-A parameter default must satisfy declared range");
+            }
             boxed.assume_init()
         }
     }
@@ -257,6 +84,45 @@ impl Default for Parameters {
     fn default() -> Self {
         *Self::new_box()
     }
+}
+
+#[derive(Copy, Clone)]
+struct ParameterBound {
+    value: f64,
+    label: &'static str,
+}
+
+const PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
+const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
+
+fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
+    let name = PARAMETER_DISPLAY_NAMES[index];
+    let flags = PARAMETER_RANGE_FLAGS[index];
+    validate_finite_parameter(name, value)?;
+    if let Some(min) = PARAMETER_MIN_BOUNDS[index] {
+        if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
+            if value <= min.value {
+                return Err(format!("parameter '{}' must be > {}, got {}", name, min.label, value));
+            }
+        } else if value < min.value {
+            return Err(format!("parameter '{}' must be >= {}, got {}", name, min.label, value));
+        }
+    }
+    if let Some(max) = PARAMETER_MAX_BOUNDS[index] {
+        if flags & PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {
+            if value >= max.value {
+                return Err(format!("parameter '{}' must be < {}, got {}", name, max.label, value));
+            }
+        } else if value > max.value {
+            return Err(format!("parameter '{}' must be <= {}, got {}", name, max.label, value));
+        }
+    }
+    for excluded in PARAMETER_EXCLUDED_BOUNDS[index] {
+        if value == excluded.value {
+            return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
+        }
+    }
+    Ok(())
 }
 
 fn validate_finite_parameter(name: &str, value: f64) -> Result<(), String> {
@@ -301,6 +167,91 @@ fn validate_parameter(
     }
     Ok(())
 }
+const PARAMETER_NAME_LOOKUP: [(&str, usize); 114] = [
+    ("flcomp", 0), ("is", 1), ("flitm", 2), ("mcf", 3), ("mcr", 4), ("vef", 5), ("ver", 6), ("aver", 7), ("rver", 8), ("iqf", 9), ("fiqf", 10), ("iqr", 11), ("iqfh", 12), ("tfh", 13), ("ahq", 14), ("ibes", 15), 
+    ("mbe", 16), ("ires", 17), ("mre", 18), ("ibcs", 19), ("mbc", 20), ("favl", 21), ("qavl", 22), ("rbi0", 23), ("vr0e", 24), ("vr0c", 25), ("rbx", 26), ("fgeo", 27), ("re", 28), ("rcx", 29), ("itss", 30), ("msf", 31), 
+    ("iscs", 32), ("msc", 33), ("cje0", 34), ("vde", 35), ("ze", 36), ("aje", 37), ("vdedc", 38), ("zedc", 39), ("ajedc", 40), ("cjci0", 41), ("vdci", 42), ("zci", 43), ("vptci", 44), ("cjcx0", 45), ("vdcx", 46), ("zcx", 47), 
+    ("vptcx", 48), ("fbc", 49), ("cjs0", 50), ("vds", 51), ("zs", 52), ("vpts", 53), ("t0", 54), ("dt0h", 55), ("tbvl", 56), ("tef0", 57), ("gte", 58), ("thcs", 59), ("ahc", 60), ("rci0", 61), ("vlim", 62), ("vpt", 63), 
+    ("vces", 64), ("vdck", 65), ("aick", 66), ("delck", 67), ("tr", 68), ("cbepar", 69), ("cbcpar", 70), ("alqf", 71), ("alit", 72), ("flnqs", 73), ("kf", 74), ("af", 75), ("vgb", 76), ("vge", 77), ("vgc", 78), ("vgs", 79), 
+    ("f1vg", 80), ("zetact", 81), ("zetabet", 82), ("dvgbe", 83), ("zetavgbe", 84), ("alt0", 85), ("kt0", 86), ("zetaci", 87), ("alvs", 88), ("alces", 89), ("aldck", 90), ("zetarbi", 91), ("zetarbx", 92), ("zetarcx", 93), ("zetare", 94), ("zetaiqf", 95), 
+    ("flteft", 96), ("zetaver", 97), ("zetaiqfh", 98), ("alfav", 99), ("alqav", 100), ("aliqfh", 101), ("kiqfh", 102), ("flsh", 103), ("rth", 104), ("zetarth", 105), ("alrth", 106), ("cth", 107), ("tnom", 108), ("dt", 109), ("dtemp", 109), ("trise", 109), 
+    ("type", 110), ("minr", 111), 
+];
+
+const PARAMETER_DISPLAY_NAMES: [&str; 112] = [
+    "flcomp", "is", "flitm", "mcf", "mcr", "vef", "ver", "aver", "rver", "iqf", "fiqf", "iqr", "iqfh", "tfh", "ahq", "ibes", 
+    "mbe", "ires", "mre", "ibcs", "mbc", "favl", "qavl", "rbi0", "vr0e", "vr0c", "rbx", "fgeo", "re", "rcx", "itss", "msf", 
+    "iscs", "msc", "cje0", "vde", "ze", "aje", "vdedc", "zedc", "ajedc", "cjci0", "vdci", "zci", "vptci", "cjcx0", "vdcx", "zcx", 
+    "vptcx", "fbc", "cjs0", "vds", "zs", "vpts", "t0", "dt0h", "tbvl", "tef0", "gte", "thcs", "ahc", "rci0", "vlim", "vpt", 
+    "vces", "vdck", "aick", "delck", "tr", "cbepar", "cbcpar", "alqf", "alit", "flnqs", "kf", "af", "vgb", "vge", "vgc", "vgs", 
+    "f1vg", "zetact", "zetabet", "dvgbe", "zetavgbe", "alt0", "kt0", "zetaci", "alvs", "alces", "aldck", "zetarbi", "zetarbx", "zetarcx", "zetare", "zetaiqf", 
+    "flteft", "zetaver", "zetaiqfh", "alfav", "alqav", "aliqfh", "kiqfh", "flsh", "rth", "zetarth", "alrth", "cth", "tnom", "dt", "type", "minr", 
+];
+
+const PARAMETER_MIN_BOUNDS: [Option<ParameterBound>; 112] = [
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -0.9, label: "-0.9" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    None, None, None, None, None, None, None, None, 
+    None, None, None, None, None, None, None, None, 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), None, None, None, None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), None, Some(ParameterBound { value: -10.0, label: "-10.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -273.15, label: "-273.15" }), None, Some(ParameterBound { value: -1.0, label: "-1.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
+];
+
+const PARAMETER_MAX_BOUNDS: [Option<ParameterBound>; 112] = [
+    None, Some(ParameterBound { value: 1.0, label: "1.0" }), None, Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 100.0, label: "100.0" }), 
+    Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), None, Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), 
+    Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), None, None, Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), 
+    Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), 
+    Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), 
+    Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 100.0, label: "100.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), 
+    Some(ParameterBound { value: 100.0, label: "100.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 100.0, label: "100.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), None, 
+    Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 20.0, label: "20.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 100.0, label: "100.0" }), 
+    Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), 
+    Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), 
+    None, None, None, None, None, None, None, None, 
+    None, None, None, None, None, None, None, None, 
+    None, None, None, None, None, None, None, Some(ParameterBound { value: 1.0, label: "1.0" }), 
+    Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), None, Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1000000.0, label: "1000000.0" }), Some(ParameterBound { value: 600.0, label: "600.0" }), None, Some(ParameterBound { value: 1.0, label: "1.0" }), None, 
+];
+
+const PARAMETER_RANGE_FLAGS: [u8; 112] = [
+    2, 0, 2, 1, 1, 1, 1, 0, 1, 1, 2, 1, 1, 2, 0, 0, 1, 0, 1, 0, 1, 2, 2, 2, 1, 1, 2, 0, 2, 2, 0, 1, 
+    0, 1, 3, 1, 3, 2, 1, 3, 2, 3, 1, 3, 1, 2, 1, 3, 1, 0, 2, 1, 3, 1, 2, 0, 2, 2, 1, 2, 1, 3, 1, 1, 
+    0, 0, 1, 1, 2, 2, 2, 1, 1, 0, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    2, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 2, 1, 0, 0, 2, 
+];
+
+const PARAMETER_EXCLUDED_BOUNDS: [&[ParameterBound]; 112] = [
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[ParameterBound { value: 0.0, label: "0.0" }], &[], 
+];
+
+fn parameter_index_for_name(name: &str) -> Option<usize> {
+    PARAMETER_NAME_LOOKUP
+        .iter()
+        .find_map(|(candidate, index)| (*candidate == name).then_some(*index))
+}
+
 fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {
     let mut boxed = Box::<[f64; N]>::new_uninit();
     unsafe {
@@ -477,123 +428,30 @@ impl Instance {
     }
 
     pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {
-        match name.to_ascii_lowercase().as_str() {
-            "flcomp" => { validate_parameter("flcomp", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p0 = value; self.mark_param_given(0); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "is" => { validate_parameter("is", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p1 = value; self.mark_param_given(1); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "flitm" => { validate_parameter("flitm", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p2 = value; self.mark_param_given(2); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "mcf" => { validate_parameter("mcf", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p3 = value; self.mark_param_given(3); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "mcr" => { validate_parameter("mcr", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p4 = value; self.mark_param_given(4); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vef" => { validate_parameter("vef", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p5 = value; self.mark_param_given(5); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "ver" => { validate_parameter("ver", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p6 = value; self.mark_param_given(6); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "aver" => { validate_parameter("aver", value, Some((0.0, "0.0")), false, Some((100.0, "100.0")), false, &[])?; self.params.p7 = value; self.mark_param_given(7); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "rver" => { validate_parameter("rver", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p8 = value; self.mark_param_given(8); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "iqf" => { validate_parameter("iqf", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p9 = value; self.mark_param_given(9); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "fiqf" => { validate_parameter("fiqf", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p10 = value; self.mark_param_given(10); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "iqr" => { validate_parameter("iqr", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p11 = value; self.mark_param_given(11); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "iqfh" => { validate_parameter("iqfh", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p12 = value; self.mark_param_given(12); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "tfh" => { validate_parameter("tfh", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p13 = value; self.mark_param_given(13); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "ahq" => { validate_parameter("ahq", value, Some((-0.9, "-0.9")), false, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p14 = value; self.mark_param_given(14); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "ibes" => { validate_parameter("ibes", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p15 = value; self.mark_param_given(15); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "mbe" => { validate_parameter("mbe", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p16 = value; self.mark_param_given(16); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "ires" => { validate_parameter("ires", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p17 = value; self.mark_param_given(17); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "mre" => { validate_parameter("mre", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p18 = value; self.mark_param_given(18); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "ibcs" => { validate_parameter("ibcs", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p19 = value; self.mark_param_given(19); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "mbc" => { validate_parameter("mbc", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p20 = value; self.mark_param_given(20); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "favl" => { validate_parameter("favl", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p21 = value; self.mark_param_given(21); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "qavl" => { validate_parameter("qavl", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p22 = value; self.mark_param_given(22); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "rbi0" => { validate_parameter("rbi0", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p23 = value; self.mark_param_given(23); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vr0e" => { validate_parameter("vr0e", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p24 = value; self.mark_param_given(24); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vr0c" => { validate_parameter("vr0c", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p25 = value; self.mark_param_given(25); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "rbx" => { validate_parameter("rbx", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p26 = value; self.mark_param_given(26); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "fgeo" => { validate_parameter("fgeo", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), false, &[])?; self.params.p27 = value; self.mark_param_given(27); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "re" => { validate_parameter("re", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p28 = value; self.mark_param_given(28); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "rcx" => { validate_parameter("rcx", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p29 = value; self.mark_param_given(29); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "itss" => { validate_parameter("itss", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p30 = value; self.mark_param_given(30); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "msf" => { validate_parameter("msf", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p31 = value; self.mark_param_given(31); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "iscs" => { validate_parameter("iscs", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p32 = value; self.mark_param_given(32); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "msc" => { validate_parameter("msc", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p33 = value; self.mark_param_given(33); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "cje0" => { validate_parameter("cje0", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p34 = value; self.mark_param_given(34); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vde" => { validate_parameter("vde", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p35 = value; self.mark_param_given(35); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "ze" => { validate_parameter("ze", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p36 = value; self.mark_param_given(36); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "aje" => { validate_parameter("aje", value, Some((1.0, "1.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p37 = value; self.mark_param_given(37); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vdedc" => { validate_parameter("vdedc", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p38 = value; self.mark_param_given(38); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zedc" => { validate_parameter("zedc", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p39 = value; self.mark_param_given(39); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "ajedc" => { validate_parameter("ajedc", value, Some((1.0, "1.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p40 = value; self.mark_param_given(40); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "cjci0" => { validate_parameter("cjci0", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p41 = value; self.mark_param_given(41); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vdci" => { validate_parameter("vdci", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p42 = value; self.mark_param_given(42); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zci" => { validate_parameter("zci", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p43 = value; self.mark_param_given(43); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vptci" => { validate_parameter("vptci", value, Some((0.0, "0.0")), true, Some((100.0, "100.0")), false, &[])?; self.params.p44 = value; self.mark_param_given(44); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "cjcx0" => { validate_parameter("cjcx0", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p45 = value; self.mark_param_given(45); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vdcx" => { validate_parameter("vdcx", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p46 = value; self.mark_param_given(46); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zcx" => { validate_parameter("zcx", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p47 = value; self.mark_param_given(47); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vptcx" => { validate_parameter("vptcx", value, Some((0.0, "0.0")), true, Some((100.0, "100.0")), false, &[])?; self.params.p48 = value; self.mark_param_given(48); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "fbc" => { validate_parameter("fbc", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p49 = value; self.mark_param_given(49); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "cjs0" => { validate_parameter("cjs0", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p50 = value; self.mark_param_given(50); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vds" => { validate_parameter("vds", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p51 = value; self.mark_param_given(51); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zs" => { validate_parameter("zs", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), true, &[])?; self.params.p52 = value; self.mark_param_given(52); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vpts" => { validate_parameter("vpts", value, Some((0.0, "0.0")), true, Some((100.0, "100.0")), false, &[])?; self.params.p53 = value; self.mark_param_given(53); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "t0" => { validate_parameter("t0", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p54 = value; self.mark_param_given(54); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "dt0h" => { validate_finite_parameter("dt0h", value)?; self.params.p55 = value; self.mark_param_given(55); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "tbvl" => { validate_parameter("tbvl", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p56 = value; self.mark_param_given(56); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "tef0" => { validate_parameter("tef0", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p57 = value; self.mark_param_given(57); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "gte" => { validate_parameter("gte", value, Some((0.0, "0.0")), true, Some((20.0, "20.0")), false, &[])?; self.params.p58 = value; self.mark_param_given(58); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "thcs" => { validate_parameter("thcs", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p59 = value; self.mark_param_given(59); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "ahc" => { validate_parameter("ahc", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p60 = value; self.mark_param_given(60); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "rci0" => { validate_parameter("rci0", value, Some((0.0, "0.0")), true, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p61 = value; self.mark_param_given(61); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vlim" => { validate_parameter("vlim", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p62 = value; self.mark_param_given(62); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vpt" => { validate_parameter("vpt", value, Some((0.0, "0.0")), true, Some((100.0, "100.0")), false, &[])?; self.params.p63 = value; self.mark_param_given(63); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vces" => { validate_parameter("vces", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p64 = value; self.mark_param_given(64); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vdck" => { validate_parameter("vdck", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p65 = value; self.mark_param_given(65); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "aick" => { validate_parameter("aick", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p66 = value; self.mark_param_given(66); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "delck" => { validate_parameter("delck", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p67 = value; self.mark_param_given(67); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "tr" => { validate_parameter("tr", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p68 = value; self.mark_param_given(68); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "cbepar" => { validate_parameter("cbepar", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p69 = value; self.mark_param_given(69); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "cbcpar" => { validate_parameter("cbcpar", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p70 = value; self.mark_param_given(70); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "alqf" => { validate_parameter("alqf", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), false, &[])?; self.params.p71 = value; self.mark_param_given(71); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "alit" => { validate_parameter("alit", value, Some((0.0, "0.0")), true, Some((1.0, "1.0")), false, &[])?; self.params.p72 = value; self.mark_param_given(72); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "flnqs" => { validate_parameter("flnqs", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p73 = value; self.mark_param_given(73); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "kf" => { validate_parameter("kf", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p74 = value; self.mark_param_given(74); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "af" => { validate_parameter("af", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p75 = value; self.mark_param_given(75); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vgb" => { validate_parameter("vgb", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p76 = value; self.mark_param_given(76); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vge" => { validate_parameter("vge", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p77 = value; self.mark_param_given(77); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vgc" => { validate_parameter("vgc", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p78 = value; self.mark_param_given(78); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "vgs" => { validate_parameter("vgs", value, Some((0.0, "0.0")), true, Some((10.0, "10.0")), false, &[])?; self.params.p79 = value; self.mark_param_given(79); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "f1vg" => { validate_finite_parameter("f1vg", value)?; self.params.p80 = value; self.mark_param_given(80); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetact" => { validate_finite_parameter("zetact", value)?; self.params.p81 = value; self.mark_param_given(81); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetabet" => { validate_finite_parameter("zetabet", value)?; self.params.p82 = value; self.mark_param_given(82); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "dvgbe" => { validate_finite_parameter("dvgbe", value)?; self.params.p83 = value; self.mark_param_given(83); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetavgbe" => { validate_finite_parameter("zetavgbe", value)?; self.params.p84 = value; self.mark_param_given(84); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "alt0" => { validate_finite_parameter("alt0", value)?; self.params.p85 = value; self.mark_param_given(85); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "kt0" => { validate_finite_parameter("kt0", value)?; self.params.p86 = value; self.mark_param_given(86); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetaci" => { validate_finite_parameter("zetaci", value)?; self.params.p87 = value; self.mark_param_given(87); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "alvs" => { validate_finite_parameter("alvs", value)?; self.params.p88 = value; self.mark_param_given(88); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "alces" => { validate_finite_parameter("alces", value)?; self.params.p89 = value; self.mark_param_given(89); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "aldck" => { validate_finite_parameter("aldck", value)?; self.params.p90 = value; self.mark_param_given(90); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetarbi" => { validate_finite_parameter("zetarbi", value)?; self.params.p91 = value; self.mark_param_given(91); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetarbx" => { validate_finite_parameter("zetarbx", value)?; self.params.p92 = value; self.mark_param_given(92); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetarcx" => { validate_finite_parameter("zetarcx", value)?; self.params.p93 = value; self.mark_param_given(93); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetare" => { validate_finite_parameter("zetare", value)?; self.params.p94 = value; self.mark_param_given(94); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetaiqf" => { validate_finite_parameter("zetaiqf", value)?; self.params.p95 = value; self.mark_param_given(95); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "flteft" => { validate_parameter("flteft", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p96 = value; self.mark_param_given(96); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetaver" => { validate_finite_parameter("zetaver", value)?; self.params.p97 = value; self.mark_param_given(97); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetaiqfh" => { validate_finite_parameter("zetaiqfh", value)?; self.params.p98 = value; self.mark_param_given(98); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "alfav" => { validate_finite_parameter("alfav", value)?; self.params.p99 = value; self.mark_param_given(99); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "alqav" => { validate_finite_parameter("alqav", value)?; self.params.p100 = value; self.mark_param_given(100); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "aliqfh" => { validate_finite_parameter("aliqfh", value)?; self.params.p101 = value; self.mark_param_given(101); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "kiqfh" => { validate_finite_parameter("kiqfh", value)?; self.params.p102 = value; self.mark_param_given(102); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "flsh" => { validate_parameter("flsh", value, Some((0.0, "0.0")), false, Some((1.0, "1.0")), false, &[])?; self.params.p103 = value; self.mark_param_given(103); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "rth" => { validate_parameter("rth", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p104 = value; self.mark_param_given(104); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "zetarth" => { validate_finite_parameter("zetarth", value)?; self.params.p105 = value; self.mark_param_given(105); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "alrth" => { validate_parameter("alrth", value, Some((-10.0, "-10.0")), false, Some((10.0, "10.0")), false, &[])?; self.params.p106 = value; self.mark_param_given(106); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "cth" => { validate_parameter("cth", value, Some((0.0, "0.0")), false, Some((1000000.0, "1000000.0")), true, &[])?; self.params.p107 = value; self.mark_param_given(107); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "tnom" => { validate_parameter("tnom", value, Some((-273.15, "-273.15")), true, Some((600.0, "600.0")), false, &[])?; self.params.p108 = value; self.mark_param_given(108); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "dt" => { validate_finite_parameter("dt", value)?; self.params.p109 = value; self.mark_param_given(109); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "dtemp" => { validate_finite_parameter("dt", value)?; self.params.p109 = value; self.mark_param_given(109); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "trise" => { validate_finite_parameter("dt", value)?; self.params.p109 = value; self.mark_param_given(109); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "type" => { validate_parameter("type", value, Some((-1.0, "-1.0")), false, Some((1.0, "1.0")), false, &[(0.0, "0.0")])?; self.params.p110 = value; self.mark_param_given(110); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            "minr" => { validate_parameter("minr", value, Some((0.0, "0.0")), false, None, true, &[])?; self.params.p111 = value; self.mark_param_given(111); self.recompute_instance_static(); self.invalidate_temperature_static(); Ok(()) }
-            _ => Err(format!("unknown parameter '{}' for generated Verilog-A model 'hicumL0va'", name)),
+        let lower = name.to_ascii_lowercase();
+        let Some(index) = parameter_index_for_name(lower.as_str()) else {
+            return Err(format!("unknown parameter '{}' for generated Verilog-A model 'hicumL0va'", name));
+        };
+        validate_parameter_metadata(index, value)?;
+        self.write_parameter_slot(index, value);
+        self.finish_set_parameter(index);
+        Ok(())
+    }
+
+    #[inline]
+    fn write_parameter_slot(&mut self, index: usize, value: f64) {
+        debug_assert!(index < Self::PARAMETER_COUNT, "generated parameter index out of range");
+        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.
+        unsafe {
+            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;
+            *ptr.add(index) = value;
         }
+    }
+
+    #[inline]
+    fn finish_set_parameter(&mut self, index: usize) {
+        self.mark_param_given(index);
+        self.recompute_instance_static(); self.invalidate_temperature_static(); 
     }
 
     #[inline]

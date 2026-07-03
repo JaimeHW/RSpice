@@ -1,8 +1,6 @@
 #![allow(dead_code, unused_assignments, unused_parens, unused_variables)]
-
 use super::state::Instance;
 use crate::device::veriloga_generated::{GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper};
-
 const LIMEXP_MAX: f64 = 5.54062238439351e34;
 #[path = "stamp_blocks_0.rs"]
 mod stamp_blocks_0;
@@ -42,9 +40,7 @@ mod stamp_blocks_16;
 mod stamp_blocks_17;
 #[path = "stamp_blocks_18.rs"]
 mod stamp_blocks_18;
-
 const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;
-
 #[inline]
 fn eval_ddt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
@@ -82,7 +78,6 @@ fn eval_ddt<const STATE_COUNT: usize>(
         0.0
     }
 }
-
 #[inline]
 fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {
     if ddt_active {
@@ -91,7 +86,6 @@ fn ddt_jacobian(ddt_active: bool, ddt_scale: f64, derivative: f64) -> f64 {
         0.0
     }
 }
-
 #[inline]
 fn eval_idt<const STATE_COUNT: usize>(
     current: &mut [f64; STATE_COUNT],
@@ -117,7 +111,6 @@ fn eval_idt<const STATE_COUNT: usize>(
     }
     current_value
 }
-
 #[inline]
 fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
     if timestep.abs() > Instance::DDT_EPSILON {
@@ -126,7 +119,6 @@ fn idt_jacobian(timestep: f64, derivative: f64) -> f64 {
         0.0
     }
 }
-
 #[derive(Default)]
 pub(crate) struct StampLocals {
     pub(crate) var_ac1: f64, pub(crate) var_ac1_dn0: f64, pub(crate) var_ac1_dn10: f64, pub(crate) var_ac1_dn13: f64,
@@ -4048,7 +4040,6 @@ pub(crate) struct StampLocals {
     pub(crate) var_zeta52_dn2: f64, pub(crate) var_zeta52_dn4: f64, pub(crate) var_zeta52_dn5: f64, pub(crate) var_zeta52_dn6: f64,
     pub(crate) var_zeta52_dn7: f64, pub(crate) var_zeta52_dn8: f64, pub(crate) var_zeta52_dn9: f64, pub(crate) var_zeta52_rv: f64,
 }
-
 impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let scalar_temperature_static_temperature = (ctx).temperature();
@@ -4081,17 +4072,16 @@ impl Instance {
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let v0=1.0;
         let v1=0.0;
-        let v1387=nv8;
-        let v1405=nv4;
-        let v1748=nv14;
-        let v1752=(if (self.scalar_static_f64[137]!=0.0){(self.scalar_static_f64[90]*(nv1-nv6))}else{v1});
-        let v1755=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[113]*(nv10-v1387))}else{v1});
-        let v1758=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[114]*(nv9-v1387))}else{v1});
-        let v1762=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[112]*(nv3-v1387))}else{v1});
-        let v1764=(if (self.scalar_static_f64[136]!=0.0){(v1405*self.scalar_static_f64[187])}else{v1});
-        let v1766=(if self.scalar_static_bool[29]{(10000.0*v1405)}else{v1});
-        let v1767=(v1405*self.scalar_static_f64[138]);
-
+        let v1385=nv8;
+        let v1403=nv4;
+        let v1746=nv14;
+        let v1750=(if (self.scalar_static_f64[137]!=0.0){(self.scalar_static_f64[90]*(nv1-nv6))}else{v1});
+        let v1753=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[113]*(nv10-v1385))}else{v1});
+        let v1756=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[114]*(nv9-v1385))}else{v1});
+        let v1760=(if (self.scalar_static_f64[91]!=0.0){(self.scalar_static_f64[112]*(nv3-v1385))}else{v1});
+        let v1762=(if (self.scalar_static_f64[136]!=0.0){(v1403*self.scalar_static_f64[187])}else{v1});
+        let v1764=(if self.scalar_static_bool[29]{(10000.0*v1403)}else{v1});
+        let v1765=(v1403*self.scalar_static_f64[138]);
         stamper.stamp_potential_branch_local(
             Some(15),
             None,
@@ -4150,7 +4140,7 @@ impl Instance {
         stamper.stamp_current_node1_local(
             Some(14),
             None,
-            multiplicity * (v1748),
+            multiplicity * (v1746),
             14,
             multiplicity * (v0),
         );
@@ -4192,7 +4182,7 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(1),
             Some(6),
-            multiplicity * (v1752),
+            multiplicity * (v1750),
             1,
             multiplicity * (self.scalar_static_f64[140]),
             6,
@@ -4211,7 +4201,7 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(10),
             Some(8),
-            multiplicity * (v1755),
+            multiplicity * (v1753),
             8,
             multiplicity * (self.scalar_static_f64[143]),
             10,
@@ -4220,7 +4210,7 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(9),
             Some(8),
-            multiplicity * (v1758),
+            multiplicity * (v1756),
             8,
             multiplicity * (self.scalar_static_f64[146]),
             9,
@@ -4229,7 +4219,7 @@ impl Instance {
         stamper.stamp_current_node2_local(
             Some(3),
             Some(8),
-            multiplicity * (v1762),
+            multiplicity * (v1760),
             3,
             multiplicity * (self.scalar_static_f64[149]),
             8,
@@ -4268,14 +4258,14 @@ impl Instance {
         stamper.stamp_current_node1_local(
             Some(4),
             None,
-            multiplicity * (v1764),
+            multiplicity * (v1762),
             4,
             multiplicity * (self.scalar_static_f64[188]),
         );
         stamper.stamp_current_node1_local(
             Some(4),
             None,
-            multiplicity * (v1766),
+            multiplicity * (v1764),
             4,
             multiplicity * (self.scalar_static_f64[151]),
         );
@@ -4309,16 +4299,15 @@ impl Instance {
             11,
             v1,
         );
-        let v1767_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 17, v1767);
+        let v1765_ddt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 17, v1765);
         stamper.stamp_current_node1_local(
             Some(4),
             None,
-            multiplicity * (v1767_ddt),
+            multiplicity * (v1765_ddt),
             4,
             multiplicity * (((self.scalar_static_f64[138]) * ddt_scale)),
         );
         let mut locals = StampLocals::default();
-
         Self::stamp_transient_block_0(param_given, &mut locals);
         Self::stamp_transient_block_1(p, &mut locals);
         Self::stamp_transient_block_2(p, &mut locals);
@@ -4452,12 +4441,10 @@ impl Instance {
         Self::stamp_transient_block_130(p, &mut locals);
         Self::stamp_transient_block_131(p, &mut locals);
         Self::stamp_transient_block_132(p, &mut locals);
-
         Self::stamp_transient_equations_block_0(stamper, p, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
         Self::stamp_transient_equations_block_1(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
         Self::stamp_transient_equations_block_2(ctx, stamper, p, nodes, multiplicity, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, &mut locals);
     }
-
     pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {
         let scalar_temperature_static_temperature = (ctx).temperature();
         let scalar_temperature_static_thermal_voltage = (ctx).thermal_voltage();
@@ -4468,8 +4455,7 @@ impl Instance {
         let nv4 = ctx.node_voltage(nodes[4]);
         let param_given = self.param_given.as_ref();
         let multiplicity = (*self).multiplicity;
-        let v1767=(nv4*self.scalar_static_f64[138]);
-
+        let v1765=(nv4*self.scalar_static_f64[138]);
         stamper.stamp_current_reactive_node1(
             Some(nodes[4]),
             None,
@@ -4477,7 +4463,6 @@ impl Instance {
             multiplicity * (self.scalar_static_f64[138]),
         );
         let mut locals = StampLocals::default();
-
         Self::stamp_reactive_block_0(param_given, &mut locals);
         Self::stamp_reactive_block_1(p, &mut locals);
         Self::stamp_reactive_block_2(p, &mut locals);
@@ -4635,7 +4620,6 @@ impl Instance {
         Self::stamp_reactive_block_154(p, &mut locals);
         Self::stamp_reactive_block_155(p, &mut locals);
         Self::stamp_reactive_block_156(p, &mut locals);
-
         Self::stamp_reactive_equations_block_0(ctx, stamper, p, nodes, branches, multiplicity, &mut locals);
     }
 }
