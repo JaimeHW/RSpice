@@ -2353,6 +2353,7 @@ impl Engine {
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                        circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
                             &mut breakpoints,
@@ -3146,6 +3147,7 @@ impl Engine {
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                        circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                         Self::collect_xspice_runtime_breakpoints(
                             &mut circuit,
                             &mut breakpoints,
@@ -3368,6 +3370,7 @@ impl Engine {
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
                 circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
+                circuit.project_xspice_voltage_outputs(&mut new_solution, num_nodes);
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop);
             }
             #[cfg(feature = "veriloga")]

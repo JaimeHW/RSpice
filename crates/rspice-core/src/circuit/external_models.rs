@@ -1332,6 +1332,142 @@ impl CircuitData {
         }
     }
 
+    /// Project committed ideal XSPICE voltage outputs back into the accepted
+    /// solution vector after event-driven models settle.
+    pub(crate) fn project_xspice_voltage_outputs(&self, solution: &mut [Value], num_nodes: usize) {
+        #[inline]
+        fn set_node(solution: &mut [Value], node: usize, value: Value) {
+            if node > 0
+                && let Some(slot) = solution.get_mut(node - 1)
+            {
+                *slot = value;
+            }
+        }
+
+        #[inline]
+        fn node_value(solution: &[Value], node: usize) -> Option<Value> {
+            if node == 0 {
+                Some(0.0)
+            } else {
+                solution.get(node - 1).copied()
+            }
+        }
+
+        #[inline]
+        fn project_voltage_pair(solution: &mut [Value], pos: usize, neg: usize, value: Value) {
+            if !value.is_finite() {
+                return;
+            }
+            match (pos, neg) {
+                (0, 0) => {}
+                (node, 0) => set_node(solution, node, value),
+                (0, node) => set_node(solution, node, -value),
+                (pos, neg) => {
+                    let Some(pos_value) = node_value(solution, pos) else {
+                        return;
+                    };
+                    let Some(neg_value) = node_value(solution, neg) else {
+                        return;
+                    };
+                    let correction = value - (pos_value - neg_value);
+                    set_node(solution, pos, pos_value + 0.5 * correction);
+                    set_node(solution, neg, neg_value - 0.5 * correction);
+                }
+            }
+        }
+
+        if num_nodes == 0 || solution.is_empty() {
+            return;
+        }
+
+        for instance in &self.xspice_instances {
+            let ports = instance.ports();
+            for (port_idx, connection) in instance.connections().iter().enumerate() {
+                let Some(port) = ports.get(port_idx) else {
+                    continue;
+                };
+                if !matches!(
+                    port.default_type,
+                    crate::xspice::PortType::Voltage
+                        | crate::xspice::PortType::DifferentialVoltage
+                        | crate::xspice::PortType::Hybrid
+                        | crate::xspice::PortType::DifferentialHybrid
+                ) {
+                    continue;
+                }
+
+                if port.is_vector {
+                    if !instance.has_analog_vector_contributions(port_idx) {
+                        continue;
+                    }
+                    match connection {
+                        crate::xspice::PortConnection::AnalogVector(nodes) => {
+                            for (index, node) in nodes.iter().copied().enumerate() {
+                                if instance
+                                    .branch_vector_output_ordinal(port_idx, index)
+                                    .is_none()
+                                {
+                                    continue;
+                                }
+                                let (_, value) =
+                                    instance.analog_vector_contribution_at(port_idx, index);
+                                project_voltage_pair(solution, node, 0, value);
+                            }
+                        }
+                        crate::xspice::PortConnection::TypedAnalogVector(elements) => {
+                            for (index, element) in elements.iter().enumerate() {
+                                if instance
+                                    .branch_vector_output_ordinal(port_idx, index)
+                                    .is_none()
+                                {
+                                    continue;
+                                }
+                                let (_, value) =
+                                    instance.analog_vector_contribution_at(port_idx, index);
+                                match element {
+                                    crate::xspice::AnalogInputConnection::Node(node) => {
+                                        project_voltage_pair(solution, *node, 0, value);
+                                    }
+                                    crate::xspice::AnalogInputConnection::Differential(
+                                        pos,
+                                        neg,
+                                    )
+                                    | crate::xspice::AnalogInputConnection::Hybrid {
+                                        pos,
+                                        neg,
+                                        ..
+                                    } => {
+                                        project_voltage_pair(solution, *pos, *neg, value);
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                if instance.branch_ordinal_at(port_idx).is_none() {
+                    continue;
+                }
+                let Some((_, value)) = instance.get_analog_contribution(port_idx) else {
+                    continue;
+                };
+                match connection {
+                    crate::xspice::PortConnection::Analog(node) => {
+                        project_voltage_pair(solution, *node, 0, value);
+                    }
+                    crate::xspice::PortConnection::Differential(pos, neg)
+                    | crate::xspice::PortConnection::Hybrid { pos, neg, .. } => {
+                        project_voltage_pair(solution, *pos, *neg, value);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
     /// Prepare build-time generated Verilog-A devices for a transient timepoint.
     #[cfg(feature = "veriloga-builtins")]
     pub fn prepare_generated_veriloga_timepoint(
@@ -2164,6 +2300,24 @@ mod tests {
 
         result.expect("out-of-range XSPICE branch row must not panic");
         assert_eq!(rhs, vec![0.0]);
+    }
+
+    #[test]
+    fn project_xspice_voltage_outputs_updates_accepted_solution() {
+        let mut instance = output_instance(PortType::Voltage, PortConnection::Analog(1));
+        let mut circuit = CircuitData::new();
+        let out_node = circuit.get_or_create_node("out");
+        let branch = circuit.allocate_branch_named("Aout#out");
+        instance
+            .set_output_branch(0, branch)
+            .expect("test instance should accept branch assignment");
+        circuit.add_xspice_instance(instance);
+
+        let mut solution = vec![0.0; circuit.matrix_size()];
+        circuit.evaluate_xspice_with_analysis(1.0e-9, 1.0e-9, &solution, AnalysisType::Transient);
+        circuit.project_xspice_voltage_outputs(&mut solution, circuit.num_nodes);
+
+        assert_eq!(solution[out_node - 1], 1.0);
     }
 
     #[test]
