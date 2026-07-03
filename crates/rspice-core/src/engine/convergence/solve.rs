@@ -932,6 +932,10 @@ impl Engine {
             let zero_solution = vec![0.0; size];
             circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, time);
         }
+        if circuit.has_xspice_devices() {
+            let zero_solution = vec![0.0; size];
+            circuit.stamp_xspice_transient_trial(matrix, &mut rhs, time, 0.0, &zero_solution);
+        }
         match matrix.solve(&rhs) {
             Ok(solution) if solution.iter().all(|value| value.is_finite()) => Ok(solution),
             Ok(_) | Err(_) if !circuit.inductors.is_empty() => {
@@ -949,6 +953,16 @@ impl Engine {
                 {
                     let zero_solution = vec![0.0; size];
                     circuit.stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, time);
+                }
+                if circuit.has_xspice_devices() {
+                    let zero_solution = vec![0.0; size];
+                    circuit.stamp_xspice_transient_trial(
+                        matrix,
+                        &mut rhs,
+                        time,
+                        0.0,
+                        &zero_solution,
+                    );
                 }
                 match matrix.solve(&rhs) {
                     Ok(solution) if solution.iter().all(|value| value.is_finite()) => Ok(solution),

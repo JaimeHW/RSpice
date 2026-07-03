@@ -127,6 +127,9 @@ impl Engine {
                     crate::xspice::AnalysisType::Transient,
                 );
             }
+            if circuit.has_xspice_devices() {
+                circuit.stamp_xspice_transient_trial(matrix, &mut rhs, time, 0.0, &solution);
+            }
 
             let Ok(mut proposal) = matrix.solve(&rhs) else {
                 break;
@@ -166,15 +169,38 @@ impl Engine {
             .voltage_sources
             .max_dc_to_transient_delta(0.0)
             .max(circuit.current_sources.max_dc_to_transient_delta(0.0));
-        if source_delta < SOURCE_ACTIVE_DELTA {
+        let xspice_ramptime_active = circuit.has_xspice_devices()
+            && self.config.ramptime.is_finite()
+            && self.config.ramptime > 0.0;
+        if source_delta < SOURCE_ACTIVE_DELTA && !xspice_ramptime_active {
+            log::debug!(
+                "Skipping t=0 transient seed: source_delta={source_delta:e}, xspice_ramptime_active={xspice_ramptime_active}"
+            );
             return None;
         }
 
-        let Ok(mut transient_seed) =
-            self.solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
-        else {
-            return None;
+        let mut transient_seed = match self
+            .solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
+        {
+            Ok(seed) => seed,
+            Err(err) => {
+                log::debug!("t=0 transient seed solve failed: {err}");
+                return None;
+            }
         };
+
+        if transient_seed
+            .iter()
+            .zip(dc_solution.iter())
+            .map(|(tran, dc)| (tran - dc).abs())
+            .fold(0.0, Value::max)
+            < SOURCE_ACTIVE_DELTA
+        {
+            log::debug!(
+                "t=0 transient seed solve matched DC fallback despite source_delta={source_delta:e}, xspice_ramptime_active={xspice_ramptime_active}"
+            );
+            return None;
+        }
 
         for value in &mut transient_seed {
             if !value.is_finite() {
@@ -189,6 +215,9 @@ impl Engine {
             .fold(0.0, Value::max);
 
         if seed_delta < SOURCE_ACTIVE_DELTA {
+            log::debug!(
+                "Skipping t=0 transient seed after sanitization: seed_delta={seed_delta:e}"
+            );
             return None;
         }
 
