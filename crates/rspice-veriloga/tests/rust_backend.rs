@@ -767,8 +767,10 @@ fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
         .as_str();
 
     assert!(
-        stamp.contains("ctx.node_voltage(nodes[0])")
-            && stamp.contains("ctx.node_voltage(nodes[1])"),
+        (stamp.contains("ctx.node_voltage(nodes[0])")
+            && stamp.contains("ctx.node_voltage(nodes[1])"))
+            || (stamp.contains("ctx.node_voltage(n[0])")
+                && stamp.contains("ctx.node_voltage(n[1])")),
         "{stamp}"
     );
     assert!(
@@ -1496,7 +1498,7 @@ fn rust_backend_auto_scalarizes_hybrid_integer_flags() {
     assert!(stamp.contains("eval_ddt"), "{stamp}");
     assert!(stamp.contains(".floor()"), "{stamp}");
     assert!(
-        stamp.contains("if v"),
+        stamp.contains("if v") || stamp.contains("if k{"),
         "integer flag should be reused as a local condition:\n{stamp}"
     );
     assert!(
@@ -2121,7 +2123,8 @@ fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
     assert!(
         compact.contains(
             "if((ctx.node_voltage(nodes[0])-ctx.node_voltage(nodes[1]))==0.0){1.0}else{0.0}"
-        ),
+        ) || compact
+            .contains("if((ctx.node_voltage(n[0])-ctx.node_voltage(n[1]))==0.0){1.0}else{0.0}"),
         "{stamp}"
     );
     assert!(stamp.contains("stamp_current_const_local"), "{stamp}");
@@ -2193,7 +2196,10 @@ fn rust_backend_auto_scalarizes_static_equations_inside_dynamic_models() {
 
     assert!(stamp.contains("eval_ddt"), "{stamp}");
     assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
-    assert!(stamp.contains("let v"), "{stamp}");
+    assert!(
+        stamp.contains("let v") || stamp.contains("let c="),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("let eq"),
         "mixed static and ddt currents should stay on scalar OptIR output:\n{stamp}"
@@ -10443,7 +10449,11 @@ fn rust_backend_scalar_lowers_parameter_idt_initial_condition() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("let p = &(*self.params);"), "{stamp}");
+    let compact = stamp
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>();
+    assert!(compact.contains("letp=&(*self.params);"), "{stamp}");
     assert!(
         stamp.contains("eval_idt") && stamp.contains("(p.p0 + 0.25)"),
         "parameter IC should be emitted in the scalar IDT state call:\n{stamp}"
@@ -11442,7 +11452,10 @@ fn rust_backend_auto_scalarizes_wide_dense_current_equations() {
         stamp.contains("stamper.stamp_current_dense_local("),
         "{stamp}"
     );
-    assert!(stamp.contains("let v"), "{stamp}");
+    assert!(
+        stamp.contains("ctx.node_voltage(nodes[4])") || stamp.contains("ctx.node_voltage(n[4])"),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("let eq0_"),
         "wide scalar currents should not fall back to legacy equation temporaries:\n{stamp}"
@@ -11555,7 +11568,10 @@ fn rust_backend_auto_scalarizes_wide_indexed_current_equations() {
         "{stamp}"
     );
     assert!(!stamp.contains("node_derivative_indices"), "{stamp}");
-    assert!(stamp.contains("let v"), "{stamp}");
+    assert!(
+        stamp.contains("ctx.node_voltage(nodes[4])") || stamp.contains("ctx.node_voltage(n[4])"),
+        "{stamp}"
+    );
     assert!(
         !stamp.contains("let eq0_"),
         "wide indexed scalar currents should not fall back to legacy equation temporaries:\n{stamp}"

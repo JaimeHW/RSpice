@@ -13,11 +13,12 @@ use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDevice
 use super::{RustTranspileOptions, device};
 
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
-const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 300_000;
+const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 1_000_000;
 const MAX_SCALAR_STAMP_EMITTED_VALUES: usize = 300_000;
-const MAX_SCALAR_STAMP_SOURCE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SCALAR_STAMP_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_SCALAR_STAMP_SOURCE_LINES: usize = 120_000;
 const SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE: usize = 1024;
+const MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE: usize = 4;
 const MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_INLINE_EXPR_COST: usize = 128;
@@ -210,6 +211,10 @@ struct ValueEmitContext<'a> {
     thermal_voltage_expr: String,
     ddt_slots: Option<&'a DdtSlots>,
     ddt_mode: DdtEmitMode,
+    node_array_expr: &'static str,
+    branch_array_expr: &'static str,
+    param_given_expr: &'static str,
+    multiplicity_expr: &'static str,
     loop_index_exprs: HashMap<u32, String>,
     runtime_loop_values: HashMap<(u32, u32), String>,
     runtime_loop_derivatives: HashMap<(u32, u32, DerivativeLane), String>,
@@ -231,6 +236,15 @@ impl CompactLetEmitter {
 
     fn push(&mut self, out: &mut String, name: &str, expr: &str) {
         let statement = format!("let {name}={expr};");
+        self.push_statement(out, &statement);
+    }
+
+    fn push_mut_typed(&mut self, out: &mut String, name: &str, ty: &str, expr: &str) {
+        let statement = format!("let mut {name}:{ty}={expr};");
+        self.push_statement(out, &statement);
+    }
+
+    fn push_statement(&mut self, out: &mut String, statement: &str) {
         if self.line.is_empty() {
             self.line.push_str(self.indent);
             self.line.push_str(&statement);
@@ -279,6 +293,10 @@ fn local_stamp_context<'a>(
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
         ddt_slots,
         ddt_mode,
+        node_array_expr: "nodes",
+        branch_array_expr: "branches",
+        param_given_expr: "param_given",
+        multiplicity_expr: "multiplicity",
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
@@ -499,9 +517,11 @@ fn generate_stamp_file(
     out.push_str(
         "    pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {\n",
     );
-    out.push_str("        let nodes = self.nodes;\n");
+    out.push_str("        let n=self.nodes;\n");
+    out.push_str("        let nodes=n;\n");
     if stamp_needs_branches {
-        out.push_str("        let branches = self.branches;\n");
+        out.push_str("        let br=self.branches;\n");
+        out.push_str("        let branches=br;\n");
     }
     if static_cache.has_temperature_values() {
         out.push_str(
@@ -509,12 +529,14 @@ fn generate_stamp_file(
         );
     }
     if stamp_needs_params {
-        out.push_str("        let p = &(*self.params);\n");
+        out.push_str("        let p=&(*self.params);\n");
     }
     if stamp_needs_param_given {
-        out.push_str("        let param_given = self.param_given.as_ref();\n");
+        out.push_str("        let pg=self.param_given.as_ref();\n");
+        out.push_str("        let param_given=pg;\n");
     }
-    out.push_str("        let multiplicity = self.multiplicity;\n");
+    out.push_str("        let m=self.multiplicity;\n");
+    out.push_str("        let multiplicity=m;\n");
     if ddt_slots.len() > 0 || has_idt_slots {
         out.push_str("        let timestep = self.timestep;\n");
     }
@@ -575,6 +597,10 @@ fn generate_stamp_file(
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
         ddt_slots: Some(ddt_slots),
         ddt_mode: DdtEmitMode::Transient,
+        node_array_expr: "n",
+        branch_array_expr: "br",
+        param_given_expr: "pg",
+        multiplicity_expr: "m",
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
@@ -615,18 +641,22 @@ fn generate_stamp_file(
         out.push_str(
             "    pub fn stamp_reactive(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedReactiveStamper<'_>) {\n",
         );
-        out.push_str("        let nodes = self.nodes;\n");
-        out.push_str("        let branches = self.branches;\n");
+        out.push_str("        let n=self.nodes;\n");
+        out.push_str("        let nodes=n;\n");
+        out.push_str("        let br=self.branches;\n");
+        out.push_str("        let branches=br;\n");
         if static_cache.has_temperature_values() {
             out.push_str(
                 "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
             );
         }
-        out.push_str("        let p = &(*self.params);\n");
+        out.push_str("        let p=&(*self.params);\n");
         if reactive_needs_param_given {
-            out.push_str("        let param_given = self.param_given.as_ref();\n");
+            out.push_str("        let pg=self.param_given.as_ref();\n");
+            out.push_str("        let param_given=pg;\n");
         }
-        out.push_str("        let multiplicity = self.multiplicity;\n");
+        out.push_str("        let m=self.multiplicity;\n");
+        out.push_str("        let multiplicity=m;\n");
         let reactive_static_refs = scalar_static_cache_refs_for_stamp(static_cache);
         emit_scalar_static_cache_aliases(static_cache, &mut out);
         let reactive_shared_refs = shared_plan
@@ -648,6 +678,10 @@ fn generate_stamp_file(
             thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
             ddt_slots: Some(ddt_slots),
             ddt_mode: DdtEmitMode::ReactiveLinearized,
+            node_array_expr: "n",
+            branch_array_expr: "br",
+            param_given_expr: "pg",
+            multiplicity_expr: "m",
             loop_index_exprs: HashMap::new(),
             runtime_loop_values: HashMap::new(),
             runtime_loop_derivatives: HashMap::new(),
@@ -674,8 +708,21 @@ fn generate_stamp_file(
         out.push_str("    }\n");
     }
     out.push_str("}\n");
+    trace_scalar_stamp_source_size(artifact, &out);
     reject_oversized_scalar_stamp_source(artifact, &out)?;
     Ok(out)
+}
+
+fn trace_scalar_stamp_source_size(artifact: &CanonicalIrArtifact, source: &str) {
+    if std::env::var_os("RSPICE_VERILOGA_SCALAR_STAMP_SOURCE_SIZE_TRACE").is_none() {
+        return;
+    }
+    eprintln!(
+        "scalar stamp source size {}: bytes={} lines={}",
+        artifact.mir.module_name,
+        source.len(),
+        source.lines().count()
+    );
 }
 
 fn reject_oversized_scalar_stamp_source(
@@ -737,10 +784,11 @@ fn reject_oversized_scalar_stamp_value_emit(
         common_inline_values,
     )?;
     if scalar_stamp_source_line_estimate_exceeds_budget(emitted_values) {
+        let binding_lines = scalar_stamp_packed_binding_line_estimate(emitted_values);
         return Err(unsupported(
             artifact,
             format!(
-                "pure scalar stamp would emit at least {emitted_values} value binding lines before stamp calls; current scalar source line budget is {MAX_SCALAR_STAMP_SOURCE_LINES}"
+                "pure scalar stamp would emit approximately {emitted_values} value bindings, estimated as at least {binding_lines} packed binding lines before stamp calls; current scalar source line budget is {MAX_SCALAR_STAMP_SOURCE_LINES}"
             ),
         ));
     }
@@ -845,8 +893,14 @@ pub(super) fn scalar_stamp_emitted_values_exceeds_budget(emitted_values: usize) 
 }
 
 fn scalar_stamp_source_line_estimate_exceeds_budget(emitted_values: usize) -> bool {
-    emitted_values.saturating_add(SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE)
+    scalar_stamp_packed_binding_line_estimate(emitted_values)
+        .saturating_add(SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE)
         > MAX_SCALAR_STAMP_SOURCE_LINES
+}
+
+fn scalar_stamp_packed_binding_line_estimate(emitted_values: usize) -> usize {
+    emitted_values.saturating_add(MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE - 1)
+        / MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE
 }
 
 fn shared_stamp_values_plan(
@@ -1118,6 +1172,10 @@ pub(super) fn emit_shared_stamp_values_method(
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
         ddt_slots: Some(ddt_slots),
         ddt_mode: DdtEmitMode::Transient,
+        node_array_expr: "n",
+        branch_array_expr: "br",
+        param_given_expr: "pg",
+        multiplicity_expr: "m",
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
@@ -1128,9 +1186,11 @@ pub(super) fn emit_shared_stamp_values_method(
     out.push_str(
         "    fn eval_common_stamp_values(&mut self, ctx: &GeneratedEvalContext<'_>) -> CommonStampValues {\n",
     );
-    out.push_str("        let nodes = self.nodes;\n");
+    out.push_str("        let n=self.nodes;\n");
+    out.push_str("        let nodes=n;\n");
     if live_values_need_branches(artifact, &plan.live) {
-        out.push_str("        let branches = self.branches;\n");
+        out.push_str("        let br=self.branches;\n");
+        out.push_str("        let branches=br;\n");
     }
     if static_cache.has_temperature_values() {
         out.push_str(
@@ -1138,13 +1198,15 @@ pub(super) fn emit_shared_stamp_values_method(
         );
     }
     if live_values_need_params(artifact, &plan.live) {
-        out.push_str("        let p = &(*self.params);\n");
+        out.push_str("        let p=&(*self.params);\n");
     }
     if live_values_need_param_given(artifact, &plan.live) {
-        out.push_str("        let param_given = self.param_given.as_ref();\n");
+        out.push_str("        let pg=self.param_given.as_ref();\n");
+        out.push_str("        let param_given=pg;\n");
     }
     if live_values_need_multiplicity(artifact, &plan.live) {
-        out.push_str("        let multiplicity = self.multiplicity;\n");
+        out.push_str("        let m=self.multiplicity;\n");
+        out.push_str("        let multiplicity=m;\n");
     }
     emit_scalar_static_cache_aliases(static_cache, out);
     emit_live_values(
@@ -1370,6 +1432,10 @@ pub(super) fn scalar_state_extensions(
         thermal_voltage_expr: "thermal_voltage".to_string(),
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
+        node_array_expr: "nodes",
+        branch_array_expr: "branches",
+        param_given_expr: "param_given",
+        multiplicity_expr: "multiplicity",
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
@@ -1387,6 +1453,10 @@ pub(super) fn scalar_state_extensions(
         thermal_voltage_expr: "thermal_voltage".to_string(),
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
+        node_array_expr: "nodes",
+        branch_array_expr: "branches",
+        param_given_expr: "param_given",
+        multiplicity_expr: "multiplicity",
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
@@ -1689,6 +1759,10 @@ pub(super) fn emit_static_current_values_with_shared_plan(
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
         ddt_slots: None,
         ddt_mode: DdtEmitMode::Transient,
+        node_array_expr: "nodes",
+        branch_array_expr: "branches",
+        param_given_expr: "param_given",
+        multiplicity_expr: "multiplicity",
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
@@ -3130,15 +3204,15 @@ fn emit_value_expr(
         }
         OptValueKind::ParamGiven { parameter } => {
             let index = usize::from(*parameter);
-            format!("if param_given[{index}] {{ 1.0 }} else {{ 0.0 }}")
+            format!("if {}[{index}]{{1.0}}else{{0.0}}", context.param_given_expr)
         }
         OptValueKind::Temperature => context.temperature_expr.clone(),
         OptValueKind::ThermalVoltage => context.thermal_voltage_expr.clone(),
-        OptValueKind::Multiplicity => "multiplicity".to_string(),
+        OptValueKind::Multiplicity => context.multiplicity_expr.to_string(),
         OptValueKind::Time => "self.time".to_string(),
         OptValueKind::Analysis { query } => {
             format!(
-                "if {} {{ 1.0 }} else {{ 0.0 }}",
+                "if {}{{1.0}}else{{0.0}}",
                 analysis_predicate_expr(query.as_str())
             )
         }
@@ -3162,15 +3236,19 @@ fn emit_value_expr(
             DdtEmitMode::ReactiveLinearized => "1.0".to_string(),
         },
         OptValueKind::NodePotential { node } => {
-            format!("ctx.node_voltage(nodes[{}])", node.index())
+            format!(
+                "ctx.node_voltage({}[{}])",
+                context.node_array_expr,
+                node.index()
+            )
         }
         OptValueKind::BranchFlow { branch } => {
             let slot = branch_flow_slot(artifact, *branch)?;
-            format!("ctx.branch_current(branches[{slot}])")
+            format!("ctx.branch_current({}[{slot}])", context.branch_array_expr)
         }
         OptValueKind::BranchUnknownFlow { branch_unknown } => {
             let slot = branch_unknown_flow_slot(artifact, *branch_unknown)?;
-            format!("ctx.branch_current(branches[{slot}])")
+            format!("ctx.branch_current({}[{slot}])", context.branch_array_expr)
         }
         OptValueKind::LoopIndex { loop_id } => context
             .loop_index_exprs
@@ -3298,6 +3376,10 @@ fn emit_counted_sum_expr(
         thermal_voltage_expr: context.thermal_voltage_expr.clone(),
         ddt_slots: context.ddt_slots,
         ddt_mode: context.ddt_mode,
+        node_array_expr: context.node_array_expr,
+        branch_array_expr: context.branch_array_expr,
+        param_given_expr: context.param_given_expr,
+        multiplicity_expr: context.multiplicity_expr,
         loop_index_exprs: context.loop_index_exprs.clone(),
         runtime_loop_values: context.runtime_loop_values.clone(),
         runtime_loop_derivatives: context.runtime_loop_derivatives.clone(),
@@ -3487,12 +3569,17 @@ fn emit_runtime_loop(
         thermal_voltage_expr: context.thermal_voltage_expr.clone(),
         ddt_slots: context.ddt_slots,
         ddt_mode: context.ddt_mode,
+        node_array_expr: context.node_array_expr,
+        branch_array_expr: context.branch_array_expr,
+        param_given_expr: context.param_given_expr,
+        multiplicity_expr: context.multiplicity_expr,
         loop_index_exprs: context.loop_index_exprs.clone(),
         runtime_loop_values: context.runtime_loop_values.clone(),
         runtime_loop_derivatives: context.runtime_loop_derivatives.clone(),
         external_value_refs: context.external_value_refs.clone(),
     };
 
+    let mut init_let_emitter = CompactLetEmitter::new("        ");
     for (slot, variable) in runtime_loop.variables.iter().enumerate() {
         let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
         let local = runtime_loop_value_name(loop_id, slot);
@@ -3501,10 +3588,7 @@ fn emit_runtime_loop(
             value_type(artifact, variable.initial)?,
             variable.value_type,
         );
-        out.push_str(&format!(
-            "        let mut {local}: {}={initial};\n",
-            rust_type(variable.value_type)
-        ));
+        init_let_emitter.push_mut_typed(out, &local, rust_type(variable.value_type), &initial);
         loop_context
             .runtime_loop_values
             .insert((loop_id, slot), local);
@@ -3517,14 +3601,13 @@ fn emit_runtime_loop(
             } else {
                 "0.0".to_string()
             };
-            out.push_str(&format!(
-                "        let mut {derivative_local}: f64={initial_derivative};\n"
-            ));
+            init_let_emitter.push_mut_typed(out, &derivative_local, "f64", &initial_derivative);
             loop_context
                 .runtime_loop_derivatives
                 .insert((loop_id, slot, *lane), derivative_local);
         }
     }
+    init_let_emitter.flush(out);
     out.push_str("        {\n");
     let guard = runtime_loop_guard_name(loop_id);
     out.push_str(&format!("            let mut {guard}=0usize;\n"));
@@ -3532,16 +3615,14 @@ fn emit_runtime_loop(
     let condition_values =
         ordered_counted_sum_values(artifact, &condition_live, context.cached_values)?;
     out.push_str("            while {\n");
-    for value_id in condition_values {
-        emit_runtime_loop_inner_value(
-            artifact,
-            parameter_fields,
-            value_id,
-            &loop_context,
-            "                ",
-            out,
-        )?;
-    }
+    emit_runtime_loop_inner_values(
+        artifact,
+        parameter_fields,
+        condition_values,
+        &loop_context,
+        "                ",
+        out,
+    )?;
     let condition = value_ref(
         artifact,
         parameter_fields,
@@ -3560,16 +3641,14 @@ fn emit_runtime_loop(
     ));
 
     let body_values = ordered_counted_sum_values(artifact, &body_live, context.cached_values)?;
-    for value_id in body_values {
-        emit_runtime_loop_inner_value(
-            artifact,
-            parameter_fields,
-            value_id,
-            &loop_context,
-            "                ",
-            out,
-        )?;
-    }
+    emit_runtime_loop_inner_values(
+        artifact,
+        parameter_fields,
+        body_values,
+        &loop_context,
+        "                ",
+        out,
+    )?;
     for assignment in &runtime_loop.assignments {
         let variable = runtime_loop
             .variables
@@ -3612,14 +3691,12 @@ fn emit_runtime_loop(
     out.push_str("            }\n");
     out.push_str("        }\n");
 
+    let mut result_let_emitter = CompactLetEmitter::new("        ");
     for (slot, variable) in runtime_loop.variables.iter().enumerate() {
         if live.contains(&variable.result) {
             let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
             let local = runtime_loop_value_name(loop_id, slot);
-            out.push_str(&format!(
-                "        let {}={local};\n",
-                value_name(variable.result)
-            ));
+            result_let_emitter.push(out, &value_name(variable.result), &local);
         }
     }
     for value in &artifact.opt.values {
@@ -3634,10 +3711,34 @@ fn emit_runtime_loop(
             && value_loop_id == loop_id
         {
             let local = runtime_loop_derivative_name(loop_id, slot, lane);
-            out.push_str(&format!("        let {}={local};\n", value_name(value.id)));
+            result_let_emitter.push(out, &value_name(value.id), &local);
         }
     }
+    result_let_emitter.flush(out);
     out.push('\n');
+    Ok(())
+}
+
+fn emit_runtime_loop_inner_values(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    values: impl IntoIterator<Item = ValueId>,
+    context: &ValueEmitContext<'_>,
+    indent: &'static str,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let mut let_emitter = CompactLetEmitter::new(indent);
+    for value_id in values {
+        emit_runtime_loop_inner_value(
+            artifact,
+            parameter_fields,
+            value_id,
+            context,
+            &mut let_emitter,
+            out,
+        )?;
+    }
+    let_emitter.flush(out);
     Ok(())
 }
 
@@ -3646,7 +3747,7 @@ fn emit_runtime_loop_inner_value(
     parameter_fields: &HashMap<String, String>,
     value_id: ValueId,
     context: &ValueEmitContext<'_>,
-    indent: &str,
+    let_emitter: &mut CompactLetEmitter,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let value = artifact
@@ -3667,7 +3768,7 @@ fn emit_runtime_loop_inner_value(
         return Ok(());
     }
     let expr = emit_value_expr(artifact, parameter_fields, value, context)?;
-    out.push_str(&format!("{indent}let {}={};\n", value_name(value.id), expr));
+    let_emitter.push(out, &value_name(value.id), &expr);
     Ok(())
 }
 
@@ -3913,7 +4014,7 @@ fn emit_value_only_system_function(
                 unsupported(artifact, "$param_given idt initial condition argument")
             })?;
             Ok(format!(
-                "if param_given[{}] {{ 1.0 }} else {{ 0.0 }}",
+                "if param_given[{}]{{1.0}}else{{0.0}}",
                 usize::from(parameter)
             ))
         }
@@ -4126,17 +4227,18 @@ fn value_ref(
             }
             OptValueKind::ParamGiven { parameter } => {
                 return Ok(format!(
-                    "if param_given[{}] {{ 1.0 }} else {{ 0.0 }}",
+                    "if {}[{}]{{1.0}}else{{0.0}}",
+                    context.param_given_expr,
                     usize::from(parameter)
                 ));
             }
             OptValueKind::Temperature => return Ok(context.temperature_expr.clone()),
             OptValueKind::ThermalVoltage => return Ok(context.thermal_voltage_expr.clone()),
-            OptValueKind::Multiplicity => return Ok("multiplicity".to_string()),
+            OptValueKind::Multiplicity => return Ok(context.multiplicity_expr.to_string()),
             OptValueKind::Time => return Ok("self.time".to_string()),
             OptValueKind::Analysis { ref query } => {
                 return Ok(format!(
-                    "if {} {{ 1.0 }} else {{ 0.0 }}",
+                    "if {}{{1.0}}else{{0.0}}",
                     analysis_predicate_expr(query.as_str())
                 ));
             }
@@ -5373,22 +5475,152 @@ fn rust_type(value_type: OptValueType) -> &'static str {
 }
 
 fn value_name(value: ValueId) -> String {
-    format!("v{}", base36_index(value.index()))
+    compact_scalar_identifier(value.index())
 }
 
-fn base36_index(mut index: u32) -> String {
-    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
-    if index == 0 {
-        return "0".to_string();
-    }
+fn compact_scalar_identifier(mut index: u32) -> String {
+    const FIRST: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const REST: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let first_base = FIRST.len() as u32;
+    let rest_base = REST.len() as u32;
+    let mut width = 1u32;
+    let mut rest_scale = 1u32;
 
-    let mut bytes = Vec::new();
-    while index > 0 {
-        bytes.push(DIGITS[(index % 36) as usize]);
-        index /= 36;
+    loop {
+        let capacity = first_base
+            .checked_mul(rest_scale)
+            .expect("scalar identifier capacity overflow");
+        if index < capacity {
+            let first = index / rest_scale;
+            let mut remainder = index % rest_scale;
+            let mut bytes = Vec::with_capacity(width as usize);
+            bytes.push(FIRST[first as usize]);
+            let mut suffix = vec![REST[0]; width.saturating_sub(1) as usize];
+            for slot in suffix.iter_mut().rev() {
+                *slot = REST[(remainder % rest_base) as usize];
+                remainder /= rest_base;
+            }
+            bytes.extend(suffix);
+            let mut name = String::from_utf8(bytes).expect("scalar identifier alphabet is UTF-8");
+            if is_reserved_scalar_identifier(&name) {
+                name.push('_');
+            }
+            return name;
+        }
+        index -= capacity;
+        width += 1;
+        rest_scale = rest_scale
+            .checked_mul(rest_base)
+            .expect("scalar identifier scale overflow");
     }
-    bytes.reverse();
-    String::from_utf8(bytes).expect("base36 digits are valid UTF-8")
+}
+
+fn is_reserved_scalar_identifier(name: &str) -> bool {
+    matches!(
+        name,
+        "as" | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "pub"
+            | "ref"
+            | "return"
+            | "self"
+            | "Self"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "unsafe"
+            | "use"
+            | "where"
+            | "while"
+            | "async"
+            | "await"
+            | "dyn"
+            | "abstract"
+            | "become"
+            | "box"
+            | "do"
+            | "final"
+            | "macro"
+            | "override"
+            | "priv"
+            | "typeof"
+            | "unsized"
+            | "virtual"
+            | "yield"
+            | "try"
+            | "bool"
+            | "f32"
+            | "f64"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "Some"
+            | "None"
+            | "Ok"
+            | "Err"
+            | "ctx"
+            | "stamper"
+            | "p"
+            | "n"
+            | "br"
+            | "pg"
+            | "m"
+            | "nodes"
+            | "branches"
+            | "param_given"
+            | "multiplicity"
+            | "sf"
+            | "sb"
+            | "common"
+            | "timestep"
+            | "ddt_state_current"
+            | "ddt_state_previous"
+            | "ddt_state_older"
+            | "ddt_state_initialized"
+            | "ddt_derivative_current"
+            | "ddt_derivative_previous"
+            | "idt_state_current"
+            | "idt_state_previous"
+            | "idt_state_initialized"
+            | "ddt_active"
+            | "ddt_scale"
+            | "ddt_previous_value_scale"
+            | "ddt_older_value_scale"
+            | "ddt_previous_derivative_scale"
+            | "idt_scale"
+            | "counted_sum"
+            | "limexp_arg"
+            | "limited_exp_arg"
+    )
 }
 
 fn runtime_loop_value_name(loop_id: u32, slot: u32) -> String {
@@ -5597,5 +5829,54 @@ mod tests {
             ),
             "((if flag{1.0}else{0.0})).sqrt()"
         );
+    }
+
+    #[test]
+    fn scalar_source_line_budget_uses_compact_binding_estimate() {
+        let emitted_values =
+            MAX_SCALAR_STAMP_SOURCE_LINES - SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE;
+
+        assert_eq!(
+            scalar_stamp_packed_binding_line_estimate(
+                emitted_values * MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE
+            ),
+            emitted_values
+        );
+        assert!(!scalar_stamp_source_line_estimate_exceeds_budget(
+            MAX_SCALAR_STAMP_EMITTED_VALUES
+        ));
+        assert!(scalar_stamp_emitted_values_exceeds_budget(
+            MAX_SCALAR_STAMP_EMITTED_VALUES + 1
+        ));
+    }
+
+    #[test]
+    fn compact_scalar_identifiers_are_short_and_reserved_safe() {
+        assert_eq!(compact_scalar_identifier(0), "a");
+        assert_eq!(compact_scalar_identifier(12), "m_");
+        assert_eq!(compact_scalar_identifier(13), "n_");
+        assert_eq!(compact_scalar_identifier(15), "p_");
+        assert_eq!(compact_scalar_identifier(52), "a0");
+
+        let mut seen = HashSet::new();
+        for index in 0..20_000 {
+            let name = compact_scalar_identifier(index);
+            assert!(
+                seen.insert(name.clone()),
+                "duplicate scalar identifier {name}"
+            );
+            let raw = name.trim_end_matches('_');
+            assert!(
+                !is_reserved_scalar_identifier(raw) || name.ends_with('_'),
+                "unescaped reserved scalar identifier {name}"
+            );
+            let mut chars = name.chars();
+            let first = chars.next().expect("identifier is not empty");
+            assert!(first == '_' || first.is_ascii_alphabetic(), "{name}");
+            assert!(
+                chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric()),
+                "{name}"
+            );
+        }
     }
 }

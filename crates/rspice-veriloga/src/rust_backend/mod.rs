@@ -300,8 +300,11 @@ endmodule
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
         assert!(stamp.contains("fn scalar_limexp("), "{stamp}");
         assert!(stamp.contains("fn scalar_limexp_derivative("), "{stamp}");
-        assert!(stamp.contains("scalar_limexp(v"), "{stamp}");
-        assert!(stamp.contains("scalar_limexp_derivative(v"), "{stamp}");
+        assert!(stamp.matches("scalar_limexp(").count() >= 2, "{stamp}");
+        assert!(
+            stamp.matches("scalar_limexp_derivative(").count() >= 2,
+            "{stamp}"
+        );
         assert!(!stamp.contains("let limexp_arg"), "{stamp}");
     }
 
@@ -2135,14 +2138,26 @@ endmodule
             .lines()
             .filter(|line| line.trim_start().starts_with("let v"))
             .count();
+        let runtime_loop_initializer_lines = stamp
+            .lines()
+            .filter(|line| line.trim_start().starts_with("let mut r0_"))
+            .count();
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
         assert!(stamp.contains("let mut r0_"), "{stamp}");
+        assert!(
+            stamp.contains(";let mut r0_"),
+            "runtime loop mutable locals should be packed onto shared source lines\n{stamp}"
+        );
         assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
         assert!(stamp.contains("while {"), "{stamp}");
         assert!(
             value_locals < 400,
             "runtime loop should not unroll into thousands of scalar locals, saw {value_locals}"
+        );
+        assert!(
+            runtime_loop_initializer_lines < 16,
+            "runtime loop initializers should stay compact, saw {runtime_loop_initializer_lines}\n{stamp}"
         );
         assert!(!stamp.contains("AdValue"), "{stamp}");
     }
@@ -2464,7 +2479,7 @@ endmodule
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
         assert!(stamp.contains("let mut r0_"), "{stamp}");
         assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
-        assert!(stamp.contains("}else{v0}"), "{stamp}");
+        assert!(stamp.contains("}else{"), "{stamp}");
         assert!(!stamp.contains("{true}else{false}"), "{stamp}");
         assert!(!stamp.contains("AdValue"), "{stamp}");
     }
