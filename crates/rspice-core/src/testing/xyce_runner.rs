@@ -4042,6 +4042,17 @@ impl XyceTestRunner {
                     {
                         continue;
                     }
+                    if self.transient_probe_matches_reference_time_neighborhood(
+                        reference,
+                        layout.time_column,
+                        row_index,
+                        column_index + layout.data_column_offset,
+                        actual,
+                        tolerance,
+                        time_tolerance,
+                    ) {
+                        continue;
+                    }
                     if let Some(output_interval) = output_initial_interval
                         && self.transient_probe_matches_output_interval_corridor(
                             probe,
@@ -4072,6 +4083,101 @@ impl XyceTestRunner {
         }
 
         Ok(mismatches)
+    }
+
+    fn transient_probe_matches_reference_time_neighborhood(
+        &self,
+        reference: &XycePrnTable,
+        time_column: usize,
+        row_index: usize,
+        data_column: usize,
+        actual: Value,
+        tolerance: XyceComparisonTolerance,
+        time_tolerance: Value,
+    ) -> bool {
+        if !actual.is_finite() || !time_tolerance.is_finite() || time_tolerance < 0.0 {
+            return false;
+        }
+        let Some(row) = reference.rows.get(row_index) else {
+            return false;
+        };
+        let Some(&time) = row.get(time_column) else {
+            return false;
+        };
+        if !time.is_finite() {
+            return false;
+        }
+
+        let mut first_row = row_index;
+        while first_row > 0
+            && Self::reference_time_is_in_prn_neighborhood(
+                time,
+                reference.rows[first_row - 1].get(time_column).copied(),
+                time_tolerance,
+            )
+        {
+            first_row -= 1;
+        }
+
+        let mut last_row = row_index;
+        while last_row + 1 < reference.rows.len()
+            && Self::reference_time_is_in_prn_neighborhood(
+                time,
+                reference.rows[last_row + 1].get(time_column).copied(),
+                time_tolerance,
+            )
+        {
+            last_row += 1;
+        }
+
+        if first_row == last_row {
+            return false;
+        }
+
+        let mut min_reference = Value::INFINITY;
+        let mut max_reference = Value::NEG_INFINITY;
+        let mut finite_values = 0usize;
+        for row in &reference.rows[first_row..=last_row] {
+            let Some(&value) = row.get(data_column) else {
+                continue;
+            };
+            if value.is_finite() {
+                finite_values += 1;
+                min_reference = min_reference.min(value);
+                max_reference = max_reference.max(value);
+            }
+        }
+
+        finite_values >= 2
+            && min_reference.is_finite()
+            && max_reference.is_finite()
+            && (actual >= min_reference && actual <= max_reference
+                || self
+                    .value_mismatch(min_reference, actual, tolerance)
+                    .is_none()
+                || self
+                    .value_mismatch(max_reference, actual, tolerance)
+                    .is_none())
+    }
+
+    fn reference_time_is_in_prn_neighborhood(
+        anchor_time: Value,
+        candidate_time: Option<Value>,
+        time_tolerance: Value,
+    ) -> bool {
+        let Some(candidate_time) = candidate_time else {
+            return false;
+        };
+        if !anchor_time.is_finite() || !candidate_time.is_finite() {
+            return false;
+        }
+        if candidate_time == anchor_time {
+            return true;
+        }
+        let candidate_tolerance = Self::default_prn_time_quantization_tolerance(candidate_time);
+        let neighborhood = time_tolerance.max(candidate_tolerance) * PRN_TIME_NEIGHBOR_HALF_ULPS;
+        let binary_roundoff = Value::EPSILON * anchor_time.abs().max(candidate_time.abs());
+        neighborhood > 0.0 && (candidate_time - anchor_time).abs() <= neighborhood + binary_roundoff
     }
 
     fn transient_probe_matches_output_interval_corridor(
@@ -11360,6 +11466,130 @@ C1 out 0 40u IC=1
                 )
                 .expect("time-neighborhood comparison should evaluate"),
             "expected value falls inside adjacent PRN-rounded transition samples"
+        );
+    }
+
+    #[test]
+    fn transient_comparison_accepts_duplicate_reference_time_envelope() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![vec![0.0, 1.0e-9, 1.0], vec![1.0, 1.0e-9, 3.0]],
+        };
+        let tolerance = runner.default_comparison_tolerance("v(1)");
+
+        assert!(
+            runner.transient_probe_matches_reference_time_neighborhood(
+                &reference, 1, 0, 2, 2.0, tolerance, 0.0,
+            ),
+            "actual value inside duplicate printed-time oracle envelope should be accepted"
+        );
+    }
+
+    #[test]
+    fn transient_comparison_rejects_outside_duplicate_reference_time_envelope() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![vec![0.0, 1.0e-9, 1.0], vec![1.0, 1.0e-9, 3.0]],
+        };
+        let tolerance = runner.default_comparison_tolerance("v(1)");
+
+        assert!(
+            !runner.transient_probe_matches_reference_time_neighborhood(
+                &reference, 1, 0, 2, 4.0, tolerance, 0.0,
+            ),
+            "actual value outside duplicate printed-time oracle envelope should be rejected"
+        );
+    }
+
+    #[test]
+    fn transient_comparison_rejects_single_reference_time_row_neighborhood() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![vec![0.0, 1.0e-9, 1.0], vec![1.0, 2.0e-9, 3.0]],
+        };
+        let tolerance = runner.default_comparison_tolerance("v(1)");
+
+        assert!(
+            !runner.transient_probe_matches_reference_time_neighborhood(
+                &reference, 1, 0, 2, 2.0, tolerance, 0.0,
+            ),
+            "a single oracle row must still fail normal comparison"
+        );
+    }
+
+    #[test]
+    fn transient_comparison_accepts_rounded_reference_time_neighborhood() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let time = 2.83500038e-8;
+        let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(time);
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, time - time_tolerance, 0.017],
+                vec![1.0, time, 0.019],
+                vec![2.0, time + time_tolerance, 0.023],
+            ],
+        };
+        let tolerance = runner.default_comparison_tolerance("v(1)");
+
+        assert!(
+            runner.transient_probe_matches_reference_time_neighborhood(
+                &reference,
+                1,
+                1,
+                2,
+                0.020293594015632306,
+                tolerance,
+                time_tolerance,
+            ),
+            "actual value inside rounded printed-time oracle envelope should be accepted"
+        );
+    }
+
+    #[test]
+    fn transient_comparison_accepts_decimal_boundary_reference_time_neighborhood() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let time = 1.31654818e-7;
+        let neighbor_time = 1.31654820e-7;
+        let time_tolerance = XyceTestRunner::default_prn_time_quantization_tolerance(time);
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(1)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, time, 7.68303997e-3],
+                vec![1.0, neighbor_time, 1.14131863e-2],
+            ],
+        };
+        let tolerance = runner.default_comparison_tolerance("v(1)");
+
+        assert!(
+            runner.transient_probe_matches_reference_time_neighborhood(
+                &reference,
+                1,
+                0,
+                2,
+                8.189634498984992e-3,
+                tolerance,
+                time_tolerance,
+            ),
+            "decimal timestamps at the PRN-neighborhood boundary should not fail due to binary roundoff"
         );
     }
 
