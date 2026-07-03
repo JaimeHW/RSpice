@@ -1712,6 +1712,69 @@ fn test_ngspice_mesa_suite() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #[test]
+fn test_ngspice_bsim3soi_t3_dc_focus_cases_run() {
+    let tests_dir = get_tests_dir();
+
+    for relative in [
+        "bsim3soidd/t3.cir",
+        "bsim3soifd/t3.cir",
+        "bsim3soipd/t3.cir",
+    ] {
+        let suite = relative
+            .split_once('/')
+            .expect("focused ngspice SOI deck should include a suite")
+            .0;
+        let runner = TestRunner::new(tests_dir.clone(), suite_config(suite));
+        let result = runner.run_test(&tests_dir.join(relative));
+
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some("DC Sweep"),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
+}
+
+#[test]
+fn test_ngspice_mes_mesa_focus_cases_run() {
+    let tests_dir = get_tests_dir();
+
+    for (relative, expected_analysis) in [("mes/subth.cir", "DC Sweep"), ("mesa/mesgout.cir", "AC")]
+    {
+        let suite = relative
+            .split_once('/')
+            .expect("focused ngspice MES deck should include a suite")
+            .0;
+        let runner = TestRunner::new(tests_dir.clone(), suite_config(suite));
+        let result = runner.run_test(&tests_dir.join(relative));
+
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some(expected_analysis),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
+}
+
+#[test]
 fn test_full_ngspice_suite_summary() {
     assert_ngspice_regression_deck_run_allowed("full suite");
 
