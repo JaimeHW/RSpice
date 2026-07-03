@@ -666,10 +666,7 @@ fn evaluate_digital_oscillator(
         return Ok(());
     }
 
-    let mut transition_time = last_time + interval;
-    if transition_time < ctx.time {
-        transition_time = ctx.time;
-    }
+    let transition_time = last_time + interval;
 
     let next_state = 1 - last_state;
     oscillator_set_state(ctx, OSC_LAST_TIME, transition_time);
@@ -677,7 +674,7 @@ fn evaluate_digital_oscillator(
     ctx.set_output_digital(
         "out",
         state_to_value(next_state),
-        (transition_time - ctx.time).max(0.0),
+        transition_time - ctx.time,
     );
 
     let next_interval = if next_state == 0 {
