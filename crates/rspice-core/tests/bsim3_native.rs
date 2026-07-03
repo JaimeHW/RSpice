@@ -12,7 +12,7 @@
 //! - LEVEL=49 and Xyce-compatible LEVEL=9 cards build and run natively, without the
 //!   `allow_simplified_mos` escape hatch.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
 /// The module's own oracle model cards (n018/p018, LEVEL=49, CAPMOD=3).
@@ -88,6 +88,10 @@ fn models018_level9_acnqsmod1() -> String {
 
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
+}
+
+fn engine_with_dialect(dialect: SpiceDialect) -> Engine {
+    Engine::new(SimulationConfig::default().with_spice_dialect(dialect))
 }
 
 fn bsim3_nmos_op_id_with_models(models: &str, instance_suffix: &str) -> Result<f64, String> {
@@ -423,12 +427,69 @@ fn level49_version324_fails_closed_until_native_bsim3v32_port_exists() {
 }
 
 #[test]
+fn level49_version31_legacy_metadata_routes_to_native_bsim3_in_xyce_dialect() {
+    let deck = "* BSIM3 legacy metadata NMOS DC Operating Point\n\
+                V1 drain 0 1.0\n\
+                V2 gate 0 1.0\n\
+                M1 drain gate 0 0 NMOD W=1u L=100n\n\
+                .model NMOD NMOS LEVEL=49 VERSION=3.1 TOX=9E-9 VTH0=0.5\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("BSIM3 VERSION=3.1 deck parses");
+    let (_, report) = engine_with_dialect(SpiceDialect::Xyce)
+        .run_dc_op_with_report(&netlist)
+        .expect("Xyce BSIM3 VERSION=3.1 metadata should run on the native B3 evaluator");
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("m1 op entry");
+
+    assert_eq!(
+        entry.device_kind, "BSIM3",
+        "VERSION=3.1 must use the native BSIM3 port, not a simplified fallback"
+    );
+    let id = entry
+        .params
+        .iter()
+        .find(|(key, _)| *key == "id")
+        .map(|(_, value)| *value)
+        .expect("BSIM3 op id");
+    assert!(id.is_finite(), "BSIM3 VERSION=3.1 op id should be finite");
+}
+
+#[test]
+fn level49_version31_without_xyce_dialect_fails_closed_until_bsim3v1_port_exists() {
+    let deck = "* generic BSIM3v1 card must not use the v3.3 evaluator\n\
+                V1 drain 0 1.0\n\
+                V2 gate 0 1.0\n\
+                M1 drain gate 0 0 NMOD W=1u L=100n\n\
+                .model NMOD NMOS LEVEL=49 VERSION=3.1 TOX=9E-9 VTH0=0.5\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("BSIM3 VERSION=3.1 deck parses");
+
+    for dialect in [SpiceDialect::BestAvailable, SpiceDialect::Ngspice] {
+        let message = engine_with_dialect(dialect)
+            .run_dc_op_with_report(&netlist)
+            .expect_err("generic BSIM3 VERSION=3.1 must fail closed until BSIM3v1 exists")
+            .to_string();
+        assert!(
+            message.contains("BSIM3 VERSION=3.1")
+                && message.contains("native BSIM3v1 port")
+                && message.contains("Xyce B3 compatibility"),
+            "generic VERSION=3.1 diagnostic should identify the missing native port: {message}"
+        );
+    }
+}
+
+#[test]
 fn unsupported_pre33_bsim3_version_still_fails_closed() {
     let deck = "* unsupported BSIM3 pre-3.3 version\n\
                 V1 drain 0 1.0\n\
                 V2 gate 0 1.0\n\
                 M1 drain gate 0 0 NMOD W=1u L=100n\n\
-                .model NMOD NMOS LEVEL=49 VERSION=3.1 TOX=9E-9 VTH0=0.5\n\
+                .model NMOD NMOS LEVEL=49 VERSION=3.0 TOX=9E-9 VTH0=0.5\n\
                 .op\n\
                 .end\n";
     let netlist = Netlist::parse(deck).expect("BSIM3 deck parses");
@@ -439,7 +500,7 @@ fn unsupported_pre33_bsim3_version_still_fails_closed() {
     assert!(
         message.contains("unsupported BSIM3 pre-3.3")
             && message.contains("LEVEL=49")
-            && message.contains("VERSION=3.1"),
+            && message.contains("VERSION=3"),
         "unsupported version diagnostic should identify the rejected card: {message}"
     );
 }

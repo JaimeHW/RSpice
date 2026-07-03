@@ -2145,19 +2145,20 @@ fn test_xyce_lead_current_probe_cases_run() {
         );
     }
 
-    let unsupported_device_deck =
+    let bsim3_legacy_version_deck =
         "Netlists/Certification_Tests/BUG_812_SON/global_accessor_interference.cir";
-    let result = runner.run_test(root.join(unsupported_device_deck));
+    let result = runner.run_test(root.join(bsim3_legacy_version_deck));
     assert!(
-        result.passed && result.expected_unsupported,
-        "{unsupported_device_deck} should remain named unsupported until BSIM3 VERSION=3.1 is fully implemented, got {result:?}"
+        result.passed && !result.expected_unsupported,
+        "{bsim3_legacy_version_deck} should run as a numeric BSIM3 VERSION=3.1 comparison, got {result:?}"
     );
     assert!(
-        result
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("BSIM3 pre-3.3 LEVEL=49 VERSION=3.1")),
-        "unsupported reason should name the BSIM3 3.1 capability boundary, got {result:?}"
+        result.mismatches.is_empty(),
+        "{bsim3_legacy_version_deck} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_dc",
+        "{bsim3_legacy_version_deck} should report the native static .prn DC contract"
     );
 }
 

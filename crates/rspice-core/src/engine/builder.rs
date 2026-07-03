@@ -3858,6 +3858,20 @@ impl Engine {
                             bsim3_level8_49_version_family(params_map, &device_model.string_params)
                     {
                         match version_family {
+                            Bsim3VersionFamily::LegacyV31Metadata(version) => {
+                                if self.config.spice_dialect != SpiceDialect::Xyce {
+                                    return Err(SimulationError::Circuit(format!(
+                                        "MOSFET '{}': BSIM3 VERSION={version} LEVEL={level} \
+                                         requires a distinct native BSIM3v1 port outside Xyce \
+                                         B3 compatibility mode; RSpice's BSIM3v3.3 native \
+                                         evaluator must not be used as a generic VERSION={version} \
+                                         compatibility fallback",
+                                        element.name
+                                    )));
+                                }
+                                // Xyce MOSFET_B3 treats VERSION=3.1 as accepted metadata on
+                                // its B3 evaluator; it does not switch to ngspice BSIM3v1.
+                            }
                             Bsim3VersionFamily::V32(version) => {
                                 return Err(SimulationError::Circuit(format!(
                                     "MOSFET '{}': BSIM3v32 LEVEL={level} VERSION={version} \

@@ -153,6 +153,7 @@ pub(super) fn level9_selects_bsim3(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Bsim3VersionFamily {
+    LegacyV31Metadata(String),
     V32(String),
     V33OrLater,
     UnsupportedPre33(String),
@@ -170,6 +171,8 @@ pub(super) fn bsim3_level8_49_version_family(
         let requested = format!("{version}");
         return Some(if approx_any(version, &[3.2, 3.22, 3.23, 3.24]) {
             Bsim3VersionFamily::V32(requested)
+        } else if approx_any(version, &[3.1]) {
+            Bsim3VersionFamily::LegacyV31Metadata(requested)
         } else if version < 3.3 {
             Bsim3VersionFamily::UnsupportedPre33(requested)
         } else {
@@ -188,6 +191,8 @@ pub(super) fn bsim3_level8_49_version_family(
             "3.2" | "3.20" | "3.2.0" | "3.22" | "3.2.2" | "3.23" | "3.2.3" | "3.24" | "3.2.4"
         ) {
             Bsim3VersionFamily::V32(normalized.to_string())
+        } else if matches!(normalized, "3.1" | "3.10" | "3.1.0") {
+            Bsim3VersionFamily::LegacyV31Metadata(normalized.to_string())
         } else if normalized.parse::<f64>().is_ok_and(|version| version < 3.3) {
             Bsim3VersionFamily::UnsupportedPre33(normalized.to_string())
         } else {
