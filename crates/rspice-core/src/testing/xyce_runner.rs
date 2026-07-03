@@ -217,7 +217,9 @@ struct XyceStaticAcPlan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticTranContract {
     PlainStatic,
+    PlainCsd,
     WrapperStatic,
+    WrapperCsd,
     WrapperStaticExpectedError,
 }
 
@@ -226,12 +228,23 @@ impl XyceStaticTranContract {
         match (self, has_step) {
             (Self::PlainStatic, false) => "static_prn_tran",
             (Self::PlainStatic, true) => "static_prn_step_tran",
+            (Self::PlainCsd, false) => "static_csd_tran",
+            (Self::PlainCsd, true) => "static_csd_step_tran",
             (Self::WrapperStatic, false) => "wrapper_static_prn_tran",
             (Self::WrapperStatic, true) => "wrapper_static_prn_step_tran",
+            (Self::WrapperCsd, false) => "wrapper_csd_tran",
+            (Self::WrapperCsd, true) => "wrapper_csd_step_tran",
             (Self::WrapperStaticExpectedError, false) => "wrapper_static_prn_tran_expected_error",
             (Self::WrapperStaticExpectedError, true) => {
                 "wrapper_static_prn_step_tran_expected_error"
             }
+        }
+    }
+
+    fn reference_extension(self) -> &'static str {
+        match self {
+            Self::PlainCsd | Self::WrapperCsd => "csd",
+            _ => "prn",
         }
     }
 }
@@ -1171,16 +1184,6 @@ impl XyceTestRunner {
 
     fn static_tran_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticTranPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
-        let reference_path = self
-            .static_prn_reference_path(&deck.path)
-            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-        if !reference_path.is_file() {
-            return Err(format!(
-                "no checked-in static .prn oracle at {}",
-                self.display_path(&reference_path)
-            ));
-        }
-
         let source =
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
         if Self::contains_control_block(&source) {
@@ -1191,7 +1194,10 @@ impl XyceTestRunner {
         }
         Self::reject_unsupported_source_directives(&source)?;
 
-        let print = Self::single_tran_print_request(&source)?;
+        let print_output = Self::single_tran_print_output_request(&source)?;
+        let print = XycePrintRequest {
+            probes: print_output.probes.clone(),
+        };
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let tran = Self::single_tran_analysis(&netlist)?;
@@ -1204,11 +1210,31 @@ impl XyceTestRunner {
         if steps.is_empty() && requires_wrapper && native_static_prn_wrapper.is_none() {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
+        let contract = if requires_wrapper {
+            native_static_prn_wrapper.unwrap_or(XyceStaticTranContract::WrapperStatic)
+        } else {
+            Self::static_tran_contract_for_print_format(false, print_output.format.as_deref())?
+        };
+        let reference_path = self
+            .static_output_reference_path(&deck.path, contract.reference_extension())
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        if !reference_path.is_file() {
+            return Err(format!(
+                "no checked-in static .{} oracle at {}",
+                contract.reference_extension(),
+                self.display_path(&reference_path)
+            ));
+        }
         if !steps.is_empty() {
             Self::validate_static_step_tran_contract(&netlist)?;
         }
         if requires_wrapper {
-            Self::validate_native_static_prn_tran_wrapper_contract(&source)?;
+            match contract {
+                XyceStaticTranContract::WrapperCsd => {
+                    Self::validate_native_static_csd_tran_wrapper_contract(&source)?;
+                }
+                _ => Self::validate_native_static_prn_tran_wrapper_contract(&source)?,
+            }
         }
         Self::validate_static_tran_contract(&netlist, &tran, &print)?;
 
@@ -1220,11 +1246,7 @@ impl XyceTestRunner {
             tran,
             steps,
             wrapper_tolerance: Self::native_default_prn_tran_wrapper_tolerance(&deck.relative_path),
-            contract: if requires_wrapper {
-                native_static_prn_wrapper.unwrap_or(XyceStaticTranContract::WrapperStatic)
-            } else {
-                XyceStaticTranContract::PlainStatic
-            },
+            contract,
         })
     }
 
@@ -2236,6 +2258,86 @@ impl XyceTestRunner {
         }
     }
 
+    fn validate_native_static_csd_tran_wrapper_contract(source: &str) -> Result<(), String> {
+        let mut primary_tran_print_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") {
+                let tokens = Self::split_print_fields(&trimmed)?;
+                let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+                let Some(analysis) = token_refs.get(1).copied() else {
+                    return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
+                };
+                if !analysis.eq_ignore_ascii_case("TRAN") {
+                    return Err(format!(
+                        "wrapper-origin transient CSDF contract does not cover .PRINT {analysis}"
+                    ));
+                }
+                let mut format = None;
+                let mut index = 2usize;
+                while index < token_refs.len() {
+                    if let Some((raw_key, raw_value, consumed)) =
+                        Self::print_option_assignment(&token_refs, index)
+                    {
+                        let value = raw_value.trim().trim_matches(['"', '\'']);
+                        match raw_key.trim().to_ascii_lowercase().as_str() {
+                            "file" => {
+                                return Err(
+                                    "wrapper-origin transient CSDF contract does not cover FILE= side outputs"
+                                        .to_string(),
+                                );
+                            }
+                            "format" => format = Some(value),
+                            _ => {}
+                        }
+                        index += consumed;
+                        continue;
+                    }
+                    index += 1;
+                }
+                match format {
+                    Some(format) if format.eq_ignore_ascii_case("PROBE") => {
+                        primary_tran_print_count += 1;
+                    }
+                    Some(format) => {
+                        return Err(format!(
+                            "wrapper-origin transient CSDF contract does not cover .PRINT TRAN FORMAT={format}"
+                        ));
+                    }
+                    None => {
+                        return Err(
+                            "wrapper-origin transient CSDF contract requires FORMAT=PROBE"
+                                .to_string(),
+                        );
+                    }
+                }
+                continue;
+            }
+            if Self::is_extra_wrapper_tran_output_analysis_command(command) {
+                return Err(format!(
+                    "wrapper-origin transient CSDF contract does not cover {command} directives"
+                ));
+            }
+        }
+
+        match primary_tran_print_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin transient CSDF contract requires one primary .PRINT TRAN statement"
+                    .to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin transient CSDF contract requires one primary .PRINT TRAN statement, found {primary_tran_print_count}"
+            )),
+        }
+    }
+
     fn native_static_prn_tran_wrapper_contract(
         deck_path: &Path,
         relative_path: &str,
@@ -2243,6 +2345,10 @@ impl XyceTestRunner {
     ) -> Option<XyceStaticTranContract> {
         if Self::validate_native_pwl_repeat_error_tran_wrapper_contract(deck_path, source).is_ok() {
             return Some(XyceStaticTranContract::WrapperStaticExpectedError);
+        }
+
+        if Self::is_native_csd_tran_wrapper_candidate(relative_path, source) {
+            return Some(XyceStaticTranContract::WrapperCsd);
         }
 
         if Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
@@ -2253,6 +2359,11 @@ impl XyceTestRunner {
         }
 
         None
+    }
+
+    fn is_native_csd_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        Self::normalize_manifest_key(relative_path).starts_with("netlists/output/tran/")
+            && Self::validate_native_static_csd_tran_wrapper_contract(source).is_ok()
     }
 
     fn is_native_default_prn_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
@@ -2314,6 +2425,30 @@ impl XyceTestRunner {
             enabled = true;
         }
         enabled
+    }
+
+    fn static_tran_contract_for_print_format(
+        requires_wrapper: bool,
+        format: Option<&str>,
+    ) -> Result<XyceStaticTranContract, String> {
+        let normalized = format.unwrap_or("STD").trim();
+        if Self::tran_print_format_is_prn_compatible(normalized) {
+            return Ok(if requires_wrapper {
+                XyceStaticTranContract::WrapperStatic
+            } else {
+                XyceStaticTranContract::PlainStatic
+            });
+        }
+        if normalized.eq_ignore_ascii_case("PROBE") {
+            return Ok(if requires_wrapper {
+                XyceStaticTranContract::WrapperCsd
+            } else {
+                XyceStaticTranContract::PlainCsd
+            });
+        }
+        Err(format!(
+            "native static .PRINT TRAN comparison does not cover FORMAT={normalized}"
+        ))
     }
 
     fn validate_native_output_initial_interval_tran_wrapper_contract(
@@ -2949,14 +3084,14 @@ impl XyceTestRunner {
             }
         };
 
-        let reference = match Self::parse_prn_file(&plan.reference_path) {
+        let reference = match Self::parse_tran_reference_file(plan.contract, &plan.reference_path) {
             Ok(reference) => reference,
             Err(err) => {
                 return self.failure_result(
                     deck,
                     start,
                     contract,
-                    format!("failed to parse Xyce .prn oracle: {err}"),
+                    format!("failed to parse Xyce transient oracle: {err}"),
                     Vec::new(),
                 );
             }
@@ -11250,13 +11385,10 @@ impl XyceTestRunner {
         }
     }
 
-    fn single_tran_print_request(source: &str) -> Result<XycePrintRequest, String> {
+    fn single_tran_print_output_request(source: &str) -> Result<XycePrintOutputRequest, String> {
         let requests = Self::print_output_requests(source, "TRAN")?
             .into_iter()
             .filter(|request| request.file.is_none())
-            .map(|request| XycePrintRequest {
-                probes: request.probes,
-            })
             .collect::<Vec<_>>();
 
         match requests.len() {
@@ -11548,6 +11680,18 @@ impl XyceTestRunner {
         }
     }
 
+    fn parse_tran_reference_file(
+        contract: XyceStaticTranContract,
+        path: &Path,
+    ) -> Result<XycePrnTable, String> {
+        match contract {
+            XyceStaticTranContract::PlainCsd | XyceStaticTranContract::WrapperCsd => {
+                Self::parse_tran_csd_file(path)
+            }
+            _ => Self::parse_prn_file(path),
+        }
+    }
+
     fn parse_csv_file(path: &Path) -> Result<XycePrnTable, String> {
         let content =
             fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
@@ -11569,6 +11713,168 @@ impl XyceTestRunner {
         let content =
             fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
         Self::parse_ac_csd_table(&content)
+    }
+
+    fn parse_tran_csd_file(path: &Path) -> Result<XycePrnTable, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_tran_csd_table(&content)
+    }
+
+    fn parse_tran_csd_table(content: &str) -> Result<XycePrnTable, String> {
+        let lines = content
+            .lines()
+            .enumerate()
+            .map(|(line_number, line)| (line_number + 1, line.trim()))
+            .filter(|(_, line)| !line.is_empty())
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            return Err("empty Xyce transient CSDF table".to_string());
+        }
+
+        let mut columns: Option<Vec<String>> = None;
+        let mut rows = Vec::new();
+        let mut index = 0usize;
+        while index < lines.len() {
+            let (line_number, line) = lines[index];
+            if !line.eq_ignore_ascii_case("#H") {
+                return Err(format!(
+                    "Xyce transient CSDF section must start with #H at line {line_number}, got '{line}'"
+                ));
+            }
+            index += 1;
+
+            let mut complex_values = false;
+            let mut sweep_column = "TIME".to_string();
+            while index < lines.len() {
+                let (_, header_line) = lines[index];
+                if header_line.eq_ignore_ascii_case("#N") {
+                    break;
+                }
+                for (key, value) in Self::parse_csd_header_assignments(header_line) {
+                    if key.eq_ignore_ascii_case("COMPLEXVALUES")
+                        && value.eq_ignore_ascii_case("YES")
+                    {
+                        complex_values = true;
+                    }
+                    if key.eq_ignore_ascii_case("SWEEPVAR") {
+                        sweep_column = value.to_ascii_uppercase();
+                    }
+                }
+                index += 1;
+            }
+            if complex_values {
+                return Err("Xyce transient CSDF COMPLEXVALUES=YES is not supported".to_string());
+            }
+            if index >= lines.len() {
+                return Err("Xyce transient CSDF section has no #N column block".to_string());
+            }
+
+            index += 1;
+            let Some((column_line_number, column_line)) = lines.get(index).copied() else {
+                return Err("Xyce transient CSDF #N block has no column line".to_string());
+            };
+            let section_input_columns = Self::parse_csd_columns(column_line).map_err(|err| {
+                format!("invalid Xyce transient CSDF column line {column_line_number}: {err}")
+            })?;
+            if section_input_columns.is_empty() {
+                return Err(format!(
+                    "Xyce transient CSDF column line {column_line_number} has no columns"
+                ));
+            }
+            let mut section_columns = Vec::with_capacity(section_input_columns.len() + 1);
+            section_columns.push(sweep_column);
+            section_columns.extend(section_input_columns.iter().cloned());
+            if let Some(columns) = &columns {
+                if !Self::same_prn_columns(columns, &section_columns) {
+                    return Err(format!(
+                        "Xyce transient CSDF section changes columns from {:?} to {:?}",
+                        columns, section_columns
+                    ));
+                }
+            } else {
+                columns = Some(section_columns);
+            }
+            index += 1;
+
+            while index < lines.len() {
+                let (line_number, line) = lines[index];
+                if line.eq_ignore_ascii_case("#;") {
+                    index += 1;
+                    break;
+                }
+                if line.eq_ignore_ascii_case("#H") {
+                    break;
+                }
+                if !line.starts_with("#C") {
+                    return Err(format!(
+                        "expected Xyce transient CSDF #C row header at line {line_number}, got '{line}'"
+                    ));
+                }
+                let (time, expected_count) =
+                    Self::parse_csd_sweep_row_header(line).map_err(|err| {
+                        format!(
+                            "invalid Xyce transient CSDF #C row header at line {line_number}: {err}"
+                        )
+                    })?;
+                index += 1;
+
+                let mut row = Vec::with_capacity(expected_count + 1);
+                row.push(time);
+                while row.len() <= expected_count {
+                    let Some((data_line_number, data_line)) = lines.get(index).copied() else {
+                        return Err(format!(
+                            "Xyce transient CSDF row beginning at line {line_number} ended after {} value(s), expected {expected_count}",
+                            row.len().saturating_sub(1)
+                        ));
+                    };
+                    if data_line.starts_with('#') {
+                        return Err(format!(
+                            "Xyce transient CSDF row beginning at line {line_number} ended before {expected_count} value(s) at line {data_line_number}"
+                        ));
+                    }
+                    for token in data_line.split_whitespace() {
+                        if row.len() > expected_count {
+                            return Err(format!(
+                                "Xyce transient CSDF row beginning at line {line_number} has more than {expected_count} value(s)"
+                            ));
+                        }
+                        let expected_position = row.len();
+                        let value = Self::parse_csd_complex_value_token(token, expected_position)
+                            .map_err(|err| {
+                                format!(
+                                    "invalid Xyce transient CSDF data token '{token}' at line {data_line_number}: {err}"
+                                )
+                            })?;
+                        if value.im.abs() > f64::EPSILON {
+                            return Err(format!(
+                                "Xyce transient CSDF token '{token}' at line {data_line_number} has nonzero imaginary component {}",
+                                value.im
+                            ));
+                        }
+                        row.push(value.re);
+                    }
+                    index += 1;
+                }
+                if let Some(columns) = &columns {
+                    if row.len() != columns.len() {
+                        return Err(format!(
+                            "Xyce transient CSDF row beginning at line {line_number} has {} column value(s), expected {}",
+                            row.len(),
+                            columns.len()
+                        ));
+                    }
+                }
+                rows.push(row);
+            }
+        }
+
+        let columns =
+            columns.ok_or_else(|| "Xyce transient CSDF table has no columns".to_string())?;
+        if rows.is_empty() {
+            return Err("Xyce transient CSDF table has no data rows".to_string());
+        }
+        Ok(XycePrnTable { columns, rows })
     }
 
     fn parse_ac_csd_table(content: &str) -> Result<XycePrnTable, String> {
@@ -14152,6 +14458,24 @@ R2 b 0 2
     }
 
     #[test]
+    fn tran_probe_contract_selects_csd_oracle_extension() {
+        assert_eq!(
+            XyceTestRunner::static_tran_contract_for_print_format(true, Some("PROBE"))
+                .expect("PROBE wrapper contract is supported"),
+            XyceStaticTranContract::WrapperCsd
+        );
+        assert_eq!(
+            XyceStaticTranContract::WrapperCsd.reference_extension(),
+            "csd"
+        );
+        assert_eq!(
+            XyceTestRunner::static_tran_contract_for_print_format(false, Some("PROBE"))
+                .expect("plain PROBE contract is supported"),
+            XyceStaticTranContract::PlainCsd
+        );
+    }
+
+    #[test]
     fn dc_csv_contract_selects_csv_oracle_extension() {
         assert_eq!(
             XyceTestRunner::static_dc_contract_for_print_format(true, Some("CSV"))
@@ -14216,6 +14540,26 @@ COMPLEXVALUES='NO' NODES='2'
         assert_eq!(table.rows.len(), 2);
         assert_eq!(table.rows[0], vec![0.0, -0.1]);
         assert_eq!(table.rows[1], vec![1.0, -0.2]);
+    }
+
+    #[test]
+    fn tran_csd_parser_injects_time_column() {
+        let table = XyceTestRunner::parse_tran_csd_table(
+            "\
+#H
+SOURCE='Xyce' VERSION='7.0'
+COMPLEXVALUES='NO' SWEEPVAR='Time'
+#N
+'V(1)' 'I(V1)'
+#C 2.00000000e-01 2
+2.00000000e-01:1 -2.00000000e-01:2
+#;
+",
+        )
+        .expect("transient CSDF table parses");
+
+        assert_eq!(table.columns, vec!["TIME", "V(1)", "I(V1)"]);
+        assert_eq!(table.rows, vec![vec![0.2, 0.2, -0.2]]);
     }
 
     #[test]

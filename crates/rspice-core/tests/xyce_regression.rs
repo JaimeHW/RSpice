@@ -1223,6 +1223,32 @@ fn test_xyce_default_prn_transient_output_wrapper_cases_run_natively() {
 }
 
 #[test]
+fn test_xyce_probe_transient_output_wrapper_case_runs_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let relative = "Netlists/Output/TRAN/tran-probe.cir";
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain its removed upstream transient PROBE wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native wrapper-origin transient PROBE/CSDF comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .csd oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_csd_tran",
+        "{relative} should report the native wrapper-origin transient CSDF contract"
+    );
+}
+
+#[test]
 fn test_xyce_output_initial_interval_transient_wrapper_case_runs_natively() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
