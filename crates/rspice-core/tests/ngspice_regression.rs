@@ -1435,6 +1435,34 @@ fn test_ngspice_xspice_digital_suite() {
 }
 
 #[test]
+fn test_ngspice_xspice_digital_focus_cases_run() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+
+    for relative in [
+        "xspice/digital/d_ram.cir",
+        "xspice/digital/d_source.cir",
+        "xspice/digital/d_state.cir",
+    ] {
+        let result = runner.run_test(&tests_dir.join(relative));
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some("Transient"),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
+}
+
+#[test]
 fn test_ngspice_regression_parser_suite() {
     let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
     let stats = run_and_report(&runner, "regression/parser");
