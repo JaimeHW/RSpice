@@ -2246,10 +2246,10 @@ impl XyceTestRunner {
                                 &locked_result,
                             );
                         }
-                        if best_mismatches
-                            .as_ref()
-                            .is_none_or(|best| locked_mismatches.len() < best.len())
-                        {
+                        if Self::candidate_mismatches_are_better(
+                            best_mismatches.as_deref(),
+                            &locked_mismatches,
+                        ) {
                             best_mismatches = Some(locked_mismatches);
                         }
                     }
@@ -2304,10 +2304,10 @@ impl XyceTestRunner {
                                     &backward_euler_result,
                                 );
                             }
-                            if best_mismatches
-                                .as_ref()
-                                .is_none_or(|best| backward_euler_mismatches.len() < best.len())
-                            {
+                            if Self::candidate_mismatches_are_better(
+                                best_mismatches.as_deref(),
+                                &backward_euler_mismatches,
+                            ) {
                                 best_mismatches = Some(backward_euler_mismatches);
                             }
                         }
@@ -2461,7 +2461,7 @@ impl XyceTestRunner {
                     deck, start, contract, &plan, &step_runs, &abort, true,
                 );
             }
-            if locked_mismatches.len() < mismatches.len() {
+            if Self::candidate_mismatches_are_better(Some(&mismatches), &locked_mismatches) {
                 return self.failure_result(
                     deck,
                     start,
@@ -2485,6 +2485,42 @@ impl XyceTestRunner {
             ),
             mismatches,
         )
+    }
+
+    fn candidate_mismatches_are_better(
+        current_best: Option<&[XyceValueMismatch]>,
+        candidate: &[XyceValueMismatch],
+    ) -> bool {
+        let Some(best) = current_best else {
+            return true;
+        };
+        if candidate.len() != best.len() {
+            return candidate.len() < best.len();
+        }
+
+        let candidate_max = Self::mismatch_max_relative_error(candidate);
+        let best_max = Self::mismatch_max_relative_error(best);
+        if candidate_max != best_max {
+            return candidate_max < best_max;
+        }
+
+        Self::mismatch_relative_error_sum(candidate) < Self::mismatch_relative_error_sum(best)
+    }
+
+    fn mismatch_max_relative_error(mismatches: &[XyceValueMismatch]) -> f64 {
+        mismatches
+            .iter()
+            .map(|mismatch| mismatch.relative_error)
+            .filter(|value| value.is_finite())
+            .fold(0.0, f64::max)
+    }
+
+    fn mismatch_relative_error_sum(mismatches: &[XyceValueMismatch]) -> f64 {
+        mismatches
+            .iter()
+            .map(|mismatch| mismatch.relative_error)
+            .filter(|value| value.is_finite())
+            .sum()
     }
 
     fn compare_step_tran_runs(
