@@ -1,8 +1,9 @@
 use rspice_core::xspice::{
     CmContext, CodeModelRegistry,
     conformance::{
-        IfSpecConformancePolicy, PartialVerificationOptions, audit_ngspice_ifspec_tree,
-        audit_ngspice_xspice_examples, context_with_model_defaults, verify_model_partials,
+        IfSpecConformancePolicy, PartialVerificationOptions, audit_ngspice_ifspec_test_coverage,
+        audit_ngspice_ifspec_tree, audit_ngspice_xspice_examples, context_with_model_defaults,
+        verify_model_partials,
     },
 };
 use std::path::{Path, PathBuf};
@@ -109,6 +110,40 @@ fn ngspice46_xspice_example_corpus_is_adjudicated() {
     assert!(
         needs_adjudication.is_empty(),
         "unadjudicated ngspice XSPICE example decks: {needs_adjudication:#?}"
+    );
+}
+
+#[test]
+fn ngspice46_ifspec_catalog_has_test_coverage_markers() {
+    let Some(ngspice_root) = skip_without_local_ngspice_source() else {
+        return;
+    };
+    let workspace = workspace_root();
+    let coverage_roots = vec![
+        workspace.join("crates").join("rspice-core").join("tests"),
+        workspace
+            .join("crates")
+            .join("rspice-core")
+            .join("src")
+            .join("xspice"),
+    ];
+    let report = audit_ngspice_ifspec_test_coverage(
+        &ngspice_root.join("src").join("xspice").join("icm"),
+        &coverage_roots,
+        &IfSpecConformancePolicy::ngspice46(),
+    )
+    .expect("ngspice ifspec coverage audits");
+
+    assert!(
+        report.checked_models >= 70,
+        "expected the ngspice 46 XSPICE ifspec catalog, checked {} model(s)",
+        report.checked_models
+    );
+    assert_eq!(
+        report.uncovered_models,
+        Vec::<String>::new(),
+        "XSPICE catalog models without test coverage markers: {:#?}",
+        report.uncovered_models
     );
 }
 

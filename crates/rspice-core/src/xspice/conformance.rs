@@ -77,6 +77,27 @@ impl IfSpecConformanceReport {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct XspiceCatalogCoverageReport {
+    pub checked_models: usize,
+    pub covered_models: Vec<String>,
+    pub uncovered_models: Vec<String>,
+}
+
+impl XspiceCatalogCoverageReport {
+    pub fn covered_count(&self) -> usize {
+        self.covered_models.len()
+    }
+
+    pub fn uncovered_count(&self) -> usize {
+        self.uncovered_models.len()
+    }
+
+    pub fn has_uncovered_models(&self) -> bool {
+        !self.uncovered_models.is_empty()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IfSpecConformancePolicy {
     model_aliases: BTreeMap<String, String>,
@@ -171,6 +192,53 @@ pub fn audit_ngspice_ifspec_tree(
         audit_model_ifspec(&spec, Some(path), registry, policy, &mut report);
     }
 
+    Ok(report)
+}
+
+pub fn audit_ngspice_ifspec_test_coverage(
+    icm_root: &Path,
+    coverage_roots: &[PathBuf],
+    policy: &IfSpecConformancePolicy,
+) -> Result<XspiceCatalogCoverageReport, ConformanceError> {
+    let mut model_paths = Vec::new();
+    collect_ifspec_paths(icm_root, &mut model_paths)?;
+    model_paths.sort();
+
+    let mut coverage_sources = Vec::new();
+    for root in coverage_roots {
+        collect_rust_source_paths(root, &mut coverage_sources)?;
+    }
+    coverage_sources.sort();
+    coverage_sources.dedup();
+
+    let mut coverage_tokens = BTreeSet::new();
+    for path in coverage_sources {
+        let source = read_to_string(&path)?;
+        collect_identifier_tokens(&source, &mut coverage_tokens);
+    }
+
+    let mut report = XspiceCatalogCoverageReport::default();
+    for path in model_paths {
+        let source = read_to_string(&path)?;
+        let spec = parse_ifspec(&source).map_err(|err| ConformanceError::Parse {
+            path: path.clone(),
+            message: err.to_string(),
+        })?;
+        if policy.should_skip_model(&spec.spice_model_name) {
+            continue;
+        }
+
+        report.checked_models += 1;
+        let ngspice_name = canonical_key(&spec.spice_model_name);
+        let rspice_name = canonical_key(policy.rspice_model_name(&spec.spice_model_name));
+        if coverage_tokens.contains(&ngspice_name) || coverage_tokens.contains(&rspice_name) {
+            report.covered_models.push(spec.spice_model_name);
+        } else {
+            report.uncovered_models.push(spec.spice_model_name);
+        }
+    }
+    report.covered_models.sort();
+    report.uncovered_models.sort();
     Ok(report)
 }
 
@@ -507,6 +575,55 @@ fn read_to_string(path: &Path) -> Result<String, ConformanceError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+fn collect_rust_source_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), ConformanceError> {
+    if dir.is_file() {
+        if dir
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
+        {
+            paths.push(dir.to_path_buf());
+        }
+        return Ok(());
+    }
+
+    let entries = fs::read_dir(dir).map_err(|source| ConformanceError::Io {
+        path: dir.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| ConformanceError::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rust_source_paths(&path, paths)?;
+        } else if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
+        {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn collect_identifier_tokens(source: &str, tokens: &mut BTreeSet<String>) {
+    let mut token = String::new();
+    for ch in source.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            token.push(ch.to_ascii_lowercase());
+        } else if !token.is_empty() {
+            tokens.insert(std::mem::take(&mut token));
+        }
+    }
+    if !token.is_empty() {
+        tokens.insert(token);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
