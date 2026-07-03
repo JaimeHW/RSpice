@@ -19,7 +19,9 @@ use rspice_veriloga::rust_backend::{
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::BTreeSet;
 use std::env;
+use std::io::Write as _;
 use std::path::Path;
+use std::time::Instant;
 
 const FILTER_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_FILTER";
 const REQUIRE_NO_LEGACY_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_LEGACY";
@@ -65,9 +67,22 @@ fn run_shipped_rust_backend_frontier() {
     let transpiler = RustTranspiler::new_auto(RustTranspileOptions::default());
     let mut counts = BackendSelectionCounts::default();
     let mut failures = Vec::new();
+    let total_modules: usize = sources.iter().map(|source| source.modules.len()).sum();
+    let mut module_index = 0usize;
 
     for source in sources {
         for module in &source.modules {
+            module_index += 1;
+            let relative_path = source
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&source.path)
+                .display();
+            eprintln!(
+                "frontier compiling {module_index}/{total_modules}: {relative_path} :: {module}"
+            );
+            let _ = std::io::stderr().flush();
+            let started = Instant::now();
             let compiled = match compiler
                 .compile_file_canonical_ir_with_metadata(&source.path, Some(module))
             {
@@ -85,16 +100,14 @@ fn run_shipped_rust_backend_frontier() {
                     continue;
                 }
             };
+            let compile_elapsed = started.elapsed();
 
+            let transpile_started = Instant::now();
             match transpiler.transpile_with_report(&compiled.artifact) {
                 Ok(report) => {
+                    let transpile_elapsed = transpile_started.elapsed();
                     counts.record(report.backend);
                     if should_trace_scalar_gap(report.backend) {
-                        let relative_path = source
-                            .path
-                            .strip_prefix(&root)
-                            .unwrap_or(&source.path)
-                            .display();
                         eprintln!(
                             "scalar diagnostic for {:?} :: {} :: {}",
                             report.backend, relative_path, module
@@ -103,24 +116,18 @@ fn run_shipped_rust_backend_frontier() {
                         trace_scalar_gap(&compiled.artifact);
                     }
                     eprintln!(
-                        "{:?} :: {} :: {}",
+                        "{:?} :: {} :: {} (compile {:.2?}, transpile {:.2?}, total {:.2?})",
                         report.backend,
-                        source
-                            .path
-                            .strip_prefix(&root)
-                            .unwrap_or(&source.path)
-                            .display(),
-                        module
+                        relative_path,
+                        module,
+                        compile_elapsed,
+                        transpile_elapsed,
+                        started.elapsed()
                     );
                 }
                 Err(error) => failures.push(format!(
                     "{} :: {} failed to transpile Rust backend: {error}",
-                    source
-                        .path
-                        .strip_prefix(&root)
-                        .unwrap_or(&source.path)
-                        .display(),
-                    module
+                    relative_path, module
                 )),
             }
         }
