@@ -240,8 +240,10 @@ impl XyceStaticTranContract {
 enum XyceStaticAcContract {
     PlainStatic,
     PlainCsv,
+    PlainCsd,
     WrapperStatic,
     WrapperCsv,
+    WrapperCsd,
 }
 
 impl XyceStaticAcContract {
@@ -249,8 +251,10 @@ impl XyceStaticAcContract {
         match self {
             Self::PlainStatic => "static_fd_prn_ac",
             Self::PlainCsv => "static_fd_csv_ac",
+            Self::PlainCsd => "static_csd_ac",
             Self::WrapperStatic => "wrapper_static_fd_prn_ac",
             Self::WrapperCsv => "wrapper_static_fd_csv_ac",
+            Self::WrapperCsd => "wrapper_csd_ac",
         }
     }
 
@@ -258,6 +262,7 @@ impl XyceStaticAcContract {
         match self {
             Self::PlainStatic | Self::WrapperStatic => "FD.prn",
             Self::PlainCsv | Self::WrapperCsv => "FD.csv",
+            Self::PlainCsd | Self::WrapperCsd => "csd",
         }
     }
 }
@@ -653,6 +658,12 @@ enum XyceAcProbeComponent {
     Scalar,
     Real,
     Imaginary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceAcCsdColumnExpansion {
+    Scalar,
+    Complex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2189,6 +2200,7 @@ impl XyceTestRunner {
                             "format" => {
                                 if !Self::ac_print_format_is_prn_compatible(value)
                                     && !value.eq_ignore_ascii_case("CSV")
+                                    && !value.eq_ignore_ascii_case("PROBE")
                                 {
                                     return Err(format!(
                                         "wrapper-origin frequency-domain static output contract does not cover .PRINT AC FORMAT={value}"
@@ -2465,6 +2477,13 @@ impl XyceTestRunner {
                 XyceStaticAcContract::PlainCsv
             });
         }
+        if normalized.eq_ignore_ascii_case("PROBE") {
+            return Ok(if requires_wrapper {
+                XyceStaticAcContract::WrapperCsd
+            } else {
+                XyceStaticAcContract::PlainCsd
+            });
+        }
         Err(format!(
             "native static .PRINT AC comparison does not cover FORMAT={normalized}"
         ))
@@ -2611,14 +2630,14 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract();
-        let reference = match Self::parse_prn_file(&plan.reference_path) {
+        let reference = match Self::parse_ac_reference_file(plan.contract, &plan.reference_path) {
             Ok(reference) => reference,
             Err(err) => {
                 return self.failure_result(
                     deck,
                     start,
                     contract,
-                    format!("failed to parse Xyce .FD.prn oracle: {err}"),
+                    format!("failed to parse Xyce AC oracle: {err}"),
                     Vec::new(),
                 );
             }
@@ -11517,6 +11536,18 @@ impl XyceTestRunner {
         }
     }
 
+    fn parse_ac_reference_file(
+        contract: XyceStaticAcContract,
+        path: &Path,
+    ) -> Result<XycePrnTable, String> {
+        match contract {
+            XyceStaticAcContract::PlainCsd | XyceStaticAcContract::WrapperCsd => {
+                Self::parse_ac_csd_file(path)
+            }
+            _ => Self::parse_prn_file(path),
+        }
+    }
+
     fn parse_csv_file(path: &Path) -> Result<XycePrnTable, String> {
         let content =
             fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
@@ -11532,6 +11563,236 @@ impl XyceTestRunner {
         let content =
             fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
         Self::parse_csd_table(&content)
+    }
+
+    fn parse_ac_csd_file(path: &Path) -> Result<XycePrnTable, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_ac_csd_table(&content)
+    }
+
+    fn parse_ac_csd_table(content: &str) -> Result<XycePrnTable, String> {
+        let lines = content
+            .lines()
+            .enumerate()
+            .map(|(line_number, line)| (line_number + 1, line.trim()))
+            .filter(|(_, line)| !line.is_empty())
+            .collect::<Vec<_>>();
+        if lines.is_empty() {
+            return Err("empty Xyce AC CSDF table".to_string());
+        }
+
+        let mut columns: Option<Vec<String>> = None;
+        let mut expansion: Option<Vec<XyceAcCsdColumnExpansion>> = None;
+        let mut rows = Vec::new();
+        let mut index = 0usize;
+        while index < lines.len() {
+            let (line_number, line) = lines[index];
+            if !line.eq_ignore_ascii_case("#H") {
+                return Err(format!(
+                    "Xyce AC CSDF section must start with #H at line {line_number}, got '{line}'"
+                ));
+            }
+            index += 1;
+
+            let mut complex_values = false;
+            let mut sweep_column = "FREQ".to_string();
+            while index < lines.len() {
+                let (_, header_line) = lines[index];
+                if header_line.eq_ignore_ascii_case("#N") {
+                    break;
+                }
+                for (key, value) in Self::parse_csd_header_assignments(header_line) {
+                    if key.eq_ignore_ascii_case("COMPLEXVALUES")
+                        && value.eq_ignore_ascii_case("YES")
+                    {
+                        complex_values = true;
+                    }
+                    if key.eq_ignore_ascii_case("SWEEPVAR") {
+                        sweep_column = value.to_ascii_uppercase();
+                    }
+                }
+                index += 1;
+            }
+            if index >= lines.len() {
+                return Err("Xyce AC CSDF section has no #N column block".to_string());
+            }
+
+            index += 1;
+            let Some((column_line_number, column_line)) = lines.get(index).copied() else {
+                return Err("Xyce AC CSDF #N block has no column line".to_string());
+            };
+            let section_input_columns = Self::parse_csd_columns(column_line).map_err(|err| {
+                format!("invalid Xyce AC CSDF column line {column_line_number}: {err}")
+            })?;
+            if section_input_columns.is_empty() {
+                return Err(format!(
+                    "Xyce AC CSDF column line {column_line_number} has no columns"
+                ));
+            }
+            let section_expansion =
+                Self::ac_csd_column_expansion(&section_input_columns, complex_values);
+            let section_columns = Self::expanded_ac_csd_columns(
+                &sweep_column,
+                &section_input_columns,
+                &section_expansion,
+            );
+            if let Some(columns) = &columns {
+                if !Self::same_prn_columns(columns, &section_columns) {
+                    return Err(format!(
+                        "Xyce AC CSDF section changes columns from {:?} to {:?}",
+                        columns, section_columns
+                    ));
+                }
+            } else {
+                columns = Some(section_columns);
+                expansion = Some(section_expansion);
+            }
+            let expansion = expansion
+                .as_ref()
+                .expect("AC CSDF expansion initialized with columns");
+            index += 1;
+
+            while index < lines.len() {
+                let (line_number, line) = lines[index];
+                if line.eq_ignore_ascii_case("#;") {
+                    index += 1;
+                    break;
+                }
+                if line.eq_ignore_ascii_case("#H") {
+                    break;
+                }
+                if !line.starts_with("#C") {
+                    return Err(format!(
+                        "expected Xyce AC CSDF #C row header at line {line_number}, got '{line}'"
+                    ));
+                }
+                let (frequency, expected_count) =
+                    Self::parse_csd_sweep_row_header(line).map_err(|err| {
+                        format!("invalid Xyce AC CSDF #C row header at line {line_number}: {err}")
+                    })?;
+                index += 1;
+
+                let mut tokens = Vec::with_capacity(expected_count);
+                while tokens.len() < expected_count {
+                    let Some((data_line_number, data_line)) = lines.get(index).copied() else {
+                        return Err(format!(
+                            "Xyce AC CSDF row beginning at line {line_number} ended after {} value(s), expected {expected_count}",
+                            tokens.len()
+                        ));
+                    };
+                    if data_line.starts_with('#') {
+                        return Err(format!(
+                            "Xyce AC CSDF row beginning at line {line_number} ended before {expected_count} value(s) at line {data_line_number}"
+                        ));
+                    }
+                    for token in data_line.split_whitespace() {
+                        if tokens.len() >= expected_count {
+                            return Err(format!(
+                                "Xyce AC CSDF row beginning at line {line_number} has more than {expected_count} value(s)"
+                            ));
+                        }
+                        let expected_position = tokens.len() + 1;
+                        tokens.push(
+                            Self::parse_csd_complex_value_token(token, expected_position).map_err(
+                                |err| {
+                                    format!(
+                                        "invalid Xyce AC CSDF data token '{token}' at line {data_line_number}: {err}"
+                                    )
+                                },
+                            )?,
+                        );
+                    }
+                    index += 1;
+                }
+                if tokens.len() != section_input_columns.len() {
+                    return Err(format!(
+                        "Xyce AC CSDF row beginning at line {line_number} has {} value(s), expected {} column(s)",
+                        tokens.len(),
+                        section_input_columns.len()
+                    ));
+                }
+
+                let mut row = Vec::new();
+                row.push(frequency);
+                for (value, expansion) in tokens.into_iter().zip(expansion.iter()) {
+                    match expansion {
+                        XyceAcCsdColumnExpansion::Scalar => {
+                            if value.im.abs() > f64::EPSILON {
+                                return Err(format!(
+                                    "Xyce AC CSDF scalar row beginning at line {line_number} has nonzero imaginary component {}",
+                                    value.im
+                                ));
+                            }
+                            row.push(value.re);
+                        }
+                        XyceAcCsdColumnExpansion::Complex => {
+                            row.push(value.re);
+                            row.push(value.im);
+                        }
+                    }
+                }
+                rows.push(row);
+            }
+        }
+
+        let columns = columns.ok_or_else(|| "Xyce AC CSDF table has no columns".to_string())?;
+        if rows.is_empty() {
+            return Err("Xyce AC CSDF table has no data rows".to_string());
+        }
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn ac_csd_column_expansion(
+        columns: &[String],
+        complex_values: bool,
+    ) -> Vec<XyceAcCsdColumnExpansion> {
+        columns
+            .iter()
+            .map(|column| {
+                if complex_values && Self::ac_csd_column_is_complex_probe(column) {
+                    XyceAcCsdColumnExpansion::Complex
+                } else {
+                    XyceAcCsdColumnExpansion::Scalar
+                }
+            })
+            .collect()
+    }
+
+    fn expanded_ac_csd_columns(
+        sweep_column: &str,
+        input_columns: &[String],
+        expansion: &[XyceAcCsdColumnExpansion],
+    ) -> Vec<String> {
+        let mut columns = Vec::with_capacity(
+            1 + input_columns.len()
+                + expansion
+                    .iter()
+                    .filter(|kind| matches!(kind, XyceAcCsdColumnExpansion::Complex))
+                    .count(),
+        );
+        columns.push(sweep_column.to_string());
+        for (column, expansion) in input_columns.iter().zip(expansion.iter()) {
+            match expansion {
+                XyceAcCsdColumnExpansion::Scalar => columns.push(column.clone()),
+                XyceAcCsdColumnExpansion::Complex => {
+                    columns.push(format!("Re({column})"));
+                    columns.push(format!("Im({column})"));
+                }
+            }
+        }
+        columns
+    }
+
+    fn ac_csd_column_is_complex_probe(column: &str) -> bool {
+        let normalized = Self::normalize_probe(column);
+        if let Some(voltage_probe) = Self::parse_ac_voltage_probe(&normalized) {
+            return voltage_probe.accessor == XyceVoltageAccessor::Value;
+        }
+        if let Some(current_probe) = Self::parse_ac_current_probe(&normalized) {
+            return current_probe.accessor == XyceCurrentAccessor::Value;
+        }
+        false
     }
 
     fn parse_csd_table(content: &str) -> Result<XycePrnTable, String> {
@@ -11563,7 +11824,7 @@ impl XyceTestRunner {
                 if header_line.eq_ignore_ascii_case("#N") {
                     break;
                 }
-                if let Some((key, value)) = Self::parse_csd_header_assignment(header_line) {
+                for (key, value) in Self::parse_csd_header_assignments(header_line) {
                     if key.eq_ignore_ascii_case("COMPLEXVALUES")
                         && value.eq_ignore_ascii_case("YES")
                     {
@@ -11617,9 +11878,10 @@ impl XyceTestRunner {
                         "expected Xyce CSDF #C row header at line {line_number}, got '{line}'"
                     ));
                 }
-                let expected_count = Self::parse_csd_row_count(line).map_err(|err| {
-                    format!("invalid Xyce CSDF #C row header at line {line_number}: {err}")
-                })?;
+                let (_, expected_count) =
+                    Self::parse_csd_sweep_row_header(line).map_err(|err| {
+                        format!("invalid Xyce CSDF #C row header at line {line_number}: {err}")
+                    })?;
                 index += 1;
 
                 let mut row = Vec::with_capacity(expected_count);
@@ -11642,13 +11904,19 @@ impl XyceTestRunner {
                             ));
                         }
                         let expected_position = row.len() + 1;
-                        row.push(Self::parse_csd_value_token(token, expected_position).map_err(
-                            |err| {
+                        let value = Self::parse_csd_complex_value_token(token, expected_position)
+                            .map_err(|err| {
                                 format!(
                                     "invalid Xyce CSDF data token '{token}' at line {data_line_number}: {err}"
                                 )
-                            },
-                        )?);
+                            })?;
+                        if value.im.abs() > f64::EPSILON {
+                            return Err(format!(
+                                "Xyce CSDF real table token '{token}' at line {data_line_number} has nonzero imaginary component {}",
+                                value.im
+                            ));
+                        }
+                        row.push(value.re);
                     }
                     index += 1;
                 }
@@ -11672,14 +11940,13 @@ impl XyceTestRunner {
         Ok(XycePrnTable { columns, rows })
     }
 
-    fn parse_csd_header_assignment(line: &str) -> Option<(&str, &str)> {
-        let (key, rest) = line.split_once('=')?;
-        let value = rest
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim_matches(['"', '\'']);
-        Some((key.trim(), value))
+    fn parse_csd_header_assignments(line: &str) -> Vec<(&str, &str)> {
+        line.split_whitespace()
+            .filter_map(|field| {
+                let (key, value) = field.split_once('=')?;
+                Some((key.trim(), value.trim_matches(['"', '\''])))
+            })
+            .collect()
     }
 
     fn parse_csd_columns(line: &str) -> Result<Vec<String>, String> {
@@ -11714,17 +11981,23 @@ impl XyceTestRunner {
         }
     }
 
-    fn parse_csd_row_count(line: &str) -> Result<usize, String> {
+    fn parse_csd_sweep_row_header(line: &str) -> Result<(f64, usize), String> {
         let fields = line.split_whitespace().collect::<Vec<_>>();
         if fields.len() != 3 || !fields[0].eq_ignore_ascii_case("#C") {
             return Err("expected '#C <sweep-value> <value-count>'".to_string());
         }
-        fields[2]
+        let sweep_value = Self::parse_xyce_numeric_token(fields[1])
+            .map_err(|err| format!("invalid sweep value '{}': {err}", fields[1]))?;
+        let value_count = fields[2]
             .parse::<usize>()
-            .map_err(|err| format!("invalid value count '{}': {err}", fields[2]))
+            .map_err(|err| format!("invalid value count '{}': {err}", fields[2]))?;
+        Ok((sweep_value, value_count))
     }
 
-    fn parse_csd_value_token(token: &str, expected_position: usize) -> Result<f64, String> {
+    fn parse_csd_complex_value_token(
+        token: &str,
+        expected_position: usize,
+    ) -> Result<Complex64, String> {
         let (value, position) = token
             .split_once(':')
             .ok_or_else(|| "expected '<value>:<position>'".to_string())?;
@@ -11736,8 +12009,12 @@ impl XyceTestRunner {
                 "position {position} does not match expected position {expected_position}"
             ));
         }
-        Self::parse_xyce_numeric_token(value)
-            .map_err(|err| format!("invalid numeric value '{}': {err}", value))
+        let (real, imaginary) = value.split_once('/').unwrap_or((value, "0"));
+        let real = Self::parse_xyce_numeric_token(real)
+            .map_err(|err| format!("invalid real value '{}': {err}", real))?;
+        let imaginary = Self::parse_xyce_numeric_token(imaginary)
+            .map_err(|err| format!("invalid imaginary value '{}': {err}", imaginary))?;
+        Ok(Complex64::new(real, imaginary))
     }
 
     fn parse_raw_table(bytes: &[u8]) -> Result<XycePrnTable, String> {
@@ -13857,6 +14134,24 @@ R2 b 0 2
     }
 
     #[test]
+    fn ac_probe_contract_selects_csd_oracle_extension() {
+        assert_eq!(
+            XyceTestRunner::static_ac_contract_for_print_format(true, Some("PROBE"))
+                .expect("PROBE wrapper contract is supported"),
+            XyceStaticAcContract::WrapperCsd
+        );
+        assert_eq!(
+            XyceStaticAcContract::WrapperCsd.reference_extension(),
+            "csd"
+        );
+        assert_eq!(
+            XyceTestRunner::static_ac_contract_for_print_format(false, Some("PROBE"))
+                .expect("plain PROBE contract is supported"),
+            XyceStaticAcContract::PlainCsd
+        );
+    }
+
+    #[test]
     fn dc_csv_contract_selects_csv_oracle_extension() {
         assert_eq!(
             XyceTestRunner::static_dc_contract_for_print_format(true, Some("CSV"))
@@ -13921,6 +14216,42 @@ COMPLEXVALUES='NO' NODES='2'
         assert_eq!(table.rows.len(), 2);
         assert_eq!(table.rows[0], vec![0.0, -0.1]);
         assert_eq!(table.rows[1], vec![1.0, -0.2]);
+    }
+
+    #[test]
+    fn ac_csd_parser_expands_complex_probe_values() {
+        let table = XyceTestRunner::parse_ac_csd_table(
+            "\
+#H
+SOURCE='Xyce' VERSION='7.0'
+COMPLEXVALUES='YES' SWEEPVAR='FREQ'
+#N
+'V(B)' 'VR(B)' 'I(V1)' 'VM(B)'
+#C 1.00000000e+02 4
+1.00000000e+00/2.00000000e+00:1 1.00000000e+00/0.00000000e+00:2
+-3.00000000e+00/4.00000000e+00:3 2.23606798e+00/0.00000000e+00:4
+#;
+",
+        )
+        .expect("AC CSDF table parses");
+
+        assert_eq!(
+            table.columns,
+            vec![
+                "FREQ",
+                "Re(V(B))",
+                "Im(V(B))",
+                "VR(B)",
+                "Re(I(V1))",
+                "Im(I(V1))",
+                "VM(B)"
+            ]
+        );
+        assert_eq!(table.rows.len(), 1);
+        assert_eq!(
+            table.rows[0],
+            vec![100.0, 1.0, 2.0, 1.0, -3.0, 4.0, 2.23606798]
+        );
     }
 
     #[test]
