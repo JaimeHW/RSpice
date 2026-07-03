@@ -10,8 +10,8 @@
 use rspice_core::{
     netlist::Netlist,
     testing::{
-        TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics,
-        decode_test_result,
+        decode_test_result, TestResult, TestRunner as CoreTestRunner, TestRunnerConfig,
+        TestStatistics,
     },
 };
 use std::{
@@ -1017,6 +1017,36 @@ fn test_ngspice_general_rtlinv_focus() {
 }
 
 #[test]
+fn test_ngspice_general_mosamp_schmitt_focus() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(
+        tests_dir.clone(),
+        suite_config_with_timeout("general", FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS),
+    );
+
+    for (relative, expected_analysis) in [
+        ("general/mosamp.cir", "Transient"),
+        ("general/schmitt.cir", "Transient"),
+    ] {
+        let result = runner.run_test(&tests_dir.join(relative));
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some(expected_analysis),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
+}
+
+#[test]
 fn test_ngspice_resistance_suite() {
     let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
     let stats = run_and_report(&runner, "resistance");
@@ -1026,6 +1056,34 @@ fn test_ngspice_resistance_suite() {
         stats.total,
         stats.pass_rate()
     );
+}
+
+#[test]
+fn test_ngspice_resistance_focus_cases_run() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+
+    for (relative, expected_analysis) in [
+        ("resistance/res_array.cir", "DC OP + Transient + AC"),
+        ("resistance/res_partition.cir", "DC OP + AC"),
+        ("resistance/res_simple.cir", "Transient"),
+    ] {
+        let result = runner.run_test(&tests_dir.join(relative));
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some(expected_analysis),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
 }
 
 #[test]
@@ -1083,6 +1141,30 @@ fn test_ngspice_transmission_ltra1_focus() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Device Model Tests
 // ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_ngspice_bsim1_bsim2_dc_focus() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+
+    for relative in ["bsim1/test.cir", "bsim2/test.cir"] {
+        let result = runner.run_test(&tests_dir.join(relative));
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some("DC Sweep"),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
+}
 
 #[test]
 fn test_ngspice_jfet_suite() {
