@@ -12,6 +12,7 @@ use crate::solver::{SimulationResult, StaticMatrix};
 use crate::{CircuitData, Netlist, Value};
 
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
+const DC_SWEEP_RESULT_PREALLOC_LIMIT: usize = 4096;
 
 /// One accepted point from a DC sweep, including the solved node/branch result
 /// and the per-device operating-point report cached at that bias.
@@ -423,7 +424,8 @@ impl Engine {
         }
 
         if source_name.eq_ignore_ascii_case("TEMP") || source_name.eq_ignore_ascii_case("TEMPER") {
-            let mut results = Vec::with_capacity(sweep_points.len());
+            let mut results =
+                Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
             for &sweep_value in &sweep_points {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -514,7 +516,8 @@ impl Engine {
         let node_hints = self.collect_node_voltage_hints(netlist, &circuit);
 
         let sweep_result = (|| -> Result<Vec<DcSweepPointResult>, SimulationError> {
-            let mut results = Vec::with_capacity(sweep_points.len());
+            let mut results =
+                Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
 
             // Use previous solution as initial guess for next point.
             // For the first point, apply .NODESET/.IC hints if present.
@@ -660,7 +663,8 @@ impl Engine {
         sweep_points: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
-        let mut results = Vec::with_capacity(sweep_points.len());
+        let mut results =
+            Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
         let mut any_binding = false;
 
         for &sweep_value in sweep_points {
