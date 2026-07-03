@@ -1604,6 +1604,9 @@ impl XyceTestRunner {
         let Ok(netlist) = Self::parse_xyce_netlist(source, deck_path) else {
             return false;
         };
+        if Self::validate_plain_static_dc_prn_wrapper_netlist(&netlist).is_err() {
+            return false;
+        }
         let Ok(dc) = Self::single_dc_sweep(&netlist) else {
             return false;
         };
@@ -1627,6 +1630,9 @@ impl XyceTestRunner {
         }
 
         let mut dc_count = 0usize;
+        let mut model_count = 0usize;
+        let mut subckt_count = 0usize;
+        let mut ends_count = 0usize;
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
             if trimmed.is_empty() {
@@ -1640,7 +1646,13 @@ impl XyceTestRunner {
             }
             match command.to_ascii_lowercase().as_str() {
                 ".dc" => dc_count += 1,
-                ".print" | ".param" | ".func" | ".end" => {}
+                ".model" => {
+                    model_count += 1;
+                    Self::validate_plain_static_dc_prn_wrapper_model_type(&trimmed)?;
+                }
+                ".subckt" => subckt_count += 1,
+                ".ends" => ends_count += 1,
+                ".print" | ".param" | ".func" | ".options" | ".end" => {}
                 other => {
                     return Err(format!(
                         "wrapper-origin plain static DC contract does not cover {other} directives"
@@ -1658,7 +1670,69 @@ impl XyceTestRunner {
             _ => Err(format!(
                 "wrapper-origin plain static DC contract requires exactly one .DC statement, found {dc_count}"
             )),
+        }?;
+
+        if model_count > 1 {
+            return Err(format!(
+                "wrapper-origin plain static DC contract currently covers at most one .MODEL statement, found {model_count}"
+            ));
         }
+        if subckt_count > 1 {
+            return Err(format!(
+                "wrapper-origin plain static DC contract currently covers at most one .SUBCKT statement, found {subckt_count}"
+            ));
+        }
+        if subckt_count != ends_count {
+            return Err(format!(
+                "wrapper-origin plain static DC contract requires balanced .SUBCKT/.ENDS statements, found {subckt_count}/{ends_count}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_plain_static_dc_prn_wrapper_model_type(model_line: &str) -> Result<(), String> {
+        let Some(model_type) = model_line.split_whitespace().nth(2) else {
+            return Err(
+                "wrapper-origin plain static DC contract requires .MODEL statements to include a model type"
+                    .to_string(),
+            );
+        };
+        let normalized = model_type
+            .trim_matches(|ch| matches!(ch, '(' | ')' | ','))
+            .to_ascii_uppercase();
+        if matches!(normalized.as_str(), "NMOS" | "PMOS") {
+            return Ok(());
+        }
+        Err(format!(
+            "wrapper-origin plain static DC contract does not yet cover .MODEL type {model_type}"
+        ))
+    }
+
+    fn validate_plain_static_dc_prn_wrapper_netlist(netlist: &Netlist) -> Result<(), String> {
+        if netlist.models.len() > 1 {
+            return Err(format!(
+                "wrapper-origin plain static DC contract currently covers at most one parsed model, found {}",
+                netlist.models.len()
+            ));
+        }
+        for model in &netlist.models {
+            if !matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "NMOS" | "PMOS"
+            ) {
+                return Err(format!(
+                    "wrapper-origin plain static DC contract does not yet cover parsed model type {}",
+                    model.model_type
+                ));
+            }
+        }
+        if netlist.subcircuits.len() > 1 {
+            return Err(format!(
+                "wrapper-origin plain static DC contract currently covers at most one parsed subcircuit, found {}",
+                netlist.subcircuits.len()
+            ));
+        }
+        Ok(())
     }
 
     fn upstream_wrapper_required_reason() -> &'static str {
