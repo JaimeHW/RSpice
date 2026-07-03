@@ -367,6 +367,7 @@ impl B3SoiDd {
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
         self.last_limited.set(false);
+        self.bias_was_limited.set(false);
     }
 
     /// ngspice bypass predicate (b3soiddld.c:589-643): every branch-voltage
@@ -450,7 +451,7 @@ impl B3SoiDd {
     /// charges injects `ag0`-amplified phantom currents whenever the body
     /// limiter engages.
     fn charge_bias(&self, voltages: &[Value]) -> B3SoiDdBias {
-        if self.bypass_active.get() {
+        if self.bypass_active.get() || self.bias_was_limited.get() {
             self.bias
         } else {
             self.branch_voltages(voltages)
@@ -670,6 +671,7 @@ impl B3SoiDd {
 
     fn branch_voltages(&self, v: &[Value]) -> B3SoiDdBias {
         let mut bias = self.raw_branch_voltages(v);
+        let _ = self.apply_branch_limiting(&mut bias);
         let _ = self.apply_body_limiting(&mut bias);
         bias
     }
@@ -799,6 +801,19 @@ impl B3SoiDd {
     /// Returns whether the per-iteration change cap actually engaged (the
     /// ngspice `Check` flag; the SmartVbs DC floor intentionally does not set
     /// it, matching `B3SOIDDSmartVbs`'s `NG_IGNORE(check)`).
+    fn apply_branch_limiting(&self, bias: &mut B3SoiDdBias) -> bool {
+        if !self.limit_anchor_valid.get() {
+            return false;
+        }
+
+        let mut check = false;
+        bias.vgs = common::soi_limit(bias.vgs, self.bias.vgs, 3.0, &mut check);
+        bias.vds = common::soi_limit(bias.vds, self.bias.vds, 3.0, &mut check);
+        bias.ves = common::soi_limit(bias.ves, self.bias.ves, 3.0, &mut check);
+        bias.vps = common::soi_limit(bias.vps, self.bias.vps, 3.0, &mut check);
+        check
+    }
+
     fn apply_body_limiting(&self, bias: &mut B3SoiDdBias) -> bool {
         if !self.limit_anchor_valid.get() {
             // First iterate of a phase: accept the raw bias, but still apply the
@@ -866,7 +881,7 @@ impl NonlinearDevice for B3SoiDd {
         self.force_full_eval.set(false);
         let raw_bias = self.raw_branch_voltages(voltages);
         let mut bias = raw_bias;
-        let limited = self.apply_body_limiting(&mut bias);
+        let limited = self.apply_branch_limiting(&mut bias) || self.apply_body_limiting(&mut bias);
         self.last_limited.set(limited);
         self.bias_was_limited.set(!biases_match(raw_bias, bias));
         self.bias = bias;
@@ -1668,6 +1683,48 @@ mod tests {
         assert!(
             dev.last_limited.get(),
             "temperature limiting should mark the iterate non-bypassable"
+        );
+    }
+
+    #[test]
+    fn update_limits_branch_voltages_per_newton_iteration() {
+        let model = Arc::new(B3SoiDdModel::from_params(&n1_params(), false, 300.15));
+        let mut dev = B3SoiDd::new(
+            "m1".to_string(),
+            1,
+            2,
+            2,
+            3,
+            4,
+            5,
+            7,
+            0,
+            BodyMode::TiedIdeal,
+            model,
+            geom(),
+            300.15,
+        )
+        .expect("DD device builds");
+
+        dev.update(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(dev.bias.vgs, 0.0);
+        assert_eq!(dev.bias.vds, 0.0);
+        assert_eq!(dev.bias.ves, 0.0);
+        assert_eq!(dev.bias.vps, 0.0);
+
+        dev.update(&[10.0, 8.0, 0.0, 7.0, 0.0, 0.0, 9.0]);
+
+        assert!((dev.bias.vds - 3.0).abs() <= 1.0e-12, "vds={}", dev.bias.vds);
+        assert!((dev.bias.vgs - 3.0).abs() <= 1.0e-12, "vgs={}", dev.bias.vgs);
+        assert!((dev.bias.ves - 3.0).abs() <= 1.0e-12, "ves={}", dev.bias.ves);
+        assert!((dev.bias.vps - 3.0).abs() <= 1.0e-12, "vps={}", dev.bias.vps);
+        assert!(
+            dev.last_limited.get(),
+            "branch limiting should mark the iterate non-bypassable"
+        );
+        assert!(
+            dev.bias_was_limited.get(),
+            "charge and RHS stamping must reuse the limited branch bias"
         );
     }
 
