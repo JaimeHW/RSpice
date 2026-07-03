@@ -729,11 +729,15 @@ impl<'a> Parser<'a> {
                 "PWL" => Some(Function::Pwl),
                 "MOD" | "FMOD" => Some(Function::Mod),
                 "SPICE_PULSE" => Some(Function::SpicePulse),
+                "SPICE_SIN" => Some(Function::SpiceSin),
+                "SPICE_EXP" => Some(Function::SpiceExp),
+                "SPICE_SFFM" => Some(Function::SpiceSffm),
                 "IF" | "TERNARY_FCN" => Some(Function::If),
                 _ => None,
             };
 
             if let Some(f) = func {
+                self.validate_function_arity(name, f, args.len());
                 return Expr::Function { func: f, args };
             }
 
@@ -746,6 +750,35 @@ impl<'a> Parser<'a> {
         self.errors
             .push(format!("Unknown identifier '{}' in expression", name));
         Expr::Const(0.0)
+    }
+
+    fn validate_function_arity(&mut self, function_name: &str, func: Function, arg_count: usize) {
+        let range = match func {
+            Function::SpicePulse => Some((1, 7)),
+            Function::SpiceSin => Some((3, 6)),
+            Function::SpiceExp => Some((2, 6)),
+            Function::SpiceSffm => Some((2, 5)),
+            _ => None,
+        };
+
+        let Some((min, max)) = range else {
+            return;
+        };
+
+        if arg_count < min {
+            self.errors.push(format!(
+                "{} expects at least {} argument{}, got {}",
+                function_name,
+                min,
+                if min == 1 { "" } else { "s" },
+                arg_count
+            ));
+        } else if arg_count > max {
+            self.errors.push(format!(
+                "{} expects at most {} arguments, got {}",
+                function_name, max, arg_count
+            ));
+        }
     }
 
     fn parse_first_function_argument(&mut self, function_name: &str) -> Expr {
@@ -890,6 +923,52 @@ mod tests {
         assert_eq!(eval_tran(expr, 10.8e-12), 2.0);
         assert!((eval_tran(expr, 11.0e-12) - 1.55).abs() < 1.0e-12);
         assert_eq!(eval_tran(expr, 11.2e-12), 1.1);
+    }
+
+    #[test]
+    fn spice_source_expression_functions_follow_source_waveforms() {
+        assert_eq!(eval_tran("spice_sin(-0.5, 2, 34meg, 0.5n, 0.1)", 0.0), -0.5);
+        let sin_time = 0.75e-9;
+        let sin_expected = -0.5
+            + 2.0
+                * (-0.1_f64 * (sin_time - 0.5e-9)).exp()
+                * (std::f64::consts::TAU * 34.0e6 * (sin_time - 0.5e-9)).sin();
+        assert!(
+            (eval_tran("spice_sin(-0.5, 2, 34meg, 0.5n, 0.1)", sin_time) - sin_expected).abs()
+                < 1.0e-15
+        );
+
+        assert_eq!(
+            eval_tran("spice_exp(1.1, 2, 2n, 15n, 5n, 30n)", 1.0e-9),
+            1.1
+        );
+        let exp_time = 7.0e-9;
+        let exp_expected = 1.1
+            + (2.0 - 1.1) * (1.0 - (-((exp_time - 2.0e-9_f64) / 15.0e-9_f64)).exp())
+            - (2.0 - 1.1) * (1.0 - (-((exp_time - 5.0e-9_f64) / 30.0e-9_f64)).exp());
+        assert!(
+            (eval_tran("spice_exp(1.1, 2, 2n, 15n, 5n, 30n)", exp_time) - exp_expected).abs()
+                < 1.0e-15
+        );
+
+        assert_eq!(
+            eval_tran("spice_sffm(-0.5, 2, 100meg, 0.3, 2.1meg)", 0.0),
+            -0.5
+        );
+        let sffm_time = 1.0e-9;
+        let sffm_expected = -0.5
+            + 2.0
+                * (std::f64::consts::TAU * 100.0e6 * sffm_time
+                    + 0.3 * (std::f64::consts::TAU * 2.1e6 * sffm_time).sin())
+                .sin();
+        assert!(
+            (eval_tran("spice_sffm(-0.5, 2, 100meg, 0.3, 2.1meg)", sffm_time) - sffm_expected)
+                .abs()
+                < 1.0e-15
+        );
+
+        let err = parse_expression_strict("spice_sffm(-0.5)").expect_err("arity rejected");
+        assert!(err.message.contains("expects at least 2 arguments"));
     }
 
     #[test]

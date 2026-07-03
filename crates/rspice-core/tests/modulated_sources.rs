@@ -8,7 +8,7 @@
 
 use std::f64::consts::PI;
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::{Netlist, SourceSpec};
 
 const TOL: f64 = 1e-9;
@@ -48,8 +48,18 @@ fn transient_node_values(
     tstop: f64,
     max_step: f64,
 ) -> (Vec<f64>, Vec<f64>) {
+    transient_node_values_with_config(deck, node, tstop, max_step, SimulationConfig::default())
+}
+
+fn transient_node_values_with_config(
+    deck: &str,
+    node: &str,
+    tstop: f64,
+    max_step: f64,
+    config: SimulationConfig,
+) -> (Vec<f64>, Vec<f64>) {
     let netlist = Netlist::parse(deck).expect("parse");
-    let engine = Engine::new(SimulationConfig::default());
+    let engine = Engine::new(config);
     let result = engine
         .run_tran(&netlist, tstop, max_step)
         .expect("transient");
@@ -301,6 +311,33 @@ r1 1 0 1k
         times.iter().any(|t| (t - 1.0e-6).abs() < 1e-12),
         "TD must be a breakpoint timepoint"
     );
+}
+
+#[test]
+fn sffm_xyce_dialect_matches_xyce_five_parameter_formula() {
+    let deck = "\
+* xyce sffm waveform
+v1 1 0 sffm(-0.5 2 100meg 0.3 2.1meg)
+r1 1 0 1k
+.tran 0.1n 1n
+.end
+";
+    let (times, values) = transient_node_values_with_config(
+        deck,
+        "1",
+        1.0e-9,
+        0.1e-9,
+        SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce),
+    );
+    assert_eq!(values.first().copied(), Some(-0.5));
+    for (t, v) in times.iter().zip(values.iter()) {
+        let expected =
+            -0.5 + 2.0 * (2.0 * PI * 100.0e6 * t + 0.3 * (2.0 * PI * 2.1e6 * t).sin()).sin();
+        assert!(
+            (v - expected).abs() < TOL,
+            "xyce sffm at t={t}: got {v}, formula {expected}"
+        );
+    }
 }
 
 #[test]

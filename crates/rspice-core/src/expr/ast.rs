@@ -117,6 +117,9 @@ pub enum Function {
     FastTableFile, // fasttablefile("path") / fasttablefile(path)
     Mod,           // mod(x, y) = x % y - modulo
     SpicePulse,    // spice_pulse(v1, v2, td, tr, tf, pw[, per])
+    SpiceSin,      // spice_sin(vo, va, freq, td, theta[, phase_degrees])
+    SpiceExp,      // spice_exp(v1, v2, td1, tau1, td2, tau2)
+    SpiceSffm,     // spice_sffm(vo, va[, fc[, mdi[, fs]]])
     // Conditional
     If, // if(cond, then, else)
 }

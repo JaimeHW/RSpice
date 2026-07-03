@@ -6,6 +6,7 @@ use super::ast::LookupTable;
 use crate::{Value, netlist::ExpressionDialect};
 use std::collections::HashMap;
 
+const TWO_PI: Value = std::f64::consts::TAU;
 const EXPR_ZERO_TOLERANCE: Value = 1.0e-12;
 const XYCE_ATANH_EPSILON: Value = 1.0e-12;
 const XYCE_TANH_SATURATION_THRESHOLD: Value = 20.0;
@@ -95,6 +96,9 @@ pub enum Instruction {
     LookupTable(usize),
     Mod,
     SpicePulse(usize),
+    SpiceSin(usize),
+    SpiceExp(usize),
+    SpiceSffm(usize),
 
     /// Conditional: if cond != 0, keep second, else keep third
     IfElse,
@@ -395,9 +399,53 @@ impl Vm {
                     self.stack.push(result);
                 }
                 Instruction::SpicePulse(arg_count) => {
-                    if *arg_count >= 6 && self.stack.len() >= *arg_count {
+                    if self.stack.len() >= *arg_count {
                         let start = self.stack.len() - *arg_count;
-                        let result = spice_pulse_from_args(ctx.time, &self.stack[start..]);
+                        let args = &self.stack[start..];
+                        let result = if (1..=7).contains(arg_count) {
+                            spice_pulse_from_args(ctx.time, args)
+                        } else {
+                            0.0
+                        };
+                        self.stack.truncate(start);
+                        self.stack.push(result);
+                    }
+                }
+                Instruction::SpiceSin(arg_count) => {
+                    if self.stack.len() >= *arg_count {
+                        let start = self.stack.len() - *arg_count;
+                        let args = &self.stack[start..];
+                        let result = if (3..=6).contains(arg_count) {
+                            spice_sin_from_args(ctx.time, args)
+                        } else {
+                            0.0
+                        };
+                        self.stack.truncate(start);
+                        self.stack.push(result);
+                    }
+                }
+                Instruction::SpiceExp(arg_count) => {
+                    if self.stack.len() >= *arg_count {
+                        let start = self.stack.len() - *arg_count;
+                        let args = &self.stack[start..];
+                        let result = if (2..=6).contains(arg_count) {
+                            spice_exp_from_args(ctx.time, args)
+                        } else {
+                            0.0
+                        };
+                        self.stack.truncate(start);
+                        self.stack.push(result);
+                    }
+                }
+                Instruction::SpiceSffm(arg_count) => {
+                    if self.stack.len() >= *arg_count {
+                        let start = self.stack.len() - *arg_count;
+                        let args = &self.stack[start..];
+                        let result = if (2..=5).contains(arg_count) {
+                            spice_sffm_from_args(ctx.time, args)
+                        } else {
+                            0.0
+                        };
                         self.stack.truncate(start);
                         self.stack.push(result);
                     }
@@ -544,11 +592,11 @@ fn interpolate_segment(x: Value, x1: Value, y1: Value, x2: Value, y2: Value, fla
 
 fn spice_pulse_from_args(time: Value, args: &[Value]) -> Value {
     let v1 = args[0];
-    let v2 = args[1];
-    let delay = finite_nonnegative(args[2], 0.0);
-    let rise = finite_nonnegative(args[3], 0.0);
-    let fall = finite_nonnegative(args[4], 0.0);
-    let width = finite_nonnegative(args[5], 0.0);
+    let v2 = args.get(1).copied().unwrap_or(0.0);
+    let delay = args.get(2).copied().unwrap_or(0.0);
+    let rise = args.get(3).copied().unwrap_or(0.0);
+    let fall = args.get(4).copied().unwrap_or(0.0);
+    let width = args.get(5).copied().unwrap_or(0.0);
 
     if time < delay {
         return v1;
@@ -580,13 +628,53 @@ fn spice_pulse_from_args(time: Value, args: &[Value]) -> Value {
     v1
 }
 
-#[inline]
-fn finite_nonnegative(value: Value, default: Value) -> Value {
-    if value.is_finite() && value >= 0.0 {
-        value
+fn spice_sin_from_args(time: Value, args: &[Value]) -> Value {
+    let offset = args[0];
+    let amplitude = args[1];
+    let frequency = args[2];
+    let delay = args.get(3).copied().unwrap_or(0.0);
+    let damping = args.get(4).copied().unwrap_or(0.0);
+    let phase = args.get(5).copied().unwrap_or(0.0).to_radians();
+    let elapsed = time - delay;
+
+    if elapsed <= 0.0 {
+        offset + amplitude * phase.sin()
     } else {
-        default
+        offset
+            + amplitude * (-damping * elapsed).exp() * (TWO_PI * frequency * elapsed + phase).sin()
     }
+}
+
+fn spice_exp_from_args(time: Value, args: &[Value]) -> Value {
+    let v1 = args[0];
+    let v2 = args[1];
+    let td1 = args.get(2).copied().unwrap_or(0.0);
+    let tau1 = args.get(3).copied().unwrap_or(0.0);
+    let td2 = args.get(4).copied().unwrap_or(td1);
+    let tau2 = args.get(5).copied().unwrap_or(0.0);
+
+    if time <= td1 {
+        v1
+    } else if time <= td2 {
+        v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
+    } else {
+        v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
+            - (v2 - v1) * (1.0 - (-(time - td2) / tau2).exp())
+    }
+}
+
+fn spice_sffm_from_args(time: Value, args: &[Value]) -> Value {
+    let offset = args[0];
+    let amplitude = args[1];
+    let carrier_freq = args.get(2).copied().unwrap_or(0.0);
+    let modulation_index = args.get(3).copied().unwrap_or(0.0);
+    let signal_freq = args.get(4).copied().unwrap_or(0.0);
+
+    offset
+        + amplitude
+            * (TWO_PI * carrier_freq * time
+                + modulation_index * (TWO_PI * signal_freq * time).sin())
+            .sin()
 }
 
 fn xyce_tanh(value: Value) -> Value {

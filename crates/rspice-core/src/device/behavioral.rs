@@ -524,6 +524,13 @@ fn collect_expression_transient_breakpoints(
                 Function::SpicePulse => {
                     collect_spice_pulse_breakpoints(args, tstop, breakpoints);
                 }
+                Function::SpiceSin => {
+                    collect_spice_delay_breakpoint(args, 3, tstop, breakpoints);
+                }
+                Function::SpiceExp => {
+                    collect_spice_delay_breakpoint(args, 2, tstop, breakpoints);
+                    collect_spice_delay_breakpoint(args, 4, tstop, breakpoints);
+                }
                 _ => {}
             }
             for arg in args {
@@ -611,6 +618,24 @@ fn collect_spice_pulse_breakpoints(args: &[Expr], tstop: Value, breakpoints: &mu
         breakpoints.push(cycle_start + rise);
         breakpoints.push(cycle_start + rise + width);
         breakpoints.push(cycle_start + rise + width + fall);
+    }
+}
+
+fn collect_spice_delay_breakpoint(
+    args: &[Expr],
+    delay_arg_index: usize,
+    tstop: Value,
+    breakpoints: &mut Vec<Value>,
+) {
+    let Some(delay_expr) = args.get(delay_arg_index) else {
+        return;
+    };
+    let Some(delay) = constant_expression_value(delay_expr) else {
+        return;
+    };
+    let delay = finite_nonnegative(delay, 0.0);
+    if delay <= tstop {
+        breakpoints.push(delay);
     }
 }
 
@@ -1032,7 +1057,9 @@ fn eval_function_with_derivative(
         }
         Function::Table | Function::Pwl => eval_table_function_with_derivative(args, context),
         Function::TableFile | Function::FastTable | Function::FastTableFile => Some((0.0, 0.0)),
-        Function::SpicePulse => None,
+        Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
+            None
+        }
         Function::If => {
             let (condition, _) = eval_arg(0)?;
             if condition != 0.0 {

@@ -423,6 +423,17 @@ impl VoltageSources {
             .unwrap_or(cycles * 1e3)
     }
 
+    /// Xyce SFFM defaults omitted FC and FS to one cycle over the transient
+    /// stop time.
+    #[inline]
+    fn xyce_modulated_frequency_default(context: Option<TransientSourceContext>) -> Value {
+        context
+            .map(|ctx| ctx.tstop)
+            .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
+            .map(|tstop| 1.0 / tstop)
+            .unwrap_or(0.0)
+    }
+
     #[inline]
     fn resolve_pulse_timing(
         delay: Value,
@@ -735,6 +746,30 @@ impl VoltageSources {
                 phase_modulation,
                 phase_carrier,
             } => {
+                if matches!(
+                    Self::pulse_dialect(context),
+                    crate::engine::SpiceDialect::Xyce
+                ) {
+                    let fc = if carrier_freq.is_finite() {
+                        *carrier_freq
+                    } else {
+                        Self::xyce_modulated_frequency_default(context)
+                    };
+                    let fs = if signal_freq.is_finite() {
+                        *signal_freq
+                    } else {
+                        Self::xyce_modulated_frequency_default(context)
+                    };
+                    let mdi = if modulation_index.is_finite() {
+                        *modulation_index
+                    } else {
+                        0.0
+                    };
+                    return *offset
+                        + *amplitude
+                            * ((2.0 * PI * fc * time) + mdi * (2.0 * PI * fs * time).sin()).sin();
+                }
+
                 // ngspice vsrcload.c SFFM semantics, including the exact
                 // omitted-parameter defaults and the MDI clamp.
                 let fc = if carrier_freq.is_finite() && *carrier_freq > 0.0 {

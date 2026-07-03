@@ -1024,6 +1024,7 @@ fn test_xyce_source_waveform_transient_cases_run() {
 
     for relative in [
         "Netlists/VSFFM/vsffm.cir",
+        "Netlists/SOURCES/sources.cir",
         "Netlists/SOURCES/ebh.cir",
         "Netlists/SOURCES/ebh_sub.cir",
     ] {

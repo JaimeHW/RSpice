@@ -137,6 +137,9 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 }
                 Function::Mod => Instruction::Mod,
                 Function::SpicePulse => Instruction::SpicePulse(args.len()),
+                Function::SpiceSin => Instruction::SpiceSin(args.len()),
+                Function::SpiceExp => Instruction::SpiceExp(args.len()),
+                Function::SpiceSffm => Instruction::SpiceSffm(args.len()),
                 Function::If => Instruction::IfElse,
             };
             program.instructions.push(instr);
