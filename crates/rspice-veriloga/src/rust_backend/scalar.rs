@@ -14,6 +14,9 @@ use super::{RustTranspileOptions, device};
 
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 240_000;
+const MAX_SCALAR_STAMP_EMITTED_VALUES: usize = 300_000;
+const MAX_SCALAR_STAMP_SOURCE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SCALAR_STAMP_SOURCE_LINES: usize = 120_000;
 const MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_INLINE_EXPR_COST: usize = 128;
@@ -338,6 +341,12 @@ fn generate_stamp_file(
         .as_ref()
         .map(|plan| tail_live_values(&reactive_live, &plan.live))
         .unwrap_or_else(|| reactive_live.clone());
+    reject_oversized_scalar_stamp_value_emit(
+        artifact,
+        shared_plan.as_ref(),
+        &stamp_emit_live,
+        &reactive_emit_live,
+    )?;
     let stamp_inline_values =
         scalar_stamp_inline_values(artifact, &stamp_emit_live, static_cache, &roots)?;
     let has_idt_slots = ddt_slots.idt_len() > 0;
@@ -560,7 +569,63 @@ fn generate_stamp_file(
         out.push_str("    }\n");
     }
     out.push_str("}\n");
+    reject_oversized_scalar_stamp_source(artifact, &out)?;
     Ok(out)
+}
+
+fn reject_oversized_scalar_stamp_source(
+    artifact: &CanonicalIrArtifact,
+    source: &str,
+) -> Result<(), RustBackendError> {
+    let source_bytes = source.len();
+    let source_lines = source.lines().count();
+    if source_bytes <= MAX_SCALAR_STAMP_SOURCE_BYTES
+        && source_lines <= MAX_SCALAR_STAMP_SOURCE_LINES
+    {
+        return Ok(());
+    }
+
+    Err(unsupported(
+        artifact,
+        format!(
+            "pure scalar stamp source has {source_bytes} bytes and {source_lines} lines; current scalar source budget is {MAX_SCALAR_STAMP_SOURCE_BYTES} bytes and {MAX_SCALAR_STAMP_SOURCE_LINES} lines"
+        ),
+    ))
+}
+
+fn reject_oversized_scalar_stamp_value_emit(
+    artifact: &CanonicalIrArtifact,
+    shared_plan: Option<&SharedStampValuesPlan>,
+    stamp_emit_live: &HashSet<ValueId>,
+    reactive_emit_live: &HashSet<ValueId>,
+) -> Result<(), RustBackendError> {
+    let emitted_values =
+        scalar_stamp_value_emit_estimate(shared_plan, stamp_emit_live, reactive_emit_live);
+    if !scalar_stamp_emitted_values_exceeds_budget(emitted_values) {
+        return Ok(());
+    }
+
+    Err(unsupported(
+        artifact,
+        format!(
+            "pure scalar stamp would emit approximately {emitted_values} value bindings; current scalar emission budget is {MAX_SCALAR_STAMP_EMITTED_VALUES}"
+        ),
+    ))
+}
+
+fn scalar_stamp_value_emit_estimate(
+    shared_plan: Option<&SharedStampValuesPlan>,
+    stamp_emit_live: &HashSet<ValueId>,
+    reactive_emit_live: &HashSet<ValueId>,
+) -> usize {
+    let common_values = shared_plan.map(|plan| plan.live.len()).unwrap_or(0);
+    common_values
+        .saturating_add(stamp_emit_live.len())
+        .saturating_add(reactive_emit_live.len())
+}
+
+pub(super) fn scalar_stamp_emitted_values_exceeds_budget(emitted_values: usize) -> bool {
+    emitted_values > MAX_SCALAR_STAMP_EMITTED_VALUES
 }
 
 fn shared_stamp_values_plan(
@@ -632,6 +697,45 @@ pub(super) fn shared_stamp_values_plan_for_roots(
         roots,
         reactive_roots,
     )
+}
+
+pub(super) fn scalar_stamp_emitted_value_estimate_for_roots(
+    artifact: &CanonicalIrArtifact,
+    static_cache: &ScalarStaticCache,
+    roots: &HashMap<EquationId, ValueId>,
+    reactive_roots: &HashMap<EquationId, ValueId>,
+) -> Result<usize, RustBackendError> {
+    let stamp_live = collect_stamp_live_values(artifact, roots, static_cache)?;
+    let reactive_live = if reactive_roots.is_empty() {
+        HashSet::new()
+    } else {
+        collect_stamp_live_values(artifact, reactive_roots, static_cache)?
+    };
+    let shared_plan = if reactive_roots.is_empty() {
+        None
+    } else {
+        shared_stamp_values_plan(
+            artifact,
+            &stamp_live,
+            &reactive_live,
+            static_cache,
+            roots,
+            reactive_roots,
+        )?
+    };
+    let stamp_emit_live = shared_plan
+        .as_ref()
+        .map(|plan| tail_live_values(&stamp_live, &plan.live))
+        .unwrap_or_else(|| stamp_live.clone());
+    let reactive_emit_live = shared_plan
+        .as_ref()
+        .map(|plan| tail_live_values(&reactive_live, &plan.live))
+        .unwrap_or(reactive_live);
+    Ok(scalar_stamp_value_emit_estimate(
+        shared_plan.as_ref(),
+        &stamp_emit_live,
+        &reactive_emit_live,
+    ))
 }
 
 fn shareable_common_stamp_values(

@@ -372,6 +372,15 @@ pub(super) fn generate_hybrid_device(
         .map(|(equation, root)| (*equation, *root))
         .collect();
     let static_cache = super::scalar::ScalarStaticCache::from_roots(artifact, &scalar_cache_roots)?;
+    let scalar_emit_estimate = super::scalar::scalar_stamp_emitted_value_estimate_for_roots(
+        artifact,
+        &static_cache,
+        &scalar_cache_roots,
+        &ddt_roots,
+    )?;
+    if super::scalar::scalar_stamp_emitted_values_exceeds_budget(scalar_emit_estimate) {
+        return generate_device_with_scalar_hybrid_plan(artifact, options, None, true);
+    }
     let scalar_hybrid_plan = ScalarHybridStampPlan {
         large_signal_roots,
         ddt_roots,
@@ -11474,6 +11483,12 @@ fn collect_transient_liveness_excluding(
             &mut values,
             &mut HashSet::new(),
         )?;
+        collect_guard_expression_identifiers(
+            artifact,
+            equation.expression.id,
+            &mut values,
+            &mut HashSet::new(),
+        )?;
         collect_large_signal_value_required_derivative_identifiers(
             artifact,
             equation.expression.id,
@@ -11603,6 +11618,12 @@ fn collect_reactive_liveness_excluding(
                 &mut live_variables,
                 &mut HashSet::new(),
             )?;
+            collect_guard_expression_identifiers(
+                artifact,
+                equation.expression.id,
+                &mut live_variables,
+                &mut HashSet::new(),
+            )?;
         }
     }
 
@@ -11717,6 +11738,12 @@ fn collect_transient_live_statement_dependencies(
                         live_values,
                         &mut HashSet::new(),
                     )?;
+                    collect_guard_expression_identifiers(
+                        artifact,
+                        assignment.expr.id,
+                        live_values,
+                        &mut HashSet::new(),
+                    )?;
                     collect_large_signal_value_required_derivative_identifiers(
                         artifact,
                         assignment.expr.id,
@@ -11756,6 +11783,12 @@ fn collect_transient_live_statement_dependencies(
                     live_derivatives,
                 ) {
                     collect_expression_identifiers(
+                        artifact,
+                        loop_statement.condition.id,
+                        live_values,
+                        &mut HashSet::new(),
+                    )?;
+                    collect_guard_expression_identifiers(
                         artifact,
                         loop_statement.condition.id,
                         live_values,
@@ -11817,6 +11850,12 @@ fn collect_live_statement_dependencies(
                         live_variables,
                         &mut HashSet::new(),
                     )?;
+                    collect_guard_expression_identifiers(
+                        artifact,
+                        assignment.expr.id,
+                        live_variables,
+                        &mut HashSet::new(),
+                    )?;
                     if let Some(index) = &assignment.index {
                         collect_expression_identifiers(
                             artifact,
@@ -11835,6 +11874,12 @@ fn collect_live_statement_dependencies(
                 )?;
                 if loop_contains_live_assignment(loop_statement, live_variables) {
                     collect_expression_identifiers(
+                        artifact,
+                        loop_statement.condition.id,
+                        live_variables,
+                        &mut HashSet::new(),
+                    )?;
+                    collect_guard_expression_identifiers(
                         artifact,
                         loop_statement.condition.id,
                         live_variables,
@@ -11945,6 +11990,38 @@ fn collect_expression_identifiers(
     }
     for child in expression_children(&expression.kind) {
         collect_expression_identifiers(artifact, child, identifiers, visited)?;
+    }
+    Ok(())
+}
+
+fn collect_guard_expression_identifiers(
+    artifact: &CanonicalIrArtifact,
+    id: ExprId,
+    identifiers: &mut HashSet<String>,
+    visited: &mut HashSet<ExprId>,
+) -> Result<(), RustBackendError> {
+    if !visited.insert(id) {
+        return Ok(());
+    }
+    let expression = artifact
+        .mir
+        .expressions
+        .get(usize::from(id))
+        .ok_or_else(|| {
+            RustBackendError::internal(
+                artifact.metadata.source_package.as_str(),
+                artifact.mir.module_name.as_str(),
+                format!("expression {id} is outside MIR arena"),
+            )
+        })?;
+
+    if let HirExprKind::Identifier { name } = &expression.kind
+        && name.starts_with("__guard")
+    {
+        identifiers.insert(name.to_string());
+    }
+    for child in expression_children(&expression.kind) {
+        collect_guard_expression_identifiers(artifact, child, identifiers, visited)?;
     }
     Ok(())
 }
