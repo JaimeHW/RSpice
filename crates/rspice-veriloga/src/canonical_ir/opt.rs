@@ -4776,6 +4776,24 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
     }
 
+    fn consume_current_path_assignment_history_replay_step(
+        &mut self,
+        variable: VariableId,
+    ) -> Option<()> {
+        let entries = self
+            .variable_assignment_history
+            .get(&variable)
+            .map(Vec::len)
+            .unwrap_or(usize::MAX);
+        if self.history_reconstruction_budget_exhausted
+            && self.exhausted_budget_current_path_history_replay(entries)
+        {
+            Some(())
+        } else {
+            self.consume_history_reconstruction_step()
+        }
+    }
+
     fn cheap_current_path_history_replay(&self, entries: usize) -> bool {
         entries <= MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_ENTRIES
             && self.conditional_path_stack.len() <= MAX_SCALAR_CHEAP_CURRENT_PATH_HISTORY_DEPTH
@@ -4959,11 +4977,12 @@ impl<'a> ScalarGraphBuilder<'a> {
     ) -> Option<ValueId> {
         if self.conditional_path_stack.is_empty()
             || self.conditional_path_stack.len() > MAX_SCALAR_CURRENT_PATH_HISTORY_DEPTH
-            || self.history_reconstruction_budget_exhausted
+            || (self.history_reconstruction_budget_exhausted
+                && !self.exhausted_budget_current_path_history_replay(history.len()))
         {
             return None;
         }
-        self.consume_history_reconstruction_step()?;
+        self.consume_current_path_history_reconstruction_step(history.len())?;
         let scan_start = history
             .len()
             .saturating_sub(MAX_SCALAR_RECENT_HISTORY_RECONSTRUCTION_ENTRIES);
@@ -5001,7 +5020,7 @@ impl<'a> ScalarGraphBuilder<'a> {
         entry: &AssignmentHistoryEntry,
         previous_value: ValueId,
     ) -> Option<ValueId> {
-        self.consume_history_reconstruction_step()?;
+        self.consume_current_path_assignment_history_replay_step(variable)?;
         let expression = self.mir.expressions.get(usize::from(entry.expr))?;
         let HirExprKind::Conditional {
             condition,
@@ -5050,7 +5069,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         variable: VariableId,
         history: &[AssignmentHistoryEntry],
     ) -> Option<ValueId> {
-        if self.history_reconstruction_budget_exhausted {
+        if self.history_reconstruction_budget_exhausted
+            && !self.exhausted_budget_current_path_history_replay(history.len())
+        {
             return None;
         }
         if self.conditional_path_stack.len() > MAX_SCALAR_CURRENT_PATH_HISTORY_DEPTH
@@ -5523,7 +5544,8 @@ impl<'a> ScalarGraphBuilder<'a> {
         history: &[AssignmentHistoryEntry],
     ) -> Option<ValueId> {
         if self.conditional_path_stack.len() > MAX_SCALAR_CURRENT_PATH_HISTORY_DEPTH
-            || self.history_reconstruction_budget_exhausted
+            || (self.history_reconstruction_budget_exhausted
+                && !self.exhausted_budget_current_path_history_replay(history.len()))
         {
             return None;
         }

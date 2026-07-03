@@ -13,7 +13,7 @@ use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDevice
 use super::{RustTranspileOptions, device};
 
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
-const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 240_000;
+const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 300_000;
 const MAX_SCALAR_STAMP_EMITTED_VALUES: usize = 300_000;
 const MAX_SCALAR_STAMP_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SCALAR_STAMP_SOURCE_LINES: usize = 120_000;
@@ -21,6 +21,8 @@ const MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_INLINE_EXPR_COST: usize = 128;
 const MIN_SHARED_STAMP_LIVE_VALUES: usize = 1024;
+const MIN_ALIASED_SCALAR_STATIC_CACHE_VALUES: usize = 64;
+const MIN_LOCAL_SHARED_STAMP_VALUES: usize = 64;
 
 pub(super) struct ScalarStaticCache {
     instance_values: Vec<ValueId>,
@@ -129,6 +131,48 @@ impl ScalarStaticCache {
 
     fn has_bool_values(&self) -> bool {
         self.bool_count > 0
+    }
+}
+
+fn use_scalar_static_cache_aliases(static_cache: &ScalarStaticCache) -> bool {
+    static_cache
+        .f64_count
+        .saturating_add(static_cache.bool_count)
+        >= MIN_ALIASED_SCALAR_STATIC_CACHE_VALUES
+}
+
+fn scalar_static_cache_refs_for_stamp(
+    static_cache: &ScalarStaticCache,
+) -> HashMap<ValueId, String> {
+    if !use_scalar_static_cache_aliases(static_cache) {
+        return static_cache.refs.clone();
+    }
+
+    static_cache
+        .refs
+        .iter()
+        .map(|(value, reference)| {
+            let reference = if let Some(suffix) = reference.strip_prefix("self.scalar_static_f64") {
+                format!("sf{suffix}")
+            } else if let Some(suffix) = reference.strip_prefix("self.scalar_static_bool") {
+                format!("sb{suffix}")
+            } else {
+                reference.clone()
+            };
+            (*value, reference)
+        })
+        .collect()
+}
+
+fn emit_scalar_static_cache_aliases(static_cache: &ScalarStaticCache, out: &mut String) {
+    if !use_scalar_static_cache_aliases(static_cache) {
+        return;
+    }
+    if static_cache.has_f64_values() {
+        out.push_str("        let sf=&self.scalar_static_f64;\n");
+    }
+    if static_cache.has_bool_values() {
+        out.push_str("        let sb=&self.scalar_static_bool;\n");
     }
 }
 
@@ -341,14 +385,27 @@ fn generate_stamp_file(
         .as_ref()
         .map(|plan| tail_live_values(&reactive_live, &plan.live))
         .unwrap_or_else(|| reactive_live.clone());
-    reject_oversized_scalar_stamp_value_emit(
-        artifact,
-        shared_plan.as_ref(),
-        &stamp_emit_live,
-        &reactive_emit_live,
-    )?;
     let stamp_inline_values =
         scalar_stamp_inline_values(artifact, &stamp_emit_live, static_cache, &roots)?;
+    let reactive_inline_values = if reactive_roots.is_empty() {
+        HashSet::new()
+    } else {
+        scalar_stamp_inline_values(artifact, &reactive_emit_live, static_cache, &reactive_roots)?
+    };
+    let common_inline_values = shared_plan
+        .as_ref()
+        .map(|plan| shared_stamp_inline_values(artifact, static_cache, plan))
+        .transpose()?;
+    reject_oversized_scalar_stamp_value_emit(
+        artifact,
+        static_cache,
+        shared_plan.as_ref(),
+        &stamp_emit_live,
+        &stamp_inline_values,
+        &reactive_emit_live,
+        &reactive_inline_values,
+        common_inline_values.as_ref(),
+    )?;
     let has_idt_slots = ddt_slots.idt_len() > 0;
     let stamp_needs_params = has_idt_slots
         || artifact.opt.values.iter().any(|value| {
@@ -454,13 +511,19 @@ fn generate_stamp_file(
     if has_idt_slots {
         out.push_str("        let idt_scale = if ddt_active { timestep } else { 0.0 };\n");
     }
-    if shared_plan.is_some() {
-        out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
+    let stamp_static_refs = scalar_static_cache_refs_for_stamp(static_cache);
+    emit_scalar_static_cache_aliases(static_cache, &mut out);
+    let stamp_shared_refs = shared_plan
+        .as_ref()
+        .map(shared_stamp_value_refs)
+        .unwrap_or_default();
+    if let Some(plan) = &shared_plan {
+        emit_shared_stamp_values_binding(plan, &mut out);
     }
 
     let stamp_context = ValueEmitContext {
         cached_values: &static_cache.set,
-        cached_value_refs: &static_cache.refs,
+        cached_value_refs: &stamp_static_refs,
         inline_values: &stamp_inline_values,
         use_cached_fields: true,
         inline_uncached_constants: false,
@@ -473,10 +536,7 @@ fn generate_stamp_file(
         loop_index_exprs: HashMap::new(),
         runtime_loop_values: HashMap::new(),
         runtime_loop_derivatives: HashMap::new(),
-        external_value_refs: shared_plan
-            .as_ref()
-            .map(|plan| plan.refs.clone())
-            .unwrap_or_default(),
+        external_value_refs: stamp_shared_refs,
     };
     emit_live_values(
         artifact,
@@ -503,12 +563,6 @@ fn generate_stamp_file(
         );
         out.push_str("    }\n");
     } else {
-        let reactive_inline_values = scalar_stamp_inline_values(
-            artifact,
-            &reactive_emit_live,
-            static_cache,
-            &reactive_roots,
-        )?;
         let reactive_needs_param_given = artifact.opt.values.iter().any(|value| {
             reactive_live.contains(&value.id)
                 && matches!(value.kind, OptValueKind::ParamGiven { .. })
@@ -528,12 +582,18 @@ fn generate_stamp_file(
             out.push_str("        let param_given = self.param_given.as_ref();\n");
         }
         out.push_str("        let multiplicity = self.multiplicity;\n");
-        if shared_plan.is_some() {
-            out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
+        let reactive_static_refs = scalar_static_cache_refs_for_stamp(static_cache);
+        emit_scalar_static_cache_aliases(static_cache, &mut out);
+        let reactive_shared_refs = shared_plan
+            .as_ref()
+            .map(shared_stamp_value_refs)
+            .unwrap_or_default();
+        if let Some(plan) = &shared_plan {
+            emit_shared_stamp_values_binding(plan, &mut out);
         }
         let reactive_context = ValueEmitContext {
             cached_values: &static_cache.set,
-            cached_value_refs: &static_cache.refs,
+            cached_value_refs: &reactive_static_refs,
             inline_values: &reactive_inline_values,
             use_cached_fields: true,
             inline_uncached_constants: false,
@@ -546,10 +606,7 @@ fn generate_stamp_file(
             loop_index_exprs: HashMap::new(),
             runtime_loop_values: HashMap::new(),
             runtime_loop_derivatives: HashMap::new(),
-            external_value_refs: shared_plan
-                .as_ref()
-                .map(|plan| plan.refs.clone())
-                .unwrap_or_default(),
+            external_value_refs: reactive_shared_refs,
         };
         emit_live_values(
             artifact,
@@ -595,12 +652,24 @@ fn reject_oversized_scalar_stamp_source(
 
 fn reject_oversized_scalar_stamp_value_emit(
     artifact: &CanonicalIrArtifact,
+    static_cache: &ScalarStaticCache,
     shared_plan: Option<&SharedStampValuesPlan>,
     stamp_emit_live: &HashSet<ValueId>,
+    stamp_inline_values: &HashSet<ValueId>,
     reactive_emit_live: &HashSet<ValueId>,
+    reactive_inline_values: &HashSet<ValueId>,
+    common_inline_values: Option<&HashSet<ValueId>>,
 ) -> Result<(), RustBackendError> {
-    let emitted_values =
-        scalar_stamp_value_emit_estimate(shared_plan, stamp_emit_live, reactive_emit_live);
+    let emitted_values = scalar_stamp_value_emit_estimate(
+        artifact,
+        static_cache,
+        shared_plan,
+        stamp_emit_live,
+        stamp_inline_values,
+        reactive_emit_live,
+        reactive_inline_values,
+        common_inline_values,
+    )?;
     if !scalar_stamp_emitted_values_exceeds_budget(emitted_values) {
         return Ok(());
     }
@@ -614,14 +683,82 @@ fn reject_oversized_scalar_stamp_value_emit(
 }
 
 fn scalar_stamp_value_emit_estimate(
+    artifact: &CanonicalIrArtifact,
+    static_cache: &ScalarStaticCache,
     shared_plan: Option<&SharedStampValuesPlan>,
     stamp_emit_live: &HashSet<ValueId>,
+    stamp_inline_values: &HashSet<ValueId>,
     reactive_emit_live: &HashSet<ValueId>,
-) -> usize {
-    let common_values = shared_plan.map(|plan| plan.live.len()).unwrap_or(0);
-    common_values
-        .saturating_add(stamp_emit_live.len())
-        .saturating_add(reactive_emit_live.len())
+    reactive_inline_values: &HashSet<ValueId>,
+    common_inline_values: Option<&HashSet<ValueId>>,
+) -> Result<usize, RustBackendError> {
+    let empty = HashSet::new();
+    let common_values = if let Some(plan) = shared_plan {
+        scalar_live_value_emit_count(
+            artifact,
+            &plan.live,
+            static_cache,
+            common_inline_values.unwrap_or(&empty),
+            &empty,
+        )?
+    } else {
+        0
+    };
+    let shared_external_values = shared_plan
+        .map(|plan| plan.boundary.iter().copied().collect::<HashSet<_>>())
+        .unwrap_or_default();
+    Ok(common_values
+        .saturating_add(scalar_live_value_emit_count(
+            artifact,
+            stamp_emit_live,
+            static_cache,
+            stamp_inline_values,
+            &shared_external_values,
+        )?)
+        .saturating_add(scalar_live_value_emit_count(
+            artifact,
+            reactive_emit_live,
+            static_cache,
+            reactive_inline_values,
+            &shared_external_values,
+        )?))
+}
+
+fn scalar_live_value_emit_count(
+    artifact: &CanonicalIrArtifact,
+    live: &HashSet<ValueId>,
+    static_cache: &ScalarStaticCache,
+    inline_values: &HashSet<ValueId>,
+    external_values: &HashSet<ValueId>,
+) -> Result<usize, RustBackendError> {
+    let values = ordered_live_values(artifact, live, static_cache)?;
+    let mut emitted_runtime_loops = HashSet::new();
+    let mut count = 0usize;
+    for value_id in values {
+        if external_values.contains(&value_id) || inline_values.contains(&value_id) {
+            continue;
+        }
+        let value = artifact
+            .opt
+            .values
+            .get(usize::from(value_id))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+        if let Some(loop_id) = runtime_loop_result_id(&value.kind) {
+            if emitted_runtime_loops.insert(loop_id) {
+                count = count.saturating_add(1);
+            }
+            continue;
+        }
+        if matches!(
+            value.kind,
+            OptValueKind::RuntimeLoopVariable { .. }
+                | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        ) {
+            continue;
+        }
+        count = count.saturating_add(1);
+    }
+    Ok(count)
 }
 
 pub(super) fn scalar_stamp_emitted_values_exceeds_budget(emitted_values: usize) -> bool {
@@ -731,11 +868,27 @@ pub(super) fn scalar_stamp_emitted_value_estimate_for_roots(
         .as_ref()
         .map(|plan| tail_live_values(&reactive_live, &plan.live))
         .unwrap_or(reactive_live);
-    Ok(scalar_stamp_value_emit_estimate(
+    let stamp_inline_values =
+        scalar_stamp_inline_values(artifact, &stamp_emit_live, static_cache, roots)?;
+    let reactive_inline_values = if reactive_roots.is_empty() {
+        HashSet::new()
+    } else {
+        scalar_stamp_inline_values(artifact, &reactive_emit_live, static_cache, reactive_roots)?
+    };
+    let common_inline_values = shared_plan
+        .as_ref()
+        .map(|plan| shared_stamp_inline_values(artifact, static_cache, plan))
+        .transpose()?;
+    scalar_stamp_value_emit_estimate(
+        artifact,
+        static_cache,
         shared_plan.as_ref(),
         &stamp_emit_live,
+        &stamp_inline_values,
         &reactive_emit_live,
-    ))
+        &reactive_inline_values,
+        common_inline_values.as_ref(),
+    )
 }
 
 fn shareable_common_stamp_values(
@@ -798,6 +951,39 @@ fn tail_live_values(live: &HashSet<ValueId>, shared_live: &HashSet<ValueId>) -> 
     live.difference(shared_live).copied().collect()
 }
 
+fn use_local_shared_stamp_values(plan: &SharedStampValuesPlan) -> bool {
+    plan.boundary.len() >= MIN_LOCAL_SHARED_STAMP_VALUES
+}
+
+fn shared_stamp_value_refs(plan: &SharedStampValuesPlan) -> HashMap<ValueId, String> {
+    if use_local_shared_stamp_values(plan) {
+        return plan
+            .boundary
+            .iter()
+            .map(|value| (*value, value_name(*value)))
+            .collect();
+    }
+    plan.refs.clone()
+}
+
+fn emit_shared_stamp_values_binding(plan: &SharedStampValuesPlan, out: &mut String) {
+    if !use_local_shared_stamp_values(plan) {
+        out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
+        return;
+    }
+
+    const FIELDS_PER_LINE: usize = 8;
+    out.push_str("        let CommonStampValues {\n");
+    for chunk in plan.boundary.chunks(FIELDS_PER_LINE) {
+        out.push_str("            ");
+        for value_id in chunk {
+            out.push_str(&format!("{}, ", value_name(*value_id)));
+        }
+        out.push('\n');
+    }
+    out.push_str("        }=self.eval_common_stamp_values(ctx);\n");
+}
+
 pub(super) fn emit_shared_stamp_values_struct(
     artifact: &CanonicalIrArtifact,
     plan: &SharedStampValuesPlan,
@@ -833,17 +1019,11 @@ pub(super) fn emit_shared_stamp_values_method(
     plan: &SharedStampValuesPlan,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
-    let mandatory = plan.boundary.iter().copied().collect::<HashSet<_>>();
-    let inline_values = scalar_inline_values_for_live_values(
-        artifact,
-        &plan.live,
-        &static_cache.set,
-        &mandatory,
-        &plan.boundary,
-    )?;
+    let inline_values = shared_stamp_inline_values(artifact, static_cache, plan)?;
+    let static_cache_refs = scalar_static_cache_refs_for_stamp(static_cache);
     let context = ValueEmitContext {
         cached_values: &static_cache.set,
-        cached_value_refs: &static_cache.refs,
+        cached_value_refs: &static_cache_refs,
         inline_values: &inline_values,
         use_cached_fields: true,
         inline_uncached_constants: false,
@@ -881,6 +1061,7 @@ pub(super) fn emit_shared_stamp_values_method(
     if live_values_need_multiplicity(artifact, &plan.live) {
         out.push_str("        let multiplicity = self.multiplicity;\n");
     }
+    emit_scalar_static_cache_aliases(static_cache, out);
     emit_live_values(
         artifact,
         parameter_fields,
@@ -4319,6 +4500,21 @@ fn scalar_stamp_inline_values(
     )
 }
 
+fn shared_stamp_inline_values(
+    artifact: &CanonicalIrArtifact,
+    static_cache: &ScalarStaticCache,
+    plan: &SharedStampValuesPlan,
+) -> Result<HashSet<ValueId>, RustBackendError> {
+    let mandatory = plan.boundary.iter().copied().collect::<HashSet<_>>();
+    scalar_inline_values_for_live_values(
+        artifact,
+        &plan.live,
+        &static_cache.set,
+        &mandatory,
+        &plan.boundary,
+    )
+}
+
 fn mandatory_stamp_local_values(
     artifact: &CanonicalIrArtifact,
     roots: &HashMap<EquationId, ValueId>,
@@ -4978,7 +5174,22 @@ fn rust_type(value_type: OptValueType) -> &'static str {
 }
 
 fn value_name(value: ValueId) -> String {
-    format!("v{}", value.index())
+    format!("v{}", base36_index(value.index()))
+}
+
+fn base36_index(mut index: u32) -> String {
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if index == 0 {
+        return "0".to_string();
+    }
+
+    let mut bytes = Vec::new();
+    while index > 0 {
+        bytes.push(DIGITS[(index % 36) as usize]);
+        index /= 36;
+    }
+    bytes.reverse();
+    String::from_utf8(bytes).expect("base36 digits are valid UTF-8")
 }
 
 fn runtime_loop_value_name(loop_id: u32, slot: u32) -> String {
