@@ -699,18 +699,23 @@ pub(super) fn emit_shared_stamp_values_struct(
     plan: &SharedStampValuesPlan,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
+    const FIELDS_PER_LINE: usize = 6;
     out.push_str("struct CommonStampValues {\n");
-    for value_id in &plan.boundary {
-        let value = artifact
-            .opt
-            .values
-            .get(usize::from(*value_id))
-            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
-        out.push_str(&format!(
-            "    {}: {},\n",
-            value_name(*value_id),
-            rust_type(value.value_type)
-        ));
+    for chunk in plan.boundary.chunks(FIELDS_PER_LINE) {
+        out.push_str("    ");
+        for value_id in chunk {
+            let value = artifact
+                .opt
+                .values
+                .get(usize::from(*value_id))
+                .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+            out.push_str(&format!(
+                "{}: {}, ",
+                value_name(*value_id),
+                rust_type(value.value_type)
+            ));
+        }
+        out.push('\n');
     }
     out.push_str("}\n\n");
     Ok(())
@@ -781,8 +786,13 @@ pub(super) fn emit_shared_stamp_values_method(
         out,
     )?;
     out.push_str("        CommonStampValues {\n");
-    for value_id in &plan.boundary {
-        out.push_str(&format!("            {},\n", value_name(*value_id)));
+    const VALUES_PER_LINE: usize = 8;
+    for chunk in plan.boundary.chunks(VALUES_PER_LINE) {
+        out.push_str("            ");
+        for value_id in chunk {
+            out.push_str(&format!("{}, ", value_name(*value_id)));
+        }
+        out.push('\n');
     }
     out.push_str("        }\n");
     out.push_str("    }\n\n");
@@ -1498,11 +1508,13 @@ fn emit_current_reactive_stamps_with_context(
 
 pub(super) fn scalar_transient_current_lowered_variable(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     equation: &MirEquation,
     root: ValueId,
     static_cache: &ScalarStaticCache,
     branch_axis_count: usize,
     ddt_slots: Option<&DdtSlots>,
+    shared_plan: Option<&SharedStampValuesPlan>,
 ) -> Result<LoweredVariable, RustBackendError> {
     let root_value = artifact
         .opt
@@ -1510,22 +1522,6 @@ pub(super) fn scalar_transient_current_lowered_variable(
         .get(usize::from(root))
         .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
     let derivatives = scalar_derivatives(artifact, equation, root)?;
-
-    let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
-    for (node, _) in &derivatives.nodes {
-        node_derivatives[*node as usize] = derivative_name(root, *node);
-    }
-    let mut branch_derivatives = vec!["0.0".to_string(); branch_axis_count];
-    for (branch, _) in &derivatives.branches {
-        let index = *branch as usize;
-        if index >= branch_axis_count {
-            return Err(internal(
-                artifact,
-                format!("branch derivative lane {branch} exceeds axis count {branch_axis_count}"),
-            ));
-        }
-        branch_derivatives[index] = branch_derivative_name(root, *branch);
-    }
 
     let root_name = cached_or_local_value_name(root, static_cache);
     let mut value = current_root_expr(root_value.value_type, &root_name);
@@ -1557,17 +1553,42 @@ pub(super) fn scalar_transient_current_lowered_variable(
         }
         None => {}
     }
-    if derivative_scale != "1.0" {
-        for derivative in &mut node_derivatives {
-            if derivative != "0.0" {
-                *derivative = scaled_derivative_expr(derivative.clone(), derivative_scale);
-            }
+    let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
+    let no_inline_values = HashSet::new();
+    let mut context = local_stamp_context(
+        static_cache,
+        &no_inline_values,
+        ddt_slots,
+        DdtEmitMode::Transient,
+    );
+    if let Some(plan) = shared_plan {
+        context.external_value_refs = plan.refs.clone();
+    }
+    for (node, value) in &derivatives.nodes {
+        node_derivatives[*node as usize] = scaled_derivative_value_expr(
+            artifact,
+            parameter_fields,
+            *value,
+            &context,
+            derivative_scale,
+        )?;
+    }
+    let mut branch_derivatives = vec!["0.0".to_string(); branch_axis_count];
+    for (branch, value) in &derivatives.branches {
+        let index = *branch as usize;
+        if index >= branch_axis_count {
+            return Err(internal(
+                artifact,
+                format!("branch derivative lane {branch} exceeds axis count {branch_axis_count}"),
+            ));
         }
-        for derivative in &mut branch_derivatives {
-            if derivative != "0.0" {
-                *derivative = scaled_derivative_expr(derivative.clone(), derivative_scale);
-            }
-        }
+        branch_derivatives[index] = scaled_derivative_value_expr(
+            artifact,
+            parameter_fields,
+            *value,
+            &context,
+            derivative_scale,
+        )?;
     }
 
     Ok(LoweredVariable {
@@ -1584,10 +1605,12 @@ pub(super) fn scalar_transient_current_lowered_variable(
 
 pub(super) fn scalar_reactive_current_lowered_variable(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     equation: &MirEquation,
     root: ValueId,
     static_cache: &ScalarStaticCache,
     branch_axis_count: usize,
+    shared_plan: Option<&SharedStampValuesPlan>,
 ) -> Result<LoweredVariable, RustBackendError> {
     let root_value = artifact
         .opt
@@ -1597,11 +1620,21 @@ pub(super) fn scalar_reactive_current_lowered_variable(
     let derivatives = scalar_derivatives(artifact, equation, root)?;
 
     let mut node_derivatives = vec!["0.0".to_string(); artifact.mir.nodes.len()];
-    for (node, _) in &derivatives.nodes {
-        node_derivatives[*node as usize] = derivative_name(root, *node);
+    let no_inline_values = HashSet::new();
+    let mut context = local_stamp_context(
+        static_cache,
+        &no_inline_values,
+        None,
+        DdtEmitMode::ReactiveLinearized,
+    );
+    if let Some(plan) = shared_plan {
+        context.external_value_refs = plan.refs.clone();
+    }
+    for (node, value) in &derivatives.nodes {
+        node_derivatives[*node as usize] = value_ref(artifact, parameter_fields, *value, &context)?;
     }
     let mut branch_derivatives = vec!["0.0".to_string(); branch_axis_count];
-    for (branch, _) in &derivatives.branches {
+    for (branch, value) in &derivatives.branches {
         let index = *branch as usize;
         if index >= branch_axis_count {
             return Err(internal(
@@ -1609,7 +1642,7 @@ pub(super) fn scalar_reactive_current_lowered_variable(
                 format!("branch derivative lane {branch} exceeds axis count {branch_axis_count}"),
             ));
         }
-        branch_derivatives[index] = branch_derivative_name(root, *branch);
+        branch_derivatives[index] = value_ref(artifact, parameter_fields, *value, &context)?;
     }
     let root_name = cached_or_local_value_name(root, static_cache);
     let value = current_root_expr(root_value.value_type, &root_name);
@@ -3725,6 +3758,17 @@ fn emit_binary_expr(
             "/",
             coerce_value_expr(right, right_type, OptValueType::Real),
         ),
+        OptBinaryOp::Mod => binary_expr(
+            format!(
+                "{}.trunc()",
+                f64_method_receiver(&coerce_value_expr(left, left_type, OptValueType::Real))
+            ),
+            "%",
+            format!(
+                "{}.trunc()",
+                f64_method_receiver(&coerce_value_expr(right, right_type, OptValueType::Real))
+            ),
+        ),
         OptBinaryOp::Pow => format!(
             "f64::powf({},{})",
             coerce_value_expr(left, left_type, OptValueType::Real),
@@ -4870,14 +4914,6 @@ fn scaled_derivative_value_expr(
         value_ref(artifact, parameter_fields, value, context)?,
         scale,
     ))
-}
-
-fn derivative_name(root: ValueId, node: u32) -> String {
-    format!("d{}_dn{node}", root.index())
-}
-
-fn branch_derivative_name(root: ValueId, branch: u32) -> String {
-    format!("d{}_db{branch}", root.index())
 }
 
 fn scaled_derivative_expr(derivative: String, scale: &str) -> String {

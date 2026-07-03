@@ -425,6 +425,109 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_lowers_parameter_modulo() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module parameter_modulo(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real version = 151.0;
+    real gain;
+    analog begin
+        gain = ((version % 10.0) < 5.0) ? 2.0 : 3.0;
+        I(p, n) <+ gain * V(p, n);
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("parameter modulo should lower through scalar OptIR");
+
+        let generated = report
+            .device
+            .files
+            .iter()
+            .map(|file| file.contents.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(generated.contains(".trunc()%"), "{generated}");
+        assert!(!generated.contains("AdValue"), "{generated}");
+    }
+
+    #[test]
+    fn generated_state_compacts_parameter_defaults() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module compact_parameter_defaults(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real a = 1.0;
+    parameter real b = 2.0;
+    parameter real c = a from (0:inf);
+    parameter real d = 3.0;
+    aliasparam aa = a;
+    analog begin
+        I(p, n) <+ (a + b + c + d) * V(p, n);
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("parameter defaults should emit compact state");
+
+        let state = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "state.rs")
+            .expect("state file")
+            .contents
+            .as_str();
+
+        assert!(state.contains("#[repr(C)]"), "{state}");
+        assert!(state.contains("#[derive(Copy, Clone)]"), "{state}");
+        assert!(state.contains("const DEFAULTS_0: [f64; 2]"), "{state}");
+        assert!(state.contains("std::ptr::copy_nonoverlapping"), "{state}");
+        assert!(state.contains("let params = &mut *ptr;"), "{state}");
+        assert!(state.contains("params.p2 = params.p0"), "{state}");
+        assert!(
+            state.contains("fn finish_set_parameter(&mut self, index: usize)"),
+            "{state}"
+        );
+        assert!(state.contains("const PARAMETER_NAME_LOOKUP"), "{state}");
+        assert!(state.contains("(\"aa\", 0)"), "{state}");
+        assert!(
+            state.contains("validate_parameter_metadata(index, value)?"),
+            "{state}"
+        );
+        assert!(
+            state.contains("self.write_parameter_slot(index, value);"),
+            "{state}"
+        );
+        assert!(
+            state.contains("self.finish_set_parameter(index);"),
+            "{state}"
+        );
+        assert!(
+            !state.contains("self.mark_param_given(0); Ok(())"),
+            "{state}"
+        );
+        assert!(!state.contains("match name.to_ascii_lowercase"), "{state}");
+        assert!(!state.contains("self.params.p0 = value"), "{state}");
+        assert!(!state.contains("impl Copy for Parameters"), "{state}");
+    }
+
+    #[test]
     fn scalar_backend_lowers_nested_ddt_conditionals() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
@@ -962,6 +1065,51 @@ endmodule
     }
 
     #[test]
+    fn scalar_backend_reconstructs_current_path_self_update_cascade() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module current_path_self_update_cascade(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    parameter integer region = 0;
+    parameter integer side = 0;
+    real state;
+    analog begin
+        state = $simparam("unsupported_stale_state");
+
+        if (mode == 1) begin
+            state = (region == 0) ? V(p, n) : state;
+            state = ((region != 0) && (side == 0)) ? (2.0 * V(p, n)) : state;
+            state = ((region != 0) && (side != 0)) ? (3.0 * V(p, n)) : state;
+            I(p, n) <+ state;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("current-path self-update cascade should cover the stale base");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("unsupported_stale_state"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
     fn scalar_backend_replays_unknown_current_path_history_before_stale_base() {
         let artifact = crate::VerilogACompiler::default()
             .compile_canonical_ir(
@@ -1152,6 +1300,58 @@ endmodule
             .as_str();
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_reuses_known_current_path_conditions_without_depth_growth() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module known_current_path_condition_depth(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real state;
+    analog begin
+        state = $simparam("unsupported_initial_state");
+
+        if (mode == 1) begin
+            if (mode == 1) begin
+                if (mode == 1) begin
+                    if (mode == 1) begin
+                        if (mode == 1) begin
+                            state = sqrt(1.0 + V(p, n) * V(p, n));
+                        end
+                    end
+                end
+            end
+        end
+
+        if (mode == 1) begin
+            I(p, n) <+ state;
+        end
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("known current-path conditions should not consume replay depth");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(!stamp.contains("unsupported_initial_state"), "{stamp}");
         assert!(!stamp.contains("AdValue"), "{stamp}");
     }
 
@@ -1541,6 +1741,59 @@ endmodule
         let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
             .transpile_with_report(&artifact)
             .expect("selective conditional aliases should snapshot replay operands");
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+    }
+
+    #[test]
+    fn scalar_backend_replays_selective_self_update_before_alias_snapshot() {
+        let mut source = String::from(
+            r#"
+module selective_self_update_before_alias_snapshot(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer mode = 1 from [0:1];
+    real pad, state, delta, saved;
+    analog begin
+        state = $simparam("unsupported_initial_state");
+        state = (mode == 1) ? V(p, n) : state;
+        delta = 2.0 * V(p, n);
+        state = state + delta;
+        saved = state;
+        if (mode == 1) begin
+            state = saved;
+        end else begin
+            state = -saved;
+        end
+        saved = $simparam("unused_later_saved");
+"#,
+        );
+        for _ in 0..3500 {
+            source.push_str("        pad = (((pad + 1.0) + (2.0 * 3.0)) + (4.0 / 5.0));\n");
+        }
+        source.push_str(
+            r#"
+        I(p, n) <+ ((mode == 1) ? state : 0.0);
+    end
+endmodule
+"#,
+        );
+
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(&source)
+            .expect("canonical IR");
+        assert!(
+            artifact.hir.expressions.len() > 20_000,
+            "fixture must exceed complete expanded-history expression threshold"
+        );
+        assert!(
+            artifact.hir.statements.len() <= 5_000,
+            "fixture must stay within selective history statement gate"
+        );
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("selective self-update history should replay through alias snapshots");
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
     }
@@ -2056,6 +2309,103 @@ endmodule
         let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
             .transpile_with_report(&artifact)
             .expect("parameter-bounded recurrence loop should lower to a scalar runtime loop");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("let mut r0_"), "{stamp}");
+        assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_defaults_overwritten_runtime_loop_locals() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module overwritten_runtime_loop_local(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    integer i;
+    real acc, filtered, term;
+    analog begin
+        acc = 0.0;
+        filtered = 1.0;
+        term = $simparam("unsupported_scalar_probe");
+        for (i = 0; i < nf; i = i + 1) begin
+            term = V(p, n) + i;
+            filtered = 0.5 * (filtered + term);
+            acc = acc + filtered;
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("overwritten loop locals should not require stale pre-loop scalar values");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("let mut r0_"), "{stamp}");
+        assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_replays_guarded_runtime_loop_initializer() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_runtime_loop_initializer(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer enable = 1 from [0:1];
+    parameter integer nf = 4 from [0:inf);
+    integer i;
+    real acc, out, term;
+    analog begin
+        acc = $simparam("unsupported_initial_acc");
+        term = $simparam("unsupported_initial_term");
+        if (enable == 1) begin
+            acc = 0.0;
+            for (i = 0; i < nf; i = i + 1) begin
+                term = V(p, n) + i;
+                acc = acc + term;
+            end
+            out = acc;
+        end else begin
+            out = 0.0;
+        end
+        I(p, n) <+ out;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("runtime loop should replay the active guarded initializer");
 
         let stamp = report
             .device

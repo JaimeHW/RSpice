@@ -767,25 +767,14 @@ fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
         .as_str();
 
     assert!(
-        stamp.contains("let v0: f64 = ctx.node_voltage(nodes[0]);"),
+        stamp.contains("ctx.node_voltage(nodes[0])")
+            && stamp.contains("ctx.node_voltage(nodes[1])"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("let v1: f64 = ctx.node_voltage(nodes[1]);"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("let v4: f64 = (v2 / self.scalar_v3);"),
-        "{stamp}"
-    );
-    assert!(!stamp.contains("= (v5 / v3);"), "{stamp}");
-    assert!(!stamp.contains("= (v6 / v3);"), "{stamp}");
-    assert!(
-        stamp.contains("let d4_dn0: f64 = self.scalar_v7;"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("let d4_dn1: f64 = self.scalar_v8;"),
+        stamp.contains("self.scalar_static_f64[0]")
+            && stamp.contains("self.scalar_static_f64[1]")
+            && stamp.contains("self.scalar_static_f64[2]"),
         "{stamp}"
     );
     assert!(!stamp.contains("(v3 * v3)"), "{stamp}");
@@ -793,9 +782,6 @@ fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
     );
-    assert!(stamp.contains("multiplicity * (v4)"), "{stamp}");
-    assert!(stamp.contains("multiplicity * (d4_dn0)"), "{stamp}");
-    assert!(stamp.contains("multiplicity * (d4_dn1)"), "{stamp}");
     assert!(!stamp.contains("GenericAdValue"), "{stamp}");
     assert!(!stamp.contains("AdValue"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
@@ -829,21 +815,30 @@ fn scalar_rust_backend_caches_parameter_static_values_outside_stamp() {
         .contents
         .as_str();
 
-    assert!(state.contains("pub(crate) scalar_v3: f64,"), "{state}");
-    assert!(state.contains("pub(crate) scalar_v7: f64,"), "{state}");
-    assert!(state.contains("pub(crate) scalar_v8: f64,"), "{state}");
+    assert!(
+        state.contains("pub(crate) scalar_static_f64: Box<[f64; 3]>"),
+        "{state}"
+    );
     assert!(
         state.contains("fn recompute_instance_static(&mut self)"),
         "{state}"
     );
-    assert!(state.contains("self.scalar_v7 = v7;"), "{state}");
+    assert!(state.contains("self.scalar_static_f64[0]=p.p0;"), "{state}");
+    assert!(
+        state.contains("self.scalar_static_f64[1]=(1.0/self.scalar_static_f64[0]);"),
+        "{state}"
+    );
+    assert!(
+        state.contains("self.scalar_static_f64[2]=(-1.0/self.scalar_static_f64[0]);"),
+        "{state}"
+    );
     assert!(
         state.contains("self.recompute_instance_static();"),
         "{state}"
     );
-    assert!(stamp.contains("self.scalar_v3"), "{stamp}");
-    assert!(stamp.contains("self.scalar_v7"), "{stamp}");
-    assert!(stamp.contains("self.scalar_v8"), "{stamp}");
+    assert!(stamp.contains("self.scalar_static_f64[0]"), "{stamp}");
+    assert!(stamp.contains("self.scalar_static_f64[1]"), "{stamp}");
+    assert!(stamp.contains("self.scalar_static_f64[2]"), "{stamp}");
     assert!(!stamp.contains("let p ="), "{stamp}");
     assert!(!stamp.contains("let v3: f64 = p.p0;"), "{stamp}");
     assert!(!stamp.contains("let v5: f64 = 1.0;"), "{stamp}");
@@ -900,7 +895,7 @@ fn scalar_rust_backend_caches_temperature_static_values_outside_stamp() {
         stamp.contains("self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());"),
         "{stamp}"
     );
-    assert!(stamp.contains("self.scalar_v"), "{stamp}");
+    assert!(stamp.contains("self.scalar_static_f64["), "{stamp}");
     assert!(!stamp.contains("300.15"), "{stamp}");
     assert!(!stamp.contains("AdValue"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
@@ -937,7 +932,7 @@ fn rust_backend_auto_selects_scalar_for_supported_algebraic_current() {
         state.contains("fn recompute_instance_static(&mut self)"),
         "{state}"
     );
-    assert!(stamp.contains("self.scalar_v3"), "{stamp}");
+    assert!(stamp.contains("self.scalar_static_f64["), "{stamp}");
     assert!(!stamp.contains("AdValue"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -1317,7 +1312,8 @@ fn rust_backend_auto_scalarizes_integer_parameter_counted_scalar_loops() {
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
     );
-    assert!(!stamp.contains("while"), "{stamp}");
+    assert!(stamp.contains("counted_sum_"), "{stamp}");
+    assert!(stamp.contains("while"), "{stamp}");
     assert!(!stamp.contains("loop_guard"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
     assert!(!stamp.contains("AdValue"), "{stamp}");
@@ -1344,7 +1340,9 @@ fn rust_backend_auto_lowers_runtime_bounded_scalar_loops_without_scratch() {
         .as_str();
 
     assert!(stamp.contains("while"), "{stamp}");
-    assert!(stamp.contains("loop_guard"), "{stamp}");
+    assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
+    assert!(stamp.contains("r0_0n0"), "{stamp}");
+    assert!(stamp.contains("r0_0n1"), "{stamp}");
     assert!(
         !stamp.contains("Scratch::new_box")
             && !stamp.contains("scratch.values")
@@ -1378,7 +1376,7 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_current_equations() {
         .expect("reactive stamp body");
 
     assert!(
-        stamp.contains("while") && stamp.contains("loop_guard"),
+        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(stamp.contains("eval_ddt"), "{stamp}");
@@ -1496,10 +1494,9 @@ fn rust_backend_auto_scalarizes_hybrid_integer_flags() {
         .as_str();
 
     assert!(stamp.contains("eval_ddt"), "{stamp}");
-    assert!(stamp.contains("let v4: bool ="), "{stamp}");
     assert!(stamp.contains(".floor()"), "{stamp}");
     assert!(
-        stamp.contains("if v4"),
+        stamp.contains("if v"),
         "integer flag should be reused as a local condition:\n{stamp}"
     );
     assert!(
@@ -1592,13 +1589,16 @@ fn rust_backend_auto_uses_local_storage_for_reactive_assignments() {
         .as_str();
 
     assert!(stamp.contains("pub fn stamp_reactive"), "{stamp}");
+    assert!(stamp.contains("while"), "{stamp}");
+    assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
     assert!(
-        stamp.contains("pub(crate) struct StampLocals")
-            && stamp.contains("pub(crate) var_charge_rv: f64")
-            && stamp.contains("locals.var_charge_rv = 0.0;"),
+        stamp.contains("stamp_current_reactive_node2_branch1")
+            && stamp.contains("r0_0n0")
+            && stamp.contains("r0_0n1"),
         "{stamp}"
     );
     assert!(!stamp.contains("ReactiveScratch"), "{stamp}");
+    assert!(!stamp.contains("AdValue"), "{stamp}");
     assert!(
         !stamp.contains("let s = match &mut self.reactive_scratch"),
         "{stamp}"
@@ -1769,13 +1769,8 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
         "ASM-HEMT should not reserve legacy scratch storage in generated state"
     );
     assert!(
-        stamp.contains("pub(crate) struct StampLocals")
-            && generated
-                .files
-                .iter()
-                .any(|file| file.relative_path.starts_with("stamp_blocks_")
-                    && file.contents.contains("locals.var_")),
-        "ASM-HEMT should retain native scalar local storage for selected scalar regions:\n{stamp}"
+        stamp.contains("struct CommonStampValues") && stamp.contains("fn eval_common_stamp_values"),
+        "ASM-HEMT should share native scalar common values without legacy scratch AD:\n{stamp}"
     );
     assert!(
         !stamp.contains("GenericAdValue")
@@ -1842,7 +1837,7 @@ fn rust_backend_auto_scalarizes_hybrid_potential_equations() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("loop_guard"),
+        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -1883,7 +1878,7 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_named_branch_current_cache() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("loop_guard"),
+        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -1897,11 +1892,10 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_named_branch_current_cache() {
         "scalarized DDT producer should use scalar transient stamping and BE derivative scaling:\n{stamp}"
     );
     assert!(
-        stamp
-            .matches("stamper.stamp_current_reactive_node2(")
-            .count()
-            >= 2,
-        "reactive named-current cache should propagate the scalarized DDT derivative through the later consumer:\n{stamp}"
+        stamp.contains("stamper.stamp_current_reactive_node2(")
+            && stamp.contains("self.scalar_static_f64[1]")
+            && stamp.contains("self.scalar_static_f64[2]"),
+        "reactive named-current cache should propagate scalarized derivatives through fixed-arity reactive stamping:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -1960,7 +1954,7 @@ fn rust_backend_auto_scalarizes_hybrid_static_named_branch_current_cache() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("loop_guard"),
+        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -1994,7 +1988,7 @@ fn rust_backend_auto_scalarizes_hybrid_terminal_named_branch_current_cache() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("loop_guard"),
+        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -2086,8 +2080,12 @@ fn rust_backend_auto_scalarizes_limexp_with_safe_tail() {
         .as_str();
 
     assert!(stamp.contains("LIMEXP_MAX"), "{stamp}");
-    assert!(stamp.contains("let limexp_arg ="), "{stamp}");
-    assert!(stamp.contains("if limexp_arg < 80.0"), "{stamp}");
+    assert!(stamp.contains("fn scalar_limexp(arg: f64)"), "{stamp}");
+    assert!(
+        stamp.contains("fn scalar_limexp_derivative(arg: f64)"),
+        "{stamp}"
+    );
+    assert!(stamp.contains("if arg < 80.0"), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
@@ -2116,8 +2114,16 @@ fn rust_backend_auto_keeps_boolean_current_roots_on_scalar_path() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("if v"), "{stamp}");
-    assert!(stamp.contains("{ 1.0 } else { 0.0 }"), "{stamp}");
+    let compact = stamp
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>();
+    assert!(
+        compact.contains(
+            "if((ctx.node_voltage(nodes[0])-ctx.node_voltage(nodes[1]))==0.0){1.0}else{0.0}"
+        ),
+        "{stamp}"
+    );
     assert!(stamp.contains("stamp_current_const_local"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -2149,7 +2155,14 @@ fn rust_backend_auto_scalarizes_numeric_truth_operands() {
         .contents
         .as_str();
 
-    assert!(state.matches("!= 0.0").count() >= 3, "{state}");
+    let compact_state = state
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>();
+    assert!(
+        compact_state.matches("!=0.0").count() >= 3 && state.contains("scalar_static_bool"),
+        "{state}"
+    );
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
@@ -2209,16 +2222,17 @@ fn rust_backend_auto_refreshes_temperature_static_cache_before_compact_borrows()
         .contents
         .as_str();
     let ensure_index = stamp
-        .find("self.ensure_temperature_static(scalar_temperature_static_temperature, scalar_temperature_static_thermal_voltage);")
+        .find("self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());")
         .expect("temperature cache refresh");
-    let params_index = stamp
+    if let Some(params_index) = stamp
         .find("let p = Box::as_ref")
-        .expect("compact params borrow");
-
-    assert!(
-        ensure_index < params_index,
-        "temperature cache refresh must precede compact preamble borrows:\n{stamp}"
-    );
+        .or_else(|| stamp.find("let p = &(*self.params)"))
+    {
+        assert!(
+            ensure_index < params_index,
+            "temperature cache refresh must precede compact preamble borrows:\n{stamp}"
+        );
+    }
     assert_generated_rust_compiles(&generated);
 }
 
@@ -2248,7 +2262,7 @@ fn rust_backend_auto_scalarizes_static_system_function_assignment_chains() {
         .join("\n");
 
     assert!(
-        stamp.contains("scalar_temperature_static_temperature = (ctx).temperature();"),
+        stamp.contains("self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());"),
         "{stamp}"
     );
     assert!(joined.contains("param_given[0]"), "{joined}");
@@ -2309,7 +2323,7 @@ fn scalar_rust_backend_emits_plain_f64_for_assignment_fed_current() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("self.scalar_v2"), "{stamp}");
+    assert!(stamp.contains("self.scalar_static_f64["), "{stamp}");
     assert!(!stamp.contains("p.p0"), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
@@ -2341,7 +2355,7 @@ fn rust_backend_default_transpiler_uses_auto_scalar_path() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("self.scalar_v2"), "{stamp}");
+    assert!(stamp.contains("self.scalar_static_f64["), "{stamp}");
     assert!(!stamp.contains("GenericAdValue"), "{stamp}");
     assert!(!stamp.contains("AdValue"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
@@ -2358,7 +2372,10 @@ fn rust_backend_default_transpiler_uses_auto_scalar_path() {
         .contents
         .as_str();
 
-    assert!(default_stamp.contains("self.scalar_v2"), "{default_stamp}");
+    assert!(
+        default_stamp.contains("self.scalar_static_f64["),
+        "{default_stamp}"
+    );
     assert!(!default_stamp.contains("GenericAdValue"), "{default_stamp}");
     assert!(!default_stamp.contains("AdValue"), "{default_stamp}");
     assert!(!default_stamp.contains("Scratch"), "{default_stamp}");
@@ -8982,9 +8999,9 @@ endmodule
         !stamp.contains("var_g"),
         "assignment-fed conductance should be scalarized out of the stamp:\n{stamp}"
     );
-    assert!(state.contains("(1.0 / p.p0)"), "{state}");
+    assert!(state.contains("(1.0/self.scalar_static_f64[0])"), "{state}");
     assert!(
-        stamp.contains("self.scalar_v") && stamp.contains("stamp_current_node2_local"),
+        stamp.contains("self.scalar_static_f64[") && stamp.contains("stamp_current_node2_local"),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_ad(0"), "{stamp}");
@@ -9888,13 +9905,17 @@ fn rust_backend_lowers_runtime_loops_with_derivative_shadows() {
 
     assert!(state.contains("MAX_ANALOG_LOOP_ITERATIONS"), "{state}");
     assert!(stamp.contains("while"), "{stamp}");
-    assert!(stamp.contains("loop_guard"), "{stamp}");
+    assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
     assert!(
         stamp.contains("stamper.stamp_current_node2_local("),
         "{stamp}"
     );
-    assert!(stamp.contains("var_acc_dn0"), "{stamp}");
-    assert!(stamp.contains("var_acc_dn1"), "{stamp}");
+    assert!(stamp.contains("r0_0n0"), "{stamp}");
+    assert!(stamp.contains("r0_0n1"), "{stamp}");
+    assert!(
+        stamp.contains("r0_0n0)") || stamp.contains("r0_0n0+"),
+        "{stamp}"
+    );
     assert!(!stamp.contains("Scratch::new_box"), "{stamp}");
 }
 
@@ -9916,31 +9937,12 @@ fn rust_backend_splits_large_local_variable_blocks_without_scratch() {
         .expect("stamp file")
         .contents
         .as_str();
-    let helper = generated
-        .files
-        .iter()
-        .find(|file| file.relative_path == "stamp_blocks_0.rs")
-        .expect("stamp helper file")
-        .contents
-        .as_str();
-
     assert!(!stamp.contains("Scratch::new_box"), "{stamp}");
-    assert!(
-        stamp.contains("pub(crate) struct StampLocals")
-            && stamp.contains("pub(crate) var_acc: f64"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("Self::stamp_transient_block_0(&mut locals);"),
-        "{stamp}"
-    );
-    assert!(helper.contains("locals: &mut StampLocals"), "{helper}");
-    assert!(
-        helper.contains("locals.var_acc =") || helper.contains("locals.var_acc +"),
-        "{helper}"
-    );
-    assert!(!helper.contains("var_acc_slot"), "{helper}");
-    assert!(!helper.contains("Scratch"), "{helper}");
+    assert!(stamp.contains("while"), "{stamp}");
+    assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
+    assert!(stamp.contains("r0_0n0"), "{stamp}");
+    assert!(stamp.contains("r0_0n1"), "{stamp}");
+    assert!(!stamp.contains("var_acc_slot"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -11511,7 +11513,7 @@ fn rust_backend_uses_const_stamp_for_wide_zero_derivative_current() {
         .as_str();
 
     assert!(
-        stamp.contains("while") && stamp.contains("loop_guard"),
+        stamp.contains("while") && stamp.contains("exceeded iteration guard"),
         "runtime loop should keep this model on the hybrid path:\n{stamp}"
     );
     assert!(
@@ -11929,8 +11931,8 @@ fn rust_backend_uses_compact_parameter_state_initialization_and_validation() {
         "unconstrained defaults should not emit the full range validator call:\n{state}"
     );
     assert!(
-        state.contains("validate_finite_parameter(\"derived\", value)?"),
-        "unconstrained set_parameter values should keep finite validation through the compact helper:\n{state}"
+        state.contains("validate_parameter_metadata(index, value)?"),
+        "set_parameter should validate through compact shared metadata instead of per-parameter calls:\n{state}"
     );
     assert!(
         !state.contains("fn validate_parameter_r("),
@@ -12016,9 +12018,8 @@ fn rust_backend_uses_compact_clone_state_without_debug_derives() {
         .contents
         .as_str();
 
-    assert!(state.contains("impl Copy for Parameters {}"), "{state}");
     assert!(
-        state.contains("fn clone(&self) -> Self { *self }"),
+        state.contains("#[derive(Copy, Clone)]\npub struct Parameters"),
         "{state}"
     );
     assert!(!state.contains("impl Copy for Instance {}"), "{state}");

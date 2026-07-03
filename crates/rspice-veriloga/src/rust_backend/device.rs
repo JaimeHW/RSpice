@@ -880,7 +880,19 @@ fn compact_generated_stamp_surface(mut source: String) -> String {
     ] {
         source = source.replace(from, to);
     }
-    merge_adjacent_simple_if_blocks(cache_context_reads(source))
+    strip_generated_blank_lines(merge_adjacent_simple_if_blocks(cache_context_reads(source)))
+}
+
+fn strip_generated_blank_lines(source: String) -> String {
+    let mut out = String::with_capacity(source.len());
+    for line in source.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 fn reuse_duplicate_derivative_locals_in_helper_methods(source: String) -> String {
@@ -3775,6 +3787,18 @@ mod compact_generated_stamp_surface_tests {
         is_hoistable_generated_derivative_rhs, render_runtime_support_module,
         reuse_duplicate_derivative_locals_in_helper_block, should_cache_compact_condition,
     };
+
+    #[test]
+    fn stamp_surface_removes_generated_blank_lines() {
+        let source = "fn stamp() {\n\n    let x = 1.0;\n\n    let y = x;\n\n}\n".to_string();
+
+        let compacted = compact_generated_stamp_surface(source);
+
+        assert_eq!(
+            compacted,
+            "fn stamp() {\n    let x = 1.0;\n    let y = x;\n}\n"
+        );
+    }
 
     #[test]
     fn recognizes_safe_duplicate_derivative_rhs_for_helper_hoisting() {
@@ -12989,16 +13013,10 @@ pub(super) fn generate_state_file_with_extensions(
             support_imports.join(", ")
         ));
     }
+    out.push_str("#[repr(C)]\n");
+    out.push_str("#[derive(Copy, Clone)]\n");
     out.push_str("pub struct Parameters {\n");
-    for parameter in &artifact.mir.parameters {
-        let field = &parameter_fields[parameter.name.as_str()];
-        out.push_str(&format!("    pub {field}: f64,\n"));
-    }
-    out.push_str("}\n\n");
-    out.push_str("impl Copy for Parameters {}\n\n");
-    out.push_str("impl Clone for Parameters {\n");
-    out.push_str("    #[inline]\n");
-    out.push_str("    fn clone(&self) -> Self { *self }\n");
+    emit_parameter_struct_fields(artifact, parameter_fields, &mut out);
     out.push_str("}\n\n");
 
     out.push_str("impl Parameters {\n");
@@ -13007,27 +13025,12 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("        Box::new(Self {\n");
         out.push_str("        })\n");
     } else {
-        out.push_str("        // SAFETY: every generated Parameters field is f64; all-zero bytes are a valid 0.0 value for f64.\n");
+        out.push_str("        // SAFETY: Parameters is repr(C) and every field is f64; zero bytes are valid 0.0 values, and numeric default chunks are copied into field-order slots.\n");
         out.push_str("        let mut boxed = Box::<Self>::new_uninit();\n");
         out.push_str("        unsafe {\n");
         out.push_str("            let ptr = boxed.as_mut_ptr();\n");
         out.push_str("            std::ptr::write_bytes(ptr, 0, 1);\n");
-        out.push_str("            let params = &mut *ptr;\n");
-        for parameter in &artifact.mir.parameters {
-            let field = &parameter_fields[parameter.name.as_str()];
-            let default = parameter_default_rust_expr(artifact, parameter, parameter_fields)?;
-            out.push_str(&format!("            params.{field} = {default};\n"));
-            if parameter_default_requires_runtime_validation(parameter) {
-                let validation = parameter_validation_call(
-                    parameter.name.as_str(),
-                    &format!("params.{field}"),
-                    parameter.range.as_ref(),
-                )?;
-                out.push_str(&format!(
-                    "            {validation}.expect(\"generated Verilog-A parameter default must satisfy declared range\");\n"
-                ));
-            }
-        }
+        emit_parameter_defaults(artifact, parameter_fields, &mut out)?;
         out.push_str("            boxed.assume_init()\n");
         out.push_str("        }\n");
     }
@@ -13043,6 +13046,7 @@ pub(super) fn generate_state_file_with_extensions(
     if !artifact.mir.parameters.is_empty() {
         out.push_str(&generate_shared_parameter_validator());
         out.push('\n');
+        emit_parameter_metadata(artifact, &mut out)?;
     }
 
     out.push_str("fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {\n");
@@ -13324,32 +13328,45 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(
         "    pub fn set_parameter(&mut self, name: &str, value: f64) -> Result<(), String> {\n",
     );
-    out.push_str("        match name.to_ascii_lowercase().as_str() {\n");
-    for parameter in &artifact.mir.parameters {
-        let parameter_index = usize::from(parameter.id);
-        let field = &parameter_fields[parameter.name.as_str()];
-        let validation =
-            parameter_validation_call(parameter.name.as_str(), "value", parameter.range.as_ref())?;
+    if artifact.mir.parameters.is_empty() {
+        out.push_str("        let _ = value;\n");
         out.push_str(&format!(
-            "            \"{}\" => {{ {validation}?; self.params.{field} = value; self.mark_param_given({parameter_index}); {}Ok(()) }}\n",
-            parameter.name.to_ascii_lowercase(),
-            extensions.set_parameter_hook
+            "        Err(format!(\"unknown parameter '{{}}' for generated Verilog-A model '{}'\", name))\n",
+            artifact.mir.module_name
         ));
-        for alias in &parameter.aliases {
-            out.push_str(&format!(
-                "            \"{}\" => {{ {validation}?; self.params.{field} = value; self.mark_param_given({parameter_index}); {}Ok(()) }}\n",
-                alias.to_ascii_lowercase(),
-                extensions.set_parameter_hook
-            ));
-        }
+    } else {
+        out.push_str("        let lower = name.to_ascii_lowercase();\n");
+        out.push_str("        let Some(index) = parameter_index_for_name(lower.as_str()) else {\n");
+        out.push_str(&format!(
+            "            return Err(format!(\"unknown parameter '{{}}' for generated Verilog-A model '{}'\", name));\n",
+            artifact.mir.module_name
+        ));
+        out.push_str("        };\n");
+        out.push_str("        validate_parameter_metadata(index, value)?;\n");
+        out.push_str("        self.write_parameter_slot(index, value);\n");
+        out.push_str("        self.finish_set_parameter(index);\n");
+        out.push_str("        Ok(())\n");
     }
-    out.push_str(&format!(
-        "            _ => Err(format!(\"unknown parameter '{{}}' for generated Verilog-A model '{}'\", name)),\n",
-        artifact.mir.module_name
-    ));
-    out.push_str("        }\n");
     out.push_str("    }\n");
     out.push('\n');
+    out.push_str("    #[inline]\n");
+    out.push_str("    fn write_parameter_slot(&mut self, index: usize, value: f64) {\n");
+    out.push_str("        debug_assert!(index < Self::PARAMETER_COUNT, \"generated parameter index out of range\");\n");
+    out.push_str("        // SAFETY: Parameters is repr(C), contains only f64 fields, and index is produced from generated parameter metadata.\n");
+    out.push_str("        unsafe {\n");
+    out.push_str("            let ptr = self.params.as_mut() as *mut Parameters as *mut f64;\n");
+    out.push_str("            *ptr.add(index) = value;\n");
+    out.push_str("        }\n");
+    out.push_str("    }\n\n");
+    out.push_str("    #[inline]\n");
+    out.push_str("    fn finish_set_parameter(&mut self, index: usize) {\n");
+    out.push_str("        self.mark_param_given(index);\n");
+    if !extensions.set_parameter_hook.is_empty() {
+        out.push_str("        ");
+        out.push_str(extensions.set_parameter_hook.as_str());
+        out.push('\n');
+    }
+    out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
     out.push_str("    fn mark_param_given(&mut self, index: usize) {\n");
     out.push_str("        debug_assert!(index < Self::PARAMETER_COUNT, \"generated parameter index out of range\");\n");
@@ -13464,6 +13481,332 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&extensions.impl_methods);
     out.push_str("}\n");
     Ok(out)
+}
+
+fn emit_parameter_struct_fields(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    out: &mut String,
+) {
+    const FIELDS_PER_LINE: usize = 8;
+    for chunk in artifact.mir.parameters.chunks(FIELDS_PER_LINE) {
+        out.push_str("    ");
+        for parameter in chunk {
+            let field = &parameter_fields[parameter.name.as_str()];
+            out.push_str(&format!("pub {field}: f64, "));
+        }
+        out.push('\n');
+    }
+}
+
+fn emit_parameter_defaults(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let mut index = 0usize;
+    let mut chunk_index = 0usize;
+    while index < artifact.mir.parameters.len() {
+        if artifact.mir.parameters[index].default.is_some() {
+            let start = index;
+            while index < artifact.mir.parameters.len()
+                && artifact.mir.parameters[index].default.is_some()
+            {
+                index += 1;
+            }
+            emit_numeric_parameter_default_chunk(
+                artifact,
+                parameter_fields,
+                start,
+                index,
+                chunk_index,
+                out,
+            )?;
+            chunk_index += 1;
+            continue;
+        }
+
+        let parameter = &artifact.mir.parameters[index];
+        let field = &parameter_fields[parameter.name.as_str()];
+        let default = parameter_default_rust_expr(artifact, parameter, parameter_fields)?;
+        out.push_str("            {\n");
+        out.push_str("                let params = &mut *ptr;\n");
+        out.push_str(&format!("                params.{field} = {default};\n"));
+        emit_parameter_default_validation(parameter, field, "                ", out)?;
+        out.push_str("            }\n");
+        index += 1;
+    }
+    Ok(())
+}
+
+fn emit_numeric_parameter_default_chunk(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    start: usize,
+    end: usize,
+    chunk_index: usize,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let defaults = artifact.mir.parameters[start..end]
+        .iter()
+        .map(|parameter| parameter_default_rust_expr(artifact, parameter, parameter_fields))
+        .collect::<Result<Vec<_>, _>>()?;
+    let name = format!("DEFAULTS_{chunk_index}");
+    emit_f64_const_array(&name, &defaults, out);
+    out.push_str(&format!(
+        "            std::ptr::copy_nonoverlapping({name}.as_ptr(), (ptr as *mut f64).add({start}), {});\n",
+        defaults.len()
+    ));
+    Ok(())
+}
+
+fn emit_f64_const_array(name: &str, values: &[String], out: &mut String) {
+    const VALUES_PER_LINE: usize = 8;
+    out.push_str(&format!(
+        "            const {name}: [f64; {}] = [\n",
+        values.len()
+    ));
+    for chunk in values.chunks(VALUES_PER_LINE) {
+        out.push_str("                ");
+        out.push_str(&chunk.join(", "));
+        out.push_str(",\n");
+    }
+    out.push_str("            ];\n");
+}
+
+fn emit_parameter_default_validation(
+    parameter: &MirParameterSlot,
+    field: &str,
+    indent: &str,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    if parameter_default_requires_runtime_validation(parameter) {
+        let validation = parameter_validation_call(
+            parameter.name.as_str(),
+            &format!("params.{field}"),
+            parameter.range.as_ref(),
+        )?;
+        out.push_str(&format!(
+            "{indent}{validation}.expect(\"generated Verilog-A parameter default must satisfy declared range\");\n"
+        ));
+    }
+    Ok(())
+}
+
+fn emit_parameter_metadata(
+    artifact: &CanonicalIrArtifact,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let parameter_count = artifact.mir.parameters.len();
+    let mut parameters_by_index = vec![None; parameter_count];
+    for parameter in &artifact.mir.parameters {
+        let index = usize::from(parameter.id);
+        if index >= parameter_count {
+            return Err(unsupported(
+                artifact,
+                format!(
+                    "parameter '{}' has out-of-range generated id",
+                    parameter.name
+                ),
+            ));
+        }
+        parameters_by_index[index] = Some(parameter);
+    }
+
+    let lookup_count = artifact
+        .mir
+        .parameters
+        .iter()
+        .map(|parameter| 1 + parameter.aliases.len())
+        .sum::<usize>();
+    out.push_str(&format!(
+        "const PARAMETER_NAME_LOOKUP: [(&str, usize); {lookup_count}] = [\n"
+    ));
+    emit_parameter_name_lookup_entries(artifact, out);
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_DISPLAY_NAMES: [&str; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        16,
+        |parameter| Ok(format!("{:?}", parameter.name.as_str())),
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_MIN_BOUNDS: [Option<ParameterBound>; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        8,
+        |parameter| {
+            Ok(parameter_bound_option_literal(
+                parameter.range.as_ref().and_then(|range| range.min),
+            ))
+        },
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_MAX_BOUNDS: [Option<ParameterBound>; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        8,
+        |parameter| {
+            Ok(parameter_bound_option_literal(
+                parameter.range.as_ref().and_then(|range| range.max),
+            ))
+        },
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_RANGE_FLAGS: [u8; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        32,
+        |parameter| Ok(parameter_range_flags_literal(parameter.range.as_ref())),
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_EXCLUDED_BOUNDS: [&[ParameterBound]; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        8,
+        |parameter| {
+            parameter_excluded_bounds_literal(parameter.name.as_str(), parameter.range.as_ref())
+        },
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str("fn parameter_index_for_name(name: &str) -> Option<usize> {\n");
+    out.push_str("    PARAMETER_NAME_LOOKUP\n");
+    out.push_str("        .iter()\n");
+    out.push_str(
+        "        .find_map(|(candidate, index)| (*candidate == name).then_some(*index))\n",
+    );
+    out.push_str("}\n\n");
+
+    Ok(())
+}
+
+fn emit_parameter_name_lookup_entries(artifact: &CanonicalIrArtifact, out: &mut String) {
+    const ENTRIES_PER_LINE: usize = 16;
+    let mut entries_on_line = 0usize;
+    out.push_str("    ");
+    for parameter in &artifact.mir.parameters {
+        emit_parameter_name_lookup_entry(parameter.name.as_str(), usize::from(parameter.id), out);
+        entries_on_line += 1;
+        if entries_on_line == ENTRIES_PER_LINE {
+            out.push('\n');
+            out.push_str("    ");
+            entries_on_line = 0;
+        }
+        for alias in &parameter.aliases {
+            emit_parameter_name_lookup_entry(alias.as_str(), usize::from(parameter.id), out);
+            entries_on_line += 1;
+            if entries_on_line == ENTRIES_PER_LINE {
+                out.push('\n');
+                out.push_str("    ");
+                entries_on_line = 0;
+            }
+        }
+    }
+    if entries_on_line != 0 {
+        out.push('\n');
+    }
+}
+
+fn emit_parameter_name_lookup_entry(name: &str, index: usize, out: &mut String) {
+    out.push_str(&format!("({:?}, {index}), ", name.to_ascii_lowercase()));
+}
+
+fn emit_chunked_parameter_metadata_array<F>(
+    parameters_by_index: &[Option<&MirParameterSlot>],
+    entries_per_line: usize,
+    mut emit_entry: F,
+    out: &mut String,
+) -> Result<(), RustBackendError>
+where
+    F: FnMut(&MirParameterSlot) -> Result<String, RustBackendError>,
+{
+    for chunk in parameters_by_index.chunks(entries_per_line) {
+        out.push_str("    ");
+        for parameter in chunk {
+            let Some(parameter) = parameter else {
+                return Err(RustBackendError::unsupported(
+                    "<generated>",
+                    "<parameter metadata>",
+                    "missing generated parameter id",
+                ));
+            };
+            let entry = emit_entry(parameter)?;
+            out.push_str(&entry);
+            out.push_str(", ");
+        }
+        out.push('\n');
+    }
+    Ok(())
+}
+
+fn parameter_bound_option_literal(value: Option<f64>) -> String {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| format!("Some({})", parameter_bound_literal(value)))
+        .unwrap_or_else(|| "None".to_string())
+}
+
+fn parameter_excluded_bounds_literal(
+    parameter_name: &str,
+    range: Option<&crate::canonical_ir::HirParamRange>,
+) -> Result<String, RustBackendError> {
+    let Some(range) = range else {
+        return Ok("&[]".to_string());
+    };
+    if range.exclude.is_empty() {
+        return Ok("&[]".to_string());
+    }
+
+    let mut excluded = Vec::with_capacity(range.exclude.len());
+    for value in &range.exclude {
+        if value.is_finite() {
+            excluded.push(parameter_bound_literal(*value));
+        } else {
+            return Err(RustBackendError::unsupported(
+                "<generated>",
+                parameter_name,
+                "non-finite parameter exclude constraint",
+            ));
+        }
+    }
+    Ok(format!("&[{}]", excluded.join(", ")))
+}
+
+fn parameter_range_flags_literal(range: Option<&crate::canonical_ir::HirParamRange>) -> String {
+    let mut flags = 0u8;
+    if range.is_some_and(|range| range.min_exclusive) {
+        flags |= 1;
+    }
+    if range.is_some_and(|range| range.max_exclusive) {
+        flags |= 2;
+    }
+    flags.to_string()
+}
+
+fn parameter_bound_literal(value: f64) -> String {
+    let label = format_f64(value);
+    format!("ParameterBound {{ value: {label}, label: {label:?} }}")
 }
 
 fn parameter_default_requires_runtime_validation(parameter: &MirParameterSlot) -> bool {
@@ -13774,6 +14117,45 @@ fn range_excluded_arg(value: f64) -> String {
 
 fn generate_shared_parameter_validator() -> String {
     [
+        "#[derive(Copy, Clone)]",
+        "struct ParameterBound {",
+        "    value: f64,",
+        "    label: &'static str,",
+        "}",
+        "",
+        "const PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;",
+        "const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;",
+        "",
+        "fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {",
+        "    let name = PARAMETER_DISPLAY_NAMES[index];",
+        "    let flags = PARAMETER_RANGE_FLAGS[index];",
+        "    validate_finite_parameter(name, value)?;",
+        "    if let Some(min) = PARAMETER_MIN_BOUNDS[index] {",
+        "        if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {",
+        "            if value <= min.value {",
+        "                return Err(format!(\"parameter '{}' must be > {}, got {}\", name, min.label, value));",
+        "            }",
+        "        } else if value < min.value {",
+        "            return Err(format!(\"parameter '{}' must be >= {}, got {}\", name, min.label, value));",
+        "        }",
+        "    }",
+        "    if let Some(max) = PARAMETER_MAX_BOUNDS[index] {",
+        "        if flags & PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {",
+        "            if value >= max.value {",
+        "                return Err(format!(\"parameter '{}' must be < {}, got {}\", name, max.label, value));",
+        "            }",
+        "        } else if value > max.value {",
+        "            return Err(format!(\"parameter '{}' must be <= {}, got {}\", name, max.label, value));",
+        "        }",
+        "    }",
+        "    for excluded in PARAMETER_EXCLUDED_BOUNDS[index] {",
+        "        if value == excluded.value {",
+        "            return Err(format!(\"parameter '{}' must not equal {}, got {}\", name, excluded.label, value));",
+        "        }",
+        "    }",
+        "    Ok(())",
+        "}",
+        "",
         "fn validate_finite_parameter(name: &str, value: f64) -> Result<(), String> {",
         "    if !value.is_finite() {",
         "        return Err(format!(\"parameter '{}' must be finite, got {}\", name, value));",
@@ -24752,6 +25134,7 @@ fn residual_equation_local_variable_usage(
     potential_branch_slots: &PotentialBranchSlots,
     reactive: bool,
     scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
+    scalar_hybrid_shared_plan: Option<&super::scalar::SharedStampValuesPlan>,
     equation_inline: &[bool],
     variables: &HashMap<String, LoweredVariable>,
 ) -> Result<ResidualLocalVariableUsage, RustBackendError> {
@@ -24766,9 +25149,11 @@ fn residual_equation_local_variable_usage(
     if let Some(plan) = scalar_hybrid_plan {
         seed_scalar_hybrid_branch_current_cache(
             artifact,
+            parameter_fields,
             plan,
             ddt_slots,
             potential_branch_slots,
+            scalar_hybrid_shared_plan,
             &mut branch_currents,
         )?;
     }
@@ -25110,6 +25495,7 @@ fn emit_stamp_body(
             potential_branch_slots,
             reactive,
             scalar_hybrid_plan,
+            scalar_hybrid_shared_plan,
             &equation_inline,
             &local_variables,
         )?;
@@ -25306,16 +25692,20 @@ fn emit_stamp_body(
         if reactive {
             seed_scalar_hybrid_reactive_branch_current_cache(
                 artifact,
+                parameter_fields,
                 plan,
                 potential_branch_slots,
+                scalar_hybrid_shared_plan,
                 &mut branch_currents,
             )?;
         } else {
             seed_scalar_hybrid_branch_current_cache(
                 artifact,
+                parameter_fields,
                 plan,
                 ddt_slots,
                 potential_branch_slots,
+                scalar_hybrid_shared_plan,
                 &mut branch_currents,
             )?;
         }
@@ -27114,9 +27504,11 @@ fn indexed_derivative_terms(derivatives: &[String]) -> Vec<(usize, String)> {
 
 fn seed_scalar_hybrid_branch_current_cache(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     plan: &ScalarHybridStampPlan,
     ddt_slots: &DdtSlots,
     potential_branch_slots: &PotentialBranchSlots,
+    shared_plan: Option<&super::scalar::SharedStampValuesPlan>,
     branch_currents: &mut HashMap<String, LoweredVariable>,
 ) -> Result<(), RustBackendError> {
     let branch_axis_count = potential_branch_slots.len();
@@ -27127,33 +27519,39 @@ fn seed_scalar_hybrid_branch_current_cache(
         if let Some(root) = plan.large_signal_roots.get(&equation.id).copied() {
             let lowered = super::scalar::scalar_transient_current_lowered_variable(
                 artifact,
+                parameter_fields,
                 equation,
                 root,
                 &plan.static_cache,
                 branch_axis_count,
                 None,
+                shared_plan,
             )?;
             cache_named_branch_current_variable(artifact, equation, branch_currents, lowered);
         }
         if let Some(root) = plan.ddt_roots.get(&equation.id).copied() {
             let lowered = super::scalar::scalar_transient_current_lowered_variable(
                 artifact,
+                parameter_fields,
                 equation,
                 root,
                 &plan.static_cache,
                 branch_axis_count,
                 Some(ddt_slots),
+                shared_plan,
             )?;
             cache_named_branch_current_variable(artifact, equation, branch_currents, lowered);
         }
         if let Some(root) = plan.idt_roots.get(&equation.id).copied() {
             let lowered = super::scalar::scalar_transient_current_lowered_variable(
                 artifact,
+                parameter_fields,
                 equation,
                 root,
                 &plan.static_cache,
                 branch_axis_count,
                 Some(ddt_slots),
+                shared_plan,
             )?;
             cache_named_branch_current_variable(artifact, equation, branch_currents, lowered);
         }
@@ -27163,8 +27561,10 @@ fn seed_scalar_hybrid_branch_current_cache(
 
 fn seed_scalar_hybrid_reactive_branch_current_cache(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     plan: &ScalarHybridStampPlan,
     potential_branch_slots: &PotentialBranchSlots,
+    shared_plan: Option<&super::scalar::SharedStampValuesPlan>,
     branch_currents: &mut HashMap<String, LoweredVariable>,
 ) -> Result<(), RustBackendError> {
     let branch_axis_count = potential_branch_slots.len();
@@ -27177,10 +27577,12 @@ fn seed_scalar_hybrid_reactive_branch_current_cache(
         };
         let lowered = super::scalar::scalar_reactive_current_lowered_variable(
             artifact,
+            parameter_fields,
             equation,
             root,
             &plan.static_cache,
             branch_axis_count,
+            shared_plan,
         )?;
         cache_named_branch_current_variable(artifact, equation, branch_currents, lowered);
     }

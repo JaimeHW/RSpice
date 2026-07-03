@@ -582,6 +582,9 @@ impl<'a> OptEvaluator<'a> {
             OptBinaryOp::Div => Ok(OptEvalValue::Real(
                 self.real_value(left)? / self.real_value(right)?,
             )),
+            OptBinaryOp::Mod => Ok(OptEvalValue::Real(
+                self.real_value(left)?.trunc() % self.real_value(right)?.trunc(),
+            )),
             OptBinaryOp::Pow => Ok(OptEvalValue::Real(
                 self.real_value(left)?.powf(self.real_value(right)?),
             )),
