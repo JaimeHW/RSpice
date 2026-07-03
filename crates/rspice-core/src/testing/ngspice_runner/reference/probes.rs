@@ -91,6 +91,11 @@ impl TestRunner {
         normalized
             .strip_suffix("#branch")
             .and_then(|name| (!name.is_empty()).then(|| name.to_string()))
+            .or_else(|| {
+                let (_, branch) = normalized.split_once('#')?;
+                (branch.starts_with("ibranch_") || branch.starts_with("branch_"))
+                    .then(|| normalized)
+            })
     }
 
     pub(in crate::testing::ngspice_runner) fn branch_probe_names_from_netlist(

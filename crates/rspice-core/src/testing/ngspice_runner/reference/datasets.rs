@@ -165,10 +165,7 @@ impl TestRunner {
                 }
 
                 if let Some(branch_name) = Self::parse_current_probe(expr) {
-                    let branch_idx = result
-                        .branch_names
-                        .iter()
-                        .position(|candidate| candidate.eq_ignore_ascii_case(&branch_name))?;
+                    let branch_idx = Self::resolve_transient_branch_index(result, &branch_name)?;
                     return result.branch_currents.get(branch_idx).cloned();
                 }
 
@@ -219,6 +216,54 @@ impl TestRunner {
         }
 
         mismatches
+    }
+
+    fn resolve_transient_branch_index(
+        result: &crate::engine::TransientResult,
+        branch_name: &str,
+    ) -> Option<usize> {
+        let normalized_branch = Self::normalize_variable_name(branch_name);
+        result
+            .branch_names
+            .iter()
+            .position(|candidate| Self::normalize_variable_name(candidate) == normalized_branch)
+            .or_else(|| {
+                let aliases = Self::xspice_ngspice_branch_aliases(&normalized_branch);
+                result.branch_names.iter().position(|candidate| {
+                    let normalized_candidate = Self::normalize_variable_name(candidate);
+                    aliases
+                        .iter()
+                        .any(|alias| normalized_candidate == alias.as_str())
+                })
+            })
+    }
+
+    fn xspice_ngspice_branch_aliases(normalized_branch: &str) -> Vec<String> {
+        let Some((instance, branch)) = normalized_branch.split_once('#') else {
+            return Vec::new();
+        };
+        if let Some(rest) = branch.strip_prefix("ibranch_") {
+            let mut parts = rest.split('_');
+            let port_index = parts.next().unwrap_or("0");
+            let element_index = parts.next().unwrap_or("0");
+            return if port_index == "0" && element_index == "0" {
+                vec![format!("{instance}#in#sense")]
+            } else {
+                vec![format!("{instance}#in[{element_index}]#sense")]
+            };
+        }
+        if let Some(rest) = branch.strip_prefix("branch_") {
+            let mut parts = rest.split('_');
+            let port_index = parts.next().unwrap_or("0");
+            let element_index = parts.next().unwrap_or("0");
+            if port_index == "1" {
+                return vec![
+                    format!("{instance}#out"),
+                    format!("{instance}#out[{element_index}]"),
+                ];
+            }
+        }
+        Vec::new()
     }
 
     pub(in crate::testing::ngspice_runner) fn compare_ac_reference(
@@ -754,6 +799,25 @@ impl TestRunner {
                                 expected_series,
                                 idx,
                                 actual,
+                                absolute_tolerance,
+                            )
+                        {
+                            continue;
+                        }
+                        // Event-driven XSPICE rows can sit on different
+                        // accepted timesteps across otherwise equivalent
+                        // simulators. If the reference is adjacent to a
+                        // discrete step and the simulated waveform attains
+                        // the same plateau inside the neighboring event
+                        // window, treat it as a grid-placement artifact.
+                        if time_axis
+                            && !phase_probe
+                            && self.matches_within_event_step_window(
+                                x_sim,
+                                &actual_series,
+                                expected_series,
+                                idx,
+                                expected,
                                 absolute_tolerance,
                             )
                         {

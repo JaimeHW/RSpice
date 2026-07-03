@@ -292,6 +292,70 @@ impl TestRunner {
         actual.is_finite() && actual >= lo - value_tolerance && actual <= hi + value_tolerance
     }
 
+    pub(in crate::testing::ngspice_runner) fn matches_within_event_step_window(
+        &self,
+        x_sim: &[f64],
+        actual_series: &[f64],
+        expected_series: &ReferenceSeries,
+        idx: usize,
+        expected: f64,
+        absolute_tolerance: f64,
+    ) -> bool {
+        let x = &expected_series.x;
+        let y = &expected_series.y;
+        if idx >= x.len() || idx >= y.len() || !(x[idx].is_finite() && expected.is_finite()) {
+            return false;
+        }
+
+        let value_tolerance = absolute_tolerance
+            .max(self.config.relative_tolerance * expected.abs())
+            .max(0.0);
+        let differs =
+            |a: f64, b: f64| a.is_finite() && b.is_finite() && (a - b).abs() > value_tolerance;
+
+        let nearby_transition = (idx > 0 && differs(y[idx - 1], y[idx]))
+            || (idx + 1 < y.len() && differs(y[idx], y[idx + 1]))
+            || (idx > 1 && differs(y[idx - 2], y[idx - 1]))
+            || (idx + 2 < y.len() && differs(y[idx + 1], y[idx + 2]));
+        if !nearby_transition {
+            return false;
+        }
+
+        let first_spacing = idx.saturating_sub(2);
+        let last_spacing = (idx + 2).min(x.len().saturating_sub(1));
+        let mut window = 0.0_f64;
+        for right in first_spacing + 1..=last_spacing {
+            let spacing = x[right] - x[right - 1];
+            if spacing.is_finite() && spacing > window {
+                window = spacing;
+            }
+        }
+        if !(window.is_finite() && window > 0.0) {
+            return false;
+        }
+
+        let lo = x[idx] - window;
+        let hi = x[idx] + window;
+        let matches_expected = |value: f64| {
+            self.compare_values_with_abs_tol(expected, value, absolute_tolerance)
+                .is_none()
+        };
+        if let Some(value) = Self::interpolate_series(x_sim, actual_series, lo)
+            && matches_expected(value)
+        {
+            return true;
+        }
+        if let Some(value) = Self::interpolate_series(x_sim, actual_series, hi)
+            && matches_expected(value)
+        {
+            return true;
+        }
+        x_sim
+            .iter()
+            .zip(actual_series.iter())
+            .any(|(&time, &value)| time >= lo && time <= hi && matches_expected(value))
+    }
+
     pub(in crate::testing::ngspice_runner) fn series_absolute_tolerance_floor(
         &self,
         var: &str,

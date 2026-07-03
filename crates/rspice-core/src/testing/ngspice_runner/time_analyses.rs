@@ -114,7 +114,8 @@ impl TestRunner {
         source: &str,
     ) -> Result<Option<ReferenceTable>, String> {
         if Self::locked_grid_prefers_printed_table(source)
-            && let Some(reference) = self.load_printed_reference_table_for_axis(cir_path, &["time"])?
+            && let Some(reference) =
+                self.load_printed_reference_table_for_axis(cir_path, &["time"])?
         {
             return Ok(Some(reference));
         }
@@ -128,7 +129,7 @@ impl TestRunner {
                 .any(|token| {
                     matches!(
                         token.to_ascii_lowercase().as_str(),
-                        "d_to_real" | "real_gain" | "real_delay" | "real_to_v"
+                        "d_osc" | "d_to_real" | "real_gain" | "real_delay" | "real_to_v"
                     )
                 })
         })
