@@ -8,13 +8,13 @@ impl Engine {
     /// Node topology (b3soiddset.c:975-1037):
     /// - 4-terminal `m d g s e`: floating body. An internal body node
     ///   `<name>.__body.internal` is allocated; `bodyMod = 0`, `float = 1`.
-    /// - 5-terminal `m d g s e p`: ideal body tie. The external `p` node *is* the
-    ///   body node; `bodyMod = 2`, no internal node.
+    /// - 5-terminal `m d g s e p`: body tie. With `rbody == rbsh == 0`, the
+    ///   external `p` node *is* the body node (`bodyMod = 2`). Otherwise, an
+    ///   internal body node sits behind the body-contact resistor (`bodyMod = 1`).
     ///
     /// Positive `RSH * NRD/NRS` allocates drain/source prime nodes connected by
     /// ordinary linear resistors. Positive `RTH0` with `SHMOD=1` allocates the
-    /// ngspice self-heating temperature-rise node. Resistive body ties
-    /// (bodyMod==1) are deferred with the FD sibling.
+    /// ngspice self-heating temperature-rise node.
     pub(super) fn build_b3soi_dd(
         circuit: &mut CircuitData,
         element: &crate::netlist::Element,
@@ -50,10 +50,18 @@ impl Engine {
         let node_source_external = circuit.get_or_create_node(&element.nodes[2]);
         let node_e = circuit.get_or_create_node(&element.nodes[3]);
 
+        let ideal_body_tie = model.rbody == 0.0 && model.rbsh == 0.0;
         let (node_body, node_p, body_mode) = if element.nodes.len() > 4 {
-            // Ideal body tie: P is the body node.
             let p = circuit.get_or_create_node(&element.nodes[4]);
-            (p, p, BodyMode::TiedIdeal)
+            if ideal_body_tie {
+                // Ideal body tie: P is the body node.
+                (p, p, BodyMode::TiedIdeal)
+            } else {
+                // Nonideal body tie: an internal body node sits behind the
+                // body-contact resistor; P remains the external contact.
+                let body = circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
+                (body, p, BodyMode::TiedResistive)
+            }
         } else {
             // Floating body: allocate an internal body node.
             let body = circuit.get_or_create_node(&format!("{}.__body.internal", element.name));

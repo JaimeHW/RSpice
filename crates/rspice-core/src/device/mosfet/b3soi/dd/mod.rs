@@ -11,11 +11,14 @@
 //! The device additionally owns an internal body node `B` and (in the full
 //! model) optional drain/source primes and a self-heating temperature node.
 //!
-//! For the supported decks (`rbody = rbsh = 0`, `shmod = 0`):
+//! For the supported decks (`shmod = 0`):
 //! - **Floating body** (`d g s e`): ngspice creates an internal `Body` node,
 //!   sets `bodyMod = 0`, `float = 1`. RSpice allocates one internal node.
 //! - **Ideal body tie** (`d g s e p`): ngspice sets `bodyMod = 2` and the
 //!   external `p` node *is* the body node; no internal node is created.
+//! - **Nonideal body tie** (`d g s e p`, nonzero `rbody`/`rbsh`): ngspice sets
+//!   `bodyMod = 1`; RSpice allocates an internal body node and stamps the
+//!   body-contact resistor between `B` and `P`.
 //!
 //! Positive `RSH * NRD/NRS` is lowered by the builder into ordinary linear
 //! resistors between the external terminals and the drain/source primes. When
@@ -67,6 +70,9 @@ pub enum BodyMode {
     Floating,
     /// Ideal body tie: the external contact node is the body node (bodyMod 2).
     TiedIdeal,
+    /// Nonideal body tie: an internal body node `B` sits behind the external
+    /// body contact `P` through the BSIMSOI body-contact resistance (bodyMod 1).
+    TiedResistive,
 }
 
 /// B3SOIDD device instance.
@@ -84,7 +90,8 @@ pub struct B3SoiDd {
     pub node_e: NodeId,
     /// Body node: internal (floating) or the external contact (tied).
     pub node_body: NodeId,
-    /// Body-contact node `P` (== `node_body` when tied; unused when floating).
+    /// Body-contact node `P` (== `node_body` for ideal ties; unused when
+    /// floating).
     pub node_p: NodeId,
     /// Self-heating temperature-rise node (`Temp`), or 0 when disabled.
     pub node_temp: NodeId,
@@ -493,7 +500,7 @@ impl B3SoiDd {
     /// `ag0` is the integration coefficient (`d/dt` operator gain), and the
     /// `cq*` are the integrated charge-current histories from the engine
     /// (`cq = ag0*q + history`). This mirrors the charge portion of
-    /// `B3SOIDDload` (b3soiddld.c:3679-3868, 4083-4128) for `bodyMod` 0/2 and
+    /// `B3SOIDDload` (b3soiddld.c:3679-3868, 4083-4128) for `bodyMod` 0/1/2 and
     /// the self-heating temperature node. Any drain/source series R has already
     /// been externalized into the prime nodes. The gate-overlap and
     /// extrinsic-substrate derivatives are already folded into `charge`'s
@@ -909,7 +916,8 @@ impl B3SoiDd {
     /// The device's drain/source node ids are already the prime nodes; they
     /// equal the external terminals only when no builder-lowered series
     /// resistance exists. `bNode` is the body node (internal floating or
-    /// external tie), and `pNode` is absent for the supported body modes.
+    /// external tie). For `bodyMod=1`, `pNode` is the external body contact and
+    /// the body-contact resistor is stamped after the intrinsic compact model.
     fn stamp_op(&self, op: &B3SoiDdOp, bias: B3SoiDdBias, matrix: &mut impl MatrixStamper) {
         let (dp, g, sp, e, b) = (
             self.node_drain,
@@ -1064,6 +1072,24 @@ impl B3SoiDd {
             stamp(matrix, b, t, gbb_t);
         }
         self.stamp_thermal_matrix(op, matrix);
+
+        // Body-tie resistor (bodyMod 1): a linear conductance between the
+        // internal body node `B` and the external contact `P`, matching Xyce's
+        // Ibp = Vbp / (Rbody + Rbodyext) with the BSIMSOI 1 mOhm guard.
+        if self.body_mode == BodyMode::TiedResistive {
+            stamp_conductance(matrix, b, self.node_p, self.body_tie_conductance());
+        }
+    }
+
+    fn body_tie_conductance(&self) -> Value {
+        let rbody = self.sized.rbody;
+        let rbodyext = self.sized.rbodyext;
+        let resistance = if rbody < 1.0e-3 {
+            rbodyext.max(1.0e-3)
+        } else {
+            rbody + rbodyext
+        };
+        1.0 / resistance
     }
 
     fn stamp_thermal_rhs(&self, op: &B3SoiDdOp, matrix: &mut impl MatrixStamper) {
@@ -1338,6 +1364,53 @@ mod tests {
                 .map(|(_, v)| *v)
                 .sum()
         }
+    }
+
+    #[test]
+    fn nonideal_body_tie_stamps_resolved_body_contact_resistance() {
+        let mut params = n1_params();
+        params.insert("RBODY".to_string(), 1.0);
+        params.insert("RBSH".to_string(), 0.25);
+        let model = Arc::new(B3SoiDdModel::from_params(&params, false, 300.15));
+        let mut geometry = geom();
+        geometry.body_squares = 4.0;
+        let dev = B3SoiDd::new(
+            "m1".to_string(),
+            1,
+            2,
+            3,
+            4,
+            5,
+            7,
+            0,
+            BodyMode::TiedResistive,
+            model,
+            geometry,
+            300.15,
+        )
+        .expect("DD device with nonideal body tie builds");
+
+        let expected_gbp = 1.0 / (dev.sized.rbody + dev.sized.rbodyext);
+        assert!(expected_gbp.is_finite() && expected_gbp > 0.0);
+
+        let mut stamper = CaptureStamper::default();
+        dev.stamp_op(
+            &B3SoiDdOp::default(),
+            B3SoiDdBias {
+                vbs: 0.0,
+                vgs: 0.0,
+                vds: 0.0,
+                ves: 0.0,
+                vps: 0.0,
+                del_temp: 0.0,
+            },
+            &mut stamper,
+        );
+
+        assert!((stamper.matrix_sum(5, 5) - expected_gbp).abs() <= 1.0e-12 * expected_gbp);
+        assert!((stamper.matrix_sum(5, 7) + expected_gbp).abs() <= 1.0e-12 * expected_gbp);
+        assert!((stamper.matrix_sum(7, 5) + expected_gbp).abs() <= 1.0e-12 * expected_gbp);
+        assert!((stamper.matrix_sum(7, 7) - expected_gbp).abs() <= 1.0e-12 * expected_gbp);
     }
 
     #[test]
