@@ -17,6 +17,24 @@ C1 out 0 1u
 .end
 """
 
+NONLINEAR_DC_SWEEP = """* Nonlinear DC cancellation workload
+V1 in 0 0
+R1 in out 1k
+D1 out 0 dmod
+.model dmod D(IS=1e-14 N=1 RS=10)
+.end
+"""
+
+
+def start_sigint_timer(delay, done):
+    def fire_sigint():
+        if not done.wait(delay):
+            os.kill(os.getpid(), signal.SIGINT)
+
+    killer = threading.Thread(target=fire_sigint)
+    killer.start()
+    return killer
+
 
 class TestGilRelease:
     def test_main_thread_stays_live_during_simulation(self, engine):
@@ -80,38 +98,30 @@ class TestCancellation:
         netlist = rspice.Netlist.parse(LONG_RC)
 
         # This workload runs for minutes if not cancelled.
-        def fire_sigint():
-            time.sleep(0.5)
-            os.kill(os.getpid(), signal.SIGINT)
-
-        killer = threading.Thread(target=fire_sigint)
+        done = threading.Event()
+        killer = start_sigint_timer(0.5, done)
         start = time.monotonic()
-        killer.start()
         try:
             with pytest.raises(KeyboardInterrupt):
                 engine.run_tran(netlist, stop_time=50.0, max_step=1e-7)
         finally:
+            done.set()
             killer.join()
         elapsed = time.monotonic() - start
         # Cancellation must be prompt — well under the full run time.
         assert elapsed < 10.0
 
     def test_keyboard_interrupt_cancels_dc_sweep(self, engine):
-        # A million-point sweep, cancelled shortly after start.
-        netlist = rspice.Netlist.parse(
-            "* big sweep\nV1 in 0 10\nR1 in out 1k\nR2 out 0 1k\n.end"
-        )
+        # A two-million-point nonlinear sweep, cancelled shortly after start.
+        netlist = rspice.Netlist.parse(NONLINEAR_DC_SWEEP)
 
-        def fire_sigint():
-            time.sleep(0.3)
-            os.kill(os.getpid(), signal.SIGINT)
-
-        killer = threading.Thread(target=fire_sigint)
+        done = threading.Event()
+        killer = start_sigint_timer(0.05, done)
         start = time.monotonic()
-        killer.start()
         try:
             with pytest.raises(KeyboardInterrupt):
-                engine.run_dc_sweep(netlist, "V1", 0.0, 10.0, 1e-5)
+                engine.run_dc_sweep(netlist, "V1", 0.0, 10.0, 5e-6)
         finally:
+            done.set()
             killer.join()
         assert time.monotonic() - start < 10.0
