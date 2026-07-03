@@ -273,11 +273,12 @@ impl EventQueue {
         driver_index: usize,
         value: Value,
     ) {
-        if delay < 0.0 {
+        let event_time = current_time + delay;
+        if !event_time.is_finite() || event_time < 0.0 {
             return;
         }
         let event = Event::new_with_driver_index(
-            current_time + delay,
+            event_time,
             node_id,
             port_name,
             instance,
@@ -525,22 +526,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn event_queue_ignores_negative_output_delays_like_ngspice() {
+    fn event_queue_ignores_negative_absolute_output_times() {
         let mut queue = EventQueue::new();
 
         queue.schedule_delayed(
-            1.0e-9,
-            -1.0e-12,
+            1.0e-12,
+            -1.0e-9,
             1,
             "out",
-            "a_negative_digital_delay",
+            "a_negative_digital_event_time",
             DigitalValue::one(),
         );
-        queue.schedule_real_delayed(1.0e-9, -1.0e-12, 2, "out", "a_negative_real_delay", 1.0);
+        queue.schedule_real_delayed(
+            1.0e-12,
+            -1.0e-9,
+            2,
+            "out",
+            "a_negative_real_event_time",
+            1.0,
+        );
 
         assert!(
             queue.is_empty(),
-            "ngspice reports 'Output delay < 0 not allowed' and ignores the output update"
+            "event outputs before the start of transient analysis must be ignored"
         );
     }
 
@@ -732,6 +740,20 @@ mod tests {
         let events = queue.pop_events_at(4.0e-9);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].time, 2.5e-9);
+        let stats = queue.stats();
+        assert_eq!(stats.last_event_time, 2.5e-9);
+    }
+
+    #[test]
+    fn delayed_real_event_can_target_earlier_time_in_current_step() {
+        let mut queue = EventQueue::new();
+
+        queue.schedule_real_delayed(4.0e-9, -1.5e-9, 1, "out", "driver", 2.0);
+
+        let events = queue.pop_events_at(4.0e-9);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].time, 2.5e-9);
+        assert_eq!(events[0].value, EventValue::Real(2.0));
         let stats = queue.stats();
         assert_eq!(stats.last_event_time, 2.5e-9);
     }
