@@ -25,6 +25,7 @@ const MAX_STAMP_HELPERS_PER_MODULE: usize = 16;
 const MAX_LOCAL_VARIABLE_STORAGE_SLOTS: usize = 16_384;
 const MAX_LOCAL_ASSIGNMENT_TUPLE_LANES: usize = 16;
 const STAMP_LOCAL_FIELDS_PER_LINE: usize = 4;
+const MAX_COMPACT_GENERATED_STATEMENT_LINE_BYTES: usize = 4096;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES: usize = 120_000;
@@ -530,13 +531,15 @@ fn generate_device_with_scalar_hybrid_plan(
 fn compact_stamp_files(mut files: StampFiles) -> StampFiles {
     files.stamp = compact_generated_stamp_surface(files.stamp);
     for helper in &mut files.helpers {
-        helper.contents = compact_generated_stamp_surface(std::mem::take(&mut helper.contents));
+        helper.contents =
+            compact_generated_stamp_surface_base(std::mem::take(&mut helper.contents));
         helper.contents =
             compact_generated_stamp_helper_surface(std::mem::take(&mut helper.contents));
         helper.contents = reuse_duplicate_derivative_locals_in_helper_methods(std::mem::take(
             &mut helper.contents,
         ));
         helper.contents = reconcile_helper_super_imports(std::mem::take(&mut helper.contents));
+        helper.contents = compact_generated_surface_lines(std::mem::take(&mut helper.contents));
     }
     files.stamp = prune_unused_root_scratch_allocations(files.stamp);
     files.stamp = prune_unused_root_stamp_support_aliases(files.stamp, &files.helpers);
@@ -828,7 +831,11 @@ fn compact_generated_stamp_helper_surface(mut source: String) -> String {
     source
 }
 
-fn compact_generated_stamp_surface(mut source: String) -> String {
+fn compact_generated_stamp_surface(source: String) -> String {
+    compact_generated_surface_lines(compact_generated_stamp_surface_base(source))
+}
+
+fn compact_generated_stamp_surface_base(mut source: String) -> String {
     source = compact_immediate_generated_ad_local_stores(source);
     source = compact_direct_ad_rvalue_stores(source);
     source = compact_offset_scaled_nested_mul_sub_helper_calls(source);
@@ -3789,8 +3796,10 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
-        compact_div_from_scalar_offset_denominator, compact_exp_div_scaled_inputs_expression,
-        compact_generated_stamp_surface, compact_limited_exp_div_scaled_inputs_expression,
+        collapse_single_line_generated_if_blocks, compact_div_from_scalar_offset_denominator,
+        compact_exp_div_scaled_inputs_expression, compact_generated_stamp_surface,
+        compact_generated_statement_runs, compact_generated_surface_lines,
+        compact_limited_exp_div_scaled_inputs_expression,
         compact_ln_offset_div_scaled_inputs_expression,
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
         duplicate_hoistable_derivative_rhs, generate_scratch_operation_helpers,
@@ -3808,6 +3817,79 @@ mod compact_generated_stamp_surface_tests {
             compacted,
             "fn stamp() {\n    let x = 1.0;\n    let y = x;\n}\n"
         );
+    }
+
+    #[test]
+    fn packs_generated_statement_runs_inside_helper_bodies() {
+        let source = concat!(
+            "impl Instance {\n",
+            "    pub(super) fn block() {\n",
+            "        locals.a = 1.0;\n",
+            "        locals.b = 2.0;\n",
+            "        if locals.a > 0.0 {\n",
+            "            locals.c = locals.a;\n",
+            "            locals.d = locals.b;\n",
+            "        }\n",
+            "    }\n",
+            "}\n",
+        )
+        .to_string();
+
+        let compacted = compact_generated_statement_runs(source);
+
+        assert!(compacted.contains("        locals.a = 1.0;locals.b = 2.0;\n"));
+        assert!(compacted.contains("            locals.c = locals.a;locals.d = locals.b;\n"));
+        assert!(compacted.contains("    pub(super) fn block() {\n"));
+    }
+
+    #[test]
+    fn collapses_single_line_generated_if_blocks() {
+        let source = compact_generated_statement_runs(
+            concat!(
+                "impl Instance {\n",
+                "    pub(super) fn block() {\n",
+                "        if locals.a > 0.0 {\n",
+                "            locals.b = 1.0;\n",
+                "        }\n",
+                "        if locals.c > 0.0 {\n",
+                "            locals.d = 2.0;\n",
+                "            locals.e = 3.0;\n",
+                "        }\n",
+                "    }\n",
+                "}\n",
+            )
+            .to_string(),
+        );
+
+        let compacted = collapse_single_line_generated_if_blocks(source);
+
+        assert!(compacted.contains("        if locals.a > 0.0 {locals.b = 1.0;}\n"));
+        assert!(compacted.contains("        if locals.c > 0.0 {locals.d = 2.0;locals.e = 3.0;}\n"));
+    }
+
+    #[test]
+    fn merges_adjacent_single_line_generated_if_blocks() {
+        let compacted = compact_generated_surface_lines(
+            concat!(
+                "impl Instance {\n",
+                "    pub(super) fn block() {\n",
+                "        if locals.a > 0.0 {\n",
+                "            locals.b = 1.0;\n",
+                "        }\n",
+                "        if locals.a > 0.0 {\n",
+                "            locals.c = 2.0;\n",
+                "        }\n",
+                "        if locals.a <= 0.0 {\n",
+                "            locals.d = 3.0;\n",
+                "        }\n",
+                "    }\n",
+                "}\n",
+            )
+            .to_string(),
+        );
+
+        assert!(compacted.contains("        if locals.a > 0.0 {locals.b = 1.0;locals.c = 2.0;}\n"));
+        assert!(compacted.contains("        if locals.a <= 0.0 {locals.d = 3.0;}\n"));
     }
 
     #[test]
@@ -28858,6 +28940,213 @@ fn push_generated_local_name_rewrite(
     }
     rewritten.push_str(token);
     *cursor = end;
+}
+
+fn compact_generated_statement_runs(source: String) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut pending = String::new();
+    let mut pending_indent = "";
+
+    for line in source.lines() {
+        if let Some((indent, statement)) = compactable_generated_statement(line) {
+            if pending.is_empty() {
+                pending_indent = indent;
+                pending.push_str(indent);
+                pending.push_str(statement);
+            } else if pending_indent == indent
+                && pending.len().saturating_add(statement.len())
+                    <= MAX_COMPACT_GENERATED_STATEMENT_LINE_BYTES
+            {
+                pending.push_str(statement);
+            } else {
+                flush_compact_generated_statement_run(&mut out, &mut pending);
+                pending_indent = indent;
+                pending.push_str(indent);
+                pending.push_str(statement);
+            }
+            continue;
+        }
+
+        flush_compact_generated_statement_run(&mut out, &mut pending);
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    flush_compact_generated_statement_run(&mut out, &mut pending);
+    out
+}
+
+fn compact_generated_surface_lines(source: String) -> String {
+    merge_adjacent_single_line_generated_if_blocks(collapse_single_line_generated_if_blocks(
+        compact_generated_statement_runs(source),
+    ))
+}
+
+fn compactable_generated_statement(line: &str) -> Option<(&str, &str)> {
+    let indent_len = line.len() - line.trim_start().len();
+    if indent_len < 8 {
+        return None;
+    }
+    let statement = line[indent_len..].trim_end();
+    if !statement.ends_with(';') || statement.starts_with("//") {
+        return None;
+    }
+    Some((&line[..indent_len], statement))
+}
+
+fn flush_compact_generated_statement_run(out: &mut String, pending: &mut String) {
+    if pending.is_empty() {
+        return;
+    }
+    out.push_str(pending);
+    out.push('\n');
+    pending.clear();
+}
+
+fn collapse_single_line_generated_if_blocks(source: String) -> String {
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut out = String::with_capacity(source.len());
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        if let Some((indent, header)) = generated_if_header_line(lines[index])
+            && index + 2 < lines.len()
+            && let Some((body_indent, body_statement)) =
+                compactable_generated_statement(lines[index + 1])
+            && body_indent.len() == indent.len() + 4
+            && generated_closing_brace_line(lines[index + 2], indent)
+            && indent
+                .len()
+                .saturating_add(header.len())
+                .saturating_add(body_statement.len())
+                .saturating_add(1)
+                <= MAX_COMPACT_GENERATED_STATEMENT_LINE_BYTES
+        {
+            out.push_str(indent);
+            out.push_str(header);
+            out.push_str(body_statement);
+            out.push_str("}\n");
+            index += 3;
+            continue;
+        }
+
+        out.push_str(lines[index]);
+        out.push('\n');
+        index += 1;
+    }
+
+    out
+}
+
+fn generated_if_header_line(line: &str) -> Option<(&str, &str)> {
+    let indent_len = line.len() - line.trim_start().len();
+    if indent_len < 8 {
+        return None;
+    }
+    let header = line[indent_len..].trim_end();
+    if header.starts_with("if ") && header.ends_with('{') && !header.contains(" else ") {
+        Some((&line[..indent_len], header))
+    } else {
+        None
+    }
+}
+
+fn generated_closing_brace_line(line: &str, expected_indent: &str) -> bool {
+    line == format!("{expected_indent}}}")
+}
+
+fn merge_adjacent_single_line_generated_if_blocks(source: String) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut pending_indent = String::new();
+    let mut pending_header = String::new();
+    let mut pending_body = String::new();
+
+    for line in source.lines() {
+        if let Some((indent, header, body)) = generated_single_line_if(line) {
+            if !pending_body.is_empty()
+                && pending_indent == indent
+                && pending_header == header
+                && compact_generated_if_line_len(indent, header, &pending_body)
+                    .saturating_add(body.len())
+                    <= MAX_COMPACT_GENERATED_STATEMENT_LINE_BYTES
+            {
+                pending_body.push_str(body);
+                continue;
+            }
+
+            flush_single_line_generated_if(
+                &mut out,
+                &mut pending_indent,
+                &mut pending_header,
+                &mut pending_body,
+            );
+            pending_indent.push_str(indent);
+            pending_header.push_str(header);
+            pending_body.push_str(body);
+            continue;
+        }
+
+        flush_single_line_generated_if(
+            &mut out,
+            &mut pending_indent,
+            &mut pending_header,
+            &mut pending_body,
+        );
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    flush_single_line_generated_if(
+        &mut out,
+        &mut pending_indent,
+        &mut pending_header,
+        &mut pending_body,
+    );
+    out
+}
+
+fn generated_single_line_if(line: &str) -> Option<(&str, &str, &str)> {
+    let indent_len = line.len() - line.trim_start().len();
+    if indent_len < 8 {
+        return None;
+    }
+    let trimmed = line[indent_len..].trim_end();
+    if !trimmed.starts_with("if ") || trimmed.contains(" else ") || !trimmed.ends_with('}') {
+        return None;
+    }
+    let brace = trimmed.find('{')?;
+    let header = &trimmed[..=brace];
+    let body = &trimmed[brace + 1..trimmed.len() - 1];
+    if body.is_empty() || !body.ends_with(';') || body.contains('{') || body.contains('}') {
+        return None;
+    }
+    Some((&line[..indent_len], header, body))
+}
+
+fn compact_generated_if_line_len(indent: &str, header: &str, body: &str) -> usize {
+    indent
+        .len()
+        .saturating_add(header.len())
+        .saturating_add(body.len())
+        .saturating_add(1)
+}
+
+fn flush_single_line_generated_if(
+    out: &mut String,
+    pending_indent: &mut String,
+    pending_header: &mut String,
+    pending_body: &mut String,
+) {
+    if pending_body.is_empty() {
+        return;
+    }
+    out.push_str(pending_indent);
+    out.push_str(pending_header);
+    out.push_str(pending_body);
+    out.push_str("}\n");
+    pending_indent.clear();
+    pending_header.clear();
+    pending_body.clear();
 }
 
 fn collect_local_derivative_layout(
