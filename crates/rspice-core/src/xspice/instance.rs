@@ -2132,8 +2132,11 @@ impl XspiceInstance {
                     }
                 }
                 PortConnection::DigitalVector(nodes) => {
-                    for (offset, (node, value)) in
-                        nodes.iter().skip(start_index).zip(values.into_iter()).enumerate()
+                    for (offset, (node, value)) in nodes
+                        .iter()
+                        .skip(start_index)
+                        .zip(values.into_iter())
+                        .enumerate()
                     {
                         event_queue.schedule_delayed_with_driver_index(
                             current_time,
@@ -2147,8 +2150,10 @@ impl XspiceInstance {
                     }
                 }
                 PortConnection::DigitalVectorMapped(nodes) => {
-                    for (offset, (connection, value)) in
-                        nodes.iter().skip(start_index).zip(values.into_iter())
+                    for (offset, (connection, value)) in nodes
+                        .iter()
+                        .skip(start_index)
+                        .zip(values.into_iter())
                         .enumerate()
                     {
                         event_queue.schedule_delayed_with_driver_index(
@@ -2194,8 +2199,11 @@ impl XspiceInstance {
                     }
                 }
                 PortConnection::RealVector(nodes) => {
-                    for (offset, (node, value)) in
-                        nodes.iter().skip(start_index).zip(values.into_iter()).enumerate()
+                    for (offset, (node, value)) in nodes
+                        .iter()
+                        .skip(start_index)
+                        .zip(values.into_iter())
+                        .enumerate()
                     {
                         event_queue.schedule_real_delayed_with_driver_index(
                             current_time,

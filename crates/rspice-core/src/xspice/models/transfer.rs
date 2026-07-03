@@ -1030,8 +1030,7 @@ fn s_xfer_transient_eval(
     coefficients: &Arc<SXferCoefficients>,
 ) -> CmResult<(Value, Value)> {
     with_s_xfer_transient_scratch(ctx, |ctx, state| {
-        let (output, partial) =
-            s_xfer_ngspice_transient_eval(ctx, coefficients.as_ref(), state)?;
+        let (output, partial) = s_xfer_ngspice_transient_eval(ctx, coefficients.as_ref(), state)?;
         if transfer_commits_state(ctx) {
             for (index, value) in state.iter().copied().enumerate() {
                 ctx.set_state(index, value);
