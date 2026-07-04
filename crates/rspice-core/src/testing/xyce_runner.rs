@@ -1913,9 +1913,6 @@ impl XyceTestRunner {
         let Ok(dc) = Self::single_dc_sweep(&netlist) else {
             return false;
         };
-        if Self::step_commands(&netlist).is_ok_and(|steps| !steps.is_empty()) {
-            return false;
-        }
         Self::validate_static_dc_contract(&netlist, &dc, &print).is_ok()
     }
 
@@ -1955,7 +1952,7 @@ impl XyceTestRunner {
                 }
                 ".subckt" => subckt_count += 1,
                 ".ends" => ends_count += 1,
-                ".print" | ".param" | ".func" | ".options" | ".end" => {}
+                ".print" | ".step" | ".param" | ".func" | ".options" | ".end" => {}
                 other => {
                     return Err(format!(
                         "wrapper-origin plain static DC contract does not cover {other} directives"
