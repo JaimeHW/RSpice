@@ -2902,6 +2902,7 @@ fn rust_backend_uses_direct_hot_general_ad_store_helpers() {
         "self.store_ad_value(index, AdValue::ln(value));",
         "self.store_ad_value(index, AdValue::abs(value));",
         "self.store_ad_value(index, AdValue::square(value));",
+        "self.store_ad_value(index, AdValue::cube(value));",
         "self.store_ad_value(index, AdValue::sub_from_scalar(scalar, value));",
         "self.store_ad_value(index, AdValue::div_from_scalar(scalar, value));",
         "self.store_ad_value(index, AdValue::pow_from_scalar(scalar, value));",
@@ -3222,9 +3223,10 @@ fn rust_backend_uses_compact_integer_power_helpers() {
     let support = render_runtime_support_module();
 
     assert!(
-        support.contains("fn store_powi(&mut self, index: usize, source: usize, exponent: i32)"),
+        support.contains("fn store_cube(&mut self, index: usize, source: usize)"),
         "{support}"
     );
+    assert!(stamp.contains("s.store_cube("), "{stamp}");
     assert!(stamp.contains("s.store_powi("), "{stamp}");
     assert!(!stamp.contains("store_powf("), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -3295,9 +3297,14 @@ fn rust_backend_materializes_repeated_expensive_compact_ad_operands() {
         "pow(..., 2.0) should use the square helper while reusing the shared base:\n{stamp}"
     );
     assert_eq!(
+        stamp.matches("A::cube(").count(),
+        1,
+        "pow(..., 3.0) should use the cube helper while reusing the shared base:\n{stamp}"
+    );
+    assert_eq!(
         stamp.matches("A::powi(").count(),
-        3,
-        "integer exponents above two should use powi while reusing the shared base:\n{stamp}"
+        2,
+        "integer exponents above three should use powi while reusing the shared base:\n{stamp}"
     );
     assert!(!stamp.contains("A::powf("), "{stamp}");
     assert_generated_rust_compiles(&generated);
@@ -14694,11 +14701,13 @@ module compact_integer_power_helper(p, n);
     real a;
     real b;
     real c;
+    real d;
     analog begin
         a = V(p, n);
         b = a * gain;
         c = pow(b, 3.0);
-        I(p, n) <+ c;
+        d = pow(b, 4.0);
+        I(p, n) <+ c + d;
     end
 endmodule
 "#
