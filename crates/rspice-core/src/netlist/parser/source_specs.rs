@@ -48,6 +48,28 @@ pub(super) fn parse_source_spec(
                 dc_value = Some(v);
                 continue;
             }
+            TokenKind::Ident(s)
+                if dc_value.is_some()
+                    && ac_terms.is_none()
+                    && transient.is_none()
+                    && !is_source_level_keyword(s)
+                    && crate::netlist::lexer::parse_spice_value(s).is_ok() =>
+            {
+                // Xyce accepts extra unlabeled numeric values after the DC
+                // source level and ignores them unless an AC/transient keyword
+                // gives them meaning.
+                let v =
+                    try_value(stream, params).expect("numeric-looking source tail value parses");
+                if !v.is_finite() {
+                    return Err(non_finite_source_value_error(
+                        line_num,
+                        "source tail",
+                        "value",
+                        v,
+                    ));
+                }
+                continue;
+            }
             TokenKind::Ident(s) => s.to_uppercase(),
             _ => {
                 // A bare leading value is the DC level.
@@ -60,6 +82,21 @@ pub(super) fn parse_source_spec(
                         return Err(non_finite_source_value_error(line_num, "DC", "value", v));
                     }
                     dc_value = Some(v);
+                    continue;
+                }
+                if dc_value.is_some()
+                    && ac_terms.is_none()
+                    && transient.is_none()
+                    && let Some(v) = try_value(stream, params)
+                {
+                    if !v.is_finite() {
+                        return Err(non_finite_source_value_error(
+                            line_num,
+                            "source tail",
+                            "value",
+                            v,
+                        ));
+                    }
                     continue;
                 }
                 break;

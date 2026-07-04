@@ -5777,7 +5777,7 @@ impl XyceTestRunner {
             return false;
         };
         let normalized_expression = Self::normalize_probe(expression);
-        if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+        if Self::braced_expression_is_atomic_real_probe(&normalized_expression, netlist) {
             return Self::normalized_probe_requests_linear_capacitor_branch_quantity(
                 netlist,
                 &normalized_expression,
@@ -8502,7 +8502,7 @@ impl XyceTestRunner {
     fn validate_tran_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
-            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+            if Self::braced_expression_is_atomic_real_probe(&normalized_expression, netlist) {
                 return Self::validate_atomic_tran_probe(
                     &normalized_expression,
                     expression,
@@ -9035,7 +9035,7 @@ impl XyceTestRunner {
     fn validate_dc_probe(probe: &str, netlist: &Netlist) -> Result<(), String> {
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
-            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+            if Self::braced_expression_is_atomic_real_probe(&normalized_expression, netlist) {
                 return Self::validate_atomic_dc_probe(&normalized_expression, expression, netlist);
             }
             if Self::print_expression_contains_probe_reference(expression) {
@@ -9230,7 +9230,7 @@ impl XyceTestRunner {
     ) -> Result<f64, String> {
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
-            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+            if Self::braced_expression_is_atomic_real_probe(&normalized_expression, netlist) {
                 return Self::evaluate_atomic_dc_probe(
                     &normalized_expression,
                     netlist,
@@ -9568,7 +9568,7 @@ impl XyceTestRunner {
     ) -> Result<f64, String> {
         if let Some(expression) = Self::print_expression_inner(probe) {
             let normalized_expression = Self::normalize_probe(expression);
-            if Self::braced_expression_is_atomic_probe(&normalized_expression) {
+            if Self::braced_expression_is_atomic_real_probe(&normalized_expression, netlist) {
                 return Self::evaluate_atomic_tran_probe(
                     &normalized_expression,
                     netlist,
@@ -10329,9 +10329,15 @@ impl XyceTestRunner {
         false
     }
 
-    fn braced_expression_is_atomic_probe(normalized_expression: &str) -> bool {
+    fn braced_expression_is_atomic_real_probe(
+        normalized_expression: &str,
+        netlist: &Netlist,
+    ) -> bool {
         Self::parse_device_parameter_probe(normalized_expression).is_some()
-            || Self::parse_bare_device_parameter_probe(normalized_expression).is_some()
+            || Self::bare_device_parameter_probe_is_atomic_real_probe(
+                netlist,
+                normalized_expression,
+            )
             || Self::parse_device_operating_point_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_lead_current_probe(normalized_expression)
@@ -10342,6 +10348,14 @@ impl XyceTestRunner {
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_power_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
+    }
+
+    fn bare_device_parameter_probe_is_atomic_real_probe(netlist: &Netlist, probe: &str) -> bool {
+        let Some(probe_name) = Self::parse_bare_device_parameter_probe(probe) else {
+            return false;
+        };
+        netlist.params.get_complex(&probe_name).is_none()
+            && Self::bare_device_parameter_probe_is_supported(netlist, &probe_name)
     }
 
     fn braced_expression_is_atomic_ac_probe(
@@ -16201,6 +16215,52 @@ C1 mid out 1u
         assert_eq!(columns.len(), 6);
         assert_eq!(columns[2].probe_name(), "{r0}");
         assert_eq!(columns[4].probe_name(), "{0.1+r2}");
+    }
+
+    #[test]
+    fn dc_complex_param_wrapper_accepts_unlabeled_source_tail() {
+        let source = "\
+testing of complex expressions in parameters and on the .PRINT line
+Vsrc 1 0 1 0
+R1 1 0 1e3
+C1 1 0 2e-6
+.param r0={3.0+2.0J}
+.param r1={m(r0)}
+.param r2={sqrt(-1.00000)}
+.param r3={re(0.1+r2)}
+.param r4={img(r2)}
+.DC Vsrc 1 1 1
+.print DC
++ v(1)
++ {r0}
++ {re(r0)}
++ {img(r0)}
++ {r1}
++ {v(1)/r0}
++ {v(1)/r1}
++ {ph(v(1)/r1)}
++ {db(v(1))}
++ {r(v(1))}
++ {r3}
++ {r4}
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("plain static DC wrapper source validates");
+        let print = XyceTestRunner::single_dc_print_request(source)
+            .expect("single DC print request parses");
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("test4.cir"))
+            .expect("test4 deck parses");
+        assert!(
+            !XyceTestRunner::braced_expression_is_atomic_real_probe("r1", &netlist),
+            "braced scalar parameter r1 must not be shadowed by resistor R1"
+        );
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect("plain static DC netlist validates");
+        let dc = XyceTestRunner::single_dc_sweep(&netlist).expect("single DC sweep parses");
+        XyceTestRunner::validate_static_dc_contract(&netlist, &dc, &print)
+            .expect("complex parameter DC probes validate");
     }
 
     #[test]

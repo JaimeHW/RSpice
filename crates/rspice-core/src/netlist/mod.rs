@@ -5424,6 +5424,29 @@ mod tests {
     }
 
     #[test]
+    fn source_dc_terms_ignore_unlabeled_numeric_tail_before_keywords() {
+        let netlist = Netlist::parse(
+            "source unlabeled tail\n\
+             V1 1 0 1 0 2 AC 3 45\n\
+             R1 1 0 1k\n\
+             .ac lin 1 1k 1k\n\
+             .end\n",
+        )
+        .expect("Xyce-compatible unlabeled source tail should parse");
+
+        assert!(matches!(
+            first_source_spec(&netlist),
+            SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+            } if *dc_value == 1.0
+                && *ac_magnitude == 3.0
+                && (*ac_phase - 45.0_f64.to_radians()).abs() < 1e-12
+        ));
+    }
+
+    #[test]
     fn xyce_rf_ports_lower_to_dc_source_and_z0_termination() {
         let netlist = Netlist::parse(
             "xyce rf ports\n\
