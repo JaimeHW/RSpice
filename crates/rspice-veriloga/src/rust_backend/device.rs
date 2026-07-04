@@ -14125,6 +14125,7 @@ fn emit_parameter_default_validation(
         let validation = parameter_validation_call(
             parameter.name.as_str(),
             &format!("params.{field}"),
+            parameter.value_type,
             parameter.range.as_ref(),
         )?;
         out.push_str(&format!(
@@ -14173,6 +14174,17 @@ fn emit_parameter_metadata(
         &parameters_by_index,
         16,
         |parameter| Ok(format!("{:?}", parameter.name.as_str())),
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_INTEGER_FLAGS: [bool; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        32,
+        |parameter| Ok((parameter.value_type == CanonicalValueType::Integer).to_string()),
         out,
     )?;
     out.push_str("];\n\n");
@@ -14364,6 +14376,7 @@ fn parameter_default_rust_expr(
             artifact,
             parameter.name.as_str(),
             default,
+            parameter.value_type,
             parameter.range.as_ref(),
         )?;
         return Ok(format_f64(default));
@@ -14537,12 +14550,27 @@ fn validate_parameter_value_for_codegen(
     artifact: &CanonicalIrArtifact,
     parameter_name: &str,
     value: f64,
+    value_type: CanonicalValueType,
     range: Option<&crate::canonical_ir::HirParamRange>,
 ) -> Result<(), RustBackendError> {
     if !value.is_finite() {
         return Err(unsupported(
             artifact,
             format!("non-finite default for parameter '{parameter_name}'"),
+        ));
+    }
+    if value_type == CanonicalValueType::Integer && value.fract() != 0.0 {
+        return Err(unsupported(
+            artifact,
+            format!("default for integer parameter '{parameter_name}' is fractional"),
+        ));
+    }
+    if value_type == CanonicalValueType::Integer
+        && (value < i32::MIN as f64 || value > i32::MAX as f64)
+    {
+        return Err(unsupported(
+            artifact,
+            format!("default for integer parameter '{parameter_name}' is outside i32 range"),
         ));
     }
     if let Some(range) = range {
@@ -14587,9 +14615,11 @@ fn range_contains(range: &crate::canonical_ir::HirParamRange, value: f64) -> boo
 fn parameter_validation_call(
     parameter_name: &str,
     value_expr: &str,
+    value_type: CanonicalValueType,
     range: Option<&crate::canonical_ir::HirParamRange>,
 ) -> Result<String, RustBackendError> {
-    if !parameter_range_has_runtime_constraints(parameter_name, range)? {
+    let integer = value_type == CanonicalValueType::Integer;
+    if !integer && !parameter_range_has_runtime_constraints(parameter_name, range)? {
         return Ok(format!(
             "validate_finite_parameter({parameter_name:?}, {value_expr})"
         ));
@@ -14621,7 +14651,7 @@ fn parameter_validation_call(
     };
 
     Ok(format!(
-        "validate_parameter({parameter_name:?}, {value_expr}, {}, {min_exclusive}, {}, {max_exclusive}, {exclude})",
+        "validate_parameter({parameter_name:?}, {value_expr}, {integer}, {}, {min_exclusive}, {}, {max_exclusive}, {exclude})",
         min.unwrap_or_else(|| "None".to_string()),
         max.unwrap_or_else(|| "None".to_string())
     ))
@@ -14671,6 +14701,12 @@ fn generate_shared_parameter_validator() -> String {
         "    let name = PARAMETER_DISPLAY_NAMES[index];",
         "    let flags = PARAMETER_RANGE_FLAGS[index];",
         "    validate_finite_parameter(name, value)?;",
+        "    if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {",
+        "        return Err(format!(\"parameter '{}' must be an integer, got {}\", name, value));",
+        "    }",
+        "    if PARAMETER_INTEGER_FLAGS[index] && (value < i32::MIN as f64 || value > i32::MAX as f64) {",
+        "        return Err(format!(\"parameter '{}' must fit in a 32-bit signed integer, got {}\", name, value));",
+        "    }",
         "    if let Some(min) = PARAMETER_MIN_BOUNDS[index] {",
         "        if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {",
         "            if value <= min.value {",
@@ -14707,6 +14743,7 @@ fn generate_shared_parameter_validator() -> String {
         "fn validate_parameter(",
         "    name: &str,",
         "    value: f64,",
+        "    integer: bool,",
         "    min: Option<(f64, &str)>,",
         "    min_exclusive: bool,",
         "    max: Option<(f64, &str)>,",
@@ -14714,6 +14751,12 @@ fn generate_shared_parameter_validator() -> String {
         "    excluded: &[(f64, &str)],",
         ") -> Result<(), String> {",
         "    validate_finite_parameter(name, value)?;",
+        "    if integer && value.fract() != 0.0 {",
+        "        return Err(format!(\"parameter '{}' must be an integer, got {}\", name, value));",
+        "    }",
+        "    if integer && (value < i32::MIN as f64 || value > i32::MAX as f64) {",
+        "        return Err(format!(\"parameter '{}' must fit in a 32-bit signed integer, got {}\", name, value));",
+        "    }",
         "    if let Some((min, label)) = min {",
         "        if min_exclusive {",
         "            if value <= min {",

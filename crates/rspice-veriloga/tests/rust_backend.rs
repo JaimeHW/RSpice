@@ -12074,6 +12074,58 @@ fn rust_backend_uses_compact_parameter_state_initialization_and_validation() {
 }
 
 #[test]
+fn rust_backend_validates_integer_parameters_in_shared_metadata() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module integer_param_validation(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer base = 3;
+    parameter integer nf = base + 1 from [0:inf);
+    parameter real scale = 2.0;
+    analog I(p, n) <+ (nf + scale) * V(p, n);
+endmodule
+"#,
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile integer parameter validation device");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+
+    assert!(
+        state.contains("const PARAMETER_INTEGER_FLAGS: [bool; 3]"),
+        "integer parameter validation should be emitted as shared compact metadata:\n{state}"
+    );
+    assert!(
+        state.contains("true, true, false"),
+        "integer metadata should preserve parameter order:\n{state}"
+    );
+    assert!(
+        state.contains("PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0"),
+        "set_parameter should reject fractional integer parameter values:\n{state}"
+    );
+    assert!(
+        state.contains("PARAMETER_INTEGER_FLAGS[index] && (value < i32::MIN as f64"),
+        "set_parameter should reject integer parameter values outside the generated i32 domain:\n{state}"
+    );
+    assert!(
+        state.contains("validate_parameter(\"nf\", params.p1, true"),
+        "integer parameter defaults that require runtime validation should pass the integer flag:\n{state}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_compact_parameter_field_names_in_generated_rust() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_parameter_field_source())
