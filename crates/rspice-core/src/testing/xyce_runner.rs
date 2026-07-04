@@ -1341,11 +1341,6 @@ impl XyceTestRunner {
             Self::validate_native_static_fd_ac_wrapper_contract(&source, output_override)?;
         }
 
-        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
-            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
-        let ac = Self::single_ac_analysis(&netlist)?;
-        let steps = Self::step_commands(&netlist)?;
-
         let primary_ac_output = if output_override {
             Self::output_override_print_output_request(&source, "AC")?
         } else {
@@ -1356,6 +1351,18 @@ impl XyceTestRunner {
         } else {
             Self::canonical_print_output_request(&source, "AC_IC", requires_wrapper)?
         };
+        if primary_ac_output.is_none() && primary_ac_ic_output.is_none() {
+            return Err(
+                "deck has no primary .PRINT AC or .PRINT AC_IC statement with static columns"
+                    .to_string(),
+            );
+        }
+
+        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
+            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        let ac = Self::single_ac_analysis(&netlist)?;
+        let steps = Self::step_commands(&netlist)?;
+
         let primary_ac_ic_file = primary_ac_ic_output
             .as_ref()
             .and_then(|request| request.file.clone());
@@ -1404,10 +1411,7 @@ impl XyceTestRunner {
                 }
                 (contract, None, None, None)
             } else {
-                return Err(
-                    "deck has no primary .PRINT AC or .PRINT AC_IC statement with static columns"
-                        .to_string(),
-                );
+                unreachable!("AC output request presence was checked before parsing");
             };
 
         Ok(XyceStaticAcPlan {
