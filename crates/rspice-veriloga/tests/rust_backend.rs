@@ -8458,6 +8458,15 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
     );
     assert!(support.contains("pub(crate) fn store_min_ad("), "{support}");
     for helper in [
+        "fn store_pow_binary_inputs(",
+        "fn store_min_binary_inputs(",
+        "fn store_max_binary_inputs(",
+        "fn store_min_offset_rhs(",
+        "fn store_max_offset_rhs(",
+    ] {
+        assert!(support.contains(helper), "{helper}\n{support}");
+    }
+    for helper in [
         "fn store_max_with_scalar_sqrt_binary(",
         "fn store_min_from_scalar_sqrt_binary(",
         "fn store_pow_from_scalar_sqrt_binary(",
@@ -8467,7 +8476,7 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
         assert!(support.contains(helper), "{helper}\n{support}");
     }
     assert!(
-        stamp.contains("s.store_pow_ad(2, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
+        stamp.contains("s.store_pow_binary_inputs(2, 0, 1, 1.0, 0, 1, -1.0);"),
         "{stamp}"
     );
     assert!(
@@ -8475,19 +8484,19 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_min_ad(3, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
+        stamp.contains("s.store_min_binary_inputs(3, 0, 1, 1.0, 0, 1, -1.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_max_ad(4, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
+        stamp.contains("s.store_max_binary_inputs(4, 0, 1, 1.0, 0, 1, -1.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_min_ad(11, s.ad_value(0), A::offset(s.ad_value(1), p.p0));"),
+        stamp.contains("s.store_min_offset_rhs(11, 0, 1, p.p0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_max_ad(12, s.ad_value(0), A::offset(s.ad_value(1), p.p0));"),
+        stamp.contains("s.store_max_offset_rhs(12, 0, 1, p.p0);"),
         "{stamp}"
     );
     assert!(
@@ -8515,6 +8524,11 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
     assert!(!stamp.contains("s.store_pow_from_scalar_ad(7,"), "{stamp}");
     assert!(!stamp.contains("s.store_sin_ad(8,"), "{stamp}");
     assert!(!stamp.contains("s.store_limexp_ad(9,"), "{stamp}");
+    assert!(!stamp.contains("s.store_pow_ad(2,"), "{stamp}");
+    assert!(!stamp.contains("s.store_min_ad(3,"), "{stamp}");
+    assert!(!stamp.contains("s.store_max_ad(4,"), "{stamp}");
+    assert!(!stamp.contains("s.store_min_ad(11,"), "{stamp}");
+    assert!(!stamp.contains("s.store_max_ad(12,"), "{stamp}");
     assert!(
         !stamp.contains("s.store_ad_value(10, A::pow(s.ad_value(0), A::offset"),
         "{stamp}"

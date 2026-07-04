@@ -16901,6 +16901,30 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_pow_binary_inputs(&mut self, index: usize, base_left: usize, base_right: usize, base_rhs_sign: f64, exponent_left: usize, exponent_right: usize, exponent_rhs_sign: f64) {",
+        "        let base = self.values[base_left] + self.values[base_right] * base_rhs_sign;",
+        "        let exponent = self.values[exponent_left] + self.values[exponent_right] * exponent_rhs_sign;",
+        "        let output = base.powf(exponent);",
+        "        let base_left_node_derivatives = self.node_derivatives[base_left];",
+        "        let base_right_node_derivatives = self.node_derivatives[base_right];",
+        "        let exponent_left_node_derivatives = self.node_derivatives[exponent_left];",
+        "        let exponent_right_node_derivatives = self.node_derivatives[exponent_right];",
+        "        let base_left_branch_derivatives = self.branch_derivatives[base_left];",
+        "        let base_right_branch_derivatives = self.branch_derivatives[base_right];",
+        "        let exponent_left_branch_derivatives = self.branch_derivatives[exponent_left];",
+        "        let exponent_right_branch_derivatives = self.branch_derivatives[exponent_right];",
+        "        self.values[index] = output;",
+        "        if base > 0.0 {",
+        "            let (base_derivative_scale, exponent_derivative_scale) = AdValue::pow_positive_derivative_scales(output, base, exponent);",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = base_left_node_derivatives[axis] + base_right_node_derivatives[axis] * base_rhs_sign; let exponent_derivative = exponent_left_node_derivatives[axis] + exponent_right_node_derivatives[axis] * exponent_rhs_sign; self.node_derivatives[index][axis] = base_derivative * base_derivative_scale + exponent_derivative * exponent_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = base_left_branch_derivatives[axis] + base_right_branch_derivatives[axis] * base_rhs_sign; let exponent_derivative = exponent_left_branch_derivatives[axis] + exponent_right_branch_derivatives[axis] * exponent_rhs_sign; self.branch_derivatives[index][axis] = base_derivative * base_derivative_scale + exponent_derivative * exponent_derivative_scale; }",
+        "        } else {",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = base_left_node_derivatives[axis] + base_right_node_derivatives[axis] * base_rhs_sign; let exponent_derivative = exponent_left_node_derivatives[axis] + exponent_right_node_derivatives[axis] * exponent_rhs_sign; self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, base_derivative, exponent_derivative); }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = base_left_branch_derivatives[axis] + base_right_branch_derivatives[axis] * base_rhs_sign; let exponent_derivative = exponent_left_branch_derivatives[axis] + exponent_right_branch_derivatives[axis] * exponent_rhs_sign; self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent, base_derivative, exponent_derivative); }",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_min_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
         "        if left.value <= right.value {",
         "            self.values[index] = left.value;",
@@ -16914,6 +16938,36 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_min_binary_inputs(&mut self, index: usize, left_source: usize, left_rhs: usize, left_rhs_sign: f64, right_source: usize, right_rhs: usize, right_rhs_sign: f64) {",
+        "        let left_value = self.values[left_source] + self.values[left_rhs] * left_rhs_sign;",
+        "        let right_value = self.values[right_source] + self.values[right_rhs] * right_rhs_sign;",
+        "        if left_value <= right_value {",
+        "            self.values[index] = left_value;",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left_source][axis] + self.node_derivatives[left_rhs][axis] * left_rhs_sign; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left_source][axis] + self.branch_derivatives[left_rhs][axis] * left_rhs_sign; }",
+        "        } else {",
+        "            self.values[index] = right_value;",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[right_source][axis] + self.node_derivatives[right_rhs][axis] * right_rhs_sign; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[right_source][axis] + self.branch_derivatives[right_rhs][axis] * right_rhs_sign; }",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_min_offset_rhs(&mut self, index: usize, left: usize, right: usize, offset: f64) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right] + offset;",
+        "        if left_value <= right_value {",
+        "            self.values[index] = left_value;",
+        "            self.node_derivatives[index] = self.node_derivatives[left];",
+        "            self.branch_derivatives[index] = self.branch_derivatives[left];",
+        "        } else {",
+        "            self.values[index] = right_value;",
+        "            self.node_derivatives[index] = self.node_derivatives[right];",
+        "            self.branch_derivatives[index] = self.branch_derivatives[right];",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_max_ad(&mut self, index: usize, left: AdValue, right: AdValue) {",
         "        if left.value >= right.value {",
         "            self.values[index] = left.value;",
@@ -16923,6 +16977,36 @@ fn generate_scratch_operation_helpers() -> String {
         "            self.values[index] = right.value;",
         "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = right.node_derivatives[axis]; }",
         "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = right.branch_derivatives[axis]; }",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_max_binary_inputs(&mut self, index: usize, left_source: usize, left_rhs: usize, left_rhs_sign: f64, right_source: usize, right_rhs: usize, right_rhs_sign: f64) {",
+        "        let left_value = self.values[left_source] + self.values[left_rhs] * left_rhs_sign;",
+        "        let right_value = self.values[right_source] + self.values[right_rhs] * right_rhs_sign;",
+        "        if left_value >= right_value {",
+        "            self.values[index] = left_value;",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left_source][axis] + self.node_derivatives[left_rhs][axis] * left_rhs_sign; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left_source][axis] + self.branch_derivatives[left_rhs][axis] * left_rhs_sign; }",
+        "        } else {",
+        "            self.values[index] = right_value;",
+        "            for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[right_source][axis] + self.node_derivatives[right_rhs][axis] * right_rhs_sign; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[right_source][axis] + self.branch_derivatives[right_rhs][axis] * right_rhs_sign; }",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_max_offset_rhs(&mut self, index: usize, left: usize, right: usize, offset: f64) {",
+        "        let left_value = self.values[left];",
+        "        let right_value = self.values[right] + offset;",
+        "        if left_value >= right_value {",
+        "            self.values[index] = left_value;",
+        "            self.node_derivatives[index] = self.node_derivatives[left];",
+        "            self.branch_derivatives[index] = self.branch_derivatives[left];",
+        "        } else {",
+        "            self.values[index] = right_value;",
+        "            self.node_derivatives[index] = self.node_derivatives[right];",
+        "            self.branch_derivatives[index] = self.branch_derivatives[right];",
         "        }",
         "    }",
         "",
@@ -35609,6 +35693,11 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         if let Some(line) = compact_pow_mul_base_store_helper_line(target_index, args[0], args[1]) {
             return Some(line);
         }
+        if let Some(line) =
+            compact_pow_signed_binary_inputs_store_helper_line(target_index, args[0], args[1])
+        {
+            return Some(line);
+        }
         let left_index = compact_scratch_ad_value_index(args[0]);
         if let Some(left) = left_index
             && let Some(offset_args) = compact_ad_call_args(args[1], "offset")
@@ -35636,6 +35725,11 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         };
         if args.len() != 2 {
             return None;
+        }
+        if let Some(line) =
+            compact_min_max_direct_store_helper_line(target_index, name, args[0], args[1])
+        {
+            return Some(line);
         }
         let left = compact_scratch_or_non_atomic_ad_arg(args[0])?;
         let right = compact_scratch_or_non_atomic_ad_arg(args[1])?;
@@ -35840,6 +35934,73 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
             "scratch.store_powf_ad({target_index}, {}, {});",
             args[0], args[1]
         ));
+    }
+
+    None
+}
+
+fn compact_pow_signed_binary_inputs_store_helper_line(
+    target_index: usize,
+    base: &str,
+    exponent: &str,
+) -> Option<String> {
+    let (base_left, base_right, base_rhs_sign) = compact_signed_binary_scratch_args(base)?;
+    let (exponent_left, exponent_right, exponent_rhs_sign) =
+        compact_signed_binary_scratch_args(exponent)?;
+    Some(format!(
+        "scratch.store_pow_binary_inputs({target_index}, {base_left}, {base_right}, {base_rhs_sign}, {exponent_left}, {exponent_right}, {exponent_rhs_sign});"
+    ))
+}
+
+fn compact_min_max_direct_store_helper_line(
+    target_index: usize,
+    name: &str,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    let prefix = match name {
+        "min" => "store_min",
+        "max" => "store_max",
+        _ => return None,
+    };
+
+    if let (Some(left_binary), Some(right_binary)) = (
+        compact_signed_binary_scratch_args(left),
+        compact_signed_binary_scratch_args(right),
+    ) {
+        return Some(format!(
+            "scratch.{prefix}_binary_inputs({target_index}, {}, {}, {}, {}, {}, {});",
+            left_binary.0,
+            left_binary.1,
+            left_binary.2,
+            right_binary.0,
+            right_binary.1,
+            right_binary.2
+        ));
+    }
+
+    if let Some(left) = compact_scratch_ad_value_index(left)
+        && let Some((right, offset)) = compact_offset_scratch_arg(right)
+    {
+        return Some(format!(
+            "scratch.{prefix}_offset_rhs({target_index}, {left}, {right}, {offset});"
+        ));
+    }
+
+    None
+}
+
+fn compact_signed_binary_scratch_args(value: &str) -> Option<(usize, usize, &'static str)> {
+    for (name, rhs_sign) in [("add", "1.0"), ("sub", "-1.0")] {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 2 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(args[0])?;
+        let right = compact_scratch_ad_value_index(args[1])?;
+        return Some((left, right, rhs_sign));
     }
 
     None
