@@ -4369,6 +4369,10 @@ fn emit_pow_expr(
     {
         return Ok(expr);
     }
+    if let Some(exponent) = integer_power_exponent_expr(artifact, parameter_fields, right, context)?
+    {
+        return Ok(format!("{}.powi({exponent})", f64_method_receiver(&left)));
+    }
 
     let right = coerce_value_expr(
         value_ref(artifact, parameter_fields, right, context)?,
@@ -4420,6 +4424,207 @@ fn integer_power_exponent(value: f64) -> Option<i32> {
         return None;
     }
     Some(value as i32)
+}
+
+fn integer_power_exponent_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    value: ValueId,
+    context: &ValueEmitContext<'_>,
+) -> Result<Option<String>, RustBackendError> {
+    let value_slot = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    if let OptValueKind::RealConstant(exponent) = value_slot.kind {
+        return Ok(integer_power_exponent(exponent).map(|exponent| exponent.to_string()));
+    }
+
+    if integer_power_exponent_range(artifact, value)?.is_none() {
+        return Ok(None);
+    }
+
+    let exponent = value_ref(artifact, parameter_fields, value, context)?;
+    Ok(Some(format!("({exponent} as i32)")))
+}
+
+#[derive(Clone, Copy)]
+struct IntegerPowerExponentRange {
+    min: i32,
+    max: i32,
+}
+
+fn integer_power_exponent_range(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+) -> Result<Option<IntegerPowerExponentRange>, RustBackendError> {
+    let value_slot = artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
+    match value_slot.kind {
+        OptValueKind::RealConstant(value) => {
+            Ok(
+                integer_power_exponent(value).map(|value| IntegerPowerExponentRange {
+                    min: value,
+                    max: value,
+                }),
+            )
+        }
+        OptValueKind::Parameter { parameter } => {
+            parameter_integer_exponent_range(artifact, parameter)
+        }
+        OptValueKind::Select {
+            then_value,
+            else_value,
+            ..
+        } => {
+            let Some(then_range) = integer_power_exponent_range(artifact, then_value)? else {
+                return Ok(None);
+            };
+            let Some(else_range) = integer_power_exponent_range(artifact, else_value)? else {
+                return Ok(None);
+            };
+            Ok(Some(IntegerPowerExponentRange {
+                min: then_range.min.min(else_range.min),
+                max: then_range.max.max(else_range.max),
+            }))
+        }
+        OptValueKind::Unary {
+            op: OptUnaryOp::Pos,
+            input,
+        } => integer_power_exponent_range(artifact, input),
+        OptValueKind::Unary {
+            op: OptUnaryOp::Neg,
+            input,
+        } => {
+            let Some(input_range) = integer_power_exponent_range(artifact, input)? else {
+                return Ok(None);
+            };
+            if input_range.min == i32::MIN {
+                return Ok(None);
+            }
+            Ok(Some(IntegerPowerExponentRange {
+                min: -input_range.max,
+                max: -input_range.min,
+            }))
+        }
+        OptValueKind::Binary { op, left, right } => {
+            let Some(left_range) = integer_power_exponent_range(artifact, left)? else {
+                return Ok(None);
+            };
+            let Some(right_range) = integer_power_exponent_range(artifact, right)? else {
+                return Ok(None);
+            };
+            Ok(match op {
+                OptBinaryOp::Add => checked_integer_exponent_range(
+                    left_range.min as i64 + right_range.min as i64,
+                    left_range.max as i64 + right_range.max as i64,
+                ),
+                OptBinaryOp::Sub => checked_integer_exponent_range(
+                    left_range.min as i64 - right_range.max as i64,
+                    left_range.max as i64 - right_range.min as i64,
+                ),
+                OptBinaryOp::Mul => {
+                    let products = [
+                        left_range.min as i64 * right_range.min as i64,
+                        left_range.min as i64 * right_range.max as i64,
+                        left_range.max as i64 * right_range.min as i64,
+                        left_range.max as i64 * right_range.max as i64,
+                    ];
+                    let min = products.iter().copied().min().unwrap_or(0);
+                    let max = products.iter().copied().max().unwrap_or(0);
+                    checked_integer_exponent_range(min, max)
+                }
+                _ => None,
+            })
+        }
+        _ => Ok(None),
+    }
+}
+
+fn parameter_integer_exponent_range(
+    artifact: &CanonicalIrArtifact,
+    parameter: crate::canonical_ir::ParamId,
+) -> Result<Option<IntegerPowerExponentRange>, RustBackendError> {
+    let parameter_slot = artifact
+        .mir
+        .parameters
+        .get(usize::from(parameter))
+        .ok_or_else(|| unsupported(artifact, format!("missing parameter {parameter}")))?;
+    if parameter_slot.value_type != CanonicalValueType::Integer {
+        return Ok(None);
+    }
+
+    let mut min = i32::MIN;
+    let mut max = i32::MAX;
+    if let Some(range) = &parameter_slot.range {
+        if let Some(bound) = range
+            .min
+            .and_then(|value| inclusive_integer_lower_bound(value, range.min_exclusive))
+        {
+            min = min.max(bound);
+        }
+        if let Some(bound) = range
+            .max
+            .and_then(|value| inclusive_integer_upper_bound(value, range.max_exclusive))
+        {
+            max = max.min(bound);
+        }
+    }
+
+    if min > max {
+        return Ok(None);
+    }
+    Ok(Some(IntegerPowerExponentRange { min, max }))
+}
+
+fn inclusive_integer_lower_bound(value: f64, exclusive: bool) -> Option<i32> {
+    if !value.is_finite() {
+        return None;
+    }
+    let bound = if exclusive {
+        value.floor() + 1.0
+    } else {
+        value.ceil()
+    };
+    if bound > i32::MAX as f64 {
+        None
+    } else if bound <= i32::MIN as f64 {
+        Some(i32::MIN)
+    } else {
+        Some(bound as i32)
+    }
+}
+
+fn inclusive_integer_upper_bound(value: f64, exclusive: bool) -> Option<i32> {
+    if !value.is_finite() {
+        return None;
+    }
+    let bound = if exclusive {
+        value.ceil() - 1.0
+    } else {
+        value.floor()
+    };
+    if bound < i32::MIN as f64 {
+        None
+    } else if bound >= i32::MAX as f64 {
+        Some(i32::MAX)
+    } else {
+        Some(bound as i32)
+    }
+}
+
+fn checked_integer_exponent_range(min: i64, max: i64) -> Option<IntegerPowerExponentRange> {
+    if min < i32::MIN as i64 || max > i32::MAX as i64 || min > max {
+        return None;
+    }
+    Some(IntegerPowerExponentRange {
+        min: min as i32,
+        max: max as i32,
+    })
 }
 
 fn repeated_power_expr(base: &str, factors: usize) -> String {

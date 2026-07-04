@@ -2260,7 +2260,53 @@ endmodule
             .as_str();
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
-        assert!(stamp.contains("f64::powf("), "{stamp}");
+        assert!(stamp.contains(".powi("), "{stamp}");
+        assert!(!stamp.contains("f64::powf("), "{stamp}");
+        assert!(!stamp.contains("while {"), "{stamp}");
+        assert!(!stamp.contains("AdValue"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_lowers_guarded_loop_invariant_product_accumulator() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module guarded_counted_product_accumulator(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    parameter integer enable = 1 from [0:1];
+    integer i;
+    real product, factor;
+    analog begin
+        product = 2.0;
+        factor = 1.0 + 0.1 * V(p, n);
+        for (i = 0; (i < nf) && (enable != 0); i = i + 1) begin
+            product = product * factor;
+        end
+        I(p, n) <+ product;
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("guarded loop-invariant product accumulator should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains(".powi("), "{stamp}");
+        assert!(!stamp.contains("f64::powf("), "{stamp}");
         assert!(!stamp.contains("while {"), "{stamp}");
         assert!(!stamp.contains("AdValue"), "{stamp}");
     }
