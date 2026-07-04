@@ -3866,6 +3866,9 @@ fn rust_backend_fuses_softplus_ad_operation_chains() {
         ),
         "{support}"
     );
+    assert!(support.contains("let exp = (-raw).exp();"), "{support}");
+    assert!(!support.contains("(-raw).exp().ln_1p()"), "{support}");
+    assert!(!support.contains("1.0 / (1.0 + (-raw).exp())"), "{support}");
 
     assert!(stamp.contains("s.store_ln_one_plus_exp("), "{stamp}");
     assert!(
