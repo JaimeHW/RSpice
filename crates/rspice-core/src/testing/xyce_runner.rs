@@ -2414,14 +2414,6 @@ impl XyceTestRunner {
                     "wrapper-origin transient CSV contract does not cover {command} directives"
                 ));
             }
-            if command.eq_ignore_ascii_case(".options")
-                && Self::line_declares_output_snapshots(&trimmed)?
-            {
-                return Err(
-                    "wrapper-origin transient CSV contract does not cover OUTPUT SNAPSHOTS"
-                        .to_string(),
-                );
-            }
         }
 
         match primary_tran_print_count {
@@ -6673,6 +6665,7 @@ impl XyceTestRunner {
         Ok(interval)
     }
 
+    #[cfg(test)]
     fn line_declares_output_snapshots(line: &str) -> Result<bool, String> {
         let tokens = Self::split_grouped_whitespace_fields(line, ".OPTIONS statement")?;
         let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
@@ -6714,20 +6707,15 @@ impl XyceTestRunner {
             Vec::with_capacity(reference.columns.len().saturating_sub(first_data_column));
         let mut probe_index = 0usize;
         for column in reference.columns.iter().skip(first_data_column) {
-            let Some(probe) = print.probes.get(probe_index) else {
-                return Err(format!(
-                    "reference column '{}' has no matching .PRINT TRAN probe",
-                    column
-                ));
-            };
-            if !Self::reference_column_matches_probe(column, probe) {
-                return Err(format!(
-                    "reference column '{}' does not match .PRINT TRAN probe '{}'",
-                    column, probe
-                ));
+            if let Some(probe) = print.probes.get(probe_index)
+                && Self::reference_column_matches_probe(column, probe)
+            {
+                data_columns.push(probe.clone());
+                probe_index += 1;
+                continue;
             }
-            data_columns.push(probe.clone());
-            probe_index += 1;
+
+            data_columns.push(column.clone());
         }
         if probe_index != print.probes.len() {
             return Err(format!(
@@ -7655,15 +7643,33 @@ impl XyceTestRunner {
         matches!(Self::normalize_probe(column).as_str(), "v-sweep" | "sweep")
     }
 
+    fn reference_column_probe_for_matching(column: &str) -> &str {
+        let trimmed = column.trim();
+        trimmed
+            .strip_prefix('{')
+            .and_then(|body| body.strip_suffix('}'))
+            .map(str::trim)
+            .unwrap_or(trimmed)
+    }
+
     fn reference_column_matches_probe(column: &str, probe: &str) -> bool {
         let normalized_column = Self::normalize_probe(column);
-        if normalized_column == Self::normalize_probe(probe) {
+        let normalized_probe = Self::normalize_probe(probe);
+        if normalized_column == normalized_probe {
+            return true;
+        }
+
+        let normalized_column =
+            Self::normalize_probe(Self::reference_column_probe_for_matching(column));
+        let normalized_probe =
+            Self::normalize_probe(Self::reference_column_probe_for_matching(probe));
+        if normalized_column == normalized_probe {
             return true;
         }
         if let Some(mapped_probe) = Self::compact_reference_probe_alias(&normalized_column) {
-            return mapped_probe == Self::normalize_probe(probe);
+            return mapped_probe == normalized_probe;
         }
-        if let Some(source_name) = Self::parse_current_probe(probe) {
+        if let Some(source_name) = Self::parse_current_probe(&normalized_probe) {
             return normalized_column == format!("{source_name}_branch")
                 || normalized_column == format!("{source_name}#branch");
         }
@@ -15242,6 +15248,38 @@ Values:
     }
 
     #[test]
+    fn transient_reference_columns_accept_snapshot_extra_probes() {
+        let table = XycePrnTable {
+            columns: ["TIME", "{I(V1)}", "{V(1)}", "{V(2)}"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![vec![0.0, 0.0, 0.0, 0.0]],
+        };
+        let print = XycePrintRequest {
+            probes: vec!["V(1)".to_string(), "V(2)".to_string()],
+        };
+        let layout = XyceTestRunner::transient_reference_layout(&table)
+            .expect("TIME-prefixed transient reference should parse");
+
+        let data_columns =
+            XyceTestRunner::reference_tran_data_columns(&table, &print, layout.data_column_offset)
+                .expect("snapshot-added source current column should be accepted");
+
+        assert_eq!(data_columns, vec!["{I(V1)}", "V(1)", "V(2)"]);
+    }
+
+    #[test]
+    fn reference_column_matching_preserves_braced_expressions() {
+        assert!(XyceTestRunner::reference_column_matches_probe(
+            "{R0}", "{r0}"
+        ));
+        assert!(XyceTestRunner::reference_column_matches_probe(
+            "{V(1)}", "V(1)"
+        ));
+    }
+
+    #[test]
     fn split_transient_step_reference_validates_stepnum_metadata() {
         let table = XycePrnTable {
             columns: ["STEPNUM", "TIME", "V(1)"]
@@ -16193,13 +16231,8 @@ snapshot CSV
 .TRAN 0 1
 .END
 ";
-        let err =
-            XyceTestRunner::validate_native_static_csv_tran_wrapper_contract(snapshots_source)
-                .expect_err("snapshot CSV must stay outside the native CSV wrapper contract");
-        assert!(
-            err.contains("SNAPSHOTS"),
-            "snapshot guard should name the unsupported option, got {err}"
-        );
+        XyceTestRunner::validate_native_static_csv_tran_wrapper_contract(snapshots_source)
+            .expect("snapshot CSV validates through the native CSV wrapper contract");
     }
 
     #[test]

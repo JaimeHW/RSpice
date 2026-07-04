@@ -1364,24 +1364,28 @@ fn test_xyce_csv_transient_output_wrapper_case_runs_natively() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    let relative = "Netlists/Output/TRAN/tran-csv.cir";
-    assert!(
-        runner.requires_upstream_wrapper(relative),
-        "{relative} should retain its removed upstream transient CSV wrapper provenance"
-    );
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native wrapper-origin transient CSV comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .csv oracle"
-    );
-    assert_eq!(
-        result.contract, "wrapper_static_csv_tran",
-        "{relative} should report the native wrapper-origin transient CSV contract"
-    );
+    for relative in [
+        "Netlists/Output/TRAN/tran-csv.cir",
+        "Netlists/Output/TRAN/tran-csv-snapshots.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream transient CSV wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native wrapper-origin transient CSV comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .csv oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_csv_tran",
+            "{relative} should report the native wrapper-origin transient CSV contract"
+        );
+    }
 }
 
 #[test]
