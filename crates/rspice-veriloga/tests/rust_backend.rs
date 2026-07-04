@@ -2975,6 +2975,22 @@ fn rust_backend_uses_direct_hot_general_ad_store_helpers() {
         support.contains("pow_derivative(output, base, exponent, left.dn[axis], right.dn[axis])"),
         "{support}"
     );
+    assert!(
+        support.contains("let (sin, cos) = raw.sin_cos();"),
+        "{support}"
+    );
+    assert!(support.contains("1.0 + tangent * tangent"), "{support}");
+    assert!(support.contains("1.0 - tangent * tangent"), "{support}");
+    for duplicate_trig_call in [
+        "raw.sin()",
+        "raw.cos()",
+        "let cos = raw.cos();",
+        "let cosh = raw.cosh();",
+        "1.0 / (cos * cos)",
+        "1.0 / (cosh * cosh)",
+    ] {
+        assert!(!support.contains(duplicate_trig_call), "{support}");
+    }
 }
 
 #[test]
