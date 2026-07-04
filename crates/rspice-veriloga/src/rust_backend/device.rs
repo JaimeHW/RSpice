@@ -18447,6 +18447,22 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_div_from_scalar_sqrt_add(&mut self, index: usize, scalar: f64, left: usize, right: usize) {",
+        "        let raw = self.values[left] + self.values[right];",
+        "        let root = raw.sqrt();",
+        "        let quotient = scalar / root;",
+        "        self.store_unary_add_scaled(index, left, right, quotient, -quotient / (2.0 * raw));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_from_scalar_sqrt_sub(&mut self, index: usize, scalar: f64, left: usize, right: usize) {",
+        "        let raw = self.values[left] - self.values[right];",
+        "        let root = raw.sqrt();",
+        "        let quotient = scalar / root;",
+        "        self.store_unary_sub_scaled(index, left, right, quotient, -quotient / (2.0 * raw));",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_div_from_scalar_square_ad(&mut self, index: usize, scalar: f64, value: AdValue) {",
         "        let denominator = value.value * value.value;",
         "        let reciprocal = 1.0 / denominator;",
@@ -22474,10 +22490,24 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_offset_scaled_sqrt_add(&mut self, index: usize, left: usize, right: usize, scale: f64, offset: f64) {",
+        "        let raw = self.values[left] + self.values[right];",
+        "        let value = raw.sqrt();",
+        "        self.store_unary_add_scaled(index, left, right, value * scale + offset, scale / (2.0 * value));",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_sqrt_sub(&mut self, index: usize, left: usize, right: usize) {",
         "        let raw = self.values[left] - self.values[right];",
         "        let value = raw.sqrt();",
         "        self.store_unary_sub_scaled(index, left, right, value, 1.0 / (2.0 * value));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_offset_scaled_sqrt_sub(&mut self, index: usize, left: usize, right: usize, scale: f64, offset: f64) {",
+        "        let raw = self.values[left] - self.values[right];",
+        "        let value = raw.sqrt();",
+        "        self.store_unary_sub_scaled(index, left, right, value * scale + offset, scale / (2.0 * value));",
         "    }",
         "",
         "    #[inline]",
@@ -35620,6 +35650,25 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         {
             return Some(line);
         }
+        if let Some(line) =
+            compact_div_from_scalar_sqrt_binary_store_helper_line(target_index, args[0], args[1])
+        {
+            return Some(line);
+        }
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "sub_from_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        if let Some(line) = compact_offset_scaled_sqrt_binary_store_helper_line(
+            target_index,
+            args[1],
+            "-1.0",
+            args[0],
+        ) {
+            return Some(line);
+        }
     }
 
     for (name, helper) in [
@@ -35798,6 +35847,12 @@ fn compact_negated_binary_input_store_helper_line(
         return Some(format!(
             "scratch.store_sub({target_index}, {right}, {left});"
         ));
+    }
+
+    if let Some(line) =
+        compact_offset_scaled_sqrt_binary_store_helper_line(target_index, args[0], "-1.0", "0.0")
+    {
+        return Some(line);
     }
 
     None
@@ -37152,6 +37207,15 @@ fn compact_fused_scale_offset_store_helper_call(
                 args[1], args[2]
             ));
         }
+        let offset = compact_scale_product(args[1], args[2]);
+        if let Some(line) = compact_offset_scaled_sqrt_binary_store_helper_line(
+            target_index,
+            args[0],
+            args[2],
+            &offset,
+        ) {
+            return Some(line);
+        }
         if let Some(line) = compact_scaled_offset_mul_offset_lhs_store_helper_line(
             target_index,
             args[0],
@@ -37184,6 +37248,11 @@ fn compact_fused_scale_offset_store_helper_call(
             "scratch.store_offset_scaled({target_index}, {source}, {}, {});",
             args[1], args[2]
         ));
+    }
+    if let Some(line) =
+        compact_offset_scaled_sqrt_binary_store_helper_line(target_index, args[0], args[1], args[2])
+    {
+        return Some(line);
     }
     if compact_non_atomic_ad_value(args[0]) {
         return Some(format!(
@@ -40203,6 +40272,12 @@ fn compact_div_from_scalar_affine_input_store_helper_call(
         }
     }
 
+    if let Some(line) =
+        compact_div_from_scalar_sqrt_binary_store_helper_line(target_index, scalar, denominator)
+    {
+        return Some(line);
+    }
+
     for (name, helper) in [
         ("sqrt", "store_div_from_scalar_sqrt_ad"),
         ("square", "store_div_from_scalar_square_ad"),
@@ -41138,6 +41213,12 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
     let inner = args[0];
     let scale = args[1];
 
+    if let Some(line) =
+        compact_offset_scaled_sqrt_binary_store_helper_line(target_index, inner, scale, "0.0")
+    {
+        return Some(line);
+    }
+
     for (name, scaled_helper, scaled_inputs_helper) in [
         ("add", "store_scaled_add", "store_add_scaled_inputs"),
         ("sub", "store_scaled_sub", "store_sub_scaled_inputs"),
@@ -41368,6 +41449,15 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
             return Some(format!(
                 "scratch.store_offset_scaled_{binary}({target_index}, {left}, {right}, {scale}, {combined_offset});"
             ));
+        }
+        let combined_offset = compact_scale_product(inner_args[1], scale);
+        if let Some(line) = compact_offset_scaled_sqrt_binary_store_helper_line(
+            target_index,
+            inner_args[0],
+            scale,
+            &combined_offset,
+        ) {
+            return Some(line);
         }
         if compact_non_atomic_ad_value(inner_args[0]) {
             return Some(format!(
@@ -41688,6 +41778,67 @@ fn compact_offset_scaled_add_sub_helper_line(
     ))
 }
 
+fn compact_offset_scaled_sqrt_binary_store_helper_line(
+    target_index: usize,
+    value: &str,
+    scale: &str,
+    offset: &str,
+) -> Option<String> {
+    let sqrt_args = compact_ad_call_args(value, "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+
+    for (name, helper) in [
+        ("add", "store_offset_scaled_sqrt_add"),
+        ("sub", "store_offset_scaled_sqrt_sub"),
+    ] {
+        let Some(binary_args) = compact_ad_call_args(sqrt_args[0], name) else {
+            continue;
+        };
+        if binary_args.len() != 2 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(binary_args[0])?;
+        let right = compact_scratch_ad_value_index(binary_args[1])?;
+        return Some(format!(
+            "scratch.{helper}({target_index}, {left}, {right}, {scale}, {offset});"
+        ));
+    }
+
+    None
+}
+
+fn compact_div_from_scalar_sqrt_binary_store_helper_line(
+    target_index: usize,
+    scalar: &str,
+    value: &str,
+) -> Option<String> {
+    let sqrt_args = compact_ad_call_args(value, "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+
+    for (name, helper) in [
+        ("add", "store_div_from_scalar_sqrt_add"),
+        ("sub", "store_div_from_scalar_sqrt_sub"),
+    ] {
+        let Some(binary_args) = compact_ad_call_args(sqrt_args[0], name) else {
+            continue;
+        };
+        if binary_args.len() != 2 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(binary_args[0])?;
+        let right = compact_scratch_ad_value_index(binary_args[1])?;
+        return Some(format!(
+            "scratch.{helper}({target_index}, {scalar}, {left}, {right});"
+        ));
+    }
+
+    None
+}
+
 fn compact_mul_sub_from_scalar_scaled_sub_rhs_scaled_output_arg(
     value: &str,
 ) -> Option<(usize, &str, usize, &str, usize, &str, &str, &str)> {
@@ -41750,6 +41901,14 @@ fn compact_nested_offset_store_helper_call(target_index: usize, value: &str) -> 
         if inner_args.len() != 2 {
             return None;
         }
+        if let Some(line) = compact_offset_scaled_sqrt_binary_store_helper_line(
+            target_index,
+            inner_args[0],
+            inner_args[1],
+            offset,
+        ) {
+            return Some(line);
+        }
         if let Some((binary, left, right)) = compact_direct_binary_scratch_args(inner_args[0]) {
             return Some(format!(
                 "scratch.store_offset_scaled_{binary}({target_index}, {left}, {right}, {}, {offset});",
@@ -41785,6 +41944,12 @@ fn compact_nested_offset_store_helper_call(target_index: usize, value: &str) -> 
             ));
         }
         return None;
+    }
+
+    if let Some(line) =
+        compact_offset_scaled_sqrt_binary_store_helper_line(target_index, inner, "1.0", offset)
+    {
+        return Some(line);
     }
 
     if let Some(inner_args) = compact_ad_call_args(inner, "offset") {

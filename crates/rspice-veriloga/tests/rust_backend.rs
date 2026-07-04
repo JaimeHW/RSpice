@@ -6873,6 +6873,10 @@ fn rust_backend_uses_compact_scaled_general_unary_ad_store_helpers() {
         "{support}"
     );
     assert!(
+        support.contains("fn store_offset_scaled_sqrt_add("),
+        "{support}"
+    );
+    assert!(
         support.contains("fn store_scaled_limexp_ad(&mut self, index: usize, value: AdValue"),
         "{support}"
     );
@@ -6900,17 +6904,25 @@ fn rust_backend_uses_compact_scaled_general_unary_ad_store_helpers() {
     );
     assert!(stamp.contains("s.store_scaled_exp_ad("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_ln_ad("), "{stamp}");
-    assert!(stamp.contains("s.store_scaled_sqrt_ad("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_offset_scaled_sqrt_add(4, 0, 1, p.p0, 0.0);"),
+        "{stamp}"
+    );
     assert!(stamp.contains("s.store_scaled_limexp_ad("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_limited_exp_ad("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_abs_ad("), "{stamp}");
     assert!(stamp.contains("s.store_scaled_powf_ad("), "{stamp}");
-    assert!(stamp.contains("s.store_offset_scaled_ad("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_offset_scaled_sqrt_add(9, 0, 1, (-p.p0), ((p.p1) * (p.p0)));"),
+        "{stamp}"
+    );
     assert!(
         stamp.contains("s.store_scaled_div_from_scalar_ad("),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_scaled_sqrt_ad(4,"), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_scaled_ad(9,"), "{stamp}");
     assert!(
         !stamp.contains("s.store_scaled_sub_from_scalar_ad("),
         "{stamp}"
@@ -7191,6 +7203,10 @@ fn rust_backend_uses_compact_offset_general_ad_store_helpers() {
         "{support}"
     );
     assert!(
+        support.contains("fn store_offset_scaled_sqrt_add("),
+        "{support}"
+    );
+    assert!(
         support.contains("fn store_offset_ln_ad(&mut self, index: usize, value: AdValue"),
         "{support}"
     );
@@ -7220,7 +7236,10 @@ fn rust_backend_uses_compact_offset_general_ad_store_helpers() {
     assert!(stamp.contains("s.store_offset_mul_ad("), "{stamp}");
     assert!(stamp.contains("s.store_offset_div_ad("), "{stamp}");
     assert!(stamp.contains("s.store_offset_exp_ad("), "{stamp}");
-    assert!(stamp.contains("s.store_offset_sqrt_ad("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_offset_scaled_sqrt_add(8, 0, 1, 1.0, p.p1);"),
+        "{stamp}"
+    );
     assert!(stamp.contains("s.store_offset_ln_ad("), "{stamp}");
     assert!(stamp.contains("s.store_offset_limited_exp_ad("), "{stamp}");
     assert!(stamp.contains("s.store_offset_powf_ad("), "{stamp}");
@@ -7233,6 +7252,7 @@ fn rust_backend_uses_compact_offset_general_ad_store_helpers() {
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_offset_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_sqrt_ad(8,"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -7331,6 +7351,7 @@ fn rust_backend_uses_compact_div_from_scalar_general_ad_store_helpers() {
         "fn store_div_from_scalar_mul_ad(&mut self, index: usize, scalar: f64, left: AdValue",
         "fn store_div_from_scalar_div_ad(&mut self, index: usize, scalar: f64, left: AdValue",
         "fn store_div_from_scalar_sqrt_ad(&mut self, index: usize, scalar: f64, value: AdValue",
+        "fn store_div_from_scalar_sqrt_add(",
         "fn store_div_from_scalar_square_ad(&mut self, index: usize, scalar: f64, value: AdValue",
         "fn store_div_from_scalar_sub_from_scalar_ad(&mut self, index: usize, scalar: f64, denominator_scalar: f64, value: AdValue",
         "fn store_div_from_scalar_div_from_scalar_ad(&mut self, index: usize, scalar: f64, denominator_scalar: f64, value: AdValue",
@@ -7350,7 +7371,7 @@ fn rust_backend_uses_compact_div_from_scalar_general_ad_store_helpers() {
         "s.store_div_from_scalar_sub_ad(",
         "s.store_div_from_scalar_mul_ad(",
         "s.store_div_from_scalar_div_ad(",
-        "s.store_div_from_scalar_sqrt_ad(",
+        "s.store_div_from_scalar_sqrt_add(",
         "s.store_div_from_scalar_square_ad(",
         "s.store_div_from_scalar_sub_from_scalar_ad(",
         "s.store_div_from_scalar_div_from_scalar_ad(",
@@ -7363,6 +7384,10 @@ fn rust_backend_uses_compact_div_from_scalar_general_ad_store_helpers() {
         assert!(stamp.contains(call), "{stamp}");
     }
     assert!(!stamp.contains("s.store_div_from_scalar_ad("), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_div_from_scalar_sqrt_ad(8,"),
+        "{stamp}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -8288,6 +8313,14 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{support}"
     );
     assert!(
+        support.contains("fn store_offset_scaled_sqrt_add("),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_div_from_scalar_sqrt_add("),
+        "{support}"
+    );
+    assert!(
         support.contains(
             "pub(crate) fn store_add_scaled_inputs4_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64)"
         ),
@@ -8316,23 +8349,19 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
     assert!(stamp.contains("s.store_sqrt_add(6, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_exp_add(7, 0, 1);"), "{stamp}");
     assert!(
-        stamp.contains("s.store_scaled_sqrt_ad(8, A::add(s.ad_value(0), s.ad_value(1)), p.p0);"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(8, 0, 1, p.p0, 0.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_offset_sqrt_ad(9, A::add(s.ad_value(0), s.ad_value(1)), p.p1);"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(9, 0, 1, 1.0, p.p1);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains(
-            "s.store_sub_from_scalar_ad(10, p.p0, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))));"
-        ),
+        stamp.contains("s.store_offset_scaled_sqrt_add(10, 0, 1, -1.0, p.p0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains(
-            "s.store_div_from_scalar_sqrt_ad(11, p.p0, A::add(s.ad_value(0), s.ad_value(1)));"
-        ),
+        stamp.contains("s.store_div_from_scalar_sqrt_add(11, p.p0, 0, 1);"),
         "{stamp}"
     );
     assert!(
@@ -8340,9 +8369,64 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_neg_ad(13, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))));"),
+        stamp.contains("s.store_offset_scaled_sqrt_add(13, 0, 1, -1.0, 0.0);"),
         "{stamp}"
     );
+    assert!(!stamp.contains("s.store_scaled_sqrt_ad(8,"), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_sqrt_ad(9,"), "{stamp}");
+    assert!(!stamp.contains("s.store_sub_from_scalar_ad(10,"), "{stamp}");
+    assert!(
+        !stamp.contains("s.store_div_from_scalar_sqrt_ad(11,"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_neg_ad(13,"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_offset_scaled_sqrt_binary_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_offset_scaled_sqrt_binary_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact offset-scaled sqrt binary stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_offset_scaled_sqrt_sub("),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_offset_scaled_sqrt_sub(2, 0, 1, p.p0, 0.0);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_offset_scaled_sqrt_sub(3, 0, 1, 1.0, p.p1);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_offset_scaled_sqrt_sub(5, 0, 1, p.p0, p.p1);"),
+        "{stamp}"
+    );
+    assert_eq!(
+        stamp.matches("s.store_offset_scaled_sqrt_sub(").count(),
+        4,
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_scaled_sqrt_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_offset_sqrt_ad("), "{stamp}");
+    assert!(!stamp.contains("s.store_scaled_offset_ad("), "{stamp}");
+    assert!(!stamp.contains("A::sqrt(A::sub("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -18105,6 +18189,32 @@ module compact_general_ad_store(p, n);
         m = pow(sqrt(a + b), gain);
         o = -sqrt(a + b);
         I(p, n) <+ c + d + e + f + g + h + i + j + k + l + m + o;
+    end
+endmodule
+"#
+}
+
+fn compact_offset_scaled_sqrt_binary_source() -> &'static str {
+    r#"
+module compact_offset_scaled_sqrt_binary(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real offset = 1.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = sqrt(a - b) * gain;
+        d = sqrt(a - b) + offset;
+        e = (sqrt(a - b) + offset) * gain;
+        f = (sqrt(a - b) * gain) + offset;
+        I(p, n) <+ c + d + e + f;
     end
 endmodule
 "#
