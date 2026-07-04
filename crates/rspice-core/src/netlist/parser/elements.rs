@@ -494,8 +494,19 @@ fn parse_passive_tail(
                             });
                         }
                     }
-                } else if tail.model.is_none() && tail.value.is_none() && tail.value_expr.is_none()
+                } else if let Some(param_value) = params.get(&raw_name) {
+                    if defer_simple_param_refs {
+                        tail.value_expr = Some(raw_name);
+                        tail.value = None;
+                    } else {
+                        tail.value = Some(param_value);
+                        tail.value_expr = None;
+                    }
+                } else if let Ok(param_value) = crate::netlist::lexer::parse_spice_value(&raw_name)
                 {
+                    tail.value = Some(param_value);
+                    tail.value_expr = None;
+                } else if tail.model.is_none() {
                     tail.model = Some(raw_name);
                 } else {
                     return Err(ParseError::Syntax {
@@ -509,6 +520,16 @@ fn parse_passive_tail(
             TokenKind::Number(_) => {
                 tail.value = Some(expect_value(stream, line_num, params)?);
                 consume_passive_unit_word(stream, unit_words);
+            }
+            TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
+                if defer_simple_param_refs && matches!(stream.peek().kind, TokenKind::Expression(_))
+                {
+                    tail.value_expr = take_value_expression_string(stream, params);
+                    tail.value = None;
+                } else {
+                    tail.value = Some(expect_value(stream, line_num, params)?);
+                    tail.value_expr = None;
+                }
             }
             _ => {
                 return Err(ParseError::Syntax {

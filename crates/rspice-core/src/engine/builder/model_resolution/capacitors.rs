@@ -300,6 +300,20 @@ mod tests {
     }
 
     #[test]
+    fn high_instance_temp_is_celsius_not_kelvin() {
+        let c = resolve_capacitor_from_source(
+            "hot cap\nC1 a 0 cmod 1u temp=727\n.model cmod C TC1=1.77m TC2=-0.63u\n.end\n",
+            "C1",
+        );
+        let dt = 700.0;
+        let expected = 1e-6 * (1.0 + 1.77e-3 * dt - 0.63e-6 * dt * dt);
+        assert!(
+            ((c - expected) / expected).abs() < 1e-12,
+            "resolved {c}, expected {expected}"
+        );
+    }
+
+    #[test]
     fn xyce_semiconductor_geometry_uses_model_c_as_multiplier() {
         let netlist = crate::netlist::Netlist::parse(
             "xyce geom cap\nC1 a 0 cmod L=20u W=1u\n.model cmod C CJ=1 C=2\n.end\n",

@@ -12277,11 +12277,7 @@ impl XyceTestRunner {
     }
 
     fn normalize_temperature_param_to_celsius(value: Value) -> Value {
-        if value > 200.0 {
-            crate::analysis::temperature::kelvin_to_celsius(value)
-        } else {
-            value
-        }
+        value
     }
 
     fn step_commands(netlist: &Netlist) -> Result<Vec<StepCommand>, String> {

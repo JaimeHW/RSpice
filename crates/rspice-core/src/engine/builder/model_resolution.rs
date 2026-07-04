@@ -42,11 +42,9 @@ pub(super) fn instance_param(params: &[(String, f64)], names: &[&str]) -> Option
 }
 
 fn normalize_temperature_param_to_celsius(value: f64) -> f64 {
-    if value > 200.0 {
-        crate::analysis::temperature::kelvin_to_celsius(value)
-    } else {
-        value
-    }
+    // Netlist TEMP/TNOM parameters are specified in Celsius. Device internals
+    // convert to Kelvin explicitly at their API boundary.
+    value
 }
 
 fn set_temperature_scalars(ctx: &mut crate::netlist::ParamContext, temp_c: f64, tnom_c: f64) {

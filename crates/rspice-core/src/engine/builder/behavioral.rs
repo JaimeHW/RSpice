@@ -54,11 +54,9 @@ fn expression_references_runtime_quantity(expr: &crate::expr::Expr) -> bool {
 }
 
 pub(in crate::engine::builder) fn temperature_param_to_celsius(value: f64) -> f64 {
-    if value > 200.0 {
-        crate::analysis::temperature::kelvin_to_celsius(value)
-    } else {
-        value
-    }
+    // Netlist TEMP values are Celsius; Kelvin values enter through solver
+    // configuration, not instance parameters.
+    value
 }
 
 pub(in crate::engine::builder) fn effective_instance_temperature_celsius(

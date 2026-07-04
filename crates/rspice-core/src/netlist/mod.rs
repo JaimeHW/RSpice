@@ -5902,6 +5902,88 @@ mod tests {
     }
 
     #[test]
+    fn passive_model_and_unit_suffix_value_orders_parse() {
+        let netlist = Netlist::parse(
+            "modeled passive value ordering\n\
+             C1 1 0 cmod 1uF IC=1 TEMP=727\n\
+             C2 2 0 2uF cmod\n\
+             L1 3 0 lmod 10mH TEMP=90\n\
+             L2 4 0 20mH lmod\n\
+             .model cmod C TC1=1m\n\
+             .model lmod L TC2=1u\n\
+             .end\n",
+        )
+        .expect("capacitor and inductor model/value ordering should parse");
+
+        let mut caps = netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Capacitor {
+                    value,
+                    model,
+                    initial_voltage,
+                    instance_params,
+                    ..
+                } => Some((
+                    element.name.as_str(),
+                    *value,
+                    model.as_deref(),
+                    *initial_voltage,
+                    instance_params,
+                )),
+                _ => None,
+            });
+        let c1 = caps.next().expect("C1 parsed");
+        assert_eq!(c1.0, "C1");
+        assert!((c1.1 - 1.0e-6).abs() < 1.0e-18, "C1 value {}", c1.1);
+        assert!(c1.2.is_some_and(|model| model.eq_ignore_ascii_case("cmod")));
+        assert_eq!(c1.3, Some(1.0));
+        assert!(
+            c1.4.iter()
+                .any(|(name, value)| name == "TEMP" && (*value - 727.0).abs() < 1.0e-12),
+            "C1 TEMP instance parameter should be retained: {:?}",
+            c1.4
+        );
+        let c2 = caps.next().expect("C2 parsed");
+        assert_eq!(c2.0, "C2");
+        assert!((c2.1 - 2.0e-6).abs() < 1.0e-18, "C2 value {}", c2.1);
+        assert!(c2.2.is_some_and(|model| model.eq_ignore_ascii_case("cmod")));
+
+        let mut inds = netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Inductor {
+                    value,
+                    model,
+                    instance_params,
+                    ..
+                } => Some((
+                    element.name.as_str(),
+                    *value,
+                    model.as_deref(),
+                    instance_params,
+                )),
+                _ => None,
+            });
+        let l1 = inds.next().expect("L1 parsed");
+        assert_eq!(l1.0, "L1");
+        assert!((l1.1 - 10.0e-3).abs() < 1.0e-15, "L1 value {}", l1.1);
+        assert!(l1.2.is_some_and(|model| model.eq_ignore_ascii_case("lmod")));
+        assert!(
+            l1.3.iter()
+                .any(|(name, value)| name == "TEMP" && (*value - 90.0).abs() < 1.0e-12),
+            "L1 TEMP instance parameter should be retained: {:?}",
+            l1.3
+        );
+        let l2 = inds.next().expect("L2 parsed");
+        assert_eq!(l2.0, "L2");
+        assert!((l2.1 - 20.0e-3).abs() < 1.0e-15, "L2 value {}", l2.1);
+        assert!(l2.2.is_some_and(|model| model.eq_ignore_ascii_case("lmod")));
+    }
+
+    #[test]
     fn subckt_resistor_bare_r_parameter_flattens_as_value() {
         let netlist = Netlist::parse(
             "subckt bare R parameter value\n\
