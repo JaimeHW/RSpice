@@ -661,6 +661,11 @@ fn test_xyce_mid_certification_transient_cases_run() {
 
     for (relative, expected_contract, wrapper_origin) in [
         (
+            "Netlists/Certification_Tests/BUG_263/bug_263.cir",
+            "wrapper_static_prn_tran",
+            true,
+        ),
+        (
             "Netlists/Certification_Tests/BUG_338_SON/bug_338.cir",
             "wrapper_static_prn_tran",
             true,
@@ -1300,7 +1305,10 @@ fn test_xyce_default_prn_transient_output_wrapper_cases_run_natively() {
     for relative in [
         "Netlists/Output/TRAN/tran-gnuplot.cir",
         "Netlists/Output/TRAN/tran-prn.cir",
+        "Netlists/Output/TRAN/tran-prn-comma.cir",
         "Netlists/Output/TRAN/tran-prn-noindex.cir",
+        "Netlists/Output/TRAN/tran-prn-precision.cir",
+        "Netlists/Output/TRAN/tran-prn-width.cir",
         "Netlists/Output/TRAN/tran-splot.cir",
         "Netlists/Output/TRAN/tran-touchstone-defaults-to-prn.cir",
     ] {

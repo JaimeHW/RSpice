@@ -2724,8 +2724,11 @@ impl XyceTestRunner {
         matches!(
             Self::normalize_manifest_key(relative_path).as_str(),
             "netlists/output/tran/tran-gnuplot.cir"
+                | "netlists/output/tran/tran-prn-comma.cir"
                 | "netlists/output/tran/tran-prn.cir"
                 | "netlists/output/tran/tran-prn-noindex.cir"
+                | "netlists/output/tran/tran-prn-precision.cir"
+                | "netlists/output/tran/tran-prn-width.cir"
                 | "netlists/output/tran/tran-splot.cir"
                 | "netlists/output/tran/tran-touchstone-defaults-to-prn.cir"
         ) && Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
@@ -13034,8 +13037,22 @@ impl XyceTestRunner {
             XyceStaticTranContract::PlainCsd | XyceStaticTranContract::WrapperCsd => {
                 Self::parse_tran_csd_file(path)
             }
-            _ => Self::parse_prn_file(path),
+            _ => Self::parse_tran_prn_or_legacy_probe_file(path),
         }
+    }
+
+    fn parse_tran_prn_or_legacy_probe_file(path: &Path) -> Result<XycePrnTable, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_tran_prn_or_legacy_probe_table(&content)
+    }
+
+    fn parse_tran_prn_or_legacy_probe_table(content: &str) -> Result<XycePrnTable, String> {
+        let first_nonempty = content.lines().map(str::trim).find(|line| !line.is_empty());
+        if first_nonempty.is_some_and(|line| line.eq_ignore_ascii_case("#H")) {
+            return Self::parse_tran_csd_table(content);
+        }
+        Self::parse_prn_table(content)
     }
 
     fn parse_csv_file(path: &Path) -> Result<XycePrnTable, String> {
@@ -16062,6 +16079,26 @@ COMPLEXVALUES='NO' SWEEPVAR='Time'
 
         assert_eq!(table.columns, vec!["TIME", "V(1)", "I(V1)"]);
         assert_eq!(table.rows, vec![vec![0.2, 0.2, -0.2]]);
+    }
+
+    #[test]
+    fn transient_prn_reference_parser_accepts_legacy_probe_content() {
+        let table = XyceTestRunner::parse_tran_prn_or_legacy_probe_table(
+            "\
+#H
+SOURCE='Xyce' VERSION='1.1'
+COMPLEXVALUES='NO' SWEEPVAR='Time'
+#N
+'V(1)' 'V(2)'
+#C 1.00000000e-06 2
+5.00000000e-01:1 2.50000000e-01:2
+#;
+",
+        )
+        .expect("legacy FORMAT=PROBE content can be carried in a .prn oracle");
+
+        assert_eq!(table.columns, vec!["TIME", "V(1)", "V(2)"]);
+        assert_eq!(table.rows, vec![vec![1.0e-6, 0.5, 0.25]]);
     }
 
     #[test]
