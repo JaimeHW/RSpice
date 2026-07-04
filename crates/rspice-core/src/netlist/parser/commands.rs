@@ -62,6 +62,17 @@ pub(super) fn parse_command(
         }
         ".AC" => {
             let var_str = expect_ident(stream, line_num)?;
+            if var_str.eq_ignore_ascii_case("DATA") {
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: ".AC DATA requires DATA=<table-name>".to_string(),
+                    });
+                }
+                let table_name = expect_ident(stream, line_num)?;
+                analyses.push(AnalysisCommand::AcData { table_name });
+                return Ok(());
+            }
             let variation = match var_str.as_str() {
                 "LIN" => FreqVariation::Lin,
                 "OCT" => FreqVariation::Oct,

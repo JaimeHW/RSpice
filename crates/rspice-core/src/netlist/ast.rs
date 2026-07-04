@@ -1461,6 +1461,10 @@ pub enum AnalysisCommand {
         stop_freq: Value,
     },
 
+    /// Xyce table-driven AC analysis: `.AC DATA=<table>`, where the table
+    /// supplies an explicit `FREQ` column.
+    AcData { table_name: String },
+
     /// S-parameter analysis: .SP DEC|LIN|OCT np fstart fstop [donoise]
     Sp {
         variation: FreqVariation,

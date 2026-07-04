@@ -544,9 +544,7 @@ pub(crate) fn references_data_table(line: &str) -> bool {
 
 fn is_sweep_analysis(line: &str) -> bool {
     let token = first_token(line);
-    token.eq_ignore_ascii_case(".dc")
-        || token.eq_ignore_ascii_case(".ac")
-        || token.eq_ignore_ascii_case(".tran")
+    token.eq_ignore_ascii_case(".dc") || token.eq_ignore_ascii_case(".tran")
 }
 
 /// The table name referenced by `DATA=<name>` on this line, if any.

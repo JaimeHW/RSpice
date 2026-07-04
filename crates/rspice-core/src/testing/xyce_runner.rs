@@ -18,8 +18,8 @@ use crate::expr::{Expr, parse_expression_strict};
 use crate::netlist::expr::ComplexValue as ExprComplexValue;
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
-    AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, FreqVariation, Netlist,
-    NetlistParseOptions, StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
+    AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
@@ -612,17 +612,14 @@ struct XyceTransientProblemSize {
     node_count: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct XyceAcAnalysis {
-    variation: FreqVariation,
-    points: usize,
-    start_freq: Value,
-    stop_freq: Value,
+    frequencies: Vec<Value>,
 }
 
 impl XyceAcAnalysis {
-    fn frequencies(self) -> Vec<Value> {
-        ac_sweep_frequencies(self.variation, self.points, self.start_freq, self.stop_freq)
+    fn frequencies(&self) -> Vec<Value> {
+        self.frequencies.clone()
     }
 }
 
@@ -8022,10 +8019,7 @@ impl XyceTestRunner {
     ) -> Result<(), String> {
         let frequencies = ac.frequencies();
         if frequencies.is_empty() {
-            return Err(format!(
-                ".AC sweep has invalid bounds or point count: {:?} {} {} {}",
-                ac.variation, ac.points, ac.start_freq, ac.stop_freq
-            ));
+            return Err(".AC analysis produced no frequency points".to_string());
         }
 
         for probe in &print.probes {
@@ -12676,33 +12670,64 @@ impl XyceTestRunner {
     }
 
     fn single_ac_analysis(netlist: &Netlist) -> Result<XyceAcAnalysis, String> {
-        let analyses = netlist
-            .analyses
-            .iter()
-            .filter_map(|analysis| match analysis {
+        let mut analyses = Vec::new();
+        for analysis in &netlist.analyses {
+            match analysis {
                 AnalysisCommand::Ac {
                     variation,
                     points,
                     start_freq,
                     stop_freq,
-                } => Some(XyceAcAnalysis {
-                    variation: *variation,
-                    points: *points,
-                    start_freq: *start_freq,
-                    stop_freq: *stop_freq,
+                } => analyses.push(XyceAcAnalysis {
+                    frequencies: ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq),
                 }),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+                AnalysisCommand::AcData { table_name } => analyses.push(XyceAcAnalysis {
+                    frequencies: Self::ac_data_table_frequencies(netlist, table_name)?,
+                }),
+                _ => {}
+            }
+        }
 
         match analyses.len() {
             0 => Err("deck has no .AC analysis for static .PRINT AC output".to_string()),
-            1 => Ok(analyses[0]),
+            1 => Ok(analyses[0].clone()),
             _ => Err(
                 "deck has multiple .AC analyses; multi-analysis AC comparison is not implemented yet"
                     .to_string(),
             ),
         }
+    }
+
+    fn ac_data_table_frequencies(
+        netlist: &Netlist,
+        table_name: &str,
+    ) -> Result<Vec<Value>, String> {
+        let table = netlist
+            .data_tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case(table_name))
+            .ok_or_else(|| format!(".AC DATA references unknown .DATA table '{table_name}'"))?;
+        let freq_column = table
+            .params
+            .iter()
+            .position(|param| param.eq_ignore_ascii_case("FREQ"))
+            .ok_or_else(|| format!(".AC DATA table '{}' has no FREQ column", table.name))?;
+        let frequencies = table
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(row_index, row)| {
+                row.get(freq_column).copied().ok_or_else(|| {
+                    format!(
+                        ".AC DATA table '{}' row {} does not contain FREQ column {}",
+                        table.name,
+                        row_index + 1,
+                        freq_column + 1
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(frequencies)
     }
 
     fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
@@ -16053,6 +16078,32 @@ interval output
             XyceVoltageAccessor::Decibels
         );
         assert!(XyceTestRunner::parse_voltage_probe("VX(A)").is_none());
+    }
+
+    #[test]
+    fn ac_data_table_analysis_resolves_frequency_column() {
+        let netlist = Netlist::parse(
+            "\
+xyce ac data
+I1 1 0 AC 1
+R1 1 0 1k
+.AC DATA=eric
+.DATA eric
++ FREQ unused
++ 1 7
++ 10 8
++ 100 9
+.ENDDATA
+.PRINT AC V(1)
+.END
+",
+        )
+        .expect(".AC DATA deck should parse");
+
+        let ac = XyceTestRunner::single_ac_analysis(&netlist)
+            .expect(".AC DATA table should resolve to a frequency list");
+
+        assert_eq!(ac.frequencies(), vec![1.0, 10.0, 100.0]);
     }
 
     #[test]

@@ -4823,6 +4823,37 @@ mod tests {
     }
 
     #[test]
+    fn ac_data_table_analysis_is_retained() {
+        let netlist = Netlist::parse(
+            "ac data table\n\
+             I1 1 0 AC 1\n\
+             R1 1 0 1k\n\
+             .AC DATA=pts\n\
+             .DATA pts\n\
+             + FREQ\n\
+             + 1\n\
+             + 10\n\
+             .ENDDATA\n\
+             .PRINT AC V(1)\n\
+             .END\n",
+        )
+        .expect(".AC DATA table should parse");
+
+        let table = netlist
+            .data_tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case("pts"))
+            .expect(".DATA table retained");
+        assert_eq!(table.params, vec!["FREQ"]);
+        assert_eq!(table.rows, vec![vec![1.0], vec![10.0]]);
+
+        assert!(netlist.analyses.iter().any(|analysis| matches!(
+            analysis,
+            AnalysisCommand::AcData { table_name } if table_name.eq_ignore_ascii_case("pts")
+        )));
+    }
+
+    #[test]
     fn step_linear_source_target_without_type_keyword_parses() {
         let netlist = Netlist::parse(
             "xyce source step\n\

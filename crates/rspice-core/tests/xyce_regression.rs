@@ -369,6 +369,7 @@ fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
         "Netlists/COMPLEX_NUM/test3.cir",
         "Netlists/Certification_Tests/BUG_401_SON/bug_401.cir",
         "Netlists/Certification_Tests/BUG_407_SON/bug_407_ac.cir",
+        "Netlists/Certification_Tests/BUG_1035_SON/RC_simple.cir",
         "Netlists/Certification_Tests/BUG_701_SON/ac_files.cir",
         "Netlists/Output/AC/ac-phase-in-radians.cir",
         "Netlists/Output/AC/ac-prn.cir",
