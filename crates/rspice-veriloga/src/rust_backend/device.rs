@@ -4503,6 +4503,62 @@ fn stamp() {
     }
 
     #[test]
+    fn rewrites_branch_current_ad_rvalue_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_branch_current",
+            "fn store_scaled_branch_current",
+            "fn store_offset_branch_current",
+            "fn store_scaled_offset_branch_current",
+            "fn store_abs_branch_current",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(30, AdValue::branch_current(ctx, branches, 0));
+    scratch.store_ad_value(31, AdValue::scale(AdValue::branch_current(ctx, branches, 1), params.scale));
+    scratch.store_ad_value(32, AdValue::neg(AdValue::branch_current(ctx, branches, 2)));
+    scratch.store_ad_value(33, AdValue::offset(AdValue::branch_current(ctx, branches, 3), params.offset));
+    scratch.store_ad_value(34, AdValue::scaled_offset(AdValue::branch_current(ctx, branches, 4), params.offset, params.scale));
+    scratch.store_ad_value(35, AdValue::abs(AdValue::branch_current(ctx, branches, 5)));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains("s.store_branch_current(30, ctx, branches, 0);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_scaled_branch_current(31, ctx, branches, 1, p.scale);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_scaled_branch_current(32, ctx, branches, 2, -1.0);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_offset_branch_current(33, ctx, branches, 3, p.offset);"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_scaled_offset_branch_current(34, ctx, branches, 4, p.offset, p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_abs_branch_current(35, ctx, branches, 5);"),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+        assert!(!compact.contains("AdValue::branch_current"), "{compact}");
+    }
+
+    #[test]
     fn rewrites_ddt_ad_rvalue_stores_as_direct_stores() {
         let source = r#"
 fn stamp() {
@@ -16350,6 +16406,43 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
         "        if let Some(node) = pos { self.node_derivatives[index][node] += scale; }",
         "        if let Some(node) = neg { self.node_derivatives[index][node] -= scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_unary_branch_current_scaled(&mut self, index: usize, slot: usize, value: f64, derivative_scale: f64) {",
+        "        self.values[index] = value;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        self.branch_derivatives[index][slot] = derivative_scale;",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_branch_current(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, branches: &[usize; Instance::BRANCH_COUNT], slot: usize) {",
+        "        self.store_scaled_branch_current(index, ctx, branches, slot, 1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_branch_current(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, branches: &[usize; Instance::BRANCH_COUNT], slot: usize, scale: f64) {",
+        "        let value = ctx.branch_current(branches[slot]) * scale;",
+        "        self.store_unary_branch_current_scaled(index, slot, value, scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_offset_branch_current(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, branches: &[usize; Instance::BRANCH_COUNT], slot: usize, offset: f64) {",
+        "        let value = ctx.branch_current(branches[slot]) + offset;",
+        "        self.store_unary_branch_current_scaled(index, slot, value, 1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_offset_branch_current(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, branches: &[usize; Instance::BRANCH_COUNT], slot: usize, offset: f64, scale: f64) {",
+        "        let value = (ctx.branch_current(branches[slot]) + offset) * scale;",
+        "        self.store_unary_branch_current_scaled(index, slot, value, scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_abs_branch_current(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, branches: &[usize; Instance::BRANCH_COUNT], slot: usize) {",
+        "        let raw = ctx.branch_current(branches[slot]);",
+        "        self.store_unary_branch_current_scaled(index, slot, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });",
         "    }",
         "",
         "    #[inline]",
@@ -33045,6 +33138,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         return Some(line);
     }
 
+    if let Some(line) = compact_branch_current_store_helper_call(target_index, value) {
+        return Some(line);
+    }
     if let Some(line) = compact_voltage_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -34673,6 +34769,127 @@ fn compact_runtime_branches_arg(value: &str) -> Option<String> {
         "self.branches" | "&self.branches" => Some("self.branches".to_string()),
         _ => None,
     }
+}
+
+fn compact_branch_current_store_helper_call(target_index: usize, value: &str) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "branch_current") {
+        return compact_branch_current_store_helper_line(target_index, &args, None);
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "scale") {
+        if args.len() != 2 {
+            return None;
+        }
+        let branch_args = compact_ad_call_args(args[0], "branch_current")?;
+        return compact_branch_current_store_helper_line(target_index, &branch_args, Some(args[1]));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "neg") {
+        if args.len() != 1 {
+            return None;
+        }
+        let branch_args = compact_ad_call_args(args[0], "branch_current")?;
+        return compact_branch_current_store_helper_line(target_index, &branch_args, Some("-1.0"));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "offset") {
+        if args.len() != 2 {
+            return None;
+        }
+        let branch_args = compact_ad_call_args(args[0], "branch_current")?;
+        return compact_offset_branch_current_store_helper_line(
+            target_index,
+            &branch_args,
+            args[1],
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "scaled_offset") {
+        if args.len() != 3 {
+            return None;
+        }
+        let branch_args = compact_ad_call_args(args[0], "branch_current")?;
+        return compact_scaled_offset_branch_current_store_helper_line(
+            target_index,
+            &branch_args,
+            args[1],
+            args[2],
+        );
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "abs") {
+        if args.len() != 1 {
+            return None;
+        }
+        let branch_args = compact_ad_call_args(args[0], "branch_current")?;
+        return compact_abs_branch_current_store_helper_line(target_index, &branch_args);
+    }
+
+    None
+}
+
+fn compact_branch_current_store_helper_line(
+    target_index: usize,
+    args: &[&str],
+    scale: Option<&str>,
+) -> Option<String> {
+    if args.len() != 3 {
+        return None;
+    }
+    let helper = if let Some(scale) = scale {
+        format!(
+            "scratch.store_scaled_branch_current({target_index}, {}, {}, {}, {scale});",
+            args[0], args[1], args[2]
+        )
+    } else {
+        format!(
+            "scratch.store_branch_current({target_index}, {}, {}, {});",
+            args[0], args[1], args[2]
+        )
+    };
+    Some(helper)
+}
+
+fn compact_offset_branch_current_store_helper_line(
+    target_index: usize,
+    args: &[&str],
+    offset: &str,
+) -> Option<String> {
+    if args.len() != 3 {
+        return None;
+    }
+    Some(format!(
+        "scratch.store_offset_branch_current({target_index}, {}, {}, {}, {offset});",
+        args[0], args[1], args[2]
+    ))
+}
+
+fn compact_scaled_offset_branch_current_store_helper_line(
+    target_index: usize,
+    args: &[&str],
+    offset: &str,
+    scale: &str,
+) -> Option<String> {
+    if args.len() != 3 {
+        return None;
+    }
+    Some(format!(
+        "scratch.store_scaled_offset_branch_current({target_index}, {}, {}, {}, {offset}, {scale});",
+        args[0], args[1], args[2]
+    ))
+}
+
+fn compact_abs_branch_current_store_helper_line(
+    target_index: usize,
+    args: &[&str],
+) -> Option<String> {
+    if args.len() != 3 {
+        return None;
+    }
+    Some(format!(
+        "scratch.store_abs_branch_current({target_index}, {}, {}, {});",
+        args[0], args[1], args[2]
+    ))
 }
 
 fn compact_voltage_store_helper_call(target_index: usize, value: &str) -> Option<String> {

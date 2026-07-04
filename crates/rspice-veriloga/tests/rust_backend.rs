@@ -14296,7 +14296,11 @@ fn rust_backend_lowers_forward_potential_branch_current_probe() {
         .contents
         .as_str();
 
-    assert!(stamp.contains("A::branch_current"), "{stamp}");
+    assert!(
+        stamp.contains("s.store_branch_current(0, ctx, branches, 0);"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::branch_current"), "{stamp}");
 }
 
 #[test]
@@ -14378,7 +14382,11 @@ fn rust_backend_propagates_branch_current_axis_through_assignment() {
         !stamp.contains("GeneratedDerivative::branch(branches[0]"),
         "{stamp}"
     );
-    assert!(stamp.contains("A::branch_current"), "{stamp}");
+    assert!(
+        stamp.contains("s.store_branch_current(0, ctx, branches, 0);"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::branch_current"), "{stamp}");
     assert!(stamp.contains("p.p0"), "{stamp}");
 }
 
