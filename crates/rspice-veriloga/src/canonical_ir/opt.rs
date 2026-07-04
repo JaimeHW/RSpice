@@ -1367,6 +1367,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             .iter()
             .map(|(variable, limit)| format!("{}@{limit}", self.trace_variable_label(*variable)))
             .collect();
+        let local_dependencies: Vec<_> = entry
+            .local_dependencies
+            .iter()
+            .map(|variable| self.trace_variable_label(*variable))
+            .collect();
         let local_snapshots: Vec<_> = entry
             .local_snapshots
             .iter()
@@ -1386,13 +1391,14 @@ impl<'a> ScalarGraphBuilder<'a> {
             })
             .collect();
         eprintln!(
-            "OptIR {}: assignment snapshot target={} expr={} variables=[{}] value_snapshots=[{}] history_snapshots=[{}] local_snapshots=[{}]",
+            "OptIR {}: assignment snapshot target={} expr={} variables=[{}] value_snapshots=[{}] history_snapshots=[{}] local_dependencies=[{}] local_snapshots=[{}]",
             self.mir.module_name,
             self.trace_variable_label(target),
             expr.index(),
             variables.join(","),
             value_snapshots.join(","),
             history_snapshots.join(","),
+            local_dependencies.join(","),
             local_snapshots.join(",")
         );
     }
