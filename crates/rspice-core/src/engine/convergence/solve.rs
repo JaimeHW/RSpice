@@ -625,6 +625,72 @@ impl Engine {
             }
         }
 
+        if circuit.has_b3soi_dd_self_heating() && allow_source {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let thermal_state = circuit.nonlinear_state_snapshot();
+            circuit.set_b3soi_dd_self_heating_startup_disabled(true);
+            circuit.reset_b3soi_dd_operating_point_history();
+            let mut electrical_result = self.source_stepping_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            );
+            if electrical_result.is_err() && !abort.is_aborted() {
+                circuit.reset_b3soi_dd_operating_point_history();
+                if let Some(direct_electrical_solution) =
+                    self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                {
+                    electrical_result = Ok(direct_electrical_solution);
+                }
+            }
+            circuit.restore_nonlinear_state(thermal_state);
+            match electrical_result {
+                Ok(electrical_solution) => {
+                    let mut coupled_seed = electrical_solution;
+                    circuit.seed_b3soi_dd_self_heating_temperature_guess(&mut coupled_seed);
+                    circuit.prime_b3soi_dd_operating_point_from_solution(&coupled_seed);
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &coupled_seed, abort)
+                    {
+                        log::info!(
+                            "B3SOI electrothermal startup warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
+                    if let Some(restarted) = self.static_probe_restart_after_fallback(
+                        circuit,
+                        matrix,
+                        &coupled_seed,
+                        abort,
+                    ) {
+                        log::info!(
+                            "B3SOI electrothermal startup required static-probe polishing and is now accepted."
+                        );
+                        return Ok(restarted);
+                    }
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &coupled_seed,
+                        1.0,
+                    );
+                }
+                Err(e) => {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
+                    log::warn!(
+                        "B3SOI electrothermal startup failed with {}. Continuing with configured aids.",
+                        e
+                    );
+                }
+            }
+        }
+
         if allow_source {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);

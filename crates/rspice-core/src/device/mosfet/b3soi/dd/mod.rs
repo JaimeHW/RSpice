@@ -150,6 +150,9 @@ pub struct B3SoiDd {
     /// clamp (Vbs >= 0). Cleared during transient where the body may go
     /// negative. Set by the engine before each analysis phase.
     dc_mode: std::cell::Cell<bool>,
+    /// During electrothermal startup, solve the electrical floating-body
+    /// operating point with the allocated thermal node anchored at zero.
+    self_heating_startup_disabled: std::cell::Cell<bool>,
     /// Whether the limiter anchor has been seeded (first iterate uses the raw
     /// node solution).
     limit_anchor_valid: std::cell::Cell<bool>,
@@ -281,6 +284,7 @@ impl B3SoiDd {
             del_temp_limit_anchor: 0.0,
             terminal_limit_anchor: B3SoiDdTerminals::default(),
             dc_mode: std::cell::Cell::new(false),
+            self_heating_startup_disabled: std::cell::Cell::new(false),
             limit_anchor_valid: std::cell::Cell::new(false),
             bypass_tolerances: std::cell::Cell::new(None),
             bypass_active: std::cell::Cell::new(false),
@@ -397,7 +401,54 @@ impl B3SoiDd {
     }
 
     pub fn self_heating_active(&self) -> bool {
+        !self.self_heating_startup_disabled.get() && self.has_self_heating_node()
+    }
+
+    pub(crate) fn has_self_heating_node(&self) -> bool {
         self.node_temp != 0 && self.sized.rth.is_finite() && self.sized.rth > 0.0
+    }
+
+    pub(crate) fn set_self_heating_startup_disabled(&self, disabled: bool) {
+        self.self_heating_startup_disabled.set(disabled);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+        self.bias_was_limited.set(false);
+    }
+
+    pub(crate) fn seed_self_heating_temperature_from_power(&self, solution: &mut [Value]) {
+        if !self.has_self_heating_node() {
+            return;
+        }
+        let terminals = self.raw_terminal_voltages(solution);
+        let mut bias = self.bias_from_terminals(terminals);
+        bias.del_temp = 0.0;
+        let sized = self.sized_for_bias(bias);
+        let op = eval::eval_dc(&sized, &self.consts, bias, self.mtype);
+        let delta_temp = (op.ids * bias.vds * self.sized.rth).clamp(0.0, 1.0e3);
+        if delta_temp.is_finite() {
+            if let Some(slot) = solution.get_mut(self.node_temp - 1) {
+                *slot = delta_temp;
+            }
+        }
+    }
+
+    pub(crate) fn prime_operating_point_from_solution(&mut self, solution: &[Value]) {
+        let terminals = self.raw_terminal_voltages(solution);
+        let bias = self.bias_from_terminals(terminals);
+        self.converged_ref = bias;
+        self.bias = bias;
+        self.op = self.eval_op_for_bias(bias);
+        self.has_history = true;
+        self.vbs_limit_anchor = bias.vbs;
+        self.vbd_limit_anchor = bias.vbs - bias.vds;
+        self.del_temp_limit_anchor = bias.del_temp;
+        self.terminal_limit_anchor = terminals;
+        self.limit_anchor_valid.set(true);
+        self.startup_seed_pending.set(false);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(false);
+        self.last_limited.set(false);
+        self.bias_was_limited.set(false);
     }
 
     pub fn thermal_capacitance(&self) -> Value {
@@ -821,7 +872,6 @@ impl B3SoiDd {
         (terminals, check)
     }
 
-
     fn sized_for_bias(&self, bias: B3SoiDdBias) -> Cow<'_, B3SoiDdSized> {
         if !self.self_heating_active() {
             return Cow::Borrowed(self.sized.as_ref());
@@ -1070,7 +1120,11 @@ impl NonlinearDevice for B3SoiDd {
             (raw_bias, node_terminals, false)
         } else {
             let (terminals, terminal_limited) = self.limited_terminal_voltages(voltages);
-            (self.bias_from_terminals(terminals), terminals, terminal_limited)
+            (
+                self.bias_from_terminals(terminals),
+                terminals,
+                terminal_limited,
+            )
         };
         let limited = terminal_limited
             || self.apply_branch_limiting(&mut bias)
@@ -1437,6 +1491,9 @@ impl B3SoiDd {
 
     fn stamp_thermal_matrix(&self, op: &B3SoiDdOp, matrix: &mut impl MatrixStamper) {
         if !self.self_heating_active() {
+            if self.self_heating_startup_disabled.get() && self.has_self_heating_node() {
+                stamp(matrix, self.node_temp, self.node_temp, 1.0);
+            }
             return;
         }
 

@@ -7,6 +7,7 @@ pub(in crate::engine::convergence) enum CorrectorSeedMode {
     Limited,
     StaticJfet,
     StaticJfetEveryIteration,
+    StaticProbeEveryIteration,
 }
 
 impl Engine {
@@ -147,10 +148,19 @@ impl Engine {
             CorrectorSeedMode::StaticJfet | CorrectorSeedMode::StaticJfetEveryIteration
         ) {
             circuit.update_jfet_static_linearizations(&solution);
+        } else if seed_mode == CorrectorSeedMode::StaticProbeEveryIteration {
+            circuit.update_bjt_static_linearizations(&solution);
+            circuit.update_b3soi_static_linearizations(&solution);
+            circuit.update_jfet_static_linearizations(&solution);
         }
         let mut used_iterations = 0usize;
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let mut residual_stall_iterations = 0usize;
+        let residual_stall_limit = if seed_mode == CorrectorSeedMode::StaticProbeEveryIteration {
+            max_iterations
+        } else {
+            Self::DC_RESIDUAL_STALL_LIMIT
+        };
 
         for iter in 0..max_iterations {
             if Self::should_abort_iteration(abort, iter) {
@@ -166,7 +176,11 @@ impl Engine {
             }
 
             circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
-            if seed_mode == CorrectorSeedMode::StaticJfetEveryIteration {
+            if matches!(
+                seed_mode,
+                CorrectorSeedMode::StaticJfetEveryIteration
+                    | CorrectorSeedMode::StaticProbeEveryIteration
+            ) {
                 self.stamp_static_probe_nonlinear_devices_for_dc(
                     circuit, matrix, &mut rhs, &solution,
                 );
@@ -200,11 +214,20 @@ impl Engine {
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
-            if seed_mode == CorrectorSeedMode::StaticJfetEveryIteration {
-                self.update_device_states_for_dc(circuit, &new_solution);
-                circuit.update_jfet_static_linearizations(&new_solution);
-            } else {
-                self.update_device_states_for_dc(circuit, &new_solution);
+            match seed_mode {
+                CorrectorSeedMode::StaticJfetEveryIteration => {
+                    self.update_device_states_for_dc(circuit, &new_solution);
+                    circuit.update_jfet_static_linearizations(&new_solution);
+                }
+                CorrectorSeedMode::StaticProbeEveryIteration => {
+                    self.update_device_states_for_dc(circuit, &new_solution);
+                    circuit.update_bjt_static_linearizations(&new_solution);
+                    circuit.update_b3soi_static_linearizations(&new_solution);
+                    circuit.update_jfet_static_linearizations(&new_solution);
+                }
+                _ => {
+                    self.update_device_states_for_dc(circuit, &new_solution);
+                }
             }
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = voltage_converged
@@ -223,7 +246,7 @@ impl Engine {
 
             if voltage_converged && device_converged && !nonlinear_residual_converged {
                 residual_stall_iterations += 1;
-                if residual_stall_iterations >= Self::DC_RESIDUAL_STALL_LIMIT {
+                if residual_stall_iterations >= residual_stall_limit {
                     break;
                 }
             } else {
@@ -328,7 +351,35 @@ impl Engine {
             abort,
             CorrectorSeedMode::StaticJfet,
         );
-        if converged || self.validate_nonlinear_solution(circuit, matrix, &restarted) {
+        let validated = self.validate_nonlinear_solution(circuit, matrix, &restarted);
+        if converged || validated {
+            Some(restarted)
+        } else {
+            None
+        }
+    }
+
+    pub(in crate::engine::convergence) fn static_probe_restart_after_fallback(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        restart_seed: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Option<Vec<Value>> {
+        let mut damping_state = NewtonDampingState::default();
+        let restart_iterations = self.continuation_iteration_budget(4, 64);
+        let (restarted, converged, _) = self.solve_scaled_nonlinear_corrector_with_seed_mode(
+            circuit,
+            matrix,
+            1.0,
+            restart_seed,
+            &mut damping_state,
+            restart_iterations,
+            abort,
+            CorrectorSeedMode::StaticProbeEveryIteration,
+        );
+        let validated = self.validate_nonlinear_solution(circuit, matrix, &restarted);
+        if converged || validated {
             Some(restarted)
         } else {
             None
