@@ -2921,9 +2921,45 @@ fn rust_backend_uses_direct_hot_general_ad_store_helpers() {
     );
     assert!(support.contains("5.0 * fourth_power"), "{support}");
     assert!(
+        support.contains("fn scalar_power_value(base: f64, exponent: f64) -> f64"),
+        "{support}"
+    );
+    assert!(
+        support.contains("5 => { let square = base * base; square * square * base }"),
+        "{support}"
+    );
+    assert!(
+        support.contains("let value = scalar_power_value(base, exponent);"),
+        "{support}"
+    );
+    assert!(
+        support.contains("let output = scalar_power_value(value.value, exponent);"),
+        "{support}"
+    );
+    assert!(
+        support.contains("let output = scalar_power_value(base_value, exponent);"),
+        "{support}"
+    );
+    assert!(
+        support.contains("let denominator = scalar_power_value(value.value, exponent);"),
+        "{support}"
+    );
+    assert!(
         !support.contains(
             "let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1)"
         ),
+        "{support}"
+    );
+    assert!(
+        !support.contains("let output = value.value.powf(exponent);"),
+        "{support}"
+    );
+    assert!(
+        !support.contains("let denominator = value.value.powf(exponent);"),
+        "{support}"
+    );
+    assert!(
+        !support.contains("let output = base_value.powf(exponent);"),
         "{support}"
     );
     assert!(
@@ -10637,7 +10673,14 @@ fn rust_backend_lowers_intrinsic_math_with_analytic_derivatives() {
     assert!(stamp.contains(".sqrt()"), "{stamp}");
     assert!(stamp.contains(".exp()"), "{stamp}");
     assert!(stamp.contains(".ln()"), "{stamp}");
-    assert!(stamp.contains(".powf("), "{stamp}");
+    assert!(
+        stamp.contains("{let pb=") && stamp.contains(";pb*pb}"),
+        "constant square pow should lower to direct multiplication:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains(".powf("),
+        "constant square pow should not keep a runtime powf call:\n{stamp}"
+    );
     assert!(stamp.contains(".floor()"), "{stamp}");
     assert!(
         !stamp.contains("arg.clone()"),
