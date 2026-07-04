@@ -19,7 +19,7 @@ use crate::netlist::expr::ComplexValue as ExprComplexValue;
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, FreqVariation, Netlist,
-    NetlistParseOptions, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
+    NetlistParseOptions, StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
@@ -33,6 +33,8 @@ const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
 const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
 const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 250_000.0;
+const MAX_NATIVE_TRAN_ELEMENT_STEPS: f64 = 250_000_000.0;
+const MAX_NATIVE_TRAN_NODE_SOLVE_STEPS: f64 = 2_500_000_000.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
 const XYCE_DEFAULT_PRN_FRACTION_DIGITS: f64 = 8.0;
@@ -602,6 +604,12 @@ struct XyceTranAnalysis {
     start: Option<Value>,
     max_step: Option<Value>,
     uic: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct XyceTransientProblemSize {
+    element_count: usize,
+    node_count: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -6770,7 +6778,215 @@ impl XyceTestRunner {
                 MAX_NATIVE_TRAN_ORACLE_STEPS, estimated_steps
             ));
         }
+        Self::validate_transient_execution_envelope(netlist, estimated_steps)?;
         Ok(max_step)
+    }
+
+    fn validate_transient_execution_envelope(
+        netlist: &Netlist,
+        estimated_steps: Value,
+    ) -> Result<(), String> {
+        let size = Self::transient_flattened_problem_size(netlist)?;
+        Self::validate_transient_problem_size_envelope(size, estimated_steps)
+    }
+
+    fn validate_transient_preflight_execution_envelope(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+    ) -> Result<(), String> {
+        let estimated_steps = Self::preflight_transient_estimated_steps(netlist, tran);
+        let size = Self::transient_hierarchy_problem_size_estimate(netlist)?;
+        Self::validate_transient_problem_size_envelope(size, estimated_steps)
+    }
+
+    fn validate_transient_problem_size_envelope(
+        size: XyceTransientProblemSize,
+        estimated_steps: Value,
+    ) -> Result<(), String> {
+        let estimated_element_steps = estimated_steps * size.element_count as Value;
+        if estimated_element_steps > MAX_NATIVE_TRAN_ELEMENT_STEPS {
+            return Err(format!(
+                "transient harness execution envelope supports at most {:.0} native element-step unit(s), but this deck requires about {:.0} ({} flattened element(s) across about {:.0} step(s))",
+                MAX_NATIVE_TRAN_ELEMENT_STEPS,
+                estimated_element_steps,
+                size.element_count,
+                estimated_steps
+            ));
+        }
+        let estimated_node_solve_steps =
+            estimated_steps * (size.node_count as Value) * (size.node_count as Value);
+        if estimated_node_solve_steps > MAX_NATIVE_TRAN_NODE_SOLVE_STEPS {
+            return Err(format!(
+                "transient harness execution envelope supports at most {:.0} native node-solve step unit(s), but this deck requires about {:.0} ({} flattened node(s) across about {:.0} step(s))",
+                MAX_NATIVE_TRAN_NODE_SOLVE_STEPS,
+                estimated_node_solve_steps,
+                size.node_count,
+                estimated_steps
+            ));
+        }
+        Ok(())
+    }
+
+    fn preflight_transient_estimated_steps(netlist: &Netlist, tran: &XyceTranAnalysis) -> Value {
+        let requested = tran.max_step.or_else(|| {
+            (tran.step > 0.0)
+                .then_some(tran.step)
+                .and_then(|step| Self::feasible_oracle_limited_step(tran, step))
+        });
+        let source_step = Self::source_transient_max_step(netlist, tran)
+            .and_then(|step| Self::feasible_oracle_limited_step(tran, step));
+        let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
+        let max_step = [requested, source_step, Some(fallback)]
+            .into_iter()
+            .flatten()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .reduce(Value::min)
+            .unwrap_or(fallback);
+        (tran.stop / max_step).ceil()
+    }
+
+    fn transient_flattened_problem_size(
+        netlist: &Netlist,
+    ) -> Result<XyceTransientProblemSize, String> {
+        let elements = if netlist
+            .elements
+            .iter()
+            .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            crate::netlist::flatten_netlist_with_models(netlist)
+                .map(|flattened| flattened.elements)
+                .map_err(|err| {
+                format!("transient harness execution envelope could not flatten subcircuits for native problem-size estimation: {err}")
+            })?
+        } else {
+            netlist.elements.clone()
+        };
+
+        let mut nodes = BTreeSet::new();
+        for element in &elements {
+            for node in &element.nodes {
+                if !Self::node_name_is_ground(node) {
+                    nodes.insert(node.to_ascii_lowercase());
+                }
+            }
+        }
+
+        Ok(XyceTransientProblemSize {
+            element_count: elements.len(),
+            node_count: nodes.len(),
+        })
+    }
+
+    fn transient_hierarchy_problem_size_estimate(
+        netlist: &Netlist,
+    ) -> Result<XyceTransientProblemSize, String> {
+        let mut subcircuits = BTreeMap::new();
+        for subcircuit in &netlist.subcircuits {
+            Self::collect_subcircuit_defs(subcircuit, &mut subcircuits);
+        }
+
+        let mut top_nodes = BTreeSet::new();
+        let mut element_count = 0usize;
+        let mut internal_node_count = 0usize;
+        let mut stack = BTreeSet::new();
+
+        for element in &netlist.elements {
+            for node in &element.nodes {
+                if !Self::node_name_is_ground(node) {
+                    top_nodes.insert(node.to_ascii_lowercase());
+                }
+            }
+            if let ElementKind::Subcircuit { subckt_name, .. } = &element.kind {
+                let subcircuit =
+                    subcircuits
+                        .get(&subckt_name.to_ascii_lowercase())
+                        .ok_or_else(|| {
+                            format!(
+                                "transient harness execution envelope cannot estimate unresolved subcircuit '{}'",
+                                subckt_name
+                            )
+                        })?;
+                let size =
+                    Self::subcircuit_problem_size_estimate(subcircuit, &subcircuits, &mut stack)?;
+                element_count += size.element_count;
+                internal_node_count += size.node_count;
+            } else {
+                element_count += 1;
+            }
+        }
+
+        Ok(XyceTransientProblemSize {
+            element_count,
+            node_count: top_nodes.len() + internal_node_count,
+        })
+    }
+
+    fn collect_subcircuit_defs<'a>(
+        subcircuit: &'a SubcircuitDef,
+        defs: &mut BTreeMap<String, &'a SubcircuitDef>,
+    ) {
+        defs.insert(subcircuit.name.to_ascii_lowercase(), subcircuit);
+        for nested in &subcircuit.nested_subcircuits {
+            Self::collect_subcircuit_defs(nested, defs);
+        }
+    }
+
+    fn subcircuit_problem_size_estimate(
+        subcircuit: &SubcircuitDef,
+        defs: &BTreeMap<String, &SubcircuitDef>,
+        stack: &mut BTreeSet<String>,
+    ) -> Result<XyceTransientProblemSize, String> {
+        let key = subcircuit.name.to_ascii_lowercase();
+        if !stack.insert(key.clone()) {
+            return Err(format!(
+                "transient harness execution envelope cannot estimate recursive subcircuit '{}'",
+                subcircuit.name
+            ));
+        }
+
+        let ports = subcircuit
+            .ports
+            .iter()
+            .map(|port| port.to_ascii_lowercase())
+            .collect::<BTreeSet<_>>();
+        let mut local_nodes = BTreeSet::new();
+        let mut element_count = 0usize;
+        let mut internal_node_count = 0usize;
+
+        for element in &subcircuit.elements {
+            for node in &element.nodes {
+                let normalized = node.to_ascii_lowercase();
+                if !Self::node_name_is_ground(node) && !ports.contains(&normalized) {
+                    local_nodes.insert(normalized);
+                }
+            }
+            if let ElementKind::Subcircuit { subckt_name, .. } = &element.kind {
+                let child = defs.get(&subckt_name.to_ascii_lowercase()).ok_or_else(|| {
+                    format!(
+                        "transient harness execution envelope cannot estimate unresolved subcircuit '{}'",
+                        subckt_name
+                    )
+                })?;
+                let size = Self::subcircuit_problem_size_estimate(child, defs, stack)?;
+                element_count += size.element_count;
+                internal_node_count += size.node_count;
+            } else {
+                element_count += 1;
+            }
+        }
+
+        stack.remove(&key);
+        Ok(XyceTransientProblemSize {
+            element_count,
+            node_count: local_nodes.len() + internal_node_count,
+        })
+    }
+
+    fn node_name_is_ground(node: &str) -> bool {
+        let normalized = node.trim();
+        normalized == "0"
+            || normalized.eq_ignore_ascii_case("gnd")
+            || normalized.eq_ignore_ascii_case("ground")
     }
 
     fn xyce_initial_timestep_for_tran(tran: &XyceTranAnalysis) -> Option<Value> {
@@ -7784,6 +8000,7 @@ impl XyceTestRunner {
         // validation still reflects the complete .TRAN command surface.
         let _engine_reads_uic_from_netlist = tran.uic;
 
+        Self::validate_transient_preflight_execution_envelope(netlist, tran)?;
         for probe in &print.probes {
             Self::validate_tran_probe(probe, netlist)?;
         }
@@ -15150,6 +15367,67 @@ C1 out 0 40u IC=1
                 .expect("long transient falls back to bounded native step count");
 
         assert_eq!(max_step, 400.0e-6);
+    }
+
+    #[test]
+    fn transient_max_step_rejects_oversized_flattened_work_envelope() {
+        let mut deck = String::from("oversized hierarchical transient\nV1 in 0 SIN(0 1 1)\n");
+        deck.push_str(".subckt ladder a b\n");
+        for index in 0..40 {
+            let pos = if index == 0 {
+                "a".to_string()
+            } else {
+                format!("n{index}")
+            };
+            let neg = if index == 39 {
+                "b".to_string()
+            } else {
+                format!("n{}", index + 1)
+            };
+            deck.push_str(&format!("R{index} {pos} {neg} 1\n"));
+        }
+        deck.push_str(".ends\n");
+        for index in 0..100 {
+            let input = if index == 0 {
+                "in".to_string()
+            } else {
+                format!("out{}", index - 1)
+            };
+            deck.push_str(&format!("X{index} {input} out{index} ladder\n"));
+        }
+        deck.push_str(".tran 1m 100\n.print tran v(out99)\n.end\n");
+
+        let netlist = Netlist::parse(&deck).expect("test netlist parses");
+        let tran = XyceTranAnalysis {
+            step: 1.0e-3,
+            stop: 100.0,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(out99)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 0.0],
+                vec![1.0, 1.0e-3, 0.0],
+                vec![2.0, 100.0, 0.0],
+            ],
+        };
+
+        let err = XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+            .expect_err("oversized native transient work envelope should be unsupported");
+
+        assert!(
+            err.contains("transient harness execution envelope"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains("native element-step"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
