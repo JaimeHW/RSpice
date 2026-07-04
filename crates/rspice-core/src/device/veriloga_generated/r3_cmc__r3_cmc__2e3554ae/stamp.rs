@@ -42,14 +42,14 @@ fn eval_ddt<const STATE_COUNT: usize>(
 }
 
 struct CommonStampValues {
-    a: f64, b: f64, c: f64, a6: f64, af: f64, aT: f64, 
-    bD: f64, bM: f64, bT: f64, cN: f64, cP: f64, cQ: f64, 
-    cR: f64, db: f64, dg: f64, di: f64, dj: f64, e5: f64, 
-    fA: f64, fD: f64, fE: f64, fJ: f64, fL: f64, g4: f64, 
-    g6: f64, g7: f64, gW: f64, hJ: f64, hT: f64, Bh: f64, 
-    Bi: f64, Bj: f64, BL: f64, BN: f64, BO: f64, Co: f64, 
-    Cq: f64, aoe: f64, aof: f64, aog: f64, aoh: f64, aoi: f64, 
-    aoj: f64, aok: f64, 
+    a: f64, b: f64, c: f64, a6: f64, af: f64, aT: f64,
+    bD: f64, bM: f64, bT: f64, cN: f64, cP: f64, cQ: f64,
+    cR: f64, db: f64, dg: f64, di: f64, dj: f64, e5: f64,
+    fA: f64, fD: f64, fE: f64, fJ: f64, fL: f64, g4: f64,
+    g6: f64, g7: f64, gW: f64, hJ: f64, hT: f64, Bh: f64,
+    Bi: f64, Bj: f64, BL: f64, BN: f64, BO: f64, Co: f64,
+    Cq: f64, aoe: f64, aof: f64, aog: f64, aoh: f64, aoi: f64,
+    aoj: f64, aok: f64,
 }
 
 impl Instance {
@@ -69,12 +69,12 @@ impl Instance {
         let aoh=(sf[173]*((if sb[70]{b}else{(if (sf[240]!=0.0){((yQ*(if zY{b}else{(if zr{((if zr{((vU*((-(ajb/ik))*ajr))/sf[228])}else{aij})+((zT*(sf[227]*ajK))+(zQ*((sf[229]*ajK)/wj))))}else{(if yX{(aij+(if zg{b}else{(if z2{(z3*((zb*ahd)+(yZ*((sf[229]*ahd)/wj))))}else{b})}))}else{b})})}))+(yS*(if B5{b}else{(if Ay{((if Ay{((xg*((-(amr/iX))*amH))/sf[236])}else{alz})+((B0*(sf[235]*an0))+(AX*((sf[237]*an0)/xD))))}else{(if A4{(alz+(if An{b}else{(if A9{(Aa*((Ai*akt)+(A6*((sf[237]*akt)/xD))))}else{b})}))}else{b})})})))}else{b})})+sf[252]));let aoi=(sf[173]*(if sb[70]{b}else{(if (sf[240]!=0.0){anV}else{b})}));let aoj=(sf[173]*(if sb[70]{b}else{(if (sf[240]!=0.0){((yQ*(if zY{b}else{(if zr{((if zr{((vU*((-(ajd/ik))*ajr))/sf[228])}else{ail})+((zT*(sf[227]*ajM))+(zQ*((sf[229]*ajM)/wj))))}else{(if yX{(ail+(if zg{b}else{(if z2{(z3*((zb*ahf)+(yZ*((sf[229]*ahf)/wj))))}else{b})}))}else{b})})}))+(yS*(if B5{b}else{(if Ay{((if Ay{((xg*((-(amt/iX))*amH))/sf[236])}else{alB})+((B0*(sf[235]*an2))+(AX*((sf[237]*an2)/xD))))}else{(if A4{(alB+(if An{b}else{(if A9{(Aa*((Ai*akv)+(A6*((sf[237]*akv)/xD))))}else{b})}))}else{b})})})))}else{b})}));let aok=(sf[173]*((if sb[70]{b}else{(if (sf[240]!=0.0){((yQ*(if zY{b}else{(if zr{((if zr{((vU*((-(aje/ik))*ajr))/sf[228])}else{aim})+((zT*(sf[227]*ajN))+(zQ*((sf[229]*ajN)/wj))))}else{(if yX{(aim+(if zg{b}else{(if z2{(z3*((zb*ahg)+(yZ*((sf[229]*ahg)/wj))))}else{b})}))}else{b})})}))+(yS*(if B5{b}else{(if Ay{((if Ay{((xg*((-(amu/iX))*amH))/sf[236])}else{alC})+((B0*(sf[235]*an3))+(AX*((sf[237]*an3)/xD))))}else{(if A4{(alC+(if An{b}else{(if A9{(Aa*((Ai*akw)+(A6*((sf[237]*akw)/xD))))}else{b})}))}else{b})})})))}else{b})})+sf[253]));
 
         CommonStampValues {
-            a, b, c, a6, af, aT, bD, bM, 
-            bT, cN, cP, cQ, cR, db, dg, di, 
-            dj, e5, fA, fD, fE, fJ, fL, g4, 
-            g6, g7, gW, hJ, hT, Bh, Bi, Bj, 
-            BL, BN, BO, Co, Cq, aoe, aof, aog, 
-            aoh, aoi, aoj, aok, 
+            a, b, c, a6, af, aT, bD, bM,
+            bT, cN, cP, cQ, cR, db, dg, di,
+            dj, e5, fA, fD, fE, fJ, fL, g4,
+            g6, g7, gW, hJ, hT, Bh, Bi, Bj,
+            BL, BN, BO, Co, Cq, aoe, aof, aog,
+            aoh, aoi, aoj, aok,
         }
     }
 

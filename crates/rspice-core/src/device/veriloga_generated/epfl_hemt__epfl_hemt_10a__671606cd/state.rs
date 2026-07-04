@@ -205,7 +205,7 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) scalar_static_f64: Box<[f64; 100]>,
+    pub(crate) scalar_static_f64: Box<[f64; 104]>,
     pub(crate) scalar_static_bool: Box<[bool; 3]>,
 }
 
@@ -272,7 +272,7 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            scalar_static_f64: boxed_zero_f64_array::<100>(),
+            scalar_static_f64: boxed_zero_f64_array::<104>(),
             scalar_static_bool: boxed_zero_bool_array::<3>(),
         };
         instance.recompute_instance_static();
@@ -540,8 +540,12 @@ impl Instance {
         self.scalar_static_f64[94]=(self.scalar_static_f64[61]-1.0);
         self.scalar_static_f64[95]=(self.scalar_static_f64[66]-1.0);
         self.scalar_static_f64[96]=(self.scalar_static_f64[67]-1.0);
-        self.scalar_static_f64[97]=(1.0/self.scalar_static_f64[74]);
-        self.scalar_static_f64[98]=(if (self.scalar_static_f64[75]!=0.0){self.scalar_static_f64[97]}else{0.0});
-        self.scalar_static_f64[99]=(if self.scalar_static_bool[2]{1000000000.0}else{0.0});
+        self.scalar_static_f64[97]=(self.scalar_static_f64[72]*self.scalar_static_f64[77]);
+        self.scalar_static_f64[98]=(self.scalar_static_f64[71]*self.scalar_static_f64[97]);
+        self.scalar_static_f64[99]=(self.scalar_static_f64[73]*self.scalar_static_f64[77]);
+        self.scalar_static_f64[100]=(self.scalar_static_f64[69]*self.scalar_static_f64[99]);
+        self.scalar_static_f64[101]=(1.0/self.scalar_static_f64[74]);
+        self.scalar_static_f64[102]=(if (self.scalar_static_f64[75]!=0.0){self.scalar_static_f64[101]}else{0.0});
+        self.scalar_static_f64[103]=(if self.scalar_static_bool[2]{1000000000.0}else{0.0});
     }
 }

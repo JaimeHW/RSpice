@@ -42,11 +42,11 @@ fn eval_ddt<const STATE_COUNT: usize>(
 }
 
 struct CommonStampValues {
-    k: f64, r: f64, bEf: f64, bEg: f64, c8H: f64, cbG: f64, 
-    cbJ: f64, ccf: f64, cci: f64, cd2: f64, cd5: f64, cdE: f64, 
-    cdH: f64, ce2: f64, d9G: f64, d9H: f64, dhn: f64, dho: f64, 
-    dhp: f64, dhq: f64, dhr: f64, dhu: f64, dhv: f64, dhH: f64, 
-    dhI: f64, dhM: f64, dhN: f64, dhT: f64, dhU: f64, 
+    k: f64, r: f64, bEf: f64, bEg: f64, c8H: f64, cbG: f64,
+    cbJ: f64, ccf: f64, cci: f64, cd2: f64, cd5: f64, cdE: f64,
+    cdH: f64, ce2: f64, d9G: f64, d9H: f64, dhn: f64, dho: f64,
+    dhp: f64, dhq: f64, dhr: f64, dhu: f64, dhv: f64, dhH: f64,
+    dhI: f64, dhM: f64, dhN: f64, dhT: f64, dhU: f64,
 }
 
 impl Instance {
@@ -81,10 +81,10 @@ impl Instance {
         let dhI=(if (sf[540]!=0.0){(r*(if sb[274]{((-de5)/sf[526])}else{k}))}else{k});let dhM=(if (sf[540]!=0.0){(r*(if sb[274]{((-deU)/sf[526])}else{k}))}else{k});let dhN=(if (sf[540]!=0.0){(r*(if sb[274]{((-deV)/sf[526])}else{k}))}else{k});let dhT=(if (sf[541]!=0.0){(ce2*(if sb[278]{((-dg5)/sf[529])}else{k}))}else{k});let dhU=(if (sf[541]!=0.0){(ce2*(if sb[278]{((-dg6)/sf[529])}else{k}))}else{k});
 
         CommonStampValues {
-            k, r, bEf, bEg, c8H, cbG, cbJ, ccf, 
-            cci, cd2, cd5, cdE, cdH, ce2, d9G, d9H, 
-            dhn, dho, dhp, dhq, dhr, dhu, dhv, dhH, 
-            dhI, dhM, dhN, dhT, dhU, 
+            k, r, bEf, bEg, c8H, cbG, cbJ, ccf,
+            cci, cd2, cd5, cdE, cdH, ce2, d9G, d9H,
+            dhn, dho, dhp, dhq, dhr, dhu, dhv, dhH,
+            dhI, dhM, dhN, dhT, dhU,
         }
     }
 
