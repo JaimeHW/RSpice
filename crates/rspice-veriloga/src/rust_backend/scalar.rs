@@ -3948,7 +3948,7 @@ fn emit_value_only_expr(
                 "Mul" => format!("({left} * {right})"),
                 "Div" => format!("({left} / {right})"),
                 "Mod" => format!("({left} % {right})"),
-                "Pow" => format!("({left}).powf({right})"),
+                "Pow" => emit_string_power_expr(&left, &right),
                 "Eq" => format!("if {left} == {right} {{ 1.0 }} else {{ 0.0 }}"),
                 "Ne" => format!("if {left} != {right} {{ 1.0 }} else {{ 0.0 }}"),
                 "Lt" => format!("if {left} < {right} {{ 1.0 }} else {{ 0.0 }}"),
@@ -4084,7 +4084,7 @@ fn emit_value_only_call(
         ("atanh", [arg]) => format!("{}.atanh()", f64_method_receiver(arg)),
         ("floor", [arg]) => format!("{}.floor()", f64_method_receiver(arg)),
         ("ceil", [arg]) => format!("{}.ceil()", f64_method_receiver(arg)),
-        ("pow", [left, right]) => format!("{}.powf({right})", f64_method_receiver(left)),
+        ("pow", [left, right]) => emit_string_power_expr(left, right),
         ("min", [left, right]) => format!("{}.min({right})", f64_method_receiver(left)),
         ("max", [left, right]) => format!("{}.max({right})", f64_method_receiver(left)),
         ("hypot", [left, right]) => format!("{}.hypot({right})", f64_method_receiver(left)),
@@ -4378,6 +4378,28 @@ fn emit_pow_expr(
     Ok(format!("f64::powf({left},{right})"))
 }
 
+fn emit_string_power_expr(base: &str, exponent: &str) -> String {
+    if let Some(exponent) = numeric_power_exponent_literal(exponent)
+        && let Some(expr) = emit_constant_power_expr(base, exponent)
+    {
+        expr
+    } else {
+        format!("{}.powf({exponent})", f64_method_receiver(base))
+    }
+}
+
+fn numeric_power_exponent_literal(value: &str) -> Option<f64> {
+    let mut value = value.trim();
+    while let Some(inner) = value
+        .strip_prefix('(')
+        .and_then(|inner| inner.strip_suffix(')'))
+    {
+        value = inner.trim();
+    }
+    let value = value.strip_suffix("_f64").unwrap_or(value);
+    value.parse::<f64>().ok()
+}
+
 fn emit_constant_power_expr(base: &str, exponent: f64) -> Option<String> {
     let exponent = integer_power_exponent(exponent)?;
     Some(match exponent {
@@ -4447,10 +4469,9 @@ fn emit_binary_expr(
                 f64_method_receiver(&coerce_value_expr(right, right_type, OptValueType::Real))
             ),
         ),
-        OptBinaryOp::Pow => format!(
-            "f64::powf({},{})",
-            coerce_value_expr(left, left_type, OptValueType::Real),
-            coerce_value_expr(right, right_type, OptValueType::Real)
+        OptBinaryOp::Pow => emit_string_power_expr(
+            &coerce_value_expr(left, left_type, OptValueType::Real),
+            &coerce_value_expr(right, right_type, OptValueType::Real),
         ),
         OptBinaryOp::Eq => binary_expr(
             coerce_value_expr(left, left_type, OptValueType::Real),
@@ -5935,6 +5956,20 @@ mod tests {
             Some("(x).powi(4)")
         );
         assert_eq!(emit_constant_power_expr("x", 0.5), None);
+        assert_eq!(emit_string_power_expr("x", "2.0"), "{let pb=x;pb*pb}");
+        assert_eq!(emit_string_power_expr("x", "(3.0)"), "{let pb=x;pb*pb*pb}");
+        assert_eq!(emit_string_power_expr("x", "4.0_f64"), "(x).powi(4)");
+        assert_eq!(emit_string_power_expr("x", "0.5"), "(x).powf(0.5)");
+        assert_eq!(
+            emit_binary_expr(
+                OptBinaryOp::Pow,
+                "x".to_string(),
+                OptValueType::Real,
+                "2.0".to_string(),
+                OptValueType::Real,
+            ),
+            "{let pb=x;pb*pb}"
+        );
     }
 
     #[test]
