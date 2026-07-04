@@ -676,6 +676,11 @@ fn test_xyce_mid_certification_transient_cases_run() {
             "static_prn_tran",
             false,
         ),
+        (
+            "Netlists/Certification_Tests/BUG_718_SON/voltageDiff.cir",
+            "wrapper_static_prn_tran",
+            true,
+        ),
     ] {
         assert_eq!(
             runner.requires_upstream_wrapper(relative),

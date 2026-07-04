@@ -7649,6 +7649,34 @@ impl XyceTestRunner {
             .unwrap_or(trimmed)
     }
 
+    fn canonical_reference_node_name(node: &str) -> &str {
+        if node.eq_ignore_ascii_case("gnd") {
+            "0"
+        } else {
+            node
+        }
+    }
+
+    fn reference_voltage_column_matches_probe(column: &str, probe: &str) -> bool {
+        let Some(column_probe) = Self::parse_tran_voltage_probe(column) else {
+            return false;
+        };
+        let Some(requested_probe) = Self::parse_tran_voltage_probe(probe) else {
+            return false;
+        };
+        column_probe.accessor == requested_probe.accessor
+            && Self::canonical_reference_node_name(&column_probe.node_pos)
+                == Self::canonical_reference_node_name(&requested_probe.node_pos)
+            && column_probe
+                .node_neg
+                .as_deref()
+                .map(Self::canonical_reference_node_name)
+                == requested_probe
+                    .node_neg
+                    .as_deref()
+                    .map(Self::canonical_reference_node_name)
+    }
+
     fn reference_column_matches_probe(column: &str, probe: &str) -> bool {
         let normalized_column = Self::normalize_probe(column);
         let normalized_probe = Self::normalize_probe(probe);
@@ -7661,6 +7689,9 @@ impl XyceTestRunner {
         let normalized_probe =
             Self::normalize_probe(Self::reference_column_probe_for_matching(probe));
         if normalized_column == normalized_probe {
+            return true;
+        }
+        if Self::reference_voltage_column_matches_probe(&normalized_column, &normalized_probe) {
             return true;
         }
         if let Some(mapped_probe) = Self::compact_reference_probe_alias(&normalized_column) {
@@ -8925,7 +8956,7 @@ impl XyceTestRunner {
         original: &str,
         netlist: &Netlist,
     ) -> Result<(), String> {
-        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+        if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
             if !voltage_probe.node_pos.is_empty()
                 && voltage_probe
                     .node_neg
@@ -9367,7 +9398,7 @@ impl XyceTestRunner {
         original: &str,
         netlist: &Netlist,
     ) -> Result<(), String> {
-        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+        if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
             if !voltage_probe.node_pos.is_empty()
                 && voltage_probe
                     .node_neg
@@ -9909,7 +9940,7 @@ impl XyceTestRunner {
             return Ok(time);
         }
 
-        if let Some(voltage_probe) = Self::parse_voltage_probe(normalized) {
+        if let Some(voltage_probe) = Self::parse_tran_voltage_probe(normalized) {
             let pos =
                 Self::transient_voltage_named(result, netlist, &voltage_probe.node_pos, time)?;
             let neg = match voltage_probe.node_neg {
@@ -10652,7 +10683,7 @@ impl XyceTestRunner {
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_lead_current_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
-            || Self::parse_voltage_probe(normalized_expression)
+            || Self::parse_tran_voltage_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
             || Self::parse_current_probe(normalized_expression)
                 .is_some_and(|_| Self::probe_call_covers_entire_expression(normalized_expression))
@@ -14827,6 +14858,30 @@ impl XyceTestRunner {
         })
     }
 
+    fn parse_tran_voltage_probe(probe: &str) -> Option<XyceVoltageProbe> {
+        let normalized = Self::normalize_probe(probe);
+        if !normalized.starts_with("n(") {
+            return Self::parse_voltage_probe(&normalized);
+        }
+        if !normalized.ends_with(')') {
+            return None;
+        }
+        let inner = &normalized[2..normalized.len() - 1];
+        if inner.is_empty() || inner.contains(':') {
+            return None;
+        }
+        let (node_pos, node_neg) = if let Some((a, b)) = inner.split_once(',') {
+            (a.to_string(), Some(b.to_string()))
+        } else {
+            (inner.to_string(), None)
+        };
+        Some(XyceVoltageProbe {
+            accessor: XyceVoltageAccessor::Value,
+            node_pos,
+            node_neg,
+        })
+    }
+
     fn parse_ac_voltage_probe(probe: &str) -> Option<XyceVoltageProbe> {
         let normalized = Self::normalize_probe(probe);
         if !normalized.starts_with("n(") {
@@ -15301,6 +15356,12 @@ Values:
         ));
         assert!(XyceTestRunner::reference_column_matches_probe(
             "{V(1)}", "V(1)"
+        ));
+        assert!(XyceTestRunner::reference_column_matches_probe(
+            "V(0,3)", "V(GND,3)"
+        ));
+        assert!(XyceTestRunner::reference_column_matches_probe(
+            "N(0)", "N(GND)"
         ));
     }
 
@@ -16078,6 +16139,18 @@ interval output
             XyceVoltageAccessor::Decibels
         );
         assert!(XyceTestRunner::parse_voltage_probe("VX(A)").is_none());
+        assert_eq!(
+            XyceTestRunner::parse_tran_voltage_probe("N(OUT)"),
+            Some(XyceVoltageProbe {
+                accessor: XyceVoltageAccessor::Value,
+                node_pos: "out".to_string(),
+                node_neg: None,
+            })
+        );
+        assert!(
+            XyceTestRunner::parse_tran_voltage_probe("N(M1:GM)").is_none(),
+            "transient N(...) node alias must not steal device operating-point probes"
+        );
     }
 
     #[test]
