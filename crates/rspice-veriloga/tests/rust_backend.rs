@@ -2915,6 +2915,12 @@ fn rust_backend_uses_direct_hot_general_ad_store_helpers() {
     assert!(support.contains("self.v[index] = left.value + right.value;"));
     assert!(support.contains("self.v[index] = left.value * right.value;"));
     assert!(support.contains("self.v[index] = value.value * scale;"));
+    assert!(
+        support.contains("fn integer_power_derivative_scale(base: f64, exponent: i32) -> f64"),
+        "{support}"
+    );
+    assert!(support.contains("5.0 * fourth_power"), "{support}");
+    assert!(!support.contains("base.powi(exponent - 1)"), "{support}");
     assert!(support.contains("let exponent = right.value;"));
     assert!(
         support.contains("pow_derivative(output, base, exponent, left.dn[axis], right.dn[axis])"),
