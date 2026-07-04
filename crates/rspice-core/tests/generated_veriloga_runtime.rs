@@ -590,6 +590,98 @@ fn generated_reactive_stamper_uses_linked_static_slots() {
 }
 
 #[test]
+fn generated_cached_generic_reactive_current_stamper_uses_static_axes() {
+    let nodes = [1, 2, 3];
+    let branches = [1];
+    let real_matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[
+            (0, 0, 0.0),
+            (0, 2, 0.0),
+            (0, 3, 0.0),
+            (1, 0, 0.0),
+            (1, 2, 0.0),
+            (1, 3, 0.0),
+        ],
+    )
+    .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&real_matrix, &nodes, &branches, 3);
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedReactiveStamper::new_with_static_cache(&mut matrix, 3, 10.0, &cache)
+        .stamp_current_reactive(
+            Some(1),
+            Some(2),
+            &[
+                GeneratedDerivative::node(1, 2.0),
+                GeneratedDerivative::node(3, 6.0),
+                GeneratedDerivative::branch(1, 8.0),
+            ],
+        );
+
+    let imag = matrix.to_dense_imag();
+    assert_eq!(imag[0][0], 20.0);
+    assert_eq!(imag[0][2], 60.0);
+    assert_eq!(imag[0][3], 80.0);
+    assert_eq!(imag[1][0], -20.0);
+    assert_eq!(imag[1][2], -60.0);
+    assert_eq!(imag[1][3], -80.0);
+    assert_eq!(imag[0][1], 0.0);
+    assert_eq!(imag[2][0], 0.0);
+}
+
+#[test]
+fn generated_cached_reactive_potential_stamper_uses_static_axes() {
+    let nodes = [1, 2];
+    let branches = [1];
+    let real_matrix = StaticMatrix::from_triplets(3, 3, &[(2, 0, 0.0), (2, 1, 0.0), (2, 2, 0.0)])
+        .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&real_matrix, &nodes, &branches, 2);
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedReactiveStamper::new_with_static_cache(&mut matrix, 2, 10.0, &cache)
+        .stamp_potential_reactive(
+            1,
+            &[
+                GeneratedDerivative::node(1, 1.5),
+                GeneratedDerivative::node(2, -0.25),
+                GeneratedDerivative::branch(1, 2.0),
+            ],
+        );
+
+    let imag = matrix.to_dense_imag();
+    assert_eq!(imag[2][0], -15.0);
+    assert_eq!(imag[2][1], 2.5);
+    assert_eq!(imag[2][2], -20.0);
+    assert_eq!(imag[0][0], 0.0);
+    assert_eq!(imag[1][0], 0.0);
+}
+
+#[test]
+fn generated_cached_dense_reactive_potential_stamper_uses_static_axes() {
+    let nodes = [1, 2];
+    let branches = [1];
+    let real_matrix = StaticMatrix::from_triplets(3, 3, &[(2, 0, 0.0), (2, 1, 0.0), (2, 2, 0.0)])
+        .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&real_matrix, &nodes, &branches, 2);
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedReactiveStamper::new_with_static_cache(&mut matrix, 2, 10.0, &cache)
+        .stamp_potential_reactive_dense(1, &[1, 2], &[1.5, -0.25], &[1], &[2.0]);
+
+    let imag = matrix.to_dense_imag();
+    assert_eq!(imag[2][0], -15.0);
+    assert_eq!(imag[2][1], 2.5);
+    assert_eq!(imag[2][2], -20.0);
+    assert_eq!(imag[0][0], 0.0);
+    assert_eq!(imag[1][0], 0.0);
+}
+
+#[test]
 fn generated_stamper_linearizes_potential_contribution_on_branch_row() {
     let voltages = [1.0, 0.5, 0.0];
     let mut rhs = vec![0.0; 3];
