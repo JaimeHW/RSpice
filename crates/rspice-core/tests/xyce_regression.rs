@@ -452,6 +452,8 @@ fn test_xyce_static_ac_step_fd_prn_wrapper_cases_run() {
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
     for relative in [
+        "Netlists/Output/AC/ac-step-gnuplot.cir",
+        "Netlists/Output/AC/ac-stepnum-col.cir",
         "Netlists/Output/AC/ac-step-prn.cir",
         "Netlists/Output/AC/op-step-prn.cir",
     ] {

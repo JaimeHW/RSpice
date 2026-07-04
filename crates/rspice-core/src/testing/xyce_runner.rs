@@ -642,6 +642,12 @@ struct XyceDcResultBatch {
 }
 
 #[derive(Debug, Clone)]
+struct XyceAcResultBatch {
+    netlist: Netlist,
+    results: Vec<AcResult>,
+}
+
+#[derive(Debug, Clone)]
 struct XyceStepRun {
     step_values: Vec<Value>,
     netlist: Netlist,
@@ -2209,19 +2215,17 @@ impl XyceTestRunner {
                     ));
                 }
                 let mut index = 2usize;
+                let mut has_file_output = false;
+                let mut print_format = "STD".to_string();
                 while index < token_refs.len() {
                     if let Some((raw_key, raw_value, consumed)) =
                         Self::print_option_assignment(&token_refs, index)
                     {
                         let value = raw_value.trim().trim_matches(['"', '\'']);
                         match raw_key.trim().to_ascii_lowercase().as_str() {
-                            "file" => {
-                                return Err(
-                                    "wrapper-origin frequency-domain static output contract does not cover FILE= side outputs"
-                                        .to_string(),
-                                );
-                            }
+                            "file" => has_file_output = true,
                             "format" => {
+                                print_format = value.to_string();
                                 if !Self::ac_print_format_is_prn_compatible(value)
                                     && !value.eq_ignore_ascii_case("CSV")
                                     && !value.eq_ignore_ascii_case("PROBE")
@@ -2238,7 +2242,15 @@ impl XyceTestRunner {
                     }
                     index += 1;
                 }
-                primary_ac_print_count += 1;
+                if has_file_output {
+                    if !Self::ac_print_format_is_prn_compatible(&print_format) {
+                        return Err(format!(
+                            "wrapper-origin frequency-domain static output contract does not cover FILE= side output FORMAT={print_format}"
+                        ));
+                    }
+                } else {
+                    primary_ac_print_count += 1;
+                }
                 continue;
             }
             if Self::is_extra_wrapper_ac_output_analysis_command(command) {
@@ -2854,7 +2866,29 @@ impl XyceTestRunner {
             }
         };
         if mismatches.is_empty() {
-            self.passed_result(deck, start, contract)
+            let side_mismatches = match self.compare_ac_side_outputs(&plan, &netlist, &results) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("AC side-output comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            if side_mismatches.is_empty() {
+                self.passed_result(deck, start, contract)
+            } else {
+                self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("{} Xyce AC side-output mismatch(es)", side_mismatches.len()),
+                    side_mismatches,
+                )
+            }
         } else {
             self.failure_result(
                 deck,
@@ -2899,26 +2933,9 @@ impl XyceTestRunner {
                 }
             };
 
-        let step_references =
-            match Self::split_ac_step_reference(&reference, step_runs.len(), frequencies.len()) {
-                Ok(references) => references,
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("stepped AC oracle error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            };
-
         let engine = self.create_xyce_engine();
-        let mut mismatches = Vec::new();
-        let mut row_offset = 0usize;
-        for (step_index, (run, step_reference)) in
-            step_runs.iter().zip(step_references.iter()).enumerate()
-        {
+        let mut batches = Vec::with_capacity(step_runs.len());
+        for (step_index, run) in step_runs.iter().enumerate() {
             let results = match engine.run_ac(&run.netlist, &frequencies) {
                 Ok(results) => results,
                 Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
@@ -2939,41 +2956,59 @@ impl XyceTestRunner {
                     );
                 }
             };
-
-            let mut step_mismatches = match self.compare_ac_prn_reference(
-                step_reference,
-                &plan.print,
-                &run.netlist,
-                &plan.source,
-                &results,
-            ) {
-                Ok(mismatches) => mismatches,
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!(
-                            "reference comparison error in AC step {}: {err}",
-                            step_index + 1
-                        ),
-                        Vec::new(),
-                    );
-                }
-            };
-            for mismatch in &mut step_mismatches {
-                mismatch.row += row_offset;
-            }
-            row_offset += step_reference.rows.len();
-            mismatches.extend(step_mismatches);
-            if mismatches.len() >= self.config.max_mismatches {
-                mismatches.truncate(self.config.max_mismatches);
-                break;
-            }
+            batches.push(XyceAcResultBatch {
+                netlist: run.netlist.clone(),
+                results,
+            });
         }
 
+        let mismatches = match self.compare_step_ac_reference_batches(
+            &reference,
+            &plan.print,
+            &plan.source,
+            frequencies.len(),
+            &batches,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("reference comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
         if mismatches.is_empty() {
-            self.passed_result(deck, start, contract)
+            let side_mismatches =
+                match self.compare_step_ac_side_outputs(&plan, frequencies.len(), &batches) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("AC side-output comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+            if side_mismatches.is_empty() {
+                self.passed_result(deck, start, contract)
+            } else {
+                self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce stepped AC side-output mismatch(es)",
+                        side_mismatches.len()
+                    ),
+                    side_mismatches,
+                )
+            }
         } else {
             self.failure_result(
                 deck,
@@ -2986,6 +3021,121 @@ impl XyceTestRunner {
                 mismatches,
             )
         }
+    }
+
+    fn compare_step_ac_reference_batches(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        source: &str,
+        points_per_step: usize,
+        batches: &[XyceAcResultBatch],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let step_references =
+            Self::split_ac_step_reference(reference, batches.len(), points_per_step)?;
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (step_index, (batch, step_reference)) in
+            batches.iter().zip(step_references.iter()).enumerate()
+        {
+            let mut step_mismatches = self.compare_ac_prn_reference_with_step(
+                step_reference,
+                print,
+                &batch.netlist,
+                source,
+                &batch.results,
+                Some(step_index),
+            )?;
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+            }
+            row_offset += step_reference.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(mismatches)
+    }
+
+    fn compare_ac_side_outputs(
+        &self,
+        plan: &XyceStaticAcPlan,
+        netlist: &Netlist,
+        results: &[AcResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let side_outputs = Self::prn_compatible_ac_side_output_requests(&plan.source)?;
+        let mut all_mismatches = Vec::new();
+        for request in side_outputs {
+            let file = request
+                .file
+                .as_deref()
+                .expect("side output request has FILE= set");
+            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
+                format!(
+                    "failed to parse AC side-output oracle {}: {err}",
+                    self.display_path(&reference_path)
+                )
+            })?;
+            let print = XycePrintRequest {
+                probes: request.probes,
+            };
+            let mut mismatches =
+                self.compare_ac_prn_reference(&reference, &print, netlist, &plan.source, results)?;
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{file}:{}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(all_mismatches)
+    }
+
+    fn compare_step_ac_side_outputs(
+        &self,
+        plan: &XyceStaticAcPlan,
+        points_per_step: usize,
+        batches: &[XyceAcResultBatch],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let side_outputs = Self::prn_compatible_ac_side_output_requests(&plan.source)?;
+        let mut all_mismatches = Vec::new();
+        for request in side_outputs {
+            let file = request
+                .file
+                .as_deref()
+                .expect("side output request has FILE= set");
+            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
+                format!(
+                    "failed to parse AC side-output oracle {}: {err}",
+                    self.display_path(&reference_path)
+                )
+            })?;
+            let print = XycePrintRequest {
+                probes: request.probes,
+            };
+            let mut mismatches = self.compare_step_ac_reference_batches(
+                &reference,
+                &print,
+                &plan.source,
+                points_per_step,
+                batches,
+            )?;
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{file}:{}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(all_mismatches)
     }
 
     fn run_static_prn_dc_plan(
@@ -4108,6 +4258,20 @@ impl XyceTestRunner {
             .collect())
     }
 
+    fn prn_compatible_ac_side_output_requests(
+        source: &str,
+    ) -> Result<Vec<XycePrintOutputRequest>, String> {
+        Ok(Self::print_output_requests(source, "AC")?
+            .into_iter()
+            .filter(|request| {
+                request.file.is_some()
+                    && Self::ac_print_format_is_prn_compatible(
+                        request.format.as_deref().unwrap_or("STD"),
+                    )
+            })
+            .collect())
+    }
+
     fn side_output_reference_path(reference_path: &Path, file: &str) -> Result<PathBuf, String> {
         let candidate = Self::side_output_reference_candidate(reference_path, file)?;
         if !candidate.is_file() {
@@ -5117,16 +5281,37 @@ impl XyceTestRunner {
         source: &str,
         results: &[AcResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_ac_prn_reference_with_step(reference, print, netlist, source, results, None)
+    }
+
+    fn compare_ac_prn_reference_with_step(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        source: &str,
+        results: &[AcResult],
+        expected_step_index: Option<usize>,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
         if reference.columns.is_empty() {
             return Err("reference table has no columns".to_string());
         }
 
         let mut data_column_offset = 0usize;
-        let index_column = reference
+        let stepnum_column = reference
             .columns
             .first()
-            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            .is_some_and(|column| column.eq_ignore_ascii_case("STEPNUM"))
             .then_some(0usize);
+        if stepnum_column.is_some() {
+            data_column_offset += 1;
+        }
+
+        let index_column = reference
+            .columns
+            .get(data_column_offset)
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            .then_some(data_column_offset);
         if index_column.is_some() {
             data_column_offset += 1;
         }
@@ -5177,6 +5362,22 @@ impl XyceTestRunner {
                     row.len(),
                     reference.columns.len()
                 ));
+            }
+            if let Some(stepnum_column) = stepnum_column {
+                let expected_stepnum = row[stepnum_column];
+                let actual_stepnum = expected_step_index.unwrap_or(0) as f64;
+                if (expected_stepnum - actual_stepnum).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "STEPNUM".to_string(),
+                        expected: expected_stepnum,
+                        actual: actual_stepnum,
+                        relative_error: 1.0,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
             }
             if let Some(index_column) = index_column {
                 let expected_index = row[index_column];
