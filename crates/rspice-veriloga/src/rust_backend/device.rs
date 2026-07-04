@@ -39769,7 +39769,7 @@ fn compact_scaled_binary_operand_store_helper_call(
         }
         let left = compact_scaled_or_direct_scratch_arg(args[0])?;
         let right = compact_scaled_or_direct_scratch_arg(args[1])?;
-        if !left.2 || !right.2 {
+        if !left.2 && !right.2 {
             return None;
         }
         return Some(format!(

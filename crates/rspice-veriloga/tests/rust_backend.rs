@@ -8573,13 +8573,15 @@ fn rust_backend_lowers_compact_add_with_negated_operand_as_subtract() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_sub_ad_lhs(1, A::scale(s.ad_value(0), 2.0), 0);"),
+        stamp.contains("s.store_sub_scaled_inputs(1, 0, 2.0, 0, 1.0);"),
         "{stamp}"
     );
     assert!(
         !stamp.contains("A::add(A::neg(s.ad_value(0)), A::scale(s.ad_value(0), 2.0))"),
         "{stamp}"
     );
+    assert!(!stamp.contains("A::scale(s.ad_value(0), 2.0)"), "{stamp}");
+    assert!(!stamp.contains("s.store_sub_ad_lhs("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
