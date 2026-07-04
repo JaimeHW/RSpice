@@ -3072,7 +3072,8 @@ impl XyceTestRunner {
                 .file
                 .as_deref()
                 .expect("side output request has FILE= set");
-            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference_path =
+                Self::ac_side_output_reference_path(&plan.reference_path, &request, file)?;
             let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
                 format!(
                     "failed to parse AC side-output oracle {}: {err}",
@@ -3109,7 +3110,8 @@ impl XyceTestRunner {
                 .file
                 .as_deref()
                 .expect("side output request has FILE= set");
-            let reference_path = Self::side_output_reference_path(&plan.reference_path, file)?;
+            let reference_path =
+                Self::ac_side_output_reference_path(&plan.reference_path, &request, file)?;
             let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
                 format!(
                     "failed to parse AC side-output oracle {}: {err}",
@@ -4281,6 +4283,25 @@ impl XyceTestRunner {
             ));
         }
         Ok(candidate)
+    }
+
+    fn ac_side_output_reference_path(
+        reference_path: &Path,
+        request: &XycePrintOutputRequest,
+        file: &str,
+    ) -> Result<PathBuf, String> {
+        let candidate = Self::side_output_reference_candidate(reference_path, file)?;
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        let format = request.format.as_deref().unwrap_or("STD");
+        if format.eq_ignore_ascii_case("GNUPLOT") || format.eq_ignore_ascii_case("SPLOT") {
+            return Ok(reference_path.to_path_buf());
+        }
+        Err(format!(
+            "missing checked-in side-output oracle {}",
+            candidate.display()
+        ))
     }
 
     fn side_output_reference_candidate(
