@@ -3369,6 +3369,7 @@ fn rust_backend_uses_compact_integer_power_multiply_helpers() {
         support.contains("fn store_scaled_powi_ad")
             && support.contains("fn store_offset_powi_ad")
             && support.contains("fn store_div_from_scalar_powi_ad")
+            && support.contains("fn store_neg_powi_add_input")
             && support.contains("fn store_mul_scaled_powi_rhs"),
         "runtime support should include fused integer-power consumer helpers:\n{support}"
     );
@@ -3380,8 +3381,13 @@ fn rust_backend_uses_compact_integer_power_multiply_helpers() {
         stamp.contains("s.store_div_from_scalar_powi_ad(")
             || stamp.contains("s.store_scaled_powi_ad(")
             || stamp.contains("s.store_offset_powi_ad(")
+            || stamp.contains("s.store_neg_powi_add_input(")
             || stamp.contains("s.store_mul_scaled_powi"),
         "integer power consumers should use fused powi helpers:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_neg_powi_add_input("),
+        "negated integer powers of sums should use the fused powi add helper:\n{stamp}"
     );
     assert!(
         !stamp.contains("s.store_mul_ad("),
@@ -14978,6 +14984,7 @@ module compact_integer_power_multiply(p, n, q);
     real d;
     real e;
     real f;
+    real g;
     analog begin
         a = V(p, n) + 1.0;
         b = V(q, n) + 2.0;
@@ -14985,7 +14992,8 @@ module compact_integer_power_multiply(p, n, q);
         d = gain * pow(a + b, nf);
         e = pow(a + 3.0, nf) + bias;
         f = limit / pow(a + b + 1.0, nf);
-        I(p, n) <+ c + d + e + f;
+        g = -pow(a + b, nf);
+        I(p, n) <+ c + d + e + f + g;
     end
 endmodule
 "#

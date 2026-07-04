@@ -9689,12 +9689,32 @@ fn stamp() {
 
     #[test]
     fn rewrites_negated_powf_add_input_as_direct_store() {
+        fn helper_body<'a>(support: &'a str, signature: &str) -> &'a str {
+            let start = support.find(signature).expect("missing helper");
+            let rest = &support[start..];
+            let end = rest[signature.len()..]
+                .find("\n    #[inline]")
+                .map(|offset| signature.len() + offset)
+                .unwrap_or(rest.len());
+            &rest[..end]
+        }
+
         let support = generate_scratch_operation_helpers();
         assert!(support.contains("fn store_neg_powf_add_input"), "{support}");
+        assert!(support.contains("fn store_neg_powi_add_input"), "{support}");
+        let powi = helper_body(&support, "fn store_neg_powi_add_input(");
+        assert!(
+            powi.contains(
+                "let derivative_scale = -integer_power_derivative_scale(base, exponent);"
+            ),
+            "{powi}"
+        );
+        assert!(!powi.contains("pow_base_derivative_scale"), "{powi}");
 
         let source = r#"
 fn stamp() {
     scratch.store_ad_value(110, AdValue::neg(AdValue::powf(AdValue::add(scratch.ad_value(2), scratch.ad_value(3)), params.exponent)));
+    scratch.store_ad_value(111, AdValue::neg(AdValue::powi(AdValue::add(scratch.ad_value(4), scratch.ad_value(5)), (params.nf as i32))));
 }
 "#;
 
@@ -9704,8 +9724,13 @@ fn stamp() {
             compact.contains("s.store_neg_powf_add_input(110, 2, 3, p.exponent);"),
             "{compact}"
         );
+        assert!(
+            compact.contains("s.store_neg_powi_add_input(111, 4, 5, (p.nf as i32));"),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_neg_ad("), "{compact}");
         assert!(!compact.contains("A::powf("), "{compact}");
+        assert!(!compact.contains("A::powi("), "{compact}");
         assert!(!compact.contains("A::add(s.ad_value("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
@@ -22422,6 +22447,14 @@ fn generate_scratch_operation_helpers() -> String {
         "        let base = self.values[left] + self.values[right];",
         "        let output = scalar_power_value(base, exponent);",
         "        let derivative_scale = -AdValue::pow_base_derivative_scale(output, base, exponent);",
+        "        self.store_unary_add_scaled(index, left, right, -output, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_neg_powi_add_input(&mut self, index: usize, left: usize, right: usize, exponent: i32) {",
+        "        let base = self.values[left] + self.values[right];",
+        "        let output = base.powi(exponent);",
+        "        let derivative_scale = -integer_power_derivative_scale(base, exponent);",
         "        self.store_unary_add_scaled(index, left, right, -output, derivative_scale);",
         "    }",
         "",
@@ -35228,6 +35261,18 @@ fn compact_negated_binary_input_store_helper_line(
             return Some(format!(
                 "scratch.store_neg_powf_add_input({target_index}, {left}, {right}, {});",
                 powf_args[1]
+            ));
+        }
+    }
+
+    if let Some(powi_args) = compact_ad_call_args(args[0], "powi") {
+        if powi_args.len() != 2 {
+            return None;
+        }
+        if let Some((left, right)) = compact_binary_scratch_ad_indices(powi_args[0], "add") {
+            return Some(format!(
+                "scratch.store_neg_powi_add_input({target_index}, {left}, {right}, {});",
+                powi_args[1]
             ));
         }
     }
