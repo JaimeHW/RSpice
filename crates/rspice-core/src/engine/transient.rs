@@ -2693,6 +2693,7 @@ impl Engine {
                     &new_solution,
                     dt,
                     self.config.transient_node_activity_bound,
+                    &solution_lte_excluded,
                 )
             } else {
                 None
@@ -3794,6 +3795,57 @@ mod tests {
             2,
             &[],
         ));
+    }
+
+    #[test]
+    fn nonlinear_terminal_activity_limit_respects_voltage_lte_exclusions() {
+        let mut circuit = crate::circuit::Circuit::new();
+        circuit.mosfets.add(crate::device::Mosfet::new_nmos(
+            "M1".to_string(),
+            1,
+            2,
+            3,
+            0,
+        ));
+
+        let accepted = [0.0, 0.0, 0.0];
+        let gate_only_step = [0.0, 1.0, 0.0];
+        let limited = Engine::nonlinear_terminal_activity_limit(
+            &circuit,
+            &accepted,
+            &gate_only_step,
+            1.0e-9,
+            0.4,
+            &[],
+        )
+        .expect("unexcluded gate motion should limit timestep");
+        assert!((limited - 4.0e-10).abs() < 1.0e-18);
+
+        let excluded_gate = [false, true, false];
+        assert!(
+            Engine::nonlinear_terminal_activity_limit(
+                &circuit,
+                &accepted,
+                &gate_only_step,
+                1.0e-9,
+                0.4,
+                &excluded_gate,
+            )
+            .is_none(),
+            "voltage-LTE-excluded ideal source nodes are not solved dynamics"
+        );
+
+        let drain_and_gate_step = [1.0, 1.0, 0.0];
+        let limited = Engine::nonlinear_terminal_activity_limit(
+            &circuit,
+            &accepted,
+            &drain_and_gate_step,
+            1.0e-9,
+            0.4,
+            &excluded_gate,
+        )
+        .expect("unexcluded nonlinear terminal motion must still limit timestep");
+        assert!((limited - 4.0e-10).abs() < 1.0e-18);
     }
 
     fn missing_pwl_path(name: &str) -> String {

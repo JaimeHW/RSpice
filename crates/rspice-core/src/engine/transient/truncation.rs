@@ -1387,8 +1387,8 @@ impl Engine {
     }
 
     /// Signal-activity step limit: rescale the candidate step so that no
-    /// nonlinear-device terminal voltage moves more than `bound` volts in one
-    /// step.
+    /// solved nonlinear-device terminal voltage moves more than `bound` volts
+    /// in one step.
     ///
     /// Complements the polynomial charge LTE, which estimates error from
     /// divided differences of sampled charges and is therefore blind to
@@ -1402,6 +1402,7 @@ impl Engine {
         candidate_solution: &[Value],
         dt: Value,
         bound: Value,
+        excluded_solution_indices: &[bool],
     ) -> Option<Value> {
         if !(bound.is_finite() && bound > 0.0 && dt.is_finite() && dt > 0.0) {
             return None;
@@ -1410,6 +1411,16 @@ impl Engine {
         let mut max_delta: Value = 0.0;
         let mut consider = |node: usize| {
             if node == 0 {
+                return;
+            }
+            let Some(solution_index) = node.checked_sub(1) else {
+                return;
+            };
+            if excluded_solution_indices
+                .get(solution_index)
+                .copied()
+                .unwrap_or(false)
+            {
                 return;
             }
             let accepted = accepted_solution.get(node - 1).copied().unwrap_or(0.0);
