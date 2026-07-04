@@ -108,15 +108,18 @@ pub(crate) fn lower_scaled_rhs_multiply(
                 &product_scale,
             ))
         }
-        "add_scaled_sub_value_product" if call.args.len() == 6 => Some(format!(
-            "scratch.store_mul_add_scaled_sub_value_product_rhs({target_index}, {source}, {}, {}, {}, {}, {}, {});",
-            call.args[0],
-            call.args[1],
-            scale_product(call.args[2], output_scale),
-            call.args[3],
-            call.args[4],
-            scale_product(call.args[5], output_scale)
-        )),
+        "add_scaled_sub_value_product" if call.args.len() == 6 => {
+            Some(lower_mul_add_scaled_sub_value_product_rhs(
+                target_index,
+                source,
+                call.args[0],
+                call.args[1],
+                &scale_product(call.args[2], output_scale),
+                call.args[3],
+                call.args[4],
+                &scale_product(call.args[5], output_scale),
+            ))
+        }
         "add_scaled_inputs4" if call.args.len() == 8 => {
             Some(lower_mul_add_scaled_inputs4_rhs(
                 target_index,
@@ -412,6 +415,26 @@ fn lower_mul_add_scaled_product_rhs(
     let helper = index_or_mixed_helper_name("store_mul_add_scaled_product_rhs", &mask);
     format!(
         "scratch.{helper}({target_index}, {source}, {value_arg}, {value_scale}, {product_left_arg}, {product_right_arg}, {product_scale});"
+    )
+}
+
+fn lower_mul_add_scaled_sub_value_product_rhs(
+    target_index: usize,
+    source: usize,
+    scalar: &str,
+    subtrahend: &str,
+    value_scale: &str,
+    product_left: &str,
+    product_right: &str,
+    product_scale: &str,
+) -> String {
+    let (subtrahend_mask, subtrahend_arg) = index_or_ad_arg(subtrahend);
+    let (product_left_mask, product_left_arg) = index_or_ad_arg(product_left);
+    let (product_right_mask, product_right_arg) = index_or_ad_arg(product_right);
+    let mask = format!("{subtrahend_mask}{product_left_mask}{product_right_mask}");
+    let helper = index_or_mixed_helper_name("store_mul_add_scaled_sub_value_product_rhs", &mask);
+    format!(
+        "scratch.{helper}({target_index}, {source}, {scalar}, {subtrahend_arg}, {value_scale}, {product_left_arg}, {product_right_arg}, {product_scale});"
     )
 }
 

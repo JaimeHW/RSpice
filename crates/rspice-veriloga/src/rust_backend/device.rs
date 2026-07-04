@@ -4986,6 +4986,8 @@ fn stamp() {
         for helper in [
             "fn store_mul_div_scaled_inputs_indices",
             "fn store_mul_add_scaled_sub_value_product_rhs",
+            "fn store_mul_add_scaled_sub_value_product_rhs_indices",
+            "fn store_mul_add_scaled_sub_value_product_rhs_mixed_aii",
             "fn store_mul_scaled_sqrt_scaled_input_rhs",
             "fn store_mul_scaled_exp_ln_input_rhs",
             "fn store_mul_scaled_pow_ad_rhs",
@@ -5002,6 +5004,7 @@ fn stamp() {
     scratch.store_ad_value(143, AdValue::mul_scaled_output(scratch.ad_value(11), AdValue::exp_scaled_input(AdValue::ln(AdValue::offset(AdValue::square(scratch.ad_value(12)), params.offset)), params.input_scale), params.output_scale));
     scratch.store_ad_value(144, AdValue::mul_scaled_output(scratch.ad_value(13), AdValue::pow(scratch.ad_value(14), scratch.ad_value(15)), params.output_scale));
     scratch.store_ad_value(145, AdValue::mul_scaled_output(scratch.ad_value(16), AdValue::scale_offset(AdValue::powf(scratch.ad_value(17), params.exponent), params.input_scale, params.offset), params.output_scale));
+    scratch.store_ad_value(146, AdValue::mul_scaled_output(scratch.ad_value(18), AdValue::add_scaled_sub_value_product(params.scalar, scratch.ad_value(19), params.value_scale, scratch.ad_value(20), scratch.ad_value(21), params.product_scale), params.output_scale));
 }
 "#;
 
@@ -5014,7 +5017,11 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_add_scaled_sub_value_product_rhs(141, 5, p.scalar, A::scale(s.ad_value(6), 2.0), ((p.value_scale) * (p.output_scale)), s.ad_value(7), s.ad_value(8), ((p.product_scale) * (p.output_scale)));"),
+            compact.contains("s.store_mul_add_scaled_sub_value_product_rhs_mixed_aii(141, 5, p.scalar, A::scale(s.ad_value(6), 2.0), ((p.value_scale) * (p.output_scale)), 7, 8, ((p.product_scale) * (p.output_scale)));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_mul_add_scaled_sub_value_product_rhs_indices(146, 18, p.scalar, 19, ((p.value_scale) * (p.output_scale)), 20, 21, ((p.product_scale) * (p.output_scale)));"),
             "{compact}"
         );
         assert!(
@@ -5034,6 +5041,14 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_scaled_ad_rhs("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_sub_value_product_rhs(141"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_sub_value_product_rhs(146"),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -23643,6 +23658,7 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         out.push_str(&generate_index_or_mixed_mul_add_scaled_product_rhs_helper(
             &mask,
         ));
+        out.push_str(&generate_index_or_mixed_mul_add_scaled_sub_value_product_rhs_helper(&mask));
         out.push_str(&generate_index_or_mixed_offset_add_scaled_inputs3_offset_helper(&mask));
         out.push_str(&generate_index_or_mixed_div_scaled_inputs2_helper(&mask));
         out.push_str(&generate_index_or_mixed_offset_div_scaled_inputs2_helper(
@@ -24331,6 +24347,49 @@ fn generate_index_or_mixed_mul_add_scaled_product_rhs_helper(mask: &str) -> Stri
     }}
 "#,
         value_ty = mixed_helper_type(mask, 0),
+        product_left_ty = mixed_helper_type(mask, 1),
+        product_right_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_index_or_mixed_mul_add_scaled_sub_value_product_rhs_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_mul_add_scaled_sub_value_product_rhs", mask);
+    let subtrahend_value = cached_index_or_mixed_value_expr(mask, 0, "subtrahend");
+    let product_left_value = cached_index_or_mixed_value_expr(mask, 1, "product_left");
+    let product_right_value = cached_index_or_mixed_value_expr(mask, 2, "product_right");
+    let subtrahend_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 0, "subtrahend");
+    let product_left_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 1, "product_left");
+    let product_right_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 2, "product_right");
+    let subtrahend_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 0, "subtrahend");
+    let product_left_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 1, "product_left");
+    let product_right_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 2, "product_right");
+    let subtrahend_bindings = cached_index_or_mixed_operand_bindings(mask, 0, "subtrahend");
+    let product_left_bindings = cached_index_or_mixed_operand_bindings(mask, 1, "product_left");
+    let product_right_bindings = cached_index_or_mixed_operand_bindings(mask, 2, "product_right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: usize, scalar: f64, subtrahend: {subtrahend_ty}, value_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64) {{
+        let left_value = self.values[left];
+        let left_node_derivatives = self.node_derivatives[left];
+        let left_branch_derivatives = self.branch_derivatives[left];
+{subtrahend_bindings}{product_left_bindings}{product_right_bindings}        let subtrahend_raw = {subtrahend_value};
+        let product_left_raw = {product_left_value};
+        let product_right_raw = {product_right_value};
+        let right_value = (scalar - subtrahend_raw) * value_scale + product_left_raw * product_right_raw * product_scale;
+        self.values[index] = left_value * right_value;
+        for axis in 0..Instance::NODE_COUNT {{ let right_derivative = -{subtrahend_node_derivative} * value_scale + ({product_left_node_derivative} * product_right_raw + product_left_raw * {product_right_node_derivative}) * product_scale; self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_derivative; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let right_derivative = -{subtrahend_branch_derivative} * value_scale + ({product_left_branch_derivative} * product_right_raw + product_left_raw * {product_right_branch_derivative}) * product_scale; self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_derivative; }}
+    }}
+"#,
+        subtrahend_ty = mixed_helper_type(mask, 0),
         product_left_ty = mixed_helper_type(mask, 1),
         product_right_ty = mixed_helper_type(mask, 2),
     )
