@@ -16353,6 +16353,65 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_unary_voltage_scaled(&mut self, index: usize, pos: Option<usize>, neg: Option<usize>, value: f64, derivative_scale: f64) {",
+        "        self.values[index] = value;",
+        "        self.node_derivatives[index] = [0.0; Instance::NODE_COUNT];",
+        "        self.branch_derivatives[index] = [0.0; Instance::BRANCH_COUNT];",
+        "        if let Some(node) = pos { self.node_derivatives[index][node] += derivative_scale; }",
+        "        if let Some(node) = neg { self.node_derivatives[index][node] -= derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sqrt_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let output = (pos_value - neg_value).sqrt();",
+        "        self.store_unary_voltage_scaled(index, pos, neg, output, 1.0 / (2.0 * output));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_exp_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let output = (pos_value - neg_value).exp();",
+        "        self.store_unary_voltage_scaled(index, pos, neg, output, output);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_limexp_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let raw = pos_value - neg_value;",
+        "        if raw < 80.0 {",
+        "            let output = raw.exp();",
+        "            self.store_unary_voltage_scaled(index, pos, neg, output, output);",
+        "        } else {",
+        "            self.store_unary_voltage_scaled(index, pos, neg, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX);",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_limited_exp_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
+        "        self.store_limited_exp_scaled_voltage(index, ctx, nodes, pos, neg, 1.0);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ln_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let raw = pos_value - neg_value;",
+        "        self.store_unary_voltage_scaled(index, pos, neg, raw.ln(), 1.0 / raw);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_ln_one_plus_exp_voltage(&mut self, index: usize, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>) {",
+        "        let pos_value = pos.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let neg_value = neg.map(|node| ctx.node_voltage(nodes[node])).unwrap_or(0.0);",
+        "        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(pos_value - neg_value);",
+        "        self.store_unary_voltage_scaled(index, pos, neg, output, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_add_scaled_input_voltage_rhs(&mut self, index: usize, source: usize, source_scale: f64, ctx: &GeneratedEvalContext<'_>, nodes: &[usize; Instance::NODE_COUNT], pos: Option<usize>, neg: Option<usize>, voltage_scale: f64) {",
         "        let source_value = self.values[source];",
         "        let source_node_derivatives = self.node_derivatives[source];",
@@ -34658,6 +34717,24 @@ fn compact_voltage_store_helper_call(target_index: usize, value: &str) -> Option
         );
     }
 
+    for (name, helper) in [
+        ("sqrt", "store_sqrt_voltage"),
+        ("exp", "store_exp_voltage"),
+        ("limexp", "store_limexp_voltage"),
+        ("limited_exp", "store_limited_exp_voltage"),
+        ("ln", "store_ln_voltage"),
+        ("ln_one_plus_exp", "store_ln_one_plus_exp_voltage"),
+    ] {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 1 {
+            return None;
+        }
+        let voltage_args = compact_ad_call_args(args[0], "voltage")?;
+        return compact_unary_voltage_store_helper_line(target_index, helper, &voltage_args);
+    }
+
     if let Some(args) = compact_ad_call_args(value, "limited_exp_scaled_input") {
         if args.len() != 2 {
             return None;
@@ -34738,6 +34815,20 @@ fn compact_abs_voltage_store_helper_line(target_index: usize, args: &[&str]) -> 
     }
     Some(format!(
         "scratch.store_abs_voltage({target_index}, {}, {}, {}, {});",
+        args[0], args[1], args[2], args[3]
+    ))
+}
+
+fn compact_unary_voltage_store_helper_line(
+    target_index: usize,
+    helper: &str,
+    args: &[&str],
+) -> Option<String> {
+    if args.len() != 4 {
+        return None;
+    }
+    Some(format!(
+        "scratch.{helper}({target_index}, {}, {}, {}, {});",
         args[0], args[1], args[2], args[3]
     ))
 }

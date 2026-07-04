@@ -2776,11 +2776,11 @@ fn rust_backend_moves_compact_ad_rvalue_stores_into_scratch() {
         .as_str();
 
     assert!(
-        stamp.contains("s.store_ad_value(0, A::sqrt(A::voltage(ctx, nodes, Some(0), Some(1))));"),
+        stamp.contains("s.store_sqrt_voltage(0, ctx, nodes, Some(0), Some(1));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_ad_value(0, A::exp(A::voltage(ctx, nodes, Some(1), Some(0))));"),
+        stamp.contains("s.store_exp_voltage(0, ctx, nodes, Some(1), Some(0));"),
         "{stamp}"
     );
     assert!(
@@ -3112,11 +3112,11 @@ fn rust_backend_lowers_compact_conditional_ad_branches_as_direct_stores() {
 
     assert!(stamp.contains("if (p.p0 > 0.0) {"), "{stamp}");
     assert!(
-        stamp.contains("s.store_ad_value(0, A::sqrt(A::voltage(ctx, nodes, Some(0), Some(1))));"),
+        stamp.contains("s.store_sqrt_voltage(0, ctx, nodes, Some(0), Some(1));"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_ad_value(0, A::exp(A::voltage(ctx, nodes, Some(1), Some(0))));"),
+        stamp.contains("s.store_exp_voltage(0, ctx, nodes, Some(1), Some(0));"),
         "{stamp}"
     );
     assert!(!stamp.contains(": A = {"), "{stamp}");
@@ -11113,6 +11113,60 @@ fn rust_backend_uses_direct_compact_divide_voltage_by_ad_store_helpers() {
 }
 
 #[test]
+fn rust_backend_uses_direct_compact_unary_voltage_store_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_unary_voltage_store_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact unary-voltage stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_sqrt_voltage(&mut self, index: usize",
+        "fn store_exp_voltage(&mut self, index: usize",
+        "fn store_limexp_voltage(&mut self, index: usize",
+        "fn store_limited_exp_voltage(&mut self, index: usize",
+        "fn store_ln_voltage(&mut self, index: usize",
+        "fn store_ln_one_plus_exp_voltage(&mut self, index: usize",
+    ] {
+        assert!(support.contains(helper), "{support}");
+    }
+    for call in [
+        "s.store_sqrt_voltage(",
+        "s.store_exp_voltage(",
+        "s.store_limexp_voltage(",
+        "s.store_limited_exp_voltage(",
+        "s.store_ln_voltage(",
+        "s.store_ln_one_plus_exp_voltage(",
+    ] {
+        assert!(stamp.contains(call), "{stamp}");
+    }
+    assert!(
+        !stamp.contains("s.store_ad_value(0, A::sqrt(A::voltage"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(1, A::exp(A::voltage"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_ad_value(2, A::limexp(A::voltage"),
+        "{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_uses_direct_compact_abs_voltage_store_helpers() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_abs_voltage_store_source())
@@ -13735,7 +13789,7 @@ endmodule
 }
 
 #[test]
-fn rust_backend_preserves_recognized_limited_exp_function_as_helper_call() {
+fn rust_backend_preserves_recognized_limited_exp_function_as_direct_voltage_helper() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(limited_exp_function_source())
         .expect("canonical IR");
@@ -13751,9 +13805,18 @@ fn rust_backend_preserves_recognized_limited_exp_function_as_helper_call() {
         .expect("stamp file")
         .contents
         .as_str();
+    let support = render_runtime_support_module();
 
     assert!(
-        stamp.contains("A::limited_exp(A::voltage(ctx, nodes, Some(0), Some(1)))"),
+        support.contains("fn store_limited_exp_voltage(&mut self, index: usize"),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_limited_exp_voltage(0, ctx, nodes, Some(0), Some(1));"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::limited_exp(A::voltage(ctx, nodes, Some(0), Some(1)))"),
         "{stamp}"
     );
     assert!(!stamp.contains("5.540622384e34"), "{stamp}");
@@ -19934,6 +19997,42 @@ module compact_abs_voltage_store(p, n);
     analog begin
         shaped = abs(V(p, n));
         I(p, n) <+ shaped;
+    end
+endmodule
+"#
+}
+
+fn compact_unary_voltage_store_source() -> &'static str {
+    r#"
+module compact_unary_voltage_store(p, n);
+    inout p, n;
+    electrical p, n;
+    analog function real lexp;
+        input x;
+        begin
+            if (x > 80.0) begin
+                lexp = 5.540622384e34 * (1.0 + x - 80.0);
+            end else if (x < -80.0) begin
+                lexp = 1.804851387e-35;
+            end else begin
+                lexp = exp(x);
+            end
+        end
+    endfunction
+    real shaped;
+    real exp_term;
+    real lim_term;
+    real limited;
+    real log_term;
+    real softplus;
+    analog begin
+        shaped = sqrt(V(p, n));
+        exp_term = exp(V(n, p));
+        lim_term = limexp(V(p, n));
+        limited = lexp(V(n, p));
+        log_term = ln(V(p, n));
+        softplus = ln(1.0 + exp(V(n, p)));
+        I(p, n) <+ shaped + exp_term + lim_term + limited + log_term + softplus;
     end
 endmodule
 "#
