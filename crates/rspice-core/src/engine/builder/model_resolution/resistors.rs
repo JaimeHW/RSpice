@@ -319,25 +319,34 @@ fn apply_resistor_instance_scaling(
     Ok(resistance)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Level1ModelDefaultResistance {
+    resistance: f64,
+    from_synthetic_default: bool,
+}
+
 fn resolve_level1_model_default_resistance(
     element_name: &str,
     model_def: &crate::netlist::ModelDef,
     instance_params: &[(String, f64)],
     eval_ctx: &crate::netlist::ParamContext,
-) -> Result<Option<f64>, SimulationError> {
+) -> Result<Level1ModelDefaultResistance, SimulationError> {
     let rsh = resolve_model_param(model_def, &["RSH", "SHEETRES", "SHEETR"], eval_ctx)?;
     let Some(rsh) = rsh.filter(|value| value.is_finite() && *value != 0.0) else {
-        return Ok(Some(1000.0));
+        return Ok(Level1ModelDefaultResistance {
+            resistance: 1000.0,
+            from_synthetic_default: true,
+        });
     };
 
-    let squares = if let Some(nsq) =
+    let (squares, from_synthetic_default) = if let Some(nsq) =
         instance_param(instance_params, &["NRS", "NRSQ", "NSQ", "SQUARES"])
     {
-        nsq
+        (nsq, false)
     } else if let Some(nsq) =
         resolve_model_param(model_def, &["NRS", "NRSQ", "NSQ", "SQUARES"], eval_ctx)?
     {
-        nsq
+        (nsq, false)
     } else if let Some(l) = instance_param(instance_params, &["L", "LENGTH"])
         .or_else(|| {
             resolve_model_param(model_def, &["L", "LENGTH"], eval_ctx)
@@ -364,12 +373,15 @@ fn resolve_level1_model_default_resistance(
             )));
         }
         if w_eff == 0.0 {
-            f64::INFINITY
+            (f64::INFINITY, false)
         } else {
-            l_eff / w_eff
+            (l_eff / w_eff, false)
         }
     } else {
-        return Ok(Some(1000.0));
+        return Ok(Level1ModelDefaultResistance {
+            resistance: 1000.0,
+            from_synthetic_default: true,
+        });
     };
 
     if !(squares.is_infinite() && squares.is_sign_positive())
@@ -381,7 +393,10 @@ fn resolve_level1_model_default_resistance(
         )));
     }
 
-    Ok(Some(rsh * squares))
+    Ok(Level1ModelDefaultResistance {
+        resistance: rsh * squares,
+        from_synthetic_default,
+    })
 }
 
 pub(in crate::engine::builder) fn resolve_resistor_instance_value(
@@ -470,20 +485,29 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
             model_def,
             &["R", "RES", "R0", "VALUE", "RESISTANCE"],
             &eval_ctx,
-        )?
-        .unwrap_or(1.0);
+        )?;
 
+        let mut uses_synthetic_model_default = false;
         if resistance.is_none() {
-            resistance = resolve_level1_model_default_resistance(
+            let model_default = resolve_level1_model_default_resistance(
                 element_name,
                 model_def,
                 instance_params,
                 &eval_ctx,
             )?;
+            uses_synthetic_model_default = model_default.from_synthetic_default;
+            resistance = Some(model_default.resistance);
         }
 
         if resistor_level != Some(2) {
-            resistance = resistance.map(|value| value * resistance_multiplier);
+            if uses_synthetic_model_default {
+                if let Some(model_resistance) = resistance_multiplier {
+                    resistance = Some(model_resistance);
+                }
+            } else {
+                let resistance_multiplier = resistance_multiplier.unwrap_or(1.0);
+                resistance = resistance.map(|value| value * resistance_multiplier);
+            }
         }
     } else if resistance.is_none() && uses_xyce_default {
         resistance = Some(1000.0);
@@ -804,5 +828,41 @@ R3 a 0 rmod
             "R3",
         );
         assert_eq!(level2, 1000.0);
+    }
+
+    #[test]
+    fn value_less_level1_modeled_resistor_uses_model_r_as_default() {
+        let (model_r, _) = resolve_resistor_from_source(
+            r#"value-less modeled resistor
+R1 a 0 rmod
+.model rmod R R=2k
+.end
+"#,
+            "R1",
+        );
+        assert_eq!(model_r, 2000.0);
+
+        let (model_res_alias, _) = resolve_resistor_from_source(
+            r#"value-less modeled resistor with RES alias
+R2 a 0 rmod
+.model rmod R RES=43
+.end
+"#,
+            "R2",
+        );
+        assert_eq!(model_res_alias, 43.0);
+    }
+
+    #[test]
+    fn level1_geometry_keeps_model_r_multiplier_path() {
+        let (geometry, _) = resolve_resistor_from_source(
+            r#"modeled resistor geometry with multiplier
+R1 a 0 rmod L=2 W=1
+.model rmod R RSH=100 R=2
+.end
+"#,
+            "R1",
+        );
+        assert_eq!(geometry, 400.0);
     }
 }

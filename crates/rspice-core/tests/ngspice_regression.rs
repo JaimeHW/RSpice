@@ -1708,24 +1708,27 @@ fn test_ngspice_regression_subckt_processing_suite() {
 fn test_ngspice_regression_subckt_processing_focus_case_runs() {
     let tests_dir = get_tests_dir();
     let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
-    let relative = "regression/subckt-processing/global-1.cir";
+    for relative in [
+        "regression/subckt-processing/global-1.cir",
+        "regression/subckt-processing/model-scope-5.cir",
+    ] {
+        let result = runner.run_test(&tests_dir.join(relative));
 
-    let result = runner.run_test(&tests_dir.join(relative));
-
-    assert!(
-        result.passed,
-        "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
-        result.error, result.mismatches
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "Focused ngspice {relative} deck should match its oracle"
-    );
-    assert_eq!(
-        result.analysis_type.as_deref(),
-        Some("DC OP"),
-        "Focused ngspice {relative} deck should report the expected analysis type"
-    );
+        assert!(
+            result.passed,
+            "Focused ngspice {relative} deck failed: {:?} | mismatches: {:?}",
+            result.error, result.mismatches
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "Focused ngspice {relative} deck should match its oracle"
+        );
+        assert_eq!(
+            result.analysis_type.as_deref(),
+            Some("DC OP"),
+            "Focused ngspice {relative} deck should report the expected analysis type"
+        );
+    }
 }
 
 #[test]
