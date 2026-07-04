@@ -193,17 +193,28 @@ impl Engine {
         node_name: &str,
     ) -> Option<String> {
         let normalized = Self::normalize_hierarchical_node_name(node_name);
-        let parts = normalized.split(':').collect::<Vec<_>>();
+        Self::resolve_hierarchical_node_name_with_delimiter(netlist, &normalized, ':').or_else(
+            || Self::resolve_hierarchical_node_name_with_delimiter(netlist, &normalized, '.'),
+        )
+    }
+
+    fn resolve_hierarchical_node_name_with_delimiter(
+        netlist: &Netlist,
+        normalized: &str,
+        delimiter: char,
+    ) -> Option<String> {
+        let parts = normalized.split(delimiter).collect::<Vec<_>>();
         if parts.len() < 2 {
             return None;
         }
+        let delimiter = delimiter.to_string();
 
         for instance_count in (1..parts.len()).rev() {
             if parts[..instance_count].iter().any(|part| part.is_empty()) {
                 continue;
             }
 
-            let local_node = parts[instance_count..].join(":");
+            let local_node = parts[instance_count..].join(&delimiter);
             if local_node.is_empty() {
                 continue;
             }
@@ -373,6 +384,27 @@ R2 b out 1
     }
 
     #[test]
+    fn hierarchical_node_lookup_resolves_dot_delimited_subcircuit_port() {
+        let netlist = Netlist::parse(
+            "\
+dot-delimited hierarchical lookup
+X2 4 5 IC_Subckt
+.SUBCKT IC_Subckt in out
+R1 in mid 10
+C1 mid out 1u
+.ENDS
+.END
+",
+        )
+        .expect("test deck parses");
+
+        let resolved = Engine::resolve_hierarchical_node_name(&netlist, "X2.out")
+            .expect("dot-delimited hierarchical node resolves");
+
+        assert_eq!(resolved, "5");
+    }
+
+    #[test]
     fn hierarchical_node_lookup_preserves_colon_suffix_local_nodes() {
         let netlist = Netlist::parse(
             "\
@@ -448,6 +480,33 @@ R2 b out 1
 
         let voltage_hints = engine.collect_node_voltage_hints(&netlist, &circuit);
         assert_eq!(voltage_hints, vec![(flattened_node, 0.25)]);
+    }
+
+    #[test]
+    fn dot_delimited_subcircuit_port_initial_condition_targets_connected_node() {
+        let netlist = Netlist::parse(
+            "\
+dot-delimited hierarchical startup directive
+V1 1 0 0
+X2 1 3 RC
+CLOAD 3 0 1u
+.IC V(X2.B)=0.5
+.SUBCKT RC a b
+R1 a mid 10
+C1 mid b 1u
+.ENDS
+.END
+",
+        )
+        .expect("test deck parses");
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let connected_node = circuit
+            .get_node_by_name("3")
+            .expect("connected top-level node exists");
+
+        let ic_hints = engine.collect_initial_condition_hints(&netlist, &circuit);
+        assert_eq!(ic_hints, vec![(connected_node, 0.5)]);
     }
 }
 

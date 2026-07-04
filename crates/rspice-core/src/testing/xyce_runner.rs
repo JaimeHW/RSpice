@@ -1253,8 +1253,19 @@ impl XyceTestRunner {
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let tran = Self::single_tran_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
+        let has_prn_oracle = self
+            .static_output_reference_path(
+                &deck.path,
+                XyceStaticTranContract::WrapperStatic.reference_extension(),
+            )
+            .is_some_and(|path| path.is_file());
         let native_static_prn_wrapper = if requires_wrapper {
-            Self::native_static_prn_tran_wrapper_contract(&deck.path, &deck.relative_path, &source)
+            Self::native_static_prn_tran_wrapper_contract(
+                &deck.path,
+                &deck.relative_path,
+                &source,
+                has_prn_oracle,
+            )
         } else {
             None
         };
@@ -1286,6 +1297,15 @@ impl XyceTestRunner {
                 }
                 XyceStaticTranContract::WrapperCsv => {
                     Self::validate_native_static_csv_tran_wrapper_contract(&source)?;
+                }
+                XyceStaticTranContract::WrapperStatic => {
+                    Self::validate_native_static_prn_tran_wrapper_contract_with_format_mode(
+                        &source,
+                        has_prn_oracle,
+                    )?;
+                }
+                XyceStaticTranContract::WrapperStaticExpectedError => {
+                    Self::validate_native_static_prn_tran_wrapper_contract(&source)?;
                 }
                 _ => Self::validate_native_static_prn_tran_wrapper_contract(&source)?,
             }
@@ -2236,6 +2256,13 @@ impl XyceTestRunner {
     }
 
     fn validate_native_static_prn_tran_wrapper_contract(source: &str) -> Result<(), String> {
+        Self::validate_native_static_prn_tran_wrapper_contract_with_format_mode(source, false)
+    }
+
+    fn validate_native_static_prn_tran_wrapper_contract_with_format_mode(
+        source: &str,
+        allow_wrapper_probe_primary_prn: bool,
+    ) -> Result<(), String> {
         let mut primary_tran_print_count = 0usize;
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
@@ -2266,7 +2293,10 @@ impl XyceTestRunner {
                         match raw_key.trim().to_ascii_lowercase().as_str() {
                             "file" => has_file_output = true,
                             "format" => {
-                                if !Self::tran_print_format_is_prn_compatible(value) {
+                                if !Self::tran_print_format_is_prn_compatible(value)
+                                    && !(allow_wrapper_probe_primary_prn
+                                        && value.eq_ignore_ascii_case("PROBE"))
+                                {
                                     return Err(format!(
                                         "wrapper-origin transient .prn contract does not cover .PRINT TRAN FORMAT={value}"
                                     ));
@@ -2648,6 +2678,7 @@ impl XyceTestRunner {
         deck_path: &Path,
         relative_path: &str,
         source: &str,
+        has_prn_oracle: bool,
     ) -> Option<XyceStaticTranContract> {
         if Self::validate_native_pwl_repeat_error_tran_wrapper_contract(deck_path, source).is_ok() {
             return Some(XyceStaticTranContract::WrapperStaticExpectedError);
@@ -2663,7 +2694,11 @@ impl XyceTestRunner {
 
         if Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
             || Self::is_native_output_initial_interval_tran_wrapper_candidate(source)
-            || Self::is_native_generic_static_prn_tran_wrapper_candidate(relative_path, source)
+            || Self::is_native_generic_static_prn_tran_wrapper_candidate(
+                relative_path,
+                source,
+                has_prn_oracle,
+            )
         {
             return Some(XyceStaticTranContract::WrapperStatic);
         }
@@ -2699,6 +2734,7 @@ impl XyceTestRunner {
     fn is_native_generic_static_prn_tran_wrapper_candidate(
         relative_path: &str,
         source: &str,
+        has_prn_oracle: bool,
     ) -> bool {
         let normalized_path = Self::normalize_manifest_key(relative_path);
         if normalized_path.starts_with("netlists/output/") {
@@ -2708,6 +2744,11 @@ impl XyceTestRunner {
             return false;
         }
         Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
+            || (has_prn_oracle
+                && Self::validate_native_static_prn_tran_wrapper_contract_with_format_mode(
+                    source, true,
+                )
+                .is_ok())
     }
 
     fn source_enables_constant_time_step_output(source: &str) -> bool {
@@ -15878,8 +15919,53 @@ R2 2 0 1
                 Path::new("tran-csv.cir"),
                 "Netlists/Output/TRAN/tran-csv.cir",
                 source,
+                true,
             ),
             Some(XyceStaticTranContract::WrapperCsv)
+        );
+    }
+
+    #[test]
+    fn tran_wrapper_accepts_primary_probe_format_prn_oracle_when_checked_prn_exists() {
+        let source = "\
+wrapper-origin hspice probe transient print with prn oracle
+VA 1 0 PULSE(0 1 0 1e-3 1e-3 5e-3 1s)
+R1 1 2 10
+C1 2 0 1u
+.TRAN 10u 10ms 0 UIC
+.PRINT TRAN FORMAT=PROBE V(1) V(2)
+.END
+";
+
+        XyceTestRunner::validate_native_static_prn_tran_wrapper_contract(source)
+            .expect_err("strict transient PRN wrapper contract keeps PROBE as non-PRN");
+        XyceTestRunner::validate_native_static_prn_tran_wrapper_contract_with_format_mode(
+            source, true,
+        )
+        .expect("wrapper transient PRN contract can normalize primary PROBE with a PRN oracle");
+        assert_eq!(
+            XyceTestRunner::native_static_prn_tran_wrapper_contract(
+                Path::new("subcircuit_node_delineation.cir"),
+                "Netlists/XDM/HSPICE/OTHER_PARSING/subcircuit_node_delineation.cir",
+                source,
+                true,
+            ),
+            Some(XyceStaticTranContract::WrapperStatic)
+        );
+        assert_eq!(
+            XyceTestRunner::native_static_prn_tran_wrapper_contract(
+                Path::new("subcircuit_node_delineation.cir"),
+                "Netlists/XDM/HSPICE/OTHER_PARSING/subcircuit_node_delineation.cir",
+                source,
+                false,
+            ),
+            None
+        );
+        assert_eq!(
+            XyceTestRunner::static_tran_contract_for_print_format(true, Some("PROBE"))
+                .expect("generic wrapper PROBE contract resolves"),
+            XyceStaticTranContract::WrapperCsd,
+            "generic PROBE output remains CSDF; only the wrapper-origin PRN classifier normalizes this case"
         );
     }
 
