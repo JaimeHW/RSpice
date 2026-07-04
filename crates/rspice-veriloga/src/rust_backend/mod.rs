@@ -146,28 +146,9 @@ impl RustTranspiler {
                             backend: RustBackendSelection::ScalarHybrid,
                             fallback_reason: Some(unsupported_detail(&scalar_error).to_string()),
                         }),
-                        Err(hybrid_error) if hybrid_error.is_unsupported() => {
-                            match device::generate_device(artifact, &self.options) {
-                                Ok(device) => Ok(GeneratedRustDeviceReport {
-                                    device,
-                                    backend: RustBackendSelection::LegacyDevice,
-                                    fallback_reason: Some(format!(
-                                        "scalar path: {}; hybrid scalar path: {}",
-                                        unsupported_detail(&scalar_error),
-                                        unsupported_detail(&hybrid_error)
-                                    )),
-                                }),
-                                Err(legacy_error) if legacy_error.is_unsupported() => {
-                                    Err(auto_backend_unsupported(
-                                        artifact,
-                                        &scalar_error,
-                                        &hybrid_error,
-                                        &legacy_error,
-                                    ))
-                                }
-                                Err(error) => Err(error),
-                            }
-                        }
+                        Err(hybrid_error) if hybrid_error.is_unsupported() => Err(
+                            auto_backend_unsupported(artifact, &scalar_error, &hybrid_error),
+                        ),
                         Err(error) => Err(error),
                     }
                 }
@@ -191,16 +172,14 @@ fn auto_backend_unsupported(
     artifact: &CanonicalIrArtifact,
     scalar_error: &RustBackendError,
     hybrid_error: &RustBackendError,
-    legacy_error: &RustBackendError,
 ) -> RustBackendError {
     RustBackendError::unsupported(
         artifact.metadata.source_package.as_str(),
         artifact.mir.module_name.as_str(),
         format!(
-            "model cannot be lowered by generated Rust backends; scalar path: {}; hybrid scalar path: {}; legacy path: {}",
+            "model cannot be lowered by optimized generated Rust backends; scalar path: {}; hybrid scalar path: {}",
             unsupported_detail(scalar_error),
             unsupported_detail(hybrid_error),
-            unsupported_detail(legacy_error)
         ),
     )
 }
@@ -260,13 +239,13 @@ endmodule
         assert!(
             error
                 .message
-                .contains("model cannot be lowered by generated Rust backends"),
+                .contains("model cannot be lowered by optimized generated Rust backends"),
             "{error}"
         );
         assert!(
             error
                 .message
-                .contains("legacy path: indirect contributions")
+                .contains("hybrid scalar path: indirect contributions")
         );
     }
 
@@ -339,6 +318,44 @@ endmodule
         assert!(stamp.contains("stamp_current_const_local"), "{stamp}");
         assert!(!stamp.contains("stamp_current_node"), "{stamp}");
         assert!(!stamp.contains("let d"), "{stamp}");
+    }
+
+    #[test]
+    fn scalar_backend_specializes_constant_integer_powers() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module integer_power_specializations(p, n);
+    inout p, n;
+    electrical p, n;
+    analog begin
+        I(p, n) <+ pow(V(p, n) + 1.0, 2.0)
+                 + pow(V(p, n) + 2.0, 3.0)
+                 + pow(V(p, n) + 3.0, 4.0);
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+
+        let report = RustTranspiler::new_scalar(RustTranspileOptions::default())
+            .transpile_with_report(&artifact)
+            .expect("constant integer powers should lower to scalar OptIR");
+
+        let stamp = report
+            .device
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+
+        assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
+        assert!(stamp.contains("{let pb="), "{stamp}");
+        assert!(stamp.contains(".powi(4)"), "{stamp}");
+        assert!(!stamp.contains("f64::powf("), "{stamp}");
+        assert!(!stamp.contains(".powf("), "{stamp}");
     }
 
     #[test]

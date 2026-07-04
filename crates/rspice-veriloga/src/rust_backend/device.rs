@@ -45473,13 +45473,26 @@ fn compact_scalar_mod(left: &str, right: &str) -> String {
 }
 
 fn compact_scalar_pow(left: &str, right: &str) -> String {
-    if right == "0.0" {
-        "1.0".to_string()
-    } else if right == "1.0" {
-        left.to_string()
+    if let Some(exponent) = compact_integer_power_exponent_literal(right) {
+        match exponent {
+            0 => "1.0".to_string(),
+            1 => left.to_string(),
+            2 => compact_repeated_scalar_power(left, 2),
+            3 => compact_repeated_scalar_power(left, 3),
+            _ => format!("{}.powi({exponent})", compact_f64_receiver(left)),
+        }
     } else {
         format!("{}.powf({right})", compact_f64_receiver(left))
     }
+}
+
+fn compact_repeated_scalar_power(base: &str, factors: usize) -> String {
+    debug_assert!(factors >= 2);
+    let mut product = String::from("pb");
+    for _ in 1..factors {
+        product.push_str("*pb");
+    }
+    format!("{{let pb={base};{product}}}")
 }
 
 fn compact_scalar_limexp(value: String) -> String {

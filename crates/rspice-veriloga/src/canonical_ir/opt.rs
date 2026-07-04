@@ -3491,6 +3491,11 @@ impl<'a> ScalarGraphBuilder<'a> {
                 left,
                 right,
             } if self.is_real_constant(*right, 1.0) => Some(*left),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Pow,
+                left,
+                right,
+            } if self.is_real_constant(*right, 1.0) => Some(*left),
             OptValueKind::Select {
                 then_value,
                 else_value,
@@ -3538,6 +3543,13 @@ impl<'a> ScalarGraphBuilder<'a> {
                     input: *left,
                 },
             )),
+            OptValueKind::Binary {
+                op: OptBinaryOp::Pow,
+                right,
+                ..
+            } if self.is_real_constant(*right, 0.0) => {
+                Some((OptValueType::Real, OptValueKind::RealConstant(1.0)))
+            }
             _ => None,
         }
     }

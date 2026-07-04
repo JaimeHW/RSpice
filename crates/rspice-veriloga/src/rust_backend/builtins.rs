@@ -120,6 +120,7 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
     let generator_digest = generator_digest(generator_root, false)?;
     let (devices, backend_counts, fallback_reasons) =
         generate_devices_with_stack(model_root.to_path_buf(), None, progress, jobs)?;
+    reject_legacy_backend_selections(&backend_counts, &fallback_reasons)?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any discovered modules",
@@ -177,6 +178,7 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
         progress,
         jobs,
     )?;
+    reject_legacy_backend_selections(&backend_counts, &fallback_reasons)?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any modules matching filter '{filter}'",
@@ -770,6 +772,41 @@ fn validate_requested_generator_jobs(requested: Option<usize>) -> BuiltinResult<
     Ok(())
 }
 
+fn reject_legacy_backend_selections(
+    counts: &BuiltinBackendSelectionCounts,
+    fallback_reasons: &[BuiltinBackendFallbackReason],
+) -> BuiltinResult<()> {
+    if counts.legacy_device == 0 {
+        return Ok(());
+    }
+
+    let mut details = fallback_reasons
+        .iter()
+        .filter(|reason| reason.backend == RustBackendSelection::LegacyDevice)
+        .map(|reason| {
+            format!(
+                "{} :: {} ({})",
+                reason.source.display(),
+                reason.module,
+                reason.reason
+            )
+        })
+        .collect::<Vec<_>>();
+    if details.is_empty() {
+        details.push(format!(
+            "{} generated module{} selected the legacy device backend",
+            counts.legacy_device,
+            if counts.legacy_device == 1 { "" } else { "s" }
+        ));
+    }
+
+    Err(format!(
+        "Verilog-A built-ins must use optimized Rust backends; legacy selections:\n{}",
+        details.join("\n")
+    )
+    .into())
+}
+
 #[derive(Debug)]
 struct GeneratedBuiltinModule {
     index: usize,
@@ -909,6 +946,34 @@ mod tests {
     fn builtin_generator_jobs_rejects_zero_jobs() {
         let error = builtin_generator_jobs(Some(0), 3).expect_err("zero jobs must fail");
         assert!(error.to_string().contains("must be at least 1"));
+    }
+
+    #[test]
+    fn builtin_generation_rejects_legacy_backend_selections() {
+        let counts = BuiltinBackendSelectionCounts {
+            scalar: 1,
+            hybrid: 0,
+            legacy_device: 1,
+        };
+        let reasons = vec![BuiltinBackendFallbackReason {
+            source: PathBuf::from("cmc/model.va"),
+            module: "legacy_model".to_string(),
+            backend: RustBackendSelection::LegacyDevice,
+            reason: "scalar path: unsupported; hybrid scalar path: unsupported".to_string(),
+        }];
+
+        let error = reject_legacy_backend_selections(&counts, &reasons)
+            .expect_err("legacy built-in selections must fail generation");
+
+        let message = error.to_string();
+        assert!(
+            message.contains("must use optimized Rust backends"),
+            "{message}"
+        );
+        assert!(
+            message.contains("cmc/model.va :: legacy_model"),
+            "{message}"
+        );
     }
 }
 

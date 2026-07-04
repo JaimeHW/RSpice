@@ -1114,10 +1114,14 @@ fn emit_shared_stamp_values_binding(plan: &SharedStampValuesPlan, out: &mut Stri
     out.push_str("        let CommonStampValues {\n");
     for chunk in plan.boundary.chunks(FIELDS_PER_LINE) {
         out.push_str("            ");
-        for value_id in chunk {
-            out.push_str(&format!("{}, ", value_name(*value_id)));
-        }
-        out.push('\n');
+        out.push_str(
+            &chunk
+                .iter()
+                .map(|value_id| value_name(*value_id))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        out.push_str(",\n");
     }
     out.push_str("        }=self.eval_common_stamp_values(ctx);\n");
 }
@@ -1131,19 +1135,25 @@ pub(super) fn emit_shared_stamp_values_struct(
     out.push_str("struct CommonStampValues {\n");
     for chunk in plan.boundary.chunks(FIELDS_PER_LINE) {
         out.push_str("    ");
-        for value_id in chunk {
-            let value = artifact
-                .opt
-                .values
-                .get(usize::from(*value_id))
-                .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
-            out.push_str(&format!(
-                "{}: {}, ",
-                value_name(*value_id),
-                rust_type(value.value_type)
-            ));
-        }
-        out.push('\n');
+        let fields = chunk
+            .iter()
+            .map(|value_id| {
+                let value = artifact
+                    .opt
+                    .values
+                    .get(usize::from(*value_id))
+                    .ok_or_else(|| {
+                        unsupported(artifact, format!("missing scalar value {value_id}"))
+                    })?;
+                Ok(format!(
+                    "{}: {}",
+                    value_name(*value_id),
+                    rust_type(value.value_type)
+                ))
+            })
+            .collect::<Result<Vec<_>, RustBackendError>>()?;
+        out.push_str(&fields.join(", "));
+        out.push_str(",\n");
     }
     out.push_str("}\n\n");
     Ok(())
@@ -1222,10 +1232,14 @@ pub(super) fn emit_shared_stamp_values_method(
     const VALUES_PER_LINE: usize = 8;
     for chunk in plan.boundary.chunks(VALUES_PER_LINE) {
         out.push_str("            ");
-        for value_id in chunk {
-            out.push_str(&format!("{}, ", value_name(*value_id)));
-        }
-        out.push('\n');
+        out.push_str(
+            &chunk
+                .iter()
+                .map(|value_id| value_name(*value_id))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        out.push_str(",\n");
     }
     out.push_str("        }\n");
     out.push_str("    }\n\n");
@@ -3291,13 +3305,25 @@ fn emit_value_expr(
         OptValueKind::Binary { op, left, right } => {
             let left_type = value_type(artifact, *left)?;
             let right_type = value_type(artifact, *right)?;
-            emit_binary_expr(
-                *op,
-                value_ref(artifact, parameter_fields, *left, context)?,
-                left_type,
-                value_ref(artifact, parameter_fields, *right, context)?,
-                right_type,
-            )
+            if *op == OptBinaryOp::Pow {
+                emit_pow_expr(
+                    artifact,
+                    parameter_fields,
+                    *left,
+                    left_type,
+                    *right,
+                    right_type,
+                    context,
+                )?
+            } else {
+                emit_binary_expr(
+                    *op,
+                    value_ref(artifact, parameter_fields, *left, context)?,
+                    left_type,
+                    value_ref(artifact, parameter_fields, *right, context)?,
+                    right_type,
+                )
+            }
         }
         OptValueKind::Select {
             condition,
@@ -4261,6 +4287,18 @@ fn value_type(
         .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))
 }
 
+fn real_constant_value(artifact: &CanonicalIrArtifact, value: ValueId) -> Option<f64> {
+    match artifact
+        .opt
+        .values
+        .get(usize::from(value))
+        .map(|value| &value.kind)
+    {
+        Some(OptValueKind::RealConstant(value)) => Some(*value),
+        _ => None,
+    }
+}
+
 fn emit_unary_expr(
     op: OptUnaryOp,
     input: String,
@@ -4314,6 +4352,64 @@ fn emit_unary_expr(
         OptUnaryOp::Floor => format!("{}.floor()", f64_method_receiver(&real_input())),
         OptUnaryOp::Ceil => format!("{}.ceil()", f64_method_receiver(&real_input())),
     }
+}
+
+fn emit_pow_expr(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    left: ValueId,
+    left_type: OptValueType,
+    right: ValueId,
+    right_type: OptValueType,
+    context: &ValueEmitContext<'_>,
+) -> Result<String, RustBackendError> {
+    let left = coerce_value_expr(
+        value_ref(artifact, parameter_fields, left, context)?,
+        left_type,
+        OptValueType::Real,
+    );
+    if let Some(exponent) = real_constant_value(artifact, right)
+        && let Some(expr) = emit_constant_power_expr(&left, exponent)
+    {
+        return Ok(expr);
+    }
+
+    let right = coerce_value_expr(
+        value_ref(artifact, parameter_fields, right, context)?,
+        right_type,
+        OptValueType::Real,
+    );
+    Ok(format!("f64::powf({left},{right})"))
+}
+
+fn emit_constant_power_expr(base: &str, exponent: f64) -> Option<String> {
+    let exponent = integer_power_exponent(exponent)?;
+    Some(match exponent {
+        0 => "1.0".to_string(),
+        1 => base.to_string(),
+        2 => repeated_power_expr(base, 2),
+        3 => repeated_power_expr(base, 3),
+        _ => format!("{}.powi({exponent})", f64_method_receiver(base)),
+    })
+}
+
+fn integer_power_exponent(value: f64) -> Option<i32> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return None;
+    }
+    if value < i32::MIN as f64 || value > i32::MAX as f64 {
+        return None;
+    }
+    Some(value as i32)
+}
+
+fn repeated_power_expr(base: &str, factors: usize) -> String {
+    debug_assert!(factors >= 2);
+    let mut product = String::from("pb");
+    for _ in 1..factors {
+        product.push_str("*pb");
+    }
+    format!("{{let pb={base};{product}}}")
 }
 
 fn emit_binary_expr(
@@ -5829,6 +5925,25 @@ mod tests {
             ),
             "((if flag{1.0}else{0.0})).sqrt()"
         );
+    }
+
+    #[test]
+    fn scalar_emitter_specializes_constant_integer_powers() {
+        assert_eq!(emit_constant_power_expr("x", 0.0).as_deref(), Some("1.0"));
+        assert_eq!(emit_constant_power_expr("x", 1.0).as_deref(), Some("x"));
+        assert_eq!(
+            emit_constant_power_expr("x", 2.0).as_deref(),
+            Some("{let pb=x;pb*pb}")
+        );
+        assert_eq!(
+            emit_constant_power_expr("x", 3.0).as_deref(),
+            Some("{let pb=x;pb*pb*pb}")
+        );
+        assert_eq!(
+            emit_constant_power_expr("x", 4.0).as_deref(),
+            Some("(x).powi(4)")
+        );
+        assert_eq!(emit_constant_power_expr("x", 0.5), None);
     }
 
     #[test]
