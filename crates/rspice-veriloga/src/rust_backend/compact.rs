@@ -22,27 +22,41 @@ pub(crate) fn lower_scaled_rhs_multiply(
     };
 
     match call.name {
-        "add" if call.args.len() == 2 => Some(format!(
-            "scratch.store_mul_add_scaled_inputs_rhs({target_index}, {source}, {}, {output_scale}, {}, {output_scale});",
-            call.args[0], call.args[1]
-        )),
-        "sub" if call.args.len() == 2 => Some(format!(
-            "scratch.store_mul_sub_scaled_inputs_rhs({target_index}, {source}, {}, {output_scale}, {}, {output_scale});",
-            call.args[0], call.args[1]
-        )),
-        "add_scaled_inputs" if call.args.len() == 4 => Some(format!(
-            "scratch.store_mul_add_scaled_inputs_rhs({target_index}, {source}, {}, {}, {}, {});",
+        "add" if call.args.len() == 2 => Some(lower_mul_scaled_inputs_rhs(
+            "store_mul_add_scaled_inputs_rhs",
+            target_index,
+            source,
             call.args[0],
-            scale_product(call.args[1], output_scale),
-            call.args[2],
-            scale_product(call.args[3], output_scale)
+            output_scale,
+            call.args[1],
+            output_scale,
         )),
-        "sub_scaled_inputs" if call.args.len() == 4 => Some(format!(
-            "scratch.store_mul_sub_scaled_inputs_rhs({target_index}, {source}, {}, {}, {}, {});",
+        "sub" if call.args.len() == 2 => Some(lower_mul_scaled_inputs_rhs(
+            "store_mul_sub_scaled_inputs_rhs",
+            target_index,
+            source,
             call.args[0],
-            scale_product(call.args[1], output_scale),
+            output_scale,
+            call.args[1],
+            output_scale,
+        )),
+        "add_scaled_inputs" if call.args.len() == 4 => Some(lower_mul_scaled_inputs_rhs(
+            "store_mul_add_scaled_inputs_rhs",
+            target_index,
+            source,
+            call.args[0],
+            &scale_product(call.args[1], output_scale),
             call.args[2],
-            scale_product(call.args[3], output_scale)
+            &scale_product(call.args[3], output_scale),
+        )),
+        "sub_scaled_inputs" if call.args.len() == 4 => Some(lower_mul_scaled_inputs_rhs(
+            "store_mul_sub_scaled_inputs_rhs",
+            target_index,
+            source,
+            call.args[0],
+            &scale_product(call.args[1], output_scale),
+            call.args[2],
+            &scale_product(call.args[3], output_scale),
         )),
         "add_scaled_inputs3" if call.args.len() == 6 => Some(
             lower_mul_add_scaled_inputs3_offset_rhs(
@@ -284,6 +298,24 @@ fn scratch_ad_value_index(value: &str) -> Option<usize> {
         .strip_suffix(')')?
         .parse()
         .ok()
+}
+
+fn lower_mul_scaled_inputs_rhs(
+    base: &str,
+    target_index: usize,
+    source: usize,
+    left: &str,
+    left_scale: &str,
+    right: &str,
+    right_scale: &str,
+) -> String {
+    let (left_mask, left_arg) = index_or_ad_arg(left);
+    let (right_mask, right_arg) = index_or_ad_arg(right);
+    let mask = format!("{left_mask}{right_mask}");
+    let helper = index_or_mixed_helper_name(base, &mask);
+    format!(
+        "scratch.{helper}({target_index}, {source}, {left_arg}, {left_scale}, {right_arg}, {right_scale});"
+    )
 }
 
 fn lower_mul_add_scaled_inputs3_offset_rhs(

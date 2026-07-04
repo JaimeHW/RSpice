@@ -4875,11 +4875,15 @@ fn stamp() {
         let compact = compact_generated_stamp_surface(source.to_string());
 
         assert!(
-            compact.contains("s.store_mul_add_scaled_inputs_rhs(120, 2, s.ad_value(3), p.scale, s.ad_value(4), p.scale);"),
+            compact.contains(
+                "s.store_mul_add_scaled_inputs_rhs_indices(120, 2, 3, p.scale, 4, p.scale);"
+            ),
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_sub_scaled_inputs_rhs(121, 5, s.ad_value(6), p.scale, s.ad_value(7), p.scale);"),
+            compact.contains(
+                "s.store_mul_sub_scaled_inputs_rhs_indices(121, 5, 6, p.scale, 7, p.scale);"
+            ),
             "{compact}"
         );
         assert!(
@@ -4891,12 +4895,20 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_sub_scaled_inputs_rhs(124, 16, s.ad_value(17), ((p.left_scale) * (((p.input_scale) * (p.output_scale)))), s.ad_value(18), ((p.right_scale) * (((p.input_scale) * (p.output_scale)))));"),
+            compact.contains("s.store_mul_sub_scaled_inputs_rhs_indices(124, 16, 17, ((p.left_scale) * (((p.input_scale) * (p.output_scale)))), 18, ((p.right_scale) * (((p.input_scale) * (p.output_scale)))));"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_scaled_ad_rhs("), "{compact}");
         assert!(
             !compact.contains("s.store_mul_add_scaled_inputs3_offset_rhs(122"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_inputs_rhs(120"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_sub_scaled_inputs_rhs(121"),
             "{compact}"
         );
         assert!(!compact.contains("A::sqrt(s.ad_value(13))"), "{compact}");
@@ -5127,6 +5139,8 @@ fn stamp() {
         let support = generate_scratch_operation_helpers();
         for helper in [
             "fn store_mul_add_scaled_inputs_rhs",
+            "fn store_mul_add_scaled_inputs_rhs_indices",
+            "fn store_mul_add_scaled_inputs_rhs_mixed_ai",
             "fn store_offset_add_scaled_inputs",
             "fn store_offset_add_scaled_inputs_indices",
             "fn store_offset_add_scaled_inputs_mixed_ia",
@@ -5156,11 +5170,11 @@ fn stamp() {
         let compact = compact_generated_stamp_surface(source.to_string());
 
         assert!(
-            compact.contains("s.store_mul_add_scaled_inputs_rhs(60, 2, s.ad_value(3), p.left_scale, s.ad_value(4), p.right_scale);"),
+            compact.contains("s.store_mul_add_scaled_inputs_rhs_indices(60, 2, 3, p.left_scale, 4, p.right_scale);"),
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_add_scaled_inputs_rhs(61, 7, A::div_from_scalar(1.0, s.ad_value(5)), 1.0, s.ad_value(6), p.right_scale);"),
+            compact.contains("s.store_mul_add_scaled_inputs_rhs_mixed_ai(61, 7, A::div_from_scalar(1.0, s.ad_value(5)), 1.0, 6, p.right_scale);"),
             "{compact}"
         );
         assert!(
@@ -5173,6 +5187,14 @@ fn stamp() {
         );
         assert!(
             compact.contains("s.store_offset_add_scaled_inputs_indices(64, 10, (-p.left_scale), 11, (-p.right_scale), p.scalar);"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_inputs_rhs(60"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_inputs_rhs(61"),
             "{compact}"
         );
         assert!(!compact.contains("A::add_scaled_inputs("), "{compact}");
@@ -6195,6 +6217,7 @@ fn stamp() {
         let support = generate_scratch_operation_helpers();
         for helper in [
             "fn store_mul_sub_scaled_inputs_rhs",
+            "fn store_mul_sub_scaled_inputs_rhs_indices",
             "fn store_offset_sub_scaled_inputs",
             "fn store_offset_sub_scaled_inputs_indices",
             "fn store_offset_sub_scaled_inputs_mixed_ia",
@@ -6217,7 +6240,7 @@ fn stamp() {
         let compact = compact_generated_stamp_surface(source.to_string());
 
         assert!(
-            compact.contains("s.store_mul_sub_scaled_inputs_rhs(100, 2, s.ad_value(3), p.left_scale, s.ad_value(4), p.right_scale);"),
+            compact.contains("s.store_mul_sub_scaled_inputs_rhs_indices(100, 2, 3, p.left_scale, 4, p.right_scale);"),
             "{compact}"
         );
         assert!(
@@ -6236,6 +6259,10 @@ fn stamp() {
         );
         assert!(
             compact.contains("s.store_offset_sub_scaled_inputs_mixed_ai(104, A::ln(s.ad_value(14)), p.left_scale, 15, p.right_scale, p.offset);"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_sub_scaled_inputs_rhs(100"),
             "{compact}"
         );
         assert!(!compact.contains("A::sub_scaled_inputs("), "{compact}");
@@ -23573,6 +23600,16 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         out.push_str(&generate_index_or_mixed_offset_sub_scaled_inputs_helper(
             &mask,
         ));
+        out.push_str(&generate_index_or_mixed_mul_scaled_inputs_rhs_helper(
+            &mask,
+            "store_mul_add_scaled_inputs_rhs",
+            '+',
+        ));
+        out.push_str(&generate_index_or_mixed_mul_scaled_inputs_rhs_helper(
+            &mask,
+            "store_mul_sub_scaled_inputs_rhs",
+            '-',
+        ));
         out.push_str(&generate_index_or_mixed_div_scaled_inputs_helper(&mask));
         out.push_str(&generate_index_or_mixed_offset_div_scaled_inputs_helper(
             &mask,
@@ -23927,6 +23964,43 @@ fn generate_index_or_mixed_offset_sub_scaled_inputs_helper(mask: &str) -> String
 "#,
         left_ty = mixed_helper_type(mask, 0),
         right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_mul_scaled_inputs_rhs_helper(
+    mask: &str,
+    base: &str,
+    operator: char,
+) -> String {
+    let helper = index_or_mixed_helper_name(base, mask);
+    let right_left_value = cached_index_or_mixed_value_expr(mask, 0, "right_left");
+    let right_right_value = cached_index_or_mixed_value_expr(mask, 1, "right_right");
+    let right_left_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 0, "right_left");
+    let right_right_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 1, "right_right");
+    let right_left_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 0, "right_left");
+    let right_right_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 1, "right_right");
+    let right_left_bindings = cached_index_or_mixed_operand_bindings(mask, 0, "right_left");
+    let right_right_bindings = cached_index_or_mixed_operand_bindings(mask, 1, "right_right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: usize, right_left: {right_left_ty}, right_left_scale: f64, right_right: {right_right_ty}, right_right_scale: f64) {{
+        let left_value = self.values[left];
+        let left_node_derivatives = self.node_derivatives[left];
+        let left_branch_derivatives = self.branch_derivatives[left];
+{right_left_bindings}{right_right_bindings}        let right_value = {right_left_value} * right_left_scale {operator} {right_right_value} * right_right_scale;
+        self.values[index] = left_value * right_value;
+        for axis in 0..Instance::NODE_COUNT {{ let right_derivative = {right_left_node_derivative} * right_left_scale {operator} {right_right_node_derivative} * right_right_scale; self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_derivative; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let right_derivative = {right_left_branch_derivative} * right_left_scale {operator} {right_right_branch_derivative} * right_right_scale; self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_derivative; }}
+    }}
+"#,
+        right_left_ty = mixed_helper_type(mask, 0),
+        right_right_ty = mixed_helper_type(mask, 1),
     )
 }
 
@@ -39093,18 +39167,30 @@ fn compact_mul_add_scaled_inputs_store_helper_call(
         && let Some((right_left, right_left_scale, right_right, right_right_scale)) =
             compact_add_scaled_inputs_args(args[1])
     {
-        return Some(format!(
-            "scratch.store_mul_add_scaled_inputs_rhs({target_index}, {left}, {right_left}, {right_left_scale}, {right_right}, {right_right_scale});"
-        ));
+        return compact_index_or_mixed_mul_scaled_inputs_rhs_helper_line(
+            "store_mul_add_scaled_inputs_rhs",
+            target_index,
+            left,
+            right_left,
+            right_left_scale,
+            right_right,
+            right_right_scale,
+        );
     }
 
     if let Some(right) = compact_scratch_ad_value_index(args[1])
         && let Some((left_left, left_left_scale, left_right, left_right_scale)) =
             compact_add_scaled_inputs_args(args[0])
     {
-        return Some(format!(
-            "scratch.store_mul_add_scaled_inputs_rhs({target_index}, {right}, {left_left}, {left_left_scale}, {left_right}, {left_right_scale});"
-        ));
+        return compact_index_or_mixed_mul_scaled_inputs_rhs_helper_line(
+            "store_mul_add_scaled_inputs_rhs",
+            target_index,
+            right,
+            left_left,
+            left_left_scale,
+            left_right,
+            left_right_scale,
+        );
     }
 
     None
@@ -39123,21 +39209,49 @@ fn compact_mul_sub_scaled_inputs_store_helper_call(
         && let Some((right_left, right_left_scale, right_right, right_right_scale)) =
             compact_sub_scaled_inputs_args(args[1])
     {
-        return Some(format!(
-            "scratch.store_mul_sub_scaled_inputs_rhs({target_index}, {left}, {right_left}, {right_left_scale}, {right_right}, {right_right_scale});"
-        ));
+        return compact_index_or_mixed_mul_scaled_inputs_rhs_helper_line(
+            "store_mul_sub_scaled_inputs_rhs",
+            target_index,
+            left,
+            right_left,
+            right_left_scale,
+            right_right,
+            right_right_scale,
+        );
     }
 
     if let Some(right) = compact_scratch_ad_value_index(args[1])
         && let Some((left_left, left_left_scale, left_right, left_right_scale)) =
             compact_sub_scaled_inputs_args(args[0])
     {
-        return Some(format!(
-            "scratch.store_mul_sub_scaled_inputs_rhs({target_index}, {right}, {left_left}, {left_left_scale}, {left_right}, {left_right_scale});"
-        ));
+        return compact_index_or_mixed_mul_scaled_inputs_rhs_helper_line(
+            "store_mul_sub_scaled_inputs_rhs",
+            target_index,
+            right,
+            left_left,
+            left_left_scale,
+            left_right,
+            left_right_scale,
+        );
     }
 
     None
+}
+
+fn compact_index_or_mixed_mul_scaled_inputs_rhs_helper_line(
+    base: &str,
+    target_index: usize,
+    source: usize,
+    left: &str,
+    left_scale: &str,
+    right: &str,
+    right_scale: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(base, &[left, right])?;
+    Some(format!(
+        "scratch.{helper}({target_index}, {source}, {}, {left_scale}, {}, {right_scale});",
+        value_args[0], value_args[1]
+    ))
 }
 
 fn compact_mul_add_scaled_product_store_helper_call(
