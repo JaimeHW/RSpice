@@ -63,14 +63,25 @@ pub(crate) fn lower_scaled_rhs_multiply(
             scale_product(call.args[5], output_scale),
             scale_product(call.args[6], output_scale)
         )),
-        "add_scaled_product" if call.args.len() == 5 => Some(format!(
-            "scratch.store_mul_add_scaled_product_rhs({target_index}, {source}, {}, {}, {}, {}, {});",
-            call.args[0],
-            scale_product(call.args[1], output_scale),
-            call.args[2],
-            call.args[3],
-            scale_product(call.args[4], output_scale)
-        )),
+        "add_scaled_product" if call.args.len() == 5 => {
+            let value_scale = scale_product(call.args[1], output_scale);
+            let product_scale = scale_product(call.args[4], output_scale);
+            if let Some(line) = lower_mul_add_scaled_product_value_term(
+                target_index,
+                source,
+                call.args[0],
+                &value_scale,
+                call.args[2],
+                call.args[3],
+                &product_scale,
+            ) {
+                return Some(line);
+            }
+            Some(format!(
+                "scratch.store_mul_add_scaled_product_rhs({target_index}, {source}, {}, {value_scale}, {}, {}, {product_scale});",
+                call.args[0], call.args[2], call.args[3]
+            ))
+        }
         "add_scaled_sub_value_product" if call.args.len() == 6 => Some(format!(
             "scratch.store_mul_add_scaled_sub_value_product_rhs({target_index}, {source}, {}, {}, {}, {}, {}, {});",
             call.args[0],
@@ -266,6 +277,39 @@ fn scratch_ad_value_index(value: &str) -> Option<usize> {
         .strip_suffix(')')?
         .parse()
         .ok()
+}
+
+fn lower_mul_add_scaled_product_value_term(
+    target_index: usize,
+    source: usize,
+    value: &str,
+    value_scale: &str,
+    product_left: &str,
+    product_right: &str,
+    product_scale: &str,
+) -> Option<String> {
+    let product_left = scratch_ad_value_index(product_left)?;
+    let product_right = scratch_ad_value_index(product_right)?;
+    let CompactAdExpr::Call(call) = parse_ad_expr(value) else {
+        return None;
+    };
+
+    match call.name {
+        "sqrt" if call.args.len() == 1 => {
+            let value = scratch_ad_value_index(call.args[0])?;
+            Some(format!(
+                "scratch.store_mul_add_scaled_product_sqrt_value_rhs({target_index}, {source}, {value}, {value_scale}, {product_left}, {product_right}, {product_scale});"
+            ))
+        }
+        "sub" if call.args.len() == 2 => {
+            let value_left = scratch_ad_value_index(call.args[0])?;
+            let value_right = scratch_ad_value_index(call.args[1])?;
+            Some(format!(
+                "scratch.store_mul_add_scaled_product_sub_value_rhs({target_index}, {source}, {value_left}, {value_right}, {value_scale}, {product_left}, {product_right}, {product_scale});"
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn lower_mul_div_scaled_inputs_rhs(
