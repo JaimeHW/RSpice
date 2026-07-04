@@ -3310,6 +3310,39 @@ fn rust_backend_uses_compact_integer_power_helpers() {
 }
 
 #[test]
+fn rust_backend_uses_compact_dynamic_integer_power_exponents() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_dynamic_integer_power_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact dynamic integer power helper");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(
+        stamp.contains("A::powi(") || stamp.contains(".powi("),
+        "dynamic integer power exponents should use powi instead of powf:\n{stamp}"
+    );
+    assert!(
+        stamp.contains("p.p0 as i32"),
+        "integer parameter exponent should be cast at the generated powi call:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("powf("),
+        "dynamic integer power exponents should avoid generic powf in the generated stamp:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_materializes_repeated_expensive_compact_ad_subexpressions() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_repeated_expensive_ad_subexpression_source())
@@ -14854,6 +14887,25 @@ module compact_integer_power_helper(p, n);
         d = pow(b, 4.0);
         e = pow(b, 5.0);
         I(p, n) <+ c + d + e;
+    end
+endmodule
+"#
+}
+
+fn compact_dynamic_integer_power_source() -> &'static str {
+    r#"
+module compact_dynamic_integer_power(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 5 from [1:inf);
+    real a;
+    real b;
+    real c;
+    analog begin
+        a = V(p, n) + 1.0;
+        b = pow(a, nf);
+        c = (a + 2.0) ** (nf - 1);
+        I(p, n) <+ b + c;
     end
 endmodule
 "#

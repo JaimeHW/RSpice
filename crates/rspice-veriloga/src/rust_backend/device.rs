@@ -43870,6 +43870,11 @@ impl CompactAdEmitter<'_> {
                             if let Some(exponent) = self.numeric_integer_power_exponent(*right)? {
                                 let left = self.lower(*left)?;
                                 compact_integer_power_ad_expr(&left, exponent)
+                            } else if let Some(exponent) =
+                                self.integer_power_exponent_expr(*right)?
+                            {
+                                let left = self.lower(*left)?;
+                                format!("AdValue::powi({left}, {exponent})")
                             } else if let Some(exponent) = self.scalar_constant(*right)? {
                                 let left = self.lower(*left)?;
                                 format!("AdValue::powf({left}, {exponent})")
@@ -44455,6 +44460,139 @@ impl CompactAdEmitter<'_> {
             .and_then(compact_integer_power_exponent_value))
     }
 
+    fn integer_power_exponent_expr(&self, id: ExprId) -> Result<Option<String>, RustBackendError> {
+        if let Some(exponent) = self.numeric_integer_power_exponent(id)? {
+            return Ok(Some(exponent.to_string()));
+        }
+        if self.integer_power_exponent_range(id)?.is_none() {
+            return Ok(None);
+        }
+        let Some(exponent) = self.scalar_constant(id)? else {
+            return Ok(None);
+        };
+        Ok(Some(format!("({exponent} as i32)")))
+    }
+
+    fn integer_power_exponent_range(
+        &self,
+        id: ExprId,
+    ) -> Result<Option<CompactIntegerPowerExponentRange>, RustBackendError> {
+        let kind = self.expression(id)?.kind.clone();
+        match kind {
+            HirExprKind::Number { value, .. } => Ok(compact_integer_power_exponent_value(value)
+                .map(|value| CompactIntegerPowerExponentRange {
+                    min: value,
+                    max: value,
+                })),
+            HirExprKind::Identifier { name } => {
+                self.parameter_integer_power_exponent_range(name.as_str())
+            }
+            HirExprKind::Unary { op, operand } => match op.as_str() {
+                "Pos" => self.integer_power_exponent_range(operand),
+                "Neg" => {
+                    let Some(input) = self.integer_power_exponent_range(operand)? else {
+                        return Ok(None);
+                    };
+                    if input.min == i32::MIN {
+                        return Ok(None);
+                    }
+                    Ok(Some(CompactIntegerPowerExponentRange {
+                        min: -input.max,
+                        max: -input.min,
+                    }))
+                }
+                _ => Ok(None),
+            },
+            HirExprKind::Binary { op, left, right } => {
+                let Some(left) = self.integer_power_exponent_range(left)? else {
+                    return Ok(None);
+                };
+                let Some(right) = self.integer_power_exponent_range(right)? else {
+                    return Ok(None);
+                };
+                Ok(match op.as_str() {
+                    "Add" => compact_checked_integer_power_exponent_range(
+                        left.min as i64 + right.min as i64,
+                        left.max as i64 + right.max as i64,
+                    ),
+                    "Sub" => compact_checked_integer_power_exponent_range(
+                        left.min as i64 - right.max as i64,
+                        left.max as i64 - right.min as i64,
+                    ),
+                    "Mul" => {
+                        let products = [
+                            left.min as i64 * right.min as i64,
+                            left.min as i64 * right.max as i64,
+                            left.max as i64 * right.min as i64,
+                            left.max as i64 * right.max as i64,
+                        ];
+                        let min = products.iter().copied().min().unwrap_or(0);
+                        let max = products.iter().copied().max().unwrap_or(0);
+                        compact_checked_integer_power_exponent_range(min, max)
+                    }
+                    _ => None,
+                })
+            }
+            HirExprKind::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                let Some(then_range) = self.integer_power_exponent_range(then_expr)? else {
+                    return Ok(None);
+                };
+                let Some(else_range) = self.integer_power_exponent_range(else_expr)? else {
+                    return Ok(None);
+                };
+                Ok(Some(CompactIntegerPowerExponentRange {
+                    min: then_range.min.min(else_range.min),
+                    max: then_range.max.max(else_range.max),
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn parameter_integer_power_exponent_range(
+        &self,
+        name: &str,
+    ) -> Result<Option<CompactIntegerPowerExponentRange>, RustBackendError> {
+        let Some(parameter) = self
+            .artifact
+            .mir
+            .parameters
+            .iter()
+            .find(|parameter| parameter.name.as_str() == name)
+        else {
+            return Ok(None);
+        };
+        if parameter.value_type != CanonicalValueType::Integer {
+            return Ok(None);
+        }
+
+        let mut min = i32::MIN;
+        let mut max = i32::MAX;
+        if let Some(range) = &parameter.range {
+            if let Some(bound) = range
+                .min
+                .and_then(|value| compact_inclusive_integer_lower_bound(value, range.min_exclusive))
+            {
+                min = min.max(bound);
+            }
+            if let Some(bound) = range
+                .max
+                .and_then(|value| compact_inclusive_integer_upper_bound(value, range.max_exclusive))
+            {
+                max = max.min(bound);
+            }
+        }
+
+        if min > max {
+            return Ok(None);
+        }
+        Ok(Some(CompactIntegerPowerExponentRange { min, max }))
+    }
+
     fn is_numeric_zero(&self, id: ExprId) -> Result<bool, RustBackendError> {
         Ok(self
             .numeric_literal(id)?
@@ -44503,6 +44641,7 @@ impl CompactAdEmitter<'_> {
                 {
                     return self.zero_derivative_value_expr(id);
                 }
+                let right_id = right;
                 let Some(left) = self.scalar_constant(left)? else {
                     return Ok(None);
                 };
@@ -44515,7 +44654,13 @@ impl CompactAdEmitter<'_> {
                     "Mul" => compact_scalar_mul(&left, &right),
                     "Div" => compact_scalar_div(&left, &right),
                     "Mod" => compact_scalar_mod(&left, &right),
-                    "Pow" => compact_scalar_pow(&left, &right),
+                    "Pow" => {
+                        if let Some(exponent) = self.integer_power_exponent_expr(right_id)? {
+                            compact_scalar_powi(&left, &exponent)
+                        } else {
+                            compact_scalar_pow(&left, &right)
+                        }
+                    }
                     _ => return Ok(None),
                 };
                 Ok(Some(value))
@@ -44538,6 +44683,7 @@ impl CompactAdEmitter<'_> {
         left: ExprId,
         right: ExprId,
     ) -> Result<Option<String>, RustBackendError> {
+        let right_id = right;
         let Some(left) = self.scalar_constant(left)? else {
             return Ok(None);
         };
@@ -44550,7 +44696,13 @@ impl CompactAdEmitter<'_> {
             "Mul" => compact_scalar_mul(&left, &right),
             "Div" => compact_scalar_div(&left, &right),
             "Mod" => compact_scalar_mod(&left, &right),
-            "Pow" => compact_scalar_pow(&left, &right),
+            "Pow" => {
+                if let Some(exponent) = self.integer_power_exponent_expr(right_id)? {
+                    compact_scalar_powi(&left, &exponent)
+                } else {
+                    compact_scalar_pow(&left, &right)
+                }
+            }
             _ => return Ok(None),
         };
         Ok(Some(value))
@@ -44594,6 +44746,7 @@ impl CompactAdEmitter<'_> {
                         .condition_value_expr(id)?
                         .map(|condition| format!("if {condition} {{ 1.0 }} else {{ 0.0 }}")));
                 }
+                let right_id = right;
                 let Some(left) = self.zero_derivative_value_expr(left)? else {
                     return Ok(None);
                 };
@@ -44606,7 +44759,13 @@ impl CompactAdEmitter<'_> {
                     "Mul" => Some(compact_scalar_mul(&left, &right)),
                     "Div" => Some(compact_scalar_div(&left, &right)),
                     "Mod" => Some(compact_scalar_mod(&left, &right)),
-                    "Pow" => Some(compact_scalar_pow(&left, &right)),
+                    "Pow" => Some(
+                        if let Some(exponent) = self.integer_power_exponent_expr(right_id)? {
+                            compact_scalar_powi(&left, &exponent)
+                        } else {
+                            compact_scalar_pow(&left, &right)
+                        },
+                    ),
                     _ => None,
                 })
             }
@@ -44752,9 +44911,19 @@ impl CompactAdEmitter<'_> {
             }
             "ceil" => arg(0, self)?.map(|value| format!("{}.ceil()", compact_f64_receiver(&value))),
             "pow" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(base), Some(exponent)) => {
-                    Some(format!("{}.powf({exponent})", compact_f64_receiver(&base)))
-                }
+                (Some(base), Some(exponent)) => Some(
+                    if let Some(integer_exponent) = args
+                        .get(1)
+                        .copied()
+                        .map(|id| self.integer_power_exponent_expr(id))
+                        .transpose()?
+                        .flatten()
+                    {
+                        compact_scalar_powi(&base, &integer_exponent)
+                    } else {
+                        format!("{}.powf({exponent})", compact_f64_receiver(&base))
+                    },
+                ),
                 _ => None,
             },
             "min" => match (arg(0, self)?, arg(1, self)?) {
@@ -45223,6 +45392,10 @@ impl CompactAdEmitter<'_> {
             if let Some(exponent) = self.numeric_integer_power_exponent(exponent)? {
                 let base = self.lower(base)?;
                 return Ok(compact_integer_power_ad_expr(&base, exponent));
+            }
+            if let Some(exponent) = self.integer_power_exponent_expr(exponent)? {
+                let base = self.lower(base)?;
+                return Ok(format!("AdValue::powi({base}, {exponent})"));
             }
             if let Some(exponent) = self.scalar_constant(exponent)? {
                 return Ok(format!("AdValue::powf({}, {exponent})", self.lower(base)?));
@@ -45702,6 +45875,7 @@ impl CompactAdEmitter<'_> {
                         .condition_value_expr(id)?
                         .map(|condition| format!("if {condition} {{ 1.0 }} else {{ 0.0 }}")));
                 }
+                let right_id = right;
                 let Some(left) = self.value_expr(left)? else {
                     return Ok(None);
                 };
@@ -45714,7 +45888,13 @@ impl CompactAdEmitter<'_> {
                     "Mul" => Some(compact_scalar_mul(&left, &right)),
                     "Div" => Some(compact_scalar_div(&left, &right)),
                     "Mod" => Some(compact_scalar_mod(&left, &right)),
-                    "Pow" => Some(compact_scalar_pow(&left, &right)),
+                    "Pow" => Some(
+                        if let Some(exponent) = self.integer_power_exponent_expr(right_id)? {
+                            compact_scalar_powi(&left, &exponent)
+                        } else {
+                            compact_scalar_pow(&left, &right)
+                        },
+                    ),
                     _ => None,
                 })
             }
@@ -45948,9 +46128,19 @@ impl CompactAdEmitter<'_> {
             }
             "ceil" => arg(0, self)?.map(|value| format!("{}.ceil()", compact_f64_receiver(&value))),
             "pow" => match (arg(0, self)?, arg(1, self)?) {
-                (Some(base), Some(exponent)) => {
-                    Some(format!("{}.powf({exponent})", compact_f64_receiver(&base)))
-                }
+                (Some(base), Some(exponent)) => Some(
+                    if let Some(integer_exponent) = args
+                        .get(1)
+                        .copied()
+                        .map(|id| self.integer_power_exponent_expr(id))
+                        .transpose()?
+                        .flatten()
+                    {
+                        compact_scalar_powi(&base, &integer_exponent)
+                    } else {
+                        format!("{}.powf({exponent})", compact_f64_receiver(&base))
+                    },
+                ),
                 _ => None,
             },
             "min" => match (arg(0, self)?, arg(1, self)?) {
@@ -46089,6 +46279,12 @@ fn compact_scalar_same(left: &str, right: &str) -> bool {
     left.trim() == right.trim()
 }
 
+#[derive(Clone, Copy)]
+struct CompactIntegerPowerExponentRange {
+    min: i32,
+    max: i32,
+}
+
 fn compact_integer_power_exponent_value(value: f64) -> Option<i32> {
     if !value.is_finite() || value.fract() != 0.0 {
         return None;
@@ -46109,6 +46305,55 @@ fn compact_integer_power_exponent_literal(value: &str) -> Option<i32> {
     }
     let value = value.strip_suffix("_f64").unwrap_or(value);
     compact_integer_power_exponent_value(value.parse::<f64>().ok()?)
+}
+
+fn compact_inclusive_integer_lower_bound(value: f64, exclusive: bool) -> Option<i32> {
+    if !value.is_finite() {
+        return None;
+    }
+    let bound = if exclusive {
+        value.floor() + 1.0
+    } else {
+        value.ceil()
+    };
+    if bound > i32::MAX as f64 {
+        None
+    } else if bound <= i32::MIN as f64 {
+        Some(i32::MIN)
+    } else {
+        Some(bound as i32)
+    }
+}
+
+fn compact_inclusive_integer_upper_bound(value: f64, exclusive: bool) -> Option<i32> {
+    if !value.is_finite() {
+        return None;
+    }
+    let bound = if exclusive {
+        value.ceil() - 1.0
+    } else {
+        value.floor()
+    };
+    if bound < i32::MIN as f64 {
+        None
+    } else if bound >= i32::MAX as f64 {
+        Some(i32::MAX)
+    } else {
+        Some(bound as i32)
+    }
+}
+
+fn compact_checked_integer_power_exponent_range(
+    min: i64,
+    max: i64,
+) -> Option<CompactIntegerPowerExponentRange> {
+    if min < i32::MIN as i64 || max > i32::MAX as i64 || min > max {
+        return None;
+    }
+    Some(CompactIntegerPowerExponentRange {
+        min: min as i32,
+        max: max as i32,
+    })
 }
 
 fn compact_integer_power_ad_expr(base: &str, exponent: i32) -> String {
@@ -46202,6 +46447,21 @@ fn compact_scalar_pow(left: &str, right: &str) -> String {
         }
     } else {
         format!("{}.powf({right})", compact_f64_receiver(left))
+    }
+}
+
+fn compact_scalar_powi(left: &str, exponent: &str) -> String {
+    if let Some(exponent) = compact_integer_power_exponent_literal(exponent) {
+        match exponent {
+            0 => "1.0".to_string(),
+            1 => left.to_string(),
+            2 => compact_repeated_scalar_power(left, 2),
+            3 => compact_repeated_scalar_power(left, 3),
+            4 => compact_quartic_scalar_power(left),
+            _ => format!("{}.powi({exponent})", compact_f64_receiver(left)),
+        }
+    } else {
+        format!("{}.powi({exponent})", compact_f64_receiver(left))
     }
 }
 
