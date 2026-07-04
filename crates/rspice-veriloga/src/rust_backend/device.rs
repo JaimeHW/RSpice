@@ -8339,6 +8339,10 @@ fn stamp() {
         for signature in [
             "fn store_pow_ad(",
             "fn store_pow_indices(",
+            "fn store_pow_abs_mul_base_indices(",
+            "fn store_pow_sub_from_scalar_mul_base_indices(",
+            "fn store_pow_mul_base_indices(",
+            "fn store_pow_mul_base_mixed_ai(",
             "fn store_pow_offset_rhs(",
             "fn store_offset_pow_ad(",
             "fn store_div_from_scalar_pow_ad(",
@@ -8377,6 +8381,45 @@ fn stamp() {
             div_pow.contains("right.node_derivatives[axis] * exponent_derivative_scale"),
             "{div_pow}"
         );
+
+        let abs_mul_base = helper_body(&support, "fn store_pow_abs_mul_base_indices(");
+        assert!(
+            abs_mul_base.contains(
+                "let signed_base_derivative_scale = base_derivative_scale * base_derivative_sign;"
+            ),
+            "{abs_mul_base}"
+        );
+        assert!(
+            abs_mul_base.contains(
+                "base_derivative * signed_base_derivative_scale + exponent_node_derivatives[axis] * exponent_derivative_scale"
+            ),
+            "{abs_mul_base}"
+        );
+
+        let sub_mul_base = helper_body(&support, "fn store_pow_sub_from_scalar_mul_base_indices(");
+        assert!(
+            sub_mul_base.contains("let product_derivative_scale = -base_derivative_scale;"),
+            "{sub_mul_base}"
+        );
+        assert!(
+            sub_mul_base.contains(
+                "product_derivative * product_derivative_scale + exponent_node_derivatives[axis] * exponent_derivative_scale"
+            ),
+            "{sub_mul_base}"
+        );
+
+        for signature in [
+            "fn store_pow_mul_base_indices(",
+            "fn store_pow_mul_base_mixed_ai(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                body.contains(
+                    "base_derivative * base_derivative_scale + exponent_node_derivatives[axis] * exponent_derivative_scale"
+                ),
+                "{signature}\n{body}"
+            );
+        }
     }
 
     #[test]
@@ -16244,8 +16287,15 @@ fn generate_scratch_operation_helpers() -> String {
         "        let left_branch_derivatives = self.branch_derivatives[left];",
         "        let right_branch_derivatives = self.branch_derivatives[right];",
         "        let exponent_branch_derivatives = self.branch_derivatives[exponent];",
-        "        for axis in 0..Instance::NODE_COUNT { let base_derivative = (left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]) * base_derivative_sign; self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
-        "        for axis in 0..Instance::BRANCH_COUNT { let base_derivative = (left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]) * base_derivative_sign; self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
+        "        if base > 0.0 {",
+        "            let (base_derivative_scale, exponent_derivative_scale) = AdValue::pow_positive_derivative_scales(output, base, exponent_value);",
+        "            let signed_base_derivative_scale = base_derivative_scale * base_derivative_sign;",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; self.node_derivatives[index][axis] = base_derivative * signed_base_derivative_scale + exponent_node_derivatives[axis] * exponent_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = base_derivative * signed_base_derivative_scale + exponent_branch_derivatives[axis] * exponent_derivative_scale; }",
+        "        } else {",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = (left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]) * base_derivative_sign; self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = (left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]) * base_derivative_sign; self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
+        "        }",
         "    }",
         "",
         "    #[inline]",
@@ -16262,8 +16312,15 @@ fn generate_scratch_operation_helpers() -> String {
         "        let left_branch_derivatives = self.branch_derivatives[left];",
         "        let right_branch_derivatives = self.branch_derivatives[right];",
         "        let exponent_branch_derivatives = self.branch_derivatives[exponent];",
-        "        for axis in 0..Instance::NODE_COUNT { let base_derivative = -(left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]); self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
-        "        for axis in 0..Instance::BRANCH_COUNT { let base_derivative = -(left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]); self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
+        "        if base > 0.0 {",
+        "            let (base_derivative_scale, exponent_derivative_scale) = AdValue::pow_positive_derivative_scales(output, base, exponent_value);",
+        "            let product_derivative_scale = -base_derivative_scale;",
+        "            for axis in 0..Instance::NODE_COUNT { let product_derivative = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; self.node_derivatives[index][axis] = product_derivative * product_derivative_scale + exponent_node_derivatives[axis] * exponent_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let product_derivative = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = product_derivative * product_derivative_scale + exponent_branch_derivatives[axis] * exponent_derivative_scale; }",
+        "        } else {",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = -(left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]); self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = -(left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]); self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
+        "        }",
         "    }",
         "",
         "    #[inline]",
@@ -16280,8 +16337,14 @@ fn generate_scratch_operation_helpers() -> String {
         "        let right_branch_derivatives = self.branch_derivatives[right];",
         "        let exponent_branch_derivatives = self.branch_derivatives[exponent];",
         "        self.values[index] = output;",
-        "        for axis in 0..Instance::NODE_COUNT { let base_derivative = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
-        "        for axis in 0..Instance::BRANCH_COUNT { let base_derivative = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
+        "        if base > 0.0 {",
+        "            let (base_derivative_scale, exponent_derivative_scale) = AdValue::pow_positive_derivative_scales(output, base, exponent_value);",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; self.node_derivatives[index][axis] = base_derivative * base_derivative_scale + exponent_node_derivatives[axis] * exponent_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = base_derivative * base_derivative_scale + exponent_branch_derivatives[axis] * exponent_derivative_scale; }",
+        "        } else {",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
+        "        }",
         "    }",
         "",
         "    #[inline]",
@@ -16296,8 +16359,14 @@ fn generate_scratch_operation_helpers() -> String {
         "        let right_branch_derivatives = self.branch_derivatives[right];",
         "        let exponent_branch_derivatives = self.branch_derivatives[exponent];",
         "        self.values[index] = output;",
-        "        for axis in 0..Instance::NODE_COUNT { let base_derivative = left.node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
-        "        for axis in 0..Instance::BRANCH_COUNT { let base_derivative = left.branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
+        "        if base > 0.0 {",
+        "            let (base_derivative_scale, exponent_derivative_scale) = AdValue::pow_positive_derivative_scales(output, base, exponent_value);",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = left.node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; self.node_derivatives[index][axis] = base_derivative * base_derivative_scale + exponent_node_derivatives[axis] * exponent_derivative_scale; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = left.branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = base_derivative * base_derivative_scale + exponent_branch_derivatives[axis] * exponent_derivative_scale; }",
+        "        } else {",
+        "            for axis in 0..Instance::NODE_COUNT { let base_derivative = left.node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; self.node_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_node_derivatives[axis]); }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let base_derivative = left.branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = AdValue::pow_derivative(output, base, exponent_value, base_derivative, exponent_branch_derivatives[axis]); }",
+        "        }",
         "    }",
         "",
         "    #[inline]",
