@@ -7864,10 +7864,19 @@ impl XyceTestRunner {
                     .unwrap_or(2.0 * self.config.absolute_tolerance),
             );
         }
-        if Self::parse_power_probe(normalized_probe).is_some() {
+        if Self::probe_uses_power_tolerance(normalized_probe) {
             tolerance.absolute = tolerance.absolute.max(self.config.power_absolute_tolerance);
         }
         tolerance
+    }
+
+    fn probe_uses_power_tolerance(normalized_probe: &str) -> bool {
+        if Self::parse_power_probe(normalized_probe).is_some() {
+            return true;
+        }
+        Self::print_expression_inner(normalized_probe).is_some_and(|expression| {
+            Self::parse_power_probe(&Self::normalize_probe(expression)).is_some()
+        })
     }
 
     fn probe_uses_voltage_tolerance(normalized_probe: &str) -> bool {
@@ -8996,7 +9005,8 @@ impl XyceTestRunner {
             ));
         }
         if let Some(element_name) = Self::parse_power_probe(normalized) {
-            if (Self::find_capacitor_element(netlist, &element_name).is_some()
+            if (Self::find_resistor_element(netlist, &element_name).is_some()
+                || Self::find_capacitor_element(netlist, &element_name).is_some()
                 || Self::find_inductor_element(netlist, &element_name).is_some())
                 && Self::netlist_has_recorded_branch_current(netlist, &element_name)
             {
@@ -9987,6 +9997,14 @@ impl XyceTestRunner {
         }
 
         if let Some(element_name) = Self::parse_power_probe(normalized) {
+            if Self::find_resistor_element(netlist, &element_name).is_some() {
+                return Self::evaluate_transient_resistor_power(
+                    netlist,
+                    result,
+                    time,
+                    &element_name,
+                );
+            }
             if Self::find_capacitor_element(netlist, &element_name).is_some() {
                 return Self::evaluate_transient_capacitor_power(
                     netlist,
@@ -10060,6 +10078,23 @@ impl XyceTestRunner {
                 (normalized != branch_name)
                     .then(|| result.try_branch_current_waveform_named(&normalized))?
             })
+    }
+
+    fn evaluate_transient_resistor_power(
+        netlist: &Netlist,
+        result: &TransientResult,
+        time: Value,
+        resistor_name: &str,
+    ) -> Result<Value, String> {
+        let element = Self::find_resistor_element(netlist, resistor_name)
+            .ok_or_else(|| format!("resistor '{}' not found", resistor_name))?;
+        Self::evaluate_transient_two_terminal_branch_power(
+            result,
+            time,
+            "resistor",
+            &element.name,
+            &element,
+        )
     }
 
     fn evaluate_transient_inductor_power(
@@ -15708,6 +15743,35 @@ C1 out 0 40u IC=1
     }
 
     #[test]
+    fn transient_resistor_power_probe_uses_recorded_branch_current() {
+        let netlist = Netlist::parse(
+            "transient resistor power probe\n\
+             R1 out 0 100\n\
+             .tran 1m 1m\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0e-3],
+            voltages: vec![vec![1.0, 3.0]],
+            branch_currents: vec![vec![0.01, 0.03]],
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: vec!["R1".to_string()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+        };
+
+        XyceTestRunner::validate_tran_probe("P(R1)", &netlist)
+            .expect("resistor power is a supported transient probe");
+        let power = XyceTestRunner::evaluate_tran_probe("P(R1)", &netlist, &result, 1.0e-3)
+            .expect("resistor power evaluates from branch current and voltage drop");
+
+        assert!((power - 0.09).abs() <= 1.0e-15, "power was {power}");
+    }
+
+    #[test]
     fn nested_device_then_param_step_rebinds_source_expression() {
         let netlist = Netlist::parse(
             "nested mixed step source binding\n\
@@ -16112,6 +16176,7 @@ interval output
         let phase_tolerance = runner.default_comparison_tolerance("vp(1)");
         let current_tolerance = runner.default_comparison_tolerance("i(v1)");
         let power_tolerance = runner.default_comparison_tolerance("p(l1)");
+        let braced_power_tolerance = runner.default_comparison_tolerance("{p(l1)}");
 
         assert_eq!(voltage_tolerance.absolute, crate::constants::VNTOL);
         assert_eq!(magnitude_tolerance.absolute, crate::constants::VNTOL);
@@ -16119,6 +16184,7 @@ interval output
         assert_eq!(current_tolerance.absolute, 1.0e-12);
         assert_eq!(current_tolerance.zero, Some(2.0e-12));
         assert_eq!(power_tolerance.absolute, 1.0e-9);
+        assert_eq!(braced_power_tolerance.absolute, 1.0e-9);
         assert!(
             runner
                 .value_mismatch(3.98095099e-12, 0.0, voltage_tolerance)

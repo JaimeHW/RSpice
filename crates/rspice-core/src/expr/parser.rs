@@ -180,6 +180,7 @@ impl<'a> Lexer<'a> {
                 || c == '.'
                 || c == '#'
                 || c == ':'
+                || c == '$'
                 || is_bang_name_char
             {
                 s.push(self.chars.next().unwrap());
@@ -230,7 +231,7 @@ impl<'a> Lexer<'a> {
             None => Token::Eof,
             Some(&c) => match c {
                 '0'..='9' | '.' => self.read_number(),
-                'a'..='z' | 'A'..='Z' | '_' => Token::Ident(self.read_ident()),
+                'a'..='z' | 'A'..='Z' | '_' | '$' => Token::Ident(self.read_ident()),
                 '"' | '\'' => self.read_string(c),
                 '+' => {
                     self.chars.next();
@@ -1073,6 +1074,10 @@ mod tests {
                 Expr::NodeVoltage("2D".to_string()),
                 Expr::NodeVoltage("gnd!".to_string())
             )
+        );
+        assert_eq!(
+            parse_expression_strict("V($G_CLK)").expect("global-node probe parses"),
+            Expr::NodeVoltage("$G_CLK".to_string())
         );
         assert!(
             parse_expression_strict("1!=0").is_ok(),
