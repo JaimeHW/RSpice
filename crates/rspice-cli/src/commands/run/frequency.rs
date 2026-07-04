@@ -133,6 +133,72 @@ pub(super) fn run_disto(
     run_ac(ctx, variation, points, start_freq, stop_freq)
 }
 
+pub(super) fn run_ac_data(ctx: &RunContext<'_>, table_name: &str) -> Result<(), CliError> {
+    let table = ctx
+        .netlist
+        .data_tables
+        .iter()
+        .find(|table| table.name.eq_ignore_ascii_case(table_name))
+        .ok_or_else(|| invalid_ac_data(format!(".AC DATA table '{table_name}' not found")))?;
+    let freq_col = table
+        .params
+        .iter()
+        .position(|param| param.eq_ignore_ascii_case("FREQ"))
+        .ok_or_else(|| {
+            invalid_ac_data(format!(
+                ".AC DATA table '{}' must contain a FREQ column",
+                table.name
+            ))
+        })?;
+
+    if table.rows.is_empty() {
+        return Err(invalid_ac_data(format!(
+            ".AC DATA table '{}' has no rows",
+            table.name
+        )));
+    }
+
+    let mut frequencies = Vec::with_capacity(table.rows.len());
+    for (row_idx, row) in table.rows.iter().enumerate() {
+        if row.len() != table.params.len() {
+            return Err(invalid_ac_data(format!(
+                ".AC DATA table '{}' row {} has {} value(s), expected {}",
+                table.name,
+                row_idx + 1,
+                row.len(),
+                table.params.len()
+            )));
+        }
+        let frequency = row[freq_col];
+        if !frequency.is_finite() || frequency < 0.0 {
+            return Err(invalid_ac_data(format!(
+                ".AC DATA table '{}' row {} has invalid frequency {}",
+                table.name,
+                row_idx + 1,
+                frequency
+            )));
+        }
+        frequencies.push(frequency);
+    }
+
+    if !ctx.quiet {
+        println!(
+            "Running AC DATA analysis from table {} ({} points)...",
+            table.name,
+            frequencies.len()
+        );
+    }
+
+    run_ac_frequencies(ctx, frequencies)
+}
+
+fn invalid_ac_data(message: String) -> CliError {
+    CliError::InvalidArgument {
+        message,
+        suggestion: Some("fix the .DATA table referenced by .AC DATA=<name>".to_string()),
+    }
+}
+
 pub(super) fn run_ac(
     ctx: &RunContext<'_>,
     variation: rspice_core::netlist::FreqVariation,
@@ -148,7 +214,10 @@ pub(super) fn run_ac(
     }
 
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq);
+    run_ac_frequencies(ctx, frequencies)
+}
 
+fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(), CliError> {
     match ctx.engine.run_ac(ctx.netlist, &frequencies) {
         Ok(results) => {
             if !ctx.args.allow_nonfinite {

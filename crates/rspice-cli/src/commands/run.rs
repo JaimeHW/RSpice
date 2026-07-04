@@ -228,6 +228,7 @@ impl<'a> RunContext<'a> {
                 start_freq,
                 stop_freq,
             } => frequency::run_ac(self, *variation, *points, *start_freq, *stop_freq)?,
+            AnalysisCommand::AcData { table_name } => frequency::run_ac_data(self, table_name)?,
             AnalysisCommand::Sp {
                 variation,
                 points,
