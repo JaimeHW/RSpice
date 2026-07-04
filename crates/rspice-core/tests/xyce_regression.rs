@@ -1300,24 +1300,29 @@ fn test_xyce_default_prn_transient_output_wrapper_cases_run_natively() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    let relative = "Netlists/Output/TRAN/tran-prn-noindex.cir";
-    assert!(
-        runner.requires_upstream_wrapper(relative),
-        "{relative} should retain its removed upstream transient PRN wrapper provenance"
-    );
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native wrapper-origin transient PRN comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
-    assert_eq!(
-        result.contract, "wrapper_static_prn_tran",
-        "{relative} should report the native wrapper-origin transient .prn contract"
-    );
+    for relative in [
+        "Netlists/Output/TRAN/tran-gnuplot.cir",
+        "Netlists/Output/TRAN/tran-prn-noindex.cir",
+        "Netlists/Output/TRAN/tran-splot.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream transient PRN wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native wrapper-origin transient PRN comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_tran",
+            "{relative} should report the native wrapper-origin transient .prn contract"
+        );
+    }
 }
 
 #[test]
