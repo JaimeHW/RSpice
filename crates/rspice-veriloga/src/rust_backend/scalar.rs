@@ -14,11 +14,11 @@ use super::{RustTranspileOptions, device};
 
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 1_000_000;
-const MAX_SCALAR_STAMP_EMITTED_VALUES: usize = 300_000;
+const MAX_SCALAR_STAMP_EMITTED_VALUES: usize = 1_000_000;
 const MAX_SCALAR_STAMP_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_SCALAR_STAMP_SOURCE_LINES: usize = 120_000;
 const SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE: usize = 1024;
-const MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE: usize = 4;
+const MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE: usize = 8;
 const MAX_SCALAR_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_INLINE_EXPR_COST: usize = 128;
@@ -5939,21 +5939,33 @@ mod tests {
 
     #[test]
     fn scalar_source_line_budget_uses_compact_binding_estimate() {
-        let emitted_values =
+        let compact_line_budget_values =
             MAX_SCALAR_STAMP_SOURCE_LINES - SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE;
+        let compact_binding_budget =
+            compact_line_budget_values * MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE;
 
         assert_eq!(
-            scalar_stamp_packed_binding_line_estimate(
-                emitted_values * MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE
-            ),
-            emitted_values
+            scalar_stamp_packed_binding_line_estimate(compact_binding_budget),
+            compact_line_budget_values
         );
         assert!(!scalar_stamp_source_line_estimate_exceeds_budget(
-            MAX_SCALAR_STAMP_EMITTED_VALUES
+            compact_binding_budget
+        ));
+        assert!(scalar_stamp_source_line_estimate_exceeds_budget(
+            compact_binding_budget + MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE
         ));
         assert!(scalar_stamp_emitted_values_exceeds_budget(
             MAX_SCALAR_STAMP_EMITTED_VALUES + 1
         ));
+    }
+
+    #[test]
+    fn scalar_emitted_value_budget_matches_live_value_budget() {
+        assert_eq!(
+            MAX_SCALAR_STAMP_EMITTED_VALUES,
+            MAX_SCALAR_STAMP_LIVE_VALUES
+        );
+        assert!(!scalar_stamp_emitted_values_exceeds_budget(680_156));
     }
 
     #[test]
