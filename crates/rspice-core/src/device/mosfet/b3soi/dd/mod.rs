@@ -75,6 +75,17 @@ pub enum BodyMode {
     TiedResistive,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct B3SoiDdTerminals {
+    vd: Value,
+    vg: Value,
+    vs: Value,
+    ve: Value,
+    vp: Value,
+    vb: Value,
+    vt: Value,
+}
+
 /// B3SOIDD device instance.
 #[derive(Debug, Clone)]
 pub struct B3SoiDd {
@@ -132,6 +143,9 @@ pub struct B3SoiDd {
     /// Last accepted/limited self-heating temperature rise used by
     /// `B3SOIDDlimit(delTemp, oldDelTemp, 5.0)`.
     del_temp_limit_anchor: Value,
+    /// Last accepted/limited absolute terminal voltages used by the
+    /// B3SOIDD terminal limiter before branch voltages are formed.
+    terminal_limit_anchor: B3SoiDdTerminals,
     /// DC/operating-point mode: enables the `B3SOIDDSmartVbs` floating-body
     /// clamp (Vbs >= 0). Cleared during transient where the body may go
     /// negative. Set by the engine before each analysis phase.
@@ -139,6 +153,10 @@ pub struct B3SoiDd {
     /// Whether the limiter anchor has been seeded (first iterate uses the raw
     /// node solution).
     limit_anchor_valid: std::cell::Cell<bool>,
+    /// The first DC load uses Xyce/ngspice's MODEINITJCT gate seed directly.
+    /// Without this guard `stamp_nonlinear` would immediately re-evaluate from
+    /// the raw node seed and discard the startup branch used to enter Newton.
+    startup_seed_pending: std::cell::Cell<bool>,
     /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
     /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
     /// disables bypass (DC operating point never bypasses).
@@ -261,7 +279,8 @@ impl B3SoiDd {
             vbs_limit_anchor: 0.0,
             vbd_limit_anchor: 0.0,
             del_temp_limit_anchor: 0.0,
-            dc_mode: std::cell::Cell::new(true),
+            terminal_limit_anchor: B3SoiDdTerminals::default(),
+            dc_mode: std::cell::Cell::new(false),
             limit_anchor_valid: std::cell::Cell::new(false),
             bypass_tolerances: std::cell::Cell::new(None),
             bypass_active: std::cell::Cell::new(false),
@@ -269,6 +288,7 @@ impl B3SoiDd {
             last_limited: std::cell::Cell::new(false),
             bias_was_limited: std::cell::Cell::new(false),
             charges_suppressed: false,
+            startup_seed_pending: std::cell::Cell::new(false),
             instance_ic: super::common::B3SoiInstanceIc::new(),
         })
     }
@@ -296,6 +316,34 @@ impl B3SoiDd {
         }
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
+        self.bias_was_limited.set(false);
+        self.startup_seed_pending.set(false);
+    }
+
+    /// Clear the cached operating-point linearization before a fresh DC path.
+    pub(crate) fn reset_operating_point_history(&mut self) {
+        self.op = B3SoiDdOp::default();
+        let zero_bias = B3SoiDdBias {
+            vbs: 0.0,
+            vgs: 0.0,
+            vds: 0.0,
+            ves: 0.0,
+            vps: 0.0,
+            del_temp: 0.0,
+        };
+        self.bias = zero_bias;
+        self.converged_ref = zero_bias;
+        self.has_history = false;
+        self.vbs_limit_anchor = 0.0;
+        self.vbd_limit_anchor = 0.0;
+        self.del_temp_limit_anchor = 0.0;
+        self.terminal_limit_anchor = B3SoiDdTerminals::default();
+        self.dc_mode.set(true);
+        self.limit_anchor_valid.set(false);
+        self.startup_seed_pending.set(false);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+        self.last_limited.set(false);
         self.bias_was_limited.set(false);
     }
 
@@ -433,11 +481,13 @@ impl B3SoiDd {
         self.vbs_limit_anchor = bias.vbs;
         self.vbd_limit_anchor = bias.vbs - bias.vds;
         self.del_temp_limit_anchor = bias.del_temp;
+        self.terminal_limit_anchor = self.raw_terminal_voltages(voltages);
         self.limit_anchor_valid.set(true);
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
         self.last_limited.set(false);
         self.bias_was_limited.set(false);
+        self.startup_seed_pending.set(false);
     }
 
     /// ngspice bypass predicate (b3soiddld.c:589-643): every branch-voltage
@@ -720,31 +770,57 @@ impl B3SoiDd {
     ///
     /// The solution vector is 0-indexed (node 1 -> `v[0]`); ground (NodeId 0)
     /// reads as 0.0.
-    fn raw_branch_voltages(&self, v: &[Value]) -> B3SoiDdBias {
+    fn raw_terminal_voltages(&self, v: &[Value]) -> B3SoiDdTerminals {
         let node = |n: NodeId| if n == 0 { 0.0 } else { v[n - 1] };
-        let vd = node(self.node_drain);
-        let vg = node(self.node_gate);
-        let vs = node(self.node_source);
-        let ve = node(self.node_e);
-        let vb = node(self.node_body);
-        let vp = node(self.node_p);
-        let vt = node(self.node_temp);
+        B3SoiDdTerminals {
+            vd: node(self.node_drain),
+            vg: node(self.node_gate),
+            vs: node(self.node_source),
+            ve: node(self.node_e),
+            vp: node(self.node_p),
+            vb: node(self.node_body),
+            vt: node(self.node_temp),
+        }
+    }
+
+    fn bias_from_terminals(&self, terminals: B3SoiDdTerminals) -> B3SoiDdBias {
         B3SoiDdBias {
-            vbs: self.mtype * (vb - vs),
-            vgs: self.mtype * (vg - vs),
-            vds: self.mtype * (vd - vs),
-            ves: self.mtype * (ve - vs),
-            vps: self.mtype * (vp - vs),
-            del_temp: vt,
+            vbs: self.mtype * (terminals.vb - terminals.vs),
+            vgs: self.mtype * (terminals.vg - terminals.vs),
+            vds: self.mtype * (terminals.vd - terminals.vs),
+            ves: self.mtype * (terminals.ve - terminals.vs),
+            vps: self.mtype * (terminals.vp - terminals.vs),
+            del_temp: terminals.vt,
         }
     }
 
     fn branch_voltages(&self, v: &[Value]) -> B3SoiDdBias {
-        let mut bias = self.raw_branch_voltages(v);
+        let (terminals, _) = self.limited_terminal_voltages(v);
+        let mut bias = self.bias_from_terminals(terminals);
         let _ = self.apply_branch_limiting(&mut bias);
         let _ = self.apply_body_limiting(&mut bias);
         bias
     }
+    fn raw_branch_voltages(&self, v: &[Value]) -> B3SoiDdBias {
+        self.bias_from_terminals(self.raw_terminal_voltages(v))
+    }
+
+    fn limited_terminal_voltages(&self, v: &[Value]) -> (B3SoiDdTerminals, bool) {
+        let mut terminals = self.raw_terminal_voltages(v);
+        if !self.limit_anchor_valid.get() {
+            return (terminals, false);
+        }
+
+        let old = self.terminal_limit_anchor;
+        let mut check = false;
+        terminals.vg = common::soi_limit(terminals.vg, old.vg, 3.0, &mut check);
+        terminals.vd = common::soi_limit(terminals.vd, old.vd, 3.0, &mut check);
+        terminals.vs = common::soi_limit(terminals.vs, old.vs, 3.0, &mut check);
+        terminals.vp = common::soi_limit(terminals.vp, old.vp, 3.0, &mut check);
+        terminals.ve = common::soi_limit(terminals.ve, old.ve, 3.0, &mut check);
+        (terminals, check)
+    }
+
 
     fn sized_for_bias(&self, bias: B3SoiDdBias) -> Cow<'_, B3SoiDdSized> {
         if !self.self_heating_active() {
@@ -925,12 +1001,49 @@ impl B3SoiDd {
         }
         check
     }
+
+    /// MODEINITJCT startup bias used by Xyce/ngspice for an uninitialized
+    /// B3SOIDD operating-point solve with no explicit input operating point.
+    ///
+    /// Xyce's ordinary DCOP startup preserves the source-solved terminal drops
+    /// and imposes only the gate startup value. That lets source stepping and
+    /// nodesets retain their linear context while avoiding an off-device first
+    /// linearization for floating-body SOI devices.
+    fn junction_init_bias(&self, raw: B3SoiDdBias) -> B3SoiDdBias {
+        B3SoiDdBias {
+            vgs: self.mtype * 0.1 + self.sized.vth0,
+            ..raw
+        }
+    }
 }
 
 impl NonlinearDevice for B3SoiDd {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
-        let node_bias = self.raw_branch_voltages(voltages);
+        if self.startup_seed_pending.get() && self.dc_mode.get() {
+            return;
+        }
+        if !self.has_history && self.dc_mode.get() {
+            let terminals = self.raw_terminal_voltages(voltages);
+            let bias = self.junction_init_bias(self.bias_from_terminals(terminals));
+            self.bias = bias;
+            self.op = self.eval_op_for_bias(bias);
+            self.has_history = true;
+            self.vbs_limit_anchor = bias.vbs;
+            self.vbd_limit_anchor = bias.vbs - bias.vds;
+            self.del_temp_limit_anchor = bias.del_temp;
+            self.terminal_limit_anchor = terminals;
+            self.limit_anchor_valid.set(true);
+            self.startup_seed_pending.set(true);
+            self.bypass_active.set(false);
+            self.force_full_eval.set(false);
+            self.last_limited.set(false);
+            self.bias_was_limited.set(false);
+            return;
+        }
+
+        let node_terminals = self.raw_terminal_voltages(voltages);
+        let node_bias = self.bias_from_terminals(node_terminals);
         let predicted_bias = self.predictor_bias.take();
         let raw_bias = predicted_bias.unwrap_or(node_bias);
         let using_prediction = predicted_bias.is_some() && !biases_match(raw_bias, node_bias);
@@ -953,8 +1066,15 @@ impl NonlinearDevice for B3SoiDd {
         }
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
-        let mut bias = raw_bias;
-        let limited = self.apply_branch_limiting(&mut bias) || self.apply_body_limiting(&mut bias);
+        let (mut bias, terminal_anchor, terminal_limited) = if using_prediction {
+            (raw_bias, node_terminals, false)
+        } else {
+            let (terminals, terminal_limited) = self.limited_terminal_voltages(voltages);
+            (self.bias_from_terminals(terminals), terminals, terminal_limited)
+        };
+        let limited = terminal_limited
+            || self.apply_branch_limiting(&mut bias)
+            || self.apply_body_limiting(&mut bias);
         self.last_limited.set(limited);
         self.bias_was_limited
             .set(using_prediction || !biases_match(raw_bias, bias));
@@ -966,9 +1086,11 @@ impl NonlinearDevice for B3SoiDd {
         self.has_history = true;
         // Anchor the per-iteration limiter at this (limited) iterate, in the
         // mode-selected frame, for the next Newton step.
+        self.startup_seed_pending.set(false);
         self.vbs_limit_anchor = bias.vbs;
         self.vbd_limit_anchor = bias.vbs - bias.vds;
         self.del_temp_limit_anchor = bias.del_temp;
+        self.terminal_limit_anchor = terminal_anchor;
         self.limit_anchor_valid.set(true);
     }
 
@@ -981,6 +1103,11 @@ impl NonlinearDevice for B3SoiDd {
         if self.bypass_active.get() {
             // Bypassed iterate: restamp the frozen linearization unchanged.
             self.stamp_op(&self.op, self.bias, voltages, matrix);
+            self.stamp_instance_ic(matrix);
+            return;
+        }
+        if self.startup_seed_pending.replace(false) {
+            self.stamp_op_with_rgate_seed(&self.op, self.bias, voltages, matrix, true);
             self.stamp_instance_ic(matrix);
             return;
         }
@@ -1042,6 +1169,17 @@ impl B3SoiDd {
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
+        self.stamp_op_with_rgate_seed(op, bias, voltages, matrix, false);
+    }
+
+    fn stamp_op_with_rgate_seed(
+        &self,
+        op: &B3SoiDdOp,
+        bias: B3SoiDdBias,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+        use_seeded_rgate_voltage: bool,
+    ) {
         let (dp, g, sp, e, b) = (
             self.node_drain,
             self.node_gate,
@@ -1050,8 +1188,17 @@ impl B3SoiDd {
             self.node_body,
         );
         let mt = self.mtype;
-        let rgate_terms = (self.model.rgate_mod == 2)
-            .then(|| self.rgate_gcrg_terms(self.node_gate_external, voltages, bias, op));
+        let rgate_terms = if self.model.rgate_mod == 2 {
+            if use_seeded_rgate_voltage {
+                Some(Self::rgate_gcrg_terms_from(
+                    self.mtype, op.mode, bias.vgs, bias, op,
+                ))
+            } else {
+                Some(self.rgate_gcrg_terms(self.node_gate_external, voltages, bias, op))
+            }
+        } else {
+            None
+        };
 
         // The branch voltages used to form cdreq, in the *un-swapped* (raw)
         // frame, exactly as ngspice (vds/vgs/vbs/ves are pre-swap, device

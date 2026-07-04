@@ -176,6 +176,12 @@ impl CircuitData {
         }
     }
 
+    pub(crate) fn reset_b3soi_dd_operating_point_history(&mut self) {
+        for dev in &mut self.b3soi.devices {
+            dev.reset_operating_point_history();
+        }
+    }
+
     /// Check if circuit has any native BSIM3v3.3 (level 8/49) device.
     ///
     /// Their coupled charge companion runs through a dedicated transient
