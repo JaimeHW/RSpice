@@ -701,6 +701,35 @@ mod tests {
     }
 
     #[test]
+    fn ngspice_pulse_omitted_period_breakpoints_use_transient_stop_default() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 10.0e-6,
+            rise: 1.0e-6,
+            fall: 1.0e-6,
+            width: 100.0e-3,
+            period: Value::NAN,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        Engine::add_source_spec_breakpoints(
+            &mut breakpoints,
+            &spec,
+            400.0e-3,
+            0.5e-6,
+            crate::engine::SpiceDialect::Ngspice,
+        );
+
+        assert_delays_close(
+            breakpoints.times(),
+            &[10.0e-6, 11.0e-6, 100.011e-3, 100.012e-3],
+        );
+    }
+
+    #[test]
     fn pulse_phase_shifts_breakpoints_like_ngspice_xspice_mode() {
         let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
         let spec = crate::netlist::SourceSpec::Pulse {

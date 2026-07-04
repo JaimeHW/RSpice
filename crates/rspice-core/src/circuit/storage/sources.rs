@@ -468,7 +468,7 @@ impl VoltageSources {
         fall: Value,
         width: Value,
         period: Value,
-        _width_defaults_to_zero: bool,
+        width_defaults_to_zero: bool,
         step_default: Value,
         stop_default: Value,
         dialect: crate::engine::SpiceDialect,
@@ -476,6 +476,8 @@ impl VoltageSources {
         let period_was_omitted = period.is_nan();
         let width_was_omitted = width.is_nan();
         let xyce_defaults = matches!(dialect, crate::engine::SpiceDialect::Xyce);
+        let ngspice_defaults = matches!(dialect, crate::engine::SpiceDialect::Ngspice);
+        let stop_time_defaults = xyce_defaults || ngspice_defaults;
 
         let td = if delay.is_finite() {
             delay.max(0.0)
@@ -485,6 +487,8 @@ impl VoltageSources {
         let tr = if rise.is_nan() { step_default } else { rise };
         let tf = if fall.is_nan() { step_default } else { fall };
         let pw = if width.is_nan() && xyce_defaults {
+            stop_default
+        } else if width.is_nan() && ngspice_defaults && !width_defaults_to_zero {
             stop_default
         } else if width.is_nan() {
             0.0
@@ -511,7 +515,7 @@ impl VoltageSources {
             0.0
         };
         let per = if period_was_omitted {
-            if xyce_defaults {
+            if stop_time_defaults {
                 stop_default
             } else {
                 tr + pw + tf
@@ -1410,6 +1414,14 @@ mod tests {
         })
     }
 
+    fn ngspice_transient_context(tstep: Value, tstop: Value) -> Option<TransientSourceContext> {
+        Some(TransientSourceContext {
+            tstep,
+            tstop,
+            dialect: crate::engine::SpiceDialect::Ngspice,
+        })
+    }
+
     fn xyce_transient_context(tstep: Value, tstop: Value) -> Option<TransientSourceContext> {
         Some(TransientSourceContext {
             tstep,
@@ -1564,6 +1576,55 @@ mod tests {
         );
 
         assert_close(value, 0.08);
+    }
+
+    #[test]
+    fn ngspice_pulse_omitted_period_defaults_to_transient_stop_time() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 10.0e-6,
+            rise: 1.0e-6,
+            fall: 1.0e-6,
+            width: 100.0e-3,
+            period: Value::NAN,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        let ctx = ngspice_transient_context(0.5e-6, 400.0e-3);
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 100.0115e-3, ctx),
+            0.5,
+        );
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(&spec, 100.01208e-3, ctx),
+            0.0,
+        );
+    }
+
+    #[test]
+    fn ngspice_two_level_pulse_omitted_width_defaults_to_stop_time() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 0.0,
+            rise: Value::NAN,
+            fall: Value::NAN,
+            width: Value::NAN,
+            period: Value::NAN,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+
+        assert_close(
+            VoltageSources::evaluate_source_at_time_with_context(
+                &spec,
+                7.0,
+                ngspice_transient_context(0.1, 7.0),
+            ),
+            1.0,
+        );
     }
 
     #[test]

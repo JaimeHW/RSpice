@@ -12,6 +12,7 @@ impl TestRunner {
             convergence_config: ConvergenceConfig::robust(),
             // ngspice regression references run at 27C -> 300.15 K by default.
             temperature: 300.15,
+            spice_dialect: crate::engine::SpiceDialect::Ngspice,
             ..defaults
         };
         Engine::new(config)
@@ -29,6 +30,7 @@ impl TestRunner {
             temperature: 300.15,
             // Sub-ps floor improves waveform alignment around steep HFET/MESA edges.
             min_timestep: 1e-12,
+            spice_dialect: crate::engine::SpiceDialect::Ngspice,
             ..Default::default()
         };
         Engine::new(config)
@@ -50,5 +52,24 @@ impl TestRunner {
         results.iter().any(|(x, result)| {
             !x.is_finite() || Self::simulation_result_contains_non_finite(result)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ngspice_regression_engines_use_ngspice_dialect() {
+        let runner = TestRunner::new(std::env::temp_dir(), TestRunnerConfig::default());
+
+        assert_eq!(
+            runner.create_dc_engine().config().spice_dialect,
+            crate::engine::SpiceDialect::Ngspice
+        );
+        assert_eq!(
+            runner.create_dynamic_engine().config().spice_dialect,
+            crate::engine::SpiceDialect::Ngspice
+        );
     }
 }
