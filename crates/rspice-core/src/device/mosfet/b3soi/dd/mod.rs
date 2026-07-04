@@ -118,6 +118,13 @@ pub struct B3SoiDd {
     bias: B3SoiDdBias,
     converged_ref: B3SoiDdBias,
     has_history: bool,
+    /// Last two accepted transient branch-voltage states, mirroring ngspice
+    /// `CKTstate1/state2` for `B3SOIDDv{bs,gs,ds,es,ps}` and `deltemp`.
+    accepted_bias_prev: std::cell::Cell<Option<B3SoiDdBias>>,
+    accepted_bias_prev_prev: std::cell::Cell<Option<B3SoiDdBias>>,
+    /// One-shot `MODEINITPRED` branch-voltage estimate consumed by the first
+    /// nonlinear update of a transient timestep attempt.
+    predictor_bias: std::cell::Cell<Option<B3SoiDdBias>>,
     /// Last accepted/limited `vbs` (device polarity) used as the limiter anchor
     /// for `B3SOIDDlimit`/`B3SOIDDSmartVbs` on the next Newton iterate.
     vbs_limit_anchor: Value,
@@ -248,6 +255,9 @@ impl B3SoiDd {
                 del_temp: 0.0,
             },
             has_history: false,
+            accepted_bias_prev: std::cell::Cell::new(None),
+            accepted_bias_prev_prev: std::cell::Cell::new(None),
+            predictor_bias: std::cell::Cell::new(None),
             vbs_limit_anchor: 0.0,
             vbd_limit_anchor: 0.0,
             del_temp_limit_anchor: 0.0,
@@ -270,11 +280,20 @@ impl B3SoiDd {
     /// the source potential. The per-iteration `B3SOIDDlimit` change cap applies
     /// in both modes (it only protects the Newton path, not the solution).
     pub fn set_dc_mode(&self, dc: bool) {
-        if self.dc_mode.replace(dc) == dc {
+        let old = self.dc_mode.replace(dc);
+        if old == dc {
             return;
         }
-        // A mode switch invalidates the limiter anchor (different state vector).
-        self.limit_anchor_valid.set(false);
+        if !dc && self.has_history {
+            self.seed_accepted_transient_state();
+        }
+        if dc {
+            // Re-entering an operating-point solve starts a fresh DC path.
+            self.limit_anchor_valid.set(false);
+            self.accepted_bias_prev.set(None);
+            self.accepted_bias_prev_prev.set(None);
+            self.predictor_bias.set(None);
+        }
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
         self.bias_was_limited.set(false);
@@ -347,6 +366,57 @@ impl B3SoiDd {
     pub fn begin_timestep_iteration(&self) {
         self.force_full_eval.set(true);
         self.bypass_active.set(false);
+        self.predictor_bias.set(None);
+    }
+
+    /// Mark the start of a transient timestep attempt, using ngspice's
+    /// `MODEINITPRED` branch-voltage prediction when accepted state history is
+    /// available.
+    pub fn begin_transient_timestep_iteration(&self, dt: Value, accepted_dt_prev: Value) {
+        self.begin_timestep_iteration();
+        self.predictor_bias
+            .set(self.predicted_transient_bias(dt, accepted_dt_prev));
+    }
+
+    fn seed_accepted_transient_state(&self) {
+        let bias = self.bias;
+        self.accepted_bias_prev.set(Some(bias));
+        self.accepted_bias_prev_prev.set(Some(bias));
+    }
+
+    fn predicted_transient_bias(&self, dt: Value, accepted_dt_prev: Value) -> Option<B3SoiDdBias> {
+        let prev = self.accepted_bias_prev.get().or_else(|| {
+            if self.has_history {
+                Some(self.bias)
+            } else {
+                None
+            }
+        })?;
+        let prev_prev = self.accepted_bias_prev_prev.get().unwrap_or(prev);
+        if !(dt.is_finite() && dt > 0.0 && accepted_dt_prev.is_finite() && accepted_dt_prev > 0.0) {
+            return Some(prev);
+        }
+        let xfact = dt / accepted_dt_prev;
+        Some(B3SoiDdBias {
+            vbs: (1.0 + xfact) * prev.vbs - xfact * prev_prev.vbs,
+            vgs: (1.0 + xfact) * prev.vgs - xfact * prev_prev.vgs,
+            vds: (1.0 + xfact) * prev.vds - xfact * prev_prev.vds,
+            ves: (1.0 + xfact) * prev.ves - xfact * prev_prev.ves,
+            vps: (1.0 + xfact) * prev.vps - xfact * prev_prev.vps,
+            del_temp: (1.0 + xfact) * prev.del_temp - xfact * prev_prev.del_temp,
+        })
+    }
+
+    /// Commit the compact-model branch-voltage state for an accepted transient
+    /// timepoint. This is separate from charge history because ngspice exposes
+    /// and predicts these voltage states even when `DEBUG=-1` suppresses charge
+    /// companion stamping.
+    pub fn commit_accepted_transient_state(&self) {
+        let current = self.bias;
+        let prev = self.accepted_bias_prev.get().unwrap_or(current);
+        self.accepted_bias_prev_prev.set(Some(prev));
+        self.accepted_bias_prev.set(Some(current));
+        self.predictor_bias.set(None);
     }
 
     /// Re-linearize directly at the supplied static candidate solution.
@@ -860,6 +930,10 @@ impl B3SoiDd {
 impl NonlinearDevice for B3SoiDd {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
+        let node_bias = self.raw_branch_voltages(voltages);
+        let predicted_bias = self.predictor_bias.take();
+        let raw_bias = predicted_bias.unwrap_or(node_bias);
+        let using_prediction = predicted_bias.is_some() && !biases_match(raw_bias, node_bias);
         // ngspice transient bypass (b3soiddld.c:589-643): when the previous
         // iterate evaluated without limiting and the new branch voltages plus
         // predicted currents are stationary within tolerances, freeze the
@@ -871,7 +945,7 @@ impl NonlinearDevice for B3SoiDd {
             && !self.last_limited.get()
             && self.has_history
         {
-            let raw = self.raw_branch_voltages(voltages);
+            let raw = raw_bias;
             if self.bypass_check(raw, reltol, abstol, vntol) {
                 self.bypass_active.set(true);
                 return;
@@ -879,12 +953,15 @@ impl NonlinearDevice for B3SoiDd {
         }
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
-        let raw_bias = self.raw_branch_voltages(voltages);
         let mut bias = raw_bias;
         let limited = self.apply_branch_limiting(&mut bias) || self.apply_body_limiting(&mut bias);
         self.last_limited.set(limited);
-        self.bias_was_limited.set(!biases_match(raw_bias, bias));
+        self.bias_was_limited
+            .set(using_prediction || !biases_match(raw_bias, bias));
         self.bias = bias;
+        if using_prediction && !limited {
+            self.converged_ref = bias;
+        }
         self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
         // Anchor the per-iteration limiter at this (limited) iterate, in the
@@ -1086,7 +1163,11 @@ impl B3SoiDd {
         }
         self.stamp_thermal_rhs(op, matrix);
 
-        stamp_conductance(matrix, b, sp, self.eval_gmin);
+        // ngspice's DD loader adds the scaled SOI Gmin only to the body KCL
+        // row (`Bsp -= Gmin`, `Bb += Gmin`), not as a symmetric source-body
+        // two-terminal conductance.
+        stamp(matrix, b, sp, -self.eval_gmin);
+        stamp(matrix, b, b, self.eval_gmin);
         stamp_conductance(matrix, g, dp, self.eval_gmin);
 
         // ----- matrix (b3soiddld.c:4090-4128, DC: gc*=0) -----

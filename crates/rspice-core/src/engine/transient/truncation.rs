@@ -991,37 +991,40 @@ impl Engine {
 
         // The history is indexed DD devices first, then FD, then PD,
         // matching the companion stamp/commit walks.
-        let mut device_charges: Vec<(Value, Value, Value)> = Vec::with_capacity(
+        let mut device_charges: Vec<Option<(Value, Value, Value)>> = Vec::with_capacity(
             circuit.b3soi.devices.len()
                 + circuit.b3soi_fd.devices.len()
                 + circuit.b3soi_pd.devices.len(),
         );
         for dev in &circuit.b3soi.devices {
             if dev.charges_suppressed() {
-                device_charges.push((0.0, 0.0, 0.0));
+                device_charges.push(None);
                 continue;
             }
             let c = dev.charge_at(candidate_solution);
-            device_charges.push((c.qg, c.qb, c.qd));
+            device_charges.push(Some((c.qg, c.qb, c.qd)));
         }
         for dev in &circuit.b3soi_fd.devices {
             if dev.charges_suppressed() {
-                device_charges.push((0.0, 0.0, 0.0));
+                device_charges.push(None);
                 continue;
             }
             let c = dev.charge_at(candidate_solution);
-            device_charges.push((c.qg, c.qb, c.qd));
+            device_charges.push(Some((c.qg, c.qb, c.qd)));
         }
         for dev in &circuit.b3soi_pd.devices {
             if dev.charges_suppressed() {
-                device_charges.push((0.0, 0.0, 0.0));
+                device_charges.push(None);
                 continue;
             }
             let c = dev.charge_at(candidate_solution);
-            device_charges.push((c.qg, c.qb, c.qd));
+            device_charges.push(Some((c.qg, c.qb, c.qd)));
         }
 
-        for (idx, (qg, qb, qd)) in device_charges.into_iter().enumerate() {
+        for (idx, charges) in device_charges.into_iter().enumerate() {
+            let Some((qg, qb, qd)) = charges else {
+                continue;
+            };
             for (q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) in [
                 (
                     qb,

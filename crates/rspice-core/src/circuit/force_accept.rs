@@ -47,6 +47,15 @@ impl CircuitData {
         }
     }
 
+    #[inline]
+    pub(in crate::circuit) fn add_force_accept_topology_clique_nonzero(
+        graph: &mut [Vec<NodeId>],
+        nodes: &[NodeId],
+    ) {
+        let nonzero: Vec<NodeId> = nodes.iter().copied().filter(|&node| node > 0).collect();
+        Self::add_force_accept_topology_clique(graph, &nonzero);
+    }
+
     pub(in crate::circuit) fn force_accept_ground_reachable_nodes(&self) -> Vec<bool> {
         let mut graph = vec![Vec::new(); self.num_nodes() + 1];
 
@@ -156,6 +165,27 @@ impl CircuitData {
                     mosfet.node_source,
                     mosfet.node_bulk,
                 ],
+            );
+        }
+        for dev in &self.b3soi.devices {
+            let (drain, gate, source, back_gate, body) = dev.charge_nodes();
+            Self::add_force_accept_topology_clique_nonzero(
+                &mut graph,
+                &[drain, gate, source, back_gate, body],
+            );
+        }
+        for dev in &self.b3soi_fd.devices {
+            let (drain, gate, source, back_gate, body) = dev.charge_nodes();
+            Self::add_force_accept_topology_clique_nonzero(
+                &mut graph,
+                &[drain, gate, source, back_gate, body],
+            );
+        }
+        for dev in &self.b3soi_pd.devices {
+            let (drain, gate, source, back_gate, body) = dev.charge_nodes();
+            Self::add_force_accept_topology_clique_nonzero(
+                &mut graph,
+                &[drain, gate, source, back_gate, body],
             );
         }
         for dev in &self.ekv26s.devices {

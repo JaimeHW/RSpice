@@ -18,7 +18,7 @@ use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot,
 };
-use crate::netlist::AnalysisCommand;
+use crate::netlist::{AnalysisCommand, SaveSignal};
 use crate::{Netlist, Value};
 use std::collections::HashMap;
 
@@ -312,6 +312,7 @@ impl Engine {
         num_nodes: usize,
         time: Value,
         derived_branches: &[DerivedTransientBranchCurrent],
+        record_device_op_traces: bool,
     ) {
         result.time.push(time);
         for (i, voltages) in result.voltages.iter_mut().enumerate() {
@@ -334,6 +335,9 @@ impl Engine {
             currents.push(Self::derived_transient_branch_current(
                 circuit, solution, time, *branch,
             ));
+        }
+        if record_device_op_traces {
+            result.record_device_op_sample(circuit.device_op_report());
         }
     }
 
@@ -533,6 +537,14 @@ impl Engine {
                 .any(|tl| tl.has_txl_runtime() || tl.has_distributed_rlgc())
     }
 
+    fn should_record_transient_device_op_traces(netlist: &Netlist) -> bool {
+        netlist
+            .saves
+            .signals
+            .iter()
+            .any(|signal| matches!(signal, SaveSignal::DeviceParam { .. }))
+    }
+
     fn run_tran_with_abort_resolved(
         &self,
         netlist: &Netlist,
@@ -559,6 +571,7 @@ impl Engine {
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
         let fingerprint = netlist_fingerprint(netlist);
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
+        let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
         let mut circuit = self.build_circuit(netlist)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
             let result = TransientResult {
@@ -689,7 +702,7 @@ impl Engine {
             if self.config.spice_dialect == SpiceDialect::Xyce && startup_voltage_hints_active {
                 0.0
             } else {
-                self.config.convergence_config.gmin_target.max(0.0)
+                self.dc_nodal_gmin_floor(&circuit)
             };
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&solution);
@@ -896,6 +909,9 @@ impl Engine {
             real_traces: Vec::new(),
             device_op_traces: Vec::new(),
         };
+        if record_device_op_traces {
+            result.record_device_op_sample(circuit.device_op_report());
+        }
         let mut digital_snapshot = Vec::new();
         let mut real_snapshot = Vec::new();
         let mut digital_trace_indices = HashMap::new();
@@ -1385,8 +1401,18 @@ impl Engine {
                 step_trap_order,
             ));
             let suppress_gate_charge = false;
+            let mut rejected_attempt_nonlinear_state = circuit
+                .has_nonlinear_devices()
+                .then(|| circuit.nonlinear_state_snapshot());
+            macro_rules! restore_rejected_transient_nonlinear_state {
+                () => {{
+                    if let Some(snapshot) = rejected_attempt_nonlinear_state.take() {
+                        circuit.restore_nonlinear_state(snapshot);
+                    }
+                }};
+            }
             for dev in &circuit.b3soi.devices {
-                dev.begin_timestep_iteration();
+                dev.begin_transient_timestep_iteration(dt, b3soi_history.accepted_dt_prev);
             }
             for dev in &circuit.b3soi_fd.devices {
                 dev.begin_timestep_iteration();
@@ -1812,6 +1838,7 @@ impl Engine {
                             self.voltage_abstol(),
                             self.voltage_reltol(),
                         );
+                        let voltage_converged_for_acceptance = voltage_converged;
                         let residual_converged =
                             self.residual_convergence_met(&circuit, &mut matrix, &sol, &rhs);
                         // CRITICAL: Update new_solution BEFORE checking device convergence
@@ -1835,12 +1862,67 @@ impl Engine {
                             self.voltage_abstol(),
                             self.current_abstol(),
                         );
-                        total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
-
-                        if voltage_converged
+                        let mut residual_converged_for_acceptance = residual_converged;
+                        if !residual_converged_for_acceptance
+                            && voltage_converged_for_acceptance
                             && device_converged
                             && behavioral_converged
-                            && residual_converged
+                        {
+                            // The first residual check is against the
+                            // pre-solve linearization. If a Newton candidate
+                            // was damped, that linearized system may no longer
+                            // be exactly satisfied even though the restamped
+                            // nonlinear equations at the candidate are.
+                            self.stamp_transient_system(
+                                &mut circuit,
+                                &mut matrix,
+                                &mut rhs,
+                                &new_solution,
+                                t + dt,
+                                dt,
+                                &residual::TransientSystemContext {
+                                    coeff: &coeff,
+                                    method: current_method,
+                                    trap_order: step_trap_order,
+                                    bjt_history: &bjt_history,
+                                    jfet_history: &jfet_history,
+                                    diode_history: &diode_history,
+                                    diode_companion_slots: &diode_companion_slots,
+                                    mosfet_history: &mosfet_history,
+                                    mosfet_companion_slots: &mosfet_companion_slots,
+                                    vdmos_history: &vdmos_history,
+                                    vdmos_companion_slots: &vdmos_companion_slots,
+                                    b3soi_history: &b3soi_history,
+                                    b3soi_zero_first_transient_charge_derivative:
+                                        b3soi_first_transient_handoff
+                                            && result.time.len() == 1
+                                            && _iter == 0,
+                                    bsim3_history: &bsim3_history,
+                                    bsim4_history: &bsim4_history,
+                                    ekv26_history: &ekv26_history,
+                                    suppress_gate_charge,
+                                    baseline_diag_gmin: transient_baseline_diag_gmin,
+                                    tline_dc_refs: &tline_dc_refs,
+                                    coupled_tline_refs: &coupled_tline_refs,
+                                },
+                                &mut vbic_snapshot_cache,
+                                VbicCachedSnapshotReuse::NewtonBypass,
+                                false,
+                                0.0,
+                            );
+                            residual_converged_for_acceptance = self.residual_convergence_met(
+                                &circuit,
+                                &mut matrix,
+                                &new_solution,
+                                &rhs,
+                            );
+                        }
+                        total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
+
+                        if voltage_converged_for_acceptance
+                            && device_converged
+                            && behavioral_converged
+                            && residual_converged_for_acceptance
                         {
                             converged = true;
                             break;
@@ -1989,6 +2071,7 @@ impl Engine {
                         );
                         return Err(SimulationError::ConvergenceFailed(total_iterations));
                     }
+                    restore_rejected_transient_nonlinear_state!();
                     total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
                     continue;
                 }
@@ -2017,6 +2100,7 @@ impl Engine {
                     Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt);
                 let exhausted_retries = retry_count >= MAX_RETRIES;
                 let exhausted_at_min = at_min_dt && retry_count >= MIN_RETRIES_AT_MINIMUM_TIMESTEP;
+                let mut force_accepted_rejected_newton_step = false;
 
                 if exhausted_retries || exhausted_at_min {
                     let bounded_force_candidate = Self::bounded_force_accept_candidate(
@@ -2115,6 +2199,7 @@ impl Engine {
                             // fresh ramp dt escapes them. Only when the
                             // restart already ran at this wall is the run
                             // genuinely dead.
+                            restore_rejected_transient_nonlinear_state!();
                             if livelock_restart!() {
                                 stale_accept_count = 0;
                                 retry_count = 0;
@@ -2122,6 +2207,7 @@ impl Engine {
                             }
                             return Err(SimulationError::ConvergenceFailed(total_iterations));
                         }
+                        restore_rejected_transient_nonlinear_state!();
                         continue;
                     }
                     let clipped_force_candidate = Self::is_clipped_force_candidate(
@@ -2148,6 +2234,7 @@ impl Engine {
                         4,
                     );
                     stale_accept_count = 0;
+                    force_accepted_rejected_newton_step = true;
 
                     t += dt;
                     let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
@@ -2425,6 +2512,7 @@ impl Engine {
                         num_nodes,
                         t,
                         &derived_branch_currents,
+                        record_device_op_traces,
                     );
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
@@ -2475,6 +2563,9 @@ impl Engine {
                         trap_order = 1;
                     }
                     livelock_check!(dt);
+                }
+                if !force_accepted_rejected_newton_step {
+                    restore_rejected_transient_nonlinear_state!();
                 }
                 total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
                 continue;
@@ -2759,6 +2850,7 @@ impl Engine {
                     trap_order =
                         Self::trapezoidal_order_after_timestep_control_reject(step_trap_order);
                     timestep.force_step(retry_dt);
+                    restore_rejected_transient_nonlinear_state!();
                     total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                     continue;
                 }
@@ -2840,6 +2932,7 @@ impl Engine {
                     Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt);
                 let exhausted_retries = retry_count >= MAX_RETRIES;
                 let exhausted_at_min = at_min_dt && retry_count >= MIN_RETRIES_AT_MINIMUM_TIMESTEP;
+                let mut force_accepted_rejected_lte_step = false;
 
                 if exhausted_retries || exhausted_at_min {
                     let bounded_force_candidate = Self::bounded_force_accept_candidate(
@@ -2934,6 +3027,7 @@ impl Engine {
                             }
                             return Err(SimulationError::ConvergenceFailed(total_iterations));
                         }
+                        restore_rejected_transient_nonlinear_state!();
                         continue;
                     }
                     let clipped_force_candidate = Self::is_clipped_force_candidate(
@@ -2949,6 +3043,7 @@ impl Engine {
                         timestep.force_step((dt * 0.5).min(max_step));
                     }
                     stale_accept_count = 0;
+                    force_accepted_rejected_lte_step = true;
 
                     t += dt;
                     let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
@@ -3222,6 +3317,7 @@ impl Engine {
                         num_nodes,
                         t,
                         &derived_branch_currents,
+                        record_device_op_traces,
                     );
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
@@ -3263,6 +3359,9 @@ impl Engine {
                     }
                     livelock_check!(dt);
                 }
+                if !force_accepted_rejected_lte_step {
+                    restore_rejected_transient_nonlinear_state!();
+                }
                 total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                 continue;
             }
@@ -3301,6 +3400,7 @@ impl Engine {
                     return Err(SimulationError::ConvergenceFailed(total_iterations));
                 }
                 trap_order = 1;
+                restore_rejected_transient_nonlinear_state!();
                 total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                 continue;
             }
@@ -3457,6 +3557,7 @@ impl Engine {
                 num_nodes,
                 t,
                 &derived_branch_currents,
+                record_device_op_traces,
             );
             if record_xspice_event_traces {
                 circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);

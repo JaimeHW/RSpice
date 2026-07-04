@@ -401,7 +401,7 @@ impl Engine {
     /// Commit the SOI (DD/FD/PD) charge history after an accepted timestep.
     #[inline]
     pub(super) fn update_b3soi_history(
-        circuit: &crate::circuit::Circuit,
+        circuit: &mut crate::circuit::Circuit,
         voltages: &[Value],
         method: IntegrationMethod,
         trap_order: u8,
@@ -413,7 +413,8 @@ impl Engine {
         }
         let effective_method = Self::effective_companion_method(method, trap_order);
         let mut idx = 0;
-        for dev in &circuit.b3soi.devices {
+        for dev in &mut circuit.b3soi.devices {
+            dev.commit_accepted_transient_state();
             if dev.charges_suppressed() {
                 idx += 1;
                 continue;
