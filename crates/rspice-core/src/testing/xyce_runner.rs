@@ -2293,6 +2293,7 @@ impl XyceTestRunner {
                     ));
                 }
                 let mut has_file_output = false;
+                let mut has_probe = false;
                 let mut index = 2usize;
                 while index < token_refs.len() {
                     if let Some((raw_key, raw_value, consumed)) =
@@ -2316,9 +2317,13 @@ impl XyceTestRunner {
                         index += consumed;
                         continue;
                     }
+                    let normalized = token_refs[index].to_ascii_lowercase();
+                    if !Self::is_print_option_token(&normalized) {
+                        has_probe = true;
+                    }
                     index += 1;
                 }
-                if !has_file_output {
+                if has_probe && !has_file_output {
                     primary_tran_print_count += 1;
                 }
                 continue;
@@ -2694,6 +2699,7 @@ impl XyceTestRunner {
         }
 
         if Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
+            || Self::is_native_output_other_prn_tran_wrapper_candidate(relative_path, source)
             || Self::is_native_output_initial_interval_tran_wrapper_candidate(source)
             || Self::is_native_generic_static_prn_tran_wrapper_candidate(
                 relative_path,
@@ -2729,6 +2735,14 @@ impl XyceTestRunner {
                 | "netlists/output/tran/tran-splot.cir"
                 | "netlists/output/tran/tran-touchstone-defaults-to-prn.cir"
         ) && Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
+    }
+
+    fn is_native_output_other_prn_tran_wrapper_candidate(
+        relative_path: &str,
+        source: &str,
+    ) -> bool {
+        Self::normalize_manifest_key(relative_path).starts_with("netlists/output/other/")
+            && Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
     }
 
     fn is_native_output_initial_interval_tran_wrapper_candidate(source: &str) -> bool {
@@ -5006,15 +5020,18 @@ impl XyceTestRunner {
     fn prn_compatible_tran_side_output_requests(
         source: &str,
     ) -> Result<Vec<XycePrintOutputRequest>, String> {
-        Ok(Self::print_output_requests(source, "TRAN")?
-            .into_iter()
-            .filter(|request| {
-                request.file.is_some()
-                    && Self::tran_print_format_is_prn_compatible(
-                        request.format.as_deref().unwrap_or("STD"),
-                    )
-            })
-            .collect())
+        Ok(Self::aggregate_print_output_requests(
+            Self::print_output_requests(source, "TRAN")?,
+            "TRAN",
+        )?
+        .into_iter()
+        .filter(|request| {
+            request.file.is_some()
+                && Self::tran_print_format_is_prn_compatible(
+                    request.format.as_deref().unwrap_or("STD"),
+                )
+        })
+        .collect())
     }
 
     fn prn_compatible_ac_side_output_requests(
@@ -13112,10 +13129,7 @@ impl XyceTestRunner {
             }
 
             if probes.is_empty() {
-                return Err(format!(
-                    ".PRINT {} statement has no probes",
-                    expected_analysis.to_ascii_uppercase()
-                ));
+                continue;
             }
             requests.push(XycePrintOutputRequest {
                 format,
@@ -15249,6 +15263,42 @@ Values:
                 format: Some("STD".to_string()),
                 file: Some("out data.prn".to_string()),
                 probes: ["V(1)", "{V(2) + 1.0}"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            }]
+        );
+    }
+
+    #[test]
+    fn blank_print_lines_are_ignored_and_side_outputs_aggregate() {
+        let source = r#"
+.PRINT TRAN V(1) V(2)
+.PRINT TRAN
+.PRINT TRAN FILE=blank.prn
+.PRINT TRAN FILE=blank.prn V(3)
+.PRINT TRAN FILE=blank.prn v(4) V(5)
+"#;
+
+        let primary = XyceTestRunner::single_tran_print_output_request(source)
+            .expect("primary transient print survives inert blank .PRINT lines");
+        assert_eq!(
+            primary,
+            XycePrintOutputRequest {
+                format: None,
+                file: None,
+                probes: ["V(1)", "V(2)"].into_iter().map(str::to_string).collect(),
+            }
+        );
+
+        let side_outputs = XyceTestRunner::prn_compatible_tran_side_output_requests(source)
+            .expect("transient side-output requests aggregate by FILE target");
+        assert_eq!(
+            side_outputs,
+            vec![XycePrintOutputRequest {
+                format: None,
+                file: Some("blank.prn".to_string()),
+                probes: ["V(3)", "v(4)", "V(5)"]
                     .into_iter()
                     .map(str::to_string)
                     .collect(),

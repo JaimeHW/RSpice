@@ -1309,6 +1309,7 @@ fn test_xyce_default_prn_transient_output_wrapper_cases_run_natively() {
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
     for relative in [
+        "Netlists/Output/Other/blankPrint.cir",
         "Netlists/Output/TRAN/tran-gnuplot.cir",
         "Netlists/Output/TRAN/tran-prn.cir",
         "Netlists/Output/TRAN/tran-prn-comma.cir",
