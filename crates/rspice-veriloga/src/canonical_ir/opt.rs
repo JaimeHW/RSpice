@@ -32,7 +32,7 @@ const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES: usize = 8;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_HISTORY_ENTRIES: usize = 5;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_VARIABLES: usize = 16;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_TOTAL_ENTRIES: usize = 64;
-const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH: Option<usize> = None;
+const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH: Option<usize> = Some(1);
 const MAX_SELECTIVE_ASSIGNMENT_DEPENDENCY_EXPR_NODES: usize = 256;
 const MAX_SELECTIVE_ASSIGNMENT_DEPENDENCY_VARIABLES: usize = 64;
 const MAX_SELECTIVE_ASSIGNMENT_BROAD_DEPENDENCY_VARIABLES: usize = 256;
@@ -4458,7 +4458,9 @@ impl<'a> ScalarGraphBuilder<'a> {
         variable: VariableId,
         history: &LocalAssignmentHistory,
     ) -> Option<ValueId> {
-        let mut value = history.base_value?;
+        let Some(mut value) = history.base_value else {
+            return self.lower_assignment_history_window_without_base(variable, history);
+        };
         if history.entries.is_empty() {
             return self.coerce_value_to_variable_type(variable, value);
         }
@@ -4485,6 +4487,27 @@ impl<'a> ScalarGraphBuilder<'a> {
             value = self.coerce_value_to_variable_type(variable, next)?;
         }
         Some(value)
+    }
+
+    fn lower_assignment_history_window_without_base(
+        &mut self,
+        variable: VariableId,
+        history: &LocalAssignmentHistory,
+    ) -> Option<ValueId> {
+        if history.entries.is_empty() {
+            return None;
+        }
+        if !self.conditional_path_stack.is_empty()
+            && let Some(value) =
+                self.lower_assignment_history_entries_for_current_path(variable, &history.entries)
+        {
+            return self.coerce_value_to_variable_type(variable, value);
+        }
+        self.lower_complementary_assignment_history_entries_value(variable, &history.entries)
+            .or_else(|| {
+                self.lower_recent_assignment_history_entries_value(variable, &history.entries)
+            })
+            .and_then(|value| self.coerce_value_to_variable_type(variable, value))
     }
 
     fn lower_expression_with_assignment_snapshot(
@@ -4692,7 +4715,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             let Some(history) = self.local_assignment_history.get(&variable).cloned() else {
                 continue;
             };
-            if history.base_value.is_none() {
+            if history.base_value.is_none() && history.entries.is_empty() {
                 continue;
             }
             let Some(next_total_entries) = total_entries.checked_add(history.len()) else {
@@ -4909,6 +4932,23 @@ impl<'a> ScalarGraphBuilder<'a> {
             .clone();
         let update = self.conditional_self_update(variable, entry.expr)?;
         self.lower_complementary_self_assignment_pair(variable, limit, &entry, update)
+    }
+
+    fn lower_complementary_assignment_history_entries_value(
+        &mut self,
+        variable: VariableId,
+        history: &[AssignmentHistoryEntry],
+    ) -> Option<ValueId> {
+        let limit = history.len();
+        let current_entry = history.get(limit.checked_sub(1)?)?.clone();
+        let update = self.conditional_self_update(variable, current_entry.expr)?;
+        self.lower_complementary_self_assignment_pair_from_history(
+            variable,
+            history,
+            limit,
+            &current_entry,
+            update,
+        )
     }
 
     fn lower_complementary_self_assignment_pair(
@@ -10040,6 +10080,154 @@ mod tests {
             &builder.values[usize::from(value)].kind,
             OptValueKind::RealConstant(value) if *value == 1.0
         ));
+    }
+
+    #[test]
+    fn local_assignment_snapshot_replays_complementary_window_without_base() {
+        let condition_expr = ExprId::from(0);
+        let inverted_condition_expr = ExprId::from(1);
+        let temp_expr = ExprId::from(2);
+        let first_value_expr = ExprId::from(3);
+        let second_value_expr = ExprId::from(4);
+        let first_update_expr = ExprId::from(5);
+        let second_update_expr = ExprId::from(6);
+        let mir = test_mir(vec![
+            HirExpression {
+                id: condition_expr,
+                kind: HirExprKind::Identifier {
+                    name: "cond".into(),
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: inverted_condition_expr,
+                kind: HirExprKind::Unary {
+                    op: "Not".into(),
+                    operand: condition_expr,
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: temp_expr,
+                kind: HirExprKind::Identifier { name: "T2".into() },
+                span: test_span(),
+            },
+            HirExpression {
+                id: first_value_expr,
+                kind: HirExprKind::Number {
+                    value: 1.0,
+                    raw: "1.0".into(),
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: second_value_expr,
+                kind: HirExprKind::Number {
+                    value: 2.0,
+                    raw: "2.0".into(),
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: first_update_expr,
+                kind: HirExprKind::Conditional {
+                    condition: condition_expr,
+                    then_expr: first_value_expr,
+                    else_expr: temp_expr,
+                },
+                span: test_span(),
+            },
+            HirExpression {
+                id: second_update_expr,
+                kind: HirExprKind::Conditional {
+                    condition: inverted_condition_expr,
+                    then_expr: second_value_expr,
+                    else_expr: temp_expr,
+                },
+                span: test_span(),
+            },
+        ]);
+        let hir = test_hir_variables(vec![
+            ("T2", CanonicalValueType::Real),
+            ("cond", CanonicalValueType::Boolean),
+        ]);
+        let temp = VariableId::from(0);
+        let condition = VariableId::from(1);
+        let mut builder = ScalarGraphBuilder::new(Some(&hir), &mir);
+        let condition_value =
+            builder.push_value(OptValueType::Boolean, OptValueKind::BooleanConstant(true));
+        builder
+            .variable_values
+            .insert(condition, Some(condition_value));
+        let history = LocalAssignmentHistory {
+            base_value: None,
+            entries: vec![
+                test_assignment_history_entry(first_update_expr),
+                test_assignment_history_entry(second_update_expr),
+            ],
+        };
+        builder
+            .local_assignment_history
+            .insert(temp, history.clone());
+
+        let snapshots = builder
+            .local_assignment_history_snapshots(BTreeSet::from([temp]))
+            .expect("base-free local history should be snapshotted");
+        assert_eq!(snapshots, vec![(temp, history.clone())]);
+
+        let value = builder
+            .lower_local_assignment_history_snapshot(temp, &history)
+            .expect("complementary local history window should replay without a base value");
+        assert!(matches!(
+            builder.values[usize::from(value)].kind,
+            OptValueKind::RealConstant(value) if value == 1.0
+        ));
+    }
+
+    #[test]
+    fn local_assignment_snapshots_include_bounded_local_dependencies() {
+        let value_expr = ExprId::from(0);
+        let mir = test_mir(vec![HirExpression {
+            id: value_expr,
+            kind: HirExprKind::Number {
+                value: 4.0,
+                raw: "4.0".into(),
+            },
+            span: test_span(),
+        }]);
+        let hir = test_hir_variables(vec![
+            ("T2", CanonicalValueType::Real),
+            ("TMF0", CanonicalValueType::Real),
+        ]);
+        let target = VariableId::from(0);
+        let dependency = VariableId::from(1);
+        let mut builder = ScalarGraphBuilder::new(Some(&hir), &mir);
+        let dependency_base =
+            builder.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+        let dependency_history = LocalAssignmentHistory {
+            base_value: Some(dependency_base),
+            entries: vec![test_assignment_history_entry(value_expr)],
+        };
+        let mut target_entry = test_assignment_history_entry(value_expr);
+        target_entry.local_dependencies.push(dependency);
+        let target_history = LocalAssignmentHistory {
+            base_value: None,
+            entries: vec![target_entry],
+        };
+        builder
+            .local_assignment_history
+            .insert(target, target_history.clone());
+        builder
+            .local_assignment_history
+            .insert(dependency, dependency_history.clone());
+
+        let snapshots = builder
+            .local_assignment_history_snapshots(BTreeSet::from([target]))
+            .expect("bounded local dependency should be snapshotted");
+
+        assert_eq!(snapshots.len(), 2);
+        assert!(snapshots.contains(&(target, target_history)));
+        assert!(snapshots.contains(&(dependency, dependency_history)));
     }
 
     #[test]
