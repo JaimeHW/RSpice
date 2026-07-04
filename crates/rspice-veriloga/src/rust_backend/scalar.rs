@@ -4407,6 +4407,7 @@ fn emit_constant_power_expr(base: &str, exponent: f64) -> Option<String> {
         1 => base.to_string(),
         2 => repeated_power_expr(base, 2),
         3 => repeated_power_expr(base, 3),
+        4 => quartic_power_expr(base),
         _ => format!("{}.powi({exponent})", f64_method_receiver(base)),
     })
 }
@@ -4428,6 +4429,10 @@ fn repeated_power_expr(base: &str, factors: usize) -> String {
         product.push_str("*pb");
     }
     format!("{{let pb={base};{product}}}")
+}
+
+fn quartic_power_expr(base: &str) -> String {
+    format!("{{let pb={base};let ps=pb*pb;ps*ps}}")
 }
 
 fn emit_binary_expr(
@@ -5953,12 +5958,15 @@ mod tests {
         );
         assert_eq!(
             emit_constant_power_expr("x", 4.0).as_deref(),
-            Some("(x).powi(4)")
+            Some("{let pb=x;let ps=pb*pb;ps*ps}")
         );
         assert_eq!(emit_constant_power_expr("x", 0.5), None);
         assert_eq!(emit_string_power_expr("x", "2.0"), "{let pb=x;pb*pb}");
         assert_eq!(emit_string_power_expr("x", "(3.0)"), "{let pb=x;pb*pb*pb}");
-        assert_eq!(emit_string_power_expr("x", "4.0_f64"), "(x).powi(4)");
+        assert_eq!(
+            emit_string_power_expr("x", "4.0_f64"),
+            "{let pb=x;let ps=pb*pb;ps*ps}"
+        );
         assert_eq!(emit_string_power_expr("x", "0.5"), "(x).powf(0.5)");
         assert_eq!(
             emit_binary_expr(

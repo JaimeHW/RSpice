@@ -17016,6 +17016,16 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_pow4_ad(&mut self, index: usize, value: AdValue) {",
+        "        let raw = value.value;",
+        "        let square = raw * raw;",
+        "        self.values[index] = square * square;",
+        "        let derivative_scale = 4.0 * square * raw;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_limexp_ad(&mut self, index: usize, value: AdValue) {",
         "        let raw = value.value;",
         "        if raw < 80.0 {",
@@ -17659,6 +17669,13 @@ fn generate_scratch_operation_helpers() -> String {
         "        let source_value = self.values[source];",
         "        let square = source_value * source_value;",
         "        self.store_unary_scaled(index, source, square * source_value, 3.0 * square);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_pow4(&mut self, index: usize, source: usize) {",
+        "        let source_value = self.values[source];",
+        "        let square = source_value * source_value;",
+        "        self.store_unary_scaled(index, source, square * square, 4.0 * square * source_value);",
         "    }",
         "",
         "    #[inline]",
@@ -24470,6 +24487,18 @@ fn generate_ad_value_struct() -> String {
         "        let square = raw * raw;",
         "        value.value = square * raw;",
         "        let derivative_scale = 3.0 * square;",
+        "        for derivative in &mut value.node_derivatives { *derivative *= derivative_scale; }",
+        "        for derivative in &mut value.branch_derivatives { *derivative *= derivative_scale; }",
+        "        value",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn pow4(arg: Self) -> Self {",
+        "        let mut value = arg;",
+        "        let raw = value.value;",
+        "        let square = raw * raw;",
+        "        value.value = square * square;",
+        "        let derivative_scale = 4.0 * square * raw;",
         "        for derivative in &mut value.node_derivatives { *derivative *= derivative_scale; }",
         "        for derivative in &mut value.branch_derivatives { *derivative *= derivative_scale; }",
         "        value",
@@ -32155,6 +32184,7 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
         ("abs", "store_abs"),
         ("square", "store_square"),
         ("cube", "store_cube"),
+        ("pow4", "store_pow4"),
         ("sqrt", "store_sqrt"),
         ("exp", "store_exp"),
         ("limexp", "store_limexp"),
@@ -34060,6 +34090,7 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         ("neg", "store_neg_ad"),
         ("square", "store_square_ad"),
         ("cube", "store_cube_ad"),
+        ("pow4", "store_pow4_ad"),
         ("sqrt", "store_sqrt_ad"),
         ("exp", "store_exp_ad"),
         ("limexp", "store_limexp_ad"),
@@ -45450,6 +45481,7 @@ fn compact_integer_power_ad_expr(base: &str, exponent: i32) -> String {
         1 => base.to_string(),
         2 => format!("AdValue::square({base})"),
         3 => format!("AdValue::cube({base})"),
+        4 => format!("AdValue::pow4({base})"),
         _ => format!("AdValue::powi({base}, {exponent})"),
     }
 }
@@ -45464,6 +45496,7 @@ fn compact_integer_power_store_helper_line(
         1 => format!("scratch.copy_ad({target_index}, {source});"),
         2 => format!("scratch.store_square({target_index}, {source});"),
         3 => format!("scratch.store_cube({target_index}, {source});"),
+        4 => format!("scratch.store_pow4({target_index}, {source});"),
         _ => format!("scratch.store_powi({target_index}, {source}, {exponent});"),
     }
 }
@@ -45478,6 +45511,7 @@ fn compact_integer_power_ad_store_helper_line(
         1 => format!("scratch.store_ad_value({target_index}, {value});"),
         2 => format!("scratch.store_square_ad({target_index}, {value});"),
         3 => format!("scratch.store_cube_ad({target_index}, {value});"),
+        4 => format!("scratch.store_pow4_ad({target_index}, {value});"),
         _ => format!("scratch.store_powi_ad({target_index}, {value}, {exponent});"),
     }
 }
@@ -45527,6 +45561,7 @@ fn compact_scalar_pow(left: &str, right: &str) -> String {
             1 => left.to_string(),
             2 => compact_repeated_scalar_power(left, 2),
             3 => compact_repeated_scalar_power(left, 3),
+            4 => compact_quartic_scalar_power(left),
             _ => format!("{}.powi({exponent})", compact_f64_receiver(left)),
         }
     } else {
@@ -45541,6 +45576,10 @@ fn compact_repeated_scalar_power(base: &str, factors: usize) -> String {
         product.push_str("*pb");
     }
     format!("{{let pb={base};{product}}}")
+}
+
+fn compact_quartic_scalar_power(base: &str) -> String {
+    format!("{{let pb={base};let ps=pb*pb;ps*ps}}")
 }
 
 fn compact_scalar_limexp(value: String) -> String {

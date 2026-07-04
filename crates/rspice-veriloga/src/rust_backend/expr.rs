@@ -2916,7 +2916,10 @@ mod tests {
         assert_eq!(power_value_expr("x", "1.0"), "x");
         assert_eq!(power_value_expr("x", "2.0"), "{let pb=x;pb*pb}");
         assert_eq!(power_value_expr("x", "(3.0)"), "{let pb=x;pb*pb*pb}");
-        assert_eq!(power_value_expr("x", "4.0_f64"), "(x).powi(4)");
+        assert_eq!(
+            power_value_expr("x", "4.0_f64"),
+            "{let pb=x;let ps=pb*pb;ps*ps}"
+        );
         assert_eq!(power_value_expr("x", "0.5"), "(x).powf(0.5)");
         assert_eq!(
             binary_value("Pow", "x", "2.0").expect("pow value"),
@@ -2935,6 +2938,10 @@ mod tests {
         assert_eq!(
             pow_derivative_expr("value", "x", "3.0_f64", "dx", "0.0"),
             "(dx * (3.0 * {let pb=x;pb*pb}))"
+        );
+        assert_eq!(
+            pow_derivative_expr("value", "x", "4.0", "dx", "0.0"),
+            "(dx * (4.0 * {let pb=x;pb*pb*pb}))"
         );
         assert!(!pow_derivative_expr("value", "x", "0.5", "dx", "0.0").contains("powi"));
     }
@@ -3103,6 +3110,7 @@ fn constant_integer_power_value_expr(base: &str, exponent: i32) -> String {
         1 => base.to_string(),
         2 => repeated_integer_power_value_expr(base, 2),
         3 => repeated_integer_power_value_expr(base, 3),
+        4 => quartic_integer_power_value_expr(base),
         _ => format!("{}.powi({exponent})", f64_binary_receiver(base)),
     }
 }
@@ -3114,6 +3122,10 @@ fn repeated_integer_power_value_expr(base: &str, factors: usize) -> String {
         product.push_str("*pb");
     }
     format!("{{let pb={base};{product}}}")
+}
+
+fn quartic_integer_power_value_expr(base: &str) -> String {
+    format!("{{let pb={base};let ps=pb*pb;ps*ps}}")
 }
 
 fn integer_power_exponent_literal(value: &str) -> Option<i32> {

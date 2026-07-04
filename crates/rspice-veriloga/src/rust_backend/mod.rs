@@ -353,7 +353,8 @@ endmodule
 
         assert_eq!(report.backend, RustBackendSelection::ScalarOptIr);
         assert!(stamp.contains("{let pb="), "{stamp}");
-        assert!(stamp.contains(".powi(4)"), "{stamp}");
+        assert!(stamp.contains("let ps=pb*pb;ps*ps"), "{stamp}");
+        assert!(!stamp.contains(".powi(4)"), "{stamp}");
         assert!(!stamp.contains("f64::powf("), "{stamp}");
         assert!(!stamp.contains(".powf("), "{stamp}");
     }
