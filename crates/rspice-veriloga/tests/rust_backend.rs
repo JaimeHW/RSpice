@@ -11114,7 +11114,18 @@ fn generated_pow_integer_derivative_stays_finite_for_negative_base() {
     })
     .transpile(&artifact)
     .expect("transpile integer pow device");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
 
+    assert!(stamp.contains("{let pb="), "{stamp}");
+    assert!(!stamp.contains(".powf("), "{stamp}");
+    assert!(!stamp.contains(".ln()"), "{stamp}");
+    assert!(!stamp.contains(".fract()"), "{stamp}");
     assert_generated_pow_square_runtime(&generated);
 }
 

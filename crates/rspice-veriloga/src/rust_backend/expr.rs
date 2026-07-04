@@ -1654,11 +1654,7 @@ impl ExprEmitter<'_> {
             "atanh" => format!("{}.atanh()", f64_binary_receiver(&args[0].value)),
             "floor" => format!("{}.floor()", f64_binary_receiver(&args[0].value)),
             "ceil" => format!("{}.ceil()", f64_binary_receiver(&args[0].value)),
-            "pow" => format!(
-                "{}.powf({})",
-                f64_binary_receiver(&args[0].value),
-                args[1].value
-            ),
+            "pow" => power_value_expr(&args[0].value, &args[1].value),
             "min" => format!(
                 "{}.min({})",
                 f64_binary_receiver(&args[0].value),
@@ -2895,7 +2891,7 @@ fn is_simple_scaled_derivative_factor(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_inline_derivative_expr;
+    use super::{binary_value, is_inline_derivative_expr, pow_derivative_expr, power_value_expr};
 
     #[test]
     fn inline_derivative_expr_accepts_scaled_scratch_rows() {
@@ -2912,6 +2908,35 @@ mod tests {
         assert!(!is_inline_derivative_expr(
             "(scratch.node_derivatives[12][0] * expensive_scale())"
         ));
+    }
+
+    #[test]
+    fn expression_backend_specializes_integer_power_values() {
+        assert_eq!(power_value_expr("x", "0.0"), "1.0");
+        assert_eq!(power_value_expr("x", "1.0"), "x");
+        assert_eq!(power_value_expr("x", "2.0"), "{let pb=x;pb*pb}");
+        assert_eq!(power_value_expr("x", "(3.0)"), "{let pb=x;pb*pb*pb}");
+        assert_eq!(power_value_expr("x", "4.0_f64"), "(x).powi(4)");
+        assert_eq!(power_value_expr("x", "0.5"), "(x).powf(0.5)");
+        assert_eq!(
+            binary_value("Pow", "x", "2.0").expect("pow value"),
+            "{let pb=x;pb*pb}"
+        );
+    }
+
+    #[test]
+    fn expression_backend_specializes_integer_power_derivatives() {
+        assert_eq!(pow_derivative_expr("value", "x", "0.0", "dx", "0.0"), "0.0");
+        assert_eq!(pow_derivative_expr("value", "x", "1.0", "dx", "0.0"), "dx");
+        assert_eq!(
+            pow_derivative_expr("value", "x", "2.0", "dx", "0.0"),
+            "(dx * (2.0 * x))"
+        );
+        assert_eq!(
+            pow_derivative_expr("value", "x", "3.0_f64", "dx", "0.0"),
+            "(dx * (3.0 * {let pb=x;pb*pb}))"
+        );
+        assert!(!pow_derivative_expr("value", "x", "0.5", "dx", "0.0").contains("powi"));
     }
 }
 
@@ -3001,7 +3026,7 @@ fn binary_value(op: &str, left: &str, right: &str) -> Result<String, RustBackend
         "Mul" => Ok(mul_expr(left, right)),
         "Div" => Ok(div_expr(left, right)),
         "Mod" => Ok(mod_expr(left, right)),
-        "Pow" => Ok(format!("{}.powf({right})", f64_binary_receiver(left))),
+        "Pow" => Ok(power_value_expr(left, right)),
         _ => Err(RustBackendError::unsupported(
             "<generated>",
             "<expr>",
@@ -3062,6 +3087,49 @@ fn mod_expr(left: &str, right: &str) -> String {
     } else {
         format!("({left} % {right})")
     }
+}
+
+fn power_value_expr(base: &str, exponent: &str) -> String {
+    if let Some(exponent) = integer_power_exponent_literal(exponent) {
+        constant_integer_power_value_expr(base, exponent)
+    } else {
+        format!("{}.powf({exponent})", f64_binary_receiver(base))
+    }
+}
+
+fn constant_integer_power_value_expr(base: &str, exponent: i32) -> String {
+    match exponent {
+        0 => "1.0".to_string(),
+        1 => base.to_string(),
+        2 => repeated_integer_power_value_expr(base, 2),
+        3 => repeated_integer_power_value_expr(base, 3),
+        _ => format!("{}.powi({exponent})", f64_binary_receiver(base)),
+    }
+}
+
+fn repeated_integer_power_value_expr(base: &str, factors: usize) -> String {
+    debug_assert!(factors >= 2);
+    let mut product = String::from("pb");
+    for _ in 1..factors {
+        product.push_str("*pb");
+    }
+    format!("{{let pb={base};{product}}}")
+}
+
+fn integer_power_exponent_literal(value: &str) -> Option<i32> {
+    let value = trim_enclosing_parentheses(value);
+    let value = value.strip_suffix("_f64").unwrap_or(value);
+    integer_power_exponent_value(value.parse::<f64>().ok()?)
+}
+
+fn integer_power_exponent_value(value: f64) -> Option<i32> {
+    if !value.is_finite() || value.fract() != 0.0 {
+        return None;
+    }
+    if value < i32::MIN as f64 || value > i32::MAX as f64 {
+        return None;
+    }
+    Some(value as i32)
 }
 
 fn div_derivative_expr(
@@ -3354,6 +3422,13 @@ fn pow_derivative_expr(
     dbase: &str,
     dexponent: &str,
 ) -> String {
+    if is_zero_derivative(dexponent)
+        && let Some(exponent) = integer_power_exponent_literal(exponent)
+        && let Some(derivative) = integer_power_derivative_expr(base, exponent, dbase)
+    {
+        return derivative;
+    }
+
     let base_receiver = f64_binary_receiver(base);
     let integer_exponent_derivative = conditional_expr(
         &format!("{exponent} == 0.0"),
@@ -3378,6 +3453,22 @@ fn pow_derivative_expr(
         &integer_exponent_derivative,
         &general_derivative,
     )
+}
+
+fn integer_power_derivative_expr(base: &str, exponent: i32, dbase: &str) -> Option<String> {
+    if exponent == 0 || is_zero_derivative(dbase) {
+        return Some("0.0".to_string());
+    }
+    if exponent == 1 {
+        return Some(dbase.to_string());
+    }
+    let derivative_power = exponent.checked_sub(1)?;
+    let exponent_scale = format!("{exponent}.0");
+    let derivative_scale = mul_expr(
+        &exponent_scale,
+        &constant_integer_power_value_expr(base, derivative_power),
+    );
+    Some(scaled_derivative_expr(dbase, &derivative_scale))
 }
 
 fn reactive_unary(op: &str, operand: &ExprValue) -> Result<ReactiveValue, RustBackendError> {
