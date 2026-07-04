@@ -1891,7 +1891,7 @@ impl XyceTestRunner {
     }
 
     fn validate_plain_static_dc_prn_wrapper_source(source: &str) -> Result<(), String> {
-        Self::validate_default_prn_wrapper_source(source)?;
+        Self::validate_default_prn_wrapper_source_with_format_mode(source, true)?;
 
         let print = Self::single_dc_print_request(source)?;
         for probe in &print.probes {
@@ -2034,6 +2034,13 @@ impl XyceTestRunner {
     }
 
     fn validate_default_prn_wrapper_source(source: &str) -> Result<(), String> {
+        Self::validate_default_prn_wrapper_source_with_format_mode(source, false)
+    }
+
+    fn validate_default_prn_wrapper_source_with_format_mode(
+        source: &str,
+        allow_wrapper_probe_primary_prn: bool,
+    ) -> Result<(), String> {
         let mut primary_print_count = 0usize;
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
@@ -2046,7 +2053,10 @@ impl XyceTestRunner {
             if command.eq_ignore_ascii_case(".print") {
                 let tokens = Self::split_print_fields(&trimmed)?;
                 let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
-                if !Self::validate_default_prn_print_tokens(&token_refs)? {
+                if !Self::validate_default_prn_print_tokens(
+                    &token_refs,
+                    allow_wrapper_probe_primary_prn,
+                )? {
                     primary_print_count += 1;
                 }
                 continue;
@@ -2070,7 +2080,10 @@ impl XyceTestRunner {
         }
     }
 
-    fn validate_default_prn_print_tokens(tokens: &[&str]) -> Result<bool, String> {
+    fn validate_default_prn_print_tokens(
+        tokens: &[&str],
+        allow_wrapper_probe_primary_prn: bool,
+    ) -> Result<bool, String> {
         let Some(analysis) = tokens.get(1) else {
             return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
         };
@@ -2093,6 +2106,9 @@ impl XyceTestRunner {
                         has_file_output = true;
                     }
                     "format" if Self::dc_print_format_is_prn_compatible(value) => {}
+                    "format"
+                        if allow_wrapper_probe_primary_prn
+                            && value.eq_ignore_ascii_case("PROBE") => {}
                     "format" => {
                         return Err(format!(
                             "wrapper-origin default .prn contract does not cover FORMAT={value}"
@@ -16311,6 +16327,29 @@ C1 1 0 2e-6
         let dc = XyceTestRunner::single_dc_sweep(&netlist).expect("single DC sweep parses");
         XyceTestRunner::validate_static_dc_contract(&netlist, &dc, &print)
             .expect("complex parameter DC probes validate");
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_accepts_primary_probe_format_prn_oracle() {
+        let source = "\
+wrapper-origin hspice probe print with prn oracle
+VA IN 0 DC 0
+E1 1 0 IN 0 2
+R1 1 2 10
+R2 2 0 10
+.DC VA 0 10 1
+.PRINT DC FORMAT=PROBE v(in) v(2)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("plain static DC wrapper source accepts primary FORMAT=PROBE");
+        assert_eq!(
+            XyceTestRunner::static_dc_contract_for_print_format(true, Some("PROBE"))
+                .expect("generic wrapper PROBE contract resolves"),
+            XyceStaticDcContract::WrapperCsd,
+            "generic PROBE output remains CSDF; only the wrapper-origin PRN source validator normalizes this case"
+        );
     }
 
     #[test]
