@@ -18713,6 +18713,34 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_add_sqrt_rhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_root = self.values[right].sqrt();",
+        "        let right_scale = 1.0 / (2.0 * right_root);",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_value + right_root;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] + right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_add_sqrt_lhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_root = self.values[left].sqrt();",
+        "        let right_value = self.values[right];",
+        "        let left_scale = 1.0 / (2.0 * left_root);",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_root + right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale + right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + right_branch_derivatives[axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_add_div_from_scalar_rhs(&mut self, index: usize, left: usize, scalar: f64, denominator: usize) {",
         "        let left_value = self.values[left];",
         "        let denominator_value = self.values[denominator];",
@@ -18878,6 +18906,20 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_sub_sqrt_rhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_value = self.values[left];",
+        "        let right_root = self.values[right].sqrt();",
+        "        let right_scale = 1.0 / (2.0 * right_root);",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_value - right_root;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] - right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] - right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_sub_div_rhs_ad(&mut self, index: usize, left: usize, numerator: AdValue, denominator: AdValue) {",
         "        let left_value = self.values[left];",
         "        let reciprocal = 1.0 / denominator.value;",
@@ -18936,6 +18978,20 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = left.value - right_value;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - self.node_derivatives[right][axis]; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - self.branch_derivatives[right][axis]; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sub_sqrt_lhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_root = self.values[left].sqrt();",
+        "        let right_value = self.values[right];",
+        "        let left_scale = 1.0 / (2.0 * left_root);",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = left_root - right_value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale - right_node_derivatives[axis]; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale - right_branch_derivatives[axis]; }",
         "    }",
         "",
         "    #[inline]",
@@ -21210,6 +21266,22 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
+    "    fn store_div_sqrt_rhs(&mut self, index: usize, left: usize, right: usize) {",
+    "        let left_value = self.values[left];",
+    "        let left_node_derivatives = self.node_derivatives[left];",
+    "        let right_node_derivatives = self.node_derivatives[right];",
+    "        let left_branch_derivatives = self.branch_derivatives[left];",
+    "        let right_branch_derivatives = self.branch_derivatives[right];",
+    "        let right_root = self.values[right].sqrt();",
+    "        let reciprocal = 1.0 / right_root;",
+    "        let quotient = left_value * reciprocal;",
+    "        let right_scale = -quotient * reciprocal / (2.0 * right_root);",
+    "        self.values[index] = quotient;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
     "    fn store_div_square_rhs(&mut self, index: usize, left: usize, right: usize) {",
     "        let left_value = self.values[left];",
     "        let right_value = self.values[right];",
@@ -21299,6 +21371,23 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = quotient;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_sqrt_lhs(&mut self, index: usize, left: usize, right: usize) {",
+        "        let left_root = self.values[left].sqrt();",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_value = self.values[right];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_root * reciprocal;",
+        "        let left_scale = reciprocal / (2.0 * left_root);",
+        "        let right_scale = -quotient * reciprocal;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale + right_node_derivatives[axis] * right_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + right_branch_derivatives[axis] * right_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -35852,6 +35941,11 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
                 {
                     return Some(line);
                 }
+                if let Some(line) =
+                    compact_binary_sqrt_rhs_store_helper_line(target_index, name, left, args[1])
+                {
+                    return Some(line);
+                }
                 Some(format!(
                     "scratch.{rhs_helper}({target_index}, {left}, {});",
                     args[1]
@@ -35868,6 +35962,11 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
                 {
                     return Some(line);
                 }
+                if let Some(line) =
+                    compact_binary_sqrt_lhs_store_helper_line(target_index, name, args[0], right)
+                {
+                    return Some(line);
+                }
                 Some(format!(
                     "scratch.{lhs_helper}({target_index}, {}, {right});",
                     args[0]
@@ -35876,6 +35975,50 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
         };
     }
     None
+}
+
+fn compact_binary_sqrt_rhs_store_helper_line(
+    target_index: usize,
+    name: &str,
+    left: usize,
+    right: &str,
+) -> Option<String> {
+    let helper = match name {
+        "add" => "store_add_sqrt_rhs",
+        "sub" => "store_sub_sqrt_rhs",
+        "div" => "store_div_sqrt_rhs",
+        _ => return None,
+    };
+    let sqrt_args = compact_ad_call_args(right, "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+    let right = compact_scratch_ad_value_index(sqrt_args[0])?;
+    Some(format!(
+        "scratch.{helper}({target_index}, {left}, {right});"
+    ))
+}
+
+fn compact_binary_sqrt_lhs_store_helper_line(
+    target_index: usize,
+    name: &str,
+    left: &str,
+    right: usize,
+) -> Option<String> {
+    let helper = match name {
+        "add" => "store_add_sqrt_lhs",
+        "sub" => "store_sub_sqrt_lhs",
+        "div" => "store_div_sqrt_lhs",
+        _ => return None,
+    };
+    let sqrt_args = compact_ad_call_args(left, "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+    let left = compact_scratch_ad_value_index(sqrt_args[0])?;
+    Some(format!(
+        "scratch.{helper}({target_index}, {left}, {right});"
+    ))
 }
 
 fn compact_div_square_rhs_store_helper_line(

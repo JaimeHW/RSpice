@@ -7489,6 +7489,16 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
         support.contains("pub(crate) fn store_div_ad_lhs("),
         "{support}"
     );
+    for helper in [
+        "pub(crate) fn store_add_sqrt_rhs(",
+        "pub(crate) fn store_add_sqrt_lhs(",
+        "pub(crate) fn store_sub_sqrt_rhs(",
+        "pub(crate) fn store_sub_sqrt_lhs(",
+        "pub(crate) fn store_div_sqrt_rhs(",
+        "pub(crate) fn store_div_sqrt_lhs(",
+    ] {
+        assert!(support.contains(helper), "missing {helper}:\n{support}");
+    }
     assert!(
         stamp.contains("s.store_mul_ad_rhs(2, 0, A::atan(s.ad_value(1)));"),
         "{stamp}"
@@ -7497,28 +7507,14 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
         stamp.contains("s.store_mul_ad_lhs(3, A::atan(s.ad_value(0)), 1);"),
         "{stamp}"
     );
+    assert!(stamp.contains("s.store_add_sqrt_rhs(4, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_add_sqrt_lhs(5, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_sub_sqrt_rhs(6, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_sub_sqrt_lhs(7, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_div_sqrt_rhs(8, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_div_sqrt_lhs(9, 0, 1);"), "{stamp}");
     assert!(
-        stamp.contains("s.store_add_ad_rhs(4, 0, A::sqrt(s.ad_value(1)));"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("s.store_add_ad_lhs(5, A::sqrt(s.ad_value(0)), 1);"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("s.store_sub_ad_rhs(6, 0, A::sqrt(s.ad_value(1)));"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("s.store_sub_ad_lhs(7, A::sqrt(s.ad_value(0)), 1);"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("s.store_div_ad_rhs(8, 0, A::sqrt(s.ad_value(1)));"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("s.store_div_ad_lhs(9, A::sqrt(s.ad_value(0)), 1);"),
+        !stamp.contains("A::sqrt(s.ad_value(0))") && !stamp.contains("A::sqrt(s.ad_value(1))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
