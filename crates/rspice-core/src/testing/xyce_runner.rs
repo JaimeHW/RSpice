@@ -9005,11 +9005,7 @@ impl XyceTestRunner {
             ));
         }
         if let Some(element_name) = Self::parse_power_probe(normalized) {
-            if (Self::find_resistor_element(netlist, &element_name).is_some()
-                || Self::find_capacitor_element(netlist, &element_name).is_some()
-                || Self::find_inductor_element(netlist, &element_name).is_some())
-                && Self::netlist_has_recorded_branch_current(netlist, &element_name)
-            {
+            if Self::find_recorded_two_terminal_branch_element(netlist, &element_name).is_some() {
                 return Ok(());
             }
             return Err(format!(
@@ -9997,28 +9993,15 @@ impl XyceTestRunner {
         }
 
         if let Some(element_name) = Self::parse_power_probe(normalized) {
-            if Self::find_resistor_element(netlist, &element_name).is_some() {
-                return Self::evaluate_transient_resistor_power(
-                    netlist,
+            if let Some(element) =
+                Self::find_recorded_two_terminal_branch_element(netlist, &element_name)
+            {
+                return Self::evaluate_transient_two_terminal_branch_power(
                     result,
                     time,
-                    &element_name,
-                );
-            }
-            if Self::find_capacitor_element(netlist, &element_name).is_some() {
-                return Self::evaluate_transient_capacitor_power(
-                    netlist,
-                    result,
-                    time,
-                    &element_name,
-                );
-            }
-            if Self::find_inductor_element(netlist, &element_name).is_some() {
-                return Self::evaluate_transient_inductor_power(
-                    netlist,
-                    result,
-                    time,
-                    &element_name,
+                    "device",
+                    &element.name,
+                    &element,
                 );
             }
             return Err(format!(
@@ -10078,57 +10061,6 @@ impl XyceTestRunner {
                 (normalized != branch_name)
                     .then(|| result.try_branch_current_waveform_named(&normalized))?
             })
-    }
-
-    fn evaluate_transient_resistor_power(
-        netlist: &Netlist,
-        result: &TransientResult,
-        time: Value,
-        resistor_name: &str,
-    ) -> Result<Value, String> {
-        let element = Self::find_resistor_element(netlist, resistor_name)
-            .ok_or_else(|| format!("resistor '{}' not found", resistor_name))?;
-        Self::evaluate_transient_two_terminal_branch_power(
-            result,
-            time,
-            "resistor",
-            &element.name,
-            &element,
-        )
-    }
-
-    fn evaluate_transient_inductor_power(
-        netlist: &Netlist,
-        result: &TransientResult,
-        time: Value,
-        inductor_name: &str,
-    ) -> Result<Value, String> {
-        let element = Self::find_inductor_element(netlist, inductor_name)
-            .ok_or_else(|| format!("inductor '{}' not found", inductor_name))?;
-        Self::evaluate_transient_two_terminal_branch_power(
-            result,
-            time,
-            "inductor",
-            &element.name,
-            &element,
-        )
-    }
-
-    fn evaluate_transient_capacitor_power(
-        netlist: &Netlist,
-        result: &TransientResult,
-        time: Value,
-        capacitor_name: &str,
-    ) -> Result<Value, String> {
-        let element = Self::find_capacitor_element(netlist, capacitor_name)
-            .ok_or_else(|| format!("capacitor '{}' not found", capacitor_name))?;
-        Self::evaluate_transient_two_terminal_branch_power(
-            result,
-            time,
-            "capacitor",
-            &element.name,
-            &element,
-        )
     }
 
     fn evaluate_transient_two_terminal_branch_power(
@@ -10800,7 +10732,7 @@ impl XyceTestRunner {
         let rest = &expression[index..];
         for prefix in [
             "idb", "ir", "ii", "im", "ip", "id", "ig", "is", "ib", "ic", "ie", "vdb", "vr", "vi",
-            "vm", "vp", "v", "i", "p", "n",
+            "vm", "vp", "v", "i", "p", "w", "n",
         ] {
             let next_index = index + prefix.len();
             if rest.len() <= prefix.len()
@@ -12571,6 +12503,29 @@ impl XyceTestRunner {
             return Some(Self::instance_param(instance_params, &[parameter]).unwrap_or(1.0));
         }
         Self::instance_param(instance_params, &[parameter])
+    }
+
+    fn find_recorded_two_terminal_branch_element(
+        netlist: &Netlist,
+        name: &str,
+    ) -> Option<crate::netlist::Element> {
+        if let Some(element) = netlist.elements.iter().find(|element| {
+            Self::device_instance_names_match(&element.name, name)
+                && element.nodes.len() >= 2
+                && Self::element_has_recorded_branch_current(&element.kind)
+        }) {
+            return Some(element.clone());
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist)
+            .ok()?
+            .elements
+            .into_iter()
+            .find(|element| {
+                Self::device_instance_names_match(&element.name, name)
+                    && element.nodes.len() >= 2
+                    && Self::element_has_recorded_branch_current(&element.kind)
+            })
     }
 
     fn find_resistor_element(netlist: &Netlist, name: &str) -> Option<crate::netlist::Element> {
@@ -14980,7 +14935,9 @@ impl XyceTestRunner {
 
     fn parse_power_probe(probe: &str) -> Option<String> {
         let normalized = Self::normalize_probe(probe);
-        if !normalized.starts_with("p(") || !normalized.ends_with(')') {
+        if !(normalized.starts_with("p(") || normalized.starts_with("w("))
+            || !normalized.ends_with(')')
+        {
             return None;
         }
         let inner = &normalized[2..normalized.len() - 1];
@@ -15769,6 +15726,46 @@ C1 out 0 40u IC=1
             .expect("resistor power evaluates from branch current and voltage drop");
 
         assert!((power - 0.09).abs() <= 1.0e-15, "power was {power}");
+    }
+
+    #[test]
+    fn transient_voltage_source_power_probe_uses_recorded_branch_current() {
+        let netlist = Netlist::parse(
+            "transient voltage source power probe\n\
+             V1 out 0 1\n\
+             .tran 1m 1m\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let result = TransientResult {
+            time: vec![0.0, 1.0e-3],
+            voltages: vec![vec![2.0, 3.0]],
+            branch_currents: vec![vec![0.5, -0.25]],
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: vec!["V1".to_string()],
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+        };
+
+        XyceTestRunner::validate_tran_probe("P(V1)", &netlist)
+            .expect("voltage-source power is a supported transient probe");
+        XyceTestRunner::validate_tran_probe("W(V1)", &netlist)
+            .expect("W is a Xyce power-probe alias");
+        XyceTestRunner::validate_tran_probe("{W(V1)}", &netlist)
+            .expect("braced W power expression validates through probe rewriting");
+
+        let direct = XyceTestRunner::evaluate_tran_probe("P(V1)", &netlist, &result, 1.0e-3)
+            .expect("P(V1) evaluates from branch current and voltage drop");
+        let alias = XyceTestRunner::evaluate_tran_probe("W(V1)", &netlist, &result, 1.0e-3)
+            .expect("W(V1) evaluates from branch current and voltage drop");
+        let braced = XyceTestRunner::evaluate_tran_probe("{W(V1)}", &netlist, &result, 1.0e-3)
+            .expect("{W(V1)} evaluates through expression rewriting");
+
+        assert!((direct + 0.75).abs() <= 1.0e-15, "power was {direct}");
+        assert_eq!(alias, direct);
+        assert_eq!(braced, direct);
     }
 
     #[test]

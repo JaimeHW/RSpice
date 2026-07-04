@@ -728,6 +728,29 @@ fn test_xyce_bug_229_native_transient_case_runs() {
 }
 
 #[test]
+fn test_xyce_bug_629_power_alias_transient_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_629_SON/bug_629.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native Xyce transient P/W power-probe comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "static_prn_tran",
+        "{relative} should report the native transient .prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_bug_1301_wrapper_transient_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
