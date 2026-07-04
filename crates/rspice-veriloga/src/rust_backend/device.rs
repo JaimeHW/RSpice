@@ -4759,7 +4759,7 @@ fn stamp() {
         for helper in [
             "fn store_mul_scaled_powf_rhs",
             "fn store_mul_scaled_sqrt_rhs",
-            "fn store_mul_scaled_ln_ad_rhs",
+            "fn store_mul_scaled_ln_offset_rhs",
             "fn store_mul_scaled_offset_rhs",
             "fn store_mul_scaled_abs_rhs",
             "fn store_mul_scaled_exp_rhs",
@@ -4789,9 +4789,7 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains(
-                "s.store_mul_scaled_ln_ad_rhs(92, 6, p.scale, A::offset(s.ad_value(7), p.offset));"
-            ),
+            compact.contains("s.store_mul_scaled_ln_offset_rhs(92, 6, p.scale, 7, p.offset);"),
             "{compact}"
         );
         assert!(
@@ -20663,6 +20661,12 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
+    "    fn store_mul_scaled_ln_offset_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, offset: f64) {",
+    "        let raw = self.values[value_source] + offset;",
+    "        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, raw.ln(), 1.0 / raw);",
+    "    }",
+    "",
+    "    #[inline]",
     "    fn store_mul_scaled_ln_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue) {",
     "        let raw = value.value;",
     "        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, raw.ln(), 1.0 / raw);",
@@ -21479,6 +21483,23 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = quotient * scale;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * reciprocal + right.node_derivatives[axis] * right_scale) * scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * reciprocal + right.branch_derivatives[axis] * right_scale) * scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_div_ln_offset_rhs(&mut self, index: usize, left: usize, right: usize, offset: f64, scale: f64) {",
+        "        let left_value = self.values[left];",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        let shifted_right = self.values[right] + offset;",
+        "        let denominator = shifted_right.ln();",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = left_value * reciprocal;",
+        "        let right_scale = -quotient * reciprocal / shifted_right;",
+        "        self.values[index] = quotient * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale) * scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale) * scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -39395,6 +39416,23 @@ fn compact_mul_scaled_unary_rhs_helper_line(
         ));
     }
 
+    if let Some(args) = compact_ad_call_args(value, "ln") {
+        if args.len() != 1 {
+            return None;
+        }
+        if let Some(offset_args) = compact_ad_call_args(args[0], "offset") {
+            if offset_args.len() != 2 {
+                return None;
+            }
+            if let Some(value_source) = compact_scratch_ad_value_index(offset_args[0]) {
+                return Some(format!(
+                    "scratch.store_mul_scaled_ln_offset_rhs({target_index}, {source}, {output_scale}, {value_source}, {});",
+                    offset_args[1]
+                ));
+            }
+        }
+    }
+
     for (name, helper) in [
         ("exp", "store_mul_scaled_exp"),
         ("ln", "store_mul_scaled_ln"),
@@ -41249,6 +41287,14 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
             }
             (Some(left), None) if compact_non_atomic_ad_value(inner_args[1]) => {
                 let combined_scale = compact_scale_product(&left.1, scale);
+                if let Some(line) = compact_scaled_div_ln_offset_rhs_helper_line(
+                    target_index,
+                    left.0,
+                    inner_args[1],
+                    &combined_scale,
+                ) {
+                    return Some(line);
+                }
                 return Some(format!(
                     "scratch.store_scaled_div_ad_rhs({target_index}, {}, {}, {combined_scale});",
                     left.0, inner_args[1]
@@ -41513,6 +41559,27 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
     }
 
     None
+}
+
+fn compact_scaled_div_ln_offset_rhs_helper_line(
+    target_index: usize,
+    left: usize,
+    right: &str,
+    scale: &str,
+) -> Option<String> {
+    let ln_args = compact_ad_call_args(right, "ln")?;
+    if ln_args.len() != 1 {
+        return None;
+    }
+    let offset_args = compact_ad_call_args(ln_args[0], "offset")?;
+    if offset_args.len() != 2 {
+        return None;
+    }
+    let right = compact_scratch_ad_value_index(offset_args[0])?;
+    Some(format!(
+        "scratch.store_scaled_div_ln_offset_rhs({target_index}, {left}, {right}, {}, {scale});",
+        offset_args[1]
+    ))
 }
 
 fn compact_offset_fused_scaled_multiply_store_helper_line(
