@@ -25981,18 +25981,16 @@ fn emit_stamp_body(
                                 &lowered.reactive_branch_derivatives,
                                 true,
                             );
-                            out.push_str("        stamper.stamp_current_reactive_dense(\n");
+                            out.push_str("        stamper.stamp_current_reactive_dense_local(\n");
                             out.push_str(&format!(
                                 "            {},\n",
-                                optional_node_expr(equation.branch.pos_node)
+                                optional_node_local_expr(equation.branch.pos_node)
                             ));
                             out.push_str(&format!(
                                 "            {},\n",
-                                optional_node_expr(equation.branch.neg_node)
+                                optional_node_local_expr(equation.branch.neg_node)
                             ));
-                            out.push_str("            &self.nodes,\n");
                             out.push_str(&format!("            {},\n", derivative_refs.node_ref));
-                            out.push_str("            &self.branches,\n");
                             out.push_str(&format!("            {},\n", derivative_refs.branch_ref));
                             out.push_str(&format!(
                                 "            {},\n",
@@ -26009,14 +26007,14 @@ fn emit_stamp_body(
                                 Some("self.multiplicity"),
                             );
                             if !emitted_fixed {
-                                out.push_str("        stamper.stamp_current_reactive(\n");
+                                out.push_str("        stamper.stamp_current_reactive_local(\n");
                                 out.push_str(&format!(
                                     "            {},\n",
-                                    optional_node_expr(equation.branch.pos_node)
+                                    optional_node_local_expr(equation.branch.pos_node)
                                 ));
                                 out.push_str(&format!(
                                     "            {},\n",
-                                    optional_node_expr(equation.branch.neg_node)
+                                    optional_node_local_expr(equation.branch.neg_node)
                                 ));
                                 out.push_str("            &[\n");
                                 for node_index in 0..artifact.mir.nodes.len() {
@@ -26025,7 +26023,7 @@ fn emit_stamp_body(
                                         continue;
                                     }
                                     out.push_str(&format!(
-                                        "                GeneratedDerivative::node(self.nodes[{node_index}], self.multiplicity * ({})),\n",
+                                        "                GeneratedDerivative::node({node_index}, self.multiplicity * ({})),\n",
                                         lowered.reactive_derivatives[node_index]
                                     ));
                                 }
@@ -26036,7 +26034,7 @@ fn emit_stamp_body(
                                         continue;
                                     }
                                     out.push_str(&format!(
-                                        "                GeneratedDerivative::branch(self.branches[{branch_index}], self.multiplicity * ({})),\n",
+                                        "                GeneratedDerivative::branch({branch_index}, self.multiplicity * ({})),\n",
                                         lowered.reactive_branch_derivatives[branch_index]
                                     ));
                                 }
@@ -26067,15 +26065,13 @@ fn emit_stamp_body(
                                 &lowered.reactive_branch_derivatives,
                                 false,
                             );
-                            out.push_str("        stamper.stamp_potential_reactive_dense(\n");
-                            out.push_str(&format!("            self.branches[{slot}],\n"));
-                            out.push_str("            &self.nodes,\n");
+                            out.push_str("        stamper.stamp_potential_reactive_dense_local(\n");
+                            out.push_str(&format!("            {slot},\n"));
                             out.push_str(&format!("            {},\n", derivative_refs.node_ref));
-                            out.push_str("            &self.branches,\n");
                             out.push_str(&format!("            {},\n", derivative_refs.branch_ref));
                             out.push_str("        );\n");
                         } else {
-                            let branch_expr = format!("self.branches[{slot}]");
+                            let branch_expr = format!("{slot}");
                             let emitted_fixed = emit_fixed_sparse_reactive_potential_stamp(
                                 out,
                                 &branch_expr,
@@ -26084,8 +26080,8 @@ fn emit_stamp_body(
                                 None,
                             );
                             if !emitted_fixed {
-                                out.push_str("        stamper.stamp_potential_reactive(\n");
-                                out.push_str(&format!("            self.branches[{slot}],\n"));
+                                out.push_str("        stamper.stamp_potential_reactive_local(\n");
+                                out.push_str(&format!("            {slot},\n"));
                                 out.push_str("            &[\n");
                                 for node_index in 0..artifact.mir.nodes.len() {
                                     if is_zero_derivative(&lowered.reactive_derivatives[node_index])
@@ -26093,7 +26089,7 @@ fn emit_stamp_body(
                                         continue;
                                     }
                                     out.push_str(&format!(
-                                        "                GeneratedDerivative::node(self.nodes[{node_index}], {}),\n",
+                                        "                GeneratedDerivative::node({node_index}, {}),\n",
                                         lowered.reactive_derivatives[node_index]
                                     ));
                                 }
@@ -26104,7 +26100,7 @@ fn emit_stamp_body(
                                         continue;
                                     }
                                     out.push_str(&format!(
-                                        "                GeneratedDerivative::branch(self.branches[{branch_index}], {}),\n",
+                                        "                GeneratedDerivative::branch({branch_index}, {}),\n",
                                         lowered.reactive_branch_derivatives[branch_index]
                                     ));
                                 }
@@ -26773,13 +26769,19 @@ fn emit_fixed_sparse_reactive_current_stamp(
     }
     if branch_terms.is_empty() && (1..=3).contains(&node_terms.len()) {
         out.push_str(&format!(
-            "        stamper.stamp_current_reactive_node{}(\n",
+            "        stamper.stamp_current_reactive_node{}_local(\n",
             node_terms.len()
         ));
-        out.push_str(&format!("            {},\n", optional_node_expr(pos_node)));
-        out.push_str(&format!("            {},\n", optional_node_expr(neg_node)));
+        out.push_str(&format!(
+            "            {},\n",
+            optional_node_local_expr(pos_node)
+        ));
+        out.push_str(&format!(
+            "            {},\n",
+            optional_node_local_expr(neg_node)
+        ));
         for term in node_terms {
-            out.push_str(&format!("            self.nodes[{}],\n", term.index));
+            out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
                 scaled_derivative_expr(derivative_scale, term.derivative)
@@ -26790,13 +26792,19 @@ fn emit_fixed_sparse_reactive_current_stamp(
     }
     if node_terms.is_empty() && (1..=2).contains(&branch_terms.len()) {
         out.push_str(&format!(
-            "        stamper.stamp_current_reactive_branch{}(\n",
+            "        stamper.stamp_current_reactive_branch{}_local(\n",
             branch_terms.len()
         ));
-        out.push_str(&format!("            {},\n", optional_node_expr(pos_node)));
-        out.push_str(&format!("            {},\n", optional_node_expr(neg_node)));
+        out.push_str(&format!(
+            "            {},\n",
+            optional_node_local_expr(pos_node)
+        ));
+        out.push_str(&format!(
+            "            {},\n",
+            optional_node_local_expr(neg_node)
+        ));
         for term in branch_terms {
-            out.push_str(&format!("            self.branches[{}],\n", term.index));
+            out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
                 scaled_derivative_expr(derivative_scale, term.derivative)
@@ -26807,20 +26815,26 @@ fn emit_fixed_sparse_reactive_current_stamp(
     }
     if branch_terms.len() == 1 && (1..=2).contains(&node_terms.len()) {
         out.push_str(&format!(
-            "        stamper.stamp_current_reactive_node{}_branch1(\n",
+            "        stamper.stamp_current_reactive_node{}_branch1_local(\n",
             node_terms.len()
         ));
-        out.push_str(&format!("            {},\n", optional_node_expr(pos_node)));
-        out.push_str(&format!("            {},\n", optional_node_expr(neg_node)));
+        out.push_str(&format!(
+            "            {},\n",
+            optional_node_local_expr(pos_node)
+        ));
+        out.push_str(&format!(
+            "            {},\n",
+            optional_node_local_expr(neg_node)
+        ));
         for term in node_terms {
-            out.push_str(&format!("            self.nodes[{}],\n", term.index));
+            out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
                 scaled_derivative_expr(derivative_scale, term.derivative)
             ));
         }
         let term = branch_terms[0];
-        out.push_str(&format!("            self.branches[{}],\n", term.index));
+        out.push_str(&format!("            {},\n", term.index));
         out.push_str(&format!(
             "            {},\n",
             scaled_derivative_expr(derivative_scale, term.derivative)
@@ -26845,12 +26859,12 @@ fn emit_fixed_sparse_reactive_potential_stamp(
     }
     if branch_terms.is_empty() && (1..=2).contains(&node_terms.len()) {
         out.push_str(&format!(
-            "        stamper.stamp_potential_reactive_node{}(\n",
+            "        stamper.stamp_potential_reactive_node{}_local(\n",
             node_terms.len()
         ));
         out.push_str(&format!("            {branch_expr},\n"));
         for term in node_terms {
-            out.push_str(&format!("            self.nodes[{}],\n", term.index));
+            out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
                 scaled_derivative_expr(derivative_scale, term.derivative)
@@ -26861,12 +26875,12 @@ fn emit_fixed_sparse_reactive_potential_stamp(
     }
     if node_terms.is_empty() && (1..=2).contains(&branch_terms.len()) {
         out.push_str(&format!(
-            "        stamper.stamp_potential_reactive_branch{}(\n",
+            "        stamper.stamp_potential_reactive_branch{}_local(\n",
             branch_terms.len()
         ));
         out.push_str(&format!("            {branch_expr},\n"));
         for term in branch_terms {
-            out.push_str(&format!("            self.branches[{}],\n", term.index));
+            out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
                 scaled_derivative_expr(derivative_scale, term.derivative)
@@ -26877,19 +26891,19 @@ fn emit_fixed_sparse_reactive_potential_stamp(
     }
     if branch_terms.len() == 1 && (1..=2).contains(&node_terms.len()) {
         out.push_str(&format!(
-            "        stamper.stamp_potential_reactive_node{}_branch1(\n",
+            "        stamper.stamp_potential_reactive_node{}_branch1_local(\n",
             node_terms.len()
         ));
         out.push_str(&format!("            {branch_expr},\n"));
         for term in node_terms {
-            out.push_str(&format!("            self.nodes[{}],\n", term.index));
+            out.push_str(&format!("            {},\n", term.index));
             out.push_str(&format!(
                 "            {},\n",
                 scaled_derivative_expr(derivative_scale, term.derivative)
             ));
         }
         let term = branch_terms[0];
-        out.push_str(&format!("            self.branches[{}],\n", term.index));
+        out.push_str(&format!("            {},\n", term.index));
         out.push_str(&format!(
             "            {},\n",
             scaled_derivative_expr(derivative_scale, term.derivative)
@@ -45848,11 +45862,6 @@ fn emit_loop_statement(
     )?;
     out.push_str(&format!("{indent}}}\n"));
     Ok(())
-}
-
-fn optional_node_expr(node: Option<crate::canonical_ir::NodeId>) -> String {
-    node.map(|node| format!("Some(self.nodes[{}])", node.index()))
-        .unwrap_or_else(|| "None".to_string())
 }
 
 fn optional_node_local_expr(node: Option<crate::canonical_ir::NodeId>) -> String {

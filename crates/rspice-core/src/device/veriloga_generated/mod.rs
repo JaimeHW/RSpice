@@ -312,8 +312,10 @@ impl BuiltinVerilogAInstance {
         );
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
-        let mut stamper = GeneratedReactiveStamper::new_with_static_cache(
+        let mut stamper = GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
             matrix,
+            &self.nodes,
+            &self.branches,
             num_nodes,
             omega,
             &self.static_stamp_cache,
@@ -3011,6 +3013,8 @@ impl<'a> GeneratedStamper<'a> {
 pub struct GeneratedReactiveStamper<'a> {
     matrix: &'a mut ComplexMatrix,
     cache: Option<&'a GeneratedStaticStampCache>,
+    nodes: &'a [usize],
+    branches: &'a [usize],
     num_nodes: usize,
     omega: Value,
 }
@@ -3021,6 +3025,8 @@ impl<'a> GeneratedReactiveStamper<'a> {
         Self {
             matrix,
             cache: None,
+            nodes: &[],
+            branches: &[],
             num_nodes,
             omega,
         }
@@ -3036,6 +3042,45 @@ impl<'a> GeneratedReactiveStamper<'a> {
         Self {
             matrix,
             cache: Some(cache),
+            nodes: &[],
+            branches: &[],
+            num_nodes,
+            omega,
+        }
+    }
+
+    #[inline]
+    pub fn new_with_local_maps(
+        matrix: &'a mut ComplexMatrix,
+        nodes: &'a [usize],
+        branches: &'a [usize],
+        num_nodes: usize,
+        omega: Value,
+    ) -> Self {
+        Self {
+            matrix,
+            cache: None,
+            nodes,
+            branches,
+            num_nodes,
+            omega,
+        }
+    }
+
+    #[inline]
+    pub fn new_with_local_maps_and_static_cache(
+        matrix: &'a mut ComplexMatrix,
+        nodes: &'a [usize],
+        branches: &'a [usize],
+        num_nodes: usize,
+        omega: Value,
+        cache: &'a GeneratedStaticStampCache,
+    ) -> Self {
+        Self {
+            matrix,
+            cache: Some(cache),
+            nodes,
+            branches,
             num_nodes,
             omega,
         }
@@ -3195,6 +3240,238 @@ impl<'a> GeneratedReactiveStamper<'a> {
                 continue;
             }
             if let Some(col) = self.branch_matrix_index(branch) {
+                self.add_current_reactive_derivative_pair(pos_row, neg_row, col, derivative);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        derivatives: &[GeneratedDerivative],
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for derivative in derivatives {
+                let Some(col_axis) = Self::derivative_axis_cached_local(cache, derivative.axis)
+                else {
+                    continue;
+                };
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative.value,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+
+        for derivative in derivatives {
+            if let Some(col) = self.axis_matrix_index_local(derivative.axis) {
+                self.add_current_reactive_derivative_pair(
+                    pos_row,
+                    neg_row,
+                    col,
+                    self.omega * derivative.value,
+                );
+            }
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_dense_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        node_derivatives: &[Value],
+        branch_derivatives: &[Value],
+        derivative_scale: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+
+            let derivative_scale = self.omega * derivative_scale;
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for (node, derivative) in node_derivatives.iter().copied().enumerate() {
+                let derivative = derivative_scale * derivative;
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.node_axis(node) else {
+                    continue;
+                };
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative,
+                );
+            }
+            for (branch, derivative) in branch_derivatives.iter().copied().enumerate() {
+                let derivative = derivative_scale * derivative;
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.branch_axis(branch) else {
+                    continue;
+                };
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+
+        let derivative_scale = self.omega * derivative_scale;
+        for (node, derivative) in node_derivatives.iter().copied().enumerate() {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            if let Some(col) = self.node_matrix_index_local(node) {
+                self.add_current_reactive_derivative_pair(pos_row, neg_row, col, derivative);
+            }
+        }
+        for (branch, derivative) in branch_derivatives.iter().copied().enumerate() {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            if let Some(col) = self.branch_matrix_index_local(branch) {
+                self.add_current_reactive_derivative_pair(pos_row, neg_row, col, derivative);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_indexed_dense_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        nodes: &[usize],
+        node_derivatives: &[Value],
+        branches: &[usize],
+        branch_derivatives: &[Value],
+        derivative_scale: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+
+            let derivative_scale = self.omega * derivative_scale;
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
+                let derivative = derivative_scale * derivative;
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.node_axis(node) else {
+                    continue;
+                };
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative,
+                );
+            }
+            for (branch, derivative) in branches
+                .iter()
+                .copied()
+                .zip(branch_derivatives.iter().copied())
+            {
+                let derivative = derivative_scale * derivative;
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.branch_axis(branch) else {
+                    continue;
+                };
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+
+        let derivative_scale = self.omega * derivative_scale;
+        for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            if let Some(col) = self.node_matrix_index_local(node) {
+                self.add_current_reactive_derivative_pair(pos_row, neg_row, col, derivative);
+            }
+        }
+        for (branch, derivative) in branches
+            .iter()
+            .copied()
+            .zip(branch_derivatives.iter().copied())
+        {
+            let derivative = derivative_scale * derivative;
+            if derivative == 0.0 {
+                continue;
+            }
+            if let Some(col) = self.branch_matrix_index_local(branch) {
                 self.add_current_reactive_derivative_pair(pos_row, neg_row, col, derivative);
             }
         }
@@ -3422,6 +3699,468 @@ impl<'a> GeneratedReactiveStamper<'a> {
             );
         }
         if let Some(col) = self.branch_matrix_index(branch0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative2,
+            );
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_node1_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        node0: usize,
+        derivative0: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+            if let Some(col_axis) = cache.node_axis(node0) {
+                let width = cache.axis_count();
+                let slots_ready = width != 0 && cache.slots.len() == width * width;
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative0,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_node2_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.node_axis(node0) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.node_axis(node1) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative1,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+        if let Some(col) = self.node_matrix_index_local(node1) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative1,
+            );
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_node3_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+        node2: usize,
+        derivative2: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.node_axis(node0) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.node_axis(node1) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative1,
+                );
+            }
+            if let Some(col_axis) = cache.node_axis(node2) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative2,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+        if let Some(col) = self.node_matrix_index_local(node1) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative1,
+            );
+        }
+        if let Some(col) = self.node_matrix_index_local(node2) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative2,
+            );
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_branch1_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        branch0: usize,
+        derivative0: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+            if let Some(col_axis) = cache.branch_axis(branch0) {
+                let width = cache.axis_count();
+                let slots_ready = width != 0 && cache.slots.len() == width * width;
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative0,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = self.branch_matrix_index_local(branch0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_branch2_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        branch0: usize,
+        derivative0: Value,
+        branch1: usize,
+        derivative1: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.branch_axis(branch0) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.branch_axis(branch1) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative1,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = self.branch_matrix_index_local(branch0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+        if let Some(col) = self.branch_matrix_index_local(branch1) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative1,
+            );
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_node1_branch1_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        node0: usize,
+        derivative0: Value,
+        branch0: usize,
+        derivative1: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.node_axis(node0) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.branch_axis(branch0) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative1,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+        if let Some(col) = self.branch_matrix_index_local(branch0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative1,
+            );
+        }
+    }
+
+    #[inline]
+    pub fn stamp_current_reactive_node2_branch1_local(
+        &mut self,
+        pos: Option<usize>,
+        neg: Option<usize>,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+        branch0: usize,
+        derivative2: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.node_axis(node0) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.node_axis(node1) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative1,
+                );
+            }
+            if let Some(col_axis) = cache.branch_axis(branch0) {
+                self.add_current_reactive_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    self.omega * derivative2,
+                );
+            }
+            return;
+        }
+
+        let pos_row = pos.and_then(|node| self.node_matrix_index_local(node));
+        let neg_row = neg.and_then(|node| self.node_matrix_index_local(node));
+        if pos_row.is_none() && neg_row.is_none() {
+            return;
+        }
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative0,
+            );
+        }
+        if let Some(col) = self.node_matrix_index_local(node1) {
+            self.add_current_reactive_derivative_pair(
+                pos_row,
+                neg_row,
+                col,
+                self.omega * derivative1,
+            );
+        }
+        if let Some(col) = self.branch_matrix_index_local(branch0) {
             self.add_current_reactive_derivative_pair(
                 pos_row,
                 neg_row,
@@ -3769,6 +4508,472 @@ impl<'a> GeneratedReactiveStamper<'a> {
     }
 
     #[inline]
+    pub fn stamp_potential_reactive_local(
+        &mut self,
+        branch: usize,
+        derivatives: &[GeneratedDerivative],
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for derivative in derivatives {
+                let Some(col_axis) = Self::derivative_axis_cached_local(cache, derivative.axis)
+                else {
+                    continue;
+                };
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative.value,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        for derivative in derivatives {
+            if let Some(col) = self.axis_matrix_index_local(derivative.axis) {
+                self.add_imag(row, col, -self.omega * derivative.value);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_dense_local(
+        &mut self,
+        branch: usize,
+        node_derivatives: &[Value],
+        branch_derivatives: &[Value],
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for (node, derivative) in node_derivatives.iter().copied().enumerate() {
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.node_axis(node) else {
+                    continue;
+                };
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative,
+                );
+            }
+            for (branch, derivative) in branch_derivatives.iter().copied().enumerate() {
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.branch_axis(branch) else {
+                    continue;
+                };
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        for (node, derivative) in node_derivatives.iter().copied().enumerate() {
+            if derivative == 0.0 {
+                continue;
+            }
+            if let Some(col) = self.node_matrix_index_local(node) {
+                self.add_imag(row, col, -self.omega * derivative);
+            }
+        }
+        for (branch, derivative) in branch_derivatives.iter().copied().enumerate() {
+            if derivative == 0.0 {
+                continue;
+            }
+            if let Some(col) = self.branch_matrix_index_local(branch) {
+                self.add_imag(row, col, -self.omega * derivative);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_indexed_dense_local(
+        &mut self,
+        branch: usize,
+        nodes: &[usize],
+        node_derivatives: &[Value],
+        branches: &[usize],
+        branch_derivatives: &[Value],
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.node_axis(node) else {
+                    continue;
+                };
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative,
+                );
+            }
+            for (branch, derivative) in branches
+                .iter()
+                .copied()
+                .zip(branch_derivatives.iter().copied())
+            {
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.branch_axis(branch) else {
+                    continue;
+                };
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        for (node, derivative) in nodes.iter().copied().zip(node_derivatives.iter().copied()) {
+            if derivative == 0.0 {
+                continue;
+            }
+            if let Some(col) = self.node_matrix_index_local(node) {
+                self.add_imag(row, col, -self.omega * derivative);
+            }
+        }
+        for (branch, derivative) in branches
+            .iter()
+            .copied()
+            .zip(branch_derivatives.iter().copied())
+        {
+            if derivative == 0.0 {
+                continue;
+            }
+            if let Some(col) = self.branch_matrix_index_local(branch) {
+                self.add_imag(row, col, -self.omega * derivative);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_node1_local(
+        &mut self,
+        branch: usize,
+        node0: usize,
+        derivative0: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            if let Some(col_axis) = cache.node_axis(node0) {
+                let width = cache.axis_count();
+                let slots_ready = width != 0 && cache.slots.len() == width * width;
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative0,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_imag(row, col, -self.omega * derivative0);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_node2_local(
+        &mut self,
+        branch: usize,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.node_axis(node0) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.node_axis(node1) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative1,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_imag(row, col, -self.omega * derivative0);
+        }
+        if let Some(col) = self.node_matrix_index_local(node1) {
+            self.add_imag(row, col, -self.omega * derivative1);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_branch1_local(
+        &mut self,
+        branch: usize,
+        branch0: usize,
+        derivative0: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            if let Some(col_axis) = cache.branch_axis(branch0) {
+                let width = cache.axis_count();
+                let slots_ready = width != 0 && cache.slots.len() == width * width;
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative0,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        if let Some(col) = self.branch_matrix_index_local(branch0) {
+            self.add_imag(row, col, -self.omega * derivative0);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_branch2_local(
+        &mut self,
+        branch: usize,
+        branch0: usize,
+        derivative0: Value,
+        branch1: usize,
+        derivative1: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.branch_axis(branch0) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.branch_axis(branch1) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative1,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        if let Some(col) = self.branch_matrix_index_local(branch0) {
+            self.add_imag(row, col, -self.omega * derivative0);
+        }
+        if let Some(col) = self.branch_matrix_index_local(branch1) {
+            self.add_imag(row, col, -self.omega * derivative1);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_node1_branch1_local(
+        &mut self,
+        branch: usize,
+        node0: usize,
+        derivative0: Value,
+        branch0: usize,
+        derivative1: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.node_axis(node0) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.branch_axis(branch0) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative1,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_imag(row, col, -self.omega * derivative0);
+        }
+        if let Some(col) = self.branch_matrix_index_local(branch0) {
+            self.add_imag(row, col, -self.omega * derivative1);
+        }
+    }
+
+    #[inline]
+    pub fn stamp_potential_reactive_node2_branch1_local(
+        &mut self,
+        branch: usize,
+        node0: usize,
+        derivative0: Value,
+        node1: usize,
+        derivative1: Value,
+        branch0: usize,
+        derivative2: Value,
+    ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch) else {
+                return;
+            };
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            if let Some(col_axis) = cache.node_axis(node0) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative0,
+                );
+            }
+            if let Some(col_axis) = cache.node_axis(node1) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative1,
+                );
+            }
+            if let Some(col_axis) = cache.branch_axis(branch0) {
+                self.add_imag_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -self.omega * derivative2,
+                );
+            }
+            return;
+        }
+
+        let Some(row) = self.branch_matrix_index_local(branch) else {
+            return;
+        };
+        if let Some(col) = self.node_matrix_index_local(node0) {
+            self.add_imag(row, col, -self.omega * derivative0);
+        }
+        if let Some(col) = self.node_matrix_index_local(node1) {
+            self.add_imag(row, col, -self.omega * derivative1);
+        }
+        if let Some(col) = self.branch_matrix_index_local(branch0) {
+            self.add_imag(row, col, -self.omega * derivative2);
+        }
+    }
+
+    #[inline]
     fn branch_matrix_index(&self, branch_ordinal: usize) -> Option<usize> {
         if branch_ordinal > 0 {
             Some(self.num_nodes + branch_ordinal - 1)
@@ -3783,10 +4988,34 @@ impl<'a> GeneratedReactiveStamper<'a> {
     }
 
     #[inline]
+    fn node_matrix_index_local(&self, node: usize) -> Option<usize> {
+        self.nodes
+            .get(node)
+            .copied()
+            .and_then(Self::node_matrix_index)
+    }
+
+    #[inline]
+    fn branch_matrix_index_local(&self, branch: usize) -> Option<usize> {
+        self.branches
+            .get(branch)
+            .copied()
+            .and_then(|branch| self.branch_matrix_index(branch))
+    }
+
+    #[inline]
     fn axis_matrix_index(&self, axis: GeneratedDerivativeAxis) -> Option<usize> {
         match axis {
             GeneratedDerivativeAxis::Node(node) => Self::node_matrix_index(node),
             GeneratedDerivativeAxis::Branch(branch) => self.branch_matrix_index(branch),
+        }
+    }
+
+    #[inline]
+    fn axis_matrix_index_local(&self, axis: GeneratedDerivativeAxis) -> Option<usize> {
+        match axis {
+            GeneratedDerivativeAxis::Node(node) => self.node_matrix_index_local(node),
+            GeneratedDerivativeAxis::Branch(branch) => self.branch_matrix_index_local(branch),
         }
     }
 
@@ -3798,5 +5027,16 @@ impl<'a> GeneratedReactiveStamper<'a> {
     ) -> Option<usize> {
         self.axis_matrix_index(axis)
             .and_then(|index| cache.axis_for_matrix_index(index))
+    }
+
+    #[inline]
+    fn derivative_axis_cached_local(
+        cache: &GeneratedStaticStampCache,
+        axis: GeneratedDerivativeAxis,
+    ) -> Option<usize> {
+        match axis {
+            GeneratedDerivativeAxis::Node(node) => cache.node_axis(node),
+            GeneratedDerivativeAxis::Branch(branch) => cache.branch_axis(branch),
+        }
     }
 }

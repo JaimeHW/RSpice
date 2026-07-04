@@ -2722,18 +2722,18 @@ fn emit_current_reactive_stamp(
 ) -> Result<(), RustBackendError> {
     let derivatives = scalar_derivatives(artifact, equation, root)?;
 
-    let pos = optional_node_global_expr(equation.branch.pos_node);
-    let neg = optional_node_global_expr(equation.branch.neg_node);
+    let pos = optional_node_local_expr(equation.branch.pos_node);
+    let neg = optional_node_local_expr(equation.branch.neg_node);
     match (
         derivatives.nodes.as_slice(),
         derivatives.branches.as_slice(),
     ) {
         ([], []) => {}
         ([(node0, value0)], []) => {
-            out.push_str("        stamper.stamp_current_reactive_node1(\n");
+            out.push_str("        stamper.stamp_current_reactive_node1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            nodes[{node0}],\n"));
+            out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value0, context)?
@@ -2741,15 +2741,15 @@ fn emit_current_reactive_stamp(
             out.push_str("        );\n");
         }
         ([(node0, value0), (node1, value1)], []) => {
-            out.push_str("        stamper.stamp_current_reactive_node2(\n");
+            out.push_str("        stamper.stamp_current_reactive_node2_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            nodes[{node0}],\n"));
+            out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value0, context)?
             ));
-            out.push_str(&format!("            nodes[{node1}],\n"));
+            out.push_str(&format!("            {node1},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value1, context)?
@@ -2757,20 +2757,20 @@ fn emit_current_reactive_stamp(
             out.push_str("        );\n");
         }
         ([(node0, value0), (node1, value1), (node2, value2)], []) => {
-            out.push_str("        stamper.stamp_current_reactive_node3(\n");
+            out.push_str("        stamper.stamp_current_reactive_node3_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            nodes[{node0}],\n"));
+            out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value0, context)?
             ));
-            out.push_str(&format!("            nodes[{node1}],\n"));
+            out.push_str(&format!("            {node1},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value1, context)?
             ));
-            out.push_str(&format!("            nodes[{node2}],\n"));
+            out.push_str(&format!("            {node2},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value2, context)?
@@ -2778,10 +2778,10 @@ fn emit_current_reactive_stamp(
             out.push_str("        );\n");
         }
         ([], [(branch0, value0)]) => {
-            out.push_str("        stamper.stamp_current_reactive_branch1(\n");
+            out.push_str("        stamper.stamp_current_reactive_branch1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            branches[{branch0}],\n"));
+            out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value0, context)?
@@ -2789,15 +2789,15 @@ fn emit_current_reactive_stamp(
             out.push_str("        );\n");
         }
         ([], [(branch0, value0), (branch1, value1)]) => {
-            out.push_str("        stamper.stamp_current_reactive_branch2(\n");
+            out.push_str("        stamper.stamp_current_reactive_branch2_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            branches[{branch0}],\n"));
+            out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value0, context)?
             ));
-            out.push_str(&format!("            branches[{branch1}],\n"));
+            out.push_str(&format!("            {branch1},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *value1, context)?
@@ -2805,15 +2805,15 @@ fn emit_current_reactive_stamp(
             out.push_str("        );\n");
         }
         ([(node0, node_value0)], [(branch0, branch_value0)]) => {
-            out.push_str("        stamper.stamp_current_reactive_node1_branch1(\n");
+            out.push_str("        stamper.stamp_current_reactive_node1_branch1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            nodes[{node0}],\n"));
+            out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *node_value0, context)?
             ));
-            out.push_str(&format!("            branches[{branch0}],\n"));
+            out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *branch_value0, context)?
@@ -2821,20 +2821,20 @@ fn emit_current_reactive_stamp(
             out.push_str("        );\n");
         }
         ([(node0, node_value0), (node1, node_value1)], [(branch0, branch_value0)]) => {
-            out.push_str("        stamper.stamp_current_reactive_node2_branch1(\n");
+            out.push_str("        stamper.stamp_current_reactive_node2_branch1_local(\n");
             out.push_str(&format!("            {pos},\n"));
             out.push_str(&format!("            {neg},\n"));
-            out.push_str(&format!("            nodes[{node0}],\n"));
+            out.push_str(&format!("            {node0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *node_value0, context)?
             ));
-            out.push_str(&format!("            nodes[{node1}],\n"));
+            out.push_str(&format!("            {node1},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *node_value1, context)?
             ));
-            out.push_str(&format!("            branches[{branch0}],\n"));
+            out.push_str(&format!("            {branch0},\n"));
             out.push_str(&format!(
                 "            multiplicity * ({}),\n",
                 value_ref(artifact, parameter_fields, *branch_value0, context)?
@@ -2891,19 +2891,17 @@ fn emit_wide_current_reactive_stamp(
             branch_values[*branch as usize] =
                 value_ref(artifact, parameter_fields, *value, context)?;
         }
-        out.push_str("        stamper.stamp_current_reactive_dense(\n");
+        out.push_str("        stamper.stamp_current_reactive_dense_local(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
-        out.push_str("            &nodes,\n");
         out.push_str(&format!("            &[{}],\n", node_values.join(",")));
-        out.push_str("            &branches,\n");
         out.push_str(&format!("            &[{}],\n", branch_values.join(",")));
         out.push_str("            multiplicity,\n");
         out.push_str("        );\n");
     } else {
         let node_indices = node_derivatives
             .iter()
-            .map(|(node, _)| format!("nodes[{node}]"))
+            .map(|(node, _)| node.to_string())
             .collect::<Vec<_>>()
             .join(", ");
         let node_values = node_derivatives
@@ -2913,7 +2911,7 @@ fn emit_wide_current_reactive_stamp(
             .join(", ");
         let branch_indices = branch_derivatives
             .iter()
-            .map(|(branch, _)| format!("branches[{branch}]"))
+            .map(|(branch, _)| branch.to_string())
             .collect::<Vec<_>>()
             .join(", ");
         let branch_values = branch_derivatives
@@ -2921,7 +2919,7 @@ fn emit_wide_current_reactive_stamp(
             .map(|(_, value)| value_ref(artifact, parameter_fields, *value, context))
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
-        out.push_str("        stamper.stamp_current_reactive_dense(\n");
+        out.push_str("        stamper.stamp_current_reactive_indexed_dense_local(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
         out.push_str(&format!("            &[{node_indices}],\n"));
@@ -2949,19 +2947,17 @@ fn emit_wide_node_current_reactive_stamp(
             node_derivatives[*node as usize] =
                 value_ref(artifact, parameter_fields, *value, context)?;
         }
-        out.push_str("        stamper.stamp_current_reactive_dense(\n");
+        out.push_str("        stamper.stamp_current_reactive_dense_local(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
-        out.push_str("            &nodes,\n");
         out.push_str(&format!("            &[{}],\n", node_derivatives.join(",")));
-        out.push_str("            &[],\n");
         out.push_str("            &[],\n");
         out.push_str("            multiplicity,\n");
         out.push_str("        );\n");
     } else {
         let node_indices = derivatives
             .iter()
-            .map(|(node, _)| format!("nodes[{node}]"))
+            .map(|(node, _)| node.to_string())
             .collect::<Vec<_>>()
             .join(", ");
         let node_derivatives = derivatives
@@ -2969,7 +2965,7 @@ fn emit_wide_node_current_reactive_stamp(
             .map(|(_, value)| value_ref(artifact, parameter_fields, *value, context))
             .collect::<Result<Vec<_>, _>>()?
             .join(", ");
-        out.push_str("        stamper.stamp_current_reactive_dense(\n");
+        out.push_str("        stamper.stamp_current_reactive_indexed_dense_local(\n");
         out.push_str(&format!("            {pos},\n"));
         out.push_str(&format!("            {neg},\n"));
         out.push_str(&format!("            &[{node_indices}],\n"));
@@ -5768,11 +5764,6 @@ fn scaled_derivative_expr(derivative: String, scale: &str) -> String {
 
 fn optional_node_local_expr(node: Option<crate::canonical_ir::NodeId>) -> String {
     node.map(|node| format!("Some({})", node.index()))
-        .unwrap_or_else(|| "None".to_string())
-}
-
-fn optional_node_global_expr(node: Option<crate::canonical_ir::NodeId>) -> String {
-    node.map(|node| format!("Some(nodes[{}])", node.index()))
         .unwrap_or_else(|| "None".to_string())
 }
 

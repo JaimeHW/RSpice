@@ -115,7 +115,9 @@ fn generated_stamper_uses_linked_static_stamp_slots() {
     );
     assert!(
         runtime.contains("pub fn stamp_current_dense_local(")
-            && runtime.contains("pub fn stamp_potential_dense_local("),
+            && runtime.contains("pub fn stamp_potential_dense_local(")
+            && runtime.contains("pub fn stamp_current_reactive_dense_local(")
+            && runtime.contains("pub fn stamp_potential_reactive_dense_local("),
         "generated runtime should provide local-axis stamp entry points:\n{runtime}"
     );
     assert!(
@@ -679,6 +681,123 @@ fn generated_cached_dense_reactive_potential_stamper_uses_static_axes() {
     assert_eq!(imag[2][2], -20.0);
     assert_eq!(imag[0][0], 0.0);
     assert_eq!(imag[1][0], 0.0);
+}
+
+#[test]
+fn generated_local_reactive_current_stamper_uses_static_axes() {
+    let nodes = [1, 2, 3];
+    let branches = [1];
+    let real_matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[
+            (0, 0, 0.0),
+            (0, 2, 0.0),
+            (0, 3, 0.0),
+            (1, 0, 0.0),
+            (1, 2, 0.0),
+            (1, 3, 0.0),
+        ],
+    )
+    .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&real_matrix, &nodes, &branches, 3);
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+        &mut matrix,
+        &nodes,
+        &branches,
+        3,
+        10.0,
+        &cache,
+    )
+    .stamp_current_reactive_local(
+        Some(0),
+        Some(1),
+        &[
+            GeneratedDerivative::node(0, 2.0),
+            GeneratedDerivative::node(2, 6.0),
+            GeneratedDerivative::branch(0, 8.0),
+        ],
+    );
+
+    let imag = matrix.to_dense_imag();
+    assert_eq!(imag[0][0], 20.0);
+    assert_eq!(imag[0][2], 60.0);
+    assert_eq!(imag[0][3], 80.0);
+    assert_eq!(imag[1][0], -20.0);
+    assert_eq!(imag[1][2], -60.0);
+    assert_eq!(imag[1][3], -80.0);
+    assert_eq!(imag[0][1], 0.0);
+    assert_eq!(imag[2][0], 0.0);
+}
+
+#[test]
+fn generated_local_reactive_potential_stamper_uses_static_axes() {
+    let nodes = [1, 2];
+    let branches = [1];
+    let real_matrix = StaticMatrix::from_triplets(3, 3, &[(2, 0, 0.0), (2, 1, 0.0), (2, 2, 0.0)])
+        .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&real_matrix, &nodes, &branches, 2);
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedReactiveStamper::new_with_local_maps_and_static_cache(
+        &mut matrix,
+        &nodes,
+        &branches,
+        2,
+        10.0,
+        &cache,
+    )
+    .stamp_potential_reactive_dense_local(0, &[1.5, -0.25], &[2.0]);
+
+    let imag = matrix.to_dense_imag();
+    assert_eq!(imag[2][0], -15.0);
+    assert_eq!(imag[2][1], 2.5);
+    assert_eq!(imag[2][2], -20.0);
+    assert_eq!(imag[0][0], 0.0);
+    assert_eq!(imag[1][0], 0.0);
+}
+
+#[test]
+fn generated_local_reactive_stamper_falls_back_to_instance_maps() {
+    let nodes = [2, 0, 1];
+    let branches = [1];
+    let real_matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[
+            (0, 0, 0.0),
+            (0, 1, 0.0),
+            (0, 3, 0.0),
+            (1, 0, 0.0),
+            (1, 1, 0.0),
+            (1, 3, 0.0),
+        ],
+    )
+    .expect("static matrix");
+    let mut matrix = ComplexMatrix::from_real_structure(&real_matrix);
+
+    GeneratedReactiveStamper::new_with_local_maps(&mut matrix, &nodes, &branches, 3, 10.0)
+        .stamp_current_reactive_indexed_dense_local(
+            Some(2),
+            Some(0),
+            &[0, 2],
+            &[1.5, -0.25],
+            &[0],
+            &[2.0],
+            2.0,
+        );
+
+    let imag = matrix.to_dense_imag();
+    assert_eq!(imag[0][1], 30.0);
+    assert_eq!(imag[0][0], -5.0);
+    assert_eq!(imag[0][3], 40.0);
+    assert_eq!(imag[1][1], -30.0);
+    assert_eq!(imag[1][0], 5.0);
+    assert_eq!(imag[1][3], -40.0);
 }
 
 #[test]

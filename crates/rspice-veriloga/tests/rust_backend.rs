@@ -997,7 +997,7 @@ fn rust_backend_auto_scalarizes_wide_ddt_reactive_current_equations() {
     assert!(stamp.contains("eval_ddt"), "{stamp}");
     assert!(stamp.contains("stamp_current_dense_local"), "{stamp}");
     assert!(
-        stamp.contains("stamper.stamp_current_reactive_dense("),
+        stamp.contains("stamper.stamp_current_reactive_dense_local("),
         "{stamp}"
     );
     assert!(!stamp.contains("Scratch"), "{stamp}");
@@ -1387,7 +1387,7 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_current_equations() {
         "{stamp}"
     );
     assert!(
-        reactive_body.contains("stamper.stamp_current_reactive_node2("),
+        reactive_body.contains("stamper.stamp_current_reactive_node2_local("),
         "{reactive_body}"
     );
     assert!(
@@ -1594,7 +1594,7 @@ fn rust_backend_auto_uses_local_storage_for_reactive_assignments() {
     assert!(stamp.contains("while"), "{stamp}");
     assert!(stamp.contains("exceeded iteration guard"), "{stamp}");
     assert!(
-        stamp.contains("stamp_current_reactive_node2_branch1")
+        stamp.contains("stamp_current_reactive_node2_branch1_local")
             && stamp.contains("r0_0n0")
             && stamp.contains("r0_0n1"),
         "{stamp}"
@@ -1894,7 +1894,7 @@ fn rust_backend_auto_scalarizes_hybrid_ddt_named_branch_current_cache() {
         "scalarized DDT producer should use scalar transient stamping and BE derivative scaling:\n{stamp}"
     );
     assert!(
-        stamp.contains("stamper.stamp_current_reactive_node2(")
+        stamp.contains("stamper.stamp_current_reactive_node2_local(")
             && stamp.contains("self.scalar_static_f64[1]")
             && stamp.contains("self.scalar_static_f64[2]"),
         "reactive named-current cache should propagate scalarized derivatives through fixed-arity reactive stamping:\n{stamp}"
@@ -1930,7 +1930,7 @@ fn rust_backend_auto_scalarizes_ddt_branch_current_reactive_derivative() {
         "DDT transient stamp should use native branch derivative stamping:\n{stamp}"
     );
     assert!(
-        stamp.contains("stamper.stamp_current_reactive_branch1("),
+        stamp.contains("stamper.stamp_current_reactive_branch1_local("),
         "DDT reactive stamp should use native branch derivative stamping:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -9102,7 +9102,10 @@ fn rust_backend_runtime_support_splits_transient_and_reactive_scratch_storage() 
         stamp.contains("eval_ddt(") && stamp.contains("stamp_current_node2_local"),
         "mixed dynamic/static fixture should exercise native scalar DDT stamping:\n{stamp}"
     );
-    assert!(stamp.contains("stamp_current_reactive_node2"), "{stamp}");
+    assert!(
+        stamp.contains("stamp_current_reactive_node2_local"),
+        "{stamp}"
+    );
     assert!(
         support.contains("fn from_derivatives("),
         "runtime support should expose a native-local AD constructor:\n{support}"
@@ -12686,7 +12689,7 @@ pub mod runtime {{
     }}
 
     impl<'a> GeneratedReactiveStamper<'a> {{
-        pub fn stamp_current_reactive_node1(
+        pub fn stamp_current_reactive_node1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -12696,7 +12699,7 @@ pub mod runtime {{
             *self.touched += derivative0;
         }}
 
-        pub fn stamp_current_reactive_node2(
+        pub fn stamp_current_reactive_node2_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -12708,7 +12711,7 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1;
         }}
 
-        pub fn stamp_current_reactive_node3(
+        pub fn stamp_current_reactive_node3_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -12722,7 +12725,7 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1 + derivative2;
         }}
 
-        pub fn stamp_current_reactive_branch1(
+        pub fn stamp_current_reactive_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -12732,7 +12735,7 @@ pub mod runtime {{
             *self.touched += derivative0;
         }}
 
-        pub fn stamp_current_reactive_branch2(
+        pub fn stamp_current_reactive_branch2_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -12744,7 +12747,7 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1;
         }}
 
-        pub fn stamp_current_reactive_node1_branch1(
+        pub fn stamp_current_reactive_node1_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -12756,7 +12759,7 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1;
         }}
 
-        pub fn stamp_current_reactive_node2_branch1(
+        pub fn stamp_current_reactive_node2_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -12770,7 +12773,7 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1 + derivative2;
         }}
 
-        pub fn stamp_current_reactive(
+        pub fn stamp_current_reactive_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -12779,13 +12782,11 @@ pub mod runtime {{
             *self.touched += derivatives.iter().map(|derivative| derivative.value).sum::<f64>();
         }}
 
-        pub fn stamp_current_reactive_dense(
+        pub fn stamp_current_reactive_dense_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
-            _nodes: &[usize],
             node_derivatives: &[f64],
-            _branches: &[usize],
             branch_derivatives: &[f64],
             derivative_scale: f64,
         ) {{
@@ -12794,7 +12795,24 @@ pub mod runtime {{
                     + branch_derivatives.iter().copied().sum::<f64>());
         }}
 
-        pub fn stamp_potential_reactive(
+        pub fn stamp_current_reactive_indexed_dense_local(
+            &mut self,
+            _pos: Option<usize>,
+            _neg: Option<usize>,
+            nodes: &[usize],
+            node_derivatives: &[f64],
+            branches: &[usize],
+            branch_derivatives: &[f64],
+            derivative_scale: f64,
+        ) {{
+            *self.touched += derivative_scale
+                * (nodes.iter().copied().map(|index| index as f64).sum::<f64>()
+                    + node_derivatives.iter().copied().sum::<f64>()
+                    + branches.iter().copied().map(|index| index as f64).sum::<f64>()
+                    + branch_derivatives.iter().copied().sum::<f64>());
+        }}
+
+        pub fn stamp_potential_reactive_local(
             &mut self,
             _branch: usize,
             derivatives: &[GeneratedDerivative],
@@ -12802,7 +12820,7 @@ pub mod runtime {{
             *self.touched += derivatives.iter().map(|derivative| derivative.value).sum::<f64>();
         }}
 
-        pub fn stamp_potential_reactive_node1(
+        pub fn stamp_potential_reactive_node1_local(
             &mut self,
             _branch: usize,
             _node0: usize,
@@ -12811,7 +12829,7 @@ pub mod runtime {{
             *self.touched += derivative0;
         }}
 
-        pub fn stamp_potential_reactive_node2(
+        pub fn stamp_potential_reactive_node2_local(
             &mut self,
             _branch: usize,
             _node0: usize,
@@ -12822,7 +12840,7 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1;
         }}
 
-        pub fn stamp_potential_reactive_branch1(
+        pub fn stamp_potential_reactive_branch1_local(
             &mut self,
             _branch: usize,
             _branch0: usize,
@@ -12831,7 +12849,7 @@ pub mod runtime {{
             *self.touched += derivative0;
         }}
 
-        pub fn stamp_potential_reactive_branch2(
+        pub fn stamp_potential_reactive_branch2_local(
             &mut self,
             _branch: usize,
             _branch0: usize,
@@ -12842,7 +12860,7 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1;
         }}
 
-        pub fn stamp_potential_reactive_node1_branch1(
+        pub fn stamp_potential_reactive_node1_branch1_local(
             &mut self,
             _branch: usize,
             _node0: usize,
@@ -12853,7 +12871,7 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1;
         }}
 
-        pub fn stamp_potential_reactive_node2_branch1(
+        pub fn stamp_potential_reactive_node2_branch1_local(
             &mut self,
             _branch: usize,
             _node0: usize,
@@ -12866,15 +12884,27 @@ pub mod runtime {{
             *self.touched += derivative0 + derivative1 + derivative2;
         }}
 
-        pub fn stamp_potential_reactive_dense(
+        pub fn stamp_potential_reactive_dense_local(
             &mut self,
             _branch: usize,
-            _nodes: &[usize],
             node_derivatives: &[f64],
-            _branches: &[usize],
             branch_derivatives: &[f64],
         ) {{
             *self.touched += node_derivatives.iter().copied().sum::<f64>()
+                + branch_derivatives.iter().copied().sum::<f64>();
+        }}
+
+        pub fn stamp_potential_reactive_indexed_dense_local(
+            &mut self,
+            _branch: usize,
+            nodes: &[usize],
+            node_derivatives: &[f64],
+            branches: &[usize],
+            branch_derivatives: &[f64],
+        ) {{
+            *self.touched += nodes.iter().copied().map(|index| index as f64).sum::<f64>()
+                + node_derivatives.iter().copied().sum::<f64>()
+                + branches.iter().copied().map(|index| index as f64).sum::<f64>()
                 + branch_derivatives.iter().copied().sum::<f64>();
         }}
     }}
@@ -13256,7 +13286,7 @@ pub mod runtime {{
     }}
 
     impl<'a> GeneratedReactiveStamper<'a> {{
-        pub fn stamp_current_reactive_node1(
+        pub fn stamp_current_reactive_node1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -13265,7 +13295,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_current_reactive_node2(
+        pub fn stamp_current_reactive_node2_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -13276,7 +13306,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_current_reactive_node3(
+        pub fn stamp_current_reactive_node3_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -13289,7 +13319,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_current_reactive_branch1(
+        pub fn stamp_current_reactive_branch1_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -13298,7 +13328,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_current_reactive_branch2(
+        pub fn stamp_current_reactive_branch2_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -13309,7 +13339,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_current_reactive(
+        pub fn stamp_current_reactive_local(
             &mut self,
             _pos: Option<usize>,
             _neg: Option<usize>,
@@ -13317,7 +13347,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_reactive_node1(
+        pub fn stamp_potential_reactive_node1_local(
             &mut self,
             _branch: usize,
             _node0: usize,
@@ -13325,7 +13355,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_reactive_node2(
+        pub fn stamp_potential_reactive_node2_local(
             &mut self,
             _branch: usize,
             _node0: usize,
@@ -13335,7 +13365,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_reactive_branch1(
+        pub fn stamp_potential_reactive_branch1_local(
             &mut self,
             _branch: usize,
             _branch0: usize,
@@ -13343,7 +13373,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_reactive_branch2(
+        pub fn stamp_potential_reactive_branch2_local(
             &mut self,
             _branch: usize,
             _branch0: usize,
@@ -13353,7 +13383,7 @@ pub mod runtime {{
         ) {{
         }}
 
-        pub fn stamp_potential_reactive(
+        pub fn stamp_potential_reactive_local(
             &mut self,
             _branch: usize,
             _derivatives: &[GeneratedDerivative],
