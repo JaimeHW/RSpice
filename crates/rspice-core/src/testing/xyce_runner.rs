@@ -251,6 +251,13 @@ impl XyceStaticTranContract {
         }
     }
 
+    fn can_use_reference_stop(self) -> bool {
+        matches!(
+            self,
+            Self::WrapperStatic | Self::WrapperCsv | Self::WrapperCsd
+        )
+    }
+
     fn reference_extension(self) -> &'static str {
         match self {
             Self::PlainCsv | Self::WrapperCsv => "csv",
@@ -2662,6 +2669,7 @@ impl XyceTestRunner {
         matches!(
             Self::normalize_manifest_key(relative_path).as_str(),
             "netlists/output/tran/tran-gnuplot.cir"
+                | "netlists/output/tran/tran-prn.cir"
                 | "netlists/output/tran/tran-prn-noindex.cir"
                 | "netlists/output/tran/tran-splot.cir"
                 | "netlists/output/tran/tran-touchstone-defaults-to-prn.cir"
@@ -4087,35 +4095,39 @@ impl XyceTestRunner {
                 );
             }
         };
+        let tran = Self::tran_analysis_for_reference_stop(
+            plan.contract,
+            plan.tran,
+            reference_time_grid.as_slice(),
+        );
 
-        let max_step =
-            match Self::transient_max_step_for_reference(&netlist, &plan.tran, &reference) {
-                Ok(max_step) => max_step,
-                Err(err) if err.contains("transient harness execution envelope") => {
-                    return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        "unsupported_xyce_contract",
-                        &err,
-                    );
-                }
-                Err(err) => {
-                    return self.failure_result(
-                        deck,
-                        start,
-                        contract,
-                        format!("reference time-grid error: {err}"),
-                        Vec::new(),
-                    );
-                }
-            };
+        let max_step = match Self::transient_max_step_for_reference(&netlist, &tran, &reference) {
+            Ok(max_step) => max_step,
+            Err(err) if err.contains("transient harness execution envelope") => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_contract",
+                    &err,
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("reference time-grid error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
 
         let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
         let engine = self.create_xyce_static_tran_engine(None, initial_step);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let mut best_mismatches = None;
         let mut simulation_error = None;
-        match engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort) {
+        match engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
             Ok(result) => {
                 let mismatches = match self.compare_tran_prn_reference(
                     &reference,
@@ -4176,7 +4188,7 @@ impl XyceTestRunner {
 
         let locked_engine =
             self.create_xyce_static_tran_engine(Some(reference_time_grid.clone()), initial_step);
-        match locked_engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort) {
+        match locked_engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
             Ok(locked_result) => {
                 match self.compare_tran_prn_reference(
                     &reference,
@@ -4229,12 +4241,7 @@ impl XyceTestRunner {
                     crate::analysis::IntegrationMethod::BackwardEuler,
                     initial_step,
                 );
-            match backward_euler_engine.run_tran_with_abort(
-                &netlist,
-                plan.tran.stop,
-                max_step,
-                &abort,
-            ) {
+            match backward_euler_engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
                 Ok(backward_euler_result) => {
                     match self.compare_tran_prn_reference(
                         &reference,
@@ -6945,6 +6952,28 @@ impl XyceTestRunner {
             previous = Some(time);
         }
         Ok(grid)
+    }
+
+    fn tran_analysis_for_reference_stop(
+        contract: XyceStaticTranContract,
+        tran: XyceTranAnalysis,
+        reference_time_grid: &[Value],
+    ) -> XyceTranAnalysis {
+        if !contract.can_use_reference_stop() {
+            return tran;
+        }
+        let Some(reference_stop) = reference_time_grid
+            .last()
+            .copied()
+            .filter(|time| time.is_finite() && *time > tran.stop)
+        else {
+            return tran;
+        };
+
+        XyceTranAnalysis {
+            stop: reference_stop,
+            ..tran
+        }
     }
 
     fn reference_time_column_index(reference: &XycePrnTable) -> Option<usize> {
@@ -14864,6 +14893,31 @@ Values:
             .expect("transient PRN time grid should parse");
 
         assert_eq!(grid, vec![0.0, 1.0e-9, 4.0e-9]);
+    }
+
+    #[test]
+    fn wrapper_tran_analysis_extends_to_reference_stop() {
+        let tran = XyceTranAnalysis {
+            step: 1.0e-9,
+            stop: 10.0e-9,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+
+        let wrapper = XyceTestRunner::tran_analysis_for_reference_stop(
+            XyceStaticTranContract::WrapperStatic,
+            tran,
+            &[0.0, 10.0e-9, 10.0e-6],
+        );
+        assert_eq!(wrapper.stop, 10.0e-6);
+
+        let plain = XyceTestRunner::tran_analysis_for_reference_stop(
+            XyceStaticTranContract::PlainStatic,
+            tran,
+            &[0.0, 10.0e-9, 10.0e-6],
+        );
+        assert_eq!(plain.stop, 10.0e-9);
     }
 
     #[test]

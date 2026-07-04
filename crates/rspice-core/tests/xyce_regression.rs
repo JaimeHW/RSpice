@@ -772,10 +772,7 @@ fn test_xyce_generic_wrapper_transient_guardrails_stay_unsupported() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    for relative in [
-        "Netlists/Certification_Tests/BUG_61/capacitor.cir",
-        "Netlists/Output/TRAN/tran-prn.cir",
-    ] {
+    for relative in ["Netlists/Certification_Tests/BUG_61/capacitor.cir"] {
         let result = runner.run_test(root.join(relative));
         assert!(
             result.passed && result.expected_unsupported,
@@ -1302,6 +1299,7 @@ fn test_xyce_default_prn_transient_output_wrapper_cases_run_natively() {
 
     for relative in [
         "Netlists/Output/TRAN/tran-gnuplot.cir",
+        "Netlists/Output/TRAN/tran-prn.cir",
         "Netlists/Output/TRAN/tran-prn-noindex.cir",
         "Netlists/Output/TRAN/tran-splot.cir",
         "Netlists/Output/TRAN/tran-touchstone-defaults-to-prn.cir",
