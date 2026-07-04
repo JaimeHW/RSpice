@@ -23819,6 +23819,18 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         out.push_str(&generate_index_or_mixed_offset_div_scaled_product_helper(
             &mask,
         ));
+        out.push_str(&generate_index_or_mixed_div_scaled_product_offset_helper(
+            &mask,
+            DivScaledProductOffsetOperand::ProductLeft,
+        ));
+        out.push_str(&generate_index_or_mixed_div_scaled_product_offset_helper(
+            &mask,
+            DivScaledProductOffsetOperand::ProductRight,
+        ));
+        out.push_str(&generate_index_or_mixed_div_scaled_product_offset_helper(
+            &mask,
+            DivScaledProductOffsetOperand::Denominator,
+        ));
     }
     for mask in index_or_mixed_masks(2) {
         out.push_str(&generate_index_or_mixed_exp_mul_scaled_lhs_helper(&mask));
@@ -25404,6 +25416,104 @@ fn generate_index_or_mixed_offset_div_scaled_product_helper(mask: &str) -> Strin
         product_left_ty = mixed_helper_type(mask, 0),
         product_right_ty = mixed_helper_type(mask, 1),
         denominator_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+#[derive(Clone, Copy)]
+enum DivScaledProductOffsetOperand {
+    ProductLeft,
+    ProductRight,
+    Denominator,
+}
+
+fn generate_index_or_mixed_div_scaled_product_offset_helper(
+    mask: &str,
+    offset_operand: DivScaledProductOffsetOperand,
+) -> String {
+    let product_left_raw = mixed_helper_value_expr(mask, 0, "product_left");
+    let product_right_raw = mixed_helper_value_expr(mask, 1, "product_right");
+    let denominator_raw = mixed_helper_value_expr(mask, 2, "denominator");
+    let product_left_value = match offset_operand {
+        DivScaledProductOffsetOperand::ProductLeft => {
+            format!("{product_left_raw} + product_left_offset")
+        }
+        DivScaledProductOffsetOperand::ProductRight
+        | DivScaledProductOffsetOperand::Denominator => product_left_raw,
+    };
+    let product_right_value = match offset_operand {
+        DivScaledProductOffsetOperand::ProductRight => {
+            format!("{product_right_raw} + product_right_offset")
+        }
+        DivScaledProductOffsetOperand::ProductLeft | DivScaledProductOffsetOperand::Denominator => {
+            product_right_raw
+        }
+    };
+    let denominator_value = match offset_operand {
+        DivScaledProductOffsetOperand::Denominator => {
+            format!("({denominator_raw} + denominator_offset) * denominator_scale")
+        }
+        DivScaledProductOffsetOperand::ProductLeft
+        | DivScaledProductOffsetOperand::ProductRight => {
+            format!("{denominator_raw} * denominator_scale")
+        }
+    };
+    let (base, signature) = match offset_operand {
+        DivScaledProductOffsetOperand::ProductLeft => (
+            "store_div_scaled_product_offset_lhs",
+            format!(
+                "product_left: {}, product_left_offset: f64, product_right: {}, product_scale: f64, denominator: {}, denominator_scale: f64",
+                mixed_helper_type(mask, 0),
+                mixed_helper_type(mask, 1),
+                mixed_helper_type(mask, 2)
+            ),
+        ),
+        DivScaledProductOffsetOperand::ProductRight => (
+            "store_div_scaled_product_offset_rhs",
+            format!(
+                "product_left: {}, product_right: {}, product_right_offset: f64, product_scale: f64, denominator: {}, denominator_scale: f64",
+                mixed_helper_type(mask, 0),
+                mixed_helper_type(mask, 1),
+                mixed_helper_type(mask, 2)
+            ),
+        ),
+        DivScaledProductOffsetOperand::Denominator => (
+            "store_div_scaled_product_offset_denominator",
+            format!(
+                "product_left: {}, product_right: {}, product_scale: f64, denominator: {}, denominator_offset: f64, denominator_scale: f64",
+                mixed_helper_type(mask, 0),
+                mixed_helper_type(mask, 1),
+                mixed_helper_type(mask, 2)
+            ),
+        ),
+    };
+    let helper = index_or_mixed_helper_name(base, mask);
+    let product_left_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "product_left");
+    let product_right_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "product_right");
+    let denominator_node_derivative = mixed_helper_node_derivative_expr(mask, 2, "denominator");
+    let product_left_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 0, "product_left");
+    let product_right_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 1, "product_right");
+    let denominator_branch_derivative = mixed_helper_branch_derivative_expr(mask, 2, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, {signature}) {{
+        let product_left_value = {product_left_value};
+        let product_right_value = {product_right_value};
+        let denominator_value = {denominator_value};
+        let reciprocal = 1.0 / denominator_value;
+        let product_value = product_left_value * product_right_value;
+        let scaled_product_value = product_value * product_scale;
+        let quotient = scaled_product_value * reciprocal;
+        let product_derivative_scale = product_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = ({product_left_node_derivative} * product_right_value + product_left_value * {product_right_node_derivative}) * product_derivative_scale + {denominator_node_derivative} * denominator_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = ({product_left_branch_derivative} * product_right_value + product_left_value * {product_right_branch_derivative}) * product_derivative_scale + {denominator_branch_derivative} * denominator_derivative_scale; }}
+    }}
+"#,
     )
 }
 
@@ -35668,28 +35778,43 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "div_scaled_product_offset_lhs")
         && args.len() == 6
     {
-        return Some(format!(
-            "scratch.store_div_scaled_product_offset_lhs({target_index}, {}, {}, {}, {}, {}, {});",
-            args[0], args[1], args[2], args[3], args[4], args[5]
-        ));
+        return compact_index_or_mixed_div_scaled_product_offset_lhs_helper_line(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+        );
     }
 
     if let Some(args) = compact_ad_call_args(value, "div_scaled_product_offset_rhs")
         && args.len() == 6
     {
-        return Some(format!(
-            "scratch.store_div_scaled_product_offset_rhs({target_index}, {}, {}, {}, {}, {}, {});",
-            args[0], args[1], args[2], args[3], args[4], args[5]
-        ));
+        return compact_index_or_mixed_div_scaled_product_offset_rhs_helper_line(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+        );
     }
 
     if let Some(args) = compact_ad_call_args(value, "div_scaled_product_offset_denominator")
         && args.len() == 6
     {
-        return Some(format!(
-            "scratch.store_div_scaled_product_offset_denominator({target_index}, {}, {}, {}, {}, {}, {});",
-            args[0], args[1], args[2], args[3], args[4], args[5]
-        ));
+        return compact_index_or_mixed_div_scaled_product_offset_denominator_helper_line(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+        );
     }
 
     if let Some(args) = compact_ad_call_args(value, "div_scaled_product3")
@@ -39664,6 +39789,78 @@ fn compact_index_or_mixed_offset_div_scaled_product_helper_line(
     call_args.push(value_args[2].clone());
     call_args.push(denominator_scale.to_string());
     call_args.push(offset.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_div_scaled_product_offset_lhs_helper_line(
+    target_index: usize,
+    product_left: &str,
+    product_left_offset: &str,
+    product_right: &str,
+    product_scale: &str,
+    denominator: &str,
+    denominator_scale: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(
+        "store_div_scaled_product_offset_lhs",
+        &[product_left, product_right, denominator],
+    )?;
+    let mut call_args = Vec::with_capacity(7);
+    call_args.push(target_index.to_string());
+    call_args.push(value_args[0].clone());
+    call_args.push(product_left_offset.to_string());
+    call_args.push(value_args[1].clone());
+    call_args.push(product_scale.to_string());
+    call_args.push(value_args[2].clone());
+    call_args.push(denominator_scale.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_div_scaled_product_offset_rhs_helper_line(
+    target_index: usize,
+    product_left: &str,
+    product_right: &str,
+    product_right_offset: &str,
+    product_scale: &str,
+    denominator: &str,
+    denominator_scale: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(
+        "store_div_scaled_product_offset_rhs",
+        &[product_left, product_right, denominator],
+    )?;
+    let mut call_args = Vec::with_capacity(7);
+    call_args.push(target_index.to_string());
+    call_args.push(value_args[0].clone());
+    call_args.push(value_args[1].clone());
+    call_args.push(product_right_offset.to_string());
+    call_args.push(product_scale.to_string());
+    call_args.push(value_args[2].clone());
+    call_args.push(denominator_scale.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_div_scaled_product_offset_denominator_helper_line(
+    target_index: usize,
+    product_left: &str,
+    product_right: &str,
+    product_scale: &str,
+    denominator: &str,
+    denominator_offset: &str,
+    denominator_scale: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(
+        "store_div_scaled_product_offset_denominator",
+        &[product_left, product_right, denominator],
+    )?;
+    let mut call_args = Vec::with_capacity(7);
+    call_args.push(target_index.to_string());
+    call_args.push(value_args[0].clone());
+    call_args.push(value_args[1].clone());
+    call_args.push(product_scale.to_string());
+    call_args.push(value_args[2].clone());
+    call_args.push(denominator_offset.to_string());
+    call_args.push(denominator_scale.to_string());
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
