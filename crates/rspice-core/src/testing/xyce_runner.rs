@@ -2195,6 +2195,7 @@ impl XyceTestRunner {
 
     fn validate_native_static_fd_ac_wrapper_contract(source: &str) -> Result<(), String> {
         let mut primary_ac_print_count = 0usize;
+        let has_op_analysis = Self::source_has_op_analysis(source);
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
             if trimmed.is_empty() {
@@ -2210,6 +2211,9 @@ impl XyceTestRunner {
                     return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
                 };
                 if !analysis.eq_ignore_ascii_case("AC") {
+                    if analysis.eq_ignore_ascii_case("AC_IC") && !has_op_analysis {
+                        continue;
+                    }
                     return Err(format!(
                         "wrapper-origin frequency-domain static output contract does not cover .PRINT {analysis}"
                     ));
@@ -13531,6 +13535,15 @@ impl XyceTestRunner {
                 .trim()
                 .to_ascii_lowercase();
             normalized == ".control" || normalized == ".endc"
+        })
+    }
+
+    fn source_has_op_analysis(source: &str) -> bool {
+        Self::logical_netlist_lines(source).iter().any(|line| {
+            let Some(command) = Self::strip_netlist_comment(line).split_whitespace().next() else {
+                return false;
+            };
+            command.eq_ignore_ascii_case(".op")
         })
     }
 
