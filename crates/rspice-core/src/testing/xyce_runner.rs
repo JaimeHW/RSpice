@@ -221,8 +221,10 @@ struct XyceStaticAcPlan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticTranContract {
     PlainStatic,
+    PlainCsv,
     PlainCsd,
     WrapperStatic,
+    WrapperCsv,
     WrapperCsd,
     WrapperStaticExpectedError,
 }
@@ -232,10 +234,14 @@ impl XyceStaticTranContract {
         match (self, has_step) {
             (Self::PlainStatic, false) => "static_prn_tran",
             (Self::PlainStatic, true) => "static_prn_step_tran",
+            (Self::PlainCsv, false) => "static_csv_tran",
+            (Self::PlainCsv, true) => "static_csv_step_tran",
             (Self::PlainCsd, false) => "static_csd_tran",
             (Self::PlainCsd, true) => "static_csd_step_tran",
             (Self::WrapperStatic, false) => "wrapper_static_prn_tran",
             (Self::WrapperStatic, true) => "wrapper_static_prn_step_tran",
+            (Self::WrapperCsv, false) => "wrapper_static_csv_tran",
+            (Self::WrapperCsv, true) => "wrapper_static_csv_step_tran",
             (Self::WrapperCsd, false) => "wrapper_csd_tran",
             (Self::WrapperCsd, true) => "wrapper_csd_step_tran",
             (Self::WrapperStaticExpectedError, false) => "wrapper_static_prn_tran_expected_error",
@@ -247,6 +253,7 @@ impl XyceStaticTranContract {
 
     fn reference_extension(self) -> &'static str {
         match self {
+            Self::PlainCsv | Self::WrapperCsv => "csv",
             Self::PlainCsd | Self::WrapperCsd => "csd",
             _ => "prn",
         }
@@ -1270,6 +1277,9 @@ impl XyceTestRunner {
                 XyceStaticTranContract::WrapperCsd => {
                     Self::validate_native_static_csd_tran_wrapper_contract(&source)?;
                 }
+                XyceStaticTranContract::WrapperCsv => {
+                    Self::validate_native_static_csv_tran_wrapper_contract(&source)?;
+                }
                 _ => Self::validate_native_static_prn_tran_wrapper_contract(&source)?,
             }
         }
@@ -2270,6 +2280,97 @@ impl XyceTestRunner {
         }
     }
 
+    fn validate_native_static_csv_tran_wrapper_contract(source: &str) -> Result<(), String> {
+        let mut primary_tran_print_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") {
+                let tokens = Self::split_print_fields(&trimmed)?;
+                let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+                let Some(analysis) = token_refs.get(1).copied() else {
+                    return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
+                };
+                if !analysis.eq_ignore_ascii_case("TRAN") {
+                    return Err(format!(
+                        "wrapper-origin transient CSV contract does not cover .PRINT {analysis}"
+                    ));
+                }
+
+                let mut format = None;
+                let mut has_file_output = false;
+                let mut index = 2usize;
+                while index < token_refs.len() {
+                    if let Some((raw_key, raw_value, consumed)) =
+                        Self::print_option_assignment(&token_refs, index)
+                    {
+                        let value = raw_value.trim().trim_matches(['"', '\'']);
+                        match raw_key.trim().to_ascii_lowercase().as_str() {
+                            "file" => has_file_output = true,
+                            "format" => format = Some(value),
+                            _ => {}
+                        }
+                        index += consumed;
+                        continue;
+                    }
+                    index += 1;
+                }
+
+                if has_file_output {
+                    return Err(
+                        "wrapper-origin transient CSV contract does not cover FILE= side outputs"
+                            .to_string(),
+                    );
+                }
+                match format {
+                    Some(format) if format.eq_ignore_ascii_case("CSV") => {
+                        primary_tran_print_count += 1;
+                    }
+                    Some(format) => {
+                        return Err(format!(
+                            "wrapper-origin transient CSV contract does not cover .PRINT TRAN FORMAT={format}"
+                        ));
+                    }
+                    None => {
+                        return Err(
+                            "wrapper-origin transient CSV contract requires FORMAT=CSV".to_string()
+                        );
+                    }
+                }
+                continue;
+            }
+            if Self::is_extra_wrapper_tran_output_analysis_command(command) {
+                return Err(format!(
+                    "wrapper-origin transient CSV contract does not cover {command} directives"
+                ));
+            }
+            if command.eq_ignore_ascii_case(".options")
+                && Self::line_declares_output_snapshots(&trimmed)?
+            {
+                return Err(
+                    "wrapper-origin transient CSV contract does not cover OUTPUT SNAPSHOTS"
+                        .to_string(),
+                );
+            }
+        }
+
+        match primary_tran_print_count {
+            1 => Ok(()),
+            0 => Err(
+                "wrapper-origin transient CSV contract requires one primary .PRINT TRAN statement"
+                    .to_string(),
+            ),
+            _ => Err(format!(
+                "wrapper-origin transient CSV contract requires one primary .PRINT TRAN statement, found {primary_tran_print_count}"
+            )),
+        }
+    }
+
     fn validate_native_static_fd_ac_wrapper_contract(
         source: &str,
         output_override: bool,
@@ -2533,6 +2634,10 @@ impl XyceTestRunner {
             return Some(XyceStaticTranContract::WrapperCsd);
         }
 
+        if Self::is_native_csv_tran_wrapper_candidate(relative_path, source) {
+            return Some(XyceStaticTranContract::WrapperCsv);
+        }
+
         if Self::is_native_default_prn_tran_wrapper_candidate(relative_path, source)
             || Self::is_native_output_initial_interval_tran_wrapper_candidate(source)
             || Self::is_native_generic_static_prn_tran_wrapper_candidate(relative_path, source)
@@ -2546,6 +2651,11 @@ impl XyceTestRunner {
     fn is_native_csd_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
         Self::normalize_manifest_key(relative_path).starts_with("netlists/output/tran/")
             && Self::validate_native_static_csd_tran_wrapper_contract(source).is_ok()
+    }
+
+    fn is_native_csv_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        Self::normalize_manifest_key(relative_path).starts_with("netlists/output/tran/")
+            && Self::validate_native_static_csv_tran_wrapper_contract(source).is_ok()
     }
 
     fn is_native_default_prn_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
@@ -2622,6 +2732,13 @@ impl XyceTestRunner {
                 XyceStaticTranContract::WrapperStatic
             } else {
                 XyceStaticTranContract::PlainStatic
+            });
+        }
+        if normalized.eq_ignore_ascii_case("CSV") {
+            return Ok(if requires_wrapper {
+                XyceStaticTranContract::WrapperCsv
+            } else {
+                XyceStaticTranContract::PlainCsv
             });
         }
         if normalized.eq_ignore_ascii_case("PROBE") {
@@ -2956,6 +3073,9 @@ impl XyceTestRunner {
     ) -> Option<(&'a str, &'a str, usize)> {
         let token = tokens.get(index).copied()?;
         if let Some((key, value)) = token.split_once('=') {
+            if value.is_empty() && token.ends_with('=') {
+                return Some((key, tokens.get(index + 1).copied()?, 2));
+            }
             return Some((key, value, 1));
         }
         if token.ends_with('=') {
@@ -6472,6 +6592,38 @@ impl XyceTestRunner {
         }
 
         Ok(interval)
+    }
+
+    fn line_declares_output_snapshots(line: &str) -> Result<bool, String> {
+        let tokens = Self::split_grouped_whitespace_fields(line, ".OPTIONS statement")?;
+        let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+        if !token_refs
+            .iter()
+            .skip(1)
+            .any(|token| token.eq_ignore_ascii_case("output"))
+        {
+            return Ok(false);
+        }
+
+        let mut index = 1usize;
+        while index < token_refs.len() {
+            if let Some((raw_key, raw_value, consumed)) =
+                Self::print_option_assignment(&token_refs, index)
+            {
+                if raw_key.trim().eq_ignore_ascii_case("snapshots") {
+                    let value = raw_value.trim().trim_matches(['"', '\'']);
+                    return Ok(!matches!(
+                        value.to_ascii_lowercase().as_str(),
+                        "0" | "false" | "no" | "off"
+                    ));
+                }
+                index += consumed;
+            } else {
+                index += 1;
+            }
+        }
+
+        Ok(false)
     }
 
     fn reference_tran_data_columns(
@@ -12776,6 +12928,9 @@ impl XyceTestRunner {
         path: &Path,
     ) -> Result<XycePrnTable, String> {
         match contract {
+            XyceStaticTranContract::PlainCsv | XyceStaticTranContract::WrapperCsv => {
+                Self::parse_csv_file(path)
+            }
             XyceStaticTranContract::PlainCsd | XyceStaticTranContract::WrapperCsd => {
                 Self::parse_tran_csd_file(path)
             }
@@ -15236,6 +15391,22 @@ interval output
     }
 
     #[test]
+    fn output_snapshots_option_is_detected_for_csv_guardrails() {
+        assert!(
+            XyceTestRunner::line_declares_output_snapshots(
+                ".OPTIONS OUTPUT SNAPSHOTS=true INITIAL_INTERVAL=0.01"
+            )
+            .expect("snapshot option parses")
+        );
+        assert!(
+            !XyceTestRunner::line_declares_output_snapshots(
+                ".OPTIONS OUTPUT SNAPSHOTS = false INITIAL_INTERVAL=0.01"
+            )
+            .expect("disabled snapshot option parses")
+        );
+    }
+
+    #[test]
     fn transient_output_interval_corridor_uses_adjacent_reference_rows() {
         let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
         let reference = XycePrnTable {
@@ -15572,6 +15743,63 @@ R2 b 0 2
             XyceTestRunner::static_tran_contract_for_print_format(false, Some("PROBE"))
                 .expect("plain PROBE contract is supported"),
             XyceStaticTranContract::PlainCsd
+        );
+    }
+
+    #[test]
+    fn tran_csv_contract_selects_csv_oracle_extension() {
+        assert_eq!(
+            XyceTestRunner::static_tran_contract_for_print_format(true, Some("CSV"))
+                .expect("CSV wrapper contract is supported"),
+            XyceStaticTranContract::WrapperCsv
+        );
+        assert_eq!(
+            XyceStaticTranContract::WrapperCsv.reference_extension(),
+            "csv"
+        );
+        assert_eq!(
+            XyceTestRunner::static_tran_contract_for_print_format(false, Some("CSV"))
+                .expect("plain CSV contract is supported"),
+            XyceStaticTranContract::PlainCsv
+        );
+        let snapshots_source = "\
+snapshot CSV
+.OPTIONS OUTPUT SNAPSHOTS=true INITIAL_INTERVAL=0.01
+.PRINT TRAN FORMAT=CSV V(1)
+.TRAN 0 1
+.END
+";
+        let err =
+            XyceTestRunner::validate_native_static_csv_tran_wrapper_contract(snapshots_source)
+                .expect_err("snapshot CSV must stay outside the native CSV wrapper contract");
+        assert!(
+            err.contains("SNAPSHOTS"),
+            "snapshot guard should name the unsupported option, got {err}"
+        );
+    }
+
+    #[test]
+    fn tran_csv_wrapper_classifier_accepts_primary_csv_output() {
+        let source = "\
+CSV transient
+V1 1 0 SIN(0 1 1)
+R1 1 2 1
+R2 2 0 1
+.OPTIONS OUTPUT INITIAL_INTERVAL=0.01
+.PRINT TRAN FORMAT= CSV V(1) V(2)
+.TRAN 0 1
+.END
+";
+
+        XyceTestRunner::validate_native_static_csv_tran_wrapper_contract(source)
+            .expect("primary transient CSV wrapper contract validates");
+        assert_eq!(
+            XyceTestRunner::native_static_prn_tran_wrapper_contract(
+                Path::new("tran-csv.cir"),
+                "Netlists/Output/TRAN/tran-csv.cir",
+                source,
+            ),
+            Some(XyceStaticTranContract::WrapperCsv)
         );
     }
 
