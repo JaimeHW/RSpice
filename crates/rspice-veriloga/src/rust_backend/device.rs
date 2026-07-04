@@ -9335,7 +9335,11 @@ fn stamp() {
     #[test]
     fn rewrites_pow_multiply_stores_as_direct_stores() {
         let support = generate_scratch_operation_helpers();
-        for helper in ["fn store_mul_pow_mixed_aii", "fn store_mul_pow_mixed_aai"] {
+        for helper in [
+            "fn store_mul_add_scaled_product_pow_rhs",
+            "fn store_mul_pow_mixed_aii",
+            "fn store_mul_pow_mixed_aai",
+        ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
         assert!(
@@ -9354,7 +9358,7 @@ fn stamp() {
 
         assert!(
             compact.contains(
-                "s.store_mul_pow_mixed_aii(153, A::add_scaled_product(s.ad_value(2), 1.0, s.ad_value(3), s.ad_value(4), p.scale), 5, 6);"
+                "s.store_mul_add_scaled_product_pow_rhs(153, 2, 1.0, 3, 4, p.scale, 5, 6);"
             ),
             "{compact}"
         );
@@ -9365,6 +9369,11 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_pow_mixed_aii(153"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::add_scaled_product("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -19402,15 +19411,45 @@ fn generate_scratch_operation_helpers() -> String {
     "        let product_right_value = product_right.value;",
     "        let right_value = value.value * value_scale + product_left_value * product_right_value * product_scale;",
     "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * (value.node_derivatives[axis] * value_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale); }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * (value.branch_derivatives[axis] * value_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale); }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_shared_diff_quotient_add_product_input_product_quotient(&mut self, index: usize, diff_left: usize, diff_right: usize, denominator: usize, sum_value: usize, sum_product_left: usize, sum_product_right: usize, sum_input: usize, quotient_product_left: usize) {",
-    "        let diff_left_value = self.values[diff_left];",
-    "        let diff_right_value = self.values[diff_right];",
-    "        let denominator_value = self.values[denominator];",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * (value.node_derivatives[axis] * value_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale); }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * (value.branch_derivatives[axis] * value_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale); }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul_add_scaled_product_pow_rhs(&mut self, index: usize, value: usize, value_scale: f64, product_left: usize, product_right: usize, product_scale: f64, base: usize, exponent: usize) {",
+        "        let value_raw = self.values[value];",
+        "        let product_left_value = self.values[product_left];",
+        "        let product_right_value = self.values[product_right];",
+        "        let factor_value = value_raw * value_scale + product_left_value * product_right_value * product_scale;",
+        "        let base_value = self.values[base];",
+        "        let exponent_value = self.values[exponent];",
+        "        let output = base_value.powf(exponent_value);",
+        "        let value_node_derivatives = self.node_derivatives[value];",
+        "        let product_left_node_derivatives = self.node_derivatives[product_left];",
+        "        let product_right_node_derivatives = self.node_derivatives[product_right];",
+        "        let base_node_derivatives = self.node_derivatives[base];",
+        "        let exponent_node_derivatives = self.node_derivatives[exponent];",
+        "        let value_branch_derivatives = self.branch_derivatives[value];",
+        "        let product_left_branch_derivatives = self.branch_derivatives[product_left];",
+        "        let product_right_branch_derivatives = self.branch_derivatives[product_right];",
+        "        let base_branch_derivatives = self.branch_derivatives[base];",
+        "        let exponent_branch_derivatives = self.branch_derivatives[exponent];",
+        "        self.values[index] = factor_value * output;",
+        "        if base_value > 0.0 {",
+        "            let (base_derivative_scale, exponent_derivative_scale) = AdValue::pow_positive_derivative_scales(output, base_value, exponent_value);",
+        "            for axis in 0..Instance::NODE_COUNT { let factor_derivative = value_node_derivatives[axis] * value_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right_node_derivatives[axis]) * product_scale; let pow_derivative = base_node_derivatives[axis] * base_derivative_scale + exponent_node_derivatives[axis] * exponent_derivative_scale; self.node_derivatives[index][axis] = factor_derivative * output + factor_value * pow_derivative; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let factor_derivative = value_branch_derivatives[axis] * value_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right_branch_derivatives[axis]) * product_scale; let pow_derivative = base_branch_derivatives[axis] * base_derivative_scale + exponent_branch_derivatives[axis] * exponent_derivative_scale; self.branch_derivatives[index][axis] = factor_derivative * output + factor_value * pow_derivative; }",
+        "        } else {",
+        "            for axis in 0..Instance::NODE_COUNT { let factor_derivative = value_node_derivatives[axis] * value_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right_node_derivatives[axis]) * product_scale; let pow_derivative = AdValue::pow_derivative(output, base_value, exponent_value, base_node_derivatives[axis], exponent_node_derivatives[axis]); self.node_derivatives[index][axis] = factor_derivative * output + factor_value * pow_derivative; }",
+        "            for axis in 0..Instance::BRANCH_COUNT { let factor_derivative = value_branch_derivatives[axis] * value_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right_branch_derivatives[axis]) * product_scale; let pow_derivative = AdValue::pow_derivative(output, base_value, exponent_value, base_branch_derivatives[axis], exponent_branch_derivatives[axis]); self.branch_derivatives[index][axis] = factor_derivative * output + factor_value * pow_derivative; }",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_mul_shared_diff_quotient_add_product_input_product_quotient(&mut self, index: usize, diff_left: usize, diff_right: usize, denominator: usize, sum_value: usize, sum_product_left: usize, sum_product_right: usize, sum_input: usize, quotient_product_left: usize) {",
+        "        let diff_left_value = self.values[diff_left];",
+        "        let diff_right_value = self.values[diff_right];",
+        "        let denominator_value = self.values[denominator];",
     "        let sum_value_raw = self.values[sum_value];",
     "        let sum_product_left_value = self.values[sum_product_left];",
     "        let sum_product_right_value = self.values[sum_product_right];",
@@ -38327,12 +38366,39 @@ fn compact_index_or_mixed_mul_pow_helper_line(
     base: &str,
     exponent: &str,
 ) -> Option<String> {
+    if let Some(line) =
+        compact_mul_add_scaled_product_pow_rhs_helper_line(target_index, factor, base, exponent)
+    {
+        return Some(line);
+    }
+
     let (helper, value_args) =
         compact_index_or_mixed_value_args("store_mul_pow", &[factor, base, exponent])?;
     let mut call_args = Vec::with_capacity(4);
     call_args.push(target_index.to_string());
     call_args.extend(value_args);
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_mul_add_scaled_product_pow_rhs_helper_line(
+    target_index: usize,
+    factor: &str,
+    base: &str,
+    exponent: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(factor, "add_scaled_product")?;
+    if args.len() != 5 {
+        return None;
+    }
+    let value = compact_scratch_ad_value_index(args[0])?;
+    let product_left = compact_scratch_ad_value_index(args[2])?;
+    let product_right = compact_scratch_ad_value_index(args[3])?;
+    let base = compact_scratch_ad_value_index(base)?;
+    let exponent = compact_scratch_ad_value_index(exponent)?;
+    Some(format!(
+        "scratch.store_mul_add_scaled_product_pow_rhs({target_index}, {value}, {}, {product_left}, {product_right}, {}, {base}, {exponent});",
+        args[1], args[4]
+    ))
 }
 
 fn compact_index_or_mixed_mul_add_sub_helper_line(
