@@ -122,6 +122,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 Function::Sign => Instruction::Sign,
                 Function::Uramp => Instruction::Uramp,
                 Function::Stp => Instruction::Stp,
+                Function::Ustep => Instruction::Ustep,
                 Function::U2 => Instruction::U2,
                 Function::Eq0 => Instruction::Eq0,
                 Function::Ne0 => Instruction::Ne0,

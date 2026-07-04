@@ -714,7 +714,8 @@ impl<'a> Parser<'a> {
                 "LIMIT" => Some(Function::Limit),
                 "SIGN" | "SGN" => Some(Function::Sign),
                 "URAMP" => Some(Function::Uramp),
-                "STP" | "STEP" | "U" => Some(Function::Stp),
+                "STP" | "STEP" => Some(Function::Stp),
+                "U" | "USTEP" => Some(Function::Ustep),
                 "U2" => Some(Function::U2),
                 "EQ0" => Some(Function::Eq0),
                 "NE0" => Some(Function::Ne0),
@@ -1000,13 +1001,18 @@ mod tests {
     }
 
     #[test]
-    fn xyce_unary_step_and_sign_zero_semantics() {
+    fn unary_step_and_sign_zero_semantics() {
         assert_eq!(eval_const("stp(-1)"), 0.0);
         assert_eq!(eval_const("stp(-1e-15)"), 0.0);
         assert_eq!(eval_const("stp(0)"), 0.0);
         assert_eq!(eval_const("stp(1e-15)"), 0.0);
         assert_eq!(eval_const("stp(1e-9)"), 1.0);
         assert_eq!(eval_const("stp(1)"), 1.0);
+        assert_eq!(eval_const("step(0)"), 0.0);
+        assert_eq!(eval_const("u(-1)"), 0.0);
+        assert_eq!(eval_const("u(0)"), 0.5);
+        assert_eq!(eval_const("u(1e-15)"), 1.0);
+        assert_eq!(eval_const("ustep(0)"), 0.5);
         assert_eq!(eval_const("sgn(-1)"), -1.0);
         assert_eq!(eval_const("sgn(-1e-15)"), 0.0);
         assert_eq!(eval_const("sgn(0)"), 0.0);

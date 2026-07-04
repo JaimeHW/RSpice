@@ -484,6 +484,7 @@ fn expression_excludes_voltage_output_from_transient_lte(expr: &Expr) -> bool {
                     | Function::Round
                     | Function::Sign
                     | Function::Stp
+                    | Function::Ustep
                     | Function::Eq0
                     | Function::Ne0
                     | Function::Gt0
@@ -1012,6 +1013,19 @@ fn eval_function_with_derivative(
         Function::Stp => {
             let (x, _) = eval_arg(0)?;
             Some((bool_value(x > EXPR_ZERO_TOLERANCE), 0.0))
+        }
+        Function::Ustep => {
+            let (x, _) = eval_arg(0)?;
+            Some((
+                if x > 0.0 {
+                    1.0
+                } else if x < 0.0 {
+                    0.0
+                } else {
+                    0.5
+                },
+                0.0,
+            ))
         }
         Function::U2 => {
             let (x, dx) = eval_arg(0)?;
@@ -1689,6 +1703,15 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn analytic_derivative_keeps_ustep_boundary_value_and_zero_slope() {
+        assert_eq!(eval_const_derivative("stp(0)"), (0.0, 0.0));
+        assert_eq!(eval_const_derivative("u(-1)"), (0.0, 0.0));
+        assert_eq!(eval_const_derivative("u(0)"), (0.5, 0.0));
+        assert_eq!(eval_const_derivative("u(1e-15)"), (1.0, 0.0));
+        assert_eq!(eval_const_derivative("ustep(0)"), (0.5, 0.0));
+    }
+
+    #[test]
     fn file_table_voltage_source_excludes_output_from_generic_voltage_lte() {
         let dir = unique_temp_dir("behavioral-file-table-lte");
         std::fs::create_dir_all(&dir).expect("create temp table directory");
@@ -1715,5 +1738,22 @@ mod tests {
             .expect("system clock before epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("rspice-{label}-{unique}"))
+    }
+
+    fn eval_const_derivative(expression: &str) -> (Value, Value) {
+        let ast = parse_expression_strict(expression)
+            .unwrap_or_else(|err| panic!("parse `{expression}` failed: {err}"));
+        let program = compile(&ast);
+        let context = BehavioralDerivativeContext {
+            program: &program,
+            node_values: &[],
+            branch_values: &[],
+            time: 0.0,
+            temperature: 27.0,
+            expression_dialect: ExpressionDialect::Ngspice,
+            target: DerivativeTarget::Node(0),
+        };
+        eval_behavioral_expr_with_derivative(&ast, &context)
+            .unwrap_or_else(|| panic!("analytic derivative for `{expression}` failed"))
     }
 }

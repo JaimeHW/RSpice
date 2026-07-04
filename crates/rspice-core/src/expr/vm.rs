@@ -84,6 +84,7 @@ pub enum Instruction {
     Sign,
     Uramp,
     Stp,
+    Ustep,
     U2,
     Eq0,
     Ne0,
@@ -354,6 +355,15 @@ impl Vm {
                 Instruction::Stp => {
                     self.unary_op(|a| if a > EXPR_ZERO_TOLERANCE { 1.0 } else { 0.0 })
                 }
+                Instruction::Ustep => self.unary_op(|a| {
+                    if a > 0.0 {
+                        1.0
+                    } else if a < 0.0 {
+                        0.0
+                    } else {
+                        0.5
+                    }
+                }),
                 Instruction::U2 => self.unary_op(|a| a.clamp(0.0, 1.0)),
                 Instruction::Eq0 => self.unary_op(|a| {
                     if a.abs() < EXPR_ZERO_TOLERANCE {
