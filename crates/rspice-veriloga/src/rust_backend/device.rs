@@ -5539,6 +5539,7 @@ fn stamp() {
         let support = generate_scratch_operation_helpers();
         for helper in [
             "fn store_mul_div_scaled_inputs_indices",
+            "fn store_mul_div_scaled_inputs_sqrt_offset",
             "fn store_mul_div_scaled_inputs_mixed_iaa",
             "fn store_offset_div_scaled_inputs",
         ] {
@@ -5563,7 +5564,7 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_div_scaled_inputs_mixed_iaa(131, 7, A::sqrt(s.ad_value(5)), 0.5, A::offset(s.ad_value(6), p.bias), p.right_scale);"),
+            compact.contains("s.store_mul_div_scaled_inputs_sqrt_offset(131, 7, 5, 0.5, 6, p.bias, p.right_scale);"),
             "{compact}"
         );
         assert!(
@@ -5571,6 +5572,11 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_div_scaled_inputs_mixed_iaa(131"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::sqrt(s.ad_value(5))"), "{compact}");
         assert!(!compact.contains("s.store_mul_ad_rhs("), "{compact}");
         assert!(!compact.contains("s.store_mul_ad_lhs("), "{compact}");
         assert!(!compact.contains("s.store_offset_ad("), "{compact}");
@@ -5582,6 +5588,7 @@ fn stamp() {
         let support = generate_scratch_operation_helpers();
         for helper in [
             "fn store_mul_div_scaled_inputs_indices",
+            "fn store_mul_div_scaled_inputs_sqrt_offset",
             "fn store_mul_div_scaled_inputs_mixed_iaa",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
@@ -5601,10 +5608,17 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_div_scaled_inputs_mixed_iaa(151, 5, A::sqrt(s.ad_value(6)), 1.0, A::offset(s.ad_value(7), p.bias), 1.0);"),
+            compact.contains(
+                "s.store_mul_div_scaled_inputs_sqrt_offset(151, 5, 6, 1.0, 7, p.bias, 1.0);"
+            ),
             "{compact}"
         );
         assert!(!compact.contains("A::div("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_div_scaled_inputs_mixed_iaa(151"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::sqrt(s.ad_value(6))"), "{compact}");
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
@@ -11143,6 +11157,7 @@ fn stamp() {
     fn rewrites_mul_div_scaled_inputs_store_mul_ad_as_direct_store() {
         let support = generate_scratch_operation_helpers();
         for helper in [
+            "fn store_mul_div_scaled_inputs_sqrt_offset",
             "fn store_mul_div_scaled_inputs_mixed_aii",
             "fn store_mul_div_scaled_inputs_mixed_iaa",
         ] {
@@ -11172,10 +11187,15 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_div_scaled_inputs_mixed_iaa(162, 11, A::sqrt(s.ad_value(9)), 0.5, A::offset(s.ad_value(10), p.bias), p.denominator_scale);"),
+            compact.contains("s.store_mul_div_scaled_inputs_sqrt_offset(162, 11, 9, 0.5, 10, p.bias, p.denominator_scale);"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_div_scaled_inputs_mixed_iaa(162"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::sqrt(s.ad_value(9))"), "{compact}");
         assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
     }
 
@@ -19726,6 +19746,27 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = left_value * quotient;",
     "        for axis in 0..Instance::NODE_COUNT { let quotient_derivative = input.node_derivatives[axis] * input_derivative_scale + denominator.node_derivatives[axis] * denominator_derivative_scale; self.node_derivatives[index][axis] = left_node_derivatives[axis] * quotient + left_value * quotient_derivative; }",
     "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = input.branch_derivatives[axis] * input_derivative_scale + denominator.branch_derivatives[axis] * denominator_derivative_scale; self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * quotient + left_value * quotient_derivative; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_div_scaled_inputs_sqrt_offset(&mut self, index: usize, factor: usize, numerator: usize, numerator_scale: f64, denominator: usize, denominator_offset: f64, denominator_scale: f64) {",
+    "        let factor_value = self.values[factor];",
+    "        let numerator_input = self.values[numerator];",
+    "        let numerator_value = numerator_input.sqrt();",
+    "        let denominator_raw = self.values[denominator] + denominator_offset;",
+    "        let reciprocal = 1.0 / (denominator_raw * denominator_scale);",
+    "        let quotient = numerator_value * numerator_scale * reciprocal;",
+    "        let numerator_derivative_scale = numerator_scale * reciprocal / (2.0 * numerator_value);",
+    "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+    "        let factor_node_derivatives = self.node_derivatives[factor];",
+    "        let numerator_node_derivatives = self.node_derivatives[numerator];",
+    "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+    "        let factor_branch_derivatives = self.branch_derivatives[factor];",
+    "        let numerator_branch_derivatives = self.branch_derivatives[numerator];",
+    "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+    "        self.values[index] = factor_value * quotient;",
+    "        for axis in 0..Instance::NODE_COUNT { let quotient_derivative = numerator_node_derivatives[axis] * numerator_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; self.node_derivatives[index][axis] = factor_node_derivatives[axis] * quotient + factor_value * quotient_derivative; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = numerator_branch_derivatives[axis] * numerator_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * quotient + factor_value * quotient_derivative; }",
     "    }",
     "",
     "    #[inline]",
@@ -38346,6 +38387,17 @@ fn compact_index_or_mixed_mul_div_scaled_inputs_helper_line(
     denominator: &str,
     denominator_scale: &str,
 ) -> Option<String> {
+    if let Some(line) = compact_mul_div_scaled_inputs_sqrt_offset_helper_line(
+        target_index,
+        factor,
+        numerator,
+        numerator_scale,
+        denominator,
+        denominator_scale,
+    ) {
+        return Some(line);
+    }
+
     let (helper, value_args) = compact_index_or_mixed_value_args(
         "store_mul_div_scaled_inputs",
         &[factor, numerator, denominator],
@@ -38358,6 +38410,26 @@ fn compact_index_or_mixed_mul_div_scaled_inputs_helper_line(
     call_args.push(value_args[2].clone());
     call_args.push(denominator_scale.to_string());
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_mul_div_scaled_inputs_sqrt_offset_helper_line(
+    target_index: usize,
+    factor: &str,
+    numerator: &str,
+    numerator_scale: &str,
+    denominator: &str,
+    denominator_scale: &str,
+) -> Option<String> {
+    let factor = compact_scratch_ad_value_index(factor)?;
+    let sqrt_args = compact_ad_call_args(numerator, "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+    let numerator = compact_scratch_ad_value_index(sqrt_args[0])?;
+    let (denominator, denominator_offset) = compact_offset_scratch_arg(denominator)?;
+    Some(format!(
+        "scratch.store_mul_div_scaled_inputs_sqrt_offset({target_index}, {factor}, {numerator}, {numerator_scale}, {denominator}, {denominator_offset}, {denominator_scale});"
+    ))
 }
 
 fn compact_index_or_mixed_mul_div_scaled_product_helper_line(
