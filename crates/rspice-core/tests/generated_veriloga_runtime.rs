@@ -328,6 +328,107 @@ fn generated_indexed_dense_current_stamper_skips_static_zero_lanes() {
 }
 
 #[test]
+fn generated_cached_dense_current_stamper_uses_static_axes() {
+    let nodes = [1, 2, 3];
+    let branches = [1];
+    let voltages = [1.0, 2.0, 3.0, 4.0];
+    let mut rhs = vec![0.0; 4];
+    let mut matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[
+            (0, 0, 0.0),
+            (0, 2, 0.0),
+            (0, 3, 0.0),
+            (1, 0, 0.0),
+            (1, 2, 0.0),
+            (1, 3, 0.0),
+        ],
+    )
+    .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, 3);
+
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 3, &cache)
+        .stamp_current_dense_local(Some(0), Some(1), 5.0, &[0.5, 0.0, -1.0], &[2.0], 3.0);
+
+    let row0_node0 = matrix.get_index(0, 0).expect("row0 node0").0;
+    let row0_node2 = matrix.get_index(0, 2).expect("row0 node2").0;
+    let row0_branch0 = matrix.get_index(0, 3).expect("row0 branch0").0;
+    let row1_node0 = matrix.get_index(1, 0).expect("row1 node0").0;
+    let row1_node2 = matrix.get_index(1, 2).expect("row1 node2").0;
+    let row1_branch0 = matrix.get_index(1, 3).expect("row1 branch0").0;
+    let values = matrix.values_mut();
+    assert_eq!(values[row0_node0], 1.5);
+    assert_eq!(values[row0_node2], -3.0);
+    assert_eq!(values[row0_branch0], 6.0);
+    assert_eq!(values[row1_node0], -1.5);
+    assert_eq!(values[row1_node2], 3.0);
+    assert_eq!(values[row1_branch0], -6.0);
+
+    let equivalent = 5.0 - 1.5 * voltages[0] - (-3.0) * voltages[2] - 6.0 * voltages[3];
+    assert_eq!(rhs[0], -equivalent);
+    assert_eq!(rhs[1], equivalent);
+    assert_eq!(rhs[2], 0.0);
+    assert_eq!(rhs[3], 0.0);
+}
+
+#[test]
+fn generated_cached_sparse_current_stamper_uses_static_axes() {
+    let nodes = [1, 2, 3];
+    let branches = [1];
+    let voltages = [1.0, 2.0, 3.0, 4.0];
+    let mut rhs = vec![0.0; 4];
+    let mut matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[
+            (0, 0, 0.0),
+            (0, 2, 0.0),
+            (0, 3, 0.0),
+            (1, 0, 0.0),
+            (1, 2, 0.0),
+            (1, 3, 0.0),
+        ],
+    )
+    .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, 3);
+
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 3, &cache)
+        .stamp_current_sparse_local::<2, 1>(
+            Some(0),
+            Some(1),
+            5.0,
+            [0, 2],
+            [1.0, 3.0],
+            [0],
+            [4.0],
+            2.0,
+        );
+
+    let row0_node0 = matrix.get_index(0, 0).expect("row0 node0").0;
+    let row0_node2 = matrix.get_index(0, 2).expect("row0 node2").0;
+    let row0_branch0 = matrix.get_index(0, 3).expect("row0 branch0").0;
+    let row1_node0 = matrix.get_index(1, 0).expect("row1 node0").0;
+    let row1_node2 = matrix.get_index(1, 2).expect("row1 node2").0;
+    let row1_branch0 = matrix.get_index(1, 3).expect("row1 branch0").0;
+    let values = matrix.values_mut();
+    assert_eq!(values[row0_node0], 2.0);
+    assert_eq!(values[row0_node2], 6.0);
+    assert_eq!(values[row0_branch0], 8.0);
+    assert_eq!(values[row1_node0], -2.0);
+    assert_eq!(values[row1_node2], -6.0);
+    assert_eq!(values[row1_branch0], -8.0);
+
+    let equivalent = 5.0 - 2.0 * voltages[0] - 6.0 * voltages[2] - 8.0 * voltages[3];
+    assert_eq!(rhs[0], -equivalent);
+    assert_eq!(rhs[1], equivalent);
+    assert_eq!(rhs[2], 0.0);
+    assert_eq!(rhs[3], 0.0);
+}
+
+#[test]
 fn generated_ac_real_stamper_uses_linked_static_slots() {
     let nodes = [1, 2, 3, 4];
     let branches: [usize; 0] = [];
@@ -499,6 +600,34 @@ fn generated_indexed_dense_potential_stamper_skips_static_zero_lanes() {
     assert_eq!(values[b0], -2.0);
 
     let equivalent = 7.0 - 1.5 * voltages[0] - 2.0 * voltages[2];
+    assert_eq!(rhs[2], equivalent);
+    assert_eq!(rhs[0], 0.0);
+    assert_eq!(rhs[1], 0.0);
+}
+
+#[test]
+fn generated_cached_sparse_potential_stamper_uses_static_axes() {
+    let nodes = [1, 2];
+    let branches = [1];
+    let voltages = [1.0, 2.0, 3.0];
+    let mut rhs = vec![0.0; 3];
+    let mut matrix = StaticMatrix::from_triplets(3, 3, &[(2, 0, 0.0), (2, 1, 0.0), (2, 2, 0.0)])
+        .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, 2);
+
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache)
+        .stamp_potential_sparse_local::<2, 1>(0, 7.0, [0, 1], [1.5, -0.25], [0], [2.0]);
+
+    let n0 = matrix.get_index(2, 0).expect("n0 entry").0;
+    let n1 = matrix.get_index(2, 1).expect("n1 entry").0;
+    let b0 = matrix.get_index(2, 2).expect("b0 entry").0;
+    let values = matrix.values_mut();
+    assert_eq!(values[n0], -1.5);
+    assert_eq!(values[n1], 0.25);
+    assert_eq!(values[b0], -2.0);
+
+    let equivalent = 7.0 - 1.5 * voltages[0] - (-0.25) * voltages[1] - 2.0 * voltages[2];
     assert_eq!(rhs[2], equivalent);
     assert_eq!(rhs[0], 0.0);
     assert_eq!(rhs[1], 0.0);

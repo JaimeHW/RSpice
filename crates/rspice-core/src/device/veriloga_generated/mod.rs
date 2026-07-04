@@ -1468,6 +1468,66 @@ impl<'a> GeneratedStamper<'a> {
         branch_derivatives: &[Value],
         derivative_scale: Value,
     ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+
+            let needs_rhs = self.rhs.is_some();
+            let mut equivalent = value;
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for (node, derivative) in node_derivatives.iter().copied().enumerate() {
+                let derivative = derivative_scale * derivative;
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.node_axis(node) else {
+                    continue;
+                };
+                if needs_rhs {
+                    equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+                }
+                self.add_current_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative,
+                );
+            }
+            for (branch, derivative) in branch_derivatives.iter().copied().enumerate() {
+                let derivative = derivative_scale * derivative;
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.branch_axis(branch) else {
+                    continue;
+                };
+                if needs_rhs {
+                    equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+                }
+                self.add_current_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative,
+                );
+            }
+
+            if needs_rhs {
+                self.add_current_rhs_axis_pair_cached(cache, pos_axis, neg_axis, equivalent);
+            }
+            return;
+        }
+
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -1602,6 +1662,74 @@ impl<'a> GeneratedStamper<'a> {
         branch_derivatives: [Value; BRANCH_COUNT],
         derivative_scale: Value,
     ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+
+            let needs_rhs = self.rhs.is_some();
+            let mut equivalent = value;
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for (node, derivative) in node_derivative_indices
+                .iter()
+                .copied()
+                .zip(node_derivatives.iter().copied())
+            {
+                let derivative = derivative_scale * derivative;
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.node_axis(node) else {
+                    continue;
+                };
+                if needs_rhs {
+                    equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+                }
+                self.add_current_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative,
+                );
+            }
+            for (branch, derivative) in branch_derivative_indices
+                .iter()
+                .copied()
+                .zip(branch_derivatives.iter().copied())
+            {
+                let derivative = derivative_scale * derivative;
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.branch_axis(branch) else {
+                    continue;
+                };
+                if needs_rhs {
+                    equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+                }
+                self.add_current_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative,
+                );
+            }
+
+            if needs_rhs {
+                self.add_current_rhs_axis_pair_cached(cache, pos_axis, neg_axis, equivalent);
+            }
+            return;
+        }
+
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2209,6 +2337,51 @@ impl<'a> GeneratedStamper<'a> {
         node_derivatives: &[Value],
         branch_derivatives: &[Value],
     ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch_index) else {
+                return;
+            };
+            let mut equivalent = value;
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for (node, derivative) in node_derivatives.iter().copied().enumerate() {
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.node_axis(node) else {
+                    continue;
+                };
+                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+                self.add_real_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -derivative,
+                );
+            }
+            for (branch, derivative) in branch_derivatives.iter().copied().enumerate() {
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.branch_axis(branch) else {
+                    continue;
+                };
+                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+                self.add_real_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -derivative,
+                );
+            }
+            self.add_potential_rhs_axis_cached(cache, row_axis, equivalent);
+            return;
+        }
+
         let Some(row_axis) = self.branch_axis_local(branch_index) else {
             return;
         };
@@ -2297,6 +2470,59 @@ impl<'a> GeneratedStamper<'a> {
         branch_derivative_indices: [usize; BRANCH_COUNT],
         branch_derivatives: [Value; BRANCH_COUNT],
     ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch_index) else {
+                return;
+            };
+            let mut equivalent = value;
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for (node, derivative) in node_derivative_indices
+                .iter()
+                .copied()
+                .zip(node_derivatives.iter().copied())
+            {
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.node_axis(node) else {
+                    continue;
+                };
+                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+                self.add_real_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -derivative,
+                );
+            }
+            for (branch, derivative) in branch_derivative_indices
+                .iter()
+                .copied()
+                .zip(branch_derivatives.iter().copied())
+            {
+                if derivative == 0.0 {
+                    continue;
+                }
+                let Some(col_axis) = cache.branch_axis(branch) else {
+                    continue;
+                };
+                equivalent -= derivative * self.axis_value_cached(cache, col_axis);
+                self.add_real_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -derivative,
+                );
+            }
+            self.add_potential_rhs_axis_cached(cache, row_axis, equivalent);
+            return;
+        }
+
         let Some(row_axis) = self.branch_axis_local(branch_index) else {
             return;
         };
@@ -2570,12 +2796,6 @@ impl<'a> GeneratedStamper<'a> {
         if value == 0.0 {
             return;
         }
-        let Some(row) = cache.axis_matrix_index(row_axis) else {
-            return;
-        };
-        let Some(col) = cache.axis_matrix_index(col_axis) else {
-            return;
-        };
         let slot = if slots_ready {
             debug_assert!(row_axis < width);
             debug_assert!(col_axis < width);
@@ -2587,21 +2807,23 @@ impl<'a> GeneratedStamper<'a> {
         } else {
             None
         };
+        if let Some(index) = slot {
+            match &mut self.matrix {
+                GeneratedMatrixTarget::Static { matrix } => matrix.stamp_direct(index, value),
+                GeneratedMatrixTarget::AcReal { matrix } => matrix.stamp_direct_real(index, value),
+            }
+            return;
+        }
+
+        let Some(row) = cache.axis_matrix_index(row_axis) else {
+            return;
+        };
+        let Some(col) = cache.axis_matrix_index(col_axis) else {
+            return;
+        };
         match &mut self.matrix {
-            GeneratedMatrixTarget::Static { matrix } => {
-                if let Some(index) = slot {
-                    matrix.stamp_direct(index, value);
-                } else {
-                    matrix.add(row, col, value);
-                }
-            }
-            GeneratedMatrixTarget::AcReal { matrix } => {
-                if let Some(index) = slot {
-                    matrix.stamp_direct_real(index, value);
-                } else {
-                    matrix.add_real(row, col, value);
-                }
-            }
+            GeneratedMatrixTarget::Static { matrix } => matrix.add(row, col, value),
+            GeneratedMatrixTarget::AcReal { matrix } => matrix.add_real(row, col, value),
         }
     }
 
