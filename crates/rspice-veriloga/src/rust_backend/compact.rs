@@ -147,46 +147,19 @@ pub(crate) fn lower_scaled_rhs_multiply(
             ))
         }
         "add_scaled_products3" if call.args.len() == 9 => {
-            let first_left_index = scratch_ad_value_index(call.args[0]);
-            let first_right_index = scratch_ad_value_index(call.args[1]);
-            let second_left_index = scratch_ad_value_index(call.args[3]);
-            let second_right_index = scratch_ad_value_index(call.args[4]);
-            let third_left_index = scratch_ad_value_index(call.args[6]);
-            let third_right_index = scratch_ad_value_index(call.args[7]);
-            match (
-                first_left_index,
-                first_right_index,
-                second_left_index,
-                second_right_index,
-                third_left_index,
-                third_right_index,
-            ) {
-                (
-                    Some(first_left),
-                    Some(first_right),
-                    Some(second_left),
-                    Some(second_right),
-                    Some(third_left),
-                    Some(third_right),
-                ) => Some(format!(
-                    "scratch.store_mul_add_scaled_products3_indices_rhs({target_index}, {source}, {first_left}, {first_right}, {}, {second_left}, {second_right}, {}, {third_left}, {third_right}, {});",
-                    scale_product(call.args[2], output_scale),
-                    scale_product(call.args[5], output_scale),
-                    scale_product(call.args[8], output_scale)
-                )),
-                _ => Some(format!(
-                    "scratch.store_mul_add_scaled_products3_rhs({target_index}, {source}, {}, {}, {}, {}, {}, {}, {}, {}, {});",
-                    call.args[0],
-                    call.args[1],
-                    scale_product(call.args[2], output_scale),
-                    call.args[3],
-                    call.args[4],
-                    scale_product(call.args[5], output_scale),
-                    call.args[6],
-                    call.args[7],
-                    scale_product(call.args[8], output_scale)
-                )),
-            }
+            Some(lower_mul_add_scaled_products3_rhs(
+                target_index,
+                source,
+                call.args[0],
+                call.args[1],
+                &scale_product(call.args[2], output_scale),
+                call.args[3],
+                call.args[4],
+                &scale_product(call.args[5], output_scale),
+                call.args[6],
+                call.args[7],
+                &scale_product(call.args[8], output_scale),
+            ))
         }
         "scale_offset" if call.args.len() == 3 => {
             if let CompactAdExpr::Call(inner_call) = parse_ad_expr(call.args[0]) {
@@ -446,6 +419,43 @@ fn mul_add_scaled_products_rhs_helper_name(mask: &str) -> String {
         "store_mul_add_scaled_products_indices_rhs".to_string()
     } else {
         index_or_mixed_helper_name("store_mul_add_scaled_products_rhs", mask)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_mul_add_scaled_products3_rhs(
+    target_index: usize,
+    source: usize,
+    first_left: &str,
+    first_right: &str,
+    first_scale: &str,
+    second_left: &str,
+    second_right: &str,
+    second_scale: &str,
+    third_left: &str,
+    third_right: &str,
+    third_scale: &str,
+) -> String {
+    let (first_left_mask, first_left_arg) = index_or_ad_arg(first_left);
+    let (first_right_mask, first_right_arg) = index_or_ad_arg(first_right);
+    let (second_left_mask, second_left_arg) = index_or_ad_arg(second_left);
+    let (second_right_mask, second_right_arg) = index_or_ad_arg(second_right);
+    let (third_left_mask, third_left_arg) = index_or_ad_arg(third_left);
+    let (third_right_mask, third_right_arg) = index_or_ad_arg(third_right);
+    let mask = format!(
+        "{first_left_mask}{first_right_mask}{second_left_mask}{second_right_mask}{third_left_mask}{third_right_mask}"
+    );
+    let helper = mul_add_scaled_products3_rhs_helper_name(&mask);
+    format!(
+        "scratch.{helper}({target_index}, {source}, {first_left_arg}, {first_right_arg}, {first_scale}, {second_left_arg}, {second_right_arg}, {second_scale}, {third_left_arg}, {third_right_arg}, {third_scale});"
+    )
+}
+
+fn mul_add_scaled_products3_rhs_helper_name(mask: &str) -> String {
+    if mask.bytes().all(|byte| byte == b'i') {
+        "store_mul_add_scaled_products3_indices_rhs".to_string()
+    } else {
+        index_or_mixed_helper_name("store_mul_add_scaled_products3_rhs", mask)
     }
 }
 
