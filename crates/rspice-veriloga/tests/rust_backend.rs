@@ -5606,6 +5606,12 @@ fn rust_backend_directly_stores_product_division_expression_helpers() {
         ),
         "{support}"
     );
+    assert!(
+        support.contains(
+            "fn store_div_scaled_product3_by_product_indices(&mut self, index: usize, product_left: usize, product_middle: usize, product_right: usize, product_scale: f64, denominator_left: usize, denominator_right: usize, denominator_scale: f64)"
+        ),
+        "{support}"
+    );
     for helper in [
         "fn store_div_scaled_product_offset_lhs_indices(",
         "fn store_div_scaled_product_offset_rhs_indices(",
@@ -5629,6 +5635,10 @@ fn rust_backend_directly_stores_product_division_expression_helpers() {
         stamp.contains("s.store_div_scaled_inputs2_by_product_indices("),
         "{stamp}"
     );
+    assert!(
+        stamp.contains("s.store_div_scaled_product3_by_product_indices("),
+        "{stamp}"
+    );
     for helper in [
         "s.store_div_scaled_product_offset_lhs_indices(",
         "s.store_div_scaled_product_offset_rhs_indices(",
@@ -5647,6 +5657,10 @@ fn rust_backend_directly_stores_product_division_expression_helpers() {
     assert!(
         !stamp.contains("s.store_div_scaled_inputs2_by_product("),
         "direct affine-product-ratio root assignments should avoid by-value inputs-by-product stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_div_scaled_product3_by_product("),
+        "direct product3-ratio root assignments should avoid by-value product3-by-product stores:\n{stamp}"
     );
     assert!(
         !stamp.contains("s.store_div_scaled_product_offset_lhs("),
@@ -6209,6 +6223,7 @@ fn rust_backend_directly_stores_mixed_index_product_helpers() {
         "fn store_div_scaled_product_offset_denominator_mixed_iia(",
         "fn store_div_scaled_product_by_product_mixed_iiaa(",
         "fn store_div_scaled_inputs2_by_product_mixed_iiaa(",
+        "fn store_div_scaled_product3_by_product_mixed_iiiaa(",
     ] {
         assert!(support.contains(helper), "missing {helper}\n{support}");
     }
@@ -6236,6 +6251,7 @@ fn rust_backend_directly_stores_mixed_index_product_helpers() {
         "s.store_div_scaled_product_offset_denominator_mixed_iia(",
         "s.store_div_scaled_product_by_product_mixed_iiaa(",
         "s.store_div_scaled_inputs2_by_product_mixed_iiaa(",
+        "s.store_div_scaled_product3_by_product_mixed_iiiaa(",
     ] {
         assert!(stamp.contains(helper), "missing {helper}\n{stamp}");
     }
@@ -6275,6 +6291,10 @@ fn rust_backend_directly_stores_mixed_index_product_helpers() {
     assert!(
         !stamp.contains("s.store_div_scaled_inputs2_by_product("),
         "mixed affine-product-ratio root assignments should avoid by-value inputs-by-product stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_div_scaled_product3_by_product("),
+        "mixed product3-ratio root assignments should avoid by-value product3-by-product stores:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
 }
@@ -16656,6 +16676,7 @@ module compact_expression_direct_store_product_division_helpers(p, n);
     real off_den;
     real ratio;
     real inputs_ratio;
+    real product3_ratio;
     analog begin
         a = V(p, n);
         q = V(p);
@@ -16668,7 +16689,8 @@ module compact_expression_direct_store_product_division_helpers(p, n);
         off_den = (a * q) / (r + gain);
         ratio = (a * q) / (r * den);
         inputs_ratio = (a + q) / (r * den);
-        I(p, n) <+ prod2 + prod3 + off_lhs + off_rhs + off_den + ratio + inputs_ratio;
+        product3_ratio = (a * q * r) / (den * r);
+        I(p, n) <+ prod2 + prod3 + off_lhs + off_rhs + off_den + ratio + inputs_ratio + product3_ratio;
     end
 endmodule
 "#
@@ -16983,6 +17005,7 @@ module compact_expression_direct_store_mixed_index_product_helpers(p, n);
     real div_offset_den_iia;
     real div_ratio_iiaa;
     real div_inputs_ratio_iiaa;
+    real div_product3_ratio_iiiaa;
     analog begin
         a = V(p, n);
         q = V(p);
@@ -17010,6 +17033,7 @@ module compact_expression_direct_store_mixed_index_product_helpers(p, n);
         div_offset_den_iia = (a * q) / (sqrt(r) + product_scale);
         div_ratio_iiaa = (a * q) / ((r + t) * (a + q));
         div_inputs_ratio_iiaa = (a + q) / (sqrt(r) * sqrt(t));
+        div_product3_ratio_iiiaa = (a * q * r) / ((r + t) * (a + q));
         I(p, n) <+ add_iaa + add_aia + add_aai
                  + inputs_iiaa
                  + products_iaaa + products_aiaa + products_aaia + products_aaai
@@ -17017,7 +17041,7 @@ module compact_expression_direct_store_mixed_index_product_helpers(p, n);
                  + products_aiia + products_aiai + products_aaii
                  + div_iaa + div_aia + div_aai
                  + div_offset_lhs_aii + div_offset_rhs_iai + div_offset_den_iia
-                 + div_ratio_iiaa + div_inputs_ratio_iiaa;
+                 + div_ratio_iiaa + div_inputs_ratio_iiaa + div_product3_ratio_iiiaa;
     end
 endmodule
 "#
