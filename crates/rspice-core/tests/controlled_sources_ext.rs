@@ -123,6 +123,54 @@ rl out 0 1k
 ";
     let v = op_voltage(clamped, "out");
     assert!((v - 5.0).abs() < 1e-9, "TABLE endpoint clamp: got {v}");
+
+    let clamped_low = "\
+* table clamped low
+vin in 0 dc -3
+e1 out 0 table {v(in)} = (-1,-5) (1,5)
+rl out 0 1k
+.op
+.end
+";
+    let v = op_voltage(clamped_low, "out");
+    assert!((v + 5.0).abs() < 1e-9, "TABLE low endpoint clamp: got {v}");
+}
+
+#[test]
+fn bsource_pwl_extrapolates_like_ngspice() {
+    let deck = "\
+* ngspice expression pwl endpoint extrapolation
+b1 n1 0 v={pwl(-100, -10, -8, 2, 4, 12, 9, 22, 19)}
+b2 n2 0 v={pwl(0.5, -10, -8, 2, 4, 12, 9, 22, 19)}
+b3 n3 0 v={pwl(6.0, -10, -8, 2, 4, 12, 9, 22, 19)}
+b4 n4 0 v={pwl(100, -10, -8, 2, 4, 12, 9, 22, 19)}
+r1 n1 0 1k
+r2 n2 0 1k
+r3 n3 0 1k
+r4 n4 0 1k
+.op
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let op = engine.run_dc_op(&netlist).expect("operating point solves");
+    let voltage = |node: &str| {
+        let index = op
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("node {node} missing from OP result"));
+        op.node_voltages[index]
+    };
+
+    let expectations = [("n1", -98.0), ("n2", 2.5), ("n3", 6.0), ("n4", 97.0)];
+    for (node, expected) in expectations {
+        let actual = voltage(node);
+        assert!(
+            (actual - expected).abs() < 1.0e-9,
+            "PWL value at {node}: expected {expected}, got {actual}"
+        );
+    }
 }
 
 #[test]

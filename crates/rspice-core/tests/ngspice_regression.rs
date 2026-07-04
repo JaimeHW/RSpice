@@ -1485,6 +1485,7 @@ fn test_ngspice_regression_parser_focus_cases_run() {
 
     for relative in [
         "regression/parser/minus-minus.cir",
+        "regression/parser/bxpressn-1.cir",
         "regression/parser/xpressn-1.cir",
         "regression/parser/xpressn-2.cir",
         "regression/parser/xpressn-3.cir",

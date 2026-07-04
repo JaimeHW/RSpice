@@ -1113,7 +1113,8 @@ fn eval_function_with_derivative(
                 Some((left % right, d_left - quotient * d_right))
             }
         }
-        Function::Table | Function::Pwl => eval_table_function_with_derivative(args, context),
+        Function::Table => eval_table_function_with_derivative(args, context),
+        Function::Pwl => eval_pwl_function_with_derivative(args, context),
         Function::TableFile | Function::FastTable | Function::FastTableFile => Some((0.0, 0.0)),
         Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
             None
@@ -1162,6 +1163,21 @@ fn eval_table_function_with_derivative(
     args: &[Expr],
     context: &BehavioralDerivativeContext<'_>,
 ) -> Option<(Value, Value)> {
+    eval_piecewise_function_with_derivative(args, context, eval_table_points_with_derivative)
+}
+
+fn eval_pwl_function_with_derivative(
+    args: &[Expr],
+    context: &BehavioralDerivativeContext<'_>,
+) -> Option<(Value, Value)> {
+    eval_piecewise_function_with_derivative(args, context, eval_pwl_points_with_derivative)
+}
+
+fn eval_piecewise_function_with_derivative(
+    args: &[Expr],
+    context: &BehavioralDerivativeContext<'_>,
+    evaluator: fn(Value, Value, &[(Value, Value)]) -> Option<(Value, Value)>,
+) -> Option<(Value, Value)> {
     if args.len() < 3 {
         return None;
     }
@@ -1174,7 +1190,7 @@ fn eval_table_function_with_derivative(
         let (py, _) = eval_behavioral_expr_with_derivative(y_expr, context)?;
         points.push((px, py));
     }
-    eval_table_points_with_derivative(x, dx, &points)
+    evaluator(x, dx, &points)
 }
 
 fn eval_lookup_table(points: &[(Value, Value)], x: Value) -> Option<Value> {
@@ -1210,7 +1226,55 @@ fn eval_table_points_with_derivative(
             }
         }
     }
-    let ((x0, y0), (x1, y1)) = segment;
+    eval_linear_piecewise_segment_with_derivative(x, dx, segment)
+}
+
+fn eval_pwl_points_with_derivative(
+    x: Value,
+    dx: Value,
+    points: &[(Value, Value)],
+) -> Option<(Value, Value)> {
+    if points.is_empty() {
+        return Some((0.0, 0.0));
+    }
+    if points.len() == 1 {
+        return Some((points[0].1, 0.0));
+    }
+
+    let last = points.len() - 1;
+    let ascending = points[last].0 >= points[0].0;
+    let segment = if ascending {
+        if x <= points[0].0 {
+            (points[0], points[1])
+        } else if x >= points[last].0 {
+            (points[last - 1], points[last])
+        } else {
+            points
+                .windows(2)
+                .find(|pair| x >= pair[0].0 && x <= pair[1].0)
+                .map(|pair| (pair[0], pair[1]))
+                .unwrap_or((points[last - 1], points[last]))
+        }
+    } else if x >= points[0].0 {
+        (points[0], points[1])
+    } else if x <= points[last].0 {
+        (points[last - 1], points[last])
+    } else {
+        points
+            .windows(2)
+            .find(|pair| x <= pair[0].0 && x >= pair[1].0)
+            .map(|pair| (pair[0], pair[1]))
+            .unwrap_or((points[last - 1], points[last]))
+    };
+
+    eval_linear_piecewise_segment_with_derivative(x, dx, segment)
+}
+
+fn eval_linear_piecewise_segment_with_derivative(
+    x: Value,
+    dx: Value,
+    ((x0, y0), (x1, y1)): ((Value, Value), (Value, Value)),
+) -> Option<(Value, Value)> {
     let span = x1 - x0;
     if !span.is_finite() || span == 0.0 {
         return Some((y0, 0.0));

@@ -390,12 +390,22 @@ impl Vm {
                 Instruction::Pwr => self.binary_op(|a, b| a.abs().powf(b)),
                 Instruction::Pwrs => self.binary_op(|a, b| a.signum() * a.abs().powf(b)),
                 Instruction::Mod => self.binary_op(|a, b| if b != 0.0 { a % b } else { 0.0 }),
-                Instruction::Table(arg_count) | Instruction::Pwl(arg_count) => {
+                Instruction::Table(arg_count) => {
                     if *arg_count >= 3 && self.stack.len() >= *arg_count {
                         let start = self.stack.len() - *arg_count;
                         let args = &self.stack[start..];
                         let x = args[0];
                         let result = table_interpolate_from_args(x, &args[1..]);
+                        self.stack.truncate(start);
+                        self.stack.push(result);
+                    }
+                }
+                Instruction::Pwl(arg_count) => {
+                    if *arg_count >= 3 && self.stack.len() >= *arg_count {
+                        let start = self.stack.len() - *arg_count;
+                        let args = &self.stack[start..];
+                        let x = args[0];
+                        let result = pwl_interpolate_from_args(x, &args[1..]);
                         self.stack.truncate(start);
                         self.stack.push(result);
                     }
@@ -561,6 +571,63 @@ fn table_interpolate_from_args(x: Value, args: &[Value]) -> Value {
         let x2 = args[idx + 2];
         let y2 = args[idx + 3];
         if x >= x1 && x <= x2 {
+            return interpolate_segment(x, x1, y1, x2, y2, y1);
+        }
+    }
+
+    last_y
+}
+
+fn pwl_interpolate_from_args(x: Value, args: &[Value]) -> Value {
+    let pair_count = args.len() / 2;
+    if pair_count == 0 {
+        return 0.0;
+    }
+
+    let first_x = args[0];
+    let first_y = args[1];
+    if pair_count == 1 {
+        return first_y;
+    }
+
+    let second_x = args[2];
+    let second_y = args[3];
+    let last_idx = 2 * (pair_count - 1);
+    let prev_idx = last_idx - 2;
+    let last_x = args[last_idx];
+    let last_y = args[last_idx + 1];
+    let prev_x = args[prev_idx];
+    let prev_y = args[prev_idx + 1];
+    let ascending = last_x >= first_x;
+
+    if ascending {
+        if x <= first_x {
+            return interpolate_segment(x, first_x, first_y, second_x, second_y, first_y);
+        }
+        if x >= last_x {
+            return interpolate_segment(x, prev_x, prev_y, last_x, last_y, last_y);
+        }
+    } else {
+        if x >= first_x {
+            return interpolate_segment(x, first_x, first_y, second_x, second_y, first_y);
+        }
+        if x <= last_x {
+            return interpolate_segment(x, prev_x, prev_y, last_x, last_y, last_y);
+        }
+    }
+
+    for i in 0..(pair_count - 1) {
+        let idx = 2 * i;
+        let x1 = args[idx];
+        let y1 = args[idx + 1];
+        let x2 = args[idx + 2];
+        let y2 = args[idx + 3];
+        let in_segment = if ascending {
+            x >= x1 && x <= x2
+        } else {
+            x <= x1 && x >= x2
+        };
+        if in_segment {
             return interpolate_segment(x, x1, y1, x2, y2, y1);
         }
     }
