@@ -7,6 +7,7 @@
 use crate::Value;
 use crate::solver::{ComplexMatrix, CscIndex, StaticMatrix};
 
+#[cfg(feature = "veriloga-builtins")]
 pub mod builtins {
     include!("registry.rs");
 }
@@ -68,6 +69,7 @@ impl Default for GeneratedDdtCoefficients {
     }
 }
 
+#[cfg(feature = "veriloga-builtins")]
 #[derive(Clone)]
 pub struct BuiltinVerilogAInstance {
     pub model_name: &'static str,
@@ -79,6 +81,7 @@ pub struct BuiltinVerilogAInstance {
     kind: builtins::GeneratedBuiltinKind,
 }
 
+#[cfg(feature = "veriloga-builtins")]
 impl std::fmt::Debug for BuiltinVerilogAInstance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BuiltinVerilogAInstance")
@@ -91,11 +94,13 @@ impl std::fmt::Debug for BuiltinVerilogAInstance {
     }
 }
 
+#[cfg(feature = "veriloga-builtins")]
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinVerilogADevices {
     devices: Vec<BuiltinVerilogAInstance>,
 }
 
+#[cfg(feature = "veriloga-builtins")]
 impl BuiltinVerilogADevices {
     #[inline]
     pub fn new() -> Self {
@@ -204,6 +209,7 @@ impl BuiltinVerilogADevices {
     }
 }
 
+#[cfg(feature = "veriloga-builtins")]
 impl BuiltinVerilogAInstance {
     #[inline]
     pub(crate) fn restore_from_snapshot(&mut self, snapshot: Self) {
@@ -316,6 +322,7 @@ impl BuiltinVerilogAInstance {
     }
 }
 
+#[cfg(feature = "veriloga-builtins")]
 pub fn instantiate_builtin(
     model_name: &str,
     instance_name: &str,
@@ -1431,6 +1438,41 @@ impl<'a> GeneratedStamper<'a> {
         value: Value,
         derivatives: &[GeneratedDerivative],
     ) {
+        if let Some(cache) = self.cache {
+            let pos_axis = pos.and_then(|node| cache.node_axis(node));
+            let neg_axis = neg.and_then(|node| cache.node_axis(node));
+            if pos_axis.is_none() && neg_axis.is_none() {
+                return;
+            }
+
+            let needs_rhs = self.rhs.is_some();
+            let mut equivalent = value;
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for derivative in derivatives {
+                let Some(col_axis) = Self::derivative_axis_cached(cache, derivative.axis) else {
+                    continue;
+                };
+                if needs_rhs {
+                    equivalent -= derivative.value * self.axis_value_cached(cache, col_axis);
+                }
+                self.add_current_derivative_axis_pair_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    pos_axis,
+                    neg_axis,
+                    col_axis,
+                    derivative.value,
+                );
+            }
+
+            if needs_rhs {
+                self.add_current_rhs_axis_pair_cached(cache, pos_axis, neg_axis, equivalent);
+            }
+            return;
+        }
+
         let pos_axis = pos.and_then(|node| self.node_axis_local(node));
         let neg_axis = neg.and_then(|node| self.node_axis_local(node));
         if pos_axis.is_none() && neg_axis.is_none() {
@@ -2313,6 +2355,31 @@ impl<'a> GeneratedStamper<'a> {
         value: Value,
         derivatives: &[GeneratedDerivative],
     ) {
+        if let Some(cache) = self.cache {
+            let Some(row_axis) = cache.branch_axis(branch_index) else {
+                return;
+            };
+            let mut equivalent = value;
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            for derivative in derivatives {
+                let Some(col_axis) = Self::derivative_axis_cached(cache, derivative.axis) else {
+                    continue;
+                };
+                equivalent -= derivative.value * self.axis_value_cached(cache, col_axis);
+                self.add_real_axis_cached(
+                    cache,
+                    slots_ready,
+                    width,
+                    row_axis,
+                    col_axis,
+                    -derivative.value,
+                );
+            }
+            self.add_potential_rhs_axis_cached(cache, row_axis, equivalent);
+            return;
+        }
+
         let Some(row_axis) = self.branch_axis_local(branch_index) else {
             return;
         };
@@ -2709,6 +2776,17 @@ impl<'a> GeneratedStamper<'a> {
     }
 
     #[inline]
+    fn derivative_axis_cached(
+        cache: &GeneratedStaticStampCache,
+        axis: GeneratedDerivativeAxis,
+    ) -> Option<usize> {
+        match axis {
+            GeneratedDerivativeAxis::Node(node) => cache.node_axis(node),
+            GeneratedDerivativeAxis::Branch(branch) => cache.branch_axis(branch),
+        }
+    }
+
+    #[inline]
     fn node_axis_local(&self, node_index: usize) -> Option<usize> {
         self.static_cache()?.node_axis(node_index)
     }
@@ -2881,6 +2959,13 @@ impl<'a> GeneratedStamper<'a> {
         if value == 0.0 {
             return;
         }
+        if let Some(cache) = self.cache {
+            let width = cache.axis_count();
+            let slots_ready = width != 0 && cache.slots.len() == width * width;
+            self.add_real_axis_cached(cache, slots_ready, width, row_axis, col_axis, value);
+            return;
+        }
+
         let Some(row) = self.axis_matrix_index_local(row_axis) else {
             return;
         };

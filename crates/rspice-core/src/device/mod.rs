@@ -33,8 +33,7 @@ pub mod tristate;
 #[cfg(feature = "veriloga")]
 pub mod veriloga;
 
-// Build-time generated Verilog-A built-ins (feature-gated)
-#[cfg(feature = "veriloga-builtins")]
+// Generated Verilog-A runtime ABI; the built-in registry remains feature-gated inside the module.
 pub mod veriloga_generated;
 
 // Batch device storage for SIMD acceleration (feature-gated)

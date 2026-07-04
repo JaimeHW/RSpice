@@ -1,12 +1,14 @@
-#![cfg(feature = "veriloga-builtins")]
-
 use rspice_core::device::veriloga_generated::{
     GeneratedAnalysisKind, GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper,
-    GeneratedStamper, GeneratedStaticStampCache, builtins, instantiate_builtin,
+    GeneratedStamper, GeneratedStaticStampCache,
 };
+#[cfg(feature = "veriloga-builtins")]
+use rspice_core::device::veriloga_generated::{builtins, instantiate_builtin};
 use rspice_core::solver::{ComplexMatrix, StaticMatrix};
+#[cfg(feature = "veriloga-builtins")]
 use rspice_core::{CircuitData, netlist::ParamContext};
 
+#[cfg(feature = "veriloga-builtins")]
 #[test]
 fn generated_builtins_are_materialized_in_source_tree() {
     let generated_root =
@@ -429,6 +431,61 @@ fn generated_cached_sparse_current_stamper_uses_static_axes() {
 }
 
 #[test]
+fn generated_cached_generic_current_stamper_uses_static_axes() {
+    let nodes = [1, 2, 3];
+    let branches = [1];
+    let voltages = [1.0, 2.0, 3.0, 4.0];
+    let mut rhs = vec![0.0; 4];
+    let mut matrix = StaticMatrix::from_triplets(
+        4,
+        4,
+        &[
+            (0, 0, 0.0),
+            (0, 2, 0.0),
+            (0, 3, 0.0),
+            (1, 0, 0.0),
+            (1, 2, 0.0),
+            (1, 3, 0.0),
+        ],
+    )
+    .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, 3);
+
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 3, &cache)
+        .stamp_current_local(
+            Some(0),
+            Some(1),
+            5.0,
+            &[
+                GeneratedDerivative::node(0, 2.0),
+                GeneratedDerivative::node(2, 6.0),
+                GeneratedDerivative::branch(0, 8.0),
+            ],
+        );
+
+    let row0_node0 = matrix.get_index(0, 0).expect("row0 node0").0;
+    let row0_node2 = matrix.get_index(0, 2).expect("row0 node2").0;
+    let row0_branch0 = matrix.get_index(0, 3).expect("row0 branch0").0;
+    let row1_node0 = matrix.get_index(1, 0).expect("row1 node0").0;
+    let row1_node2 = matrix.get_index(1, 2).expect("row1 node2").0;
+    let row1_branch0 = matrix.get_index(1, 3).expect("row1 branch0").0;
+    let values = matrix.values_mut();
+    assert_eq!(values[row0_node0], 2.0);
+    assert_eq!(values[row0_node2], 6.0);
+    assert_eq!(values[row0_branch0], 8.0);
+    assert_eq!(values[row1_node0], -2.0);
+    assert_eq!(values[row1_node2], -6.0);
+    assert_eq!(values[row1_branch0], -8.0);
+
+    let equivalent = 5.0 - 2.0 * voltages[0] - 6.0 * voltages[2] - 8.0 * voltages[3];
+    assert_eq!(rhs[0], -equivalent);
+    assert_eq!(rhs[1], equivalent);
+    assert_eq!(rhs[2], 0.0);
+    assert_eq!(rhs[3], 0.0);
+}
+
+#[test]
 fn generated_ac_real_stamper_uses_linked_static_slots() {
     let nodes = [1, 2, 3, 4];
     let branches: [usize; 0] = [];
@@ -634,6 +691,69 @@ fn generated_cached_sparse_potential_stamper_uses_static_axes() {
 }
 
 #[test]
+fn generated_cached_generic_potential_stamper_uses_static_axes() {
+    let nodes = [1, 2];
+    let branches = [1];
+    let voltages = [1.0, 2.0, 3.0];
+    let mut rhs = vec![0.0; 3];
+    let mut matrix = StaticMatrix::from_triplets(3, 3, &[(2, 0, 0.0), (2, 1, 0.0), (2, 2, 0.0)])
+        .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, 2);
+
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache)
+        .stamp_potential_local(
+            0,
+            7.0,
+            &[
+                GeneratedDerivative::node(0, 1.5),
+                GeneratedDerivative::node(1, -0.25),
+                GeneratedDerivative::branch(0, 2.0),
+            ],
+        );
+
+    let n0 = matrix.get_index(2, 0).expect("n0 entry").0;
+    let n1 = matrix.get_index(2, 1).expect("n1 entry").0;
+    let b0 = matrix.get_index(2, 2).expect("b0 entry").0;
+    let values = matrix.values_mut();
+    assert_eq!(values[n0], -1.5);
+    assert_eq!(values[n1], 0.25);
+    assert_eq!(values[b0], -2.0);
+
+    let equivalent = 7.0 - 1.5 * voltages[0] - (-0.25) * voltages[1] - 2.0 * voltages[2];
+    assert_eq!(rhs[2], equivalent);
+    assert_eq!(rhs[0], 0.0);
+    assert_eq!(rhs[1], 0.0);
+}
+
+#[test]
+fn generated_cached_potential_branch_stamper_uses_static_axes() {
+    let nodes = [1, 2];
+    let branches = [1];
+    let voltages = [1.0, 2.0, 3.0];
+    let mut rhs = vec![0.0; 3];
+    let mut matrix =
+        StaticMatrix::from_triplets(3, 3, &[(0, 2, 0.0), (1, 2, 0.0), (2, 0, 0.0), (2, 1, 0.0)])
+            .expect("static matrix");
+    let mut cache = GeneratedStaticStampCache::default();
+    cache.link(&matrix, &nodes, &branches, 2);
+
+    GeneratedStamper::new_with_static_cache(&mut matrix, &mut rhs, &voltages, 2, &cache)
+        .stamp_potential_branch_local(Some(0), Some(1), 0, 3.0);
+
+    let p_branch = matrix.get_index(0, 2).expect("p branch entry").0;
+    let n_branch = matrix.get_index(1, 2).expect("n branch entry").0;
+    let branch_p = matrix.get_index(2, 0).expect("branch p entry").0;
+    let branch_n = matrix.get_index(2, 1).expect("branch n entry").0;
+    let values = matrix.values_mut();
+    assert_eq!(values[p_branch], 3.0);
+    assert_eq!(values[n_branch], -3.0);
+    assert_eq!(values[branch_p], 1.0);
+    assert_eq!(values[branch_n], -1.0);
+    assert_eq!(rhs, vec![0.0, 0.0, 0.0]);
+}
+
+#[test]
 fn generated_stamper_linearizes_current_contribution_against_branch_axis() {
     let voltages = [1.0, 0.5, 2.0];
     let mut rhs = vec![0.0; 3];
@@ -699,6 +819,7 @@ fn generated_stamper_linearizes_potential_contribution_against_branch_axis() {
     assert_eq!(rhs[2], equivalent);
 }
 
+#[cfg(feature = "veriloga-builtins")]
 #[test]
 fn generated_builtin_allocates_internal_nodes_from_metadata() {
     if !builtins::builtin_names()
