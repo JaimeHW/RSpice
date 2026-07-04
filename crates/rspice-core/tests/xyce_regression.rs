@@ -372,6 +372,8 @@ fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
         "Netlists/Output/AC/ac-phase-in-radians.cir",
         "Netlists/Output/AC/ac-prn.cir",
         "Netlists/Output/AC/ac-prn-diff.cir",
+        "Netlists/Output/AC/ac-touchstone-defaults-to-prn.cir",
+        "Netlists/Output/AC/op-print-line-order.cir",
         "Netlists/Output/AC/op-prn.cir",
     ] {
         assert!(

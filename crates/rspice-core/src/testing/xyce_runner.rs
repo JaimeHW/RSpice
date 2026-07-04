@@ -2211,7 +2211,42 @@ impl XyceTestRunner {
                     return Err("wrapper-origin .PRINT statement has no analysis type".to_string());
                 };
                 if !analysis.eq_ignore_ascii_case("AC") {
-                    if analysis.eq_ignore_ascii_case("AC_IC") && !has_op_analysis {
+                    if analysis.eq_ignore_ascii_case("AC_IC") {
+                        if !has_op_analysis {
+                            continue;
+                        }
+                        let mut index = 2usize;
+                        let mut has_file_output = false;
+                        let mut print_format = "STD".to_string();
+                        while index < token_refs.len() {
+                            if let Some((raw_key, raw_value, consumed)) =
+                                Self::print_option_assignment(&token_refs, index)
+                            {
+                                let value = raw_value.trim().trim_matches(['"', '\'']);
+                                match raw_key.trim().to_ascii_lowercase().as_str() {
+                                    "file" => has_file_output = true,
+                                    "format" => {
+                                        print_format = value.to_string();
+                                        if !Self::ac_ic_print_format_is_supported(value) {
+                                            return Err(format!(
+                                                "wrapper-origin frequency-domain static output contract does not cover .PRINT AC_IC FORMAT={value}"
+                                            ));
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                index += consumed;
+                                continue;
+                            }
+                            index += 1;
+                        }
+                        if has_file_output {
+                            if !Self::ac_ic_print_format_is_supported(&print_format) {
+                                return Err(format!(
+                                    "wrapper-origin frequency-domain static output contract does not cover AC_IC FILE= side output FORMAT={print_format}"
+                                ));
+                            }
+                        }
                         continue;
                     }
                     return Err(format!(
@@ -2265,15 +2300,13 @@ impl XyceTestRunner {
         }
 
         match primary_ac_print_count {
-            1 => Ok(()),
+            1.. => Ok(()),
             0 => Err(
                 "wrapper-origin frequency-domain static output contract requires one primary .PRINT AC statement"
                     .to_string(),
             ),
-            _ => Err(format!(
-                "wrapper-origin frequency-domain static output contract requires one primary .PRINT AC statement, found {primary_ac_print_count}"
-            )),
-        }
+        }?;
+        Ok(())
     }
 
     fn validate_native_static_csd_tran_wrapper_contract(source: &str) -> Result<(), String> {
@@ -2690,8 +2723,32 @@ impl XyceTestRunner {
     fn ac_print_format_is_prn_compatible(format: &str) -> bool {
         matches!(
             format.to_ascii_lowercase().as_str(),
-            "std" | "tecplot" | "noindex" | "gnuplot" | "splot"
+            "std" | "tecplot" | "touchstone" | "touchstone2" | "noindex" | "gnuplot" | "splot"
         )
+    }
+
+    fn ac_ic_print_format_is_supported(format: &str) -> bool {
+        Self::ac_print_format_is_prn_compatible(format)
+            || format.eq_ignore_ascii_case("CSV")
+            || format.eq_ignore_ascii_case("PROBE")
+    }
+
+    fn ac_initial_condition_reference_extension(
+        format: Option<&str>,
+    ) -> Result<&'static str, String> {
+        let normalized = format.unwrap_or("STD").trim();
+        if Self::ac_print_format_is_prn_compatible(normalized) {
+            return Ok("TD.prn");
+        }
+        if normalized.eq_ignore_ascii_case("CSV") {
+            return Ok("TD.csv");
+        }
+        if normalized.eq_ignore_ascii_case("PROBE") {
+            return Ok("TD.csd");
+        }
+        Err(format!(
+            "native AC_IC comparison does not cover FORMAT={normalized}"
+        ))
     }
 
     fn is_extra_wrapper_ac_output_analysis_command(command: &str) -> bool {
@@ -2883,7 +2940,33 @@ impl XyceTestRunner {
                 }
             };
             if side_mismatches.is_empty() {
-                self.passed_result(deck, start, contract)
+                let ac_ic_mismatches =
+                    match self.compare_ac_initial_condition_outputs(&plan, &netlist) {
+                        Ok(mismatches) => mismatches,
+                        Err(err) => {
+                            return self.failure_result(
+                                deck,
+                                start,
+                                contract,
+                                format!("AC initial-condition output comparison error: {err}"),
+                                Vec::new(),
+                            );
+                        }
+                    };
+                if ac_ic_mismatches.is_empty() {
+                    self.passed_result(deck, start, contract)
+                } else {
+                    self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "{} Xyce AC initial-condition output mismatch(es)",
+                            ac_ic_mismatches.len()
+                        ),
+                        ac_ic_mismatches,
+                    )
+                }
             } else {
                 self.failure_result(
                     deck,
@@ -3025,6 +3108,231 @@ impl XyceTestRunner {
                 mismatches,
             )
         }
+    }
+
+    fn compare_ac_initial_condition_outputs(
+        &self,
+        plan: &XyceStaticAcPlan,
+        netlist: &Netlist,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if !Self::source_has_op_analysis(&plan.source) {
+            return Ok(Vec::new());
+        }
+        let requests = Self::aggregate_print_output_requests(
+            Self::print_output_requests(&plan.source, "AC_IC")?,
+            "AC_IC",
+        )?;
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let dc = Self::synthetic_op_dc_sweep(netlist)?;
+        let (result, device_op_report) = self
+            .create_dc_engine()
+            .run_dc_op_with_report(netlist)
+            .map_err(|err| format!(".OP solve for AC_IC output failed: {err}"))?;
+        let op_result = DcSweepPointResult {
+            sweep_value: dc.start,
+            result,
+            device_op_report,
+        };
+
+        let mut all_mismatches = Vec::new();
+        for request in requests {
+            let reference_path = self.ac_initial_condition_reference_path(plan, &request)?;
+            let reference =
+                Self::parse_ac_initial_condition_reference_file(&request, &reference_path)
+                    .map_err(|err| {
+                        format!(
+                            "failed to parse AC_IC oracle {}: {err}",
+                            self.display_path(&reference_path)
+                        )
+                    })?;
+            let print = XycePrintRequest {
+                probes: request.probes.clone(),
+            };
+            let mut mismatches = self.compare_ac_initial_condition_reference(
+                &reference,
+                &print,
+                netlist,
+                &plan.source,
+                &dc,
+                &op_result,
+            )?;
+            if let Some(file) = request.file.as_deref() {
+                for mismatch in &mut mismatches {
+                    mismatch.probe = format!("{file}:{}", mismatch.probe);
+                }
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(all_mismatches)
+    }
+
+    fn ac_initial_condition_reference_path(
+        &self,
+        plan: &XyceStaticAcPlan,
+        request: &XycePrintOutputRequest,
+    ) -> Result<PathBuf, String> {
+        if let Some(file) = request.file.as_deref() {
+            return Self::side_output_reference_path(&plan.reference_path, file);
+        }
+
+        let extension = Self::ac_initial_condition_reference_extension(request.format.as_deref())?;
+        let path = self
+            .static_output_reference_path(&plan.deck_path, extension)
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        if !path.is_file() {
+            return Err(format!(
+                "missing checked-in AC_IC oracle {}",
+                self.display_path(&path)
+            ));
+        }
+        Ok(path)
+    }
+
+    fn parse_ac_initial_condition_reference_file(
+        request: &XycePrintOutputRequest,
+        path: &Path,
+    ) -> Result<XycePrnTable, String> {
+        match request.format.as_deref().unwrap_or("STD").trim() {
+            format if format.eq_ignore_ascii_case("CSV") => Self::parse_csv_file(path),
+            format if format.eq_ignore_ascii_case("PROBE") => Self::parse_tran_csd_file(path),
+            _ => Self::parse_prn_file(path),
+        }
+    }
+
+    fn compare_ac_initial_condition_reference(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        source: &str,
+        dc: &XyceDcSweep,
+        result: &DcSweepPointResult,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let layout = Self::transient_reference_layout(reference)?;
+        if reference.rows.len() != 1 {
+            return Err(format!(
+                "AC_IC reference row count ({}) does not match .OP point count (1)",
+                reference.rows.len()
+            ));
+        }
+
+        let row = &reference.rows[0];
+        if row.len() != reference.columns.len() {
+            return Err(format!(
+                "row 0 has {} values, expected {}",
+                row.len(),
+                reference.columns.len()
+            ));
+        }
+
+        let mut mismatches = Vec::new();
+        if let Some(stepnum_column) = layout.stepnum_column {
+            let expected_stepnum = row[stepnum_column];
+            if let Some(relative_error) = self.value_mismatch(
+                expected_stepnum,
+                0.0,
+                self.default_comparison_tolerance("stepnum"),
+            ) {
+                mismatches.push(XyceValueMismatch {
+                    row: 0,
+                    probe: "STEPNUM".to_string(),
+                    expected: expected_stepnum,
+                    actual: 0.0,
+                    relative_error,
+                });
+            }
+        }
+        if let Some(index_column) = layout.index_column {
+            let expected_index = row[index_column];
+            if let Some(relative_error) = self.value_mismatch(
+                expected_index,
+                0.0,
+                self.default_comparison_tolerance("index"),
+            ) {
+                mismatches.push(XyceValueMismatch {
+                    row: 0,
+                    probe: "Index".to_string(),
+                    expected: expected_index,
+                    actual: 0.0,
+                    relative_error,
+                });
+            }
+        }
+
+        let expected_time = row[layout.time_column];
+        if let Some(relative_error) = self.value_mismatch(
+            expected_time,
+            0.0,
+            self.default_comparison_tolerance("time"),
+        ) {
+            mismatches.push(XyceValueMismatch {
+                row: 0,
+                probe: "TIME".to_string(),
+                expected: expected_time,
+                actual: 0.0,
+                relative_error,
+            });
+        }
+        if mismatches.len() >= self.config.max_mismatches {
+            mismatches.truncate(self.config.max_mismatches);
+            return Ok(mismatches);
+        }
+
+        let data_columns = self.reference_data_columns(
+            reference,
+            print,
+            netlist,
+            layout.data_column_offset,
+            true,
+        )?;
+        let comp_tolerances = self.comp_tolerances(source, &data_columns)?;
+        let sweep_point = XyceDcSweepPoint {
+            primary: dc.start,
+            secondary: None,
+        };
+        for (column_index, column) in data_columns.iter().enumerate() {
+            let expected = row[column_index + layout.data_column_offset];
+            let (probe, actual) = match column {
+                XyceReferenceColumn::PrimarySweep { name } => (name.as_str(), dc.start),
+                XyceReferenceColumn::Probe { name } => (
+                    name.as_str(),
+                    Self::evaluate_dc_probe(
+                        name,
+                        netlist,
+                        dc,
+                        sweep_point,
+                        &result.result,
+                        &result.device_op_report,
+                    )?,
+                ),
+            };
+            let normalized_probe = Self::normalize_probe(probe);
+            let tolerance = comp_tolerances
+                .get(&normalized_probe)
+                .copied()
+                .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
+            if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                mismatches.push(XyceValueMismatch {
+                    row: 0,
+                    probe: probe.to_string(),
+                    expected,
+                    actual,
+                    relative_error,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    mismatches.truncate(self.config.max_mismatches);
+                    break;
+                }
+            }
+        }
+        Ok(mismatches)
     }
 
     fn compare_step_ac_reference_batches(
@@ -4267,7 +4575,11 @@ impl XyceTestRunner {
     fn prn_compatible_ac_side_output_requests(
         source: &str,
     ) -> Result<Vec<XycePrintOutputRequest>, String> {
-        Ok(Self::print_output_requests(source, "AC")?
+        Ok(
+            Self::aggregate_print_output_requests(
+                Self::print_output_requests(source, "AC")?,
+                "AC",
+            )?
             .into_iter()
             .filter(|request| {
                 request.file.is_some()
@@ -4275,7 +4587,8 @@ impl XyceTestRunner {
                         request.format.as_deref().unwrap_or("STD"),
                     )
             })
-            .collect())
+            .collect(),
+        )
     }
 
     fn side_output_reference_path(reference_path: &Path, file: &str) -> Result<PathBuf, String> {
@@ -11804,16 +12117,69 @@ impl XyceTestRunner {
     }
 
     fn single_ac_print_output_request(source: &str) -> Result<XycePrintOutputRequest, String> {
-        let requests = Self::print_output_requests(source, "AC")?
-            .into_iter()
-            .filter(|request| request.file.is_none())
-            .collect::<Vec<_>>();
+        let requests = Self::aggregate_print_output_requests(
+            Self::print_output_requests(source, "AC")?,
+            "AC",
+        )?
+        .into_iter()
+        .filter(|request| request.file.is_none())
+        .collect::<Vec<_>>();
 
         match requests.len() {
             0 => Err("deck has no .PRINT AC statement with static columns".to_string()),
             1 => Ok(requests.into_iter().next().expect("one request")),
             _ => Err("deck has multiple .PRINT AC statements; multi-table comparison is not implemented yet".to_string()),
         }
+    }
+
+    fn aggregate_print_output_requests(
+        requests: Vec<XycePrintOutputRequest>,
+        analysis: &str,
+    ) -> Result<Vec<XycePrintOutputRequest>, String> {
+        let mut aggregated: Vec<XycePrintOutputRequest> = Vec::new();
+        for request in requests {
+            if let Some(existing) = aggregated
+                .iter_mut()
+                .find(|existing| existing.file == request.file)
+            {
+                Self::validate_print_output_format_compatible(
+                    existing.format.as_deref(),
+                    request.format.as_deref(),
+                    analysis,
+                    request.file.as_deref(),
+                )?;
+                existing.probes.extend(request.probes);
+                if existing.format.is_none() {
+                    existing.format = request.format;
+                }
+            } else {
+                aggregated.push(request);
+            }
+        }
+        Ok(aggregated)
+    }
+
+    fn validate_print_output_format_compatible(
+        existing: Option<&str>,
+        incoming: Option<&str>,
+        analysis: &str,
+        file: Option<&str>,
+    ) -> Result<(), String> {
+        let existing_key = Self::print_format_key(existing);
+        let incoming_key = Self::print_format_key(incoming);
+        if existing_key == incoming_key {
+            return Ok(());
+        }
+        let destination = file
+            .map(|file| format!("FILE={file}"))
+            .unwrap_or_else(|| "primary output".to_string());
+        Err(format!(
+            "multiple .PRINT {analysis} statements for {destination} use different FORMAT values ({existing_key} and {incoming_key})"
+        ))
+    }
+
+    fn print_format_key(format: Option<&str>) -> String {
+        format.unwrap_or("STD").trim().to_ascii_lowercase()
     }
 
     fn dc_print_output_requests(source: &str) -> Result<Vec<XycePrintOutputRequest>, String> {
