@@ -4263,9 +4263,23 @@ fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
         "{support}"
     );
     assert!(
+        support.contains("fn store_mul_scaled_atan_rhs(&mut self, index: usize, source: usize")
+            && support
+                .contains("fn store_mul_scaled_atan_ad_rhs(&mut self, index: usize, source: usize"),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_mul_scaled_sin_rhs(&mut self, index: usize, source: usize")
+            && support
+                .contains("fn store_mul_scaled_sin_ad_rhs(&mut self, index: usize, source: usize"),
+        "{support}"
+    );
+    assert!(
         stamp.contains("s.store_mul_scaled_ln_ad_rhs(2, 0, p.p0, A::offset(s.ad_value(1), p.p1));"),
         "{stamp}"
     );
+    assert!(stamp.contains("s.store_mul_scaled_atan_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_scaled_sin_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
@@ -7496,17 +7510,15 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
         "pub(crate) fn store_sub_sqrt_lhs(",
         "pub(crate) fn store_div_sqrt_rhs(",
         "pub(crate) fn store_div_sqrt_lhs(",
+        "pub(crate) fn store_mul_atan_rhs(",
+        "pub(crate) fn store_mul_atan_lhs(",
+        "pub(crate) fn store_mul_atan_ad_rhs(",
+        "pub(crate) fn store_mul_atan_ad_lhs(",
     ] {
         assert!(support.contains(helper), "missing {helper}:\n{support}");
     }
-    assert!(
-        stamp.contains("s.store_mul_ad_rhs(2, 0, A::atan(s.ad_value(1)));"),
-        "{stamp}"
-    );
-    assert!(
-        stamp.contains("s.store_mul_ad_lhs(3, A::atan(s.ad_value(0)), 1);"),
-        "{stamp}"
-    );
+    assert!(stamp.contains("s.store_mul_atan_rhs(2, 0, 1);"), "{stamp}");
+    assert!(stamp.contains("s.store_mul_atan_lhs(3, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_add_sqrt_rhs(4, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_add_sqrt_lhs(5, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_sub_sqrt_rhs(6, 0, 1);"), "{stamp}");
@@ -7515,6 +7527,10 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
     assert!(stamp.contains("s.store_div_sqrt_lhs(9, 0, 1);"), "{stamp}");
     assert!(
         !stamp.contains("A::sqrt(s.ad_value(0))") && !stamp.contains("A::sqrt(s.ad_value(1))"),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("A::atan(s.ad_value(0))") && !stamp.contains("A::atan(s.ad_value(1))"),
         "{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -8004,6 +8020,10 @@ fn rust_backend_fuses_extended_unary_mixed_multiply_store_helpers() {
         "store_mul_limexp_rhs",
         "store_mul_abs_lhs",
         "store_mul_abs_rhs",
+        "store_mul_atan_ad_lhs",
+        "store_mul_atan_ad_rhs",
+        "store_mul_sin_ad_lhs",
+        "store_mul_sin_ad_rhs",
         "store_mul_cos_ad_lhs",
         "store_mul_cos_ad_rhs",
         "store_mul_tanh_ad_lhs",
@@ -8171,6 +8191,8 @@ fn rust_backend_fuses_unary_mixed_multiply_store_helpers() {
         "store_mul_ln_rhs",
         "store_mul_sqrt_lhs",
         "store_mul_sqrt_rhs",
+        "store_mul_sin_lhs",
+        "store_mul_sin_rhs",
     ] {
         assert!(
             support.contains(&format!("pub(crate) fn {helper}(")),
@@ -15587,12 +15609,16 @@ module compact_scaled_mixed_multiply_store(p, n);
     real q;
     real b;
     real c;
+    real d;
+    real e;
     analog begin
         a = V(p, n);
         q = V(p);
         b = (a * gain) * ln(q + offset);
         c = exp(q) * (-a);
-        I(p, n) <+ b + c;
+        d = (a * gain) * atan(q);
+        e = (a * gain) * sin(q);
+        I(p, n) <+ b + c + d + e;
     end
 endmodule
 "#
@@ -17854,6 +17880,10 @@ module compact_extended_unary_mixed_multiply_store(p, n);
     real k;
     real l;
     real m;
+    real o;
+    real r;
+    real s;
+    real t;
     analog begin
         a = V(p, n);
         b = V(n, p);
@@ -17868,7 +17898,11 @@ module compact_extended_unary_mixed_multiply_store(p, n);
         k = c * tanh(a + b);
         l = lexp(a) * c;
         m = c * lexp(a + b);
-        I(p, n) <+ d + e + f + g + h + i + j + k + l + m;
+        o = sin(a + b) * c;
+        r = c * sin(a + b);
+        s = atan(a + b) * c;
+        t = c * atan(a + b);
+        I(p, n) <+ d + e + f + g + h + i + j + k + l + m + o + r + s + t;
     end
 endmodule
 "#
@@ -17962,6 +17996,8 @@ module compact_unary_mixed_multiply_store(p, n);
     real g;
     real h;
     real i;
+    real j;
+    real k;
     analog begin
         a = V(p, n);
         b = V(n, p);
@@ -17972,7 +18008,9 @@ module compact_unary_mixed_multiply_store(p, n);
         g = c * ln(b);
         h = sqrt(a) * c;
         i = c * sqrt(b);
-        I(p, n) <+ d + e + f + g + h + i;
+        j = sin(a) * c;
+        k = c * sin(b);
+        I(p, n) <+ d + e + f + g + h + i + j + k;
     end
 endmodule
 "#
