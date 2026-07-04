@@ -446,6 +446,58 @@ fn test_xyce_static_ac_probe_wrapper_case_runs() {
 }
 
 #[test]
+fn test_xyce_static_ac_step_fd_prn_wrapper_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let relative = "Netlists/Output/AC/ac-step-prn.cir";
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed stepped AC PRN wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native wrapper-origin stepped Xyce AC .FD.prn comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in stepped Xyce .FD.prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_static_fd_prn_step_ac",
+        "{relative} should report the wrapper-origin stepped AC .FD.prn contract"
+    );
+}
+
+#[test]
+fn test_xyce_static_ac_step_probe_wrapper_cases_run() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    let relative = "Netlists/Output/AC/ac-step-probe.cir";
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed stepped AC PROBE wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native wrapper-origin stepped Xyce AC PROBE/CSDF comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in stepped Xyce .csd oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_csd_step_ac",
+        "{relative} should report the wrapper-origin stepped AC CSDF contract"
+    );
+}
+
+#[test]
 fn test_xyce_transient_delimiter_option_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

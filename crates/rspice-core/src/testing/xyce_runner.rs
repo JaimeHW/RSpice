@@ -211,6 +211,7 @@ struct XyceStaticAcPlan {
     source: String,
     print: XycePrintRequest,
     ac: XyceAcAnalysis,
+    steps: Vec<StepCommand>,
     contract: XyceStaticAcContract,
 }
 
@@ -260,14 +261,20 @@ enum XyceStaticAcContract {
 }
 
 impl XyceStaticAcContract {
-    fn result_contract(self) -> &'static str {
-        match self {
-            Self::PlainStatic => "static_fd_prn_ac",
-            Self::PlainCsv => "static_fd_csv_ac",
-            Self::PlainCsd => "static_csd_ac",
-            Self::WrapperStatic => "wrapper_static_fd_prn_ac",
-            Self::WrapperCsv => "wrapper_static_fd_csv_ac",
-            Self::WrapperCsd => "wrapper_csd_ac",
+    fn result_contract(self, stepped: bool) -> &'static str {
+        match (self, stepped) {
+            (Self::PlainStatic, false) => "static_fd_prn_ac",
+            (Self::PlainStatic, true) => "static_fd_prn_step_ac",
+            (Self::PlainCsv, false) => "static_fd_csv_ac",
+            (Self::PlainCsv, true) => "static_fd_csv_step_ac",
+            (Self::PlainCsd, false) => "static_csd_ac",
+            (Self::PlainCsd, true) => "static_csd_step_ac",
+            (Self::WrapperStatic, false) => "wrapper_static_fd_prn_ac",
+            (Self::WrapperStatic, true) => "wrapper_static_fd_prn_step_ac",
+            (Self::WrapperCsv, false) => "wrapper_static_fd_csv_ac",
+            (Self::WrapperCsv, true) => "wrapper_static_fd_csv_step_ac",
+            (Self::WrapperCsd, false) => "wrapper_csd_ac",
+            (Self::WrapperCsd, true) => "wrapper_csd_step_ac",
         }
     }
 
@@ -1288,12 +1295,6 @@ impl XyceTestRunner {
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let ac = Self::single_ac_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
-        if !steps.is_empty() {
-            return Err(
-                "native static .PRINT AC comparison does not support .STEP AC decks yet"
-                    .to_string(),
-            );
-        }
         Self::validate_static_ac_contract(&netlist, &ac, &print)?;
 
         Ok(XyceStaticAcPlan {
@@ -1302,6 +1303,7 @@ impl XyceTestRunner {
             source,
             print,
             ac,
+            steps,
             contract,
         })
     }
@@ -2764,7 +2766,7 @@ impl XyceTestRunner {
         plan: XyceStaticAcPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = plan.contract.result_contract();
+        let contract = plan.contract.result_contract(!plan.steps.is_empty());
         let reference = match Self::parse_ac_reference_file(plan.contract, &plan.reference_path) {
             Ok(reference) => reference,
             Err(err) => {
@@ -2797,6 +2799,17 @@ impl XyceTestRunner {
                 contract,
                 "AC analysis produced no frequency points".to_string(),
                 Vec::new(),
+            );
+        }
+
+        if !plan.steps.is_empty() {
+            return self.run_static_step_ac_plan(
+                deck,
+                plan,
+                netlist,
+                reference,
+                frequencies,
+                start,
             );
         }
 
@@ -2848,6 +2861,128 @@ impl XyceTestRunner {
                 start,
                 contract,
                 format!("{} Xyce AC reference mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn run_static_step_ac_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticAcPlan,
+        netlist: Netlist,
+        reference: XycePrnTable,
+        frequencies: Vec<Value>,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.contract.result_contract(true);
+        let expansion_engine = self.create_xyce_engine();
+        let step_runs =
+            match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
+                Ok(runs) => runs,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this .STEP AC deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(".STEP expansion error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+
+        let step_references =
+            match Self::split_ac_step_reference(&reference, step_runs.len(), frequencies.len()) {
+                Ok(references) => references,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("stepped AC oracle error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+
+        let engine = self.create_xyce_engine();
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (step_index, (run, step_reference)) in
+            step_runs.iter().zip(step_references.iter()).enumerate()
+        {
+            let results = match engine.run_ac(&run.netlist, &frequencies) {
+                Ok(results) => results,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this .STEP AC deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error in AC step {}: {err}", step_index + 1),
+                        Vec::new(),
+                    );
+                }
+            };
+
+            let mut step_mismatches = match self.compare_ac_prn_reference(
+                step_reference,
+                &plan.print,
+                &run.netlist,
+                &plan.source,
+                &results,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "reference comparison error in AC step {}: {err}",
+                            step_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+            }
+            row_offset += step_reference.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce stepped AC reference mismatch(es)",
+                    mismatches.len()
+                ),
                 mismatches,
             )
         }
@@ -3795,6 +3930,42 @@ impl XyceTestRunner {
             };
             Self::validate_transient_stepnum_column(&reference, references.len())?;
             references.push(reference);
+        }
+        Ok(references)
+    }
+
+    fn split_ac_step_reference(
+        reference: &XycePrnTable,
+        expected_steps: usize,
+        points_per_step: usize,
+    ) -> Result<Vec<XycePrnTable>, String> {
+        if expected_steps == 0 {
+            return Err(".STEP expansion produced no runs".to_string());
+        }
+        if points_per_step == 0 {
+            return Err("AC analysis produced no frequency points".to_string());
+        }
+        if expected_steps == 1 {
+            return Ok(vec![reference.clone()]);
+        }
+        let expected_rows = expected_steps
+            .checked_mul(points_per_step)
+            .ok_or_else(|| "stepped AC row count overflow".to_string())?;
+        if reference.rows.len() != expected_rows {
+            return Err(format!(
+                "reference contains {} AC row(s), but .STEP expansion produced {expected_steps} run(s) with {points_per_step} frequency point(s) each",
+                reference.rows.len()
+            ));
+        }
+
+        let mut references = Vec::with_capacity(expected_steps);
+        for step_index in 0..expected_steps {
+            let start = step_index * points_per_step;
+            let end = start + points_per_step;
+            references.push(XycePrnTable {
+                columns: reference.columns.clone(),
+                rows: reference.rows[start..end].to_vec(),
+            });
         }
         Ok(references)
     }
