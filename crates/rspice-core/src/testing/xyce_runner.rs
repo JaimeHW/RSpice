@@ -210,6 +210,8 @@ struct XyceStaticAcPlan {
     reference_path: Option<PathBuf>,
     source: String,
     print: Option<XycePrintRequest>,
+    primary_ac_file: Option<String>,
+    primary_ac_ic_file: Option<String>,
     ac: XyceAcAnalysis,
     steps: Vec<StepCommand>,
     contract: XyceStaticAcContract,
@@ -1304,62 +1306,71 @@ impl XyceTestRunner {
         let ac = Self::single_ac_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
 
-        let primary_ac_output = Self::primary_print_output_request(&source, "AC")?;
-        let primary_ac_ic_output = Self::primary_print_output_request(&source, "AC_IC")?;
-        let (contract, reference_path, print) = if let Some(print_output) = primary_ac_output {
-            let contract = Self::static_ac_contract_for_print_format(
-                requires_wrapper,
-                print_output.format.as_deref(),
-            )?;
-            let reference_path = self
-                .static_output_reference_path(&deck.path, contract.reference_extension())
-                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-            if !reference_path.is_file() {
-                return Err(format!(
-                    "no checked-in static .{} oracle at {}",
-                    contract.reference_extension(),
-                    self.display_path(&reference_path)
-                ));
-            }
-            let print = XycePrintRequest {
-                probes: print_output.probes,
-            };
-            Self::validate_static_ac_contract(&netlist, &ac, &print)?;
-            (contract, Some(reference_path), Some(print))
-        } else if let Some(print_output) = primary_ac_ic_output {
-            if !steps.is_empty() {
-                return Err(
+        let primary_ac_output =
+            Self::canonical_print_output_request(&source, "AC", requires_wrapper)?;
+        let primary_ac_ic_output =
+            Self::canonical_print_output_request(&source, "AC_IC", requires_wrapper)?;
+        let primary_ac_ic_file = primary_ac_ic_output
+            .as_ref()
+            .and_then(|request| request.file.clone());
+        let (contract, reference_path, print, primary_ac_file) =
+            if let Some(print_output) = primary_ac_output {
+                let primary_ac_file = print_output.file.clone();
+                let contract = Self::static_ac_contract_for_print_format(
+                    requires_wrapper,
+                    print_output.format.as_deref(),
+                )?;
+                let reference_path = self
+                    .static_output_reference_path(&deck.path, contract.reference_extension())
+                    .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+                if !reference_path.is_file() {
+                    return Err(format!(
+                        "no checked-in static .{} oracle at {}",
+                        contract.reference_extension(),
+                        self.display_path(&reference_path)
+                    ));
+                }
+                let print = XycePrintRequest {
+                    probes: print_output.probes,
+                };
+                Self::validate_static_ac_contract(&netlist, &ac, &print)?;
+                (contract, Some(reference_path), Some(print), primary_ac_file)
+            } else if let Some(print_output) = primary_ac_ic_output {
+                if !steps.is_empty() {
+                    return Err(
                     ".STEP AC_IC-only comparison is not implemented for wrapper-origin AC output"
                         .to_string(),
                 );
-            }
-            let contract = Self::static_ac_ic_contract_for_print_format(
-                requires_wrapper,
-                print_output.format.as_deref(),
-            )?;
-            let reference_path = self
-                .static_output_reference_path(&deck.path, contract.reference_extension())
-                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-            if !reference_path.is_file() {
-                return Err(format!(
-                    "no checked-in static .{} oracle at {}",
-                    contract.reference_extension(),
-                    self.display_path(&reference_path)
-                ));
-            }
-            (contract, None, None)
-        } else {
-            return Err(
-                "deck has no primary .PRINT AC or .PRINT AC_IC statement with static columns"
-                    .to_string(),
-            );
-        };
+                }
+                let contract = Self::static_ac_ic_contract_for_print_format(
+                    requires_wrapper,
+                    print_output.format.as_deref(),
+                )?;
+                let reference_path = self
+                    .static_output_reference_path(&deck.path, contract.reference_extension())
+                    .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+                if !reference_path.is_file() {
+                    return Err(format!(
+                        "no checked-in static .{} oracle at {}",
+                        contract.reference_extension(),
+                        self.display_path(&reference_path)
+                    ));
+                }
+                (contract, None, None, None)
+            } else {
+                return Err(
+                    "deck has no primary .PRINT AC or .PRINT AC_IC statement with static columns"
+                        .to_string(),
+                );
+            };
 
         Ok(XyceStaticAcPlan {
             deck_path: deck.path.clone(),
             reference_path,
             source,
             print,
+            primary_ac_file,
+            primary_ac_ic_file,
             ac,
             steps,
             contract,
@@ -2248,7 +2259,9 @@ impl XyceTestRunner {
     fn validate_native_static_fd_ac_wrapper_contract(source: &str) -> Result<(), String> {
         let mut primary_ac_print_count = 0usize;
         let mut side_ac_print_count = 0usize;
+        let mut side_ac_print_formats = Vec::new();
         let mut primary_ac_ic_print_count = 0usize;
+        let mut side_ac_ic_print_count = 0usize;
         let has_op_analysis = Self::source_has_op_analysis(source);
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
@@ -2295,6 +2308,7 @@ impl XyceTestRunner {
                             index += 1;
                         }
                         if has_file_output {
+                            side_ac_ic_print_count += 1;
                             if !Self::ac_ic_print_format_is_supported(&print_format) {
                                 return Err(format!(
                                     "wrapper-origin frequency-domain static output contract does not cover AC_IC FILE= side output FORMAT={print_format}"
@@ -2339,11 +2353,7 @@ impl XyceTestRunner {
                 }
                 if has_file_output {
                     side_ac_print_count += 1;
-                    if !Self::ac_print_format_is_prn_compatible(&print_format) {
-                        return Err(format!(
-                            "wrapper-origin frequency-domain static output contract does not cover FILE= side output FORMAT={print_format}"
-                        ));
-                    }
+                    side_ac_print_formats.push(print_format);
                 } else {
                     primary_ac_print_count += 1;
                 }
@@ -2357,18 +2367,44 @@ impl XyceTestRunner {
         }
 
         if primary_ac_print_count == 0 {
-            if side_ac_print_count > 0 {
+            if side_ac_print_count > 1 {
                 return Err(
-                    "wrapper-origin frequency-domain static output contract does not cover .PRINT AC FILE= output without a primary .PRINT AC"
+                    "wrapper-origin frequency-domain static output contract does not cover multiple .PRINT AC FILE= outputs without a primary .PRINT AC"
                         .to_string(),
                 );
             }
-            if primary_ac_ic_print_count == 0 {
+            if let Some(format) = side_ac_print_formats.first()
+                && !Self::ac_print_format_is_prn_compatible(format)
+                && !format.eq_ignore_ascii_case("CSV")
+                && !format.eq_ignore_ascii_case("PROBE")
+            {
+                return Err(format!(
+                    "wrapper-origin frequency-domain static output contract does not cover primary FILE= .PRINT AC FORMAT={format}"
+                ));
+            }
+            if primary_ac_ic_print_count == 0
+                && side_ac_ic_print_count == 0
+                && side_ac_print_count == 0
+            {
                 return Err(
                     "wrapper-origin frequency-domain static output contract requires one primary .PRINT AC or .PRINT AC_IC statement"
                         .to_string(),
                 );
             }
+        } else {
+            for format in side_ac_print_formats {
+                if !Self::ac_print_format_is_prn_compatible(&format) {
+                    return Err(format!(
+                        "wrapper-origin frequency-domain static output contract does not cover FILE= side output FORMAT={format}"
+                    ));
+                }
+            }
+        }
+        if primary_ac_ic_print_count == 0 && side_ac_ic_print_count > 1 {
+            return Err(
+                "wrapper-origin frequency-domain static output contract does not cover multiple .PRINT AC_IC FILE= outputs without a primary .PRINT AC_IC"
+                    .to_string(),
+            );
         }
         Ok(())
     }
@@ -3302,7 +3338,9 @@ impl XyceTestRunner {
                 &dc,
                 &op_result,
             )?;
-            if let Some(file) = request.file.as_deref() {
+            if let Some(file) = request.file.as_deref()
+                && Some(file) != plan.primary_ac_ic_file.as_deref()
+            {
                 for mismatch in &mut mismatches {
                     mismatch.probe = format!("{file}:{}", mismatch.probe);
                 }
@@ -3321,6 +3359,20 @@ impl XyceTestRunner {
         plan: &XyceStaticAcPlan,
         request: &XycePrintOutputRequest,
     ) -> Result<PathBuf, String> {
+        if request.file.as_deref() == plan.primary_ac_ic_file.as_deref() {
+            let extension =
+                Self::ac_initial_condition_reference_extension(request.format.as_deref())?;
+            let path = self
+                .static_output_reference_path(&plan.deck_path, extension)
+                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+            if !path.is_file() {
+                return Err(format!(
+                    "missing checked-in AC_IC oracle {}",
+                    self.display_path(&path)
+                ));
+            }
+            return Ok(path);
+        }
         if let Some(file) = request.file.as_deref() {
             return self.side_output_reference_path_for_deck(&plan.deck_path, file);
         }
@@ -3532,6 +3584,9 @@ impl XyceTestRunner {
                 .file
                 .as_deref()
                 .expect("side output request has FILE= set");
+            if Some(file) == plan.primary_ac_file.as_deref() {
+                continue;
+            }
             let reference_path =
                 Self::ac_side_output_reference_path(primary_reference_path, &request, file)?;
             let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
@@ -3575,6 +3630,9 @@ impl XyceTestRunner {
                 .file
                 .as_deref()
                 .expect("side output request has FILE= set");
+            if Some(file) == plan.primary_ac_file.as_deref() {
+                continue;
+            }
             let reference_path =
                 Self::ac_side_output_reference_path(primary_reference_path, &request, file)?;
             let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
@@ -12288,25 +12346,54 @@ impl XyceTestRunner {
         }
     }
 
+    #[cfg(test)]
     fn primary_print_output_request(
         source: &str,
         analysis: &str,
     ) -> Result<Option<XycePrintOutputRequest>, String> {
+        Self::canonical_print_output_request(source, analysis, false)
+    }
+
+    fn canonical_print_output_request(
+        source: &str,
+        analysis: &str,
+        allow_single_file_output: bool,
+    ) -> Result<Option<XycePrintOutputRequest>, String> {
         let requests = Self::aggregate_print_output_requests(
             Self::print_output_requests(source, analysis)?,
             analysis,
-        )?
-        .into_iter()
-        .filter(|request| request.file.is_none())
-        .collect::<Vec<_>>();
+        )?;
+        let primary_requests = requests
+            .iter()
+            .filter(|request| request.file.is_none())
+            .cloned()
+            .collect::<Vec<_>>();
 
-        match requests.len() {
+        match primary_requests.len() {
             0 => Ok(None),
-            1 => Ok(Some(requests.into_iter().next().expect("one request"))),
+            1 => Ok(Some(
+                primary_requests.into_iter().next().expect("one request"),
+            )),
             _ => Err(format!(
                 "deck has multiple primary .PRINT {analysis} output destinations after aggregation"
             )),
         }
+        .and_then(|primary| {
+            if primary.is_some() || !allow_single_file_output {
+                return Ok(primary);
+            }
+            let file_requests = requests
+                .into_iter()
+                .filter(|request| request.file.is_some())
+                .collect::<Vec<_>>();
+            match file_requests.len() {
+                0 => Ok(None),
+                1 => Ok(file_requests.into_iter().next()),
+                _ => Err(format!(
+                    "deck has multiple .PRINT {analysis} FILE= outputs and no primary output"
+                )),
+            }
+        })
     }
 
     fn aggregate_print_output_requests(
