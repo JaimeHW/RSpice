@@ -81,6 +81,7 @@ pub enum BinOpKind {
     Sub,
     Mul,
     Div,
+    Mod,
     Pow,
     // Comparison
     Gt, // >

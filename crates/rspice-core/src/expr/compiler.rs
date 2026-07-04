@@ -60,6 +60,7 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 BinaryOp::Sub => Instruction::Sub,
                 BinaryOp::Mul => Instruction::Mul,
                 BinaryOp::Div => Instruction::Div,
+                BinaryOp::Mod => Instruction::Mod,
                 BinaryOp::Pow => Instruction::Pow,
                 BinaryOp::Lt => Instruction::Lt,
                 BinaryOp::Le => Instruction::Le,

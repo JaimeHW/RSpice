@@ -517,6 +517,7 @@ fn serialize_expr(expr: &NetExpr) -> String {
                 BinOpKind::Sub => "-",
                 BinOpKind::Mul => "*",
                 BinOpKind::Div => "/",
+                BinOpKind::Mod => "%",
                 BinOpKind::Pow => "^",
                 BinOpKind::Gt => ">",
                 BinOpKind::Lt => "<",

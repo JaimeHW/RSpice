@@ -2505,6 +2505,7 @@ fn test_xyce_behavioral_source_transient_cases_run() {
         "Netlists/ABM_FUNC/func.cir",
         "Netlists/ABM_LOG/log.cir",
         "Netlists/BREAK/break.cir",
+        "Netlists/Certification_Tests/ISSUE_310/issue310.cir",
         "Netlists/Certification_Tests/BUG_794_SON/test2.cir",
         "Netlists/Certification_Tests/BUG_86_SON/bug86.cir",
     ] {

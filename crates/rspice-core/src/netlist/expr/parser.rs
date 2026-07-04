@@ -223,13 +223,13 @@ impl<'a> ExprParser<'a> {
 
     /// Parse additive expressions (+, -)
     fn parse_additive(&mut self) -> Result<Expr, ExprError> {
-        let mut left = self.parse_multiplicative()?;
+        let mut left = self.parse_modulo()?;
 
         loop {
             self.skip_ws();
             if self.consume('+') {
                 self.skip_ws();
-                let right = self.parse_multiplicative()?;
+                let right = self.parse_modulo()?;
                 left = Expr::BinOp {
                     op: BinOpKind::Add,
                     left: Box::new(left),
@@ -237,9 +237,31 @@ impl<'a> ExprParser<'a> {
                 };
             } else if self.consume('-') {
                 self.skip_ws();
-                let right = self.parse_multiplicative()?;
+                let right = self.parse_modulo()?;
                 left = Expr::BinOp {
                     op: BinOpKind::Sub,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            } else {
+                break;
+            }
+        }
+
+        Ok(left)
+    }
+
+    /// Parse modulo expressions (%), lower precedence than * and / like Xyce.
+    fn parse_modulo(&mut self) -> Result<Expr, ExprError> {
+        let mut left = self.parse_multiplicative()?;
+
+        loop {
+            self.skip_ws();
+            if self.consume('%') {
+                self.skip_ws();
+                let right = self.parse_multiplicative()?;
+                left = Expr::BinOp {
+                    op: BinOpKind::Mod,
                     left: Box::new(left),
                     right: Box::new(right),
                 };

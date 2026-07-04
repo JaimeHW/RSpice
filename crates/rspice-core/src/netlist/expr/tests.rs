@@ -20,6 +20,20 @@ fn bare_named_constants_parse_as_numbers() {
 }
 
 #[test]
+fn modulo_operator_matches_xyce_precedence() {
+    let ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "2 + 6*5/2%4 - 1"), 4.0);
+    assert_eq!(eval_with(&ctx, "8%3*2"), 2.0);
+}
+
+#[test]
+fn table_function_clamps_outside_defined_range() {
+    let ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "table(110n%120n,0,0,60n,3.3,100n,0)"), 0.0);
+    assert!((eval_with(&ctx, "table(200n%120n,0,0,60n,3.3,100n,0)") - 1.65).abs() < 1.0e-12);
+}
+
+#[test]
 fn function_arguments_accept_comparison_and_ternary_expressions() {
     let mut ctx = ParamContext::new();
     ctx.set("A", 1.0);

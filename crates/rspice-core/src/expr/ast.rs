@@ -44,6 +44,7 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Mod,
     Pow,
     // Comparison
     Lt,

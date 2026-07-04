@@ -510,25 +510,11 @@ fn lookup_table_interpolate(x: Value, points: &[(Value, Value)]) -> Value {
         [(_, y)] => *y,
         _ => {
             if x <= points[0].0 {
-                return interpolate_segment(
-                    x,
-                    points[0].0,
-                    points[0].1,
-                    points[1].0,
-                    points[1].1,
-                    points[0].1,
-                );
+                return points[0].1;
             }
             let last = points.len() - 1;
             if x >= points[last].0 {
-                return interpolate_segment(
-                    x,
-                    points[last - 1].0,
-                    points[last - 1].1,
-                    points[last].0,
-                    points[last].1,
-                    points[last].1,
-                );
+                return points[last].1;
             }
 
             let upper = points.partition_point(|(time, _)| *time < x);
@@ -558,22 +544,14 @@ fn table_interpolate_from_args(x: Value, args: &[Value]) -> Value {
     }
 
     if x <= first_x {
-        return interpolate_segment(x, first_x, first_y, args[2], args[3], first_y);
+        return first_y;
     }
 
     let last_idx = 2 * (pair_count - 1);
     let last_x = args[last_idx];
     let last_y = args[last_idx + 1];
     if x >= last_x {
-        let prev_idx = 2 * (pair_count - 2);
-        return interpolate_segment(
-            x,
-            args[prev_idx],
-            args[prev_idx + 1],
-            last_x,
-            last_y,
-            args[prev_idx + 1],
-        );
+        return last_y;
     }
 
     for i in 0..(pair_count - 1) {

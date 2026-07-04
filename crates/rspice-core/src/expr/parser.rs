@@ -41,6 +41,7 @@ pub enum Token {
     Minus,
     Star,
     Slash,
+    Percent,
     Caret, // ^
     // Comparison
     Lt,
@@ -252,6 +253,10 @@ impl<'a> Lexer<'a> {
                     self.chars.next();
                     Token::Slash
                 }
+                '%' => {
+                    self.chars.next();
+                    Token::Percent
+                }
                 '^' => {
                     self.chars.next();
                     Token::Caret
@@ -395,10 +400,11 @@ impl<'a> Parser<'a> {
     // 4. ==, != (equality)
     // 5. <, <=, >, >= (comparison)
     // 6. +, - (additive)
-    // 7. *, / (multiplicative)
-    // 8. ^ (power)
-    // 9. unary -, !
-    // 10. function calls, atoms
+    // 7. % (modulo)
+    // 8. *, / (multiplicative)
+    // 9. ^ (power)
+    // 10. unary -, !
+    // 11. function calls, atoms
 
     fn parse_conditional(&mut self) -> Expr {
         let condition = self.parse_or();
@@ -485,7 +491,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_additive(&mut self) -> Expr {
-        let mut left = self.parse_multiplicative();
+        let mut left = self.parse_modulo();
         loop {
             let op = match &self.current {
                 Token::Plus => BinaryOp::Add,
@@ -493,9 +499,23 @@ impl<'a> Parser<'a> {
                 _ => break,
             };
             self.advance();
-            let right = self.parse_multiplicative();
+            let right = self.parse_modulo();
             left = Expr::Binary {
                 op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        left
+    }
+
+    fn parse_modulo(&mut self) -> Expr {
+        let mut left = self.parse_multiplicative();
+        while self.current == Token::Percent {
+            self.advance();
+            let right = self.parse_multiplicative();
+            left = Expr::Binary {
+                op: BinaryOp::Mod,
                 left: Box::new(left),
                 right: Box::new(right),
             };
@@ -978,6 +998,19 @@ mod tests {
         assert_eq!(eval_tran(expr, 0.0), 1.1);
         assert!((eval_tran(expr, 0.065e-12) - 1.55).abs() < 1.0e-12);
         assert_eq!(eval_tran(expr, 0.08e-12), 2.0);
+    }
+
+    #[test]
+    fn modulo_operator_matches_xyce_precedence() {
+        assert_eq!(eval_const("2 + 6*5/2%4 - 1"), 4.0);
+        assert_eq!(eval_const("8%3*2"), 2.0);
+    }
+
+    #[test]
+    fn table_expression_clamps_outside_defined_range() {
+        let expr = "table(time%120n, 0, 0, 60n, 3.3, 100n, 0)";
+        assert!((eval_tran(expr, 200.0e-9) - 1.65).abs() < 1.0e-12);
+        assert_eq!(eval_tran(expr, 110.0e-9), 0.0);
     }
 
     #[test]

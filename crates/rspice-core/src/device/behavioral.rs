@@ -520,7 +520,7 @@ fn collect_expression_transient_breakpoints(
         Expr::Function { func, args } => {
             match func {
                 Function::Table | Function::Pwl => {
-                    collect_time_table_breakpoints(args, breakpoints);
+                    collect_time_table_breakpoints(args, tstop, breakpoints);
                 }
                 Function::SpicePulse => {
                     collect_spice_pulse_breakpoints(args, tstop, breakpoints);
@@ -560,18 +560,53 @@ fn collect_expression_transient_breakpoints(
     }
 }
 
-fn collect_time_table_breakpoints(args: &[Expr], breakpoints: &mut Vec<Value>) {
-    if !matches!(args.first(), Some(Expr::Time)) {
+fn collect_time_table_breakpoints(args: &[Expr], tstop: Value, breakpoints: &mut Vec<Value>) {
+    let Some(input) = args.first() else {
         return;
-    }
+    };
 
+    let mut knots = Vec::new();
     for pair in args[1..].chunks(2) {
         let Some(x_expr) = pair.first() else {
             continue;
         };
         if let Some(time) = constant_expression_value(x_expr) {
-            breakpoints.push(time);
+            knots.push(time);
         }
+    }
+
+    match input {
+        Expr::Time => breakpoints.extend(knots),
+        Expr::Binary {
+            op: BinaryOp::Mod,
+            left,
+            right,
+        } if matches!(left.as_ref(), Expr::Time) => {
+            let Some(period) = constant_expression_value(right) else {
+                return;
+            };
+            if !period.is_finite() || period <= 0.0 {
+                return;
+            }
+
+            let cycle_count = ((tstop.max(0.0) / period).ceil() as usize)
+                .saturating_add(1)
+                .min(1_000_000);
+            for cycle in 0..cycle_count {
+                let cycle_start = period * cycle as Value;
+                if cycle_start > tstop {
+                    break;
+                }
+                breakpoints.push(cycle_start);
+                breakpoints.push(cycle_start + period);
+                for knot in knots.iter().copied() {
+                    if knot.is_finite() && knot >= 0.0 && knot <= period {
+                        breakpoints.push(cycle_start + knot);
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -776,6 +811,14 @@ fn eval_binary_with_derivative(
                     left / right,
                     (d_left * right - left * d_right) / (right * right),
                 ))
+            }
+        }
+        BinaryOp::Mod => {
+            if right == 0.0 {
+                None
+            } else {
+                let quotient = (left / right).trunc();
+                Some((left % right, d_left - quotient * d_right))
             }
         }
         BinaryOp::Pow => eval_pow_with_derivative(left, d_left, right, d_right),
@@ -1062,11 +1105,12 @@ fn eval_function_with_derivative(
         }
         Function::Mod => {
             let (left, d_left) = eval_arg(0)?;
-            let (right, _) = eval_arg(1)?;
+            let (right, d_right) = eval_arg(1)?;
             if right == 0.0 {
                 None
             } else {
-                Some((left % right, d_left))
+                let quotient = (left / right).trunc();
+                Some((left % right, d_left - quotient * d_right))
             }
         }
         Function::Table | Function::Pwl => eval_table_function_with_derivative(args, context),
@@ -1147,6 +1191,13 @@ fn eval_table_points_with_derivative(
     }
     if points.len() == 1 {
         return Some((points[0].1, 0.0));
+    }
+    if x <= points[0].0 {
+        return Some((points[0].1, 0.0));
+    }
+    let last = points.len() - 1;
+    if x >= points[last].0 {
+        return Some((points[last].1, 0.0));
     }
     let mut segment = (points[0], points[1]);
     if x > points[0].0 {
@@ -1712,6 +1763,29 @@ mod tests {
     }
 
     #[test]
+    fn analytic_derivative_supports_modulo_operator() {
+        let (value, derivative) = eval_node_derivative("v(n)%2", 5.25);
+        assert_eq!(value, 1.25);
+        assert_eq!(derivative, 1.0);
+    }
+
+    #[test]
+    fn periodic_time_table_breakpoints_repeat_knots() {
+        let ast =
+            parse_expression_strict("table(time%120n,0,0,60n,3.3,100n,0)").expect("parse table");
+        let breakpoints = expression_transient_breakpoints(&ast, 200.0e-9);
+
+        for expected in [0.0, 60.0e-9, 100.0e-9, 120.0e-9, 180.0e-9] {
+            assert!(
+                breakpoints
+                    .iter()
+                    .any(|actual| (*actual - expected).abs() < 1.0e-18),
+                "missing breakpoint {expected:e}; got {breakpoints:?}"
+            );
+        }
+    }
+
+    #[test]
     fn file_table_voltage_source_excludes_output_from_generic_voltage_lte() {
         let dir = unique_temp_dir("behavioral-file-table-lte");
         std::fs::create_dir_all(&dir).expect("create temp table directory");
@@ -1751,6 +1825,23 @@ mod tests {
             time: 0.0,
             temperature: 27.0,
             expression_dialect: ExpressionDialect::Ngspice,
+            target: DerivativeTarget::Node(0),
+        };
+        eval_behavioral_expr_with_derivative(&ast, &context)
+            .unwrap_or_else(|| panic!("analytic derivative for `{expression}` failed"))
+    }
+
+    fn eval_node_derivative(expression: &str, node_value: Value) -> (Value, Value) {
+        let ast = parse_expression_strict(expression)
+            .unwrap_or_else(|err| panic!("parse `{expression}` failed: {err}"));
+        let program = compile(&ast);
+        let context = BehavioralDerivativeContext {
+            program: &program,
+            node_values: &[node_value],
+            branch_values: &[],
+            time: 0.0,
+            temperature: 27.0,
+            expression_dialect: ExpressionDialect::Xyce,
             target: DerivativeTarget::Node(0),
         };
         eval_behavioral_expr_with_derivative(&ast, &context)

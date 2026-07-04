@@ -398,6 +398,7 @@ fn apply_binary(
         BinOpKind::Sub => complex_sub(left, right),
         BinOpKind::Mul => complex_mul(left, right),
         BinOpKind::Div => complex_div(left, right)?,
+        BinOpKind::Mod => complex_mod(left, right)?,
         BinOpKind::Pow => complex_pow(left, right),
         BinOpKind::Gt => bool_value(left.re > right.re),
         BinOpKind::Lt => bool_value(left.re < right.re),
@@ -452,6 +453,19 @@ fn complex_div(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, 
         (left.re * right.re + left.im * right.im) / denom,
         (left.im * right.re - left.re * right.im) / denom,
     ))
+}
+
+#[inline]
+fn complex_mod(left: ComplexValue, right: ComplexValue) -> Result<ComplexValue, ExprError> {
+    if !left.is_real() || !right.is_real() {
+        return Err(ExprError::InvalidArgument(
+            "modulo requires real-valued operands".to_string(),
+        ));
+    }
+    if right.re == 0.0 {
+        return Err(ExprError::DivisionByZero);
+    }
+    Ok(ComplexValue::real(left.re % right.re))
 }
 
 #[inline]
@@ -854,7 +868,7 @@ fn eval_real_table_function(name: &str, args: &[ComplexValue]) -> Result<Complex
 /// Piecewise linear interpolation for TABLE function
 ///
 /// Linearly interpolates between defined points.
-/// For x outside the defined range, extrapolates from the nearest segment.
+/// For x outside the defined range, clamps to the nearest endpoint.
 #[inline]
 fn table_interpolate(x: Value, points: &[(Value, Value)]) -> Value {
     if points.is_empty() {
@@ -868,30 +882,14 @@ fn table_interpolate(x: Value, points: &[(Value, Value)]) -> Value {
     // Sort points by x (should already be sorted in valid input)
     // For performance, we assume input is sorted
 
-    // Handle x below first point - extrapolate
+    // Handle x below first point - clamp
     if x <= points[0].0 {
-        if points.len() >= 2 {
-            let (x0, y0) = points[0];
-            let (x1, y1) = points[1];
-            if (x1 - x0).abs() > 1e-18 {
-                let slope = (y1 - y0) / (x1 - x0);
-                return y0 + slope * (x - x0);
-            }
-        }
         return points[0].1;
     }
 
-    // Handle x above last point - extrapolate
+    // Handle x above last point - clamp
     let last = points.len() - 1;
     if x >= points[last].0 {
-        if points.len() >= 2 {
-            let (x0, y0) = points[last - 1];
-            let (x1, y1) = points[last];
-            if (x1 - x0).abs() > 1e-18 {
-                let slope = (y1 - y0) / (x1 - x0);
-                return y1 + slope * (x - x1);
-            }
-        }
         return points[last].1;
     }
 
