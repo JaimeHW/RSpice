@@ -22511,6 +22511,84 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_sqrt_binary_scaled(&mut self, index: usize, left: usize, right: usize, rhs_sign: f64, value: f64, derivative_scale: f64) {",
+        "        let left_node_derivatives = self.node_derivatives[left];",
+        "        let right_node_derivatives = self.node_derivatives[right];",
+        "        let left_branch_derivatives = self.branch_derivatives[left];",
+        "        let right_branch_derivatives = self.branch_derivatives[right];",
+        "        self.values[index] = value;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] + right_node_derivatives[axis] * rhs_sign) * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] + right_branch_derivatives[axis] * rhs_sign) * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_sin_sqrt_binary(&mut self, index: usize, left: usize, right: usize, rhs_sign: f64) {",
+        "        let root = (self.values[left] + self.values[right] * rhs_sign).sqrt();",
+        "        let (value, derivative) = root.sin_cos();",
+        "        self.store_sqrt_binary_scaled(index, left, right, rhs_sign, value, derivative / (2.0 * root));",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_limexp_sqrt_binary(&mut self, index: usize, left: usize, right: usize, rhs_sign: f64) {",
+        "        let root = (self.values[left] + self.values[right] * rhs_sign).sqrt();",
+        "        if root < 80.0 {",
+        "            let value = root.exp();",
+        "            self.store_sqrt_binary_scaled(index, left, right, rhs_sign, value, value / (2.0 * root));",
+        "        } else {",
+        "            self.store_sqrt_binary_scaled(index, left, right, rhs_sign, LIMEXP_MAX * (1.0 + (root - 80.0)), LIMEXP_MAX / (2.0 * root));",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_limited_exp_sqrt_binary(&mut self, index: usize, left: usize, right: usize, rhs_sign: f64) {",
+        "        let root = (self.values[left] + self.values[right] * rhs_sign).sqrt();",
+        "        if root > 80.0 {",
+        "            self.store_sqrt_binary_scaled(index, left, right, rhs_sign, LIMEXP_MAX * (1.0 + root - 80.0), LIMEXP_MAX / (2.0 * root));",
+        "        } else if root < -80.0 {",
+        "            self.store_scalar(index, 1.804851387e-35);",
+        "        } else {",
+        "            let value = root.exp();",
+        "            self.store_sqrt_binary_scaled(index, left, right, rhs_sign, value, value / (2.0 * root));",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_powf_sqrt_binary(&mut self, index: usize, left: usize, right: usize, rhs_sign: f64, exponent: f64) {",
+        "        let root = (self.values[left] + self.values[right] * rhs_sign).sqrt();",
+        "        let output = scalar_power_value(root, exponent);",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(output, root, exponent) / (2.0 * root);",
+        "        self.store_sqrt_binary_scaled(index, left, right, rhs_sign, output, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_pow_from_scalar_sqrt_binary(&mut self, index: usize, scalar: f64, left: usize, right: usize, rhs_sign: f64) {",
+        "        let root = (self.values[left] + self.values[right] * rhs_sign).sqrt();",
+        "        let output = scalar.powf(root);",
+        "        let derivative_scale = AdValue::pow_exponent_derivative_scale(output, scalar, root) / (2.0 * root);",
+        "        self.store_sqrt_binary_scaled(index, left, right, rhs_sign, output, derivative_scale);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_max_with_scalar_sqrt_binary(&mut self, index: usize, left: usize, right: usize, rhs_sign: f64, scalar: f64) {",
+        "        let root = (self.values[left] + self.values[right] * rhs_sign).sqrt();",
+        "        if root >= scalar {",
+        "            self.store_sqrt_binary_scaled(index, left, right, rhs_sign, root, 1.0 / (2.0 * root));",
+        "        } else {",
+        "            self.store_scalar(index, scalar);",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_min_from_scalar_sqrt_binary(&mut self, index: usize, scalar: f64, left: usize, right: usize, rhs_sign: f64) {",
+        "        let root = (self.values[left] + self.values[right] * rhs_sign).sqrt();",
+        "        if scalar <= root {",
+        "            self.store_scalar(index, scalar);",
+        "        } else {",
+        "            self.store_sqrt_binary_scaled(index, left, right, rhs_sign, root, 1.0 / (2.0 * root));",
+        "        }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_sqrt_mul(&mut self, index: usize, left: usize, right: usize) {",
         "        let raw = self.values[left] * self.values[right];",
         "        let value = raw.sqrt();",
@@ -35520,6 +35598,10 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         return Some(line);
     }
 
+    if let Some(line) = compact_sqrt_binary_wrapped_store_helper_line(target_index, value) {
+        return Some(line);
+    }
+
     if let Some(args) = compact_ad_call_args(value, "pow") {
         if args.len() != 2 {
             return None;
@@ -35758,6 +35840,95 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
             "scratch.store_powf_ad({target_index}, {}, {});",
             args[0], args[1]
         ));
+    }
+
+    None
+}
+
+fn compact_sqrt_binary_wrapped_store_helper_line(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(value, "powf") {
+        if args.len() != 2 {
+            return None;
+        }
+        let (left, right, rhs_sign) = compact_sqrt_binary_scratch_args(args[0])?;
+        return Some(format!(
+            "scratch.store_powf_sqrt_binary({target_index}, {left}, {right}, {rhs_sign}, {});",
+            args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "pow_from_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        let (left, right, rhs_sign) = compact_sqrt_binary_scratch_args(args[1])?;
+        return Some(format!(
+            "scratch.store_pow_from_scalar_sqrt_binary({target_index}, {}, {left}, {right}, {rhs_sign});",
+            args[0]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "max_with_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        let (left, right, rhs_sign) = compact_sqrt_binary_scratch_args(args[0])?;
+        return Some(format!(
+            "scratch.store_max_with_scalar_sqrt_binary({target_index}, {left}, {right}, {rhs_sign}, {});",
+            args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "min_from_scalar") {
+        if args.len() != 2 {
+            return None;
+        }
+        let (left, right, rhs_sign) = compact_sqrt_binary_scratch_args(args[1])?;
+        return Some(format!(
+            "scratch.store_min_from_scalar_sqrt_binary({target_index}, {}, {left}, {right}, {rhs_sign});",
+            args[0]
+        ));
+    }
+
+    for (name, helper) in [
+        ("sin", "store_sin_sqrt_binary"),
+        ("limexp", "store_limexp_sqrt_binary"),
+        ("limited_exp", "store_limited_exp_sqrt_binary"),
+    ] {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 1 {
+            return None;
+        }
+        let (left, right, rhs_sign) = compact_sqrt_binary_scratch_args(args[0])?;
+        return Some(format!(
+            "scratch.{helper}({target_index}, {left}, {right}, {rhs_sign});"
+        ));
+    }
+
+    None
+}
+
+fn compact_sqrt_binary_scratch_args(value: &str) -> Option<(usize, usize, &'static str)> {
+    let sqrt_args = compact_ad_call_args(value, "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+
+    for (name, rhs_sign) in [("add", "1.0"), ("sub", "-1.0")] {
+        let Some(binary_args) = compact_ad_call_args(sqrt_args[0], name) else {
+            continue;
+        };
+        if binary_args.len() != 2 {
+            return None;
+        }
+        let left = compact_scratch_ad_value_index(binary_args[0])?;
+        let right = compact_scratch_ad_value_index(binary_args[1])?;
+        return Some((left, right, rhs_sign));
     }
 
     None

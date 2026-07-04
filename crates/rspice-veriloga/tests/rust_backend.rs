@@ -8320,6 +8320,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         support.contains("fn store_div_from_scalar_sqrt_add("),
         "{support}"
     );
+    assert!(support.contains("fn store_powf_sqrt_binary("), "{support}");
     assert!(
         support.contains(
             "pub(crate) fn store_add_scaled_inputs4_indices(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64)"
@@ -8365,7 +8366,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_powf_ad(12, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))), p.p0);"),
+        stamp.contains("s.store_powf_sqrt_binary(12, 0, 1, 1.0, p.p0);"),
         "{stamp}"
     );
     assert!(
@@ -8379,6 +8380,7 @@ fn rust_backend_uses_compact_general_ad_store_helpers() {
         !stamp.contains("s.store_div_from_scalar_sqrt_ad(11,"),
         "{stamp}"
     );
+    assert!(!stamp.contains("s.store_powf_ad(12,"), "{stamp}");
     assert!(!stamp.contains("s.store_neg_ad(13,"), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -8455,6 +8457,15 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
         "{support}"
     );
     assert!(support.contains("pub(crate) fn store_min_ad("), "{support}");
+    for helper in [
+        "fn store_max_with_scalar_sqrt_binary(",
+        "fn store_min_from_scalar_sqrt_binary(",
+        "fn store_pow_from_scalar_sqrt_binary(",
+        "fn store_sin_sqrt_binary(",
+        "fn store_limexp_sqrt_binary(",
+    ] {
+        assert!(support.contains(helper), "{helper}\n{support}");
+    }
     assert!(
         stamp.contains("s.store_pow_ad(2, A::add(s.ad_value(0), s.ad_value(1)), A::sub(s.ad_value(0), s.ad_value(1)));"),
         "{stamp}"
@@ -8480,35 +8491,91 @@ fn rust_backend_uses_compact_general_ad_special_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains(
-            "s.store_max_with_scalar_ad(5, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))), p.p0);"
-        ),
+        stamp.contains("s.store_max_with_scalar_sqrt_binary(5, 0, 1, 1.0, p.p0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains(
-            "s.store_min_from_scalar_ad(6, p.p1, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))));"
-        ),
+        stamp.contains("s.store_min_from_scalar_sqrt_binary(6, p.p1, 0, 1, 1.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains(
-            "s.store_pow_from_scalar_ad(7, p.p0, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))));"
-        ),
+        stamp.contains("s.store_pow_from_scalar_sqrt_binary(7, p.p0, 0, 1, 1.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_sin_ad(8, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))));"),
+        stamp.contains("s.store_sin_sqrt_binary(8, 0, 1, 1.0);"),
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_limexp_ad(9, A::sqrt(A::add(s.ad_value(0), s.ad_value(1))));"),
+        stamp.contains("s.store_limexp_sqrt_binary(9, 0, 1, 1.0);"),
         "{stamp}"
     );
+    assert!(!stamp.contains("s.store_max_with_scalar_ad(5,"), "{stamp}");
+    assert!(!stamp.contains("s.store_min_from_scalar_ad(6,"), "{stamp}");
+    assert!(!stamp.contains("s.store_pow_from_scalar_ad(7,"), "{stamp}");
+    assert!(!stamp.contains("s.store_sin_ad(8,"), "{stamp}");
+    assert!(!stamp.contains("s.store_limexp_ad(9,"), "{stamp}");
     assert!(
         !stamp.contains("s.store_ad_value(10, A::pow(s.ad_value(0), A::offset"),
         "{stamp}"
     );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_uses_compact_sqrt_binary_wrapped_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_sqrt_binary_wrapped_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact sqrt binary wrapped stores");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    for helper in [
+        "fn store_sin_sqrt_binary(",
+        "fn store_limexp_sqrt_binary(",
+        "fn store_powf_sqrt_binary(",
+        "fn store_max_with_scalar_sqrt_binary(",
+        "fn store_min_from_scalar_sqrt_binary(",
+        "fn store_pow_from_scalar_sqrt_binary(",
+    ] {
+        assert!(support.contains(helper), "{helper}\n{support}");
+    }
+    assert!(
+        stamp.contains("s.store_sin_sqrt_binary(2, 0, 1, -1.0);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_limexp_sqrt_binary(3, 0, 1, -1.0);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_powf_sqrt_binary(4, 0, 1, -1.0, p.p0);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_max_with_scalar_sqrt_binary(5, 0, 1, -1.0, p.p1);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_min_from_scalar_sqrt_binary(6, p.p2, 0, 1, -1.0);"),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_pow_from_scalar_sqrt_binary(7, p.p1, 0, 1, -1.0);"),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("A::sqrt(A::sub("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
 
@@ -18215,6 +18282,37 @@ module compact_offset_scaled_sqrt_binary(p, n);
         e = (sqrt(a - b) + offset) * gain;
         f = (sqrt(a - b) * gain) + offset;
         I(p, n) <+ c + d + e + f;
+    end
+endmodule
+"#
+}
+
+fn compact_sqrt_binary_wrapped_source() -> &'static str {
+    r#"
+module compact_sqrt_binary_wrapped(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter real floor = 0.1;
+    parameter real ceiling = 2.0;
+    real a;
+    real b;
+    real c;
+    real d;
+    real e;
+    real f;
+    real g;
+    real h;
+    analog begin
+        a = V(p, n);
+        b = V(n, p);
+        c = sin(sqrt(a - b));
+        d = limexp(sqrt(a - b));
+        e = pow(sqrt(a - b), gain);
+        f = max(sqrt(a - b), floor);
+        g = min(ceiling, sqrt(a - b));
+        h = pow(floor, sqrt(a - b));
+        I(p, n) <+ c + d + e + f + g + h;
     end
 endmodule
 "#
