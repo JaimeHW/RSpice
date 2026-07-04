@@ -212,6 +212,7 @@ struct XyceStaticAcPlan {
     print: Option<XycePrintRequest>,
     primary_ac_file: Option<String>,
     primary_ac_ic_file: Option<String>,
+    output_override: bool,
     ac: XyceAcAnalysis,
     steps: Vec<StepCommand>,
     contract: XyceStaticAcContract,
@@ -1288,6 +1289,8 @@ impl XyceTestRunner {
 
     fn static_ac_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticAcPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
+        let output_override = requires_wrapper
+            && Self::is_native_output_override_wrapper_candidate_path(&deck.relative_path);
         let source =
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
         if Self::contains_control_block(&source) {
@@ -1298,7 +1301,7 @@ impl XyceTestRunner {
         }
         Self::reject_unsupported_source_directives(&source)?;
         if requires_wrapper {
-            Self::validate_native_static_fd_ac_wrapper_contract(&source)?;
+            Self::validate_native_static_fd_ac_wrapper_contract(&source, output_override)?;
         }
 
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
@@ -1306,10 +1309,16 @@ impl XyceTestRunner {
         let ac = Self::single_ac_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
 
-        let primary_ac_output =
-            Self::canonical_print_output_request(&source, "AC", requires_wrapper)?;
-        let primary_ac_ic_output =
-            Self::canonical_print_output_request(&source, "AC_IC", requires_wrapper)?;
+        let primary_ac_output = if output_override {
+            Self::output_override_print_output_request(&source, "AC")?
+        } else {
+            Self::canonical_print_output_request(&source, "AC", requires_wrapper)?
+        };
+        let primary_ac_ic_output = if output_override {
+            Self::output_override_print_output_request(&source, "AC_IC")?
+        } else {
+            Self::canonical_print_output_request(&source, "AC_IC", requires_wrapper)?
+        };
         let primary_ac_ic_file = primary_ac_ic_output
             .as_ref()
             .and_then(|request| request.file.clone());
@@ -1371,6 +1380,7 @@ impl XyceTestRunner {
             print,
             primary_ac_file,
             primary_ac_ic_file,
+            output_override,
             ac,
             steps,
             contract,
@@ -1614,6 +1624,10 @@ impl XyceTestRunner {
                 .rsplit('/')
                 .next()
                 .is_some_and(|file_name| file_name.contains("-raw"))
+    }
+
+    fn is_native_output_override_wrapper_candidate_path(relative_path: &str) -> bool {
+        Self::normalize_manifest_key(relative_path).starts_with("netlists/output/dasho/")
     }
 
     fn is_native_multiplicity_static_prn_wrapper_candidate_path(relative_path: &str) -> bool {
@@ -2256,7 +2270,10 @@ impl XyceTestRunner {
         }
     }
 
-    fn validate_native_static_fd_ac_wrapper_contract(source: &str) -> Result<(), String> {
+    fn validate_native_static_fd_ac_wrapper_contract(
+        source: &str,
+        output_override: bool,
+    ) -> Result<(), String> {
         let mut primary_ac_print_count = 0usize;
         let mut side_ac_print_count = 0usize;
         let mut side_ac_print_formats = Vec::new();
@@ -2364,6 +2381,20 @@ impl XyceTestRunner {
                     "wrapper-origin frequency-domain static output contract does not cover {command} directives"
                 ));
             }
+        }
+
+        if output_override {
+            if primary_ac_print_count == 0
+                && side_ac_print_count == 0
+                && primary_ac_ic_print_count == 0
+                && side_ac_ic_print_count == 0
+            {
+                return Err(
+                    "wrapper-origin frequency-domain output override contract requires one .PRINT AC or .PRINT AC_IC statement"
+                        .to_string(),
+                );
+            }
+            return Ok(());
         }
 
         if primary_ac_print_count == 0 {
@@ -3297,10 +3328,16 @@ impl XyceTestRunner {
         if !Self::source_has_op_analysis(&plan.source) {
             return Ok(Vec::new());
         }
-        let requests = Self::aggregate_print_output_requests(
-            Self::print_output_requests(&plan.source, "AC_IC")?,
-            "AC_IC",
-        )?;
+        let requests = if plan.output_override {
+            Self::output_override_print_output_request(&plan.source, "AC_IC")?
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            Self::aggregate_print_output_requests(
+                Self::print_output_requests(&plan.source, "AC_IC")?,
+                "AC_IC",
+            )?
+        };
         if requests.is_empty() {
             return Ok(Vec::new());
         }
@@ -3572,6 +3609,9 @@ impl XyceTestRunner {
         netlist: &Netlist,
         results: &[AcResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        if plan.output_override {
+            return Ok(Vec::new());
+        }
         let Some(primary_reference_path) = plan.reference_path.as_ref() else {
             return Err(
                 "AC side-output comparison requires a primary .PRINT AC oracle".to_string(),
@@ -3618,6 +3658,9 @@ impl XyceTestRunner {
         points_per_step: usize,
         batches: &[XyceAcResultBatch],
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        if plan.output_override {
+            return Ok(Vec::new());
+        }
         let Some(primary_reference_path) = plan.reference_path.as_ref() else {
             return Err(
                 "stepped AC side-output comparison requires a primary .PRINT AC oracle".to_string(),
@@ -12394,6 +12437,24 @@ impl XyceTestRunner {
                 )),
             }
         })
+    }
+
+    fn output_override_print_output_request(
+        source: &str,
+        analysis: &str,
+    ) -> Result<Option<XycePrintOutputRequest>, String> {
+        let mut probes = Vec::new();
+        for request in Self::print_output_requests(source, analysis)? {
+            probes.extend(request.probes);
+        }
+        if probes.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(XycePrintOutputRequest {
+            format: None,
+            file: None,
+            probes,
+        }))
     }
 
     fn aggregate_print_output_requests(

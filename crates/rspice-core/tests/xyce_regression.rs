@@ -376,6 +376,7 @@ fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
         "Netlists/Output/AC/ac-touchstone-defaults-to-prn.cir",
         "Netlists/Output/AC/op-print-line-order.cir",
         "Netlists/Output/AC/op-prn.cir",
+        "Netlists/Output/Dasho/ac.cir",
     ] {
         assert!(
             runner.requires_upstream_wrapper(relative),
