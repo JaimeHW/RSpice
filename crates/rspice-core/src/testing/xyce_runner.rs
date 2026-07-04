@@ -207,9 +207,9 @@ struct XyceStaticTranPlan {
 #[derive(Debug, Clone)]
 struct XyceStaticAcPlan {
     deck_path: PathBuf,
-    reference_path: PathBuf,
+    reference_path: Option<PathBuf>,
     source: String,
-    print: XycePrintRequest,
+    print: Option<XycePrintRequest>,
     ac: XyceAcAnalysis,
     steps: Vec<StepCommand>,
     contract: XyceStaticAcContract,
@@ -255,9 +255,15 @@ enum XyceStaticAcContract {
     PlainStatic,
     PlainCsv,
     PlainCsd,
+    PlainIcPrn,
+    PlainIcCsv,
+    PlainIcCsd,
     WrapperStatic,
     WrapperCsv,
     WrapperCsd,
+    WrapperIcPrn,
+    WrapperIcCsv,
+    WrapperIcCsd,
 }
 
 impl XyceStaticAcContract {
@@ -269,12 +275,24 @@ impl XyceStaticAcContract {
             (Self::PlainCsv, true) => "static_fd_csv_step_ac",
             (Self::PlainCsd, false) => "static_csd_ac",
             (Self::PlainCsd, true) => "static_csd_step_ac",
+            (Self::PlainIcPrn, false) => "static_td_prn_ac_ic",
+            (Self::PlainIcPrn, true) => "static_td_prn_step_ac_ic",
+            (Self::PlainIcCsv, false) => "static_td_csv_ac_ic",
+            (Self::PlainIcCsv, true) => "static_td_csv_step_ac_ic",
+            (Self::PlainIcCsd, false) => "static_td_csd_ac_ic",
+            (Self::PlainIcCsd, true) => "static_td_csd_step_ac_ic",
             (Self::WrapperStatic, false) => "wrapper_static_fd_prn_ac",
             (Self::WrapperStatic, true) => "wrapper_static_fd_prn_step_ac",
             (Self::WrapperCsv, false) => "wrapper_static_fd_csv_ac",
             (Self::WrapperCsv, true) => "wrapper_static_fd_csv_step_ac",
             (Self::WrapperCsd, false) => "wrapper_csd_ac",
             (Self::WrapperCsd, true) => "wrapper_csd_step_ac",
+            (Self::WrapperIcPrn, false) => "wrapper_static_td_prn_ac_ic",
+            (Self::WrapperIcPrn, true) => "wrapper_static_td_prn_step_ac_ic",
+            (Self::WrapperIcCsv, false) => "wrapper_static_td_csv_ac_ic",
+            (Self::WrapperIcCsv, true) => "wrapper_static_td_csv_step_ac_ic",
+            (Self::WrapperIcCsd, false) => "wrapper_static_td_csd_ac_ic",
+            (Self::WrapperIcCsd, true) => "wrapper_static_td_csd_step_ac_ic",
         }
     }
 
@@ -283,6 +301,9 @@ impl XyceStaticAcContract {
             Self::PlainStatic | Self::WrapperStatic => "FD.prn",
             Self::PlainCsv | Self::WrapperCsv => "FD.csv",
             Self::PlainCsd | Self::WrapperCsd => "csd",
+            Self::PlainIcPrn | Self::WrapperIcPrn => "TD.prn",
+            Self::PlainIcCsv | Self::WrapperIcCsv => "TD.csv",
+            Self::PlainIcCsd | Self::WrapperIcCsd => "TD.csd",
         }
     }
 }
@@ -1278,30 +1299,61 @@ impl XyceTestRunner {
             Self::validate_native_static_fd_ac_wrapper_contract(&source)?;
         }
 
-        let print_output = Self::single_ac_print_output_request(&source)?;
-        let contract = Self::static_ac_contract_for_print_format(
-            requires_wrapper,
-            print_output.format.as_deref(),
-        )?;
-        let reference_path = self
-            .static_output_reference_path(&deck.path, contract.reference_extension())
-            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-        if !reference_path.is_file() {
-            return Err(format!(
-                "no checked-in static .{} oracle at {}",
-                contract.reference_extension(),
-                self.display_path(&reference_path)
-            ));
-        }
-
-        let print = XycePrintRequest {
-            probes: print_output.probes,
-        };
         let netlist = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let ac = Self::single_ac_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
-        Self::validate_static_ac_contract(&netlist, &ac, &print)?;
+
+        let primary_ac_output = Self::primary_print_output_request(&source, "AC")?;
+        let primary_ac_ic_output = Self::primary_print_output_request(&source, "AC_IC")?;
+        let (contract, reference_path, print) = if let Some(print_output) = primary_ac_output {
+            let contract = Self::static_ac_contract_for_print_format(
+                requires_wrapper,
+                print_output.format.as_deref(),
+            )?;
+            let reference_path = self
+                .static_output_reference_path(&deck.path, contract.reference_extension())
+                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+            if !reference_path.is_file() {
+                return Err(format!(
+                    "no checked-in static .{} oracle at {}",
+                    contract.reference_extension(),
+                    self.display_path(&reference_path)
+                ));
+            }
+            let print = XycePrintRequest {
+                probes: print_output.probes,
+            };
+            Self::validate_static_ac_contract(&netlist, &ac, &print)?;
+            (contract, Some(reference_path), Some(print))
+        } else if let Some(print_output) = primary_ac_ic_output {
+            if !steps.is_empty() {
+                return Err(
+                    ".STEP AC_IC-only comparison is not implemented for wrapper-origin AC output"
+                        .to_string(),
+                );
+            }
+            let contract = Self::static_ac_ic_contract_for_print_format(
+                requires_wrapper,
+                print_output.format.as_deref(),
+            )?;
+            let reference_path = self
+                .static_output_reference_path(&deck.path, contract.reference_extension())
+                .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+            if !reference_path.is_file() {
+                return Err(format!(
+                    "no checked-in static .{} oracle at {}",
+                    contract.reference_extension(),
+                    self.display_path(&reference_path)
+                ));
+            }
+            (contract, None, None)
+        } else {
+            return Err(
+                "deck has no primary .PRINT AC or .PRINT AC_IC statement with static columns"
+                    .to_string(),
+            );
+        };
 
         Ok(XyceStaticAcPlan {
             deck_path: deck.path.clone(),
@@ -2195,6 +2247,8 @@ impl XyceTestRunner {
 
     fn validate_native_static_fd_ac_wrapper_contract(source: &str) -> Result<(), String> {
         let mut primary_ac_print_count = 0usize;
+        let mut side_ac_print_count = 0usize;
+        let mut primary_ac_ic_print_count = 0usize;
         let has_op_analysis = Self::source_has_op_analysis(source);
         for line in Self::logical_netlist_lines(source) {
             let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
@@ -2246,6 +2300,8 @@ impl XyceTestRunner {
                                     "wrapper-origin frequency-domain static output contract does not cover AC_IC FILE= side output FORMAT={print_format}"
                                 ));
                             }
+                        } else {
+                            primary_ac_ic_print_count += 1;
                         }
                         continue;
                     }
@@ -2282,6 +2338,7 @@ impl XyceTestRunner {
                     index += 1;
                 }
                 if has_file_output {
+                    side_ac_print_count += 1;
                     if !Self::ac_print_format_is_prn_compatible(&print_format) {
                         return Err(format!(
                             "wrapper-origin frequency-domain static output contract does not cover FILE= side output FORMAT={print_format}"
@@ -2299,13 +2356,20 @@ impl XyceTestRunner {
             }
         }
 
-        match primary_ac_print_count {
-            1.. => Ok(()),
-            0 => Err(
-                "wrapper-origin frequency-domain static output contract requires one primary .PRINT AC statement"
-                    .to_string(),
-            ),
-        }?;
+        if primary_ac_print_count == 0 {
+            if side_ac_print_count > 0 {
+                return Err(
+                    "wrapper-origin frequency-domain static output contract does not cover .PRINT AC FILE= output without a primary .PRINT AC"
+                        .to_string(),
+                );
+            }
+            if primary_ac_ic_print_count == 0 {
+                return Err(
+                    "wrapper-origin frequency-domain static output contract requires one primary .PRINT AC or .PRINT AC_IC statement"
+                        .to_string(),
+                );
+            }
+        }
         Ok(())
     }
 
@@ -2675,6 +2739,37 @@ impl XyceTestRunner {
         ))
     }
 
+    fn static_ac_ic_contract_for_print_format(
+        requires_wrapper: bool,
+        format: Option<&str>,
+    ) -> Result<XyceStaticAcContract, String> {
+        let normalized = format.unwrap_or("STD").trim();
+        if Self::ac_print_format_is_prn_compatible(normalized) {
+            return Ok(if requires_wrapper {
+                XyceStaticAcContract::WrapperIcPrn
+            } else {
+                XyceStaticAcContract::PlainIcPrn
+            });
+        }
+        if normalized.eq_ignore_ascii_case("CSV") {
+            return Ok(if requires_wrapper {
+                XyceStaticAcContract::WrapperIcCsv
+            } else {
+                XyceStaticAcContract::PlainIcCsv
+            });
+        }
+        if normalized.eq_ignore_ascii_case("PROBE") {
+            return Ok(if requires_wrapper {
+                XyceStaticAcContract::WrapperIcCsd
+            } else {
+                XyceStaticAcContract::PlainIcCsd
+            });
+        }
+        Err(format!(
+            "native static .PRINT AC_IC comparison does not cover FORMAT={normalized}"
+        ))
+    }
+
     fn static_dc_contract_for_print_format(
         requires_wrapper: bool,
         format: Option<&str>,
@@ -2840,18 +2935,6 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract(!plan.steps.is_empty());
-        let reference = match Self::parse_ac_reference_file(plan.contract, &plan.reference_path) {
-            Ok(reference) => reference,
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("failed to parse Xyce AC oracle: {err}"),
-                    Vec::new(),
-                );
-            }
-        };
         let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
             Ok(netlist) => netlist,
             Err(err) => {
@@ -2874,6 +2957,57 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+
+        let Some(primary_reference_path) = plan.reference_path.as_ref() else {
+            let ac_ic_mismatches = match self.compare_ac_initial_condition_outputs(&plan, &netlist)
+            {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("AC initial-condition output comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            return if ac_ic_mismatches.is_empty() {
+                self.passed_result(deck, start, contract)
+            } else {
+                self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "{} Xyce AC initial-condition output mismatch(es)",
+                        ac_ic_mismatches.len()
+                    ),
+                    ac_ic_mismatches,
+                )
+            };
+        };
+        let Some(primary_print) = plan.print.as_ref() else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                "AC plan has a primary reference without a primary print request".to_string(),
+                Vec::new(),
+            );
+        };
+        let reference = match Self::parse_ac_reference_file(plan.contract, primary_reference_path) {
+            Ok(reference) => reference,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("failed to parse Xyce AC oracle: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
 
         if !plan.steps.is_empty() {
             return self.run_static_step_ac_plan(
@@ -2910,7 +3044,7 @@ impl XyceTestRunner {
 
         let mismatches = match self.compare_ac_prn_reference(
             &reference,
-            &plan.print,
+            primary_print,
             &netlist,
             &plan.source,
             &results,
@@ -2997,6 +3131,15 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract(true);
+        let Some(primary_print) = plan.print.as_ref() else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                ".STEP AC comparison requires a primary .PRINT AC request".to_string(),
+                Vec::new(),
+            );
+        };
         let expansion_engine = self.create_xyce_engine();
         let step_runs =
             match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
@@ -3051,7 +3194,7 @@ impl XyceTestRunner {
 
         let mismatches = match self.compare_step_ac_reference_batches(
             &reference,
-            &plan.print,
+            primary_print,
             &plan.source,
             frequencies.len(),
             &batches,
@@ -3179,7 +3322,7 @@ impl XyceTestRunner {
         request: &XycePrintOutputRequest,
     ) -> Result<PathBuf, String> {
         if let Some(file) = request.file.as_deref() {
-            return Self::side_output_reference_path(&plan.reference_path, file);
+            return self.side_output_reference_path_for_deck(&plan.deck_path, file);
         }
 
         let extension = Self::ac_initial_condition_reference_extension(request.format.as_deref())?;
@@ -3377,6 +3520,11 @@ impl XyceTestRunner {
         netlist: &Netlist,
         results: &[AcResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let Some(primary_reference_path) = plan.reference_path.as_ref() else {
+            return Err(
+                "AC side-output comparison requires a primary .PRINT AC oracle".to_string(),
+            );
+        };
         let side_outputs = Self::prn_compatible_ac_side_output_requests(&plan.source)?;
         let mut all_mismatches = Vec::new();
         for request in side_outputs {
@@ -3385,7 +3533,7 @@ impl XyceTestRunner {
                 .as_deref()
                 .expect("side output request has FILE= set");
             let reference_path =
-                Self::ac_side_output_reference_path(&plan.reference_path, &request, file)?;
+                Self::ac_side_output_reference_path(primary_reference_path, &request, file)?;
             let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
                 format!(
                     "failed to parse AC side-output oracle {}: {err}",
@@ -3415,6 +3563,11 @@ impl XyceTestRunner {
         points_per_step: usize,
         batches: &[XyceAcResultBatch],
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        let Some(primary_reference_path) = plan.reference_path.as_ref() else {
+            return Err(
+                "stepped AC side-output comparison requires a primary .PRINT AC oracle".to_string(),
+            );
+        };
         let side_outputs = Self::prn_compatible_ac_side_output_requests(&plan.source)?;
         let mut all_mismatches = Vec::new();
         for request in side_outputs {
@@ -3423,7 +3576,7 @@ impl XyceTestRunner {
                 .as_deref()
                 .expect("side output request has FILE= set");
             let reference_path =
-                Self::ac_side_output_reference_path(&plan.reference_path, &request, file)?;
+                Self::ac_side_output_reference_path(primary_reference_path, &request, file)?;
             let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
                 format!(
                     "failed to parse AC side-output oracle {}: {err}",
@@ -4600,6 +4753,17 @@ impl XyceTestRunner {
             ));
         }
         Ok(candidate)
+    }
+
+    fn side_output_reference_path_for_deck(
+        &self,
+        deck_path: &Path,
+        file: &str,
+    ) -> Result<PathBuf, String> {
+        let anchor = self
+            .static_output_reference_path(deck_path, "anchor")
+            .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        Self::side_output_reference_path(&anchor, file)
     }
 
     fn ac_side_output_reference_path(
@@ -12116,19 +12280,32 @@ impl XyceTestRunner {
         })
     }
 
+    #[cfg(test)]
     fn single_ac_print_output_request(source: &str) -> Result<XycePrintOutputRequest, String> {
+        match Self::primary_print_output_request(source, "AC")? {
+            Some(request) => Ok(request),
+            None => Err("deck has no .PRINT AC statement with static columns".to_string()),
+        }
+    }
+
+    fn primary_print_output_request(
+        source: &str,
+        analysis: &str,
+    ) -> Result<Option<XycePrintOutputRequest>, String> {
         let requests = Self::aggregate_print_output_requests(
-            Self::print_output_requests(source, "AC")?,
-            "AC",
+            Self::print_output_requests(source, analysis)?,
+            analysis,
         )?
         .into_iter()
         .filter(|request| request.file.is_none())
         .collect::<Vec<_>>();
 
         match requests.len() {
-            0 => Err("deck has no .PRINT AC statement with static columns".to_string()),
-            1 => Ok(requests.into_iter().next().expect("one request")),
-            _ => Err("deck has multiple .PRINT AC statements; multi-table comparison is not implemented yet".to_string()),
+            0 => Ok(None),
+            1 => Ok(Some(requests.into_iter().next().expect("one request"))),
+            _ => Err(format!(
+                "deck has multiple primary .PRINT {analysis} output destinations after aggregation"
+            )),
         }
     }
 
