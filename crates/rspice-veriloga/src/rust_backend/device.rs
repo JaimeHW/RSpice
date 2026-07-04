@@ -861,6 +861,7 @@ fn compact_generated_stamp_surface_base(mut source: String) -> String {
     source = compact_mul_div_scaled_product_helper_calls(source);
     source = compact_mul_product3_helper_calls(source);
     source = compact_mul_powf_helper_calls(source);
+    source = compact_mul_powi_helper_calls(source);
     source = compact_mul_pow_helper_calls(source);
     source = compact_pow_index_helper_calls(source);
     source = compact_mul_add_sub_helper_calls(source);
@@ -2682,6 +2683,82 @@ fn compact_mul_powf_helper_call_replacement(
             return None;
         }
         compact_index_or_mixed_mul_powf_helper_line(target_index, left, powf_args[0], powf_args[1])?
+    } else {
+        return None;
+    };
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
+}
+
+fn compact_mul_powi_helper_calls(source: String) -> String {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(NEEDLE) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) =
+            compact_mul_powi_helper_call_replacement(&source, call_start, indent)
+        else {
+            let skip_to = call_start + NEEDLE.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_mul_powi_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+) -> Option<(usize, String)> {
+    const NEEDLE: &str = "scratch.store_mul_ad(";
+    let open_paren = call_start + NEEDLE.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let left = args[1].trim();
+    let right = args[2].trim();
+    let line = if let Some(powi_args) = compact_ad_call_args(left, "powi") {
+        if powi_args.len() != 2 {
+            return None;
+        }
+        compact_index_or_mixed_mul_powi_helper_line(
+            target_index,
+            right,
+            powi_args[0],
+            powi_args[1],
+        )?
+    } else if let Some(powi_args) = compact_ad_call_args(right, "powi") {
+        if powi_args.len() != 2 {
+            return None;
+        }
+        compact_index_or_mixed_mul_powi_helper_line(target_index, left, powi_args[0], powi_args[1])?
     } else {
         return None;
     };
@@ -8265,6 +8342,21 @@ fn stamp() {
             );
         }
 
+        for signature in ["fn store_mul_powi_ad_lhs(", "fn store_mul_powi_ad_rhs("] {
+            let body = helper_body(&support, signature);
+            assert!(
+                body.contains(
+                    "let derivative_scale = integer_power_derivative_scale(base, exponent);"
+                ),
+                "{body}"
+            );
+            assert!(
+                body.contains("value.node_derivatives[axis] * derivative_scale"),
+                "{body}"
+            );
+            assert!(!body.contains("pow_base_derivative_scale"), "{body}");
+        }
+
         let ad_support = generate_ad_value_struct();
 
         let ad_powf = helper_body(&ad_support, "fn powf(left: Self, exponent: f64)");
@@ -9021,6 +9113,75 @@ fn stamp() {
         );
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_powi_multiply_stores_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_mul_powi(",
+            "fn store_mul_powi_ad_lhs(",
+            "fn store_mul_powi_ad_rhs(",
+            "fn store_mul_powi_mixed_ai",
+            "fn store_mul_powi_mixed_ia",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+        assert!(
+            support
+                .contains("let derivative_scale = integer_power_derivative_scale(base, exponent);"),
+            "{support}"
+        );
+        assert!(
+            !support.contains("fn store_mul_powi_components"),
+            "{support}"
+        );
+
+        let source = r#"
+fn stamp() {
+    scratch.store_mul_ad(160, AdValue::powi(scratch.ad_value(2), (params.nf as i32)), AdValue::scale_offset(scratch.ad_value(3), params.scale, params.offset));
+    scratch.store_mul_ad(161, scratch.ad_value(5), AdValue::powi(AdValue::sub_from_scalar(params.limit, scratch.ad_value(4)), 6));
+    scratch.store_mul_ad(162, AdValue::powi(AdValue::sqrt(scratch.ad_value(6)), (params.nf as i32)), AdValue::powi(scratch.ad_value(7), (params.other as i32)));
+    scratch.store_ad_value(163, AdValue::mul(AdValue::powi(AdValue::sqrt(scratch.ad_value(8)), (params.nf as i32)), scratch.ad_value(9)));
+    scratch.store_ad_value(164, AdValue::mul(scratch.ad_value(10), AdValue::powi(AdValue::abs(scratch.ad_value(11)), (params.nf as i32))));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_mul_powi_mixed_ai(160, A::scale_offset(s.ad_value(3), p.scale, p.offset), 2, (p.nf as i32));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_powi_mixed_ia(161, 5, A::sub_from_scalar(p.limit, s.ad_value(4)), 6);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_powi(162, A::powi(s.ad_value(7), (p.other as i32)), A::sqrt(s.ad_value(6)), (p.nf as i32));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_powi_ad_lhs(163, A::sqrt(s.ad_value(8)), (p.nf as i32), 9);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_powi_ad_rhs(164, 10, A::abs(s.ad_value(11)), (p.nf as i32));"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_ad("), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+        assert!(!compact.contains("A::mul("), "{compact}");
     }
 
     #[test]
@@ -19771,6 +19932,43 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
+    "    fn store_mul_powi(&mut self, index: usize, factor: AdValue, base: AdValue, exponent: i32) {",
+    "        let factor_value = factor.value;",
+    "        let base_value = base.value;",
+    "        let output = base_value.powi(exponent);",
+    "        let derivative_scale = integer_power_derivative_scale(base_value, exponent);",
+    "        self.values[index] = factor_value * output;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor.node_derivatives[axis] * output + factor_value * base.node_derivatives[axis] * derivative_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * output + factor_value * base.branch_derivatives[axis] * derivative_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_powi_ad_lhs(&mut self, index: usize, value: AdValue, exponent: i32, source: usize) {",
+    "        let source_value = self.values[source];",
+    "        let source_node_derivatives = self.node_derivatives[source];",
+    "        let source_branch_derivatives = self.branch_derivatives[source];",
+    "        let base = value.value;",
+    "        let output = base.powi(exponent);",
+    "        let derivative_scale = integer_power_derivative_scale(base, exponent);",
+    "        self.values[index] = output * source_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale * source_value + output * source_node_derivatives[axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale * source_value + output * source_branch_derivatives[axis]; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_powi_ad_rhs(&mut self, index: usize, source: usize, value: AdValue, exponent: i32) {",
+    "        let source_value = self.values[source];",
+    "        let source_node_derivatives = self.node_derivatives[source];",
+    "        let source_branch_derivatives = self.branch_derivatives[source];",
+    "        let base = value.value;",
+    "        let output = base.powi(exponent);",
+    "        let derivative_scale = integer_power_derivative_scale(base, exponent);",
+    "        self.values[index] = source_value * output;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * output + source_value * value.node_derivatives[axis] * derivative_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * output + source_value * value.branch_derivatives[axis] * derivative_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
     "    fn store_mul_neg_lhs(&mut self, index: usize, left: usize, right: usize) {",
     "        let left_value = -self.values[left];",
     "        let right_value = self.values[right];",
@@ -22484,6 +22682,7 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
     }
     for mask in index_or_mixed_masks(2) {
         out.push_str(&generate_index_or_mixed_mul_powf_helper(&mask));
+        out.push_str(&generate_index_or_mixed_mul_powi_helper(&mask));
     }
     for mask in index_or_mixed_masks(3) {
         out.push_str(&generate_index_or_mixed_mul_pow_helper(&mask));
@@ -23879,6 +24078,33 @@ fn generate_index_or_mixed_mul_powf_helper(mask: &str) -> String {
         let base_value = {base_value};
         let output = scalar_power_value(base_value, exponent);
         let derivative_scale = AdValue::pow_base_derivative_scale(output, base_value, exponent);
+        self.values[index] = factor_value * output;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {factor_node_derivative} * output + factor_value * {base_node_derivative} * derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {factor_branch_derivative} * output + factor_value * {base_branch_derivative} * derivative_scale; }}
+    }}
+"#,
+        factor_ty = mixed_helper_type(mask, 0),
+        base_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_mul_powi_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_mul_powi", mask);
+    let factor_value = index_or_mixed_value_expr(mask, 0, "factor");
+    let base_value = index_or_mixed_value_expr(mask, 1, "base");
+    let factor_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "factor");
+    let base_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "base");
+    let factor_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "factor");
+    let base_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "base");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, factor: {factor_ty}, base: {base_ty}, exponent: i32) {{
+        let factor_value = {factor_value};
+        let base_value = {base_value};
+        let output = base_value.powi(exponent);
+        let derivative_scale = integer_power_derivative_scale(base_value, exponent);
         self.values[index] = factor_value * output;
         for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {factor_node_derivative} * output + factor_value * {base_node_derivative} * derivative_scale; }}
         for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {factor_branch_derivative} * output + factor_value * {base_branch_derivative} * derivative_scale; }}
@@ -36016,6 +36242,17 @@ fn compact_pow_mixed_lhs_helper_line(
         ));
     }
 
+    if let Some(args) = compact_ad_call_args(value, "powi") {
+        if args.len() != 2 {
+            return None;
+        }
+        let base = compact_scratch_or_non_atomic_ad_arg(args[0])?;
+        return Some(format!(
+            "scratch.store_mul_powi_ad_lhs({target_index}, {base}, {}, {source});",
+            args[1]
+        ));
+    }
+
     let args = compact_ad_call_args(value, "powf")?;
     if args.len() != 2 {
         return None;
@@ -36040,6 +36277,17 @@ fn compact_pow_mixed_rhs_helper_line(
         let exponent = compact_scratch_or_non_atomic_ad_arg(args[1])?;
         return Some(format!(
             "scratch.store_mul_pow_ad_rhs({target_index}, {source}, {base}, {exponent});"
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(value, "powi") {
+        if args.len() != 2 {
+            return None;
+        }
+        let base = compact_scratch_or_non_atomic_ad_arg(args[0])?;
+        return Some(format!(
+            "scratch.store_mul_powi_ad_rhs({target_index}, {source}, {base}, {});",
+            args[1]
         ));
     }
 
@@ -36897,6 +37145,21 @@ fn compact_index_or_mixed_mul_powf_helper_line(
 ) -> Option<String> {
     let (helper, value_args) =
         compact_index_or_mixed_value_args("store_mul_powf", &[factor, base])?;
+    let mut call_args = Vec::with_capacity(4);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    call_args.push(exponent.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_mul_powi_helper_line(
+    target_index: usize,
+    factor: &str,
+    base: &str,
+    exponent: &str,
+) -> Option<String> {
+    let (helper, value_args) =
+        compact_index_or_mixed_value_args("store_mul_powi", &[factor, base])?;
     let mut call_args = Vec::with_capacity(4);
     call_args.push(target_index.to_string());
     call_args.extend(value_args);

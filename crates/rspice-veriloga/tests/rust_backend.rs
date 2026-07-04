@@ -3343,6 +3343,44 @@ fn rust_backend_uses_compact_dynamic_integer_power_exponents() {
 }
 
 #[test]
+fn rust_backend_uses_compact_integer_power_multiply_helpers() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(compact_integer_power_multiply_source())
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile compact integer power multiply helper");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+    let support = render_runtime_support_module();
+
+    assert!(
+        support.contains("fn store_mul_powi"),
+        "runtime support should include fused integer-power multiply helpers:\n{support}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_powi"),
+        "integer power products should use fused powi multiply helpers:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_mul_ad("),
+        "integer power products should avoid generic AD multiply stores:\n{stamp}"
+    );
+    assert!(
+        !stamp.contains("powf("),
+        "integer power products should avoid floating exponent power paths:\n{stamp}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn rust_backend_materializes_repeated_expensive_compact_ad_subexpressions() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(compact_repeated_expensive_ad_subexpression_source())
@@ -14906,6 +14944,25 @@ module compact_dynamic_integer_power(p, n);
         b = pow(a, nf);
         c = (a + 2.0) ** (nf - 1);
         I(p, n) <+ b + c;
+    end
+endmodule
+"#
+}
+
+fn compact_integer_power_multiply_source() -> &'static str {
+    r#"
+module compact_integer_power_multiply(p, n, q);
+    inout p, n, q;
+    electrical p, n, q;
+    parameter integer nf = 5 from [1:inf);
+    real a;
+    real b;
+    real c;
+    analog begin
+        a = V(p, n) + 1.0;
+        b = V(q, n) + 2.0;
+        c = pow(a, nf) * b;
+        I(p, n) <+ c;
     end
 endmodule
 "#
