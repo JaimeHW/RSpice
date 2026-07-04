@@ -2963,7 +2963,7 @@ fn rust_backend_uses_direct_hot_general_ad_store_helpers() {
         "{support}"
     );
     assert!(
-        support.contains("integer_power_derivative_scale(base, exponent as i32) * dbase"),
+        support.contains("Self::pow_base_derivative_scale(value, base, exponent) * dbase"),
         "{support}"
     );
     assert!(

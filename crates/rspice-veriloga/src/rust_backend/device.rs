@@ -8184,7 +8184,7 @@ fn stamp() {
         ] {
             let body = helper_body(&support, signature);
             assert!(
-                body.contains("let derivative_scale = AdValue::pow_derivative(output, value.value, exponent, 1.0, 0.0)"),
+                body.contains("let derivative_scale = AdValue::pow_base_derivative_scale(output, value.value, exponent)"),
                 "{body}"
             );
             assert!(
@@ -8202,7 +8202,7 @@ fn stamp() {
         let div_powf = helper_body(&support, "fn store_div_from_scalar_powf_ad(");
         assert!(
             div_powf.contains(
-                "let derivative_scale = AdValue::pow_derivative(denominator, value.value, exponent, 1.0, 0.0) * denominator_scale;"
+                "let derivative_scale = AdValue::pow_base_derivative_scale(denominator, value.value, exponent) * denominator_scale;"
             ),
             "{div_powf}"
         );
@@ -8216,7 +8216,7 @@ fn stamp() {
         let pow_from_scalar = helper_body(&support, "fn store_pow_from_scalar_ad(");
         assert!(
             pow_from_scalar.contains(
-                "let derivative_scale = AdValue::pow_derivative(output, scalar, exponent, 0.0, 1.0);"
+                "let derivative_scale = AdValue::pow_exponent_derivative_scale(output, scalar, exponent);"
             ),
             "{pow_from_scalar}"
         );
@@ -8230,7 +8230,7 @@ fn stamp() {
         let offset_pow_from_scalar = helper_body(&support, "fn store_offset_pow_from_scalar_ad(");
         assert!(
             offset_pow_from_scalar.contains(
-                "let derivative_scale = AdValue::pow_derivative(output, scalar, exponent, 0.0, 1.0);"
+                "let derivative_scale = AdValue::pow_exponent_derivative_scale(output, scalar, exponent);"
             ),
             "{offset_pow_from_scalar}"
         );
@@ -8249,7 +8249,7 @@ fn stamp() {
             let body = helper_body(&support, signature);
             assert!(
                 body.contains(
-                    "let derivative_scale = AdValue::pow_derivative(output, base, exponent, 1.0, 0.0);"
+                    "let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent);"
                 ),
                 "{body}"
             );
@@ -8270,7 +8270,7 @@ fn stamp() {
         let ad_powf = helper_body(&ad_support, "fn powf(left: Self, exponent: f64)");
         assert!(
             ad_powf.contains(
-                "let derivative_scale = Self::pow_derivative(value, base, exponent, 1.0, 0.0);"
+                "let derivative_scale = Self::pow_base_derivative_scale(value, base, exponent);"
             ),
             "{ad_powf}"
         );
@@ -8284,7 +8284,7 @@ fn stamp() {
             helper_body(&ad_support, "fn pow_from_scalar(base: f64, right: Self)");
         assert!(
             ad_pow_from_scalar.contains(
-                "let derivative_scale = Self::pow_derivative(value, base, exponent, 0.0, 1.0);"
+                "let derivative_scale = Self::pow_exponent_derivative_scale(value, base, exponent);"
             ),
             "{ad_pow_from_scalar}"
         );
@@ -8309,12 +8309,39 @@ fn stamp() {
         }
 
         let ad_support = generate_ad_value_struct();
+        let base_scale_helper = helper_body(&ad_support, "fn pow_base_derivative_scale(");
+        assert!(
+            base_scale_helper.contains("integer_power_derivative_scale(base, exponent as i32)"),
+            "{base_scale_helper}"
+        );
+        assert!(
+            base_scale_helper.contains("exponent * (value / base)"),
+            "{base_scale_helper}"
+        );
+
+        let exponent_scale_helper = helper_body(&ad_support, "fn pow_exponent_derivative_scale(");
+        assert!(
+            exponent_scale_helper.contains("if base > 0.0 && base.is_finite()"),
+            "{exponent_scale_helper}"
+        );
+        assert!(
+            exponent_scale_helper.contains("value * base.ln()"),
+            "{exponent_scale_helper}"
+        );
+
         let scale_helper = helper_body(&ad_support, "fn pow_positive_derivative_scales(");
         assert!(
             scale_helper.contains("debug_assert!(base > 0.0);"),
             "{scale_helper}"
         );
-        assert!(scale_helper.contains("value * base.ln()"), "{scale_helper}");
+        assert!(
+            scale_helper.contains("Self::pow_base_derivative_scale(value, base, exponent)"),
+            "{scale_helper}"
+        );
+        assert!(
+            scale_helper.contains("Self::pow_exponent_derivative_scale(value, base, exponent)"),
+            "{scale_helper}"
+        );
 
         let ad_pow = helper_body(&ad_support, "fn pow(left: Self, right: Self)");
         assert!(ad_pow.contains("if base > 0.0"), "{ad_pow}");
@@ -16548,7 +16575,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    #[inline]",
         "    fn store_offset_powf_ad(&mut self, index: usize, value: AdValue, exponent: f64, offset: f64) {",
         "        let output = scalar_power_value(value.value, exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(output, value.value, exponent, 1.0, 0.0);",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(output, value.value, exponent);",
         "        self.values[index] = output + offset;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
@@ -16660,7 +16687,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_offset_pow_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue, offset: f64) {",
         "        let exponent = value.value;",
         "        let output = scalar.powf(exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(output, scalar, exponent, 0.0, 1.0);",
+        "        let derivative_scale = AdValue::pow_exponent_derivative_scale(output, scalar, exponent);",
         "        self.values[index] = output + offset;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
@@ -17119,7 +17146,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    #[inline]",
         "    fn store_scaled_powf_ad(&mut self, index: usize, value: AdValue, exponent: f64, scale: f64) {",
         "        let output = scalar_power_value(value.value, exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(output, value.value, exponent, 1.0, 0.0) * scale;",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(output, value.value, exponent) * scale;",
         "        self.values[index] = output * scale;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
@@ -17970,7 +17997,7 @@ fn generate_scratch_operation_helpers() -> String {
         "        let reciprocal = 1.0 / denominator;",
         "        let quotient = scalar * reciprocal;",
         "        let denominator_scale = -quotient * reciprocal;",
-        "        let derivative_scale = AdValue::pow_derivative(denominator, value.value, exponent, 1.0, 0.0) * denominator_scale;",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(denominator, value.value, exponent) * denominator_scale;",
         "        self.values[index] = quotient;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
@@ -18023,7 +18050,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_pow_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue) {",
         "        let exponent = value.value;",
         "        let output = scalar.powf(exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(output, scalar, exponent, 0.0, 1.0);",
+        "        let derivative_scale = AdValue::pow_exponent_derivative_scale(output, scalar, exponent);",
         "        self.values[index] = output;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
@@ -18083,7 +18110,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    #[inline]",
         "    fn store_powf_ad(&mut self, index: usize, value: AdValue, exponent: f64) {",
         "        let output = scalar_power_value(value.value, exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(output, value.value, exponent, 1.0, 0.0);",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(output, value.value, exponent);",
         "        self.values[index] = output;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
@@ -19657,7 +19684,7 @@ fn generate_scratch_operation_helpers() -> String {
     "        let factor_value = factor.value;",
     "        let base_value = base.value;",
     "        let output = scalar_power_value(base_value, exponent);",
-    "        let derivative_scale = AdValue::pow_derivative(output, base_value, exponent, 1.0, 0.0);",
+    "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base_value, exponent);",
     "        self.values[index] = factor_value * output;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor.node_derivatives[axis] * output + factor_value * base.node_derivatives[axis] * derivative_scale; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * output + factor_value * base.branch_derivatives[axis] * derivative_scale; }",
@@ -19670,7 +19697,7 @@ fn generate_scratch_operation_helpers() -> String {
     "        let source_branch_derivatives = self.branch_derivatives[source];",
     "        let base = value.value;",
     "        let output = scalar_power_value(base, exponent);",
-    "        let derivative_scale = AdValue::pow_derivative(output, base, exponent, 1.0, 0.0);",
+    "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent);",
     "        self.values[index] = output * source_value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale * source_value + output * source_node_derivatives[axis]; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale * source_value + output * source_branch_derivatives[axis]; }",
@@ -19683,7 +19710,7 @@ fn generate_scratch_operation_helpers() -> String {
     "        let source_branch_derivatives = self.branch_derivatives[source];",
     "        let base = value.value;",
     "        let output = scalar_power_value(base, exponent);",
-    "        let derivative_scale = AdValue::pow_derivative(output, base, exponent, 1.0, 0.0);",
+    "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent);",
     "        self.values[index] = source_value * output;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * output + source_value * value.node_derivatives[axis] * derivative_scale; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * output + source_value * value.branch_derivatives[axis] * derivative_scale; }",
@@ -19932,7 +19959,7 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_mul_scaled_powf_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, exponent: f64) {",
     "        let base = self.values[value_source];",
     "        let output = scalar_power_value(base, exponent);",
-    "        let derivative_scale = AdValue::pow_derivative(output, base, exponent, 1.0, 0.0);",
+    "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent);",
     "        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, derivative_scale);",
     "    }",
     "",
@@ -19940,7 +19967,7 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_mul_scaled_powf_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue, exponent: f64) {",
     "        let base = value.value;",
     "        let output = scalar_power_value(base, exponent);",
-    "        let derivative_scale = AdValue::pow_derivative(output, base, exponent, 1.0, 0.0);",
+    "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent);",
     "        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, derivative_scale);",
     "    }",
     "",
@@ -19952,7 +19979,7 @@ fn generate_scratch_operation_helpers() -> String {
     "        let source_branch_derivatives = self.branch_derivatives[source];",
     "        let base = self.values[value_source];",
     "        let output = scalar_power_value(base, exponent);",
-    "        let derivative_scale = AdValue::pow_derivative(output, base, exponent, 1.0, 0.0) * input_scale;",
+    "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent) * input_scale;",
     "        let right_value = output * input_scale + offset;",
     "        self.values[index] = scaled_source_value * right_value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * output_scale * right_value + scaled_source_value * self.node_derivatives[value_source][axis] * derivative_scale; }",
@@ -21962,7 +21989,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_powf(&mut self, index: usize, source: usize, exponent: f64) {",
         "        let base = self.values[source];",
         "        let value = scalar_power_value(base, exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, 1.0, 0.0);",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(value, base, exponent);",
         "        self.store_unary_scaled(index, source, value, derivative_scale);",
         "    }",
         "",
@@ -21984,7 +22011,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_neg_powf_add_input(&mut self, index: usize, left: usize, right: usize, exponent: f64) {",
         "        let base = self.values[left] + self.values[right];",
         "        let output = scalar_power_value(base, exponent);",
-        "        let derivative_scale = -AdValue::pow_derivative(output, base, exponent, 1.0, 0.0);",
+        "        let derivative_scale = -AdValue::pow_base_derivative_scale(output, base, exponent);",
         "        self.store_unary_add_scaled(index, left, right, -output, derivative_scale);",
         "    }",
         "",
@@ -21992,7 +22019,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_powf_scaled_input(&mut self, index: usize, source: usize, input_scale: f64, exponent: f64) {",
         "        let base = self.values[source] * input_scale;",
         "        let value = scalar_power_value(base, exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, input_scale, 0.0);",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(value, base, exponent) * input_scale;",
         "        self.store_unary_scaled(index, source, value, derivative_scale);",
         "    }",
         "",
@@ -22008,7 +22035,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_powf_offset_input(&mut self, index: usize, source: usize, offset: f64, exponent: f64) {",
         "        let base = self.values[source] + offset;",
         "        let value = scalar_power_value(base, exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, 1.0, 0.0);",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(value, base, exponent);",
         "        self.store_unary_scaled(index, source, value, derivative_scale);",
         "    }",
         "",
@@ -22024,7 +22051,7 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_powf_scale_offset_input(&mut self, index: usize, source: usize, input_scale: f64, offset: f64, exponent: f64) {",
         "        let base = self.values[source] * input_scale + offset;",
         "        let value = scalar_power_value(base, exponent);",
-        "        let derivative_scale = AdValue::pow_derivative(value, base, exponent, input_scale, 0.0);",
+        "        let derivative_scale = AdValue::pow_base_derivative_scale(value, base, exponent) * input_scale;",
         "        self.store_unary_scaled(index, source, value, derivative_scale);",
         "    }",
         "",
@@ -23797,7 +23824,7 @@ fn generate_index_or_mixed_mul_powf_helper(mask: &str) -> String {
         let factor_value = {factor_value};
         let base_value = {base_value};
         let output = scalar_power_value(base_value, exponent);
-        let derivative_scale = AdValue::pow_derivative(output, base_value, exponent, 1.0, 0.0);
+        let derivative_scale = AdValue::pow_base_derivative_scale(output, base_value, exponent);
         self.values[index] = factor_value * output;
         for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {factor_node_derivative} * output + factor_value * {base_node_derivative} * derivative_scale; }}
         for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {factor_branch_derivative} * output + factor_value * {base_branch_derivative} * derivative_scale; }}
@@ -25611,29 +25638,47 @@ fn generate_ad_value_struct() -> String {
         "    fn ceil(arg: Self) -> Self { Self::constant(arg.value.ceil()) }",
         "    #[inline]",
         "    fn pow_derivative(value: f64, base: f64, exponent: f64, dbase: f64, dexponent: f64) -> f64 {",
-        "        if dexponent == 0.0 && exponent.is_finite() && exponent.fract() == 0.0 {",
-        "            if exponent >= i32::MIN as f64 && exponent <= i32::MAX as f64 {",
-        "                integer_power_derivative_scale(base, exponent as i32) * dbase",
-        "            } else {",
-        "                exponent * base.powf(exponent - 1.0) * dbase",
-        "            }",
+        "        if dexponent == 0.0 {",
+        "            Self::pow_base_derivative_scale(value, base, exponent) * dbase",
         "        } else {",
         "            value * (dexponent * base.ln() + exponent * (dbase / base))",
+        "        }",
+        "    }",
+        "    #[inline]",
+        "    fn pow_base_derivative_scale(value: f64, base: f64, exponent: f64) -> f64 {",
+        "        if exponent.is_finite() && exponent.fract() == 0.0 {",
+        "            if exponent >= i32::MIN as f64 && exponent <= i32::MAX as f64 {",
+        "                integer_power_derivative_scale(base, exponent as i32)",
+        "            } else {",
+        "                exponent * base.powf(exponent - 1.0)",
+        "            }",
+        "        } else if base.is_finite() && base != 0.0 && value != 0.0 {",
+        "            exponent * (value / base)",
+        "        } else {",
+        "            exponent * base.powf(exponent - 1.0)",
+        "        }",
+        "    }",
+        "    #[inline]",
+        "    fn pow_exponent_derivative_scale(value: f64, base: f64, exponent: f64) -> f64 {",
+        "        if base > 0.0 && base.is_finite() {",
+        "            value * base.ln()",
+        "        } else {",
+        "            Self::pow_derivative(value, base, exponent, 0.0, 1.0)",
         "        }",
         "    }",
         "    #[inline]",
         "    fn pow_positive_derivative_scales(value: f64, base: f64, exponent: f64) -> (f64, f64) {",
         "        debug_assert!(base > 0.0);",
         "        (",
-        "            Self::pow_derivative(value, base, exponent, 1.0, 0.0),",
-        "            value * base.ln(),",
+        "            Self::pow_base_derivative_scale(value, base, exponent),",
+        "            Self::pow_exponent_derivative_scale(value, base, exponent),",
         "        )",
         "    }",
         "    #[inline]",
         "    fn powf(left: Self, exponent: f64) -> Self {",
         "        let base = left.value;",
         "        let value = scalar_power_value(base, exponent);",
-        "        let derivative_scale = Self::pow_derivative(value, base, exponent, 1.0, 0.0);",
+        "        let derivative_scale = Self::pow_base_derivative_scale(value, base, exponent);",
         "        let mut result = left;",
         "        result.value = value;",
         "        for derivative in &mut result.node_derivatives { *derivative *= derivative_scale; }",
@@ -25655,7 +25700,7 @@ fn generate_ad_value_struct() -> String {
         "    fn pow_from_scalar(base: f64, right: Self) -> Self {",
         "        let exponent = right.value;",
         "        let value = base.powf(exponent);",
-        "        let derivative_scale = Self::pow_derivative(value, base, exponent, 0.0, 1.0);",
+        "        let derivative_scale = Self::pow_exponent_derivative_scale(value, base, exponent);",
         "        let mut result = right;",
         "        result.value = value;",
         "        for derivative in &mut result.node_derivatives { *derivative *= derivative_scale; }",
@@ -25811,6 +25856,14 @@ pub fn render_runtime_support_module() -> String {
         .replace(
             "AdValue::pow_derivative",
             "AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_derivative",
+        )
+        .replace(
+            "AdValue::pow_base_derivative_scale",
+            "AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_base_derivative_scale",
+        )
+        .replace(
+            "AdValue::pow_exponent_derivative_scale",
+            "AdValue::<NODE_COUNT, BRANCH_COUNT>::pow_exponent_derivative_scale",
         )
         .replace(
             "AdValue::pow_positive_derivative_scales",
