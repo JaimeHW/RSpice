@@ -4,9 +4,10 @@ use super::*;
 ///
 /// Resolution order:
 /// 1. Explicit instance value (`L1 a b 1m`, or `L=`/`VALUE=` named form)
-/// 2. Model-card `L`/`IND` value
+/// 2. Model-card `L`/`IND` value for non-Xyce dialects
 ///
-/// followed by TC1/TC2 temperature scaling about the model's TNOM and
+/// followed by the Xyce model-card `L` multiplier when enabled,
+/// TC1/TC2 temperature scaling about the model's TNOM, and
 /// instance scaling: `SCALE` multiplies the value, `M`/`MULT` parallel
 /// multiplicity divides it (m parallel inductors of value L behave as L/m).
 pub(in crate::engine::builder) fn resolve_inductor_instance_value(
@@ -16,6 +17,7 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
     model_name: Option<&str>,
     instance_params: &[(String, f64)],
     temperature_kelvin: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<f64, SimulationError> {
     let model_def = if let Some(model_name) = model_name {
         let model_def = find_model_def(netlist, model_name).ok_or_else(|| {
@@ -44,18 +46,28 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
         inductance = Some(value);
     }
 
-    if let Some(model_def) = model_def
-        && inductance.is_none()
-    {
-        inductance =
-            resolve_model_param(model_def, &["L", "IND", "VALUE", "INDUCTANCE"], &eval_ctx)?;
+    let mut xyce_model_multiplier = 1.0;
+    if let Some(model_def) = model_def {
+        if spice_dialect == SpiceDialect::Xyce {
+            xyce_model_multiplier =
+                resolve_model_param(model_def, &["L"], &eval_ctx)?.unwrap_or(1.0);
+        } else if inductance.is_none() {
+            inductance =
+                resolve_model_param(model_def, &["L", "IND", "VALUE", "INDUCTANCE"], &eval_ctx)?;
+        }
 
         if inductance.is_none() {
+            let required_value = if spice_dialect == SpiceDialect::Xyce {
+                "an instance L/IND value"
+            } else {
+                "an L/IND value"
+            };
             return Err(SimulationError::Circuit(format!(
-                "Inductor '{}' model '{}' requires an L/IND value (turns-based \
+                "Inductor '{}' model '{}' requires {} (turns-based \
                  NT/CSECT/LENGTH inductance synthesis is not supported)",
                 element_name,
-                model_name.unwrap_or_default()
+                model_name.unwrap_or_default(),
+                required_value
             )));
         }
     }
@@ -66,6 +78,8 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
             element_name
         ))
     })?;
+
+    resolved *= xyce_model_multiplier;
 
     let tc1 = instance_param(instance_params, &["TC1"])
         .or_else(|| {
@@ -149,8 +163,42 @@ mod tests {
             model.as_deref(),
             instance_params,
             crate::constants::TEMP_REFERENCE,
+            SpiceDialect::Ngspice,
         )
         .expect("inductor resolves")
+    }
+
+    fn resolve_inductor_from_source_with_dialect(
+        source: &str,
+        name: &str,
+        spice_dialect: SpiceDialect,
+    ) -> Result<f64, SimulationError> {
+        let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .expect("test inductor exists");
+
+        let crate::netlist::ElementKind::Inductor {
+            value,
+            model,
+            instance_params,
+            ..
+        } = &element.kind
+        else {
+            panic!("test element is not an inductor");
+        };
+
+        resolve_inductor_instance_value(
+            &netlist,
+            &element.name,
+            *value,
+            model.as_deref(),
+            instance_params,
+            crate::constants::TEMP_REFERENCE,
+            spice_dialect,
+        )
     }
 
     #[test]
@@ -175,6 +223,36 @@ mod tests {
         assert!(
             ((l - expected) / expected).abs() < 1e-12,
             "resolved {l}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn xyce_model_l_multiplies_explicit_inductance() {
+        let l = resolve_inductor_from_source_with_dialect(
+            "xyce ind\nL1 a 0 lmod 10m temp=90\n.model lmod L L=2 TC1=0.010 TC2=0.926e-4\n.end\n",
+            "L1",
+            SpiceDialect::Xyce,
+        )
+        .expect("inductor resolves");
+        let expected = 10e-3 * 2.0 * (1.0 + 0.010 * 63.0 + 0.926e-4 * 63.0 * 63.0);
+        assert!(
+            ((l - expected) / expected).abs() < 1e-12,
+            "resolved {l}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn xyce_model_l_without_instance_value_stays_invalid() {
+        let err = resolve_inductor_from_source_with_dialect(
+            "xyce missing ind\nL1 a 0 lmod\n.model lmod L L=2\n.end\n",
+            "L1",
+            SpiceDialect::Xyce,
+        )
+        .expect_err("Xyce inductor model L is a multiplier, not a replacement value");
+
+        assert!(
+            err.to_string().contains("requires an instance L/IND value"),
+            "unexpected error: {err}"
         );
     }
 }

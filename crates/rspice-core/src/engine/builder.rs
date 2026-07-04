@@ -286,6 +286,7 @@ fn xspice_meter_resolved_inductance(
     netlist: &Netlist,
     element: &Element,
     temperature: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<Option<f64>, SimulationError> {
     match &element.kind {
         ElementKind::Inductor {
@@ -300,6 +301,7 @@ fn xspice_meter_resolved_inductance(
             model.as_deref(),
             instance_params,
             temperature,
+            spice_dialect,
         )?)),
         ElementKind::Xspice {
             model,
@@ -380,11 +382,13 @@ fn xspice_meter_equivalent_inductance(
     flat_elements: &[Element],
     input_node: &str,
     temperature: f64,
+    spice_dialect: SpiceDialect,
 ) -> Result<f64, SimulationError> {
     let mut inductance = 1.0e12;
 
     for element in flat_elements {
-        if let Some(value) = xspice_meter_resolved_inductance(netlist, element, temperature)?
+        if let Some(value) =
+            xspice_meter_resolved_inductance(netlist, element, temperature, spice_dialect)?
             && xspice_meter_element_incident(element, input_node)?
         {
             inductance = xspice_meter_parallel_inductance(inductance, value);
@@ -396,7 +400,8 @@ fn xspice_meter_equivalent_inductance(
         .filter_map(|element| xspice_meter_zero_source_other_node(element, input_node))
     {
         for element in flat_elements {
-            if let Some(value) = xspice_meter_resolved_inductance(netlist, element, temperature)?
+            if let Some(value) =
+                xspice_meter_resolved_inductance(netlist, element, temperature, spice_dialect)?
                 && xspice_meter_element_incident(element, zero_source_node)?
             {
                 inductance = xspice_meter_parallel_inductance(inductance, value);
@@ -426,9 +431,13 @@ fn xspice_meter_measured_value(
             temperature,
             spice_dialect,
         ),
-        XspiceMeterKind::Inductance => {
-            xspice_meter_equivalent_inductance(netlist, flat_elements, input_node, temperature)
-        }
+        XspiceMeterKind::Inductance => xspice_meter_equivalent_inductance(
+            netlist,
+            flat_elements,
+            input_node,
+            temperature,
+            spice_dialect,
+        ),
     }
 }
 
@@ -1741,6 +1750,7 @@ fn add_generated_xspice_auto_bridge_inductor(
     generated: &Netlist,
     element: &Element,
     temperature: crate::Value,
+    spice_dialect: SpiceDialect,
 ) -> Result<(), SimulationError> {
     let ElementKind::Inductor {
         value,
@@ -1769,6 +1779,7 @@ fn add_generated_xspice_auto_bridge_inductor(
         model.as_deref(),
         instance_params,
         temperature,
+        spice_dialect,
     )?;
     let np = circuit.get_or_create_node(&element.nodes[0]);
     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -1932,6 +1943,7 @@ fn add_generated_xspice_auto_bridge_subcircuit(
                     generated,
                     element,
                     temperature,
+                    spice_dialect,
                 )?;
             }
             ElementKind::Xspice { .. } => {
@@ -2889,6 +2901,7 @@ impl Engine {
             model.as_deref(),
             instance_params,
             engine.config.temperature,
+            engine.config.spice_dialect,
         )
         .map(Some)
     }
@@ -3220,6 +3233,7 @@ impl Engine {
                         model.as_deref(),
                         instance_params,
                         self.config.temperature,
+                        self.config.spice_dialect,
                     )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
