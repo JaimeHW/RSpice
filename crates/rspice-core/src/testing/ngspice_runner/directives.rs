@@ -385,9 +385,7 @@ impl TestRunner {
         if matches!(
             model_type.as_str(),
             "vbic" | "vbic13" | "vbic13_4t" | "vbic1p3" | "vbic_4t_et_cf"
-        ) || (matches!(model_type.as_str(), "npn" | "pnp" | "lpnp")
-            && Self::model_level(line).is_some_and(Self::is_vbic_generated_level_without_builtins))
-        {
+        ) {
             return Some(
                 "VBIC generated Verilog-A builtin models require the veriloga-builtins feature; \
                  the default regression build intentionally fails closed instead of falling back \
@@ -396,49 +394,6 @@ impl TestRunner {
             );
         }
 
-        None
-    }
-
-    #[cfg(not(feature = "veriloga-builtins"))]
-    fn is_vbic_generated_level_without_builtins(level: f64) -> bool {
-        if !level.is_finite() {
-            return false;
-        }
-        let rounded = level.round();
-        (level - rounded).abs() <= 1e-9 && matches!(rounded as i64, 4 | 9 | 11 | 12 | 13)
-    }
-
-    #[cfg(not(feature = "veriloga-builtins"))]
-    fn model_level(line: &str) -> Option<f64> {
-        let lower = line.to_ascii_lowercase();
-        let mut search_from = 0;
-        while let Some(pos) = lower[search_from..].find("level") {
-            let start = search_from + pos;
-            let before = lower[..start].chars().next_back();
-            let after_keyword = start + "level".len();
-            let after = lower[after_keyword..].chars().next();
-            let before_is_boundary =
-                before.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
-            let after_is_boundary = after.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
-            if before_is_boundary && after_is_boundary {
-                let mut chars = lower[after_keyword..].chars().peekable();
-                while chars.peek().is_some_and(|ch| ch.is_ascii_whitespace()) {
-                    chars.next();
-                }
-                if chars.next() == Some('=') {
-                    while chars.peek().is_some_and(|ch| ch.is_ascii_whitespace()) {
-                        chars.next();
-                    }
-                    let value: String = chars
-                        .take_while(|ch| {
-                            ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E')
-                        })
-                        .collect();
-                    return value.parse::<f64>().ok();
-                }
-            }
-            search_from = after_keyword;
-        }
         None
     }
 
@@ -519,22 +474,35 @@ a_rom [a1 a2] sel [o1 o2] d_rom1
 
     #[cfg(not(feature = "veriloga-builtins"))]
     #[test]
-    fn unsupported_detection_rejects_vbic_levels_without_generated_builtins() {
+    fn unsupported_detection_rejects_explicit_generated_vbic_without_builtins() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let deck = "\
-vbic level deck
-.model n1 npn level = 4
-.model p1 pnp level=13
+generated vbic deck
+.model n1 vbic13_4t
 .end
 ";
 
         let reason = runner
             .check_unsupported(deck)
-            .expect("VBIC LEVEL decks require generated builtins in this build");
+            .expect("explicit generated VBIC model requires generated builtins in this build");
 
         assert!(
             reason.contains("VBIC generated Verilog-A builtin models"),
             "unexpected unsupported reason: {reason}"
         );
+    }
+
+    #[cfg(not(feature = "veriloga-builtins"))]
+    #[test]
+    fn unsupported_detection_allows_native_vbic_numeric_levels_without_builtins() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let deck = "\
+native vbic level deck
+.model n1 npn level = 4
+.model p1 pnp level=13
+.end
+";
+
+        assert_eq!(runner.check_unsupported(deck), None);
     }
 }
