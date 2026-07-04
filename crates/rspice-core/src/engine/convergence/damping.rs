@@ -208,8 +208,9 @@ impl Engine {
             )
     }
 
-    pub(in crate::engine::convergence) fn apply_damping_strategy_with_junction_ownership<F>(
+    pub(in crate::engine::convergence) fn apply_damping_strategy_for_circuit<F>(
         &self,
+        has_b3soi_devices: bool,
         old: &[Value],
         proposal: &[Value],
         damping_state: &mut NewtonDampingState,
@@ -221,6 +222,14 @@ impl Engine {
     {
         if junction_owns_steps {
             return proposal.to_vec();
+        }
+        if has_b3soi_devices
+            && matches!(
+                self.config.convergence_config.damping_strategy,
+                DampingStrategy::VoltageLimiting
+            )
+        {
+            return Self::limit_step_delta(old, proposal, Self::MAX_DELTA_VOLTAGE_LIMIT);
         }
         self.apply_damping_strategy(old, proposal, damping_state, merit)
     }

@@ -864,6 +864,25 @@ impl VoltageSources {
         changed
     }
 
+    /// Enforce the scaled DC voltage-source constraints used by source stepping.
+    pub fn enforce_scaled_dc_voltage_constraints(
+        &self,
+        solution: &mut [Value],
+        scale: Value,
+    ) -> bool {
+        let mut changed = false;
+        let scale = if scale.is_finite() { scale } else { 1.0 };
+        for i in 0..self.names.len() {
+            changed |= project_two_terminal_voltage(
+                solution,
+                self.node_pos[i],
+                self.node_neg[i],
+                self.dc_values[i] * scale,
+            );
+        }
+        changed
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn evaluate_pat_source(
         vhi: Value,

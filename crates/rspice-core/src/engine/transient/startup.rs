@@ -366,7 +366,7 @@ impl Engine {
         // Newton; the configured aid chain is their proven startup path and
         // the linearized t=0 seed cannot substitute for a real operating
         // point, so the size heuristic must not skip the aids for them.
-        if Self::junction_limiting_owns_newton_steps(circuit) {
+        if Self::junction_limiting_owns_newton_steps(circuit) || circuit.has_b3soi_devices() {
             return true;
         }
         circuit.matrix_size() <= MAX_CONFIGURED_DC_STARTUP_MATRIX_SIZE
@@ -423,6 +423,9 @@ impl Engine {
             }
         }
 
+        if !circuit.b3soi.is_empty() {
+            circuit.reset_b3soi_dd_operating_point_history();
+        }
         match self.solve_direct_dc_startup_with_abort(netlist, circuit, matrix, abort) {
             Ok(solution) => {
                 return Ok(self.transient_startup_from_dc_solution(
@@ -443,6 +446,9 @@ impl Engine {
         }
 
         if Self::should_try_configured_dc_startup_aids(circuit) {
+            if !circuit.b3soi.is_empty() {
+                circuit.reset_b3soi_dd_operating_point_history();
+            }
             match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
                 Ok(solution) => {
                     log::warn!("Transient startup recovered using configured DC startup aids.");

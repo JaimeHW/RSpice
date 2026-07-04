@@ -53,6 +53,17 @@ impl Engine {
         Self::build_descending_schedule(start, end)
     }
 
+    #[inline]
+    pub(in crate::engine) fn gmin_nonlinear_schedule_for_circuit(
+        &self,
+        circuit: &CircuitData,
+    ) -> Vec<Value> {
+        let conv = &self.config.convergence_config;
+        let start = conv.gmin_initial.max(1e-3);
+        let end = self.dc_nodal_gmin_floor(circuit);
+        Self::build_descending_schedule(start, end)
+    }
+
     /// Try solving with a specific GMIN value
     pub(crate) fn try_solve_with_gmin(
         &self,
@@ -177,10 +188,18 @@ impl Engine {
         const MAX_SOURCE_ATTEMPTS: usize = 512;
 
         let size = circuit.matrix_size();
+        let node_count = circuit.num_nodes().min(size);
+        let entry_state = circuit.nonlinear_state_snapshot();
 
+        if !circuit.b3soi.is_empty() {
+            circuit.reset_b3soi_dd_operating_point_history();
+        }
         let zero_guess = vec![0.0; size];
-        let mut solution =
-            self.prefer_lower_merit_scaled_seed(circuit, matrix, initial_guess, &zero_guess, 0.0);
+        let mut solution = if circuit.has_b3soi_devices() {
+            Self::sanitize_initial_guess(initial_guess, size, node_count)
+        } else {
+            self.prefer_lower_merit_scaled_seed(circuit, matrix, initial_guess, &zero_guess, 0.0)
+        };
         let mut damping_state = NewtonDampingState::default();
         let source_iterations = self.continuation_iteration_budget(20, 16);
         let mut total_iterations = 0usize;
@@ -196,9 +215,11 @@ impl Engine {
             );
         total_iterations += bootstrap_iterations;
         if abort.is_aborted() {
+            circuit.restore_nonlinear_state(entry_state);
             return Err(SimulationError::Aborted);
         }
         if !bootstrap_converged {
+            circuit.restore_nonlinear_state(entry_state);
             return Err(SimulationError::ConvergenceFailed(
                 total_iterations.max(source_iterations),
             ));
@@ -211,14 +232,17 @@ impl Engine {
 
         while accepted_scale < 1.0 - SOURCE_SCALE_EPS {
             if attempts >= MAX_SOURCE_ATTEMPTS {
+                circuit.restore_nonlinear_state(entry_state);
                 return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
             }
             if Self::should_abort_iteration(abort, attempts) {
+                circuit.restore_nonlinear_state(entry_state);
                 return Err(SimulationError::Aborted);
             }
 
             let target_scale = (accepted_scale + source_step).min(1.0);
             if target_scale <= accepted_scale + SOURCE_SCALE_EPS {
+                circuit.restore_nonlinear_state(entry_state);
                 return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
             }
 
@@ -236,6 +260,7 @@ impl Engine {
             total_iterations = total_iterations.saturating_add(used_iterations);
 
             if abort.is_aborted() {
+                circuit.restore_nonlinear_state(entry_state);
                 return Err(SimulationError::Aborted);
             }
 
@@ -248,6 +273,7 @@ impl Engine {
                 circuit.restore_nonlinear_state(accepted_state);
                 source_step *= SOURCE_STEP_SHRINK;
                 if source_step < MIN_SOURCE_STEP {
+                    circuit.restore_nonlinear_state(entry_state);
                     return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
                 }
             }
@@ -267,9 +293,11 @@ impl Engine {
             );
         total_iterations = total_iterations.saturating_add(polish_iterations);
         if abort.is_aborted() {
+            circuit.restore_nonlinear_state(entry_state);
             return Err(SimulationError::Aborted);
         }
         if !converged {
+            circuit.restore_nonlinear_state(entry_state);
             return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
         }
 
@@ -330,7 +358,8 @@ impl Engine {
                     Err(_) => break,
                 };
 
-                let mut new_solution = self.apply_damping_strategy_with_junction_ownership(
+                let mut new_solution = self.apply_damping_strategy_for_circuit(
+                    circuit.has_b3soi_devices(),
                     &solution,
                     &raw_solution,
                     &mut damping_state,
@@ -346,6 +375,7 @@ impl Engine {
                         )
                     },
                 );
+                circuit.enforce_ideal_voltage_constraints(&mut new_solution, 0.0);
                 Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 
                 let converged = self.node_voltage_convergence_met(
@@ -620,7 +650,16 @@ impl Engine {
         initial_guess: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        let gmin_scales = self.gmin_nonlinear_schedule();
+        const MAX_GMIN_STEP_DECADES: Value = 1.0;
+        const MIN_GMIN_STEP_DECADES: Value = 1.0e-3;
+        const GMIN_STEP_GROWTH: Value = 1.35;
+        const GMIN_STEP_SHRINK: Value = 0.5;
+        const GMIN_SCALE_EPS: Value = 1.0e-15;
+        const MAX_GMIN_ATTEMPTS: usize = 2048;
+
+        let gmin_scales = self.gmin_nonlinear_schedule_for_circuit(circuit);
+        let start_gmin = gmin_scales.first().copied().unwrap_or(1.0e-3).max(0.0);
+        let final_gmin = gmin_scales.last().copied().unwrap_or(0.0).max(0.0);
 
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
@@ -635,7 +674,7 @@ impl Engine {
             log::debug!("GMIN stepping: resetting garbage initial guess to zero");
             vec![0.0; size]
         } else {
-            initial_guess
+            Self::normalize_initial_guess(initial_guess, size)
                 .iter()
                 .enumerate()
                 .map(|(idx, &v)| {
@@ -647,102 +686,91 @@ impl Engine {
                 })
                 .collect()
         };
-        self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
+        if !circuit.b3soi.is_empty() {
+            circuit.reset_b3soi_dd_operating_point_history();
+        }
         let mut damping_state = NewtonDampingState::default();
         let gmin_iterations = self.continuation_iteration_budget(10, 12);
+        let mut total_iterations = 0usize;
 
-        for (step, &gmin) in gmin_scales.iter().enumerate() {
-            if Self::should_abort_iteration(abort, step) {
+        let (initial_solution, initial_converged, initial_iterations) = self
+            .solve_gmin_nonlinear_corrector(
+                circuit,
+                matrix,
+                start_gmin,
+                &solution,
+                &mut damping_state,
+                gmin_iterations,
+                abort,
+            );
+        total_iterations = total_iterations.saturating_add(initial_iterations);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if !initial_converged {
+            return Err(SimulationError::ConvergenceFailed(
+                total_iterations.max(gmin_iterations),
+            ));
+        }
+        solution = initial_solution;
+
+        let mut accepted_gmin = start_gmin;
+        let mut step_decades = MAX_GMIN_STEP_DECADES;
+        let mut attempts = 0usize;
+
+        while accepted_gmin > final_gmin.max(accepted_gmin * GMIN_SCALE_EPS) {
+            if attempts >= MAX_GMIN_ATTEMPTS {
+                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+            }
+            if Self::should_abort_iteration(abort, attempts) {
                 return Err(SimulationError::Aborted);
             }
-            let junction_gmin = self.effective_device_junction_gmin(gmin);
-            log::debug!("GMIN stepping: step {} with GMIN = {:.2e}", step + 1, gmin);
 
-            // Use more iterations for GMIN stepping to allow convergence
-            for iteration in 0..gmin_iterations {
-                if Self::should_abort_iteration(abort, iteration) {
-                    return Err(SimulationError::Aborted);
-                }
-                let mut rhs = vec![0.0; size];
+            let target_gmin = Self::next_descending_gmin(accepted_gmin, final_gmin, step_decades);
+            if target_gmin >= accepted_gmin {
+                break;
+            }
 
-                matrix.clear_values();
+            let accepted_state = circuit.nonlinear_state_snapshot();
+            let mut trial_damping_state = damping_state;
+            log::debug!(
+                "GMIN stepping: attempting GMIN {:.2e} -> {:.2e}",
+                accepted_gmin,
+                target_gmin
+            );
 
-                // Add current GMIN only to node-voltage equations.
-                let node_count = circuit.num_nodes().min(size);
-                for i in 0..node_count {
-                    matrix.add(i, i, gmin);
-                }
+            let (candidate, converged, used_iterations) = self.solve_gmin_nonlinear_corrector(
+                circuit,
+                matrix,
+                target_gmin,
+                &solution,
+                &mut trial_damping_state,
+                gmin_iterations,
+                abort,
+            );
+            total_iterations = total_iterations.saturating_add(used_iterations);
 
-                // Stamp linear and nonlinear devices
-                circuit.stamp_dc_direct(matrix, &mut rhs);
-                self.stamp_nonlinear_devices_for_dc_with_junction_gmin(
-                    circuit,
-                    matrix,
-                    &mut rhs,
-                    &solution,
-                    junction_gmin,
-                );
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
 
-                // Log RHS on first iteration of first GMIN step for debugging
-                if step == 0 && iteration == 0 {
-                    log::debug!(
-                        "GMIN step 1 iter 1 - RHS: {:?}",
-                        rhs.iter().map(|v| format!("{:.2e}", v)).collect::<Vec<_>>()
-                    );
-                }
-
-                match matrix.solve(&rhs) {
-                    Ok(raw_solution) => {
-                        let mut new_solution = self.apply_damping_strategy_with_junction_ownership(
-                            &solution,
-                            &raw_solution,
-                            &mut damping_state,
-                            Self::junction_limiting_owns_newton_steps(circuit)
-                                || self.b3soi_limiter_owns_global_damping(circuit),
-                            |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
-                        );
-                        Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
-
-                        let converged = self.node_voltage_convergence_met(
-                            &solution,
-                            &new_solution,
-                            circuit.num_nodes(),
-                        );
-                        self.update_device_states_for_dc_with_junction_gmin(
-                            circuit,
-                            &new_solution,
-                            junction_gmin,
-                        );
-                        solution = new_solution;
-                        let device_converged =
-                            circuit.nonlinear_converged(self.device_convergence_criteria());
-                        let nonlinear_residual_converged = converged
-                            && device_converged
-                            && self.nonlinear_residual_converged_with_gmin(
-                                circuit, matrix, &solution, gmin,
-                            );
-                        if converged && device_converged && nonlinear_residual_converged {
-                            break;
-                        }
-                    }
-                    Err(e) if step == gmin_scales.len() - 1 => {
-                        log::error!("GMIN stepping failed at final step: {:?}", e);
-                        return Err(SimulationError::Solver(e));
-                    }
-                    Err(_) => {
-                        log::debug!(
-                            "Matrix solve failed at GMIN step {}, continuing...",
-                            step + 1
-                        );
-                        break; // Try next GMIN level
-                    }
+            if converged {
+                solution = candidate;
+                accepted_gmin = target_gmin;
+                damping_state = trial_damping_state;
+                step_decades = (step_decades * GMIN_STEP_GROWTH).min(MAX_GMIN_STEP_DECADES);
+            } else {
+                circuit.restore_nonlinear_state(accepted_state);
+                step_decades *= GMIN_STEP_SHRINK;
+                if step_decades < MIN_GMIN_STEP_DECADES {
+                    return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
                 }
             }
-            // Log solution after each GMIN step for debugging
+
+            attempts += 1;
             log::debug!(
-                "GMIN step {} (GMIN={:.0e}) solution: {:?}",
-                step + 1,
-                gmin,
+                "GMIN step accepted at {:.0e}; solution: {:?}",
+                accepted_gmin,
                 solution
                     .iter()
                     .take(8)
@@ -753,7 +781,7 @@ impl Engine {
 
         // Log the actual GMIN stepping result for debugging
         log::info!(
-            "DC operating point after GMIN stepping ({} nodes): {:?}",
+            "DC operating point candidate after GMIN stepping ({} nodes): {:?}",
             solution.len(),
             solution
                 .iter()
@@ -788,5 +816,96 @@ impl Engine {
         }
 
         Ok(solution)
+    }
+
+    fn next_descending_gmin(accepted_gmin: Value, final_gmin: Value, step_decades: Value) -> Value {
+        if final_gmin <= 0.0 {
+            let floor = 1.0e-30;
+            let next = 10.0_f64.powf(accepted_gmin.max(floor).log10() - step_decades);
+            if next <= floor { 0.0 } else { next }
+        } else {
+            let target_log = (accepted_gmin.log10() - step_decades).max(final_gmin.log10());
+            10.0_f64.powf(target_log).max(final_gmin)
+        }
+    }
+
+    fn solve_gmin_nonlinear_corrector(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        gmin: Value,
+        initial_solution: &[Value],
+        damping_state: &mut NewtonDampingState,
+        max_iterations: usize,
+        abort: &dyn AbortSignal,
+    ) -> (Vec<Value>, bool, usize) {
+        let mut solution = initial_solution.to_vec();
+        let junction_gmin = self.effective_device_junction_gmin(gmin);
+        self.update_device_states_for_dc_with_junction_gmin(circuit, &solution, junction_gmin);
+        let mut used_iterations = 0usize;
+
+        for iteration in 0..max_iterations {
+            if Self::should_abort_iteration(abort, iteration) {
+                return (solution, false, used_iterations);
+            }
+            used_iterations = iteration + 1;
+            let mut rhs = vec![0.0; solution.len()];
+            matrix.clear_values();
+
+            let node_count = circuit.num_nodes().min(solution.len());
+            for i in 0..node_count {
+                matrix.add(i, i, gmin);
+            }
+
+            circuit.stamp_dc_direct(matrix, &mut rhs);
+            self.stamp_nonlinear_devices_for_dc_with_junction_gmin(
+                circuit,
+                matrix,
+                &mut rhs,
+                &solution,
+                junction_gmin,
+            );
+
+            let raw_solution = match matrix.solve(&rhs) {
+                Ok(solution) => solution,
+                Err(_) => return (solution, false, used_iterations),
+            };
+
+            let mut new_solution = self.apply_damping_strategy_for_circuit(
+                circuit.has_b3soi_devices(),
+                &solution,
+                &raw_solution,
+                damping_state,
+                Self::junction_limiting_owns_newton_steps(circuit)
+                    || self.b3soi_limiter_owns_global_damping(circuit),
+                |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
+            );
+            circuit.enforce_ideal_voltage_constraints(&mut new_solution, 0.0);
+            Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
+
+            let voltage_converged =
+                self.node_voltage_convergence_met(&solution, &new_solution, node_count);
+            self.update_device_states_for_dc_with_junction_gmin(
+                circuit,
+                &new_solution,
+                junction_gmin,
+            );
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            let nonlinear_residual_converged = voltage_converged
+                && device_converged
+                && self.nonlinear_residual_converged_with_gmin(
+                    circuit,
+                    matrix,
+                    &new_solution,
+                    gmin,
+                );
+            solution = new_solution;
+
+            if voltage_converged && device_converged && nonlinear_residual_converged {
+                return (solution, true, used_iterations);
+            }
+        }
+
+        (solution, false, used_iterations)
     }
 }

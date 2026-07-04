@@ -364,6 +364,7 @@ impl Engine {
         let mut direct_iterations = 0usize;
         let mut residual_stall_iterations = 0usize;
         let mut residual_stalled = false;
+        let mut direct_solver_error = None;
         for iteration in 0..dc_max_iterations {
             direct_iterations = iteration + 1;
             if Self::should_abort_iteration(abort, iteration) {
@@ -393,20 +394,31 @@ impl Engine {
             // Update nonlinear/behavioral/XSPICE devices with current solution and stamp
             self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             // Solve linearized system
-            let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            let raw_solution = match matrix.solve(&rhs) {
+                Ok(solution) => solution,
+                Err(err) => {
+                    direct_solver_error = Some(SimulationError::Solver(err));
+                    break;
+                }
+            };
             // Voltage-limiting style damping is critical for strongly-coupled
             // semiconductor nonlinearities, but it can unnecessarily throttle
             // behavioral-only fixed-point updates (e.g., B-source macros that
             // legitimately require kilovolt-level solution jumps).
-            let mut new_solution = if requires_conservative_nonlinear_limiting
-                && !junction_owns_steps
-            {
-                self.apply_damping_strategy(&solution, &raw_solution, &mut damping_state, |trial| {
-                    self.nonlinear_merit(circuit, matrix, trial)
-                })
-            } else {
-                raw_solution
-            };
+            let mut new_solution =
+                if requires_conservative_nonlinear_limiting && !junction_owns_steps {
+                    self.apply_damping_strategy_for_circuit(
+                        circuit.has_b3soi_devices(),
+                        &solution,
+                        &raw_solution,
+                        &mut damping_state,
+                        junction_owns_steps,
+                        |trial| self.nonlinear_merit(circuit, matrix, trial),
+                    )
+                } else {
+                    raw_solution
+                };
+            circuit.enforce_ideal_voltage_constraints(&mut new_solution, 0.0);
             // Solution limiting: prevent numerical blow-up by clamping extreme values
             // This is a critical convergence aid for circuits with strong nonlinearities
             for (i, v) in new_solution.iter_mut().enumerate() {
@@ -495,7 +507,13 @@ impl Engine {
             }
         }
         // Log diagnostic information when falling back to convergence aids.
-        if hit_voltage_limit {
+        if let Some(err) = direct_solver_error.as_ref() {
+            log::warn!(
+                "DC Newton-Raphson linear solve failed after {} iteration(s): {}. Trying configured convergence aids...",
+                direct_iterations.max(1),
+                err
+            );
+        } else if hit_voltage_limit {
             log::warn!(
                 "DC Newton-Raphson did not converge after {} iterations. \
                 Voltage limiting triggered on {} node(s). Trying configured convergence aids...",
@@ -530,6 +548,9 @@ impl Engine {
         let allow_gmin = conv_cfg.gmin_stepping;
         let allow_arc = conv_cfg.arc_length;
         if !allow_source && !allow_pseudo && !allow_gmin && !allow_arc {
+            if let Some(err) = direct_solver_error {
+                return Err(err);
+            }
             return Err(SimulationError::ConvergenceFailed(dc_max_iterations));
         }
 
@@ -548,16 +569,25 @@ impl Engine {
         }
 
         let zero_seed = vec![0.0; solution.len()];
-        let mut fallback_seed =
-            self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0);
+        let mut fallback_seed = if circuit.has_b3soi_devices() {
+            Self::sanitize_initial_guess(
+                &solution,
+                solution.len(),
+                circuit.num_nodes().min(solution.len()),
+            )
+        } else {
+            self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0)
+        };
         let prefer_gate_generation_aids = circuit.has_jfet_gate_generation_branches();
+        let prefer_gmin_aids = prefer_gate_generation_aids || !circuit.b3soi.is_empty();
         let mut gmin_attempted = false;
 
-        if prefer_gate_generation_aids && allow_gmin {
+        if prefer_gmin_aids && allow_gmin {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
             gmin_attempted = true;
+            let gmin_state = circuit.nonlinear_state_snapshot();
             match self.gmin_stepping_nonlinear_with_abort(circuit, matrix, &fallback_seed, abort) {
                 Ok(gmin_solution) => {
                     if let Some(candidate) = self.evaluate_fallback_candidate(
@@ -586,8 +616,9 @@ impl Engine {
                     }
                 }
                 Err(e) => {
+                    circuit.restore_nonlinear_state(gmin_state);
                     log::warn!(
-                        "Early GMIN stepping for gate generation branch failed with {}. Continuing with configured aids.",
+                        "Early GMIN stepping for weakly anchored nonlinear devices failed with {}. Continuing with configured aids.",
                         e
                     );
                 }
@@ -598,6 +629,7 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
+            let source_state = circuit.nonlinear_state_snapshot();
             match self.source_stepping_nonlinear_with_guess_and_abort(
                 circuit,
                 matrix,
@@ -636,6 +668,7 @@ impl Engine {
                     }
                 }
                 Err(e) => {
+                    circuit.restore_nonlinear_state(source_state);
                     if !allow_pseudo && !allow_gmin && !allow_arc {
                         return Err(e);
                     }
@@ -704,6 +737,7 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
+            let gmin_state = circuit.nonlinear_state_snapshot();
             match self.gmin_stepping_nonlinear_with_abort(circuit, matrix, &fallback_seed, abort) {
                 Ok(gmin_solution) => {
                     if let Some(candidate) = self.evaluate_fallback_candidate(
@@ -732,6 +766,7 @@ impl Engine {
                     }
                 }
                 Err(e) => {
+                    circuit.restore_nonlinear_state(gmin_state);
                     if !allow_arc {
                         return Err(e);
                     }
@@ -1085,25 +1120,32 @@ impl Engine {
                     return Err(SimulationError::Solver(err));
                 }
             };
-            let mut new_solution = if requires_conservative_nonlinear_limiting
-                && !junction_owns_steps
-            {
-                self.apply_damping_strategy(&solution, &raw_solution, &mut damping_state, |trial| {
-                    self.nonlinear_merit_with_linear_stamp(
-                        circuit,
-                        matrix,
-                        trial,
-                        |circuit, matrix, rhs| {
-                            circuit.refresh_jiles_atherton_inductances(trial);
-                            Self::stamp_transient_operating_point_linear(
-                                circuit, matrix, rhs, time, gmin_floor, false,
-                            );
+            let mut new_solution =
+                if requires_conservative_nonlinear_limiting && !junction_owns_steps {
+                    self.apply_damping_strategy_for_circuit(
+                        circuit.has_b3soi_devices(),
+                        &solution,
+                        &raw_solution,
+                        &mut damping_state,
+                        junction_owns_steps,
+                        |trial| {
+                            self.nonlinear_merit_with_linear_stamp(
+                                circuit,
+                                matrix,
+                                trial,
+                                |circuit, matrix, rhs| {
+                                    circuit.refresh_jiles_atherton_inductances(trial);
+                                    Self::stamp_transient_operating_point_linear(
+                                        circuit, matrix, rhs, time, gmin_floor, false,
+                                    );
+                                },
+                            )
                         },
                     )
-                })
-            } else {
-                raw_solution
-            };
+                } else {
+                    raw_solution
+                };
+            circuit.enforce_ideal_voltage_constraints(&mut new_solution, time);
             Self::clamp_solution_to_physical_bounds(
                 &mut new_solution,
                 circuit.num_nodes().min(size),

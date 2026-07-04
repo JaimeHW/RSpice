@@ -179,14 +179,23 @@ impl Engine {
                 Err(_) => return (solution, false, used_iterations),
             };
 
-            let mut new_solution = self.apply_damping_strategy_with_junction_ownership(
+            let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
+                || self.b3soi_limiter_owns_global_damping(circuit);
+            let mut new_solution = self.apply_damping_strategy_for_circuit(
+                circuit.has_b3soi_devices(),
                 &solution,
                 &raw_solution,
                 damping_state,
-                Self::junction_limiting_owns_newton_steps(circuit)
-                    || self.b3soi_limiter_owns_global_damping(circuit),
+                junction_owns_steps,
                 |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale),
             );
+            if (source_scale - 1.0).abs() <= 1.0e-12 {
+                circuit.enforce_ideal_voltage_constraints(&mut new_solution, 0.0);
+            } else {
+                circuit
+                    .voltage_sources
+                    .enforce_scaled_dc_voltage_constraints(&mut new_solution, source_scale);
+            }
             Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 
             let voltage_converged =
