@@ -32,7 +32,8 @@ const MAX_SCALAR_ASSIGNMENT_ALIAS_SNAPSHOT_VARIABLES: usize = 8;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_HISTORY_ENTRIES: usize = 5;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_VARIABLES: usize = 16;
 const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_TOTAL_ENTRIES: usize = 64;
-const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH: Option<usize> = Some(1);
+const REQUIRED_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH: usize = 1;
+const MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH: usize = 2;
 const MAX_SELECTIVE_ASSIGNMENT_DEPENDENCY_EXPR_NODES: usize = 256;
 const MAX_SELECTIVE_ASSIGNMENT_DEPENDENCY_VARIABLES: usize = 64;
 const MAX_SELECTIVE_ASSIGNMENT_BROAD_DEPENDENCY_VARIABLES: usize = 256;
@@ -4705,7 +4706,11 @@ impl<'a> ScalarGraphBuilder<'a> {
             if !seen.insert(variable) {
                 continue;
             }
-            if seen.len() > MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_VARIABLES {
+            let required = depth <= REQUIRED_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH;
+            if snapshots.len() >= MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_VARIABLES {
+                if !required {
+                    continue;
+                }
                 self.trace_local_assignment_history_snapshot_reject(
                     seen.iter().copied(),
                     "variable limit",
@@ -4719,24 +4724,27 @@ impl<'a> ScalarGraphBuilder<'a> {
                 continue;
             }
             let Some(next_total_entries) = total_entries.checked_add(history.len()) else {
+                if !required {
+                    continue;
+                }
                 self.trace_local_assignment_history_snapshot_reject(
                     seen.iter().copied(),
                     "entry count overflow",
                 );
                 return None;
             };
-            total_entries = next_total_entries;
-            if total_entries > MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_TOTAL_ENTRIES {
+            if next_total_entries > MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_TOTAL_ENTRIES {
+                if !required {
+                    continue;
+                }
                 self.trace_local_assignment_history_snapshot_reject(
                     seen.iter().copied(),
                     "entry limit",
                 );
                 return None;
             }
-            if let Some(max_dependency_depth) =
-                MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH
-                && depth < max_dependency_depth
-            {
+            total_entries = next_total_entries;
+            if depth < MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_DEPENDENCY_DEPTH {
                 for entry in &history.entries {
                     for dependency in &entry.local_dependencies {
                         if *dependency != variable
@@ -10228,6 +10236,125 @@ mod tests {
         assert_eq!(snapshots.len(), 2);
         assert!(snapshots.contains(&(target, target_history)));
         assert!(snapshots.contains(&(dependency, dependency_history)));
+    }
+
+    #[test]
+    fn local_assignment_snapshots_include_small_nested_local_dependencies() {
+        let value_expr = ExprId::from(0);
+        let mir = test_mir(vec![HirExpression {
+            id: value_expr,
+            kind: HirExprKind::Number {
+                value: 4.0,
+                raw: "4.0".into(),
+            },
+            span: test_span(),
+        }]);
+        let hir = test_hir_variables(vec![
+            ("T2", CanonicalValueType::Real),
+            ("TMF0", CanonicalValueType::Real),
+            ("TMF1", CanonicalValueType::Real),
+        ]);
+        let target = VariableId::from(0);
+        let dependency = VariableId::from(1);
+        let nested_dependency = VariableId::from(2);
+        let mut builder = ScalarGraphBuilder::new(Some(&hir), &mir);
+        let nested_dependency_history = LocalAssignmentHistory {
+            base_value: None,
+            entries: vec![test_assignment_history_entry(value_expr)],
+        };
+        let mut dependency_entry = test_assignment_history_entry(value_expr);
+        dependency_entry.local_dependencies.push(nested_dependency);
+        let dependency_history = LocalAssignmentHistory {
+            base_value: None,
+            entries: vec![dependency_entry],
+        };
+        let mut target_entry = test_assignment_history_entry(value_expr);
+        target_entry.local_dependencies.push(dependency);
+        let target_history = LocalAssignmentHistory {
+            base_value: None,
+            entries: vec![target_entry],
+        };
+        builder
+            .local_assignment_history
+            .insert(target, target_history.clone());
+        builder
+            .local_assignment_history
+            .insert(dependency, dependency_history.clone());
+        builder
+            .local_assignment_history
+            .insert(nested_dependency, nested_dependency_history.clone());
+
+        let snapshots = builder
+            .local_assignment_history_snapshots(BTreeSet::from([target]))
+            .expect("small nested local dependency should be snapshotted");
+
+        assert_eq!(snapshots.len(), 3);
+        assert!(snapshots.contains(&(target, target_history)));
+        assert!(snapshots.contains(&(dependency, dependency_history)));
+        assert!(snapshots.contains(&(nested_dependency, nested_dependency_history)));
+    }
+
+    #[test]
+    fn local_assignment_snapshots_skip_oversized_optional_nested_dependencies() {
+        let value_expr = ExprId::from(0);
+        let mir = test_mir(vec![HirExpression {
+            id: value_expr,
+            kind: HirExprKind::Number {
+                value: 4.0,
+                raw: "4.0".into(),
+            },
+            span: test_span(),
+        }]);
+        let hir = test_hir_variables(vec![
+            ("T2", CanonicalValueType::Real),
+            ("TMF0", CanonicalValueType::Real),
+            ("TMF1", CanonicalValueType::Real),
+        ]);
+        let target = VariableId::from(0);
+        let dependency = VariableId::from(1);
+        let nested_dependency = VariableId::from(2);
+        let mut builder = ScalarGraphBuilder::new(Some(&hir), &mir);
+        let nested_dependency_history = LocalAssignmentHistory {
+            base_value: None,
+            entries: vec![
+                test_assignment_history_entry(value_expr);
+                MAX_SCALAR_LOCAL_ASSIGNMENT_SNAPSHOT_TOTAL_ENTRIES
+            ],
+        };
+        let mut dependency_entry = test_assignment_history_entry(value_expr);
+        dependency_entry.local_dependencies.push(nested_dependency);
+        let dependency_history = LocalAssignmentHistory {
+            base_value: None,
+            entries: vec![dependency_entry],
+        };
+        let mut target_entry = test_assignment_history_entry(value_expr);
+        target_entry.local_dependencies.push(dependency);
+        let target_history = LocalAssignmentHistory {
+            base_value: None,
+            entries: vec![target_entry],
+        };
+        builder
+            .local_assignment_history
+            .insert(target, target_history.clone());
+        builder
+            .local_assignment_history
+            .insert(dependency, dependency_history.clone());
+        builder
+            .local_assignment_history
+            .insert(nested_dependency, nested_dependency_history);
+
+        let snapshots = builder
+            .local_assignment_history_snapshots(BTreeSet::from([target]))
+            .expect("oversized optional nested dependency should not reject the snapshot");
+
+        assert_eq!(snapshots.len(), 2);
+        assert!(snapshots.contains(&(target, target_history)));
+        assert!(snapshots.contains(&(dependency, dependency_history)));
+        assert!(
+            !snapshots
+                .iter()
+                .any(|(variable, _)| *variable == nested_dependency)
+        );
     }
 
     #[test]
