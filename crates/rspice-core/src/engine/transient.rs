@@ -570,6 +570,7 @@ impl Engine {
                 branch_names: Vec::new(),
                 digital_traces: Vec::new(),
                 real_traces: Vec::new(),
+                device_op_traces: Vec::new(),
             };
             let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit);
             return Ok((result, checkpoint));
@@ -893,6 +894,7 @@ impl Engine {
             branch_names,
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
         };
         let mut digital_snapshot = Vec::new();
         let mut real_snapshot = Vec::new();

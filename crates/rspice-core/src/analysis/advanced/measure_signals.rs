@@ -430,6 +430,7 @@ mod tests {
             branch_names: vec!["v1".to_string()],
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
         }
     }
 

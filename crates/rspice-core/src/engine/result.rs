@@ -41,6 +41,17 @@ pub struct RealTrace {
     pub points: Vec<RealTracePoint>,
 }
 
+/// Accepted operating-point parameter history for one device.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransientDeviceOpTrace {
+    /// Original netlist device name.
+    pub device_name: String,
+    /// Device operating-point parameter name, such as `vbs` or `gm`.
+    pub parameter: String,
+    /// One value per accepted transient sample.
+    pub values: Vec<Value>,
+}
+
 /// Result of transient analysis - time-domain waveforms
 #[derive(Debug, Clone)]
 pub struct TransientResult {
@@ -61,9 +72,67 @@ pub struct TransientResult {
     pub digital_traces: Vec<DigitalTrace>,
     /// XSPICE real-valued event node histories captured at accepted transient points.
     pub real_traces: Vec<RealTrace>,
+    /// Device operating-point values captured at accepted transient points.
+    pub device_op_traces: Vec<TransientDeviceOpTrace>,
 }
 
 impl TransientResult {
+    /// Append one accepted device operating-point snapshot. Missing parameters
+    /// are padded with NaN so every stored trace remains aligned with `time`.
+    pub(crate) fn record_device_op_sample(&mut self, report: crate::circuit::DeviceOpReport) {
+        if self.time.is_empty() {
+            return;
+        }
+
+        let sample_index = self.time.len() - 1;
+        let mut seen = vec![false; self.device_op_traces.len()];
+
+        for entry in report.entries {
+            for (parameter, value) in entry.params {
+                let trace_index = self
+                    .device_op_traces
+                    .iter()
+                    .position(|trace| {
+                        trace.device_name.eq_ignore_ascii_case(&entry.name)
+                            && trace.parameter.eq_ignore_ascii_case(parameter)
+                    })
+                    .unwrap_or_else(|| {
+                        let trace_index = self.device_op_traces.len();
+                        self.device_op_traces.push(TransientDeviceOpTrace {
+                            device_name: entry.name.clone(),
+                            parameter: parameter.to_string(),
+                            values: vec![Value::NAN; sample_index],
+                        });
+                        seen.push(false);
+                        trace_index
+                    });
+
+                let trace = &mut self.device_op_traces[trace_index];
+                if trace.values.len() < sample_index {
+                    trace.values.resize(sample_index, Value::NAN);
+                }
+                if trace.values.len() == sample_index {
+                    trace.values.push(value);
+                } else if let Some(slot) = trace.values.get_mut(sample_index) {
+                    *slot = value;
+                }
+                seen[trace_index] = true;
+            }
+        }
+
+        for (trace_index, trace) in self.device_op_traces.iter_mut().enumerate() {
+            if seen.get(trace_index).copied().unwrap_or(false) {
+                continue;
+            }
+            if trace.values.len() < sample_index {
+                trace.values.resize(sample_index, Value::NAN);
+            }
+            if trace.values.len() == sample_index {
+                trace.values.push(Value::NAN);
+            }
+        }
+    }
+
     /// Append committed XSPICE digital values at an accepted transient time.
     pub(crate) fn record_digital_snapshot(
         &mut self,
@@ -263,6 +332,21 @@ impl TransientResult {
             .map(|waveform| waveform.as_slice())
     }
 
+    /// Get the complete operating-point parameter waveform for a named device.
+    pub fn try_device_op_waveform_named(
+        &self,
+        device_name: &str,
+        parameter: &str,
+    ) -> Option<&[Value]> {
+        self.device_op_traces
+            .iter()
+            .find(|trace| {
+                trace.device_name.eq_ignore_ascii_case(device_name)
+                    && trace.parameter.eq_ignore_ascii_case(parameter)
+            })
+            .map(|trace| trace.values.as_slice())
+    }
+
     /// Get voltage at a named node and time index, returning `None` when the
     /// name or time index is invalid.
     pub fn try_voltage_at_named(&self, name: &str, time_index: usize) -> Option<Value> {
@@ -299,6 +383,7 @@ impl From<TransientResultCompressed> for TransientResult {
             branch_names: Vec::new(),
             digital_traces: Vec::new(),
             real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
         }
     }
 }

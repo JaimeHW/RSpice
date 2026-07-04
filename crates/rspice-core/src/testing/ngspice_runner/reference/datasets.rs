@@ -441,6 +441,9 @@ impl TestRunner {
 
         let (device_name, quantity) = normalized[1..].split_once('[')?;
         let quantity = quantity.strip_suffix(']')?;
+        if let Some(series) = result.try_device_op_waveform_named(device_name, quantity) {
+            return Some(series.to_vec());
+        }
         let element = netlist
             .elements
             .iter()
