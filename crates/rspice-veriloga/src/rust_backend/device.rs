@@ -5405,6 +5405,7 @@ fn stamp() {
         let support = generate_scratch_operation_helpers();
         for helper in [
             "fn store_mul_div_scaled_product_indices",
+            "fn store_mul_div_scaled_product_sqrt_offset",
             "fn store_mul_div_scaled_product_mixed_iaia",
             "fn store_offset_div_scaled_product",
         ] {
@@ -5429,7 +5430,7 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_div_scaled_product_mixed_iaia(81, 9, A::sqrt(s.ad_value(6)), 7, p.product_scale, A::offset(s.ad_value(8), p.bias), p.denominator_scale);"),
+            compact.contains("s.store_mul_div_scaled_product_sqrt_offset(81, 9, 6, 7, p.product_scale, 8, p.bias, p.denominator_scale);"),
             "{compact}"
         );
         assert!(
@@ -5437,6 +5438,10 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("A::div_scaled_product("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_div_scaled_product_mixed_iaia(81"),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_mul_ad_rhs("), "{compact}");
         assert!(!compact.contains("s.store_mul_ad_lhs("), "{compact}");
         assert!(!compact.contains("s.store_offset_ad("), "{compact}");
@@ -10242,12 +10247,16 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_div_scaled_product_mixed_iaia(91, 8, A::sqrt(s.ad_value(9)), 10, p.product_scale, A::offset(s.ad_value(11), p.bias), p.denominator_scale);"),
+            compact.contains("s.store_mul_div_scaled_product_sqrt_offset(91, 8, 9, 10, p.product_scale, 11, p.bias, p.denominator_scale);"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
         assert!(
             !compact.contains("s.store_mul_div_scaled_product_mixed_aiii(90"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_div_scaled_product_mixed_iaia(91"),
             "{compact}"
         );
         assert!(!compact.contains("A::add_scaled_product("), "{compact}");
@@ -19677,6 +19686,31 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = factor * quotient;",
     "        for axis in 0..Instance::NODE_COUNT { let factor_derivative = factor_value_node_derivatives[axis] * factor_value_scale + (factor_product_left_node_derivatives[axis] * factor_product_right_value + factor_product_left_value * factor_product_right_node_derivatives[axis]) * factor_product_scale; let quotient_derivative = (quotient_product_left_node_derivatives[axis] * quotient_product_right_value + quotient_product_left_value * quotient_product_right_node_derivatives[axis]) * quotient_product_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; self.node_derivatives[index][axis] = factor_derivative * quotient + factor * quotient_derivative; }",
     "        for axis in 0..Instance::BRANCH_COUNT { let factor_derivative = factor_value_branch_derivatives[axis] * factor_value_scale + (factor_product_left_branch_derivatives[axis] * factor_product_right_value + factor_product_left_value * factor_product_right_branch_derivatives[axis]) * factor_product_scale; let quotient_derivative = (quotient_product_left_branch_derivatives[axis] * quotient_product_right_value + quotient_product_left_value * quotient_product_right_branch_derivatives[axis]) * quotient_product_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; self.branch_derivatives[index][axis] = factor_derivative * quotient + factor * quotient_derivative; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_div_scaled_product_sqrt_offset(&mut self, index: usize, factor: usize, sqrt_source: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_offset: f64, denominator_scale: f64) {",
+    "        let factor_value = self.values[factor];",
+    "        let sqrt_input = self.values[sqrt_source];",
+    "        let sqrt_value = sqrt_input.sqrt();",
+    "        let product_right_value = self.values[product_right];",
+    "        let denominator_raw = self.values[denominator] + denominator_offset;",
+    "        let reciprocal = 1.0 / (denominator_raw * denominator_scale);",
+    "        let quotient = sqrt_value * product_right_value * product_scale * reciprocal;",
+    "        let sqrt_derivative_scale = product_right_value * product_scale * reciprocal / (2.0 * sqrt_value);",
+    "        let product_right_derivative_scale = sqrt_value * product_scale * reciprocal;",
+    "        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;",
+    "        let factor_node_derivatives = self.node_derivatives[factor];",
+    "        let sqrt_source_node_derivatives = self.node_derivatives[sqrt_source];",
+    "        let product_right_node_derivatives = self.node_derivatives[product_right];",
+    "        let denominator_node_derivatives = self.node_derivatives[denominator];",
+    "        let factor_branch_derivatives = self.branch_derivatives[factor];",
+    "        let sqrt_source_branch_derivatives = self.branch_derivatives[sqrt_source];",
+    "        let product_right_branch_derivatives = self.branch_derivatives[product_right];",
+    "        let denominator_branch_derivatives = self.branch_derivatives[denominator];",
+    "        self.values[index] = factor_value * quotient;",
+    "        for axis in 0..Instance::NODE_COUNT { let quotient_derivative = sqrt_source_node_derivatives[axis] * sqrt_derivative_scale + product_right_node_derivatives[axis] * product_right_derivative_scale + denominator_node_derivatives[axis] * denominator_derivative_scale; self.node_derivatives[index][axis] = factor_node_derivatives[axis] * quotient + factor_value * quotient_derivative; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = sqrt_source_branch_derivatives[axis] * sqrt_derivative_scale + product_right_branch_derivatives[axis] * product_right_derivative_scale + denominator_branch_derivatives[axis] * denominator_derivative_scale; self.branch_derivatives[index][axis] = factor_branch_derivatives[axis] * quotient + factor_value * quotient_derivative; }",
     "    }",
     "",
     "    #[inline]",
@@ -38347,6 +38381,18 @@ fn compact_index_or_mixed_mul_div_scaled_product_helper_line(
         return Some(line);
     }
 
+    if let Some(line) = compact_mul_div_scaled_product_sqrt_offset_helper_line(
+        target_index,
+        factor,
+        product_left,
+        product_right,
+        product_scale,
+        denominator,
+        denominator_scale,
+    ) {
+        return Some(line);
+    }
+
     let (helper, value_args) = compact_index_or_mixed_value_args(
         "store_mul_div_scaled_product",
         &[factor, product_left, product_right, denominator],
@@ -38386,6 +38432,28 @@ fn compact_mul_add_scaled_product_div_scaled_product_helper_line(
     let denominator = compact_scratch_ad_value_index(denominator)?;
     Some(format!(
         "scratch.store_mul_add_scaled_product_div_scaled_product({target_index}, {factor_value}, {factor_value_scale}, {factor_product_left}, {factor_product_right}, {factor_product_scale}, {quotient_product_left}, {quotient_product_right}, {quotient_product_scale}, {denominator}, {denominator_scale});"
+    ))
+}
+
+fn compact_mul_div_scaled_product_sqrt_offset_helper_line(
+    target_index: usize,
+    factor: &str,
+    product_left: &str,
+    product_right: &str,
+    product_scale: &str,
+    denominator: &str,
+    denominator_scale: &str,
+) -> Option<String> {
+    let factor = compact_scratch_ad_value_index(factor)?;
+    let sqrt_args = compact_ad_call_args(product_left, "sqrt")?;
+    if sqrt_args.len() != 1 {
+        return None;
+    }
+    let sqrt_source = compact_scratch_ad_value_index(sqrt_args[0])?;
+    let product_right = compact_scratch_ad_value_index(product_right)?;
+    let (denominator, denominator_offset) = compact_offset_scratch_arg(denominator)?;
+    Some(format!(
+        "scratch.store_mul_div_scaled_product_sqrt_offset({target_index}, {factor}, {sqrt_source}, {product_right}, {product_scale}, {denominator}, {denominator_offset}, {denominator_scale});"
     ))
 }
 
