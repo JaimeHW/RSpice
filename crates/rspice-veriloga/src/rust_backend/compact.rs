@@ -190,6 +190,14 @@ pub(crate) fn lower_scaled_rhs_multiply(
                         ));
                     }
                 }
+                if inner_call.name == "powi" && inner_call.args.len() == 2 {
+                    if let Some(base_source) = scratch_ad_value_index(inner_call.args[0]) {
+                        return Some(format!(
+                            "scratch.store_mul_scaled_powi_scale_offset_rhs({target_index}, {source}, {output_scale}, {base_source}, {}, {}, {});",
+                            inner_call.args[1], call.args[1], call.args[2]
+                        ));
+                    }
+                }
             }
             scratch_ad_value_index(call.args[0]).map(|right_source| {
                 format!(

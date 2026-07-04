@@ -8357,6 +8357,27 @@ fn stamp() {
             assert!(!body.contains("pow_base_derivative_scale"), "{body}");
         }
 
+        for signature in ["fn store_offset_powi_ad(", "fn store_scaled_powi_ad("] {
+            let body = helper_body(&support, signature);
+            assert!(
+                body.contains("integer_power_derivative_scale(base, exponent)"),
+                "{body}"
+            );
+            assert!(!body.contains("pow_base_derivative_scale"), "{body}");
+        }
+
+        let div_powi = helper_body(&support, "fn store_div_from_scalar_powi_ad(");
+        assert!(
+            div_powi.contains(
+                "let derivative_scale = integer_power_derivative_scale(base, exponent) * denominator_scale;"
+            ),
+            "{div_powi}"
+        );
+        assert!(
+            !div_powi.contains("pow_base_derivative_scale"),
+            "{div_powi}"
+        );
+
         let ad_support = generate_ad_value_struct();
 
         let ad_powf = helper_body(&ad_support, "fn powf(left: Self, exponent: f64)");
@@ -9182,6 +9203,79 @@ fn stamp() {
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
         assert!(!compact.contains("A::mul("), "{compact}");
+    }
+
+    #[test]
+    fn rewrites_powi_one_sided_consumers_as_direct_stores() {
+        let support = generate_scratch_operation_helpers();
+        for helper in [
+            "fn store_scaled_powi_ad(",
+            "fn store_offset_powi_ad(",
+            "fn store_div_from_scalar_powi_ad(",
+            "fn store_mul_scaled_powi_rhs(",
+            "fn store_mul_scaled_powi_ad_rhs(",
+            "fn store_mul_scaled_powi_scale_offset_rhs(",
+        ] {
+            assert!(support.contains(helper), "missing {helper}:\n{support}");
+        }
+
+        let source = r#"
+fn stamp() {
+    scratch.store_ad_value(170, AdValue::scale(AdValue::powi(AdValue::sqrt(scratch.ad_value(2)), (params.nf as i32)), params.scale));
+    scratch.store_ad_value(171, AdValue::offset(AdValue::powi(AdValue::abs(scratch.ad_value(3)), (params.nf as i32)), params.offset));
+    scratch.store_ad_value(172, AdValue::div_from_scalar(params.limit, AdValue::powi(AdValue::ln(scratch.ad_value(4)), (params.nf as i32))));
+    scratch.store_ad_value(173, AdValue::mul_scaled_output(scratch.ad_value(5), AdValue::powi(scratch.ad_value(6), (params.nf as i32)), params.scale));
+    scratch.store_ad_value(174, AdValue::mul_scaled_output(scratch.ad_value(7), AdValue::powi(AdValue::sqrt(scratch.ad_value(8)), (params.nf as i32)), params.scale));
+    scratch.store_ad_value(175, AdValue::mul_scaled_output(scratch.ad_value(9), AdValue::scale_offset(AdValue::powi(scratch.ad_value(10), (params.nf as i32)), params.scale, params.offset), params.out_scale));
+}
+"#;
+
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        assert!(
+            compact.contains(
+                "s.store_scaled_powi_ad(170, A::sqrt(s.ad_value(2)), (p.nf as i32), p.scale);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_offset_powi_ad(171, A::abs(s.ad_value(3)), (p.nf as i32), p.offset);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_powi_ad(172, p.limit, A::ln(s.ad_value(4)), (p.nf as i32));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains("s.store_mul_scaled_powi_rhs(173, 5, p.scale, 6, (p.nf as i32));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_scaled_powi_ad_rhs(174, 7, p.scale, A::sqrt(s.ad_value(8)), (p.nf as i32));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_mul_scaled_powi_scale_offset_rhs(175, 9, p.out_scale, 10, (p.nf as i32), p.scale, p.offset);"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_scaled_powf_ad("), "{compact}");
+        assert!(!compact.contains("s.store_offset_powf_ad("), "{compact}");
+        assert!(
+            !compact.contains("s.store_div_from_scalar_powf_ad("),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_scaled_powf_"), "{compact}");
+        assert!(!compact.contains("s.store_ad_value("), "{compact}");
+        assert!(!compact.contains("A::scale("), "{compact}");
+        assert!(!compact.contains("A::offset("), "{compact}");
     }
 
     #[test]
@@ -16797,6 +16891,16 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_offset_powi_ad(&mut self, index: usize, value: AdValue, exponent: i32, offset: f64) {",
+        "        let base = value.value;",
+        "        let output = base.powi(exponent);",
+        "        let derivative_scale = integer_power_derivative_scale(base, exponent);",
+        "        self.values[index] = output + offset;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_offset_sub_from_scalar_ad(&mut self, index: usize, scalar: f64, value: AdValue, offset: f64) {",
         "        self.values[index] = scalar - value.value + offset;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -value.node_derivatives[axis]; }",
@@ -17362,6 +17466,16 @@ fn generate_scratch_operation_helpers() -> String {
         "    fn store_scaled_powf_ad(&mut self, index: usize, value: AdValue, exponent: f64, scale: f64) {",
         "        let output = scalar_power_value(value.value, exponent);",
         "        let derivative_scale = AdValue::pow_base_derivative_scale(output, value.value, exponent) * scale;",
+        "        self.values[index] = output * scale;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_scaled_powi_ad(&mut self, index: usize, value: AdValue, exponent: i32, scale: f64) {",
+        "        let base = value.value;",
+        "        let output = base.powi(exponent);",
+        "        let derivative_scale = integer_power_derivative_scale(base, exponent) * scale;",
         "        self.values[index] = output * scale;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
@@ -18213,6 +18327,19 @@ fn generate_scratch_operation_helpers() -> String {
         "        let quotient = scalar * reciprocal;",
         "        let denominator_scale = -quotient * reciprocal;",
         "        let derivative_scale = AdValue::pow_base_derivative_scale(denominator, value.value, exponent) * denominator_scale;",
+        "        self.values[index] = quotient;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_div_from_scalar_powi_ad(&mut self, index: usize, scalar: f64, value: AdValue, exponent: i32) {",
+        "        let base = value.value;",
+        "        let denominator = base.powi(exponent);",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let quotient = scalar * reciprocal;",
+        "        let denominator_scale = -quotient * reciprocal;",
+        "        let derivative_scale = integer_power_derivative_scale(base, exponent) * denominator_scale;",
         "        self.values[index] = quotient;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale; }",
@@ -20232,6 +20359,37 @@ fn generate_scratch_operation_helpers() -> String {
     "        let base = self.values[value_source];",
     "        let output = scalar_power_value(base, exponent);",
     "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent) * input_scale;",
+    "        let right_value = output * input_scale + offset;",
+    "        self.values[index] = scaled_source_value * right_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * output_scale * right_value + scaled_source_value * self.node_derivatives[value_source][axis] * derivative_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * output_scale * right_value + scaled_source_value * self.branch_derivatives[value_source][axis] * derivative_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_scaled_powi_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, exponent: i32) {",
+    "        let base = self.values[value_source];",
+    "        let output = base.powi(exponent);",
+    "        let derivative_scale = integer_power_derivative_scale(base, exponent);",
+    "        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, derivative_scale);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_scaled_powi_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, value: AdValue, exponent: i32) {",
+    "        let base = value.value;",
+    "        let output = base.powi(exponent);",
+    "        let derivative_scale = integer_power_derivative_scale(base, exponent);",
+    "        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, derivative_scale);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_scaled_powi_scale_offset_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, exponent: i32, input_scale: f64, offset: f64) {",
+    "        let source_value = self.values[source];",
+    "        let scaled_source_value = source_value * output_scale;",
+    "        let source_node_derivatives = self.node_derivatives[source];",
+    "        let source_branch_derivatives = self.branch_derivatives[source];",
+    "        let base = self.values[value_source];",
+    "        let output = base.powi(exponent);",
+    "        let derivative_scale = integer_power_derivative_scale(base, exponent) * input_scale;",
     "        let right_value = output * input_scale + offset;",
     "        self.values[index] = scaled_source_value * right_value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * output_scale * right_value + scaled_source_value * self.node_derivatives[value_source][axis] * derivative_scale; }",
@@ -38627,6 +38785,23 @@ fn compact_mul_scaled_unary_rhs_helper_line(
         ));
     }
 
+    if let Some(args) = compact_ad_call_args(value, "powi") {
+        if args.len() != 2 {
+            return None;
+        }
+        if let Some(value_source) = compact_scratch_ad_value_index(args[0]) {
+            return Some(format!(
+                "scratch.store_mul_scaled_powi_rhs({target_index}, {source}, {output_scale}, {value_source}, {});",
+                args[1]
+            ));
+        }
+        let value = compact_scratch_or_non_atomic_ad_arg(args[0])?;
+        return Some(format!(
+            "scratch.store_mul_scaled_powi_ad_rhs({target_index}, {source}, {output_scale}, {value}, {});",
+            args[1]
+        ));
+    }
+
     if let Some(args) = compact_ad_call_args(value, "offset") {
         if args.len() != 2 {
             return None;
@@ -39437,6 +39612,17 @@ fn compact_div_from_scalar_affine_input_store_helper_call(
         let value = compact_scratch_or_non_atomic_ad_arg(denominator_args[0])?;
         return Some(format!(
             "scratch.store_div_from_scalar_powf_ad({target_index}, {scalar}, {value}, {});",
+            denominator_args[1]
+        ));
+    }
+
+    if let Some(denominator_args) = compact_ad_call_args(denominator, "powi") {
+        if denominator_args.len() != 2 {
+            return None;
+        }
+        let value = compact_scratch_or_non_atomic_ad_arg(denominator_args[0])?;
+        return Some(format!(
+            "scratch.store_div_from_scalar_powi_ad({target_index}, {scalar}, {value}, {});",
             denominator_args[1]
         ));
     }
@@ -40735,6 +40921,19 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
         return None;
     }
 
+    if let Some(inner_args) = compact_ad_call_args(inner, "powi") {
+        if inner_args.len() != 2 {
+            return None;
+        }
+        if compact_non_atomic_ad_value(inner_args[0]) {
+            return Some(format!(
+                "scratch.store_scaled_powi_ad({target_index}, {}, {}, {scale});",
+                inner_args[0], inner_args[1]
+            ));
+        }
+        return None;
+    }
+
     None
 }
 
@@ -41143,6 +41342,17 @@ fn compact_nested_offset_store_helper_call(target_index: usize, value: &str) -> 
         let value = compact_scratch_or_non_atomic_ad_arg(inner_args[0])?;
         return Some(format!(
             "scratch.store_offset_powf_ad({target_index}, {value}, {}, {offset});",
+            inner_args[1]
+        ));
+    }
+
+    if let Some(inner_args) = compact_ad_call_args(inner, "powi") {
+        if inner_args.len() != 2 {
+            return None;
+        }
+        let value = compact_scratch_or_non_atomic_ad_arg(inner_args[0])?;
+        return Some(format!(
+            "scratch.store_offset_powi_ad({target_index}, {value}, {}, {offset});",
             inner_args[1]
         ));
     }
