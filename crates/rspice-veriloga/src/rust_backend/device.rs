@@ -4921,6 +4921,7 @@ fn stamp() {
         for helper in [
             "fn store_mul_add_scaled_inputs4_rhs",
             "fn store_mul_add_scaled_inputs4_indices_rhs",
+            "fn store_mul_add_scaled_inputs4_rhs_mixed_iiia",
             "fn store_mul_add_scaled_products_rhs",
             "fn store_mul_add_scaled_products_indices_rhs",
             "fn store_mul_add_scaled_products3_rhs",
@@ -4937,6 +4938,7 @@ fn stamp() {
     scratch.store_ad_value(132, AdValue::mul_scaled_output(scratch.ad_value(14), AdValue::add_scaled_inputs4(scratch.ad_value(15), params.first_scale, scratch.ad_value(16), params.second_scale, scratch.ad_value(17), params.third_scale, AdValue::sqrt(scratch.ad_value(18)), params.fourth_scale), params.output_scale));
     scratch.store_ad_value(133, AdValue::mul_scaled_output(scratch.ad_value(19), AdValue::scale_offset(scratch.ad_value(20), params.input_scale, params.offset), params.output_scale));
     scratch.store_ad_value(134, AdValue::mul_scaled_output(scratch.ad_value(21), AdValue::exp_scaled_input(scratch.ad_value(22), params.input_scale), params.output_scale));
+    scratch.store_ad_value(135, AdValue::mul(scratch.ad_value(23), AdValue::add_scaled_inputs4(scratch.ad_value(24), params.first_scale, scratch.ad_value(25), params.second_scale, scratch.ad_value(26), params.third_scale, scratch.ad_value(27), params.fourth_scale)));
 }
 "#;
 
@@ -4951,7 +4953,7 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_add_scaled_inputs4_rhs(132, 14, s.ad_value(15), ((p.first_scale) * (p.output_scale)), s.ad_value(16), ((p.second_scale) * (p.output_scale)), s.ad_value(17), ((p.third_scale) * (p.output_scale)), A::sqrt(s.ad_value(18)), ((p.fourth_scale) * (p.output_scale)));"),
+            compact.contains("s.store_mul_add_scaled_inputs4_rhs_mixed_iiia(132, 14, 15, ((p.first_scale) * (p.output_scale)), 16, ((p.second_scale) * (p.output_scale)), 17, ((p.third_scale) * (p.output_scale)), A::sqrt(s.ad_value(18)), ((p.fourth_scale) * (p.output_scale)));"),
             "{compact}"
         );
         assert!(
@@ -4962,7 +4964,19 @@ fn stamp() {
             compact.contains("s.store_mul_scaled_exp_scaled_input_rhs(134, 21, p.output_scale, 22, p.input_scale);"),
             "{compact}"
         );
+        assert!(
+            compact.contains("s.store_mul_add_scaled_inputs4_indices_rhs(135, 23, 24, p.first_scale, 25, p.second_scale, 26, p.third_scale, 27, p.fourth_scale);"),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_mul_scaled_ad_rhs("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_inputs4_rhs(132"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_inputs4_rhs(135"),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -23632,6 +23646,11 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
         out.push_str(&generate_index_or_mixed_add_scaled_inputs4_offset_helper(
             &mask,
         ));
+        if mask != "iiii" {
+            out.push_str(&generate_index_or_mixed_mul_add_scaled_inputs4_rhs_helper(
+                &mask,
+            ));
+        }
         out.push_str(&generate_index_or_mixed_sub_add_scaled_inputs4_lhs_helper(
             &mask,
         ));
@@ -24317,6 +24336,45 @@ fn generate_index_or_mixed_add_scaled_inputs4_helper(mask: &str) -> String {
 fn generate_index_or_mixed_add_scaled_inputs4_offset_helper(mask: &str) -> String {
     let helper = index_or_mixed_helper_name("store_add_scaled_inputs4_offset", mask);
     generate_index_or_mixed_add_scaled_inputs4_body(mask, &helper, &["offset: f64"])
+}
+
+fn generate_index_or_mixed_mul_add_scaled_inputs4_rhs_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_mul_add_scaled_inputs4_rhs", mask);
+    let first_value = cached_index_or_mixed_value_expr(mask, 0, "first");
+    let second_value = cached_index_or_mixed_value_expr(mask, 1, "second");
+    let third_value = cached_index_or_mixed_value_expr(mask, 2, "third");
+    let fourth_value = cached_index_or_mixed_value_expr(mask, 3, "fourth");
+    let first_node_derivative = cached_index_or_mixed_node_derivative_expr(mask, 0, "first");
+    let second_node_derivative = cached_index_or_mixed_node_derivative_expr(mask, 1, "second");
+    let third_node_derivative = cached_index_or_mixed_node_derivative_expr(mask, 2, "third");
+    let fourth_node_derivative = cached_index_or_mixed_node_derivative_expr(mask, 3, "fourth");
+    let first_branch_derivative = cached_index_or_mixed_branch_derivative_expr(mask, 0, "first");
+    let second_branch_derivative = cached_index_or_mixed_branch_derivative_expr(mask, 1, "second");
+    let third_branch_derivative = cached_index_or_mixed_branch_derivative_expr(mask, 2, "third");
+    let fourth_branch_derivative = cached_index_or_mixed_branch_derivative_expr(mask, 3, "fourth");
+    let first_bindings = cached_index_or_mixed_operand_bindings(mask, 0, "first");
+    let second_bindings = cached_index_or_mixed_operand_bindings(mask, 1, "second");
+    let third_bindings = cached_index_or_mixed_operand_bindings(mask, 2, "third");
+    let fourth_bindings = cached_index_or_mixed_operand_bindings(mask, 3, "fourth");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: usize, first: {first_ty}, first_scale: f64, second: {second_ty}, second_scale: f64, third: {third_ty}, third_scale: f64, fourth: {fourth_ty}, fourth_scale: f64) {{
+        let left_value = self.values[left];
+        let left_node_derivatives = self.node_derivatives[left];
+        let left_branch_derivatives = self.branch_derivatives[left];
+{first_bindings}{second_bindings}{third_bindings}{fourth_bindings}        let right_value = {first_value} * first_scale + {second_value} * second_scale + {third_value} * third_scale + {fourth_value} * fourth_scale;
+        self.values[index] = left_value * right_value;
+        for axis in 0..Instance::NODE_COUNT {{ let right_derivative = {first_node_derivative} * first_scale + {second_node_derivative} * second_scale + {third_node_derivative} * third_scale + {fourth_node_derivative} * fourth_scale; self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_derivative; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let right_derivative = {first_branch_derivative} * first_scale + {second_branch_derivative} * second_scale + {third_branch_derivative} * third_scale + {fourth_branch_derivative} * fourth_scale; self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_derivative; }}
+    }}
+"#,
+        first_ty = mixed_helper_type(mask, 0),
+        second_ty = mixed_helper_type(mask, 1),
+        third_ty = mixed_helper_type(mask, 2),
+        fourth_ty = mixed_helper_type(mask, 3),
+    )
 }
 
 fn generate_index_or_mixed_sub_add_scaled_inputs4_lhs_helper(mask: &str) -> String {
@@ -33991,6 +34049,9 @@ fn compact_scratch_store_helper_call(target_index: usize, value: &str) -> Option
     if let Some(line) = compact_scaled_binary_operand_store_helper_call(target_index, value) {
         return Some(line);
     }
+    if let Some(line) = compact_mul_add_scaled_inputs4_store_helper_call(target_index, value) {
+        return Some(line);
+    }
     if let Some(line) = compact_mul_add_scaled_inputs3_store_helper_call(target_index, value) {
         return Some(line);
     }
@@ -39133,6 +39194,70 @@ fn compact_mul_add_scaled_inputs3_store_helper_call(
     None
 }
 
+fn compact_mul_add_scaled_inputs4_store_helper_call(
+    target_index: usize,
+    value: &str,
+) -> Option<String> {
+    let args = compact_ad_call_args(value, "mul")?;
+    if args.len() != 2 {
+        return None;
+    }
+
+    if let Some(left) = compact_scratch_ad_value_index(args[0])
+        && let Some((
+            first,
+            first_scale,
+            second,
+            second_scale,
+            third,
+            third_scale,
+            fourth,
+            fourth_scale,
+        )) = compact_add_scaled_inputs4_args(args[1])
+    {
+        return compact_index_or_mixed_mul_add_scaled_inputs4_rhs_helper_line(
+            target_index,
+            left,
+            first,
+            first_scale,
+            second,
+            second_scale,
+            third,
+            third_scale,
+            fourth,
+            fourth_scale,
+        );
+    }
+
+    if let Some(right) = compact_scratch_ad_value_index(args[1])
+        && let Some((
+            first,
+            first_scale,
+            second,
+            second_scale,
+            third,
+            third_scale,
+            fourth,
+            fourth_scale,
+        )) = compact_add_scaled_inputs4_args(args[0])
+    {
+        return compact_index_or_mixed_mul_add_scaled_inputs4_rhs_helper_line(
+            target_index,
+            right,
+            first,
+            first_scale,
+            second,
+            second_scale,
+            third,
+            third_scale,
+            fourth,
+            fourth_scale,
+        );
+    }
+
+    None
+}
+
 fn compact_index_or_mixed_mul_add_scaled_inputs3_offset_rhs_helper_line(
     target_index: usize,
     source: usize,
@@ -39151,6 +39276,40 @@ fn compact_index_or_mixed_mul_add_scaled_inputs3_offset_rhs_helper_line(
     Some(format!(
         "scratch.{helper}({target_index}, {source}, {}, {first_scale}, {}, {second_scale}, {}, {third_scale}, {offset});",
         value_args[0], value_args[1], value_args[2]
+    ))
+}
+
+fn compact_index_or_mixed_mul_add_scaled_inputs4_rhs_helper_line(
+    target_index: usize,
+    source: usize,
+    first: &str,
+    first_scale: &str,
+    second: &str,
+    second_scale: &str,
+    third: &str,
+    third_scale: &str,
+    fourth: &str,
+    fourth_scale: &str,
+) -> Option<String> {
+    let mut mask = String::with_capacity(4);
+    let mut value_args = Vec::with_capacity(4);
+    for value in [first, second, third, fourth] {
+        if let Some(index) = compact_scratch_ad_value_index(value) {
+            mask.push('i');
+            value_args.push(index.to_string());
+        } else {
+            mask.push('a');
+            value_args.push(compact_scratch_or_non_atomic_ad_arg(value)?);
+        }
+    }
+    let helper = if mask.bytes().all(|byte| byte == b'i') {
+        "store_mul_add_scaled_inputs4_indices_rhs".to_string()
+    } else {
+        index_or_mixed_helper_name("store_mul_add_scaled_inputs4_rhs", &mask)
+    };
+    Some(format!(
+        "scratch.{helper}({target_index}, {source}, {}, {first_scale}, {}, {second_scale}, {}, {third_scale}, {}, {fourth_scale});",
+        value_args[0], value_args[1], value_args[2], value_args[3]
     ))
 }
 
@@ -39531,6 +39690,18 @@ fn compact_add_scaled_inputs3_args(
         return None;
     }
     Some((args[0], args[1], args[2], args[3], args[4], args[5], "0.0"))
+}
+
+fn compact_add_scaled_inputs4_args(
+    value: &str,
+) -> Option<(&str, &str, &str, &str, &str, &str, &str, &str)> {
+    let args = compact_ad_call_args(value, "add_scaled_inputs4")?;
+    if args.len() != 8 {
+        return None;
+    }
+    Some((
+        args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+    ))
 }
 
 fn compact_add_scaled_inputs3_div_scaled_third_store_helper_call(
