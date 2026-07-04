@@ -5724,6 +5724,22 @@ mod tests {
     }
 
     #[test]
+    fn node_names_accept_standalone_xyce_punctuation_labels() {
+        let netlist = Netlist::parse(
+            "standalone punctuation nodes\n\
+             R1 + : 2\n\
+             V0 1: 0 1\n\
+             V1 : 0 1\n\
+             .end\n",
+        )
+        .expect("Xyce standalone punctuation node labels should parse");
+
+        assert_eq!(netlist.elements[0].nodes, vec!["+", ":"]);
+        assert_eq!(netlist.elements[1].nodes, vec!["1:", "0"]);
+        assert_eq!(netlist.elements[2].nodes, vec![":", "0"]);
+    }
+
+    #[test]
     fn digit_leading_node_names_preserve_label_identity() {
         let netlist = Netlist::parse(
             "digit-leading node labels\n\

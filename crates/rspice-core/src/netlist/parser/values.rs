@@ -1476,37 +1476,69 @@ pub(super) fn expect_ident(
 pub(super) fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
     skip_commas(stream);
 
-    match &stream.peek().kind {
-        TokenKind::Ident(s) => {
-            let mut s = s.clone();
-            let ident_end = stream.peek().span.end;
-            stream.advance();
-            match &stream.peek().kind {
-                TokenKind::Plus if stream.peek().span.start == ident_end => {
-                    s.push('+');
-                    stream.advance();
-                }
-                TokenKind::Minus if stream.peek().span.start == ident_end => {
-                    s.push('-');
-                    stream.advance();
-                }
-                _ => {}
-            }
-            Ok(s)
-        }
-        TokenKind::Number(_) => {
-            // Node names are labels, not scalar values. Preserve the source
-            // spelling so digit-leading names such as `2a` stay addressable by
-            // behavioral probes like V(2a).
-            let s = stream.peek().lexeme.clone();
-            stream.advance();
-            Ok(s)
-        }
-        other => Err(ParseError::Syntax {
-            line: line_num,
-            message: format!("Expected node name, found {:?}", other),
-        }),
+    if let Some(node) = consume_node_label(stream) {
+        return Ok(node);
     }
+
+    let other = &stream.peek().kind;
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!("Expected node name, found {:?}", other),
+    })
+}
+
+fn consume_node_label(stream: &mut TokenStream) -> Option<String> {
+    let mut node = node_label_piece(stream.peek())?;
+    let mut end = stream.peek().span.end;
+    stream.advance();
+
+    while stream.peek().span.start == end {
+        let Some(piece) = node_label_piece(stream.peek()) else {
+            break;
+        };
+        node.push_str(&piece);
+        end = stream.peek().span.end;
+        stream.advance();
+    }
+
+    Some(node)
+}
+
+fn node_label_piece(token: &crate::netlist::lexer::Token) -> Option<String> {
+    match &token.kind {
+        TokenKind::Ident(s) => Some(s.clone()),
+        TokenKind::Number(value) => Some(if token.lexeme.is_empty() {
+            format_compact_number(*value)
+        } else {
+            token.lexeme.clone()
+        }),
+        _ => punctuation_node_name(token),
+    }
+}
+
+fn punctuation_node_name(token: &crate::netlist::lexer::Token) -> Option<String> {
+    let name = match token.kind {
+        TokenKind::Plus => "+",
+        TokenKind::Minus => "-",
+        TokenKind::Slash => "/",
+        TokenKind::AtSign => "@",
+        TokenKind::Tilde => "~",
+        TokenKind::LBracket => "[",
+        TokenKind::RBracket => "]",
+        TokenKind::Other(':')
+        | TokenKind::Other('`')
+        | TokenKind::Other('!')
+        | TokenKind::Other('$')
+        | TokenKind::Other('^')
+        | TokenKind::Other('&')
+        | TokenKind::Other('|')
+        | TokenKind::Other('\\')
+        | TokenKind::Other('<')
+        | TokenKind::Other('>')
+        | TokenKind::Other('?') => token.lexeme.as_str(),
+        _ => return None,
+    };
+    Some(name.to_string())
 }
 
 pub(super) fn expect_value(

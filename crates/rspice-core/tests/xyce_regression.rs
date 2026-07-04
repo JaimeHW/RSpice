@@ -2927,6 +2927,60 @@ fn test_xyce_special_character_function_name_case_runs() {
 }
 
 #[test]
+fn test_xyce_standalone_punctuation_node_name_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/INVALID_CHARS/colon_in_node_name.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a wrapper-origin Xyce punctuation-node DC comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_static_prn_dc",
+        "{relative} should report the wrapper-origin static DC .prn contract"
+    );
+}
+
+#[test]
+fn test_xyce_punctuation_node_ac_expression_case_runs() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/INVALID_CHARS/valid_chars_ac_expressions.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a wrapper-origin Xyce punctuation-node AC expression comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .FD.prn oracle"
+    );
+    assert_eq!(
+        result.contract, "wrapper_static_fd_prn_ac",
+        "{relative} should report the wrapper-origin static AC .FD.prn contract"
+    );
+}
+
+#[test]
 fn test_xyce_naked_random_parameter_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

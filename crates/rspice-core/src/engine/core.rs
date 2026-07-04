@@ -194,18 +194,44 @@ impl Engine {
     ) -> Option<String> {
         let normalized = Self::normalize_hierarchical_node_name(node_name);
         let parts = normalized.split(':').collect::<Vec<_>>();
-        if parts.len() < 2 || parts.iter().any(|part| part.is_empty()) {
+        if parts.len() < 2 {
             return None;
         }
 
-        let local_node = *parts.last()?;
+        for instance_count in (1..parts.len()).rev() {
+            if parts[..instance_count].iter().any(|part| part.is_empty()) {
+                continue;
+            }
+
+            let local_node = parts[instance_count..].join(":");
+            if local_node.is_empty() {
+                continue;
+            }
+
+            if let Some(resolved) = Self::resolve_hierarchical_node_parts(
+                netlist,
+                &parts[..instance_count],
+                &local_node,
+            ) {
+                return Some(resolved);
+            }
+        }
+
+        None
+    }
+
+    fn resolve_hierarchical_node_parts(
+        netlist: &Netlist,
+        instance_names: &[&str],
+        local_node: &str,
+    ) -> Option<String> {
         let mut elements = netlist.elements.as_slice();
         let root_subcircuits = netlist.subcircuits.as_slice();
         let mut subcircuits = root_subcircuits;
         let mut prefix = String::new();
         let mut node_map: HashMap<String, String> = HashMap::new();
 
-        for instance_name in &parts[..parts.len() - 1] {
+        for instance_name in instance_names {
             let instance = elements.iter().find(|element| {
                 element.name.eq_ignore_ascii_case(instance_name)
                     && matches!(element.kind, ElementKind::Subcircuit { .. })
@@ -344,6 +370,48 @@ R2 b out 1
             .expect("hierarchical node resolves");
 
         assert_eq!(resolved.to_ascii_lowercase(), "x2.b");
+    }
+
+    #[test]
+    fn hierarchical_node_lookup_preserves_colon_suffix_local_nodes() {
+        let netlist = Netlist::parse(
+            "\
+colon local node lookup
+X1 2 0 sub1
+.SUBCKT sub1 a b
+V1 1: 0 1
+V2 : 0 1
+X2 3 0 sub2
+.ENDS
+.SUBCKT sub2 c d
+V1 1: 0 1
+V2 : 0 1
+.ENDS
+.END
+",
+        )
+        .expect("test deck parses");
+
+        assert_eq!(
+            Engine::resolve_hierarchical_node_name(&netlist, "X1:1:")
+                .expect("colon-suffix local node resolves"),
+            "X1.1:"
+        );
+        assert_eq!(
+            Engine::resolve_hierarchical_node_name(&netlist, "X1::")
+                .expect("literal colon local node resolves"),
+            "X1.:"
+        );
+        assert_eq!(
+            Engine::resolve_hierarchical_node_name(&netlist, "X1:X2:1:")
+                .expect("nested colon-suffix local node resolves"),
+            "X1.X2.1:"
+        );
+        assert_eq!(
+            Engine::resolve_hierarchical_node_name(&netlist, "X1:X2::")
+                .expect("nested literal colon local node resolves"),
+            "X1.X2.:"
+        );
     }
 
     #[test]
