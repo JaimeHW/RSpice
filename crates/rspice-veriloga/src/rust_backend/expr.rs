@@ -2944,6 +2944,17 @@ mod tests {
             "(dx * (4.0 * {let pb=x;pb*pb*pb}))"
         );
         assert!(!pow_derivative_expr("value", "x", "0.5", "dx", "0.0").contains("powi"));
+
+        let nonzero_exponent_derivative = pow_derivative_expr("value", "x", "y", "dx", "1.0");
+        assert_eq!(
+            nonzero_exponent_derivative,
+            "(value * ((x).ln() + (y * (dx / x))))"
+        );
+        assert!(!nonzero_exponent_derivative.contains("if "));
+
+        let dynamic_exponent_derivative = pow_derivative_expr("value", "x", "y", "dx", "dy");
+        assert!(dynamic_exponent_derivative.contains("dy == 0.0"));
+        assert!(dynamic_exponent_derivative.contains("if "));
     }
 }
 
@@ -3132,6 +3143,12 @@ fn integer_power_exponent_literal(value: &str) -> Option<i32> {
     let value = trim_enclosing_parentheses(value);
     let value = value.strip_suffix("_f64").unwrap_or(value);
     integer_power_exponent_value(value.parse::<f64>().ok()?)
+}
+
+fn nonzero_numeric_literal(value: &str) -> bool {
+    let value = trim_enclosing_parentheses(value);
+    let value = value.strip_suffix("_f64").unwrap_or(value);
+    value.parse::<f64>().is_ok_and(|value| value != 0.0)
 }
 
 fn integer_power_exponent_value(value: f64) -> Option<i32> {
@@ -3457,6 +3474,9 @@ fn pow_derivative_expr(
             &mul_expr(exponent, &div_expr(dbase, base)),
         ),
     );
+    if nonzero_numeric_literal(dexponent) {
+        return general_derivative;
+    }
 
     conditional_expr(
         &format!(
