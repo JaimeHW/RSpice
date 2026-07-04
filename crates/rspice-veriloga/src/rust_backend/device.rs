@@ -5042,6 +5042,7 @@ fn stamp() {
         let support = generate_scratch_operation_helpers();
         for helper in [
             "fn store_mul_add_scaled_product_rhs",
+            "fn store_mul_add_scaled_product_rhs_indices",
             "fn store_mul_add_scaled_product_sub_value_rhs",
             "fn store_offset_add_scaled_product",
         ] {
@@ -5060,7 +5061,7 @@ fn stamp() {
         let compact = compact_generated_stamp_surface(source.to_string());
 
         assert!(
-            compact.contains("s.store_mul_add_scaled_product_rhs(50, 2, s.ad_value(3), p.value_scale, s.ad_value(4), s.ad_value(5), p.product_scale);"),
+            compact.contains("s.store_mul_add_scaled_product_rhs_indices(50, 2, 3, p.value_scale, 4, 5, p.product_scale);"),
             "{compact}"
         );
         assert!(
@@ -5074,6 +5075,10 @@ fn stamp() {
             "{compact}"
         );
         assert!(!compact.contains("A::add_scaled_product("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_product_rhs(50"),
+            "{compact}"
+        );
         assert!(
             !compact.contains("s.store_mul_add_scaled_product_rhs(51"),
             "{compact}"
@@ -23635,6 +23640,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
             &mask,
         ));
         out.push_str(&generate_index_or_mixed_mul_add_scaled_inputs3_offset_rhs_helper(&mask));
+        out.push_str(&generate_index_or_mixed_mul_add_scaled_product_rhs_helper(
+            &mask,
+        ));
         out.push_str(&generate_index_or_mixed_offset_add_scaled_inputs3_offset_helper(&mask));
         out.push_str(&generate_index_or_mixed_div_scaled_inputs2_helper(&mask));
         out.push_str(&generate_index_or_mixed_offset_div_scaled_inputs2_helper(
@@ -24284,6 +24292,47 @@ fn generate_index_or_mixed_mul_add_scaled_inputs3_offset_rhs_helper(mask: &str) 
         first_ty = mixed_helper_type(mask, 0),
         second_ty = mixed_helper_type(mask, 1),
         third_ty = mixed_helper_type(mask, 2),
+    )
+}
+
+fn generate_index_or_mixed_mul_add_scaled_product_rhs_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_mul_add_scaled_product_rhs", mask);
+    let value_raw = cached_index_or_mixed_value_expr(mask, 0, "value");
+    let product_left_value = cached_index_or_mixed_value_expr(mask, 1, "product_left");
+    let product_right_value = cached_index_or_mixed_value_expr(mask, 2, "product_right");
+    let value_node_derivative = cached_index_or_mixed_node_derivative_expr(mask, 0, "value");
+    let product_left_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 1, "product_left");
+    let product_right_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 2, "product_right");
+    let value_branch_derivative = cached_index_or_mixed_branch_derivative_expr(mask, 0, "value");
+    let product_left_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 1, "product_left");
+    let product_right_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 2, "product_right");
+    let value_bindings = cached_index_or_mixed_operand_bindings(mask, 0, "value");
+    let product_left_bindings = cached_index_or_mixed_operand_bindings(mask, 1, "product_left");
+    let product_right_bindings = cached_index_or_mixed_operand_bindings(mask, 2, "product_right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: usize, value: {value_ty}, value_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64) {{
+        let left_value = self.values[left];
+        let left_node_derivatives = self.node_derivatives[left];
+        let left_branch_derivatives = self.branch_derivatives[left];
+{value_bindings}{product_left_bindings}{product_right_bindings}        let value_raw = {value_raw};
+        let product_left_raw = {product_left_value};
+        let product_right_raw = {product_right_value};
+        let right_value = value_raw * value_scale + product_left_raw * product_right_raw * product_scale;
+        self.values[index] = left_value * right_value;
+        for axis in 0..Instance::NODE_COUNT {{ let right_derivative = {value_node_derivative} * value_scale + ({product_left_node_derivative} * product_right_raw + product_left_raw * {product_right_node_derivative}) * product_scale; self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_derivative; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let right_derivative = {value_branch_derivative} * value_scale + ({product_left_branch_derivative} * product_right_raw + product_left_raw * {product_right_branch_derivative}) * product_scale; self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_derivative; }}
+    }}
+"#,
+        value_ty = mixed_helper_type(mask, 0),
+        product_left_ty = mixed_helper_type(mask, 1),
+        product_right_ty = mixed_helper_type(mask, 2),
     )
 }
 
@@ -39437,9 +39486,15 @@ fn compact_mul_add_scaled_product_store_helper_call(
         ) {
             return Some(line);
         }
-        return Some(format!(
-            "scratch.store_mul_add_scaled_product_rhs({target_index}, {left}, {base}, {base_scale}, {product_left}, {product_right}, {product_scale});"
-        ));
+        return compact_index_or_mixed_mul_add_scaled_product_rhs_helper_line(
+            target_index,
+            left,
+            base,
+            base_scale,
+            product_left,
+            product_right,
+            product_scale,
+        );
     }
 
     if let Some(right) = compact_scratch_ad_value_index(args[1])
@@ -39457,12 +39512,37 @@ fn compact_mul_add_scaled_product_store_helper_call(
         ) {
             return Some(line);
         }
-        return Some(format!(
-            "scratch.store_mul_add_scaled_product_rhs({target_index}, {right}, {base}, {base_scale}, {product_left}, {product_right}, {product_scale});"
-        ));
+        return compact_index_or_mixed_mul_add_scaled_product_rhs_helper_line(
+            target_index,
+            right,
+            base,
+            base_scale,
+            product_left,
+            product_right,
+            product_scale,
+        );
     }
 
     None
+}
+
+fn compact_index_or_mixed_mul_add_scaled_product_rhs_helper_line(
+    target_index: usize,
+    source: usize,
+    value: &str,
+    value_scale: &str,
+    product_left: &str,
+    product_right: &str,
+    product_scale: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(
+        "store_mul_add_scaled_product_rhs",
+        &[value, product_left, product_right],
+    )?;
+    Some(format!(
+        "scratch.{helper}({target_index}, {source}, {}, {value_scale}, {}, {}, {product_scale});",
+        value_args[0], value_args[1], value_args[2]
+    ))
 }
 
 fn compact_mul_add_scaled_product_value_term_helper_line(

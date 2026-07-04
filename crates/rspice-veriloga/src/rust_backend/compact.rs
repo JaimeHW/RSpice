@@ -98,9 +98,14 @@ pub(crate) fn lower_scaled_rhs_multiply(
             ) {
                 return Some(line);
             }
-            Some(format!(
-                "scratch.store_mul_add_scaled_product_rhs({target_index}, {source}, {}, {value_scale}, {}, {}, {product_scale});",
-                call.args[0], call.args[2], call.args[3]
+            Some(lower_mul_add_scaled_product_rhs(
+                target_index,
+                source,
+                call.args[0],
+                &value_scale,
+                call.args[2],
+                call.args[3],
+                &product_scale,
             ))
         }
         "add_scaled_sub_value_product" if call.args.len() == 6 => Some(format!(
@@ -391,6 +396,25 @@ fn lower_mul_add_scaled_product_value_term(
     }
 }
 
+fn lower_mul_add_scaled_product_rhs(
+    target_index: usize,
+    source: usize,
+    value: &str,
+    value_scale: &str,
+    product_left: &str,
+    product_right: &str,
+    product_scale: &str,
+) -> String {
+    let (value_mask, value_arg) = index_or_ad_arg(value);
+    let (product_left_mask, product_left_arg) = index_or_ad_arg(product_left);
+    let (product_right_mask, product_right_arg) = index_or_ad_arg(product_right);
+    let mask = format!("{value_mask}{product_left_mask}{product_right_mask}");
+    let helper = index_or_mixed_helper_name("store_mul_add_scaled_product_rhs", &mask);
+    format!(
+        "scratch.{helper}({target_index}, {source}, {value_arg}, {value_scale}, {product_left_arg}, {product_right_arg}, {product_scale});"
+    )
+}
+
 fn lower_mul_div_scaled_inputs_rhs(
     target_index: usize,
     source: usize,
@@ -419,6 +443,8 @@ fn index_or_ad_arg(value: &str) -> (char, String) {
 fn index_or_mixed_helper_name(base: &str, mask: &str) -> String {
     if mask.bytes().all(|byte| byte == b'i') {
         format!("{base}_indices")
+    } else if mask.bytes().all(|byte| byte == b'a') {
+        base.to_string()
     } else {
         format!("{base}_mixed_{mask}")
     }
