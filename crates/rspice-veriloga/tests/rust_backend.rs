@@ -6092,8 +6092,32 @@ fn rust_backend_directly_stores_value_products_helpers() {
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_add_scaled_value_products("),
+        support.contains("fn store_add_scaled_value_products_indices("),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_add_scaled_value_products_mixed_aiiii("),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_add_scaled_value_products_mixed_iiaii("),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_value_products_indices("),
         "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_value_products_mixed_aiiii("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_value_products_mixed_iiaii("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_value_products("),
+        "index and mixed value-product roots should avoid by-value value-products stores:\n{stamp}"
     );
     assert!(
         !stamp.contains("s.store_ad_value("),
@@ -17003,12 +17027,16 @@ module compact_expression_direct_store_value_products_helpers(p, n);
     real q;
     real r;
     real shaped;
+    real shaped_mixed_value;
+    real shaped_mixed_product;
     analog begin
         a = V(p, n);
         q = V(p);
         r = V(n);
         shaped = (a * value_scale) + ((a * q) * first_scale) + ((q * r) * second_scale);
-        I(p, n) <+ shaped;
+        shaped_mixed_value = (sqrt(a) * value_scale) + ((a * q) * first_scale) + ((q * r) * second_scale);
+        shaped_mixed_product = (a * value_scale) + ((a * sqrt(q)) * first_scale) + ((q * r) * second_scale);
+        I(p, n) <+ shaped + shaped_mixed_value + shaped_mixed_product;
     end
 endmodule
 "#
