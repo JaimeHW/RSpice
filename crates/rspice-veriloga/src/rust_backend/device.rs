@@ -9244,6 +9244,8 @@ fn stamp() {
     scratch.store_ad_value(90, AdValue::powi(AdValue::scale(scratch.ad_value(2), params.scale), 3));
     scratch.store_ad_value(91, AdValue::powi(AdValue::offset(scratch.ad_value(3), params.offset), 4));
     scratch.store_ad_value(92, AdValue::powi(AdValue::scale_offset(scratch.ad_value(4), params.scale, params.offset), 5));
+    scratch.store_ad_value(93, AdValue::powi(AdValue::scale(scratch.ad_value(5), params.scale), (params.nf as i32)));
+    scratch.store_ad_value(94, AdValue::powi(AdValue::mul(scratch.ad_value(6), scratch.ad_value(7)), (params.nf as i32)));
 }
 "#;
 
@@ -9261,7 +9263,16 @@ fn stamp() {
             compact.contains("s.store_powi_scale_offset_input(92, 4, p.scale, p.offset, 5);"),
             "{compact}"
         );
-        assert!(!compact.contains("s.store_powi_ad("), "{compact}");
+        assert!(
+            compact.contains("s.store_powi_scaled_input(93, 5, p.scale, (p.nf as i32));"),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_powi_ad(94, A::mul(s.ad_value(6), s.ad_value(7)), (p.nf as i32));"
+            ),
+            "{compact}"
+        );
         assert!(!compact.contains("A::scale(s.ad_value("), "{compact}");
         assert!(!compact.contains("A::offset(s.ad_value("), "{compact}");
         assert!(
@@ -34672,19 +34683,18 @@ fn compact_general_ad_store_helper_call(target_index: usize, value: &str) -> Opt
         if args.len() != 2 {
             return None;
         }
-        let exponent = args[1].trim().parse::<i32>().ok()?;
         if let Some(line) =
-            compact_powf_affine_input_store_helper_line(target_index, args[0], args[1])
+            compact_powi_affine_input_store_helper_line(target_index, args[0], args[1])
         {
             return Some(line);
         }
         if !compact_non_atomic_ad_value(args[0]) {
             return None;
         }
-        return Some(compact_integer_power_ad_store_helper_line(
+        return Some(compact_dynamic_integer_power_ad_store_helper_line(
             target_index,
             args[0],
-            exponent,
+            args[1],
         ));
     }
 
@@ -35006,6 +35016,47 @@ fn compact_powf_affine_input_store_helper_line(
         }
         return Some(format!(
             "scratch.store_powf_scale_offset_input({target_index}, {source}, {}, {}, {exponent});",
+            args[1], args[2]
+        ));
+    }
+
+    None
+}
+
+fn compact_powi_affine_input_store_helper_line(
+    target_index: usize,
+    base: &str,
+    exponent: &str,
+) -> Option<String> {
+    if let Some(args) = compact_ad_call_args(base, "scale") {
+        if args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(args[0])?;
+        return Some(format!(
+            "scratch.store_powi_scaled_input({target_index}, {source}, {}, {exponent});",
+            args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(base, "offset") {
+        if args.len() != 2 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(args[0])?;
+        return Some(format!(
+            "scratch.store_powi_offset_input({target_index}, {source}, {}, {exponent});",
+            args[1]
+        ));
+    }
+
+    if let Some(args) = compact_ad_call_args(base, "scale_offset") {
+        if args.len() != 3 {
+            return None;
+        }
+        let source = compact_scratch_ad_value_index(args[0])?;
+        return Some(format!(
+            "scratch.store_powi_scale_offset_input({target_index}, {source}, {}, {}, {exponent});",
             args[1], args[2]
         ));
     }
@@ -46394,6 +46445,18 @@ fn compact_integer_power_ad_store_helper_line(
         3 => format!("scratch.store_cube_ad({target_index}, {value});"),
         4 => format!("scratch.store_pow4_ad({target_index}, {value});"),
         _ => format!("scratch.store_powi_ad({target_index}, {value}, {exponent});"),
+    }
+}
+
+fn compact_dynamic_integer_power_ad_store_helper_line(
+    target_index: usize,
+    value: &str,
+    exponent: &str,
+) -> String {
+    if let Some(exponent) = compact_integer_power_exponent_literal(exponent) {
+        compact_integer_power_ad_store_helper_line(target_index, value, exponent)
+    } else {
+        format!("scratch.store_powi_ad({target_index}, {value}, {exponent});")
     }
 }
 
