@@ -10912,6 +10912,14 @@ fn stamp() {
             support.contains("fn store_add_scaled_sub_square_product_mixed_ia("),
             "{support}"
         );
+        assert!(
+            support.contains("2.0 * sub_value * sub_derivative * square_scale"),
+            "{support}"
+        );
+        assert!(
+            !support.contains("sub_derivative * sub_value + sub_value * sub_derivative"),
+            "{support}"
+        );
 
         let source = r#"
 fn stamp() {
@@ -15104,8 +15112,8 @@ fn generate_scratch_operation_helpers() -> String {
         "        let sub_value = sub_left_value - sub_right_value;",
         "        let product_right_value = product_right.value;",
         "        self.values[index] = sub_value * sub_value * square_scale + product_left_value * product_right_value * product_scale;",
-        "        for axis in 0..Instance::NODE_COUNT { let sub_derivative = sub_left_node_derivatives[axis] - sub_right_node_derivatives[axis]; self.node_derivatives[index][axis] = (sub_derivative * sub_value + sub_value * sub_derivative) * square_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { let sub_derivative = sub_left_branch_derivatives[axis] - sub_right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = (sub_derivative * sub_value + sub_value * sub_derivative) * square_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::NODE_COUNT { let sub_derivative = sub_left_node_derivatives[axis] - sub_right_node_derivatives[axis]; self.node_derivatives[index][axis] = 2.0 * sub_value * sub_derivative * square_scale + (product_left_node_derivatives[axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { let sub_derivative = sub_left_branch_derivatives[axis] - sub_right_branch_derivatives[axis]; self.branch_derivatives[index][axis] = 2.0 * sub_value * sub_derivative * square_scale + (product_left_branch_derivatives[axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }",
         "    }",
         "",
         "    #[inline]",
