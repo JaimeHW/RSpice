@@ -22,6 +22,7 @@ type BuiltinResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub const GENERATED_BUILTIN_MANIFEST_FILE_NAME: &str = "manifest.txt";
 pub const REGENERATE_BUILTINS_COMMAND: &str = "cargo run -p rspice-veriloga --profile generator --bin rspice-veriloga-gen -- regenerate-builtins";
+pub const REQUIRE_SCALAR_BUILTINS_ENV: &str = "RSPICE_RUST_BACKEND_REQUIRE_SCALAR_BUILTINS";
 
 const GENERATOR_SOURCE_DIGEST_INPUTS: &[&str] = &[
     "src/lib.rs",
@@ -121,6 +122,7 @@ pub fn regenerate_generated_builtins_with_progress_and_jobs(
     let (devices, backend_counts, fallback_reasons) =
         generate_devices_with_stack(model_root.to_path_buf(), None, progress, jobs)?;
     reject_legacy_backend_selections(&backend_counts, &fallback_reasons)?;
+    reject_scalar_hybrid_backend_selections_if_requested(&backend_counts, &fallback_reasons)?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any discovered modules",
@@ -179,6 +181,7 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
         jobs,
     )?;
     reject_legacy_backend_selections(&backend_counts, &fallback_reasons)?;
+    reject_scalar_hybrid_backend_selections_if_requested(&backend_counts, &fallback_reasons)?;
     if devices.is_empty() {
         return Err(format!(
             "Verilog-A built-ins source directory '{}' does not contain any modules matching filter '{filter}'",
@@ -807,6 +810,52 @@ fn reject_legacy_backend_selections(
     .into())
 }
 
+fn reject_scalar_hybrid_backend_selections_if_requested(
+    counts: &BuiltinBackendSelectionCounts,
+    fallback_reasons: &[BuiltinBackendFallbackReason],
+) -> BuiltinResult<()> {
+    if env::var_os(REQUIRE_SCALAR_BUILTINS_ENV).is_none() {
+        return Ok(());
+    }
+
+    reject_scalar_hybrid_backend_selections(counts, fallback_reasons)
+}
+
+fn reject_scalar_hybrid_backend_selections(
+    counts: &BuiltinBackendSelectionCounts,
+    fallback_reasons: &[BuiltinBackendFallbackReason],
+) -> BuiltinResult<()> {
+    if counts.hybrid == 0 {
+        return Ok(());
+    }
+
+    let mut details = fallback_reasons
+        .iter()
+        .filter(|reason| reason.backend == RustBackendSelection::ScalarHybrid)
+        .map(|reason| {
+            format!(
+                "{} :: {} ({})",
+                reason.source.display(),
+                reason.module,
+                reason.reason
+            )
+        })
+        .collect::<Vec<_>>();
+    if details.is_empty() {
+        details.push(format!(
+            "{} generated module{} selected the scalar-hybrid backend",
+            counts.hybrid,
+            if counts.hybrid == 1 { "" } else { "s" }
+        ));
+    }
+
+    Err(format!(
+        "Verilog-A built-ins must use the pure scalar optimized Rust backend when {REQUIRE_SCALAR_BUILTINS_ENV}=1; scalar-hybrid selections:\n{}",
+        details.join("\n")
+    )
+    .into())
+}
+
 #[derive(Debug)]
 struct GeneratedBuiltinModule {
     index: usize,
@@ -974,6 +1023,28 @@ mod tests {
             message.contains("cmc/model.va :: legacy_model"),
             "{message}"
         );
+    }
+
+    #[test]
+    fn builtin_generation_can_reject_scalar_hybrid_backend_selections() {
+        let counts = BuiltinBackendSelectionCounts {
+            scalar: 1,
+            hybrid: 1,
+            legacy_device: 0,
+        };
+        let reasons = vec![BuiltinBackendFallbackReason {
+            source: PathBuf::from("cmc/hisim.va"),
+            module: "hisim".to_string(),
+            backend: RustBackendSelection::ScalarHybrid,
+            reason: "scalar path: source has 400000 emitted values over budget".to_string(),
+        }];
+
+        let error = reject_scalar_hybrid_backend_selections(&counts, &reasons)
+            .expect_err("strict scalar built-in generation must reject scalar-hybrid selections");
+
+        let message = error.to_string();
+        assert!(message.contains(REQUIRE_SCALAR_BUILTINS_ENV), "{message}");
+        assert!(message.contains("cmc/hisim.va :: hisim"), "{message}");
     }
 }
 

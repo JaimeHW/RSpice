@@ -8,6 +8,9 @@
 //!
 //! To print the scalar error for every non-scalar selection:
 //! `RSPICE_RUST_BACKEND_FRONTIER_TRACE_NON_SCALAR=1 ...`
+//!
+//! To make the frontier a pure-scalar production gate:
+//! `RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_HYBRID=1 RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_LEGACY=1 ...`
 
 use rspice_veriloga::canonical_ir::{
     CanonicalIrArtifact, ExprId, HirAnalogOperator, HirAssignment, HirExprKind, HirStatement,
@@ -25,6 +28,7 @@ use std::time::Instant;
 
 const FILTER_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_FILTER";
 const REQUIRE_NO_LEGACY_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_LEGACY";
+const REQUIRE_NO_HYBRID_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_HYBRID";
 const TRACE_NON_SCALAR_ENV: &str = "RSPICE_RUST_BACKEND_FRONTIER_TRACE_NON_SCALAR";
 
 #[test]
@@ -144,6 +148,12 @@ fn run_shipped_rust_backend_frontier() {
         assert_eq!(
             counts.legacy_device, 0,
             "legacy backend selections remain in the shipped frontier"
+        );
+    }
+    if env::var_os(REQUIRE_NO_HYBRID_ENV).is_some() {
+        assert_eq!(
+            counts.hybrid, 0,
+            "scalar-hybrid backend selections remain in the shipped frontier; rerun with {TRACE_NON_SCALAR_ENV}=1 to print scalar lowering gaps"
         );
     }
 }
