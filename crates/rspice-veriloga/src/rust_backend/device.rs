@@ -3802,9 +3802,10 @@ mod compact_generated_stamp_surface_tests {
         compact_limited_exp_div_scaled_inputs_expression,
         compact_ln_offset_div_scaled_inputs_expression,
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
-        duplicate_hoistable_derivative_rhs, generate_scratch_operation_helpers,
-        is_hoistable_generated_derivative_rhs, render_runtime_support_module,
-        reuse_duplicate_derivative_locals_in_helper_block, should_cache_compact_condition,
+        duplicate_hoistable_derivative_rhs, generate_ad_value_struct,
+        generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
+        render_runtime_support_module, reuse_duplicate_derivative_locals_in_helper_block,
+        should_cache_compact_condition,
     };
 
     #[test]
@@ -8061,19 +8062,93 @@ fn stamp() {
 
         let hypot = helper_body(&support, "fn store_hypot_ad(");
         assert!(
+            hypot.contains("let left_derivative_scale = left_value / output;"),
+            "{hypot}"
+        );
+        assert!(
+            hypot.contains("let right_derivative_scale = right_value / output;"),
+            "{hypot}"
+        );
+        assert!(
             hypot.contains(
-                "self.node_derivatives[index][axis] = (left_value * left.node_derivatives[axis] + right_value * right.node_derivatives[axis]) / output;"
+                "self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale;"
             ),
             "{hypot}"
         );
+        assert!(!hypot.contains(") / output;"), "{hypot}");
 
         let atan2 = helper_body(&support, "fn store_atan2_ad(");
         assert!(
+            atan2.contains("let reciprocal = 1.0 / denominator;"),
+            "{atan2}"
+        );
+        assert!(
+            atan2.contains("let left_derivative_scale = right_value * reciprocal;"),
+            "{atan2}"
+        );
+        assert!(
+            atan2.contains("let right_derivative_scale = -left_value * reciprocal;"),
+            "{atan2}"
+        );
+        assert!(
             atan2.contains(
-                "self.node_derivatives[index][axis] = (right_value * left.node_derivatives[axis] - left_value * right.node_derivatives[axis]) / denominator;"
+                "self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale;"
             ),
             "{atan2}"
         );
+        assert!(!atan2.contains(") / denominator;"), "{atan2}");
+
+        let offset_hypot = helper_body(&support, "fn store_offset_hypot_ad(");
+        assert!(
+            offset_hypot.contains("let left_derivative_scale = left_value / output;"),
+            "{offset_hypot}"
+        );
+        assert!(
+            offset_hypot.contains(
+                "self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale;"
+            ),
+            "{offset_hypot}"
+        );
+
+        let offset_atan2 = helper_body(&support, "fn store_offset_atan2_ad(");
+        assert!(
+            offset_atan2.contains("let reciprocal = 1.0 / denominator;"),
+            "{offset_atan2}"
+        );
+        assert!(
+            offset_atan2.contains(
+                "self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale;"
+            ),
+            "{offset_atan2}"
+        );
+
+        let ad_support = generate_ad_value_struct();
+
+        let ad_hypot = helper_body(&ad_support, "fn hypot(left: Self, right: Self)");
+        assert!(
+            ad_hypot.contains("let left_derivative_scale = left_value / value;"),
+            "{ad_hypot}"
+        );
+        assert!(
+            ad_hypot.contains(
+                "result.node_derivatives[index] = result.node_derivatives[index] * left_derivative_scale + right.node_derivatives[index] * right_derivative_scale;"
+            ),
+            "{ad_hypot}"
+        );
+        assert!(!ad_hypot.contains(") / value;"), "{ad_hypot}");
+
+        let ad_atan2 = helper_body(&ad_support, "fn atan2(y: Self, x: Self)");
+        assert!(
+            ad_atan2.contains("let reciprocal = 1.0 / denominator;"),
+            "{ad_atan2}"
+        );
+        assert!(
+            ad_atan2.contains(
+                "result.node_derivatives[index] = result.node_derivatives[index] * y_derivative_scale + x.node_derivatives[index] * x_derivative_scale;"
+            ),
+            "{ad_atan2}"
+        );
+        assert!(!ad_atan2.contains(") / denominator;"), "{ad_atan2}");
     }
 
     #[test]
@@ -16030,9 +16105,11 @@ fn generate_scratch_operation_helpers() -> String {
         "        let left_value = left.value;",
         "        let right_value = right.value;",
         "        let output = left_value.hypot(right_value);",
+        "        let left_derivative_scale = left_value / output;",
+        "        let right_derivative_scale = right_value / output;",
         "        self.values[index] = output;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_value * left.node_derivatives[axis] + right_value * right.node_derivatives[axis]) / output; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_value * left.branch_derivatives[axis] + right_value * right.branch_derivatives[axis]) / output; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -16040,9 +16117,12 @@ fn generate_scratch_operation_helpers() -> String {
         "        let left_value = left.value;",
         "        let right_value = right.value;",
         "        let denominator = right_value * right_value + left_value * left_value;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let left_derivative_scale = right_value * reciprocal;",
+        "        let right_derivative_scale = -left_value * reciprocal;",
         "        self.values[index] = left_value.atan2(right_value);",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (right_value * left.node_derivatives[axis] - left_value * right.node_derivatives[axis]) / denominator; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (right_value * left.branch_derivatives[axis] - left_value * right.branch_derivatives[axis]) / denominator; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -16225,9 +16305,11 @@ fn generate_scratch_operation_helpers() -> String {
         "        let left_value = left.value;",
         "        let right_value = right.value;",
         "        let output = left_value.hypot(right_value);",
+        "        let left_derivative_scale = left_value / output;",
+        "        let right_derivative_scale = right_value / output;",
         "        self.values[index] = output + offset;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_value * left.node_derivatives[axis] + right_value * right.node_derivatives[axis]) / output; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_value * left.branch_derivatives[axis] + right_value * right.branch_derivatives[axis]) / output; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -16235,9 +16317,12 @@ fn generate_scratch_operation_helpers() -> String {
         "        let left_value = left.value;",
         "        let right_value = right.value;",
         "        let denominator = right_value * right_value + left_value * left_value;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let left_derivative_scale = right_value * reciprocal;",
+        "        let right_derivative_scale = -left_value * reciprocal;",
         "        self.values[index] = left_value.atan2(right_value) + offset;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (right_value * left.node_derivatives[axis] - left_value * right.node_derivatives[axis]) / denominator; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (right_value * left.branch_derivatives[axis] - left_value * right.branch_derivatives[axis]) / denominator; }",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -25228,10 +25313,12 @@ fn generate_ad_value_struct() -> String {
         "        let left_value = left.value;",
         "        let right_value = right.value;",
         "        let value = left_value.hypot(right_value);",
+        "        let left_derivative_scale = left_value / value;",
+        "        let right_derivative_scale = right_value / value;",
         "        let mut result = left;",
         "        result.value = value;",
-        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = (left_value * result.node_derivatives[index] + right_value * right.node_derivatives[index]) / value; }",
-        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = (left_value * result.branch_derivatives[index] + right_value * right.branch_derivatives[index]) / value; }",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * left_derivative_scale + right.node_derivatives[index] * right_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * left_derivative_scale + right.branch_derivatives[index] * right_derivative_scale; }",
         "        result",
         "    }",
         "    #[inline]",
@@ -25239,10 +25326,13 @@ fn generate_ad_value_struct() -> String {
         "        let y_value = y.value;",
         "        let x_value = x.value;",
         "        let denominator = x_value * x_value + y_value * y_value;",
+        "        let reciprocal = 1.0 / denominator;",
+        "        let y_derivative_scale = x_value * reciprocal;",
+        "        let x_derivative_scale = -y_value * reciprocal;",
         "        let mut result = y;",
         "        result.value = y_value.atan2(x_value);",
-        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = (x_value * result.node_derivatives[index] - y_value * x.node_derivatives[index]) / denominator; }",
-        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = (x_value * result.branch_derivatives[index] - y_value * x.branch_derivatives[index]) / denominator; }",
+        "        for index in 0..Instance::NODE_COUNT { result.node_derivatives[index] = result.node_derivatives[index] * y_derivative_scale + x.node_derivatives[index] * x_derivative_scale; }",
+        "        for index in 0..Instance::BRANCH_COUNT { result.branch_derivatives[index] = result.branch_derivatives[index] * y_derivative_scale + x.branch_derivatives[index] * x_derivative_scale; }",
         "        result",
         "    }",
         "",
