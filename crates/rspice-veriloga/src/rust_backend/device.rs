@@ -6898,6 +6898,7 @@ fn stamp() {
             "fn store_add_scaled_offset_product_rhs(",
             "fn store_add_scaled_products3_indices(",
             "fn store_div_scaled_product_indices(",
+            "fn store_div_scaled_add_product_indices(",
             "fn store_div_scaled_value_by_product_indices(",
             "fn store_div_scaled_product_by_product_indices(",
             "fn store_div_scaled_inputs2_by_product_indices(",
@@ -6930,6 +6931,14 @@ fn stamp() {
                 "self.node_derivatives[index][axis] = (self.node_derivatives[first_product_left][axis] * first_product_right_raw + first_product_left_raw * self.node_derivatives[first_product_right][axis]) * first_scale + (self.node_derivatives[second_product_left][axis] * second_product_right_raw + second_product_left_raw * self.node_derivatives[second_product_right][axis]) * second_scale + (self.node_derivatives[third_product_left][axis] * third_product_right_raw + third_product_left_raw * self.node_derivatives[third_product_right][axis]) * third_scale;"
             ),
             "{add_products3}"
+        );
+
+        let div_add_product = helper_body(&support, "fn store_div_scaled_add_product_indices(");
+        assert!(
+            div_add_product.contains(
+                "self.node_derivatives[index][axis] = (self.node_derivatives[value][axis] * value_scale + (self.node_derivatives[product_left][axis] * product_right_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale) * reciprocal + self.node_derivatives[denominator][axis] * denominator_derivative_scale;"
+            ),
+            "{div_add_product}"
         );
 
         let div_product = helper_body(&support, "fn store_div_scaled_product_indices(");
@@ -23806,6 +23815,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
                 &mask,
             ));
         }
+        out.push_str(&generate_index_or_mixed_div_scaled_add_product_helper(
+            &mask,
+        ));
         out.push_str(&generate_index_or_mixed_sub_add_scaled_inputs4_lhs_helper(
             &mask,
         ));
@@ -25746,6 +25758,48 @@ fn generate_index_or_mixed_div_scaled_inputs2_by_product_helper(mask: &str) -> S
         second_ty = mixed_helper_type(mask, 1),
         denominator_left_ty = mixed_helper_type(mask, 2),
         denominator_right_ty = mixed_helper_type(mask, 3),
+    )
+}
+
+fn generate_index_or_mixed_div_scaled_add_product_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_div_scaled_add_product", mask);
+    let value_value = mixed_helper_value_expr(mask, 0, "value");
+    let product_left_value = mixed_helper_value_expr(mask, 1, "product_left");
+    let product_right_value = mixed_helper_value_expr(mask, 2, "product_right");
+    let denominator_value = mixed_helper_value_expr(mask, 3, "denominator");
+    let value_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "value");
+    let product_left_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "product_left");
+    let product_right_node_derivative = mixed_helper_node_derivative_expr(mask, 2, "product_right");
+    let denominator_node_derivative = mixed_helper_node_derivative_expr(mask, 3, "denominator");
+    let value_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "value");
+    let product_left_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 1, "product_left");
+    let product_right_branch_derivative =
+        mixed_helper_branch_derivative_expr(mask, 2, "product_right");
+    let denominator_branch_derivative = mixed_helper_branch_derivative_expr(mask, 3, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, value: {value_ty}, value_scale: f64, product_left: {product_left_ty}, product_right: {product_right_ty}, product_scale: f64, denominator: {denominator_ty}, denominator_scale: f64) {{
+        let value_term = {value_value} * value_scale;
+        let product_left_value = {product_left_value};
+        let product_right_value = {product_right_value};
+        let product_term = product_left_value * product_right_value * product_scale;
+        let numerator_value = value_term + product_term;
+        let denominator_value = {denominator_value} * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = ({value_node_derivative} * value_scale + ({product_left_node_derivative} * product_right_value + product_left_value * {product_right_node_derivative}) * product_scale) * reciprocal + {denominator_node_derivative} * denominator_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = ({value_branch_derivative} * value_scale + ({product_left_branch_derivative} * product_right_value + product_left_value * {product_right_branch_derivative}) * product_scale) * reciprocal + {denominator_branch_derivative} * denominator_derivative_scale; }}
+    }}
+"#,
+        value_ty = mixed_helper_type(mask, 0),
+        product_left_ty = mixed_helper_type(mask, 1),
+        product_right_ty = mixed_helper_type(mask, 2),
+        denominator_ty = mixed_helper_type(mask, 3),
     )
 }
 
@@ -36227,10 +36281,16 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "div_scaled_add_product")
         && args.len() == 7
     {
-        return Some(format!(
-            "scratch.store_div_scaled_add_product({target_index}, {}, {}, {}, {}, {}, {}, {});",
-            args[0], args[1], args[2], args[3], args[4], args[5], args[6]
-        ));
+        return compact_index_or_mixed_div_scaled_add_product_helper_line(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+            args[6],
+        );
     }
 
     if let Some(args) = compact_ad_call_args(value, "div_scaled_product_by_product")
@@ -40493,6 +40553,32 @@ fn compact_index_or_mixed_div_scaled_inputs_product_helper_line(
     call_args.push(value_args[3].clone());
     call_args.push(product_scale.to_string());
     call_args.push(value_args[4].clone());
+    call_args.push(denominator_scale.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_index_or_mixed_div_scaled_add_product_helper_line(
+    target_index: usize,
+    value: &str,
+    value_scale: &str,
+    product_left: &str,
+    product_right: &str,
+    product_scale: &str,
+    denominator: &str,
+    denominator_scale: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(
+        "store_div_scaled_add_product",
+        &[value, product_left, product_right, denominator],
+    )?;
+    let mut call_args = Vec::with_capacity(8);
+    call_args.push(target_index.to_string());
+    call_args.push(value_args[0].clone());
+    call_args.push(value_scale.to_string());
+    call_args.push(value_args[1].clone());
+    call_args.push(value_args[2].clone());
+    call_args.push(product_scale.to_string());
+    call_args.push(value_args[3].clone());
     call_args.push(denominator_scale.to_string());
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
