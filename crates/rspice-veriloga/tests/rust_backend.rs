@@ -2920,7 +2920,20 @@ fn rust_backend_uses_direct_hot_general_ad_store_helpers() {
         "{support}"
     );
     assert!(support.contains("5.0 * fourth_power"), "{support}");
-    assert!(!support.contains("base.powi(exponent - 1)"), "{support}");
+    assert!(
+        !support.contains(
+            "let derivative_scale = if exponent == 0 { 0.0 } else { (exponent as f64) * base.powi(exponent - 1)"
+        ),
+        "{support}"
+    );
+    assert!(
+        support.contains("integer_power_derivative_scale(base, exponent as i32) * dbase"),
+        "{support}"
+    );
+    assert!(
+        support.contains("i32::MIN => (exponent as f64) * base.powf((exponent as f64) - 1.0)"),
+        "{support}"
+    );
     assert!(support.contains("let exponent = right.value;"));
     assert!(
         support.contains("pow_derivative(output, base, exponent, left.dn[axis], right.dn[axis])"),
