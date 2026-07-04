@@ -1304,6 +1304,7 @@ fn test_xyce_default_prn_transient_output_wrapper_cases_run_natively() {
         "Netlists/Output/TRAN/tran-gnuplot.cir",
         "Netlists/Output/TRAN/tran-prn-noindex.cir",
         "Netlists/Output/TRAN/tran-splot.cir",
+        "Netlists/Output/TRAN/tran-touchstone-defaults-to-prn.cir",
     ] {
         assert!(
             runner.requires_upstream_wrapper(relative),

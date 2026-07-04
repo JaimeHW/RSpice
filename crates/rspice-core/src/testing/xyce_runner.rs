@@ -2554,6 +2554,7 @@ impl XyceTestRunner {
             "netlists/output/tran/tran-gnuplot.cir"
                 | "netlists/output/tran/tran-prn-noindex.cir"
                 | "netlists/output/tran/tran-splot.cir"
+                | "netlists/output/tran/tran-touchstone-defaults-to-prn.cir"
         ) && Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
     }
 
@@ -2880,7 +2881,7 @@ impl XyceTestRunner {
     fn tran_print_format_is_prn_compatible(format: &str) -> bool {
         matches!(
             format.to_ascii_lowercase().as_str(),
-            "std" | "tecplot" | "noindex" | "gnuplot" | "splot"
+            "std" | "tecplot" | "touchstone" | "touchstone2" | "noindex" | "gnuplot" | "splot"
         )
     }
 
