@@ -4924,6 +4924,7 @@ fn stamp() {
             "fn store_mul_add_scaled_inputs4_rhs_mixed_iiia",
             "fn store_mul_add_scaled_products_rhs",
             "fn store_mul_add_scaled_products_indices_rhs",
+            "fn store_mul_add_scaled_products_rhs_mixed_iiia",
             "fn store_mul_add_scaled_products3_rhs",
             "fn store_mul_add_scaled_products3_indices_rhs",
             "fn store_mul_scaled_exp_scaled_input_rhs",
@@ -4939,6 +4940,7 @@ fn stamp() {
     scratch.store_ad_value(133, AdValue::mul_scaled_output(scratch.ad_value(19), AdValue::scale_offset(scratch.ad_value(20), params.input_scale, params.offset), params.output_scale));
     scratch.store_ad_value(134, AdValue::mul_scaled_output(scratch.ad_value(21), AdValue::exp_scaled_input(scratch.ad_value(22), params.input_scale), params.output_scale));
     scratch.store_ad_value(135, AdValue::mul(scratch.ad_value(23), AdValue::add_scaled_inputs4(scratch.ad_value(24), params.first_scale, scratch.ad_value(25), params.second_scale, scratch.ad_value(26), params.third_scale, scratch.ad_value(27), params.fourth_scale)));
+    scratch.store_ad_value(136, AdValue::mul_scaled_output(scratch.ad_value(28), AdValue::add_scaled_products(scratch.ad_value(29), scratch.ad_value(30), params.left_scale, scratch.ad_value(31), AdValue::sqrt(scratch.ad_value(32)), params.right_scale), params.output_scale));
 }
 "#;
 
@@ -4968,6 +4970,10 @@ fn stamp() {
             compact.contains("s.store_mul_add_scaled_inputs4_indices_rhs(135, 23, 24, p.first_scale, 25, p.second_scale, 26, p.third_scale, 27, p.fourth_scale);"),
             "{compact}"
         );
+        assert!(
+            compact.contains("s.store_mul_add_scaled_products_rhs_mixed_iiia(136, 28, 29, 30, ((p.left_scale) * (p.output_scale)), 31, A::sqrt(s.ad_value(32)), ((p.right_scale) * (p.output_scale)));"),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_mul_scaled_ad_rhs("), "{compact}");
         assert!(
             !compact.contains("s.store_mul_add_scaled_inputs4_rhs(132"),
@@ -4975,6 +4981,10 @@ fn stamp() {
         );
         assert!(
             !compact.contains("s.store_mul_add_scaled_inputs4_rhs(135"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_add_scaled_products_rhs(136"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
@@ -23674,6 +23684,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
             out.push_str(&generate_index_or_mixed_mul_add_scaled_inputs4_rhs_helper(
                 &mask,
             ));
+            out.push_str(&generate_index_or_mixed_mul_add_scaled_products_rhs_helper(
+                &mask,
+            ));
         }
         out.push_str(&generate_index_or_mixed_sub_add_scaled_inputs4_lhs_helper(
             &mask,
@@ -24482,6 +24495,62 @@ fn generate_index_or_mixed_mul_add_scaled_inputs4_rhs_helper(mask: &str) -> Stri
         second_ty = mixed_helper_type(mask, 1),
         third_ty = mixed_helper_type(mask, 2),
         fourth_ty = mixed_helper_type(mask, 3),
+    )
+}
+
+fn generate_index_or_mixed_mul_add_scaled_products_rhs_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_mul_add_scaled_products_rhs", mask);
+    let left_product_left_value = cached_index_or_mixed_value_expr(mask, 0, "left_product_left");
+    let left_product_right_value = cached_index_or_mixed_value_expr(mask, 1, "left_product_right");
+    let right_product_left_value = cached_index_or_mixed_value_expr(mask, 2, "right_product_left");
+    let right_product_right_value =
+        cached_index_or_mixed_value_expr(mask, 3, "right_product_right");
+    let left_product_left_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 0, "left_product_left");
+    let left_product_right_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 1, "left_product_right");
+    let right_product_left_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 2, "right_product_left");
+    let right_product_right_node_derivative =
+        cached_index_or_mixed_node_derivative_expr(mask, 3, "right_product_right");
+    let left_product_left_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 0, "left_product_left");
+    let left_product_right_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 1, "left_product_right");
+    let right_product_left_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 2, "right_product_left");
+    let right_product_right_branch_derivative =
+        cached_index_or_mixed_branch_derivative_expr(mask, 3, "right_product_right");
+    let left_product_left_bindings =
+        cached_index_or_mixed_operand_bindings(mask, 0, "left_product_left");
+    let left_product_right_bindings =
+        cached_index_or_mixed_operand_bindings(mask, 1, "left_product_right");
+    let right_product_left_bindings =
+        cached_index_or_mixed_operand_bindings(mask, 2, "right_product_left");
+    let right_product_right_bindings =
+        cached_index_or_mixed_operand_bindings(mask, 3, "right_product_right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: usize, left_product_left: {left_product_left_ty}, left_product_right: {left_product_right_ty}, left_scale: f64, right_product_left: {right_product_left_ty}, right_product_right: {right_product_right_ty}, right_scale: f64) {{
+        let left_value = self.values[left];
+        let left_node_derivatives = self.node_derivatives[left];
+        let left_branch_derivatives = self.branch_derivatives[left];
+{left_product_left_bindings}{left_product_right_bindings}{right_product_left_bindings}{right_product_right_bindings}        let left_product_left_raw = {left_product_left_value};
+        let left_product_right_raw = {left_product_right_value};
+        let right_product_left_raw = {right_product_left_value};
+        let right_product_right_raw = {right_product_right_value};
+        let right_value = left_product_left_raw * left_product_right_raw * left_scale + right_product_left_raw * right_product_right_raw * right_scale;
+        self.values[index] = left_value * right_value;
+        for axis in 0..Instance::NODE_COUNT {{ let right_derivative = ({left_product_left_node_derivative} * left_product_right_raw + left_product_left_raw * {left_product_right_node_derivative}) * left_scale + ({right_product_left_node_derivative} * right_product_right_raw + right_product_left_raw * {right_product_right_node_derivative}) * right_scale; self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_derivative; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let right_derivative = ({left_product_left_branch_derivative} * left_product_right_raw + left_product_left_raw * {left_product_right_branch_derivative}) * left_scale + ({right_product_left_branch_derivative} * right_product_right_raw + right_product_left_raw * {right_product_right_branch_derivative}) * right_scale; self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_derivative; }}
+    }}
+"#,
+        left_product_left_ty = mixed_helper_type(mask, 0),
+        left_product_right_ty = mixed_helper_type(mask, 1),
+        right_product_left_ty = mixed_helper_type(mask, 2),
+        right_product_right_ty = mixed_helper_type(mask, 3),
     )
 }
 
