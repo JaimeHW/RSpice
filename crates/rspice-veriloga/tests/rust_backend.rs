@@ -5437,15 +5437,30 @@ fn rust_backend_directly_stores_product_sum_expression_helpers() {
     );
     assert!(
         support.contains(
-            "fn store_add_scaled_products3(&mut self, index: usize, first_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, first_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, second_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third_product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, third_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64)"
+            "fn store_add_scaled_products3_indices(&mut self, index: usize, first_product_left: usize, first_product_right: usize, first_scale: f64, second_product_left: usize, second_product_right: usize, second_scale: f64, third_product_left: usize, third_product_right: usize, third_scale: f64)"
         ),
+        "{support}"
+    );
+    assert!(
+        support.contains("fn store_add_scaled_products3_mixed_aiiiii("),
         "{support}"
     );
     assert!(
         stamp.contains("s.store_add_scaled_products_indices("),
         "{stamp}"
     );
-    assert!(stamp.contains("s.store_add_scaled_products3("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_add_scaled_products3_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_add_scaled_products3_mixed_aiiiii("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_products3("),
+        "direct three-product sum roots should avoid by-value stores:\n{stamp}"
+    );
     assert!(
         !stamp.contains("s.store_ad_value("),
         "direct product-sum root assignments should not materialize returned AD temporaries:\n{stamp}"
@@ -16652,13 +16667,15 @@ module compact_expression_direct_store_product_sum_helpers(p, n);
     real r;
     real product2;
     real product3;
+    real product3_mixed;
     analog begin
         a = V(p, n);
         q = V(p);
         r = V(n);
         product2 = (a * q) - (r * q);
         product3 = ((a * q) + (r * q)) - (a * r);
-        I(p, n) <+ product2 + product3;
+        product3_mixed = (((a + q) * q) + (r * q)) - (a * r);
+        I(p, n) <+ product2 + product3 + product3_mixed;
     end
 endmodule
 "#
