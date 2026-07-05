@@ -8173,9 +8173,14 @@ impl XyceTestRunner {
                         &netlist.params,
                     )?;
                 }
+                ElementKind::Mosfet { .. }
+                    if Self::netlist_device_is_native_ac_supported_bulk_mosfet(
+                        netlist,
+                        &element.name,
+                    ) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, and time-independent behavioral sources; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, and native MOSFET LEVEL=2/6; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -11679,6 +11684,60 @@ impl XyceTestRunner {
                 &flattened.scoped_models,
                 instance_name,
             )
+        })
+    }
+
+    fn netlist_device_is_native_ac_supported_bulk_mosfet(
+        netlist: &Netlist,
+        instance_name: &str,
+    ) -> bool {
+        if Self::elements_device_is_native_ac_supported_bulk_mosfet(
+            &netlist.elements,
+            &netlist.models,
+            &[],
+            instance_name,
+        ) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_device_is_native_ac_supported_bulk_mosfet(
+                &flattened.elements,
+                &netlist.models,
+                &flattened.scoped_models,
+                instance_name,
+            )
+        })
+    }
+
+    fn elements_device_is_native_ac_supported_bulk_mosfet(
+        elements: &[crate::netlist::Element],
+        models: &[crate::netlist::ModelDef],
+        scoped_models: &[crate::netlist::ModelDef],
+        instance_name: &str,
+    ) -> bool {
+        elements.iter().any(|element| {
+            if !Self::device_instance_names_match(&element.name, instance_name) {
+                return false;
+            }
+            let ElementKind::Mosfet { model, .. } = &element.kind else {
+                return false;
+            };
+            Self::find_model(scoped_models, model)
+                .or_else(|| Self::find_model(models, model))
+                .is_some_and(Self::model_is_native_ac_supported_bulk_mosfet)
+        })
+    }
+
+    fn model_is_native_ac_supported_bulk_mosfet(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) {
+            return false;
+        }
+        Self::numeric_param_value(&model.params, "LEVEL").is_some_and(|level| {
+            level.is_finite() && ((level - 2.0).abs() <= 1.0e-9 || (level - 6.0).abs() <= 1.0e-9)
         })
     }
 
