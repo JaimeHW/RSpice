@@ -6236,8 +6236,9 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         "fn store_add_scaled_products_mixed_iaii(",
         "fn store_add_scaled_products_mixed_iiai(",
         "fn store_add_scaled_products_mixed_iiia(",
-        "fn store_div_scaled_product_left_ad(",
-        "fn store_div_scaled_product_right_ad(",
+        "fn store_div_scaled_product_mixed_aii(",
+        "fn store_div_scaled_product_mixed_iai(",
+        "fn store_div_scaled_product_mixed_iia(",
         "fn store_div_scaled_product_add_scaled_denominator_indices(",
     ] {
         assert!(support.contains(helper), "missing {helper}\n{support}");
@@ -6255,8 +6256,9 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         "s.store_add_scaled_products_mixed_iaii(",
         "s.store_add_scaled_products_mixed_iiai(",
         "s.store_add_scaled_products_mixed_iiia(",
-        "s.store_div_scaled_product_left_ad(",
-        "s.store_div_scaled_product_right_ad(",
+        "s.store_div_scaled_product_mixed_aii(",
+        "s.store_div_scaled_product_mixed_iai(",
+        "s.store_div_scaled_product_mixed_iia(",
         "s.store_div_scaled_product_add_scaled_denominator_indices(",
     ] {
         assert!(stamp.contains(helper), "missing {helper}\n{stamp}");
@@ -6315,6 +6317,20 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         !stamp.contains("s.store_div_scaled_product("),
         "hybrid product-division root assignments should avoid by-value product stores:\n{stamp}"
     );
+    for legacy_helper in [
+        "store_div_scaled_product_left_ad",
+        "store_div_scaled_product_right_ad",
+        "store_div_scaled_product_denominator_ad",
+    ] {
+        assert!(
+            !support.contains(&format!("fn {legacy_helper}(")),
+            "legacy one-off product-division helpers should be folded into mixed helpers:\n{support}"
+        );
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated product-division calls should use mixed helpers:\n{stamp}"
+        );
+    }
     assert_generated_rust_compiles(&generated);
 }
 
@@ -17140,6 +17156,7 @@ module compact_expression_direct_store_hybrid_index_product_helpers(p, n);
     real div_left_ad;
     real div_right_ad;
     real div_denominator_ad;
+    real div_denominator_exp_ad;
     analog begin
         a = V(p, n);
         q = V(p);
@@ -17159,11 +17176,12 @@ module compact_expression_direct_store_hybrid_index_product_helpers(p, n);
         div_left_ad = ((a + t) * q) / r;
         div_right_ad = (a * (q + t)) / r;
         div_denominator_ad = (a * q) / (r + t);
+        div_denominator_exp_ad = (a * q) / exp(r);
         I(p, n) <+ add_value_ad + add_left_ad + add_right_ad
                  + inputs_first_ad + inputs_second_ad + inputs_left_ad + inputs_right_ad
                  + products_left_left_ad + products_left_right_ad
                  + products_right_left_ad + products_right_right_ad
-                 + div_left_ad + div_right_ad + div_denominator_ad;
+                 + div_left_ad + div_right_ad + div_denominator_ad + div_denominator_exp_ad;
     end
 endmodule
 "#
