@@ -7012,21 +7012,23 @@ fn rust_backend_uses_compact_scaled_mixed_add_sub_store_helpers() {
     let support = render_runtime_support_module();
 
     for helper in [
-        "fn store_scaled_add_mixed_ai(",
         "fn store_scaled_add_mixed_ia(",
-        "fn store_scaled_sub_mixed_ai(",
         "fn store_scaled_sub_mixed_ia(",
+        "fn store_add_scaled_inputs_exp_lhs(",
+        "fn store_sub_scaled_inputs_exp_lhs(",
     ] {
         assert!(support.contains(helper), "{helper}\n{support}");
     }
     for helper in [
-        "s.store_scaled_add_mixed_ai(",
         "s.store_scaled_add_mixed_ia(",
-        "s.store_scaled_sub_mixed_ai(",
         "s.store_scaled_sub_mixed_ia(",
+        "s.store_add_scaled_inputs_exp_lhs(",
+        "s.store_sub_scaled_inputs_exp_lhs(",
     ] {
         assert!(stamp.contains(helper), "{helper}\n{stamp}");
     }
+    assert!(!stamp.contains("s.store_scaled_add_mixed_ai("), "{stamp}");
+    assert!(!stamp.contains("s.store_scaled_sub_mixed_ai("), "{stamp}");
     for legacy_helper in [
         "store_scaled_add_ad_rhs",
         "store_scaled_add_ad_lhs",
@@ -7297,21 +7299,29 @@ fn rust_backend_uses_compact_mixed_scaled_operand_add_sub_store_helpers() {
     let support = render_runtime_support_module();
 
     for helper in [
-        "fn store_add_scaled_inputs_mixed_ai(",
         "fn store_add_scaled_inputs_mixed_ia(",
-        "fn store_sub_scaled_inputs_mixed_ai(",
         "fn store_sub_scaled_inputs_mixed_ia(",
+        "fn store_add_scaled_inputs_exp_lhs(",
+        "fn store_sub_scaled_inputs_exp_lhs(",
     ] {
         assert!(support.contains(helper), "{helper}\n{support}");
     }
     for helper in [
-        "s.store_add_scaled_inputs_mixed_ai(",
         "s.store_add_scaled_inputs_mixed_ia(",
-        "s.store_sub_scaled_inputs_mixed_ai(",
         "s.store_sub_scaled_inputs_mixed_ia(",
+        "s.store_add_scaled_inputs_exp_lhs(",
+        "s.store_sub_scaled_inputs_exp_lhs(",
     ] {
         assert!(stamp.contains(helper), "{helper}\n{stamp}");
     }
+    assert!(
+        !stamp.contains("s.store_add_scaled_inputs_mixed_ai("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_sub_scaled_inputs_mixed_ai("),
+        "{stamp}"
+    );
     for legacy_helper in [
         "store_add_scaled_ad_rhs",
         "store_add_scaled_ad_lhs",
