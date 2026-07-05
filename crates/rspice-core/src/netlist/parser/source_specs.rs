@@ -70,6 +70,38 @@ pub(super) fn parse_source_spec(
                 }
                 continue;
             }
+            TokenKind::Ident(s)
+                if dc_value.is_none()
+                    && ac_terms.is_none()
+                    && transient.is_none()
+                    && !is_source_level_keyword(s)
+                    && params.get(s).is_some() =>
+            {
+                let v = try_value(stream, params).expect("bound source parameter parses");
+                if !v.is_finite() {
+                    return Err(non_finite_source_value_error(line_num, "DC", "value", v));
+                }
+                dc_value = Some(v);
+                continue;
+            }
+            TokenKind::Ident(s)
+                if dc_value.is_some()
+                    && ac_terms.is_none()
+                    && transient.is_none()
+                    && !is_source_level_keyword(s)
+                    && params.get(s).is_some() =>
+            {
+                let v = try_value(stream, params).expect("bound source tail parameter parses");
+                if !v.is_finite() {
+                    return Err(non_finite_source_value_error(
+                        line_num,
+                        "source tail",
+                        "value",
+                        v,
+                    ));
+                }
+                continue;
+            }
             TokenKind::Ident(s) => s.to_uppercase(),
             _ => {
                 // A bare leading value is the DC level.

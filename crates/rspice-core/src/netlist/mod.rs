@@ -5795,6 +5795,38 @@ mod tests {
     }
 
     #[test]
+    fn bare_source_dc_levels_accept_bound_parameter_identifiers() {
+        let netlist = Netlist::parse(
+            "source bound parameter identifiers\n\
+             .param VNEG=-10 VPOS=5\n\
+             V1 n1 0 VNEG\n\
+             V2 n2 0 VPOS\n\
+             R1 n1 0 1\n\
+             R2 n2 0 1\n\
+             .end\n",
+        )
+        .expect("bare source DC levels may use resolved parameter identifiers");
+
+        let source_value = |name: &str| -> f64 {
+            netlist
+                .elements
+                .iter()
+                .find_map(|element| match &element.kind {
+                    ElementKind::VoltageSource(SourceSpec::Dc(value))
+                        if element.name.eq_ignore_ascii_case(name) =>
+                    {
+                        Some(*value)
+                    }
+                    _ => None,
+                })
+                .expect("voltage source exists")
+        };
+
+        assert_eq!(source_value("V1"), -10.0);
+        assert_eq!(source_value("V2"), 5.0);
+    }
+
+    #[test]
     fn node_names_accept_adjacent_sign_suffixes() {
         let netlist = Netlist::parse(
             "signed node suffixes\n\

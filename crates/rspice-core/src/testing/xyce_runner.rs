@@ -930,6 +930,145 @@ impl XyceTestRunner {
         rebound
     }
 
+    fn source_with_wrapper_paramfile_bindings(
+        source: &str,
+        deck_path: &Path,
+        requires_wrapper: bool,
+    ) -> Result<String, String> {
+        if !requires_wrapper {
+            return Ok(source.to_string());
+        }
+        let Some(parent) = deck_path.parent() else {
+            return Ok(source.to_string());
+        };
+        let paramfile_path = parent.join("paramfile.txt");
+        if !paramfile_path.is_file() {
+            return Ok(source.to_string());
+        }
+        let content = fs::read_to_string(&paramfile_path).map_err(|err| {
+            format!(
+                "failed to read Xyce wrapper parameter file {}: {err}",
+                paramfile_path.display()
+            )
+        })?;
+        let bindings = Self::parse_xyce_paramfile_variables(&content, &paramfile_path)?;
+        if bindings.is_empty() {
+            return Ok(source.to_string());
+        }
+        Ok(Self::source_with_param_bindings(source, &bindings))
+    }
+
+    fn source_with_param_bindings(source: &str, bindings: &[(String, Value)]) -> String {
+        let mut lines = source.lines();
+        let title = lines.next().unwrap_or("Untitled");
+        let mut rebound = String::new();
+        rebound.push_str(title);
+        rebound.push('\n');
+        for (name, value) in bindings {
+            rebound.push_str(&format!(".PARAM {name}={value:.17e}\n"));
+        }
+        for line in lines {
+            rebound.push_str(line);
+            rebound.push('\n');
+        }
+        rebound
+    }
+
+    fn parse_xyce_paramfile_variables(
+        content: &str,
+        paramfile_path: &Path,
+    ) -> Result<Vec<(String, Value)>, String> {
+        let mut lines = content.lines().enumerate().filter_map(|(index, raw)| {
+            let trimmed = raw.trim();
+            (!trimmed.is_empty()).then_some((index + 1, trimmed))
+        });
+        let Some((header_line, header)) = lines.next() else {
+            return Ok(Vec::new());
+        };
+        let header_tokens = header.split_whitespace().collect::<Vec<_>>();
+        if header_tokens.len() != 2 || !header_tokens[1].eq_ignore_ascii_case("variables") {
+            return Err(format!(
+                "unsupported Xyce wrapper parameter file header at {}:{}: expected '<count> variables'",
+                paramfile_path.display(),
+                header_line
+            ));
+        }
+        let variable_count = header_tokens[0].parse::<usize>().map_err(|err| {
+            format!(
+                "invalid variable count '{}' in Xyce wrapper parameter file {}:{}: {err}",
+                header_tokens[0],
+                paramfile_path.display(),
+                header_line
+            )
+        })?;
+
+        let mut bindings = Vec::with_capacity(variable_count);
+        let mut seen = BTreeSet::new();
+        for variable_index in 0..variable_count {
+            let Some((line_number, line)) = lines.next() else {
+                return Err(format!(
+                    "Xyce wrapper parameter file {} ended before variable row {} of {}",
+                    paramfile_path.display(),
+                    variable_index + 1,
+                    variable_count
+                ));
+            };
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            if fields.len() != 2 {
+                return Err(format!(
+                    "invalid Xyce wrapper parameter row at {}:{}: expected '<value> <name>'",
+                    paramfile_path.display(),
+                    line_number
+                ));
+            }
+            let value = crate::netlist::lexer::parse_spice_value(fields[0]).map_err(|err| {
+                format!(
+                    "invalid Xyce wrapper parameter value '{}' at {}:{}: {err}",
+                    fields[0],
+                    paramfile_path.display(),
+                    line_number
+                )
+            })?;
+            if !value.is_finite() {
+                return Err(format!(
+                    "non-finite Xyce wrapper parameter value '{}' at {}:{}",
+                    fields[0],
+                    paramfile_path.display(),
+                    line_number
+                ));
+            }
+            let name = fields[1];
+            if !Self::xyce_paramfile_parameter_name_is_supported(name) {
+                return Err(format!(
+                    "unsupported Xyce wrapper parameter name '{}' at {}:{}",
+                    name,
+                    paramfile_path.display(),
+                    line_number
+                ));
+            }
+            let key = name.to_ascii_lowercase();
+            if !seen.insert(key) {
+                return Err(format!(
+                    "duplicate Xyce wrapper parameter '{}' at {}:{}",
+                    name,
+                    paramfile_path.display(),
+                    line_number
+                ));
+            }
+            bindings.push((name.to_string(), value));
+        }
+        Ok(bindings)
+    }
+
+    fn xyce_paramfile_parameter_name_is_supported(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        (first.is_ascii_alphabetic() || first == '_')
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    }
+
     fn parse_netlist_with_expression_dialect(
         source: &str,
         deck_path: &Path,
@@ -1339,6 +1478,8 @@ impl XyceTestRunner {
             );
         }
         Self::reject_unsupported_source_directives(&source)?;
+        let source =
+            Self::source_with_wrapper_paramfile_bindings(&source, &deck.path, requires_wrapper)?;
 
         let output_override = requires_wrapper
             && Self::is_native_output_override_wrapper_candidate_path(&deck.relative_path);
@@ -2609,6 +2750,14 @@ impl XyceTestRunner {
                 }
                 continue;
             }
+            if command.eq_ignore_ascii_case(".measure") || command.eq_ignore_ascii_case(".meas") {
+                if Self::is_ignorable_wrapper_tran_measure_side_output(&trimmed)? {
+                    continue;
+                }
+                return Err(format!(
+                    "wrapper-origin transient .prn contract does not cover {command} directives"
+                ));
+            }
             if Self::is_extra_wrapper_tran_output_analysis_command(command) {
                 return Err(format!(
                     "wrapper-origin transient .prn contract does not cover {command} directives"
@@ -3537,6 +3686,51 @@ impl XyceTestRunner {
                 | ".save"
                 | ".sens"
         )
+    }
+
+    fn is_ignorable_wrapper_tran_measure_side_output(line: &str) -> Result<bool, String> {
+        let tokens = Self::split_grouped_whitespace_fields(line, ".MEASURE statement")?;
+        if tokens.len() < 5 {
+            return Ok(false);
+        }
+        if !matches!(
+            tokens[0].to_ascii_lowercase().as_str(),
+            ".measure" | ".meas"
+        ) || !tokens[1].eq_ignore_ascii_case("TRAN")
+        {
+            return Ok(false);
+        }
+        if !matches!(tokens[3].to_ascii_lowercase().as_str(), "max" | "min") {
+            return Ok(false);
+        }
+
+        let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut index = 4usize;
+        while index < token_refs.len() {
+            if Self::print_option_assignment(&token_refs, index).is_some() {
+                return Ok(false);
+            }
+            let normalized = token_refs[index]
+                .trim()
+                .trim_matches(['"', '\''])
+                .to_ascii_lowercase();
+            if matches!(
+                normalized.as_str(),
+                "error"
+                    | "four"
+                    | "fft"
+                    | "file"
+                    | "failvalue"
+                    | "comp_function"
+                    | "indepvarcol"
+                    | "depvarcol"
+            ) {
+                return Ok(false);
+            }
+            index += 1;
+        }
+
+        Ok(true)
     }
 
     fn print_option_assignment<'a>(
@@ -17175,6 +17369,46 @@ Values:
     }
 
     #[test]
+    fn xyce_paramfile_variables_parse_dakota_values() {
+        let bindings = XyceTestRunner::parse_xyce_paramfile_variables(
+            "2 variables\n-10.0 dakota_VV1\n+5    dakota_VV2\n1 functions\n1 TimeAt2\n",
+            Path::new("paramfile.txt"),
+        )
+        .expect("Xyce PRF parameter variables parse");
+
+        assert_eq!(
+            bindings,
+            vec![
+                ("dakota_VV1".to_string(), -10.0),
+                ("dakota_VV2".to_string(), 5.0)
+            ]
+        );
+
+        let rebound = XyceTestRunner::source_with_param_bindings(
+            "bug1210\nVone n1 0 dakota_VV1\n.end\n",
+            &bindings,
+        );
+        assert_eq!(
+            rebound,
+            "bug1210\n.PARAM dakota_VV1=-1.00000000000000000e1\n.PARAM dakota_VV2=5.00000000000000000e0\nVone n1 0 dakota_VV1\n.end\n"
+        );
+    }
+
+    #[test]
+    fn xyce_paramfile_rejects_duplicate_variables() {
+        let err = XyceTestRunner::parse_xyce_paramfile_variables(
+            "2 variables\n1 dakota_VV1\n2 DAKOTA_VV1\n",
+            Path::new("paramfile.txt"),
+        )
+        .expect_err("duplicate PRF variables must fail closed");
+
+        assert!(
+            err.contains("duplicate Xyce wrapper parameter"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn print_output_requests_join_continuations_across_comment_lines() {
         let requests = XyceTestRunner::print_output_requests(
             r#"
@@ -18650,6 +18884,51 @@ R2 2 0 1
                 true,
             ),
             Some(XyceStaticTranContract::WrapperCsv)
+        );
+    }
+
+    #[test]
+    fn tran_prn_wrapper_classifier_ignores_simple_measure_side_outputs() {
+        let source = "\
+wrapper-origin transient with simple measure side output
+V1 1 0 1
+R1 1 0 1
+.MEASURE TRAN maxN1 MAX V(1)
+.PRINT TRAN V(1)
+.TRAN 0 1
+.END
+";
+
+        XyceTestRunner::validate_native_static_prn_tran_wrapper_contract(source)
+            .expect("simple transient MAX measure side output does not affect .prn contract");
+        assert_eq!(
+            XyceTestRunner::native_static_prn_tran_wrapper_contract(
+                Path::new("measure-side-output.cir"),
+                "Netlists/Certification_Tests/BUG_1210_SON/bug1210.cir",
+                source,
+                true,
+            ),
+            Some(XyceStaticTranContract::WrapperStatic)
+        );
+    }
+
+    #[test]
+    fn tran_prn_wrapper_classifier_rejects_measure_file_outputs() {
+        let source = "\
+wrapper-origin transient with measure file output
+V1 1 0 1
+R1 1 0 1
+.MEASURE TRAN fit ERROR V(1) FILE=gold.prn COMP_FUNCTION=L2NORM
+.PRINT TRAN V(1)
+.TRAN 0 1
+.END
+";
+
+        let err = XyceTestRunner::validate_native_static_prn_tran_wrapper_contract(source)
+            .expect_err("measure file/error output is outside the .prn contract");
+        assert!(
+            err.contains(".MEASURE") || err.contains(".MEAS") || err.contains(".measure"),
+            "unexpected error: {err}"
         );
     }
 
