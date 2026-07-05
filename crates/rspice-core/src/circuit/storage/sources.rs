@@ -864,6 +864,24 @@ impl VoltageSources {
         changed
     }
 
+    /// Enforce operating-point voltage-source constraints.
+    ///
+    /// Combined sources such as `DC 1.2 AC 1 SIN(...)` use their explicit DC
+    /// value for OP/DC analyses; transient waveform evaluation is reserved for
+    /// time-domain projection.
+    pub fn enforce_dc_voltage_constraints(&self, solution: &mut [Value]) -> bool {
+        let mut changed = false;
+        for i in 0..self.names.len() {
+            changed |= project_two_terminal_voltage(
+                solution,
+                self.node_pos[i],
+                self.node_neg[i],
+                self.dc_values[i],
+            );
+        }
+        changed
+    }
+
     /// Enforce the scaled DC voltage-source constraints used by source stepping.
     pub fn enforce_scaled_dc_voltage_constraints(
         &self,
@@ -1447,6 +1465,41 @@ mod tests {
             tstop,
             dialect: crate::engine::SpiceDialect::Xyce,
         })
+    }
+
+    #[test]
+    fn dc_constraint_projection_uses_dc_value_for_combined_transient_source() {
+        let mut sources = VoltageSources::new();
+        sources.add_with_ac_and_spec(
+            "vin".to_string(),
+            1,
+            0,
+            1,
+            1.44,
+            0.1,
+            0.0,
+            Some(SourceSpec::DcAcTransient {
+                dc_value: 1.44,
+                ac_magnitude: 0.1,
+                ac_phase: 0.0,
+                transient: Box::new(SourceSpec::Sin {
+                    offset: 0.0,
+                    amplitude: 1.0,
+                    frequency: 1.0e5,
+                    delay: 0.0,
+                    damping: 0.0,
+                    phase: 0.0,
+                }),
+            }),
+        );
+
+        let mut dc_solution = vec![0.0];
+        assert!(sources.enforce_dc_voltage_constraints(&mut dc_solution));
+        assert_close(dc_solution[0], 1.44);
+
+        let mut transient_solution = vec![1.44];
+        assert!(sources.enforce_voltage_constraints(&mut transient_solution, 0.0));
+        assert_close(transient_solution[0], 0.0);
     }
 
     #[test]

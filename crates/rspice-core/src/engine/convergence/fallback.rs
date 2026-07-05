@@ -204,11 +204,10 @@ impl Engine {
                 |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale),
             );
             if (source_scale - 1.0).abs() <= 1.0e-12 {
-                circuit.enforce_ideal_voltage_constraints(&mut new_solution, 0.0);
+                circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution);
             } else {
                 circuit
-                    .voltage_sources
-                    .enforce_scaled_dc_voltage_constraints(&mut new_solution, source_scale);
+                    .enforce_scaled_dc_ideal_voltage_constraints(&mut new_solution, source_scale);
             }
             Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 

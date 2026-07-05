@@ -495,7 +495,36 @@ impl CircuitData {
         let mut changed = self
             .voltage_sources
             .enforce_voltage_constraints(solution, time);
-        changed |= self
+        changed |= self.enforce_dependent_voltage_constraints(solution);
+        changed
+    }
+
+    /// Re-project ideal voltage-output equations for a DC operating-point
+    /// iterate, using independent source DC values rather than any transient
+    /// waveform value at t=0.
+    pub fn enforce_dc_ideal_voltage_constraints(&self, solution: &mut [Value]) -> bool {
+        let mut changed = self
+            .voltage_sources
+            .enforce_dc_voltage_constraints(solution);
+        changed |= self.enforce_dependent_voltage_constraints(solution);
+        changed
+    }
+
+    /// Re-project ideal voltage-output equations for source-stepping DC solves.
+    pub fn enforce_scaled_dc_ideal_voltage_constraints(
+        &self,
+        solution: &mut [Value],
+        source_scale: Value,
+    ) -> bool {
+        let mut changed = self
+            .voltage_sources
+            .enforce_scaled_dc_voltage_constraints(solution, source_scale);
+        changed |= self.enforce_dependent_voltage_constraints(solution);
+        changed
+    }
+
+    fn enforce_dependent_voltage_constraints(&self, solution: &mut [Value]) -> bool {
+        let mut changed = self
             .resistor_branches
             .enforce_voltage_constraints(solution, self.num_nodes);
 

@@ -418,7 +418,7 @@ impl Engine {
                 } else {
                     raw_solution
                 };
-            circuit.enforce_ideal_voltage_constraints(&mut new_solution, 0.0);
+            circuit.enforce_dc_ideal_voltage_constraints(&mut new_solution);
             // Solution limiting: prevent numerical blow-up by clamping extreme values
             // This is a critical convergence aid for circuits with strong nonlinearities
             for (i, v) in new_solution.iter_mut().enumerate() {
