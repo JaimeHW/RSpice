@@ -6225,9 +6225,9 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
     let support = render_runtime_support_module();
 
     for helper in [
-        "fn store_add_scaled_product_value_ad(",
-        "fn store_add_scaled_product_left_ad(",
-        "fn store_add_scaled_product_right_ad(",
+        "fn store_add_scaled_product_mixed_aii(",
+        "fn store_add_scaled_product_mixed_iai(",
+        "fn store_add_scaled_product_mixed_iia(",
         "fn store_add_scaled_inputs_product_first_ad(",
         "fn store_add_scaled_inputs_product_second_ad(",
         "fn store_add_scaled_inputs_product_left_ad(",
@@ -6244,9 +6244,9 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
     }
 
     for helper in [
-        "s.store_add_scaled_product_value_ad(",
-        "s.store_add_scaled_product_left_ad(",
-        "s.store_add_scaled_product_right_ad(",
+        "s.store_add_scaled_product_mixed_aii(",
+        "s.store_add_scaled_product_mixed_iai(",
+        "s.store_add_scaled_product_mixed_iia(",
         "s.store_add_scaled_inputs_product_first_ad(",
         "s.store_add_scaled_inputs_product_second_ad(",
         "s.store_add_scaled_inputs_product_left_ad(",
@@ -6266,6 +6266,20 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         !stamp.contains("s.store_add_scaled_product("),
         "hybrid product-add root assignments should avoid by-value product stores:\n{stamp}"
     );
+    for legacy_helper in [
+        "store_add_scaled_product_value_ad",
+        "store_add_scaled_product_left_ad",
+        "store_add_scaled_product_right_ad",
+    ] {
+        assert!(
+            !support.contains(&format!("fn {legacy_helper}(")),
+            "legacy one-off add-product helpers should be folded into mixed helpers:\n{support}"
+        );
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated add-product calls should use mixed helpers:\n{stamp}"
+        );
+    }
     assert!(
         !stamp.contains("s.store_add_scaled_inputs_product("),
         "hybrid input-product root assignments should avoid by-value product stores:\n{stamp}"
