@@ -6949,7 +6949,7 @@ fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
         "{stamp}"
     );
     assert!(
-        support.contains("fn store_scaled_div_ad_rhs(&mut self, index: usize, left: usize"),
+        support.contains("fn store_scaled_div_mixed_ia("),
         "{support}"
     );
     assert!(
@@ -6957,15 +6957,25 @@ fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
         "{support}"
     );
     assert!(
-        support.contains("fn store_scaled_div_ad_lhs(&mut self, index: usize, left: AdValue"),
+        support.contains("fn store_scaled_div_mixed_ai("),
         "{support}"
     );
     assert!(
         stamp.contains("s.store_scaled_div_ln_offset_rhs(4, 0, 1, p.p0, p.p1);"),
         "{stamp}"
     );
+    assert!(stamp.contains("s.store_scaled_div_mixed_ai("), "{stamp}");
+    assert!(stamp.contains("s.store_scaled_div_mixed_ia("), "{stamp}");
+    assert!(
+        !support.contains("fn store_scaled_div_ad_rhs(&mut self, index: usize, left: usize"),
+        "{support}"
+    );
+    assert!(
+        !support.contains("fn store_scaled_div_ad_lhs(&mut self, index: usize, left: AdValue"),
+        "{support}"
+    );
     assert!(!stamp.contains("s.store_scaled_div_ad_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_scaled_div_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_scaled_div_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -17688,6 +17698,7 @@ module compact_result_scaled_mixed_mul_div_store(p, n);
     real c;
     real d;
     real e;
+    real f;
     analog begin
         a = V(p, n);
         q = V(p);
@@ -17695,7 +17706,8 @@ module compact_result_scaled_mixed_mul_div_store(p, n);
         c = (exp(q) * a) * output_gain;
         d = (a / ln(q + offset)) * output_gain;
         e = (exp(q) / a) * output_gain;
-        I(p, n) <+ b + c + d + e;
+        f = (a / exp(q)) * output_gain;
+        I(p, n) <+ b + c + d + e + f;
     end
 endmodule
 "#

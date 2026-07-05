@@ -21279,20 +21279,6 @@ fn generate_scratch_operation_helpers() -> String {
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + right_branch_derivatives[axis] * right_scale; }",
         "    }",
         "",
-        "    #[inline]",
-        "    fn store_scaled_div_ad_rhs(&mut self, index: usize, left: usize, right: AdValue, scale: f64) {",
-        "        let left_value = self.values[left];",
-        "        let left_node_derivatives = self.node_derivatives[left];",
-        "        let left_branch_derivatives = self.branch_derivatives[left];",
-        "        let reciprocal = 1.0 / right.value;",
-        "        let quotient = left_value * reciprocal;",
-        "        let right_scale = -quotient * reciprocal;",
-        "        self.values[index] = quotient * scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * reciprocal + right.node_derivatives[axis] * right_scale) * scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * reciprocal + right.branch_derivatives[axis] * right_scale) * scale; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_scaled_div_ln_offset_rhs(&mut self, index: usize, left: usize, right: usize, offset: f64, scale: f64) {",
         "        let left_value = self.values[left];",
         "        let left_node_derivatives = self.node_derivatives[left];",
@@ -21309,20 +21295,6 @@ fn generate_scratch_operation_helpers() -> String {
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale) * scale; }",
         "    }",
         "",
-        "    #[inline]",
-        "    fn store_scaled_div_ad_lhs(&mut self, index: usize, left: AdValue, right: usize, scale: f64) {",
-        "        let right_value = self.values[right];",
-        "        let right_node_derivatives = self.node_derivatives[right];",
-        "        let right_branch_derivatives = self.branch_derivatives[right];",
-        "        let reciprocal = 1.0 / right_value;",
-        "        let quotient = left.value * reciprocal;",
-        "        let right_scale = -quotient * reciprocal;",
-        "        self.values[index] = quotient * scale;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left.node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale) * scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left.branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale) * scale; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_scaled_add(&mut self, index: usize, left: usize, right: usize, scale: f64) {",
         "        let left_value = self.values[left];",
         "        let right_value = self.values[right];",
@@ -22842,6 +22814,7 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
                 "store_scaled_sub",
                 '-',
             ));
+            out.push_str(&generate_index_or_mixed_scaled_div_helper(&mask));
             out.push_str(&generate_index_or_mixed_scaled_inputs_helper(
                 &mask,
                 "store_add_scaled_inputs",
@@ -23300,6 +23273,33 @@ fn generate_index_or_mixed_scaled_add_sub_helper(mask: &str, base: &str, operato
         self.values[index] = ({left_value} {operator} {right_value}) * scale;
         for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = ({left_node_derivative} {operator} {right_node_derivative}) * scale; }}
         for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = ({left_branch_derivative} {operator} {right_branch_derivative}) * scale; }}
+    }}
+"#,
+        left_ty = mixed_helper_type(mask, 0),
+        right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_scaled_div_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_scaled_div", mask);
+    let left_value = index_or_mixed_value_expr(mask, 0, "left");
+    let left_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "left");
+    let left_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "left");
+    let right_value = index_or_mixed_value_expr(mask, 1, "right");
+    let right_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "right");
+    let right_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, right: {right_ty}, scale: f64) {{
+        let right_value = {right_value};
+        let reciprocal = 1.0 / right_value;
+        let quotient = {left_value} * reciprocal;
+        let right_scale = -quotient * reciprocal;
+        self.values[index] = quotient * scale;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = ({left_node_derivative} * reciprocal + {right_node_derivative} * right_scale) * scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = ({left_branch_derivative} * reciprocal + {right_branch_derivative} * right_scale) * scale; }}
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
@@ -39344,6 +39344,27 @@ fn compact_index_or_mixed_mul_unary_helper_line(
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
+fn compact_index_or_mixed_scaled_div_helper_line(
+    target_index: usize,
+    left: &str,
+    right: &str,
+    scale: &str,
+) -> Option<String> {
+    let left_is_index = compact_scratch_ad_value_index(left).is_some();
+    let right_is_index = compact_scratch_ad_value_index(right).is_some();
+    if left_is_index == right_is_index {
+        return None;
+    }
+
+    let (helper, value_args) =
+        compact_index_or_mixed_value_args("store_scaled_div", &[left, right])?;
+    let mut call_args = Vec::with_capacity(4);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    call_args.push(scale.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
 fn compact_index_or_mixed_mul_div_helper_line(
     target_index: usize,
     factor: &str,
@@ -43461,17 +43482,23 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
                 ) {
                     return Some(line);
                 }
-                return Some(format!(
-                    "scratch.store_scaled_div_ad_rhs({target_index}, {}, {}, {combined_scale});",
-                    left.0, inner_args[1]
-                ));
+                let left_arg = format!("scratch.ad_value({})", left.0);
+                return compact_index_or_mixed_scaled_div_helper_line(
+                    target_index,
+                    &left_arg,
+                    inner_args[1],
+                    &combined_scale,
+                );
             }
             (None, Some(right)) if compact_non_atomic_ad_value(inner_args[0]) => {
                 let combined_scale = compact_scale_ratio(scale, &right.1);
-                return Some(format!(
-                    "scratch.store_scaled_div_ad_lhs({target_index}, {}, {}, {combined_scale});",
-                    inner_args[0], right.0
-                ));
+                let right_arg = format!("scratch.ad_value({})", right.0);
+                return compact_index_or_mixed_scaled_div_helper_line(
+                    target_index,
+                    inner_args[0],
+                    &right_arg,
+                    &combined_scale,
+                );
             }
             _ => {}
         }
