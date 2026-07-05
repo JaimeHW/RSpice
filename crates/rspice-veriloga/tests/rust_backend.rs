@@ -7886,15 +7886,15 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
         .as_str();
     let support = render_runtime_support_module();
 
-    assert!(
-        support.contains("pub(crate) fn store_mul_ad_rhs("),
-        "{support}"
-    );
-    assert!(
-        support.contains("pub(crate) fn store_div_ad_lhs("),
-        "{support}"
-    );
     for helper in [
+        "pub(crate) fn store_add_mixed_ia(",
+        "pub(crate) fn store_add_mixed_ai(",
+        "pub(crate) fn store_sub_mixed_ia(",
+        "pub(crate) fn store_sub_mixed_ai(",
+        "pub(crate) fn store_mul_mixed_ia(",
+        "pub(crate) fn store_mul_mixed_ai(",
+        "pub(crate) fn store_div_mixed_ia(",
+        "pub(crate) fn store_div_mixed_ai(",
         "pub(crate) fn store_add_sqrt_rhs(",
         "pub(crate) fn store_add_sqrt_lhs(",
         "pub(crate) fn store_sub_sqrt_rhs(",
@@ -7907,6 +7907,21 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
     ] {
         assert!(support.contains(helper), "missing {helper}:\n{support}");
     }
+    for deleted_helper in [
+        "pub(crate) fn store_add_ad_rhs(",
+        "pub(crate) fn store_add_ad_lhs(",
+        "pub(crate) fn store_sub_ad_rhs(",
+        "pub(crate) fn store_sub_ad_lhs(",
+        "pub(crate) fn store_mul_ad_rhs(",
+        "pub(crate) fn store_mul_ad_lhs(",
+        "pub(crate) fn store_div_ad_rhs(",
+        "pub(crate) fn store_div_ad_lhs(",
+    ] {
+        assert!(
+            !support.contains(deleted_helper),
+            "obsolete helper still emitted: {deleted_helper}\n{support}"
+        );
+    }
     assert!(!support.contains("pub(crate) fn store_mul_atan_ad_rhs("));
     assert!(!support.contains("pub(crate) fn store_mul_atan_ad_lhs("));
     assert!(stamp.contains("s.store_mul_atan_rhs(2, 0, 1);"), "{stamp}");
@@ -7917,6 +7932,33 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
     assert!(stamp.contains("s.store_sub_sqrt_lhs(7, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_div_sqrt_rhs(8, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_div_sqrt_lhs(9, 0, 1);"), "{stamp}");
+    for call in [
+        "s.store_add_mixed_ia(",
+        "s.store_add_mixed_ai(",
+        "s.store_sub_mixed_ia(",
+        "s.store_sub_mixed_ai(",
+        "s.store_mul_mixed_ia(",
+        "s.store_mul_mixed_ai(",
+        "s.store_div_mixed_ia(",
+        "s.store_div_mixed_ai(",
+    ] {
+        assert!(stamp.contains(call), "missing {call}:\n{stamp}");
+    }
+    for deleted_call in [
+        "s.store_add_ad_rhs(",
+        "s.store_add_ad_lhs(",
+        "s.store_sub_ad_rhs(",
+        "s.store_sub_ad_lhs(",
+        "s.store_mul_ad_rhs(",
+        "s.store_mul_ad_lhs(",
+        "s.store_div_ad_rhs(",
+        "s.store_div_ad_lhs(",
+    ] {
+        assert!(
+            !stamp.contains(deleted_call),
+            "obsolete call still emitted: {deleted_call}\n{stamp}"
+        );
+    }
     assert!(
         !stamp.contains("A::sqrt(s.ad_value(0))") && !stamp.contains("A::sqrt(s.ad_value(1))"),
         "{stamp}"
@@ -18271,6 +18313,14 @@ module compact_mixed_scratch_ad_store(p, n);
     real h;
     real i;
     real j;
+    real k;
+    real l;
+    real m;
+    real r;
+    real t;
+    real u;
+    real v;
+    real w;
     analog begin
         a = V(p, n);
         b = V(n, p);
@@ -18282,7 +18332,15 @@ module compact_mixed_scratch_ad_store(p, n);
         h = sqrt(a) - b;
         i = a / sqrt(b);
         j = sqrt(a) / b;
-        I(p, n) <+ c + d + e + f + g + h + i + j;
+        k = a + cosh(b);
+        l = cosh(a) + b;
+        m = a - cosh(b);
+        r = cosh(a) - b;
+        t = a * cosh(b);
+        u = cosh(a) * b;
+        v = a / cosh(b);
+        w = cosh(a) / b;
+        I(p, n) <+ c + d + e + f + g + h + i + j + k + l + m + r + t + u + v + w;
     end
 endmodule
 "#

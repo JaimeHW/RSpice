@@ -880,6 +880,7 @@ fn compact_generated_stamp_surface_base(mut source: String) -> String {
     source = compact_mul_add_sub_helper_calls(source);
     source = compact_mul_square_exp_scaled_input_helper_calls(source);
     source = compact_mul_scale_offset_helper_calls(source);
+    source = compact_binary_side_ad_helper_calls(source);
     source = compact_sqrt_mul_sub_operand_helper_calls(source);
     source = compact_sqrt_square_ad_expressions(source);
     for (from, to) in [
@@ -1642,6 +1643,102 @@ fn compact_add_sub_div_lhs_helper_calls(source: String) -> String {
     let source =
         compact_add_sub_div_helper_calls_for(source, "scratch.store_add_ad_rhs(", "add_rhs");
     compact_add_sub_div_helper_calls_for(source, "scratch.store_sub_ad_lhs(", "sub_lhs")
+}
+
+fn compact_binary_side_ad_helper_calls(mut source: String) -> String {
+    for (needle, base, mask) in [
+        ("scratch.store_add_ad_rhs(", "store_add", "ia"),
+        ("scratch.store_add_ad_lhs(", "store_add", "ai"),
+        ("scratch.store_sub_ad_rhs(", "store_sub", "ia"),
+        ("scratch.store_sub_ad_lhs(", "store_sub", "ai"),
+        ("scratch.store_mul_ad_rhs(", "store_mul", "ia"),
+        ("scratch.store_mul_ad_lhs(", "store_mul", "ai"),
+        ("scratch.store_div_ad_rhs(", "store_div", "ia"),
+        ("scratch.store_div_ad_lhs(", "store_div", "ai"),
+    ] {
+        source = compact_binary_side_ad_helper_calls_for(source, needle, base, mask);
+    }
+    source
+}
+
+fn compact_binary_side_ad_helper_calls_for(
+    source: String,
+    needle: &str,
+    base: &str,
+    mask: &str,
+) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = source[cursor..].find(needle) {
+        let call_start = cursor + relative_start;
+        let line_start = source[..call_start]
+            .rfind('\n')
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let indent = &source[line_start..call_start];
+        if !indent.chars().all(|ch| ch == ' ' || ch == '\t') {
+            let skip_to = call_start + needle.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        }
+
+        let Some((statement_end, replacement)) = compact_binary_side_ad_helper_call_replacement(
+            &source, call_start, indent, needle, base, mask,
+        ) else {
+            let skip_to = call_start + needle.len();
+            out.push_str(&source[cursor..skip_to]);
+            cursor = skip_to;
+            continue;
+        };
+
+        out.push_str(&source[cursor..line_start]);
+        out.push_str(&replacement);
+        cursor = statement_end;
+    }
+
+    out.push_str(&source[cursor..]);
+    out
+}
+
+fn compact_binary_side_ad_helper_call_replacement(
+    source: &str,
+    call_start: usize,
+    indent: &str,
+    needle: &str,
+    base: &str,
+    mask: &str,
+) -> Option<(usize, String)> {
+    let open_paren = call_start + needle.len() - 1;
+    let close_paren = find_matching_ascii_delimiter(source, open_paren, b'(', b')')?;
+    let args = split_top_level_args(&source[(open_paren + 1)..close_paren])?;
+    if args.len() != 3 {
+        return None;
+    }
+    let target_index = args[0].trim().parse::<usize>().ok()?;
+    let helper = index_or_mixed_helper_name(base, mask);
+    let line = match mask {
+        "ia" => {
+            let left = args[1].trim().parse::<usize>().ok()?;
+            format!(
+                "scratch.{helper}({target_index}, {left}, {});",
+                args[2].trim()
+            )
+        }
+        "ai" => {
+            let right = args[2].trim().parse::<usize>().ok()?;
+            format!(
+                "scratch.{helper}({target_index}, {}, {right});",
+                args[1].trim()
+            )
+        }
+        _ => return None,
+    };
+    let mut replacement = String::new();
+    push_indented_compact_line(&mut replacement, indent, &line);
+    let statement_end = compact_statement_end_after_call(source, close_paren)?;
+    Some((statement_end, replacement))
 }
 
 fn compact_add_sub_div_helper_calls_for(source: String, needle: &str, kind: &str) -> String {
@@ -4156,6 +4253,51 @@ mod compact_generated_stamp_surface_tests {
         assert!(should_cache_compact_condition(
             "((!assign10_cond0) && assign10_cond1)"
         ));
+    }
+
+    #[test]
+    fn rewrites_binary_side_ad_fallbacks_as_mixed_helpers() {
+        let source = r#"
+fn stamp() {
+    scratch.store_add_ad_rhs(10, 1, AdValue::cosh(scratch.ad_value(2)));
+    scratch.store_add_ad_lhs(11, AdValue::cosh(scratch.ad_value(2)), 1);
+    scratch.store_sub_ad_rhs(12, 1, AdValue::cosh(scratch.ad_value(2)));
+    scratch.store_sub_ad_lhs(13, AdValue::cosh(scratch.ad_value(2)), 1);
+    scratch.store_mul_ad_rhs(14, 1, AdValue::cosh(scratch.ad_value(2)));
+    scratch.store_mul_ad_lhs(15, AdValue::cosh(scratch.ad_value(2)), 1);
+    scratch.store_div_ad_rhs(16, 1, AdValue::cosh(scratch.ad_value(2)));
+    scratch.store_div_ad_lhs(17, AdValue::cosh(scratch.ad_value(2)), 1);
+}
+"#;
+        let compact = compact_generated_stamp_surface(source.to_string());
+
+        for expected in [
+            "s.store_add_mixed_ia(10, 1, A::cosh(s.ad_value(2)));",
+            "s.store_add_mixed_ai(11, A::cosh(s.ad_value(2)), 1);",
+            "s.store_sub_mixed_ia(12, 1, A::cosh(s.ad_value(2)));",
+            "s.store_sub_mixed_ai(13, A::cosh(s.ad_value(2)), 1);",
+            "s.store_mul_mixed_ia(14, 1, A::cosh(s.ad_value(2)));",
+            "s.store_mul_mixed_ai(15, A::cosh(s.ad_value(2)), 1);",
+            "s.store_div_mixed_ia(16, 1, A::cosh(s.ad_value(2)));",
+            "s.store_div_mixed_ai(17, A::cosh(s.ad_value(2)), 1);",
+        ] {
+            assert!(compact.contains(expected), "missing {expected}:\n{compact}");
+        }
+        for obsolete in [
+            "store_add_ad_rhs",
+            "store_add_ad_lhs",
+            "store_sub_ad_rhs",
+            "store_sub_ad_lhs",
+            "store_mul_ad_rhs",
+            "store_mul_ad_lhs",
+            "store_div_ad_rhs",
+            "store_div_ad_lhs",
+        ] {
+            assert!(
+                !compact.contains(obsolete),
+                "obsolete helper survived: {obsolete}\n{compact}"
+            );
+        }
     }
 
     #[test]
@@ -8257,20 +8399,20 @@ fn stamp() {
             "{mul_add_rhs}"
         );
 
-        let add_ad_rhs = helper_body(&support, "fn store_add_ad_rhs(");
+        let add_mixed_ia = helper_body(&support, "fn store_add_mixed_ia(");
         assert!(
-            !add_ad_rhs.contains("_node_derivatives = self.node_derivatives"),
-            "{add_ad_rhs}"
+            !add_mixed_ia.contains("_node_derivatives = self.node_derivatives"),
+            "{add_mixed_ia}"
         );
         assert!(
-            !add_ad_rhs.contains("_branch_derivatives = self.branch_derivatives"),
-            "{add_ad_rhs}"
+            !add_mixed_ia.contains("_branch_derivatives = self.branch_derivatives"),
+            "{add_mixed_ia}"
         );
         assert!(
-            add_ad_rhs.contains(
+            add_mixed_ia.contains(
                 "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] + right.node_derivatives[axis];"
             ),
-            "{add_ad_rhs}"
+            "{add_mixed_ia}"
         );
 
         let add_scaled_sqrt_sub_square = helper_body(
@@ -8454,20 +8596,20 @@ fn stamp() {
             "{sub_div_lhs_indices}"
         );
 
-        let sub_ad_lhs = helper_body(&support, "fn store_sub_ad_lhs(");
+        let sub_mixed_ai = helper_body(&support, "fn store_sub_mixed_ai(");
         assert!(
-            !sub_ad_lhs.contains("_node_derivatives = self.node_derivatives"),
-            "{sub_ad_lhs}"
+            !sub_mixed_ai.contains("_node_derivatives = self.node_derivatives"),
+            "{sub_mixed_ai}"
         );
         assert!(
-            !sub_ad_lhs.contains("_branch_derivatives = self.branch_derivatives"),
-            "{sub_ad_lhs}"
+            !sub_mixed_ai.contains("_branch_derivatives = self.branch_derivatives"),
+            "{sub_mixed_ai}"
         );
         assert!(
-            sub_ad_lhs.contains(
+            sub_mixed_ai.contains(
                 "self.node_derivatives[index][axis] = left.node_derivatives[axis] - self.node_derivatives[right][axis];"
             ),
-            "{sub_ad_lhs}"
+            "{sub_mixed_ai}"
         );
 
         let mul_ad_product_rhs = helper_body(&support, "fn store_mul_ad_product_rhs(");
@@ -19207,14 +19349,6 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_add_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
-        "        let left_value = self.values[left];",
-        "        self.values[index] = left_value + right.value;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] + right.node_derivatives[axis]; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] + right.branch_derivatives[axis]; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_add_sqrt_rhs(&mut self, index: usize, left: usize, right: usize) {",
         "        let left_value = self.values[left];",
         "        let right_root = self.values[right].sqrt();",
@@ -19273,16 +19407,6 @@ fn generate_scratch_operation_helpers() -> String {
         "        let subtrahend_branch_derivatives = self.branch_derivatives[subtrahend];",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] + product_left_node_derivatives[axis] * subtrahend_term - product_left_value * subtrahend_node_derivatives[axis]; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] + product_left_branch_derivatives[axis] * subtrahend_term - product_left_value * subtrahend_branch_derivatives[axis]; }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_add_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
-        "        let right_value = self.values[right];",
-        "        let right_node_derivatives = self.node_derivatives[right];",
-        "        let right_branch_derivatives = self.branch_derivatives[right];",
-        "        self.values[index] = left.value + right_value;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] + right_node_derivatives[axis]; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] + right_branch_derivatives[axis]; }",
         "    }",
         "",
         "    #[inline]",
@@ -19398,16 +19522,6 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_sub_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
-        "        let left_value = self.values[left];",
-        "        let left_node_derivatives = self.node_derivatives[left];",
-        "        let left_branch_derivatives = self.branch_derivatives[left];",
-        "        self.values[index] = left_value - right.value;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] - right.node_derivatives[axis]; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] - right.branch_derivatives[axis]; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_sub_sqrt_rhs(&mut self, index: usize, left: usize, right: usize) {",
         "        let left_value = self.values[left];",
         "        let right_root = self.values[right].sqrt();",
@@ -19472,14 +19586,6 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = scalar - quotient;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -(numerator.node_derivatives[axis] * reciprocal + denominator.node_derivatives[axis] * denominator_derivative_scale); }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -(numerator.branch_derivatives[axis] * reciprocal + denominator.branch_derivatives[axis] * denominator_derivative_scale); }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_sub_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
-        "        let right_value = self.values[right];",
-        "        self.values[index] = left.value - right_value;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] - self.node_derivatives[right][axis]; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] - self.branch_derivatives[right][axis]; }",
         "    }",
         "",
         "    #[inline]",
@@ -19662,26 +19768,6 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = (source.value + left_offset - root) * scale;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source.node_derivatives[axis] * derivative_scale; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source.branch_derivatives[axis] * derivative_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-        "    fn store_mul_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
-        "        let left_value = self.values[left];",
-        "        let left_node_derivatives = self.node_derivatives[left];",
-        "        let left_branch_derivatives = self.branch_derivatives[left];",
-        "        self.values[index] = left_value * right.value;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right.value + left_value * right.node_derivatives[axis]; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right.value + left_value * right.branch_derivatives[axis]; }",
-        "    }",
-        "",
-        "    #[inline]",
-    "    fn store_mul_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
-    "        let right_value = self.values[right];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left.value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value + left.value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value + left.value * right_branch_derivatives[axis]; }",
     "    }",
     "",
     "    #[inline]",
@@ -21142,18 +21228,6 @@ fn generate_scratch_operation_helpers() -> String {
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis] * input_scale; }",
     "    }",
     "",
-    "    fn store_div_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
-    "        let left_value = self.values[left];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let reciprocal = 1.0 / right.value;",
-    "        let quotient = left_value * reciprocal;",
-    "        let right_scale = -quotient * reciprocal;",
-    "        self.values[index] = quotient;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * reciprocal + right.node_derivatives[axis] * right_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * reciprocal + right.branch_derivatives[axis] * right_scale; }",
-    "    }",
-    "",
     "    #[inline]",
     "    fn store_div_sqrt_rhs(&mut self, index: usize, left: usize, right: usize) {",
     "        let left_value = self.values[left];",
@@ -21247,19 +21321,6 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = quotient;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * left_scale + right_node_derivatives[axis] * right_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * left_scale + right_branch_derivatives[axis] * right_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_div_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
-        "        let right_value = self.values[right];",
-        "        let right_node_derivatives = self.node_derivatives[right];",
-        "        let right_branch_derivatives = self.branch_derivatives[right];",
-        "        let reciprocal = 1.0 / right_value;",
-        "        let quotient = left.value * reciprocal;",
-        "        let right_scale = -quotient * reciprocal;",
-        "        self.values[index] = quotient;",
-        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -22804,6 +22865,26 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
     }
     for mask in index_or_mixed_masks(2) {
         if mask != "ii" {
+            out.push_str(&generate_index_or_mixed_binary_store_helper(
+                &mask,
+                "store_add",
+                '+',
+            ));
+            out.push_str(&generate_index_or_mixed_binary_store_helper(
+                &mask,
+                "store_sub",
+                '-',
+            ));
+            out.push_str(&generate_index_or_mixed_binary_store_helper(
+                &mask,
+                "store_mul",
+                '*',
+            ));
+            out.push_str(&generate_index_or_mixed_binary_store_helper(
+                &mask,
+                "store_div",
+                '/',
+            ));
             out.push_str(&generate_index_or_mixed_scaled_add_sub_helper(
                 &mask,
                 "store_scaled_add",
@@ -23278,6 +23359,64 @@ fn generate_index_or_mixed_scaled_add_sub_helper(mask: &str, base: &str, operato
         left_ty = mixed_helper_type(mask, 0),
         right_ty = mixed_helper_type(mask, 1),
     )
+}
+
+fn generate_index_or_mixed_binary_store_helper(mask: &str, base: &str, operator: char) -> String {
+    let helper = index_or_mixed_helper_name(base, mask);
+    let left_value = index_or_mixed_value_expr(mask, 0, "left");
+    let left_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "left");
+    let left_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "left");
+    let right_value = index_or_mixed_value_expr(mask, 1, "right");
+    let right_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "right");
+    let right_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "right");
+    match operator {
+        '+' | '-' => format!(
+            r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, right: {right_ty}) {{
+        self.values[index] = {left_value} {operator} {right_value};
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} {operator} {right_node_derivative}; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} {operator} {right_branch_derivative}; }}
+    }}
+"#,
+            left_ty = mixed_helper_type(mask, 0),
+            right_ty = mixed_helper_type(mask, 1),
+        ),
+        '*' => format!(
+            r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, right: {right_ty}) {{
+        let left_value = {left_value};
+        let right_value = {right_value};
+        self.values[index] = left_value * right_value;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * right_value + left_value * {right_node_derivative}; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * right_value + left_value * {right_branch_derivative}; }}
+    }}
+"#,
+            left_ty = mixed_helper_type(mask, 0),
+            right_ty = mixed_helper_type(mask, 1),
+        ),
+        '/' => format!(
+            r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, right: {right_ty}) {{
+        let right_value = {right_value};
+        let reciprocal = 1.0 / right_value;
+        let quotient = {left_value} * reciprocal;
+        let right_scale = -quotient * reciprocal;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * reciprocal + {right_node_derivative} * right_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * reciprocal + {right_branch_derivative} * right_scale; }}
+    }}
+"#,
+            left_ty = mixed_helper_type(mask, 0),
+            right_ty = mixed_helper_type(mask, 1),
+        ),
+        _ => String::new(),
+    }
 }
 
 fn generate_index_or_mixed_scaled_div_helper(mask: &str) -> String {
