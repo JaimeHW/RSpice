@@ -7445,8 +7445,10 @@ fn stamp() {
         );
         for signature in [
             "fn store_add_scaled_inputs_product_indices(",
-            "fn store_add_scaled_inputs_product_first_ad(",
-            "fn store_add_scaled_inputs_product_right_ad(",
+            "fn store_add_scaled_inputs_product_mixed_aiii(",
+            "fn store_add_scaled_inputs_product_mixed_iaii(",
+            "fn store_add_scaled_inputs_product_mixed_iiai(",
+            "fn store_add_scaled_inputs_product_mixed_iiia(",
             "fn store_add_scaled_inputs_product_mixed_aaii(",
         ] {
             let body = helper_body(&support, signature);
@@ -7466,6 +7468,15 @@ fn stamp() {
                 "self.node_derivatives[index][axis] = self.node_derivatives[first][axis] * first_scale + self.node_derivatives[second][axis] * second_scale + (self.node_derivatives[product_left][axis] * product_right_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale;"
             ),
             "{inputs_product}"
+        );
+
+        let inputs_product_first_mixed =
+            helper_body(&support, "fn store_add_scaled_inputs_product_mixed_aiii(");
+        assert!(
+            inputs_product_first_mixed.contains(
+                "self.node_derivatives[index][axis] = first.node_derivatives[axis] * first_scale + self.node_derivatives[second][axis] * second_scale + (self.node_derivatives[product_left][axis] * product_right_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale;"
+            ),
+            "{inputs_product_first_mixed}"
         );
 
         let inputs_product_mixed =
@@ -23551,54 +23562,6 @@ fn generate_hybrid_index_product_scratch_helpers() -> &'static str {
     }
 
     #[inline]
-    fn store_add_scaled_inputs_product_first_ad(&mut self, index: usize, first: AdValue, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
-        let first_value = first.value * first_scale;
-        let second_value = self.values[second] * second_scale;
-        let product_left_value = self.values[product_left];
-        let product_right_value = self.values[product_right];
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.values[index] = first_value + second_value + product_term;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = first.node_derivatives[axis] * first_scale + self.node_derivatives[second][axis] * second_scale + (self.node_derivatives[product_left][axis] * product_right_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = first.branch_derivatives[axis] * first_scale + self.branch_derivatives[second][axis] * second_scale + (self.branch_derivatives[product_left][axis] * product_right_value + product_left_value * self.branch_derivatives[product_right][axis]) * product_scale; }
-    }
-
-    #[inline]
-    fn store_add_scaled_inputs_product_second_ad(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64) {
-        let first_value = self.values[first] * first_scale;
-        let second_value = second.value * second_scale;
-        let product_left_value = self.values[product_left];
-        let product_right_value = self.values[product_right];
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.values[index] = first_value + second_value + product_term;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[first][axis] * first_scale + second.node_derivatives[axis] * second_scale + (self.node_derivatives[product_left][axis] * product_right_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[first][axis] * first_scale + second.branch_derivatives[axis] * second_scale + (self.branch_derivatives[product_left][axis] * product_right_value + product_left_value * self.branch_derivatives[product_right][axis]) * product_scale; }
-    }
-
-    #[inline]
-    fn store_add_scaled_inputs_product_left_ad(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: AdValue, product_right: usize, product_scale: f64) {
-        let first_value = self.values[first] * first_scale;
-        let second_value = self.values[second] * second_scale;
-        let product_left_value = product_left.value;
-        let product_right_value = self.values[product_right];
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.values[index] = first_value + second_value + product_term;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[first][axis] * first_scale + self.node_derivatives[second][axis] * second_scale + (product_left.node_derivatives[axis] * product_right_value + product_left_value * self.node_derivatives[product_right][axis]) * product_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[first][axis] * first_scale + self.branch_derivatives[second][axis] * second_scale + (product_left.branch_derivatives[axis] * product_right_value + product_left_value * self.branch_derivatives[product_right][axis]) * product_scale; }
-    }
-
-    #[inline]
-    fn store_add_scaled_inputs_product_right_ad(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, product_left: usize, product_right: AdValue, product_scale: f64) {
-        let first_value = self.values[first] * first_scale;
-        let second_value = self.values[second] * second_scale;
-        let product_left_value = self.values[product_left];
-        let product_right_value = product_right.value;
-        let product_term = product_left_value * product_right_value * product_scale;
-        self.values[index] = first_value + second_value + product_term;
-        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[first][axis] * first_scale + self.node_derivatives[second][axis] * second_scale + (self.node_derivatives[product_left][axis] * product_right_value + product_left_value * product_right.node_derivatives[axis]) * product_scale; }
-        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[first][axis] * first_scale + self.branch_derivatives[second][axis] * second_scale + (self.branch_derivatives[product_left][axis] * product_right_value + product_left_value * product_right.branch_derivatives[axis]) * product_scale; }
-    }
-
-    #[inline]
     fn store_div_scaled_product_left_ad(&mut self, index: usize, product_left: AdValue, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64) {
         let product_left_value = product_left.value;
         let product_right_value = self.values[product_right];
@@ -23718,10 +23681,10 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
             &mask,
         ));
     }
-    for mask in [
-        "iaaa", "aiaa", "aaia", "aaai", "iiaa", "iaia", "iaai", "aiia", "aiai", "aaii",
-    ] {
-        out.push_str(&generate_mixed_add_scaled_inputs_product_helper(mask));
+    for mask in index_or_mixed_masks(4) {
+        if mask != "iiii" {
+            out.push_str(&generate_mixed_add_scaled_inputs_product_helper(&mask));
+        }
     }
     for mask in index_or_mixed_masks(4) {
         if mask != "iiii" {
@@ -35952,46 +35915,7 @@ fn compact_common_fused_expression_store_helper_call(
         let second_index = compact_scratch_ad_value_index(args[2]);
         let product_left_index = compact_scratch_ad_value_index(args[4]);
         let product_right_index = compact_scratch_ad_value_index(args[5]);
-        match (
-            first_index,
-            second_index,
-            product_left_index,
-            product_right_index,
-        ) {
-            (Some(first), Some(second), Some(product_left), Some(product_right)) => {
-                return Some(format!(
-                    "scratch.store_add_scaled_inputs_product_indices({target_index}, {first}, {}, {second}, {}, {product_left}, {product_right}, {});",
-                    args[1], args[3], args[6]
-                ));
-            }
-            (None, Some(second), Some(product_left), Some(product_right)) => {
-                return Some(format!(
-                    "scratch.store_add_scaled_inputs_product_first_ad({target_index}, {}, {}, {second}, {}, {product_left}, {product_right}, {});",
-                    args[0], args[1], args[3], args[6]
-                ));
-            }
-            (Some(first), None, Some(product_left), Some(product_right)) => {
-                return Some(format!(
-                    "scratch.store_add_scaled_inputs_product_second_ad({target_index}, {first}, {}, {}, {}, {product_left}, {product_right}, {});",
-                    args[1], args[2], args[3], args[6]
-                ));
-            }
-            (Some(first), Some(second), None, Some(product_right)) => {
-                return Some(format!(
-                    "scratch.store_add_scaled_inputs_product_left_ad({target_index}, {first}, {}, {second}, {}, {}, {product_right}, {});",
-                    args[1], args[3], args[4], args[6]
-                ));
-            }
-            (Some(first), Some(second), Some(product_left), None) => {
-                return Some(format!(
-                    "scratch.store_add_scaled_inputs_product_right_ad({target_index}, {first}, {}, {second}, {}, {product_left}, {}, {});",
-                    args[1], args[3], args[5], args[6]
-                ));
-            }
-            _ => {}
-        }
-
-        if let Some(helper) = compact_mixed_index_product_store_helper_name(
+        if let Some(helper) = compact_index_or_mixed_product_store_helper_name(
             "store_add_scaled_inputs_product",
             &[
                 first_index,

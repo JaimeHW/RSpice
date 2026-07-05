@@ -6228,10 +6228,10 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         "fn store_add_scaled_product_mixed_aii(",
         "fn store_add_scaled_product_mixed_iai(",
         "fn store_add_scaled_product_mixed_iia(",
-        "fn store_add_scaled_inputs_product_first_ad(",
-        "fn store_add_scaled_inputs_product_second_ad(",
-        "fn store_add_scaled_inputs_product_left_ad(",
-        "fn store_add_scaled_inputs_product_right_ad(",
+        "fn store_add_scaled_inputs_product_mixed_aiii(",
+        "fn store_add_scaled_inputs_product_mixed_iaii(",
+        "fn store_add_scaled_inputs_product_mixed_iiai(",
+        "fn store_add_scaled_inputs_product_mixed_iiia(",
         "fn store_add_scaled_products_mixed_aiii(",
         "fn store_add_scaled_products_mixed_iaii(",
         "fn store_add_scaled_products_mixed_iiai(",
@@ -6247,10 +6247,10 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         "s.store_add_scaled_product_mixed_aii(",
         "s.store_add_scaled_product_mixed_iai(",
         "s.store_add_scaled_product_mixed_iia(",
-        "s.store_add_scaled_inputs_product_first_ad(",
-        "s.store_add_scaled_inputs_product_second_ad(",
-        "s.store_add_scaled_inputs_product_left_ad(",
-        "s.store_add_scaled_inputs_product_right_ad(",
+        "s.store_add_scaled_inputs_product_mixed_aiii(",
+        "s.store_add_scaled_inputs_product_mixed_iaii(",
+        "s.store_add_scaled_inputs_product_mixed_iiai(",
+        "s.store_add_scaled_inputs_product_mixed_iiia(",
         "s.store_add_scaled_products_mixed_aiii(",
         "s.store_add_scaled_products_mixed_iaii(",
         "s.store_add_scaled_products_mixed_iiai(",
@@ -6284,6 +6284,21 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         !stamp.contains("s.store_add_scaled_inputs_product("),
         "hybrid input-product root assignments should avoid by-value product stores:\n{stamp}"
     );
+    for legacy_helper in [
+        "store_add_scaled_inputs_product_first_ad",
+        "store_add_scaled_inputs_product_second_ad",
+        "store_add_scaled_inputs_product_left_ad",
+        "store_add_scaled_inputs_product_right_ad",
+    ] {
+        assert!(
+            !support.contains(&format!("fn {legacy_helper}(")),
+            "legacy one-off input-product helpers should be folded into mixed helpers:\n{support}"
+        );
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated input-product calls should use mixed helpers:\n{stamp}"
+        );
+    }
     assert!(
         !stamp.contains("s.store_add_scaled_products("),
         "hybrid product-sum root assignments should avoid by-value product stores:\n{stamp}"
