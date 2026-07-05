@@ -4989,6 +4989,7 @@ fn stamp() {
             "fn store_mul_scaled_square_rhs",
             "fn store_mul_scaled_square_ad_rhs",
             "fn store_mul_scaled_square_sub_from_scalar_rhs",
+            "fn store_mul_scaled_square_ln_rhs",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
@@ -5014,13 +5015,16 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains(
-                "s.store_mul_scaled_square_ad_rhs(102, 6, p.scale, A::ln(s.ad_value(7)));"
-            ),
+            compact.contains("s.store_mul_scaled_square_ln_rhs(102, 6, p.scale, 7);"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_scaled_ad_rhs("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_scaled_square_ad_rhs(102"),
+            "{compact}"
+        );
         assert!(!compact.contains("A::square("), "{compact}");
+        assert!(!compact.contains("A::ln(s.ad_value(7))"), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -8433,6 +8437,7 @@ fn stamp() {
             "fn store_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia(",
             "fn store_square_mul_sub_from_scalar_scaled_rhs_scaled_output_indices(",
             "fn store_square_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia(",
+            "fn store_mul_scaled_square_ln_rhs(",
             "fn store_mul_scaled_powf_sqrt_rhs(",
             "fn store_mul_scaled_powi_sqrt_rhs(",
         ] {
@@ -22947,11 +22952,41 @@ fn generate_scratch_operation_helpers() -> String {
         "",
     ]
     .join("\n");
+    out.push_str(&generate_mul_scaled_square_unary_rhs_helpers());
     out.push_str(&generate_mul_scaled_power_unary_rhs_helpers());
     out.push_str(generate_hybrid_index_product_scratch_helpers());
     out.push_str(&generate_mixed_index_product_scratch_helpers());
     out.push_str(&generate_square_product_and_product3_scratch_helpers());
     out
+}
+
+fn generate_mul_scaled_square_unary_rhs_helpers() -> String {
+    let mut out = String::new();
+    for &(name, _) in COMPACT_MUL_UNARY_HELPERS {
+        out.push_str(&generate_mul_scaled_square_unary_rhs_helper(name));
+    }
+    out
+}
+
+fn generate_mul_scaled_square_unary_rhs_helper(unary: &str) -> String {
+    let helper = format!("store_mul_scaled_square_{unary}_rhs");
+    let unary_bindings = mul_unary_output_derivative_bindings(unary);
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize) {{
+        let value_raw = self.values[value_source];
+        {unary_bindings}
+        let square_value = unary_value * unary_value;
+        let square_derivative_scale = 2.0 * unary_value * derivative_scale;
+        let scaled_source_value = self.values[source] * output_scale;
+        self.values[index] = scaled_source_value * square_value;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = self.node_derivatives[source][axis] * output_scale * square_value + scaled_source_value * self.node_derivatives[value_source][axis] * square_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = self.branch_derivatives[source][axis] * output_scale * square_value + scaled_source_value * self.branch_derivatives[value_source][axis] * square_derivative_scale; }}
+    }}
+"#
+    )
 }
 
 fn generate_mul_scaled_power_unary_rhs_helpers() -> String {
@@ -42473,6 +42508,11 @@ fn compact_mul_scaled_unary_rhs_helper_line(
         if let Some(value_source) = compact_scratch_ad_value_index(args[0]) {
             return Some(format!(
                 "scratch.store_mul_scaled_square_rhs({target_index}, {source}, {output_scale}, {value_source});"
+            ));
+        }
+        if let Some((unary, value_source)) = compact_index_unary_arg(args[0]) {
+            return Some(format!(
+                "scratch.store_mul_scaled_square_{unary}_rhs({target_index}, {source}, {output_scale}, {value_source});"
             ));
         }
         let value = compact_scratch_or_non_atomic_ad_arg(args[0])?;
