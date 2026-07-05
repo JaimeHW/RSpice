@@ -20593,33 +20593,6 @@ fn generate_scratch_operation_helpers() -> String {
     "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = numerator_branch_derivatives[axis] * reciprocal + denominator_branch_derivatives[axis] * denominator_scale; self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * quotient + source_value * quotient_derivative; }",
     "    }",
     "",
-    "    #[inline]",
-    "    fn store_mul_div_ad_lhs(&mut self, index: usize, left: AdValue, right: AdValue, source: usize) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let reciprocal = 1.0 / right.value;",
-    "        let quotient = left.value * reciprocal;",
-    "        let denominator_scale = -quotient * reciprocal;",
-    "        self.values[index] = quotient * source_value;",
-    "        for axis in 0..Instance::NODE_COUNT { let quotient_derivative = left.node_derivatives[axis] * reciprocal + right.node_derivatives[axis] * denominator_scale; self.node_derivatives[index][axis] = quotient_derivative * source_value + quotient * source_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = left.branch_derivatives[axis] * reciprocal + right.branch_derivatives[axis] * denominator_scale; self.branch_derivatives[index][axis] = quotient_derivative * source_value + quotient * source_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_div_ad_rhs(&mut self, index: usize, source: usize, left: AdValue, right: AdValue) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let reciprocal = 1.0 / right.value;",
-    "        let quotient = left.value * reciprocal;",
-    "        let denominator_scale = -quotient * reciprocal;",
-    "        self.values[index] = source_value * quotient;",
-    "        for axis in 0..Instance::NODE_COUNT { let quotient_derivative = left.node_derivatives[axis] * reciprocal + right.node_derivatives[axis] * denominator_scale; self.node_derivatives[index][axis] = source_node_derivatives[axis] * quotient + source_value * quotient_derivative; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { let quotient_derivative = left.branch_derivatives[axis] * reciprocal + right.branch_derivatives[axis] * denominator_scale; self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * quotient + source_value * quotient_derivative; }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_square_exp_scaled_input(&mut self, index: usize, square_source: usize, exp_source: usize, exp_scale: f64) {",
     "        let square_raw = self.values[square_source];",
     "        let square_value = square_raw * square_raw;",
@@ -23187,6 +23160,9 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
             &mask,
         ));
     }
+    for mask in ["iaa", "iai", "iia"] {
+        out.push_str(&generate_index_or_mixed_mul_div_helper(mask));
+    }
     for mask in ["aaa", "aai", "aia", "aii", "iaa", "iai", "iia", "iii"] {
         out.push_str(&generate_index_or_mixed_mul_div_scaled_inputs_helper(mask));
     }
@@ -25590,6 +25566,40 @@ fn generate_index_or_mixed_mul_div_from_scalar_lhs_helper(mask: &str) -> String 
 "#,
         denominator_ty = mixed_helper_type(mask, 0),
         right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_mul_div_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_mul_div", mask);
+    let factor_value = index_or_mixed_value_expr(mask, 0, "factor");
+    let numerator_value = index_or_mixed_value_expr(mask, 1, "numerator");
+    let denominator_value = index_or_mixed_value_expr(mask, 2, "denominator");
+    let factor_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "factor");
+    let numerator_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "numerator");
+    let denominator_node_derivative = index_or_mixed_node_derivative_expr(mask, 2, "denominator");
+    let factor_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "factor");
+    let numerator_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "numerator");
+    let denominator_branch_derivative =
+        index_or_mixed_branch_derivative_expr(mask, 2, "denominator");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, factor: {factor_ty}, numerator: {numerator_ty}, denominator: {denominator_ty}) {{
+        let factor_value = {factor_value};
+        let numerator_value = {numerator_value};
+        let denominator_value = {denominator_value};
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        self.values[index] = factor_value * quotient;
+        for axis in 0..Instance::NODE_COUNT {{ let quotient_derivative = {numerator_node_derivative} * reciprocal + {denominator_node_derivative} * denominator_scale; self.node_derivatives[index][axis] = {factor_node_derivative} * quotient + factor_value * quotient_derivative; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let quotient_derivative = {numerator_branch_derivative} * reciprocal + {denominator_branch_derivative} * denominator_scale; self.branch_derivatives[index][axis] = {factor_branch_derivative} * quotient + factor_value * quotient_derivative; }}
+    }}
+"#,
+        factor_ty = mixed_helper_type(mask, 0),
+        numerator_ty = mixed_helper_type(mask, 1),
+        denominator_ty = mixed_helper_type(mask, 2),
     )
 }
 
@@ -39395,6 +39405,20 @@ fn compact_index_or_mixed_mul_ad_product_rhs_helper_line(
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
+fn compact_index_or_mixed_mul_div_helper_line(
+    target_index: usize,
+    factor: &str,
+    numerator: &str,
+    denominator: &str,
+) -> Option<String> {
+    let (helper, value_args) =
+        compact_index_or_mixed_value_args("store_mul_div", &[factor, numerator, denominator])?;
+    let mut call_args = Vec::with_capacity(4);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
 fn compact_add_product3_rhs_helper_line(
     target_index: usize,
     source: usize,
@@ -41082,11 +41106,13 @@ fn compact_division_mixed_multiply_store_helper_call(
                     "scratch.store_mul_div_lhs({target_index}, {numerator}, {denominator}, {source});"
                 ));
             }
-            let numerator = compact_scratch_or_non_atomic_ad_arg(div_args[0])?;
-            let denominator = compact_scratch_or_non_atomic_ad_arg(div_args[1])?;
-            Some(format!(
-                "scratch.store_mul_div_ad_lhs({target_index}, {numerator}, {denominator}, {source});"
-            ))
+            let factor = format!("scratch.ad_value({source})");
+            compact_index_or_mixed_mul_div_helper_line(
+                target_index,
+                &factor,
+                div_args[0],
+                div_args[1],
+            )
         }
         (Some(source), None) => {
             let div_args = compact_ad_call_args(args[1], "div")?;
@@ -41101,11 +41127,13 @@ fn compact_division_mixed_multiply_store_helper_call(
                     "scratch.store_mul_div_rhs({target_index}, {source}, {numerator}, {denominator});"
                 ));
             }
-            let numerator = compact_scratch_or_non_atomic_ad_arg(div_args[0])?;
-            let denominator = compact_scratch_or_non_atomic_ad_arg(div_args[1])?;
-            Some(format!(
-                "scratch.store_mul_div_ad_rhs({target_index}, {source}, {numerator}, {denominator});"
-            ))
+            let factor = format!("scratch.ad_value({source})");
+            compact_index_or_mixed_mul_div_helper_line(
+                target_index,
+                &factor,
+                div_args[0],
+                div_args[1],
+            )
         }
         _ => None,
     }

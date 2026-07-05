@@ -8581,18 +8581,27 @@ fn rust_backend_fuses_division_mixed_multiply_store_helpers() {
         support.contains("pub(crate) fn store_mul_div_rhs("),
         "{support}"
     );
+    for helper in [
+        "fn store_mul_div_mixed_iaa(",
+        "fn store_mul_div_mixed_iai(",
+        "fn store_mul_div_mixed_iia(",
+    ] {
+        assert!(support.contains(helper), "{support}");
+    }
     assert!(
-        support.contains("pub(crate) fn store_mul_div_ad_lhs("),
+        !support.contains("pub(crate) fn store_mul_div_ad_lhs("),
         "{support}"
     );
     assert!(
-        support.contains("pub(crate) fn store_mul_div_ad_rhs("),
+        !support.contains("pub(crate) fn store_mul_div_ad_rhs("),
         "{support}"
     );
     assert!(stamp.contains("s.store_mul_div_lhs("), "{stamp}");
     assert!(stamp.contains("s.store_mul_div_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_div_ad_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_div_ad_rhs("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_div_mixed_iai("), "{stamp}");
+    assert!(stamp.contains("s.store_mul_div_mixed_iia("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_div_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_div_ad_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
     assert_generated_rust_compiles(&generated);
