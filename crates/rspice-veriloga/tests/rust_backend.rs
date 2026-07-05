@@ -6980,32 +6980,37 @@ fn rust_backend_uses_compact_scaled_mixed_add_sub_store_helpers() {
         .as_str();
     let support = render_runtime_support_module();
 
-    assert!(
-        support.contains(
-            "fn store_scaled_add_ad_rhs(&mut self, index: usize, left: usize, right: AdValue"
-        ) && support.contains("right: AdValue")
-            && support.contains("scale: f64)"),
-        "{support}"
-    );
-    assert!(
-        support.contains("fn store_scaled_add_ad_lhs(&mut self, index: usize, left: AdValue")
-            && support.contains("right: usize, scale: f64)"),
-        "{support}"
-    );
-    assert!(
-        support.contains(
-            "fn store_scaled_sub_ad_rhs(&mut self, index: usize, left: usize, right: AdValue"
-        ),
-        "{support}"
-    );
-    assert!(
-        support.contains("fn store_scaled_sub_ad_lhs(&mut self, index: usize, left: AdValue"),
-        "{support}"
-    );
-    assert!(stamp.contains("s.store_scaled_add_ad_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_scaled_add_ad_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_scaled_sub_ad_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_scaled_sub_ad_lhs("), "{stamp}");
+    for helper in [
+        "fn store_scaled_add_mixed_ai(",
+        "fn store_scaled_add_mixed_ia(",
+        "fn store_scaled_sub_mixed_ai(",
+        "fn store_scaled_sub_mixed_ia(",
+    ] {
+        assert!(support.contains(helper), "{helper}\n{support}");
+    }
+    for helper in [
+        "s.store_scaled_add_mixed_ai(",
+        "s.store_scaled_add_mixed_ia(",
+        "s.store_scaled_sub_mixed_ai(",
+        "s.store_scaled_sub_mixed_ia(",
+    ] {
+        assert!(stamp.contains(helper), "{helper}\n{stamp}");
+    }
+    for legacy_helper in [
+        "store_scaled_add_ad_rhs",
+        "store_scaled_add_ad_lhs",
+        "store_scaled_sub_ad_rhs",
+        "store_scaled_sub_ad_lhs",
+    ] {
+        assert!(
+            !support.contains(&format!("fn {legacy_helper}(")),
+            "legacy scaled affine helpers should be folded into mixed helpers:\n{support}"
+        );
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated scaled affine calls should use mixed helpers:\n{stamp}"
+        );
+    }
     assert!(!stamp.contains("s.store_scale_ad("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -7260,30 +7265,37 @@ fn rust_backend_uses_compact_mixed_scaled_operand_add_sub_store_helpers() {
         .as_str();
     let support = render_runtime_support_module();
 
-    assert!(
-        support.contains(
-            "fn store_add_scaled_ad_rhs(&mut self, index: usize, left: usize, scale: f64, right: AdValue"
-        ),
-        "{support}"
-    );
-    assert!(
-        support.contains("fn store_add_scaled_ad_lhs(&mut self, index: usize, left: AdValue"),
-        "{support}"
-    );
-    assert!(
-        support.contains(
-            "fn store_sub_scaled_ad_rhs(&mut self, index: usize, left: usize, scale: f64, right: AdValue"
-        ),
-        "{support}"
-    );
-    assert!(
-        support.contains("fn store_sub_scaled_ad_lhs(&mut self, index: usize, left: AdValue"),
-        "{support}"
-    );
-    assert!(stamp.contains("s.store_add_scaled_ad_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_add_scaled_ad_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_sub_scaled_ad_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_sub_scaled_ad_lhs("), "{stamp}");
+    for helper in [
+        "fn store_add_scaled_inputs_mixed_ai(",
+        "fn store_add_scaled_inputs_mixed_ia(",
+        "fn store_sub_scaled_inputs_mixed_ai(",
+        "fn store_sub_scaled_inputs_mixed_ia(",
+    ] {
+        assert!(support.contains(helper), "{helper}\n{support}");
+    }
+    for helper in [
+        "s.store_add_scaled_inputs_mixed_ai(",
+        "s.store_add_scaled_inputs_mixed_ia(",
+        "s.store_sub_scaled_inputs_mixed_ai(",
+        "s.store_sub_scaled_inputs_mixed_ia(",
+    ] {
+        assert!(stamp.contains(helper), "{helper}\n{stamp}");
+    }
+    for legacy_helper in [
+        "store_add_scaled_ad_rhs",
+        "store_add_scaled_ad_lhs",
+        "store_sub_scaled_ad_rhs",
+        "store_sub_scaled_ad_lhs",
+    ] {
+        assert!(
+            !support.contains(&format!("fn {legacy_helper}(")),
+            "legacy one-scaled affine helpers should be folded into mixed helpers:\n{support}"
+        );
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated one-scaled affine calls should use mixed helpers:\n{stamp}"
+        );
+    }
     assert!(!stamp.contains("s.store_add_ad("), "{stamp}");
     assert!(!stamp.contains("s.store_sub_ad("), "{stamp}");
     assert_generated_rust_compiles(&generated);
