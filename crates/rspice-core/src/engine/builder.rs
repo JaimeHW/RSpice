@@ -3404,6 +3404,10 @@ impl Engine {
                             &params_map,
                             &device_model.expr_params,
                             &device_model.string_params,
+                            !device_model.string_vector_params.is_empty()
+                                || !device_model.real_vector_params.is_empty()
+                                || !device_model.real_vector_expr_params.is_empty()
+                                || !device_model.integer_vector_params.is_empty(),
                         )?;
                         rs_given = params_map.contains_key("RS");
                         diode = diode.with_model_params(&params_map);

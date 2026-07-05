@@ -13652,9 +13652,66 @@ impl XyceTestRunner {
         ) {
             return false;
         }
-        Self::numeric_param_value(&model.params, "LEVEL").is_none_or(|level| {
-            level.is_finite() && ((level - 0.0).abs() <= 1.0e-9 || (level - 1.0).abs() <= 1.0e-9)
-        })
+        let Some(level) = Self::numeric_param_value(&model.params, "LEVEL") else {
+            return true;
+        };
+        if !level.is_finite() {
+            return false;
+        }
+        if (level - 0.0).abs() <= 1.0e-9 || (level - 1.0).abs() <= 1.0e-9 {
+            return true;
+        }
+        (level - 2.0).abs() <= 1.0e-9 && Self::model_is_native_xyce_level2_diode_subset(model)
+    }
+
+    fn model_is_native_xyce_level2_diode_subset(model: &crate::netlist::ModelDef) -> bool {
+        model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model.params.iter().all(|(name, value)| {
+                value.is_finite() && Self::xyce_level2_native_diode_param(name)
+            })
+    }
+
+    fn xyce_level2_native_diode_param(name: &str) -> bool {
+        matches!(
+            name.to_ascii_uppercase().as_str(),
+            "LEVEL"
+                | "IS"
+                | "JS"
+                | "N"
+                | "RS"
+                | "KF"
+                | "AF"
+                | "BV"
+                | "VB"
+                | "IBV"
+                | "IKF"
+                | "IK"
+                | "IKR"
+                | "CJO"
+                | "CJ0"
+                | "CJ"
+                | "VJ"
+                | "M"
+                | "TT"
+                | "FC"
+                | "JSW"
+                | "NS"
+                | "CJSW"
+                | "CJP"
+                | "PHP"
+                | "VJSW"
+                | "MJSW"
+                | "FCS"
+                | "NBV"
+                | "XTI"
+                | "EG"
+                | "TNOM"
+        )
     }
 
     fn netlist_device_is_single_native_ac_supported_bulk_mosfet(
@@ -19485,6 +19542,50 @@ VMON 2 3 0
             .expect("legacy diode DC deck parses");
         XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
             .expect("plain static DC netlist accepts native legacy diode model");
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_accepts_xyce_level2_native_diode_subset() {
+        let source = "\
+plain static Xyce level 2 diode dc
+VD 1 0 DC 0.05
+D1 1 0 DXX
+.MODEL DXX D (LEVEL=2 IS=1e-18 N=1)
+.DC VD 0 1.2 0.05
+.PRINT DC FORMAT=PROBE V(1) I(VD)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("source-level diode syntax validates");
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("library_parsing.cir"))
+            .expect("Xyce LEVEL=2 diode DC deck parses");
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect("plain static DC netlist accepts Xyce LEVEL=2 native diode subset");
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_rejects_xyce_level2_diode_outside_native_subset() {
+        let source = "\
+plain static Xyce level 2 diode unsupported param dc
+VD 1 0 DC 0.05
+D1 1 0 DXX
+.MODEL DXX D (LEVEL=2 IRF=1)
+.DC VD 0 1.2 0.05
+.PRINT DC V(1)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("source-level diode syntax validates");
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("level2_diode_irf.cir"))
+            .expect("Xyce LEVEL=2 diode unsupported-param deck parses at netlist level");
+        let err = XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect_err("unsupported Xyce LEVEL=2 diode params stay outside the wrapper contract");
+        assert!(
+            err.contains("advanced diode model"),
+            "unexpected validation error: {err}"
+        );
     }
 
     #[test]

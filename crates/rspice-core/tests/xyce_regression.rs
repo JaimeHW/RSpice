@@ -3459,6 +3459,7 @@ fn test_xyce_plain_static_dc_wrapper_cases_run_natively() {
         "Netlists/XDM/HSPICE/CONTROLLED_SOURCES/voltage_controlled_sources_w_extraneous_identifiers.cir",
         "Netlists/XDM/HSPICE/CONTROLLED_SOURCES/current_controlled_sources_w_extraneous_identifiers.cir",
         "Netlists/XDM/HSPICE/OTHER_PARSING/mixed_param_and_func.cir",
+        "Netlists/XDM/HSPICE/OTHER_PARSING/library_parsing.cir",
         "Netlists/XDM/HSPICE/MODELS/correct_instance_parameters_translation_inside_subckt.cir",
         "Netlists/XDM/HSPICE/TEMPERATURE/tnom_default_setting.cir",
         "Netlists/XDM/HSPICE/TEMPERATURE/tnom_option_setting.cir",
@@ -3517,7 +3518,6 @@ fn test_xyce_plain_static_dc_wrapper_guardrails_stay_unsupported() {
 
     for relative in [
         "Netlists/XDM/HSPICE/OTHER_PARSING/ternary_operator.cir",
-        "Netlists/XDM/HSPICE/OTHER_PARSING/library_parsing.cir",
         "Netlists/XDM/HSPICE/MODELS/correct_instance_parameters.cir",
         "Netlists/XDM/PSPICE/OTHER_PARSING/probe_dc_lines.cir",
     ] {

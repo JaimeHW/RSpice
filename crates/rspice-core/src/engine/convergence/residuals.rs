@@ -3,6 +3,63 @@
 use super::*;
 
 impl Engine {
+    pub(in crate::engine) fn dc_static_probe_polished_solution(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+    ) -> Option<Vec<Value>> {
+        let size = circuit.matrix_size();
+        if solution.len() != size || solution.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        let node_count = circuit.num_nodes().min(size);
+        let mut polished_solution = None;
+        let accepted = matrix.with_probe_values(|probe, rhs| {
+            for row in 0..node_count {
+                probe.add(row, row, gmin_floor);
+            }
+            circuit.stamp_dc_direct(probe, rhs);
+            if self
+                .try_stamp_static_probe_nonlinear_devices_for_dc(circuit, probe, rhs, solution)
+                .is_err()
+            {
+                return false;
+            }
+
+            let Ok(next_solution) = probe.solve(rhs) else {
+                return false;
+            };
+            if next_solution.iter().any(|value| !value.is_finite()) {
+                return false;
+            }
+
+            let checked_nodes = node_count.min(next_solution.len());
+            let voltage_abstol = self.voltage_abstol();
+            let nodes_fixed = solution[..checked_nodes]
+                .iter()
+                .zip(next_solution[..checked_nodes].iter())
+                .all(|(current, next)| (next - current).abs() <= voltage_abstol);
+            if nodes_fixed {
+                polished_solution = Some(next_solution);
+            }
+            nodes_fixed
+        });
+        circuit.restore_nonlinear_state(snapshot);
+
+        if accepted {
+            if let Some(ref polished) = polished_solution {
+                self.update_device_states_for_dc(circuit, polished);
+            }
+            polished_solution
+        } else {
+            None
+        }
+    }
+
     pub(in crate::engine::convergence) fn residual_probe_fixed_point_converged(
         &self,
         circuit: &CircuitData,

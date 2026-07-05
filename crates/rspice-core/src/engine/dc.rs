@@ -184,6 +184,13 @@ impl Engine {
         let mut matrix = matrix;
 
         let solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let solution = if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+            engine
+                .dc_static_probe_polished_solution(&mut circuit, &mut matrix, &solution)
+                .unwrap_or(solution)
+        } else {
+            solution
+        };
         if let Some(message) = circuit.take_xspice_evaluation_error() {
             return Err(SimulationError::Circuit(format!(
                 "XSPICE evaluation failed: {message}"
@@ -619,6 +626,15 @@ impl Engine {
                         }
                         engine.solve_linear(&mut circuit, &mut matrix)?
                     };
+                let solution =
+                    if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+                        engine
+                            .dc_static_probe_polished_solution(&mut circuit, &mut matrix, &solution)
+                            .unwrap_or(solution)
+                    } else {
+                        solution
+                    };
+
                 if let Some(message) = circuit.take_xspice_evaluation_error() {
                     return Err(SimulationError::Circuit(format!(
                         "XSPICE evaluation failed: {message}"
@@ -856,6 +872,47 @@ D1 0 in DMOD
         assert!(
             voltages.windows(2).all(|pair| pair[0] > pair[1]),
             "diode voltage should become more negative as source current increases: {voltages:?}"
+        );
+    }
+
+    #[test]
+    fn dc_sweep_reports_polished_high_current_diode_source_branch_current() {
+        let deck = "\
+high current diode branch current polish
+.OPTIONS DEVICE TNOM=25 TEMP=25
+VD 1 0 DC 0.05
+D1 1 0 DXX
+.MODEL DXX D (LEVEL=2 IS=1e-18 N=1)
+.DC VD 1.2 1.2 1
+.PRINT DC V(1) I(VD)
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let results = Engine::default()
+            .run_dc_sweep(&netlist, "VD", 1.2, 1.2, 1.0)
+            .expect("DC sweep solves");
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0].1;
+        let voltage = result
+            .try_voltage_named("1")
+            .expect("swept node voltage is present");
+        assert!(
+            (voltage - 1.2).abs() <= 1.0e-12,
+            "expected ideal source to force V(1)=1.2, got {voltage}"
+        );
+
+        let vt = crate::constants::thermal_voltage(
+            crate::analysis::temperature::celsius_to_kelvin(25.0),
+        );
+        let expected = -1.0e-18 * ((1.2 / vt).exp() - 1.0);
+        let current = result
+            .branch_current_named("VD")
+            .expect("VD branch current is present");
+        let rel = (current - expected).abs() / expected.abs();
+        assert!(
+            rel <= 5.0e-3,
+            "expected diode source current near Shockley value {expected:.12e}, got {current:.12e} (rel={rel:.3e})"
         );
     }
 

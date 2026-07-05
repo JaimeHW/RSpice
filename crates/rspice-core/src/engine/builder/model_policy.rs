@@ -290,7 +290,11 @@ pub(super) fn known_unsupported_bjt_family(level: f64) -> Option<(&'static str, 
 }
 
 pub(super) fn supported_diode_level(level: f64) -> bool {
-    bjt_level_matches(level, 0.0) || bjt_level_matches(level, 1.0)
+    bjt_level_matches(level, 0.0) || bjt_level_matches(level, 1.0) || xyce_diode_level2(level)
+}
+
+fn xyce_diode_level2(level: f64) -> bool {
+    bjt_level_matches(level, 2.0)
 }
 
 pub(super) fn supported_bjt_level(level: f64) -> bool {
@@ -573,6 +577,7 @@ pub(super) fn validate_diode_model_level(
     params: &HashMap<String, f64>,
     expr_params: &[(String, String)],
     string_params: &[(String, String)],
+    has_vector_params: bool,
 ) -> Result<(), SimulationError> {
     for (name, expr) in expr_params {
         if name.eq_ignore_ascii_case("LEVEL") {
@@ -599,17 +604,113 @@ pub(super) fn validate_diode_model_level(
             "Diode '{element_name}': model '{model}' has invalid LEVEL={level}"
         )));
     }
+    if xyce_diode_level2(level) {
+        validate_xyce_level2_diode_native_subset(
+            element_name,
+            model,
+            params,
+            expr_params,
+            string_params,
+            has_vector_params,
+        )?;
+    }
     if !supported_diode_level(level) {
         let descriptor = bjt_level_descriptor(level);
         return Err(SimulationError::Circuit(format!(
             "Diode '{element_name}': model '{model}' requests {descriptor}, which has no native \
              implementation. Supported diode model levels: legacy SPICE diode (no LEVEL, LEVEL=0, \
-             or LEVEL=1). Advanced CMC diode models will be generated from Verilog-A rather than \
+             or LEVEL=1) and Xyce/HSPICE LEVEL=2 when all model parameters are in the native diode \
+             subset. Advanced CMC diode models will be generated from Verilog-A rather than \
              hand-written here."
         )));
     }
 
     Ok(())
+}
+
+fn validate_xyce_level2_diode_native_subset(
+    element_name: &str,
+    model: &str,
+    params: &HashMap<String, f64>,
+    expr_params: &[(String, String)],
+    string_params: &[(String, String)],
+    has_vector_params: bool,
+) -> Result<(), SimulationError> {
+    if has_vector_params {
+        return Err(SimulationError::Circuit(format!(
+            "Diode '{element_name}': model '{model}' uses vector parameters with Xyce/HSPICE \
+             LEVEL=2; only finite numeric native diode parameters are supported"
+        )));
+    }
+    if let Some((name, expr)) = expr_params.first() {
+        let param = name.to_ascii_uppercase();
+        return Err(SimulationError::Circuit(format!(
+            "Diode '{element_name}': model '{model}' uses unresolved Xyce/HSPICE LEVEL=2 \
+             parameter {param}={expr}; only finite numeric native diode parameters are supported"
+        )));
+    }
+    if let Some((name, value)) = string_params.first() {
+        let param = name.to_ascii_uppercase();
+        return Err(SimulationError::Circuit(format!(
+            "Diode '{element_name}': model '{model}' uses non-numeric Xyce/HSPICE LEVEL=2 \
+             parameter {param}=\"{value}\"; only finite numeric native diode parameters are \
+             supported"
+        )));
+    }
+    for (name, value) in params {
+        let param = name.to_ascii_uppercase();
+        if !xyce_level2_native_diode_param(&param) {
+            return Err(SimulationError::Circuit(format!(
+                "Diode '{element_name}': model '{model}' uses Xyce/HSPICE LEVEL=2 parameter \
+                 {param}, which is outside the native diode parameter subset"
+            )));
+        }
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Diode '{element_name}': model '{model}' uses non-finite Xyce/HSPICE LEVEL=2 \
+                 parameter {param}={value}; native diode parameters must be finite numeric literals"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn xyce_level2_native_diode_param(name: &str) -> bool {
+    matches!(
+        name,
+        "LEVEL"
+            | "IS"
+            | "JS"
+            | "N"
+            | "RS"
+            | "KF"
+            | "AF"
+            | "BV"
+            | "VB"
+            | "IBV"
+            | "IKF"
+            | "IK"
+            | "IKR"
+            | "CJO"
+            | "CJ0"
+            | "CJ"
+            | "VJ"
+            | "M"
+            | "TT"
+            | "FC"
+            | "JSW"
+            | "NS"
+            | "CJSW"
+            | "CJP"
+            | "PHP"
+            | "VJSW"
+            | "MJSW"
+            | "FCS"
+            | "NBV"
+            | "XTI"
+            | "EG"
+            | "TNOM"
+    )
 }
 
 pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &[
@@ -1096,5 +1197,38 @@ pub(super) fn mos_level_descriptor(level: i32) -> String {
         70470 => "LEVEL=70470 (B4SOI 4.7)".to_string(),
         10240 => "LEVEL=10240 (L-UTSOI)".to_string(),
         _ => format!("LEVEL={level}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn diode_params(entries: &[(&str, f64)]) -> HashMap<String, f64> {
+        entries
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), *value))
+            .collect()
+    }
+
+    #[test]
+    fn diode_policy_accepts_xyce_level2_native_subset() {
+        let params = diode_params(&[("LEVEL", 2.0), ("IS", 1.0e-18), ("N", 1.0)]);
+
+        validate_diode_model_level("D1", "DXX", &params, &[], &[], false)
+            .expect("Xyce/HSPICE diode LEVEL=2 with native params is supported");
+    }
+
+    #[test]
+    fn diode_policy_rejects_xyce_level2_outside_native_subset() {
+        let params = diode_params(&[("LEVEL", 2.0), ("IRF", 1.0)]);
+
+        let err = validate_diode_model_level("D1", "DXX", &params, &[], &[], false)
+            .expect_err("unsupported Xyce/HSPICE LEVEL=2 diode params fail closed");
+        assert!(
+            err.to_string().contains("native diode parameter subset"),
+            "unexpected error: {err}"
+        );
     }
 }
