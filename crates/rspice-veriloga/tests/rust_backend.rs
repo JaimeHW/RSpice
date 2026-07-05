@@ -7893,11 +7893,12 @@ fn rust_backend_uses_compact_mixed_scratch_ad_store_helpers() {
         "pub(crate) fn store_div_sqrt_lhs(",
         "pub(crate) fn store_mul_atan_rhs(",
         "pub(crate) fn store_mul_atan_lhs(",
-        "pub(crate) fn store_mul_atan_ad_rhs(",
-        "pub(crate) fn store_mul_atan_ad_lhs(",
+        "pub(crate) fn store_mul_atan_mixed_ia(",
     ] {
         assert!(support.contains(helper), "missing {helper}:\n{support}");
     }
+    assert!(!support.contains("pub(crate) fn store_mul_atan_ad_rhs("));
+    assert!(!support.contains("pub(crate) fn store_mul_atan_ad_lhs("));
     assert!(stamp.contains("s.store_mul_atan_rhs(2, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_mul_atan_lhs(3, 0, 1);"), "{stamp}");
     assert!(stamp.contains("s.store_add_sqrt_rhs(4, 0, 1);"), "{stamp}");
@@ -8471,6 +8472,20 @@ fn rust_backend_fuses_extended_unary_mixed_multiply_store_helpers() {
         "store_mul_limexp_rhs",
         "store_mul_abs_lhs",
         "store_mul_abs_rhs",
+        "store_mul_atan_mixed_ia",
+        "store_mul_sin_mixed_ia",
+        "store_mul_cos_mixed_ia",
+        "store_mul_tanh_mixed_ia",
+        "store_mul_limited_exp_lhs",
+        "store_mul_limited_exp_mixed_ia",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    for legacy_helper in [
         "store_mul_atan_ad_lhs",
         "store_mul_atan_ad_rhs",
         "store_mul_sin_ad_lhs",
@@ -8479,14 +8494,17 @@ fn rust_backend_fuses_extended_unary_mixed_multiply_store_helpers() {
         "store_mul_cos_ad_rhs",
         "store_mul_tanh_ad_lhs",
         "store_mul_tanh_ad_rhs",
-        "store_mul_limited_exp_lhs",
+        "store_mul_limited_exp_ad_lhs",
         "store_mul_limited_exp_ad_rhs",
     ] {
         assert!(
-            support.contains(&format!("pub(crate) fn {helper}(")),
-            "{helper}\n{support}"
+            !support.contains(&format!("pub(crate) fn {legacy_helper}(")),
+            "{legacy_helper}\n{support}"
         );
-        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "{legacy_helper}\n{stamp}"
+        );
     }
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
@@ -8701,6 +8719,17 @@ fn rust_backend_fuses_nested_unary_mixed_multiply_store_helpers() {
     let support = render_runtime_support_module();
 
     for helper in [
+        "store_mul_exp_mixed_ia",
+        "store_mul_ln_mixed_ia",
+        "store_mul_sqrt_mixed_ia",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    for legacy_helper in [
         "store_mul_exp_ad_lhs",
         "store_mul_exp_ad_rhs",
         "store_mul_ln_ad_lhs",
@@ -8709,10 +8738,13 @@ fn rust_backend_fuses_nested_unary_mixed_multiply_store_helpers() {
         "store_mul_sqrt_ad_rhs",
     ] {
         assert!(
-            support.contains(&format!("pub(crate) fn {helper}(")),
-            "{helper}\n{support}"
+            !support.contains(&format!("pub(crate) fn {legacy_helper}(")),
+            "{legacy_helper}\n{support}"
         );
-        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "{legacy_helper}\n{stamp}"
+        );
     }
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");

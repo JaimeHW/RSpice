@@ -32,6 +32,19 @@ const MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES: usize = 120_000;
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
+const COMPACT_MUL_UNARY_HELPERS: &[(&str, &str)] = &[
+    ("exp", "store_mul_exp"),
+    ("ln", "store_mul_ln"),
+    ("atan", "store_mul_atan"),
+    ("ln_one_plus_exp", "store_mul_ln_one_plus_exp"),
+    ("sqrt", "store_mul_sqrt"),
+    ("limexp", "store_mul_limexp"),
+    ("limited_exp", "store_mul_limited_exp"),
+    ("abs", "store_mul_abs"),
+    ("sin", "store_mul_sin"),
+    ("cos", "store_mul_cos"),
+    ("tanh", "store_mul_tanh"),
+];
 
 struct ScalarHybridStampPlan {
     large_signal_roots: HashMap<EquationId, ValueId>,
@@ -5649,11 +5662,12 @@ fn stamp() {
         for helper in [
             "fn store_mul_ln_one_plus_exp_lhs",
             "fn store_mul_ln_one_plus_exp_rhs",
-            "fn store_mul_ln_one_plus_exp_ad_lhs",
-            "fn store_mul_ln_one_plus_exp_ad_rhs",
+            "fn store_mul_ln_one_plus_exp_mixed_ia",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(!support.contains("fn store_mul_ln_one_plus_exp_ad_lhs"));
+        assert!(!support.contains("fn store_mul_ln_one_plus_exp_ad_rhs"));
 
         let source = r#"
 fn stamp() {
@@ -5671,15 +5685,18 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_ln_one_plus_exp_ad_lhs(121, A::sqrt(s.ad_value(4)), 5);"),
+            compact
+                .contains("s.store_mul_ln_one_plus_exp_mixed_ia(121, 5, A::sqrt(s.ad_value(4)));"),
             "{compact}"
         );
         assert!(
             compact.contains(
-                "s.store_mul_ln_one_plus_exp_ad_rhs(122, 6, A::offset(s.ad_value(7), p.bias));"
+                "s.store_mul_ln_one_plus_exp_mixed_ia(122, 6, A::offset(s.ad_value(7), p.bias));"
             ),
             "{compact}"
         );
+        assert!(!compact.contains("s.store_mul_ln_one_plus_exp_ad_lhs("));
+        assert!(!compact.contains("s.store_mul_ln_one_plus_exp_ad_rhs("));
         assert!(!compact.contains("A::ln_one_plus_exp("), "{compact}");
         assert!(!compact.contains("s.store_mul_ad_rhs("), "{compact}");
         assert!(!compact.contains("s.store_mul_ad_lhs("), "{compact}");
@@ -20664,26 +20681,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_unary_ad_lhs(&mut self, index: usize, value: AdValue, source: usize, unary_value: f64, derivative_scale: f64) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        self.values[index] = unary_value * source_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale * source_value + unary_value * source_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale * source_value + unary_value * source_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_unary_ad_rhs(&mut self, index: usize, source: usize, value: AdValue, unary_value: f64, derivative_scale: f64) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        self.values[index] = source_value * unary_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * unary_value + source_value * value.node_derivatives[axis] * derivative_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * unary_value + source_value * value.branch_derivatives[axis] * derivative_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_scaled_unary_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, unary_value: f64, derivative_scale: f64) {",
     "        let scaled_source_value = self.values[source] * output_scale;",
     "        self.values[index] = scaled_source_value * unary_value;",
@@ -20975,18 +20972,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_exp_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let unary_value = value.value.exp();",
-    "        self.store_mul_unary_ad_lhs(index, value, source, unary_value, unary_value);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_exp_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let unary_value = value.value.exp();",
-    "        self.store_mul_unary_ad_rhs(index, source, value, unary_value, unary_value);",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_ln_lhs(&mut self, index: usize, value_source: usize, source: usize) {",
     "        let raw = self.values[value_source];",
     "        self.store_mul_unary_lhs(index, value_source, source, raw.ln(), 1.0 / raw);",
@@ -20996,18 +20981,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_mul_ln_rhs(&mut self, index: usize, source: usize, value_source: usize) {",
     "        let raw = self.values[value_source];",
     "        self.store_mul_unary_rhs(index, source, value_source, raw.ln(), 1.0 / raw);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_ln_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let raw = value.value;",
-    "        self.store_mul_unary_ad_lhs(index, value, source, raw.ln(), 1.0 / raw);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_ln_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let raw = value.value;",
-    "        self.store_mul_unary_ad_rhs(index, source, value, raw.ln(), 1.0 / raw);",
     "    }",
     "",
     "    #[inline]",
@@ -21023,18 +20996,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_atan_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let raw = value.value;",
-    "        self.store_mul_unary_ad_lhs(index, value, source, raw.atan(), 1.0 / (1.0 + raw * raw));",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_atan_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let raw = value.value;",
-    "        self.store_mul_unary_ad_rhs(index, source, value, raw.atan(), 1.0 / (1.0 + raw * raw));",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_ln_one_plus_exp_lhs(&mut self, index: usize, value_source: usize, source: usize) {",
     "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.values[value_source]);",
     "        self.store_mul_unary_lhs(index, value_source, source, value, derivative_scale);",
@@ -21044,18 +21005,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_mul_ln_one_plus_exp_rhs(&mut self, index: usize, source: usize, value_source: usize) {",
     "        let (value, derivative_scale) = Self::ln_one_plus_exp_raw(self.values[value_source]);",
     "        self.store_mul_unary_rhs(index, source, value_source, value, derivative_scale);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_ln_one_plus_exp_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);",
-    "        self.store_mul_unary_ad_lhs(index, value, source, output, derivative_scale);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_ln_one_plus_exp_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let (output, derivative_scale) = Self::ln_one_plus_exp_raw(value.value);",
-    "        self.store_mul_unary_ad_rhs(index, source, value, output, derivative_scale);",
     "    }",
     "",
     "    #[inline]",
@@ -21071,18 +21020,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_sqrt_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let unary_value = value.value.sqrt();",
-    "        self.store_mul_unary_ad_lhs(index, value, source, unary_value, 1.0 / (2.0 * unary_value));",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_sqrt_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let unary_value = value.value.sqrt();",
-    "        self.store_mul_unary_ad_rhs(index, source, value, unary_value, 1.0 / (2.0 * unary_value));",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_abs_lhs(&mut self, index: usize, value_source: usize, source: usize) {",
     "        let raw = self.values[value_source];",
     "        self.store_mul_unary_lhs(index, value_source, source, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });",
@@ -21092,18 +21029,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_mul_abs_rhs(&mut self, index: usize, source: usize, value_source: usize) {",
     "        let raw = self.values[value_source];",
     "        self.store_mul_unary_rhs(index, source, value_source, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_abs_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let raw = value.value;",
-    "        self.store_mul_unary_ad_lhs(index, value, source, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_abs_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let raw = value.value;",
-    "        self.store_mul_unary_ad_rhs(index, source, value, raw.abs(), if raw >= 0.0 { 1.0 } else { -1.0 });",
     "    }",
     "",
     "    #[inline]",
@@ -21121,20 +21046,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_sin_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let raw = value.value;",
-    "        let (sin, cos) = raw.sin_cos();",
-    "        self.store_mul_unary_ad_lhs(index, value, source, sin, cos);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_sin_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let raw = value.value;",
-    "        let (sin, cos) = raw.sin_cos();",
-    "        self.store_mul_unary_ad_rhs(index, source, value, sin, cos);",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_cos_lhs(&mut self, index: usize, value_source: usize, source: usize) {",
     "        let raw = self.values[value_source];",
     "        let (sin, cos) = raw.sin_cos();",
@@ -21146,20 +21057,6 @@ fn generate_scratch_operation_helpers() -> String {
     "        let raw = self.values[value_source];",
     "        let (sin, cos) = raw.sin_cos();",
     "        self.store_mul_unary_rhs(index, source, value_source, cos, -sin);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_cos_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let raw = value.value;",
-    "        let (sin, cos) = raw.sin_cos();",
-    "        self.store_mul_unary_ad_lhs(index, value, source, cos, -sin);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_cos_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let raw = value.value;",
-    "        let (sin, cos) = raw.sin_cos();",
-    "        self.store_mul_unary_ad_rhs(index, source, value, cos, -sin);",
     "    }",
     "",
     "    #[inline]",
@@ -21177,20 +21074,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_tanh_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let raw = value.value;",
-    "        let tangent = raw.tanh();",
-    "        self.store_mul_unary_ad_lhs(index, value, source, tangent, 1.0 - tangent * tangent);",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_tanh_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let raw = value.value;",
-    "        let tangent = raw.tanh();",
-    "        self.store_mul_unary_ad_rhs(index, source, value, tangent, 1.0 - tangent * tangent);",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_limexp_lhs(&mut self, index: usize, value_source: usize, source: usize) {",
     "        let raw = self.values[value_source];",
     "        if raw < 80.0 { let value = raw.exp(); self.store_mul_unary_lhs(index, value_source, source, value, value); } else { self.store_mul_unary_lhs(index, value_source, source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); }",
@@ -21203,18 +21086,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_limexp_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let raw = value.value;",
-    "        if raw < 80.0 { let output = raw.exp(); self.store_mul_unary_ad_lhs(index, value, source, output, output); } else { self.store_mul_unary_ad_lhs(index, value, source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_limexp_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let raw = value.value;",
-    "        if raw < 80.0 { let output = raw.exp(); self.store_mul_unary_ad_rhs(index, source, value, output, output); } else { self.store_mul_unary_ad_rhs(index, source, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_limited_exp_lhs(&mut self, index: usize, value_source: usize, source: usize) {",
     "        let raw = self.values[value_source];",
     "        if raw > 80.0 { self.store_mul_unary_lhs(index, value_source, source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); } else if raw < -80.0 { self.store_mul_unary_lhs(index, value_source, source, 1.804851387e-35, 0.0); } else { let value = raw.exp(); self.store_mul_unary_lhs(index, value_source, source, value, value); }",
@@ -21224,18 +21095,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_mul_limited_exp_rhs(&mut self, index: usize, source: usize, value_source: usize) {",
     "        let raw = self.values[value_source];",
     "        if raw > 80.0 { self.store_mul_unary_rhs(index, source, value_source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); } else if raw < -80.0 { self.store_mul_unary_rhs(index, source, value_source, 1.804851387e-35, 0.0); } else { let value = raw.exp(); self.store_mul_unary_rhs(index, source, value_source, value, value); }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_limited_exp_ad_lhs(&mut self, index: usize, value: AdValue, source: usize) {",
-    "        let raw = value.value;",
-    "        if raw > 80.0 { self.store_mul_unary_ad_lhs(index, value, source, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); } else if raw < -80.0 { self.store_mul_unary_ad_lhs(index, value, source, 1.804851387e-35, 0.0); } else { let output = raw.exp(); self.store_mul_unary_ad_lhs(index, value, source, output, output); }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_limited_exp_ad_rhs(&mut self, index: usize, source: usize, value: AdValue) {",
-    "        let raw = value.value;",
-    "        if raw > 80.0 { self.store_mul_unary_ad_rhs(index, source, value, LIMEXP_MAX * (1.0 + raw - 80.0), LIMEXP_MAX); } else if raw < -80.0 { self.store_mul_unary_ad_rhs(index, source, value, 1.804851387e-35, 0.0); } else { let output = raw.exp(); self.store_mul_unary_ad_rhs(index, source, value, output, output); }",
     "    }",
     "",
     "    #[inline]",
@@ -23120,6 +22979,11 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
     }
     for mask in index_or_mixed_masks(2) {
         out.push_str(&generate_index_or_mixed_mul_scale_offset_helper(&mask));
+    }
+    for &(name, helper) in COMPACT_MUL_UNARY_HELPERS {
+        out.push_str(&generate_index_or_mixed_mul_unary_helper(
+            name, helper, "ia",
+        ));
     }
     for mask in ["ia", "ai"] {
         out.push_str(&generate_index_or_mixed_mul_ad_product_lhs_helper(mask));
@@ -25753,6 +25617,68 @@ fn generate_index_or_mixed_mul_scale_offset_helper(mask: &str) -> String {
         factor_ty = mixed_helper_type(mask, 0),
         value_ty = mixed_helper_type(mask, 1),
     )
+}
+
+fn generate_index_or_mixed_mul_unary_helper(name: &str, base: &str, mask: &str) -> String {
+    let helper = index_or_mixed_helper_name(base, mask);
+    let factor_value = mixed_helper_value_expr(mask, 0, "factor");
+    let value_raw = mixed_helper_value_expr(mask, 1, "value");
+    let factor_node_derivative = mixed_helper_node_derivative_expr(mask, 0, "factor");
+    let value_node_derivative = mixed_helper_node_derivative_expr(mask, 1, "value");
+    let factor_branch_derivative = mixed_helper_branch_derivative_expr(mask, 0, "factor");
+    let value_branch_derivative = mixed_helper_branch_derivative_expr(mask, 1, "value");
+    let unary_bindings = mul_unary_output_derivative_bindings(name);
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, factor: {factor_ty}, value: {value_ty}) {{
+        let value_raw = {value_raw};
+        {unary_bindings}
+        let factor_value = {factor_value};
+        self.values[index] = factor_value * unary_value;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {factor_node_derivative} * unary_value + factor_value * {value_node_derivative} * derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {factor_branch_derivative} * unary_value + factor_value * {value_branch_derivative} * derivative_scale; }}
+    }}
+"#,
+        factor_ty = mixed_helper_type(mask, 0),
+        value_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn mul_unary_output_derivative_bindings(name: &str) -> &'static str {
+    match name {
+        "exp" => "let unary_value = value_raw.exp();\n        let derivative_scale = unary_value;",
+        "ln" => {
+            "let unary_value = value_raw.ln();\n        let derivative_scale = 1.0 / value_raw;"
+        }
+        "atan" => {
+            "let unary_value = value_raw.atan();\n        let derivative_scale = 1.0 / (1.0 + value_raw * value_raw);"
+        }
+        "ln_one_plus_exp" => {
+            "let (unary_value, derivative_scale) = Self::ln_one_plus_exp_raw(value_raw);"
+        }
+        "sqrt" => {
+            "let unary_value = value_raw.sqrt();\n        let derivative_scale = 1.0 / (2.0 * unary_value);"
+        }
+        "limexp" => {
+            "let (unary_value, derivative_scale) = if value_raw < 80.0 {\n            let output = value_raw.exp();\n            (output, output)\n        } else {\n            (LIMEXP_MAX * (1.0 + value_raw - 80.0), LIMEXP_MAX)\n        };"
+        }
+        "limited_exp" => {
+            "let (unary_value, derivative_scale) = if value_raw > 80.0 {\n            (LIMEXP_MAX * (1.0 + value_raw - 80.0), LIMEXP_MAX)\n        } else if value_raw < -80.0 {\n            (1.804851387e-35, 0.0)\n        } else {\n            let output = value_raw.exp();\n            (output, output)\n        };"
+        }
+        "abs" => {
+            "let unary_value = value_raw.abs();\n        let derivative_scale = if value_raw >= 0.0 { 1.0 } else { -1.0 };"
+        }
+        "sin" => "let (unary_value, derivative_scale) = value_raw.sin_cos();",
+        "cos" => {
+            "let (sin, unary_value) = value_raw.sin_cos();\n        let derivative_scale = -sin;"
+        }
+        "tanh" => {
+            "let unary_value = value_raw.tanh();\n        let derivative_scale = 1.0 - unary_value * unary_value;"
+        }
+        _ => unreachable!("unknown multiply unary helper"),
+    }
 }
 
 fn generate_index_or_mixed_mul_ad_product_lhs_helper(mask: &str) -> String {
@@ -39405,6 +39331,19 @@ fn compact_index_or_mixed_mul_ad_product_rhs_helper_line(
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
+fn compact_index_or_mixed_mul_unary_helper_line(
+    target_index: usize,
+    helper_base: &str,
+    factor: &str,
+    value: &str,
+) -> Option<String> {
+    let (helper, value_args) = compact_index_or_mixed_value_args(helper_base, &[factor, value])?;
+    let mut call_args = Vec::with_capacity(3);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
 fn compact_index_or_mixed_mul_div_helper_line(
     target_index: usize,
     factor: &str,
@@ -41190,19 +41129,7 @@ fn compact_unary_mixed_multiply_store_helper_call(
 
     let left = compact_scratch_ad_value_index(args[0]);
     let right = compact_scratch_ad_value_index(args[1]);
-    for (name, helper) in [
-        ("exp", "store_mul_exp"),
-        ("ln", "store_mul_ln"),
-        ("atan", "store_mul_atan"),
-        ("ln_one_plus_exp", "store_mul_ln_one_plus_exp"),
-        ("sqrt", "store_mul_sqrt"),
-        ("limexp", "store_mul_limexp"),
-        ("limited_exp", "store_mul_limited_exp"),
-        ("abs", "store_mul_abs"),
-        ("sin", "store_mul_sin"),
-        ("cos", "store_mul_cos"),
-        ("tanh", "store_mul_tanh"),
-    ] {
+    for &(name, helper) in COMPACT_MUL_UNARY_HELPERS {
         match (left, right) {
             (None, Some(right)) => {
                 let Some(unary_args) = compact_ad_call_args(args[0], name) else {
@@ -41216,10 +41143,12 @@ fn compact_unary_mixed_multiply_store_helper_call(
                         "scratch.{helper}_lhs({target_index}, {value_source}, {right});"
                     ));
                 }
-                let value = compact_scratch_or_non_atomic_ad_arg(unary_args[0])?;
-                return Some(format!(
-                    "scratch.{helper}_ad_lhs({target_index}, {value}, {right});"
-                ));
+                return compact_index_or_mixed_mul_unary_helper_line(
+                    target_index,
+                    helper,
+                    args[1],
+                    unary_args[0],
+                );
             }
             (Some(left), None) => {
                 let Some(unary_args) = compact_ad_call_args(args[1], name) else {
@@ -41233,10 +41162,12 @@ fn compact_unary_mixed_multiply_store_helper_call(
                         "scratch.{helper}_rhs({target_index}, {left}, {value_source});"
                     ));
                 }
-                let value = compact_scratch_or_non_atomic_ad_arg(unary_args[0])?;
-                return Some(format!(
-                    "scratch.{helper}_ad_rhs({target_index}, {left}, {value});"
-                ));
+                return compact_index_or_mixed_mul_unary_helper_line(
+                    target_index,
+                    helper,
+                    args[0],
+                    unary_args[0],
+                );
             }
             _ => {}
         }
