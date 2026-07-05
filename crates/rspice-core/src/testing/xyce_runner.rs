@@ -219,6 +219,7 @@ struct XyceStaticAcPlan {
     primary_ac_ic_file: Option<String>,
     output_override: bool,
     ac: XyceAcAnalysis,
+    frequency_bound: bool,
     steps: Vec<StepCommand>,
     contract: XyceStaticAcContract,
 }
@@ -907,6 +908,28 @@ impl XyceTestRunner {
         Self::parse_netlist_with_expression_dialect(source, deck_path, ExpressionDialect::Xyce)
     }
 
+    fn parse_error_is_undefined_ac_frequency_symbol(err: &crate::netlist::ParseError) -> bool {
+        let message = err.to_string().to_ascii_uppercase();
+        message.contains("UNDEFINED PARAMETER: FREQ")
+            || message.contains("UNDEFINED PARAMETER: HERTZ")
+    }
+
+    fn source_with_ac_frequency_bindings(source: &str, frequency: Value) -> String {
+        let mut lines = source.lines();
+        let title = lines.next().unwrap_or("Untitled");
+        let mut rebound = String::new();
+        rebound.push_str(title);
+        rebound.push('\n');
+        rebound.push_str(&format!(
+            ".PARAM FREQ={frequency:.17e} HERTZ={frequency:.17e}\n"
+        ));
+        for line in lines {
+            rebound.push_str(line);
+            rebound.push('\n');
+        }
+        rebound
+    }
+
     fn parse_netlist_with_expression_dialect(
         source: &str,
         deck_path: &Path,
@@ -1462,13 +1485,41 @@ impl XyceTestRunner {
             );
         }
 
-        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
-            .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
+        let (netlist, frequency_bound) = match Self::parse_xyce_netlist(&source, &deck.path) {
+            Ok(netlist) => (netlist, false),
+            Err(err) if Self::parse_error_is_undefined_ac_frequency_symbol(&err) => {
+                let frequency_bound_source = Self::source_with_ac_frequency_bindings(&source, 1.0);
+                let netlist = Self::parse_xyce_netlist(&frequency_bound_source, &deck.path)
+                    .map_err(|retry_err| {
+                        format!(
+                            "netlist parser does not yet accept this Xyce deck even with AC frequency bindings: {retry_err}"
+                        )
+                    })?;
+                (netlist, true)
+            }
+            Err(err) => {
+                return Err(format!(
+                    "netlist parser does not yet accept this Xyce deck: {err}"
+                ));
+            }
+        };
         let ac = Self::single_ac_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
         if ac.data_points().is_some() && !steps.is_empty() {
             return Err(
                 ".STEP combined with .AC DATA is not implemented in the native Xyce oracle"
+                    .to_string(),
+            );
+        }
+        if frequency_bound && !steps.is_empty() {
+            return Err(
+                ".STEP combined with AC frequency-dependent parameters is not implemented in the native Xyce oracle"
+                    .to_string(),
+            );
+        }
+        if frequency_bound && ac.data_points().is_some() {
+            return Err(
+                ".AC DATA combined with AC frequency-dependent parameters is not implemented in the native Xyce oracle"
                     .to_string(),
             );
         }
@@ -1533,6 +1584,7 @@ impl XyceTestRunner {
             primary_ac_ic_file,
             output_override,
             ac,
+            frequency_bound,
             steps,
             contract,
         })
@@ -3507,7 +3559,26 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract(!plan.steps.is_empty());
-        let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
+        let frequencies = plan.ac.frequencies();
+        if frequencies.is_empty() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                "AC analysis produced no frequency points".to_string(),
+                Vec::new(),
+            );
+        }
+
+        let frequency_bound_source;
+        let parse_source = if plan.frequency_bound {
+            frequency_bound_source =
+                Self::source_with_ac_frequency_bindings(&plan.source, frequencies[0]);
+            frequency_bound_source.as_str()
+        } else {
+            plan.source.as_str()
+        };
+        let netlist = match Self::parse_xyce_netlist(parse_source, &plan.deck_path) {
             Ok(netlist) => netlist,
             Err(err) => {
                 return self.failure_result(
@@ -3519,16 +3590,6 @@ impl XyceTestRunner {
                 );
             }
         };
-        let frequencies = plan.ac.frequencies();
-        if frequencies.is_empty() {
-            return self.failure_result(
-                deck,
-                start,
-                contract,
-                "AC analysis produced no frequency points".to_string(),
-                Vec::new(),
-            );
-        }
 
         let Some(primary_reference_path) = plan.reference_path.as_ref() else {
             let ac_ic_mismatches = match self.compare_ac_initial_condition_outputs(&plan, &netlist)
@@ -3593,6 +3654,15 @@ impl XyceTestRunner {
         }
         if plan.ac.data_points().is_some() {
             return self.run_static_ac_data_plan(deck, plan, netlist, reference, start);
+        }
+        if plan.frequency_bound {
+            return self.run_static_frequency_bound_ac_plan(
+                deck,
+                plan,
+                reference,
+                frequencies,
+                start,
+            );
         }
 
         let engine = self.create_xyce_engine();
@@ -3676,6 +3746,139 @@ impl XyceTestRunner {
                         ac_ic_mismatches,
                     )
                 }
+            } else {
+                self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("{} Xyce AC side-output mismatch(es)", side_mismatches.len()),
+                    side_mismatches,
+                )
+            }
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("{} Xyce AC reference mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn run_static_frequency_bound_ac_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticAcPlan,
+        reference: XycePrnTable,
+        frequencies: Vec<Value>,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.contract.result_contract(false);
+        let Some(primary_print) = plan.print.as_ref() else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                "frequency-bound AC comparison requires a primary .PRINT AC request".to_string(),
+                Vec::new(),
+            );
+        };
+
+        let engine = self.create_xyce_engine();
+        let mut point_results = Vec::with_capacity(frequencies.len());
+        for (row_index, frequency) in frequencies.iter().copied().enumerate() {
+            let point_source = Self::source_with_ac_frequency_bindings(&plan.source, frequency);
+            let point_netlist = match Self::parse_xyce_netlist(&point_source, &plan.deck_path) {
+                Ok(netlist) => netlist,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "frequency-bound AC row {} parse error at FREQ={frequency}: {err}",
+                            row_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mut results = match engine.run_ac(&point_netlist, &[frequency]) {
+                Ok(results) => results,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support this frequency-bound AC deck: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "simulation error in frequency-bound AC row {}: {err}",
+                            row_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let Some(result) = results.pop() else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "frequency-bound AC row {} produced no AC result",
+                        row_index + 1
+                    ),
+                    Vec::new(),
+                );
+            };
+            point_results.push(XyceAcDataPointResult {
+                netlist: point_netlist,
+                result,
+            });
+        }
+
+        let mismatches = match self.compare_ac_data_prn_reference(
+            &reference,
+            primary_print,
+            &plan.source,
+            &point_results,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("reference comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            let side_mismatches = match self.compare_ac_data_side_outputs(&plan, &point_results) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("AC side-output comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            if side_mismatches.is_empty() {
+                self.passed_result(deck, start, contract)
             } else {
                 self.failure_result(
                     deck,
@@ -6941,7 +7144,7 @@ impl XyceTestRunner {
 
         if reference.rows.len() != points.len() {
             return Err(format!(
-                "reference row count ({}) does not match .AC DATA row count ({})",
+                "reference row count ({}) does not match AC point count ({})",
                 reference.rows.len(),
                 points.len()
             ));
@@ -17883,6 +18086,41 @@ R1 1 0 1k
         assert_eq!(
             data_points[1].overrides,
             vec![("FREQ".to_string(), 10.0), ("unused".to_string(), 8.0)]
+        );
+    }
+
+    #[test]
+    fn ac_frequency_bindings_allow_freq_dependent_global_params_to_parse() {
+        let source = "\
+xyce ac freq binding
+.GLOBAL_PARAM OMEGA={2*PI*FREQ}
+R1 a 0 {OMEGA}
+V1 a 0 AC 1
+.AC DEC 1 10 100
+.PRINT AC FREQ HERTZ R1:R
+.END
+";
+
+        let err = XyceTestRunner::parse_xyce_netlist(source, Path::new("freq.cir"))
+            .expect_err("plain parse should reject unbound FREQ");
+        assert!(XyceTestRunner::parse_error_is_undefined_ac_frequency_symbol(&err));
+
+        let rebound = XyceTestRunner::source_with_ac_frequency_bindings(source, 10.0);
+        let netlist = XyceTestRunner::parse_xyce_netlist(&rebound, Path::new("freq.cir"))
+            .expect("frequency-bound source parses");
+        let ac = XyceTestRunner::single_ac_analysis(&netlist)
+            .expect("AC analysis is still detected after frequency binding");
+
+        let frequencies = ac.frequencies();
+        assert_eq!(frequencies.len(), 2);
+        assert!((frequencies[0] - 10.0).abs() < 1.0e-12);
+        assert!((frequencies[1] - 100.0).abs() < 1.0e-10);
+        assert!((netlist.params.get("FREQ").expect("FREQ bound") - 10.0).abs() < 1.0e-12);
+        assert!(
+            (netlist.params.get("OMEGA").expect("OMEGA evaluates")
+                - 2.0 * std::f64::consts::PI * 10.0)
+                .abs()
+                < 1.0e-12
         );
     }
 
