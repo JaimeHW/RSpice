@@ -12,7 +12,7 @@ use crate::analysis::AcResult;
 use crate::analysis::ac::ac_sweep_frequencies;
 use crate::engine::{
     ConvergenceConfig, DcSweepPointResult, SimulationConfig, SimulationError, SpiceDialect,
-    TransientResult, extract_dc_value,
+    TransientResult, extract_ac_value, extract_dc_value,
 };
 use crate::expr::{Expr, parse_expression_strict};
 use crate::netlist::expr::ComplexValue as ExprComplexValue;
@@ -644,12 +644,23 @@ struct XyceTransientProblemSize {
 #[derive(Debug, Clone)]
 struct XyceAcAnalysis {
     frequencies: Vec<Value>,
+    data_points: Option<Vec<XyceAcDataPoint>>,
 }
 
 impl XyceAcAnalysis {
     fn frequencies(&self) -> Vec<Value> {
         self.frequencies.clone()
     }
+
+    fn data_points(&self) -> Option<&[XyceAcDataPoint]> {
+        self.data_points.as_deref()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct XyceAcDataPoint {
+    frequency: Value,
+    overrides: Vec<(String, Value)>,
 }
 
 impl XyceAcReferenceColumn {
@@ -723,6 +734,12 @@ struct XyceDcDataPointResult {
 struct XyceAcResultBatch {
     netlist: Netlist,
     results: Vec<AcResult>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceAcDataPointResult {
+    netlist: Netlist,
+    result: AcResult,
 }
 
 #[derive(Debug, Clone)]
@@ -1449,6 +1466,12 @@ impl XyceTestRunner {
             .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let ac = Self::single_ac_analysis(&netlist)?;
         let steps = Self::step_commands(&netlist)?;
+        if ac.data_points().is_some() && !steps.is_empty() {
+            return Err(
+                ".STEP combined with .AC DATA is not implemented in the native Xyce oracle"
+                    .to_string(),
+            );
+        }
 
         let primary_ac_ic_file = primary_ac_ic_output
             .as_ref()
@@ -3568,6 +3591,9 @@ impl XyceTestRunner {
                 start,
             );
         }
+        if plan.ac.data_points().is_some() {
+            return self.run_static_ac_data_plan(deck, plan, netlist, reference, start);
+        }
 
         let engine = self.create_xyce_engine();
         let results = match engine.run_ac(&netlist, &frequencies) {
@@ -3650,6 +3676,140 @@ impl XyceTestRunner {
                         ac_ic_mismatches,
                     )
                 }
+            } else {
+                self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("{} Xyce AC side-output mismatch(es)", side_mismatches.len()),
+                    side_mismatches,
+                )
+            }
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("{} Xyce AC reference mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
+    }
+
+    fn run_static_ac_data_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticAcPlan,
+        netlist: Netlist,
+        reference: XycePrnTable,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.contract.result_contract(false);
+        let Some(primary_print) = plan.print.as_ref() else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                ".AC DATA comparison requires a primary .PRINT AC request".to_string(),
+                Vec::new(),
+            );
+        };
+        let Some(data_points) = plan.ac.data_points() else {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                ".AC DATA comparison has no data rows".to_string(),
+                Vec::new(),
+            );
+        };
+
+        let engine = self.create_xyce_engine();
+        let mut point_results = Vec::with_capacity(data_points.len());
+        for (row_index, point) in data_points.iter().enumerate() {
+            let row_netlist =
+                match Engine::create_perturbed_netlist_multi(&netlist, &point.overrides) {
+                    Ok((row_netlist, _)) => row_netlist,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!(
+                                ".AC DATA row {} parameter override error: {err}",
+                                row_index + 1
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            let mut results = match engine.run_ac(&row_netlist, &[point.frequency]) {
+                Ok(results) => results,
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this .AC DATA deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error in .AC DATA row {}: {err}", row_index + 1),
+                        Vec::new(),
+                    );
+                }
+            };
+            let Some(result) = results.pop() else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(".AC DATA row {} produced no AC result", row_index + 1),
+                    Vec::new(),
+                );
+            };
+            point_results.push(XyceAcDataPointResult {
+                netlist: row_netlist,
+                result,
+            });
+        }
+
+        let mismatches = match self.compare_ac_data_prn_reference(
+            &reference,
+            primary_print,
+            &plan.source,
+            &point_results,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("reference comparison error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            let side_mismatches = match self.compare_ac_data_side_outputs(&plan, &point_results) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("AC side-output comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            if side_mismatches.is_empty() {
+                self.passed_result(deck, start, contract)
             } else {
                 self.failure_result(
                     deck,
@@ -4122,6 +4282,54 @@ impl XyceTestRunner {
             };
             let mut mismatches =
                 self.compare_ac_prn_reference(&reference, &print, netlist, &plan.source, results)?;
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("{file}:{}", mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+        Ok(all_mismatches)
+    }
+
+    fn compare_ac_data_side_outputs(
+        &self,
+        plan: &XyceStaticAcPlan,
+        points: &[XyceAcDataPointResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if plan.output_override {
+            return Ok(Vec::new());
+        }
+        let Some(primary_reference_path) = plan.reference_path.as_ref() else {
+            return Err(
+                ".AC DATA side-output comparison requires a primary .PRINT AC oracle".to_string(),
+            );
+        };
+        let side_outputs = Self::prn_compatible_ac_side_output_requests(&plan.source)?;
+        let mut all_mismatches = Vec::new();
+        for request in side_outputs {
+            let file = request
+                .file
+                .as_deref()
+                .expect("side output request has FILE= set");
+            if Some(file) == plan.primary_ac_file.as_deref() {
+                continue;
+            }
+            let reference_path =
+                Self::ac_side_output_reference_path(primary_reference_path, &request, file)?;
+            let reference = Self::parse_prn_file(&reference_path).map_err(|err| {
+                format!(
+                    "failed to parse AC side-output oracle {}: {err}",
+                    self.display_path(&reference_path)
+                )
+            })?;
+            let print = XycePrintRequest {
+                probes: request.probes,
+            };
+            let mut mismatches =
+                self.compare_ac_data_prn_reference(&reference, &print, &plan.source, points)?;
             for mismatch in &mut mismatches {
                 mismatch.probe = format!("{file}:{}", mismatch.probe);
             }
@@ -6681,6 +6889,164 @@ impl XyceTestRunner {
         results: &[AcResult],
     ) -> Result<Vec<XyceValueMismatch>, String> {
         self.compare_ac_prn_reference_with_step(reference, print, netlist, source, results, None)
+    }
+
+    fn compare_ac_data_prn_reference(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        source: &str,
+        points: &[XyceAcDataPointResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if reference.columns.is_empty() {
+            return Err("reference table has no columns".to_string());
+        }
+
+        let mut data_column_offset = 0usize;
+        let stepnum_column = reference
+            .columns
+            .first()
+            .is_some_and(|column| column.eq_ignore_ascii_case("STEPNUM"))
+            .then_some(0usize);
+        if stepnum_column.is_some() {
+            data_column_offset += 1;
+        }
+
+        let index_column = reference
+            .columns
+            .get(data_column_offset)
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"))
+            .then_some(data_column_offset);
+        if index_column.is_some() {
+            data_column_offset += 1;
+        }
+
+        let frequency_column = reference
+            .columns
+            .get(data_column_offset)
+            .filter(|column| Self::is_ac_frequency_reference_column(column))
+            .map(|_| data_column_offset)
+            .ok_or_else(|| {
+                format!(
+                    "expected Xyce .FD.prn frequency column at position {}, got '{}'",
+                    data_column_offset,
+                    reference
+                        .columns
+                        .get(data_column_offset)
+                        .map(String::as_str)
+                        .unwrap_or("<missing>")
+                )
+            })?;
+        data_column_offset += 1;
+
+        if reference.rows.len() != points.len() {
+            return Err(format!(
+                "reference row count ({}) does not match .AC DATA row count ({})",
+                reference.rows.len(),
+                points.len()
+            ));
+        }
+
+        let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
+        let phase_output_radians = Self::source_requests_ac_phase_output_radians(source);
+        let comp_columns = data_columns
+            .iter()
+            .map(|column| XyceReferenceColumn::Probe {
+                name: column.probe_name().to_string(),
+            })
+            .collect::<Vec<_>>();
+        let comp_tolerances = self.comp_tolerances(source, &comp_columns)?;
+        let frequency_tolerance = XyceComparisonTolerance::from_config(&self.config);
+
+        let mut mismatches = Vec::new();
+        for (row_index, (row, point)) in reference.rows.iter().zip(points).enumerate() {
+            if row.len() != reference.columns.len() {
+                return Err(format!(
+                    "row {} has {} values, expected {}",
+                    row_index,
+                    row.len(),
+                    reference.columns.len()
+                ));
+            }
+            if let Some(stepnum_column) = stepnum_column {
+                let expected_stepnum = row[stepnum_column];
+                if (expected_stepnum - 0.0).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "STEPNUM".to_string(),
+                        expected: expected_stepnum,
+                        actual: 0.0,
+                        relative_error: 1.0,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+            if let Some(index_column) = index_column {
+                let expected_index = row[index_column];
+                let actual_index = row_index as Value;
+                if (expected_index - actual_index).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "Index".to_string(),
+                        expected: expected_index,
+                        actual: actual_index,
+                        relative_error: 1.0,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+
+            let expected_frequency = row[frequency_column];
+            if let Some(relative_error) = self.value_mismatch(
+                expected_frequency,
+                point.result.frequency,
+                frequency_tolerance,
+            ) {
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: reference.columns[frequency_column].clone(),
+                    expected: expected_frequency,
+                    actual: point.result.frequency,
+                    relative_error,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
+            }
+
+            for (column_index, column) in data_columns.iter().enumerate() {
+                let expected = row[column_index + data_column_offset];
+                let actual = Self::evaluate_ac_reference_column(
+                    column,
+                    &point.netlist,
+                    &point.result,
+                    phase_output_radians,
+                )?;
+                let normalized_probe = Self::normalize_probe(column.probe_name());
+                let tolerance = comp_tolerances
+                    .get(&normalized_probe)
+                    .copied()
+                    .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: reference.columns[column_index + data_column_offset].clone(),
+                        expected,
+                        actual,
+                        relative_error,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+        }
+
+        Ok(mismatches)
     }
 
     fn compare_ac_prn_reference_with_step(
@@ -9864,6 +10230,11 @@ impl XyceTestRunner {
         }
         if let Some((element_name, parameter)) = Self::parse_device_parameter_probe(normalized) {
             match parameter.as_str() {
+                "acmag" | "acphase"
+                    if Self::source_is_independent_source(netlist, &element_name) =>
+                {
+                    return Ok(());
+                }
                 "r" if Self::find_resistor_element(netlist, &element_name).is_some() => {
                     return Ok(());
                 }
@@ -10847,6 +11218,20 @@ impl XyceTestRunner {
     ) -> Option<Result<Value, String>> {
         let (element_name, parameter) = Self::parse_device_parameter_probe(normalized)?;
         Some(match parameter.as_str() {
+            "acmag" => Self::independent_source_ac_terms(netlist, &element_name)
+                .map(|(magnitude, _)| magnitude)
+                .ok_or_else(|| {
+                    format!(
+                        "AC device parameter probe '{element_name}:ACMAG' has no independent source"
+                    )
+                }),
+            "acphase" => Self::independent_source_ac_terms(netlist, &element_name)
+                .map(|(_, phase)| phase.to_degrees())
+                .ok_or_else(|| {
+                    format!(
+                        "AC device parameter probe '{element_name}:ACPHASE' has no independent source"
+                    )
+                }),
             "r" => Self::effective_resistor_value(netlist, &element_name).ok_or_else(|| {
                 format!("AC device parameter probe '{element_name}:R' has no finite resistance")
             }),
@@ -13274,6 +13659,19 @@ impl XyceTestRunner {
             })
     }
 
+    fn independent_source_ac_terms(netlist: &Netlist, source: &str) -> Option<(Value, Value)> {
+        netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(source))
+            .and_then(|element| match &element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Some(extract_ac_value(spec))
+                }
+                _ => None,
+            })
+    }
+
     fn evaluate_current_source_current(
         netlist: &Netlist,
         dc: &XyceDcSweep,
@@ -13778,10 +14176,18 @@ impl XyceTestRunner {
                     stop_freq,
                 } => analyses.push(XyceAcAnalysis {
                     frequencies: ac_sweep_frequencies(*variation, *points, *start_freq, *stop_freq),
+                    data_points: None,
                 }),
-                AnalysisCommand::AcData { table_name } => analyses.push(XyceAcAnalysis {
-                    frequencies: Self::ac_data_table_frequencies(netlist, table_name)?,
-                }),
+                AnalysisCommand::AcData { table_name } => {
+                    let data_points = Self::ac_data_table_points(netlist, table_name)?;
+                    analyses.push(XyceAcAnalysis {
+                        frequencies: data_points
+                            .iter()
+                            .map(|point| point.frequency)
+                            .collect::<Vec<_>>(),
+                        data_points: Some(data_points),
+                    });
+                }
                 _ => {}
             }
         }
@@ -13796,36 +14202,81 @@ impl XyceTestRunner {
         }
     }
 
-    fn ac_data_table_frequencies(
+    fn ac_data_table_points(
         netlist: &Netlist,
         table_name: &str,
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<Vec<XyceAcDataPoint>, String> {
         let table = netlist
             .data_tables
             .iter()
             .find(|table| table.name.eq_ignore_ascii_case(table_name))
             .ok_or_else(|| format!(".AC DATA references unknown .DATA table '{table_name}'"))?;
+        if table.params.is_empty() {
+            return Err(format!(".AC DATA table '{}' has no columns", table.name));
+        }
+        if table.rows.is_empty() {
+            return Err(format!(".AC DATA table '{}' has no rows", table.name));
+        }
+        let mut unique_params = BTreeSet::new();
+        for param in &table.params {
+            if !unique_params.insert(param.to_ascii_uppercase()) {
+                return Err(format!(
+                    ".AC DATA table '{}' has duplicate column '{}'",
+                    table.name, param
+                ));
+            }
+        }
         let freq_column = table
             .params
             .iter()
             .position(|param| param.eq_ignore_ascii_case("FREQ"))
             .ok_or_else(|| format!(".AC DATA table '{}' has no FREQ column", table.name))?;
-        let frequencies = table
+        let points = table
             .rows
             .iter()
             .enumerate()
             .map(|(row_index, row)| {
-                row.get(freq_column).copied().ok_or_else(|| {
+                if row.len() != table.params.len() {
+                    return Err(format!(
+                        ".AC DATA table '{}' row {} has {} value(s), expected {}",
+                        table.name,
+                        row_index + 1,
+                        row.len(),
+                        table.params.len()
+                    ));
+                }
+                if let Some((column_index, value)) =
+                    row.iter().enumerate().find(|(_, value)| !value.is_finite())
+                {
+                    return Err(format!(
+                        ".AC DATA table '{}' row {} column '{}' must be finite, got {}",
+                        table.name,
+                        row_index + 1,
+                        table.params[column_index],
+                        value
+                    ));
+                }
+                let frequency = row.get(freq_column).copied().ok_or_else(|| {
                     format!(
                         ".AC DATA table '{}' row {} does not contain FREQ column {}",
                         table.name,
                         row_index + 1,
                         freq_column + 1
                     )
+                })?;
+                let overrides = table
+                    .params
+                    .iter()
+                    .cloned()
+                    .zip(row.iter().copied())
+                    .collect::<Vec<_>>();
+                Ok(XyceAcDataPoint {
+                    frequency,
+                    overrides,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(frequencies)
+        Ok(points)
     }
 
     fn single_dc_sweep(netlist: &Netlist) -> Result<XyceDcSweep, String> {
@@ -17427,6 +17878,12 @@ R1 1 0 1k
             .expect(".AC DATA table should resolve to a frequency list");
 
         assert_eq!(ac.frequencies(), vec![1.0, 10.0, 100.0]);
+        let data_points = ac.data_points().expect(".AC DATA rows are retained");
+        assert_eq!(data_points.len(), 3);
+        assert_eq!(
+            data_points[1].overrides,
+            vec![("FREQ".to_string(), 10.0), ("unused".to_string(), 8.0)]
+        );
     }
 
     #[test]
@@ -17514,6 +17971,45 @@ R2 b 0 2
             XyceTestRunner::validate_ac_complex_probe("IDB(V1)", &netlist)
                 .expect_err("scalar current accessor is not a complex probe")
                 .contains("complex I")
+        );
+    }
+
+    #[test]
+    fn ac_probe_evaluates_independent_source_ac_parameters() {
+        let netlist = Netlist::parse(
+            "\
+ac source parameter probes
+I1 a 0 AC 2 45
+R1 a 0 1k
+.AC DEC 1 1 10
+.PRINT AC {I1:ACMAG} {I1:ACPHASE}
+.END
+",
+        )
+        .expect("AC source parameter deck parses");
+        let result = AcResult {
+            frequency: 1.0,
+            node_names: vec!["a".to_string()],
+            branch_names: Vec::new(),
+            voltages: vec![Complex64::new(0.0, 0.0)],
+            currents: Vec::new(),
+        };
+
+        XyceTestRunner::validate_ac_probe("{I1:ACMAG}", &netlist)
+            .expect("AC source magnitude parameter validates");
+        XyceTestRunner::validate_ac_probe("{I1:ACPHASE}", &netlist)
+            .expect("AC source phase parameter validates");
+        assert_eq!(
+            XyceTestRunner::evaluate_ac_probe("{I1:ACMAG}", &netlist, &result, false)
+                .expect("AC source magnitude parameter evaluates"),
+            2.0
+        );
+        assert!(
+            (XyceTestRunner::evaluate_ac_probe("{I1:ACPHASE}", &netlist, &result, false)
+                .expect("AC source phase parameter evaluates")
+                - 45.0)
+                .abs()
+                < 1.0e-12
         );
     }
 
