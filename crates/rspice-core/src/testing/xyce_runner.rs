@@ -200,6 +200,7 @@ struct XyceStaticTranPlan {
     reference_path: PathBuf,
     source: String,
     print: XycePrintRequest,
+    output_override: bool,
     tran: XyceTranAnalysis,
     steps: Vec<StepCommand>,
     contract: XyceStaticTranContract,
@@ -1250,7 +1251,15 @@ impl XyceTestRunner {
         }
         Self::reject_unsupported_source_directives(&source)?;
 
-        let print_output = Self::single_tran_print_output_request(&source)?;
+        let output_override = requires_wrapper
+            && Self::is_native_output_override_wrapper_candidate_path(&deck.relative_path);
+        let print_output = if output_override {
+            Self::output_override_print_output_request(&source, "TRAN")?.ok_or_else(|| {
+                "output override deck has no .PRINT TRAN statement with static columns".to_string()
+            })?
+        } else {
+            Self::single_tran_print_output_request(&source)?
+        };
         let print = XycePrintRequest {
             probes: print_output.probes.clone(),
         };
@@ -1265,12 +1274,18 @@ impl XyceTestRunner {
             )
             .is_some_and(|path| path.is_file());
         let native_static_prn_wrapper = if requires_wrapper {
-            Self::native_static_prn_tran_wrapper_contract(
-                &deck.path,
-                &deck.relative_path,
-                &source,
-                has_prn_oracle,
-            )
+            if output_override {
+                Self::native_output_override_prn_tran_wrapper_contract(&source)
+                    .map(Some)
+                    .map_err(|_| Self::upstream_wrapper_required_reason().to_string())?
+            } else {
+                Self::native_static_prn_tran_wrapper_contract(
+                    &deck.path,
+                    &deck.relative_path,
+                    &source,
+                    has_prn_oracle,
+                )
+            }
         } else {
             None
         };
@@ -1304,10 +1319,14 @@ impl XyceTestRunner {
                     Self::validate_native_static_csv_tran_wrapper_contract(&source)?;
                 }
                 XyceStaticTranContract::WrapperStatic => {
-                    Self::validate_native_static_prn_tran_wrapper_contract_with_format_mode(
-                        &source,
-                        has_prn_oracle,
-                    )?;
+                    if output_override {
+                        Self::validate_native_output_override_prn_tran_wrapper_contract(&source)?;
+                    } else {
+                        Self::validate_native_static_prn_tran_wrapper_contract_with_format_mode(
+                            &source,
+                            has_prn_oracle,
+                        )?;
+                    }
                 }
                 XyceStaticTranContract::WrapperStaticExpectedError => {
                     Self::validate_native_static_prn_tran_wrapper_contract(&source)?;
@@ -1322,6 +1341,7 @@ impl XyceTestRunner {
             reference_path,
             source,
             print,
+            output_override,
             tran,
             steps,
             wrapper_tolerance: Self::native_default_prn_tran_wrapper_tolerance(&deck.relative_path),
@@ -2720,6 +2740,13 @@ impl XyceTestRunner {
         None
     }
 
+    fn native_output_override_prn_tran_wrapper_contract(
+        source: &str,
+    ) -> Result<XyceStaticTranContract, String> {
+        Self::validate_native_output_override_prn_tran_wrapper_contract(source)?;
+        Ok(XyceStaticTranContract::WrapperStatic)
+    }
+
     fn is_native_csd_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
         Self::normalize_manifest_key(relative_path).starts_with("netlists/output/tran/")
             && Self::validate_native_static_csd_tran_wrapper_contract(source).is_ok()
@@ -2904,6 +2931,73 @@ impl XyceTestRunner {
                 "wrapper-origin initial-interval transient .prn contract requires one .OPTIONS OUTPUT INITIAL_INTERVAL directive, found {initial_interval_options}"
             )),
         }
+    }
+
+    fn validate_native_output_override_prn_tran_wrapper_contract(
+        source: &str,
+    ) -> Result<(), String> {
+        let mut print_count = 0usize;
+        let mut probe_count = 0usize;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") {
+                let tokens = Self::split_print_fields(&trimmed)?;
+                let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+                let Some(analysis) = token_refs.get(1).copied() else {
+                    return Err("output override .PRINT statement has no analysis type".to_string());
+                };
+                if !analysis.eq_ignore_ascii_case("TRAN") {
+                    return Err(format!(
+                        "wrapper-origin transient output override contract does not cover .PRINT {analysis}"
+                    ));
+                }
+
+                print_count += 1;
+                let mut index = 2usize;
+                while index < token_refs.len() {
+                    if let Some((raw_key, raw_value, consumed)) =
+                        Self::print_option_assignment(&token_refs, index)
+                    {
+                        let value = raw_value.trim().trim_matches(['"', '\'']);
+                        if raw_key.trim().eq_ignore_ascii_case("FORMAT") {
+                            Self::static_tran_contract_for_print_format(true, Some(value))
+                                .map_err(|err| {
+                                    format!(
+                                        "wrapper-origin transient output override contract does not cover {err}"
+                                    )
+                                })?;
+                        }
+                        index += consumed;
+                        continue;
+                    }
+                    let normalized = token_refs[index].to_ascii_lowercase();
+                    if !Self::is_print_option_token(&normalized) {
+                        probe_count += 1;
+                    }
+                    index += 1;
+                }
+                continue;
+            }
+            if Self::is_extra_wrapper_tran_output_analysis_command(command) {
+                return Err(format!(
+                    "wrapper-origin transient output override contract does not cover {command} directives"
+                ));
+            }
+        }
+
+        if print_count == 0 || probe_count == 0 {
+            return Err(
+                "wrapper-origin transient output override contract requires .PRINT TRAN probes"
+                    .to_string(),
+            );
+        }
+        Ok(())
     }
 
     fn validate_native_pwl_repeat_error_tran_wrapper_contract(
@@ -4731,6 +4825,9 @@ impl XyceTestRunner {
         netlist: &Netlist,
         result: &TransientResult,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        if plan.output_override {
+            return Ok(Vec::new());
+        }
         let side_outputs = Self::prn_compatible_tran_side_output_requests(&plan.source)?;
         let mut all_mismatches = Vec::new();
         for request in side_outputs {
@@ -4775,6 +4872,9 @@ impl XyceTestRunner {
         abort: &dyn AbortSignal,
         locked_time_grid: bool,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        if plan.output_override {
+            return Ok(Vec::new());
+        }
         let side_outputs = Self::prn_compatible_tran_side_output_requests(&plan.source)?;
         let mut all_mismatches = Vec::new();
         for request in side_outputs {
@@ -15543,6 +15643,46 @@ Values:
                     .map(str::to_string)
                     .collect(),
             }]
+        );
+    }
+
+    #[test]
+    fn transient_output_override_aggregates_primary_and_file_prints() {
+        let source = r#"
+.TRAN 0 1
+.PRINT TRAN FORMAT=CSV V(1)
+.PRINT TRAN FILE=nooverwriteFoo V(2)
+"#;
+
+        XyceTestRunner::validate_native_output_override_prn_tran_wrapper_contract(source)
+            .expect("output override TRAN wrapper contract validates");
+        let request = XyceTestRunner::output_override_print_output_request(source, "TRAN")
+            .expect("output override request parses")
+            .expect("output override has probes");
+
+        assert_eq!(
+            request,
+            XycePrintOutputRequest {
+                format: None,
+                file: None,
+                probes: ["V(1)", "V(2)"].into_iter().map(str::to_string).collect(),
+            }
+        );
+    }
+
+    #[test]
+    fn transient_output_override_rejects_unrelated_print_analysis() {
+        let source = r#"
+.TRAN 0 1
+.PRINT TRAN V(1)
+.PRINT AC V(1)
+"#;
+
+        let err = XyceTestRunner::validate_native_output_override_prn_tran_wrapper_contract(source)
+            .expect_err("output override TRAN contract should reject mixed print analyses");
+        assert!(
+            err.contains(".PRINT AC"),
+            "unexpected validation error: {err}"
         );
     }
 
