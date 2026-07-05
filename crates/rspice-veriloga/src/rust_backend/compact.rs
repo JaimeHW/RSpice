@@ -211,6 +211,14 @@ pub(crate) fn lower_scaled_rhs_multiply(
         "exp_scaled_input" if call.args.len() == 2 => {
             if let CompactAdExpr::Call(inner_call) = parse_ad_expr(call.args[0]) {
                 if inner_call.name == "ln" && inner_call.args.len() == 1 {
+                    if let Some((value_source, offset)) =
+                        lowerable_offset_square_arg(inner_call.args[0])
+                    {
+                        return Some(format!(
+                            "scratch.store_mul_scaled_exp_ln_offset_square_rhs({target_index}, {source}, {output_scale}, {value_source}, {offset}, {});",
+                            call.args[1]
+                        ));
+                    }
                     return Some(format!(
                         "scratch.store_mul_scaled_exp_ln_input_rhs({target_index}, {source}, {output_scale}, {}, {});",
                         inner_call.args[0], call.args[1]
@@ -237,6 +245,25 @@ fn parse_ad_expr(value: &str) -> CompactAdExpr<'_> {
         return CompactAdExpr::Call(call);
     }
     CompactAdExpr::Other
+}
+
+fn lowerable_offset_square_arg(value: &str) -> Option<(usize, &str)> {
+    let CompactAdExpr::Call(offset_call) = parse_ad_expr(value) else {
+        return None;
+    };
+    if offset_call.name != "offset" || offset_call.args.len() != 2 {
+        return None;
+    }
+
+    let CompactAdExpr::Call(square_call) = parse_ad_expr(offset_call.args[0]) else {
+        return None;
+    };
+    if square_call.name != "square" || square_call.args.len() != 1 {
+        return None;
+    }
+
+    scratch_ad_value_index(square_call.args[0])
+        .map(|value_source| (value_source, offset_call.args[1]))
 }
 
 fn scratch_ad_value_index(value: &str) -> Option<usize> {

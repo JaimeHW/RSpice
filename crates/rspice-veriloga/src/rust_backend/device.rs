@@ -5201,6 +5201,7 @@ fn stamp() {
             "fn store_mul_add_scaled_sub_value_product_rhs_mixed_aii",
             "fn store_mul_scaled_sqrt_scaled_input_rhs",
             "fn store_mul_scaled_exp_ln_input_rhs",
+            "fn store_mul_scaled_exp_ln_offset_square_rhs",
             "fn store_mul_scaled_pow_ad_rhs",
             "fn store_mul_scaled_powf_scale_offset_rhs",
         ] {
@@ -5240,7 +5241,7 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_mul_scaled_exp_ln_input_rhs(143, 11, p.output_scale, A::offset(A::square(s.ad_value(12)), p.offset), p.input_scale);"),
+            compact.contains("s.store_mul_scaled_exp_ln_offset_square_rhs(143, 11, p.output_scale, 12, p.offset, p.input_scale);"),
             "{compact}"
         );
         assert!(
@@ -5258,6 +5259,14 @@ fn stamp() {
         );
         assert!(
             !compact.contains("s.store_mul_add_scaled_sub_value_product_rhs(146"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_scaled_exp_ln_input_rhs(143"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("A::offset(A::square(s.ad_value(12))"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
@@ -8454,6 +8463,7 @@ fn stamp() {
             "fn store_mul_scaled_square_sub_from_scalar_sqrt_rhs(",
             "fn store_mul_scaled_powf_sqrt_rhs(",
             "fn store_mul_scaled_powi_sqrt_rhs(",
+            "fn store_mul_scaled_exp_ln_offset_square_rhs(",
         ] {
             let body = helper_body(&support, signature);
             assert!(
@@ -21160,6 +21170,16 @@ fn generate_scratch_operation_helpers() -> String {
     "        let output = raw.exp();",
     "        let derivative_scale = output * input_scale / value.value;",
     "        self.store_mul_scaled_unary_ad_rhs(index, source, output_scale, value, output, derivative_scale);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_scaled_exp_ln_offset_square_rhs(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, offset: f64, input_scale: f64) {",
+    "        let value = self.values[value_source];",
+    "        let base = value * value + offset;",
+    "        let raw = base.ln() * input_scale;",
+    "        let output = raw.exp();",
+    "        let derivative_scale = output * input_scale * 2.0 * value / base;",
+    "        self.store_mul_scaled_unary_rhs(index, source, output_scale, value_source, output, derivative_scale);",
     "    }",
     "",
     "    #[inline]",
