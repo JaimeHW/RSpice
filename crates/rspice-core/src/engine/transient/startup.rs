@@ -13,8 +13,21 @@ pub(super) enum InitialSolutionMode {
 
 const STARTUP_WARMUP_MIN_GMIN: Value = 1.0e-18;
 const STARTUP_WARMUP_MAX_GMIN: Value = 1.0e-15;
+// Keep startup warmup bounded, but allow normal 5 V/12 V rails to settle
+// through the same per-iteration voltage clamp used to avoid runaway states.
+const STARTUP_WARMUP_MIN_ITERS: usize = 16;
+const STARTUP_WARMUP_MAX_ITERS: usize = 96;
+const STARTUP_WARMUP_MAX_DELTA_V: Value = 2e-1;
 
 impl Engine {
+    #[inline]
+    fn startup_warmup_iteration_budget(&self) -> usize {
+        self.config
+            .max_iterations
+            .max(STARTUP_WARMUP_MIN_ITERS)
+            .min(STARTUP_WARMUP_MAX_ITERS)
+    }
+
     #[inline]
     fn startup_warmup_conditioning_gmin(&self, circuit: &crate::circuit::Circuit) -> Value {
         self.dc_nodal_gmin_floor(circuit)
@@ -79,15 +92,12 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         seed: &[Value],
     ) -> Vec<Value> {
-        const WARMUP_ITERS: usize = 16;
-        const MAX_WARMUP_DELTA_V: Value = 2e-1;
-
         let size = circuit.matrix_size();
         let mut solution = seed.to_vec();
         let mut rhs = vec![0.0; size];
         let gmin_floor = self.startup_warmup_conditioning_gmin(circuit);
 
-        for _ in 0..WARMUP_ITERS {
+        for _ in 0..self.startup_warmup_iteration_budget() {
             matrix.clear_values();
             rhs.fill(0.0);
 
@@ -122,7 +132,8 @@ impl Engine {
                 if !new_v.is_finite() {
                     new_v = old;
                 }
-                let delta = (new_v - old).clamp(-MAX_WARMUP_DELTA_V, MAX_WARMUP_DELTA_V);
+                let delta =
+                    (new_v - old).clamp(-STARTUP_WARMUP_MAX_DELTA_V, STARTUP_WARMUP_MAX_DELTA_V);
                 proposal[i] = old + delta;
             }
 
@@ -147,15 +158,12 @@ impl Engine {
         seed: &[Value],
         time: Value,
     ) -> Vec<Value> {
-        const WARMUP_ITERS: usize = 16;
-        const MAX_WARMUP_DELTA_V: Value = 2e-1;
-
         let size = circuit.matrix_size();
         let mut solution = seed.to_vec();
         let mut rhs = vec![0.0; size];
         let gmin_floor = self.startup_warmup_conditioning_gmin(circuit);
 
-        for _ in 0..WARMUP_ITERS {
+        for _ in 0..self.startup_warmup_iteration_budget() {
             matrix.clear_values();
             rhs.fill(0.0);
 
@@ -196,7 +204,8 @@ impl Engine {
                 if !new_v.is_finite() {
                     new_v = old;
                 }
-                let delta = (new_v - old).clamp(-MAX_WARMUP_DELTA_V, MAX_WARMUP_DELTA_V);
+                let delta =
+                    (new_v - old).clamp(-STARTUP_WARMUP_MAX_DELTA_V, STARTUP_WARMUP_MAX_DELTA_V);
                 proposal[i] = old + delta;
             }
 
