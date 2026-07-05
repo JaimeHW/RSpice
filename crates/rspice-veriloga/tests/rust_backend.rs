@@ -5892,13 +5892,17 @@ fn rust_backend_directly_stores_mixed_scaled_sub_from_scalar_multiply_helpers() 
 
     assert!(
         support.contains(
-            "fn store_mul_sub_from_scalar_ad_rhs_scaled_output(&mut self, index: usize, left: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, output_scale: f64)"
+            "fn store_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia(&mut self, index: usize, left: usize, scalar: f64, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, output_scale: f64)"
         ),
         "{support}"
     );
     assert!(
-        stamp.contains("s.store_mul_sub_from_scalar_ad_rhs_scaled_output("),
+        stamp.contains("s.store_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia("),
         "{stamp}"
+    );
+    assert!(
+        !support.contains("fn store_mul_sub_from_scalar_ad_rhs_scaled_output("),
+        "{support}"
     );
     assert!(
         !stamp.contains("s.store_ad_value("),
