@@ -528,6 +528,13 @@ fn generate_stamp_file(
             "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
         );
     }
+    let stamp_shared_refs = shared_plan
+        .as_ref()
+        .map(shared_stamp_value_refs)
+        .unwrap_or_default();
+    if let Some(plan) = &shared_plan {
+        emit_shared_stamp_values_binding(plan, &mut out);
+    }
     if stamp_needs_params {
         out.push_str("        let p=&(*self.params);\n");
     }
@@ -577,13 +584,6 @@ fn generate_stamp_file(
     }
     let stamp_static_refs = scalar_static_cache_refs_for_stamp(static_cache);
     emit_scalar_static_cache_aliases(static_cache, &mut out);
-    let stamp_shared_refs = shared_plan
-        .as_ref()
-        .map(shared_stamp_value_refs)
-        .unwrap_or_default();
-    if let Some(plan) = &shared_plan {
-        emit_shared_stamp_values_binding(plan, &mut out);
-    }
 
     let stamp_context = ValueEmitContext {
         cached_values: &static_cache.set,
@@ -650,6 +650,13 @@ fn generate_stamp_file(
                 "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
             );
         }
+        let reactive_shared_refs = shared_plan
+            .as_ref()
+            .map(shared_stamp_value_refs)
+            .unwrap_or_default();
+        if let Some(plan) = &shared_plan {
+            emit_shared_stamp_values_binding(plan, &mut out);
+        }
         out.push_str("        let p=&(*self.params);\n");
         if reactive_needs_param_given {
             out.push_str("        let pg=self.param_given.as_ref();\n");
@@ -659,13 +666,6 @@ fn generate_stamp_file(
         out.push_str("        let multiplicity=m;\n");
         let reactive_static_refs = scalar_static_cache_refs_for_stamp(static_cache);
         emit_scalar_static_cache_aliases(static_cache, &mut out);
-        let reactive_shared_refs = shared_plan
-            .as_ref()
-            .map(shared_stamp_value_refs)
-            .unwrap_or_default();
-        if let Some(plan) = &shared_plan {
-            emit_shared_stamp_values_binding(plan, &mut out);
-        }
         let reactive_context = ValueEmitContext {
             cached_values: &static_cache.set,
             cached_value_refs: &reactive_static_refs,
@@ -1510,14 +1510,14 @@ pub(super) fn scalar_state_extensions(
             .push_str("        instance.recompute_instance_static();\n");
         extensions
             .set_parameter_hook
-            .push_str("self.recompute_instance_static(); ");
+            .push_str("self.recompute_instance_static();\n");
     }
 
     if static_cache.has_temperature_values() {
         push_temperature_cache_state_fields(&mut extensions);
         extensions
             .set_parameter_hook
-            .push_str("self.invalidate_temperature_static(); ");
+            .push_str("self.invalidate_temperature_static();\n");
         methods.push_str(
             "\n    #[inline]\n    fn invalidate_temperature_static(&mut self) {\n        self.scalar_temperature_static_valid = false;\n    }\n",
         );
@@ -3470,6 +3470,21 @@ fn runtime_loop_source_binding_estimate(
         .ok_or_else(|| unsupported(artifact, format!("missing runtime loop {loop_id}")))?;
     let derivative_lanes = runtime_loop_live_derivative_lanes(artifact, loop_id, live);
 
+    let mut initializer_live = HashSet::new();
+    for variable in &runtime_loop.variables {
+        mark_counted_sum_term_live(
+            artifact,
+            variable.initial,
+            cached_values,
+            &mut initializer_live,
+        )?;
+        for lane in &derivative_lanes {
+            if let Some(value) = derivative_value_for_lane(artifact, variable.initial, *lane)? {
+                mark_counted_sum_term_live(artifact, value, cached_values, &mut initializer_live)?;
+            }
+        }
+    }
+
     let mut condition_live = HashSet::new();
     mark_counted_sum_term_live(
         artifact,
@@ -3492,6 +3507,8 @@ fn runtime_loop_source_binding_estimate(
         .variables
         .len()
         .saturating_mul(1usize.saturating_add(derivative_lanes.len()));
+    let initializer_dependency_lines =
+        ordered_counted_sum_values(artifact, &initializer_live, cached_values)?.len();
     let condition_lines =
         ordered_counted_sum_values(artifact, &condition_live, cached_values)?.len();
     let body_lines = ordered_counted_sum_values(artifact, &body_live, cached_values)?.len();
@@ -3518,6 +3535,7 @@ fn runtime_loop_source_binding_estimate(
         .count();
 
     Ok(initialization_lines
+        .saturating_add(initializer_dependency_lines)
         .saturating_add(condition_lines)
         .saturating_add(body_lines)
         .saturating_add(assignment_lines)
@@ -3541,6 +3559,29 @@ fn emit_runtime_loop(
         .ok_or_else(|| unsupported(artifact, format!("missing runtime loop {loop_id}")))?;
     let derivative_lanes = runtime_loop_live_derivative_lanes(artifact, loop_id, live);
 
+    let mut initializer_live = HashSet::new();
+    let mut external_uses = Vec::new();
+    for variable in &runtime_loop.variables {
+        external_uses.push(variable.initial);
+        mark_counted_sum_term_live(
+            artifact,
+            variable.initial,
+            context.cached_values,
+            &mut initializer_live,
+        )?;
+        for lane in &derivative_lanes {
+            if let Some(value) = derivative_value_for_lane(artifact, variable.initial, *lane)? {
+                external_uses.push(value);
+                mark_counted_sum_term_live(
+                    artifact,
+                    value,
+                    context.cached_values,
+                    &mut initializer_live,
+                )?;
+            }
+        }
+    }
+
     let mut condition_live = HashSet::new();
     mark_counted_sum_term_live(
         artifact,
@@ -3550,7 +3591,7 @@ fn emit_runtime_loop(
     )?;
 
     let mut body_live = HashSet::new();
-    let mut external_uses = vec![runtime_loop.condition];
+    external_uses.push(runtime_loop.condition);
     for assignment in &runtime_loop.assignments {
         external_uses.push(assignment.value);
         mark_counted_sum_term_live(
@@ -3567,7 +3608,8 @@ fn emit_runtime_loop(
         }
     }
 
-    let mut loop_live = condition_live.clone();
+    let mut loop_live = initializer_live.clone();
+    loop_live.extend(condition_live.iter().copied());
     loop_live.extend(body_live.iter().copied());
     let mandatory = HashSet::new();
     let mut loop_inline_values: HashSet<ValueId> = context.inline_values.iter().copied().collect();
@@ -3601,12 +3643,23 @@ fn emit_runtime_loop(
         external_value_refs: context.external_value_refs.clone(),
     };
 
+    let initializer_values =
+        ordered_counted_sum_values(artifact, &initializer_live, context.cached_values)?;
+    emit_runtime_loop_inner_values(
+        artifact,
+        parameter_fields,
+        initializer_values,
+        &loop_context,
+        "        ",
+        out,
+    )?;
+
     let mut init_let_emitter = CompactLetEmitter::new("        ");
     for (slot, variable) in runtime_loop.variables.iter().enumerate() {
         let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
         let local = runtime_loop_value_name(loop_id, slot);
         let initial = coerce_value_expr(
-            value_ref(artifact, parameter_fields, variable.initial, context)?,
+            value_ref(artifact, parameter_fields, variable.initial, &loop_context)?,
             value_type(artifact, variable.initial)?,
             variable.value_type,
         );
@@ -3619,7 +3672,7 @@ fn emit_runtime_loop(
             let initial_derivative = if let Some(value) =
                 derivative_value_for_lane(artifact, variable.initial, *lane)?
             {
-                value_ref(artifact, parameter_fields, value, context)?
+                value_ref(artifact, parameter_fields, value, &loop_context)?
             } else {
                 "0.0".to_string()
             };
@@ -5312,9 +5365,11 @@ fn scalar_value_dependencies(
         } => projected_ddx_derivative_values(artifact, value, pos_node, neg_node)?,
         OptValueKind::Ddt { input, .. } => vec![input],
         OptValueKind::CountedSum { count, initial, .. } => vec![count, initial],
-        OptValueKind::RuntimeLoopResult { loop_id, .. }
-        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
+        OptValueKind::RuntimeLoopResult { loop_id, .. } => {
             runtime_loop_initial_values(artifact, loop_id)?
+        }
+        OptValueKind::RuntimeLoopResultDerivative { loop_id, lane, .. } => {
+            runtime_loop_initial_values_for_derivative_lane(artifact, loop_id, lane)?
         }
         OptValueKind::Unary { input, .. } => vec![input],
         OptValueKind::Binary { left, right, .. } => vec![left, right],
@@ -5359,6 +5414,27 @@ fn runtime_loop_initial_values(
         .iter()
         .map(|variable| variable.initial)
         .collect())
+}
+
+fn runtime_loop_initial_values_for_derivative_lane(
+    artifact: &CanonicalIrArtifact,
+    loop_id: u32,
+    lane: DerivativeLane,
+) -> Result<Vec<ValueId>, RustBackendError> {
+    let runtime_loop = artifact
+        .opt
+        .runtime_loops
+        .iter()
+        .find(|runtime_loop| runtime_loop.loop_id == loop_id)
+        .ok_or_else(|| unsupported(artifact, format!("missing runtime loop {loop_id}")))?;
+    let mut values = Vec::with_capacity(runtime_loop.variables.len() * 2);
+    for variable in &runtime_loop.variables {
+        values.push(variable.initial);
+        if let Some(derivative) = derivative_value_for_lane(artifact, variable.initial, lane)? {
+            values.push(derivative);
+        }
+    }
+    Ok(values)
 }
 
 fn scalar_value_can_inline(kind: &OptValueKind) -> bool {
@@ -5617,10 +5693,14 @@ fn scalar_value_dependency_values(
         | OptValueKind::EquationValue { .. }
         | OptValueKind::DdtScale => Vec::new(),
         OptValueKind::RuntimeLoopResult { loop_id, .. }
-        | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. }
             if mode == ScalarValueDependencyMode::Stamp =>
         {
             runtime_loop_initial_values(artifact, loop_id)?
+        }
+        OptValueKind::RuntimeLoopResultDerivative { loop_id, lane, .. }
+            if mode == ScalarValueDependencyMode::Stamp =>
+        {
+            runtime_loop_initial_values_for_derivative_lane(artifact, loop_id, lane)?
         }
         OptValueKind::RuntimeLoopResult { .. }
         | OptValueKind::RuntimeLoopResultDerivative { .. } => Vec::new(),
@@ -5878,6 +5958,7 @@ fn is_reserved_scalar_identifier(name: &str) -> bool {
             | "async"
             | "await"
             | "dyn"
+            | "gen"
             | "abstract"
             | "become"
             | "box"
@@ -6100,7 +6181,61 @@ fn format_f64(value: f64) -> String {
 }
 
 fn f64_method_receiver(value: &str) -> String {
-    format!("({value})")
+    if let Some(typed) = typed_f64_literal(value) {
+        format!("({typed})")
+    } else {
+        format!("({value})")
+    }
+}
+
+fn typed_f64_literal(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.ends_with("_f64") || value.starts_with("f64::") {
+        return None;
+    }
+    let saw_float_marker = scan_numeric_literal(value)?;
+    if saw_float_marker {
+        Some(format!("{value}_f64"))
+    } else {
+        None
+    }
+}
+
+fn scan_numeric_literal(value: &str) -> Option<bool> {
+    let unsigned = value.strip_prefix('-').unwrap_or(value);
+    if unsigned.is_empty() || !unsigned.as_bytes()[0].is_ascii_digit() {
+        return None;
+    }
+
+    let mut saw_digit = false;
+    let mut saw_float_marker = false;
+    let mut previous_was_exponent = false;
+    for byte in unsigned.bytes() {
+        match byte {
+            b'0'..=b'9' => {
+                saw_digit = true;
+                previous_was_exponent = false;
+            }
+            b'.' => {
+                saw_float_marker = true;
+                previous_was_exponent = false;
+            }
+            b'e' | b'E' => {
+                saw_float_marker = true;
+                previous_was_exponent = true;
+            }
+            b'+' | b'-' if previous_was_exponent => {
+                previous_was_exponent = false;
+            }
+            _ => return None,
+        }
+    }
+
+    if saw_digit {
+        Some(saw_float_marker)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -6136,6 +6271,16 @@ mod tests {
                 OptValueType::Real,
             ),
             "((if flag{1.0}else{0.0})<x)"
+        );
+        assert_eq!(
+            emit_binary_expr(
+                OptBinaryOp::Mod,
+                "x".to_string(),
+                OptValueType::Real,
+                "2.0".to_string(),
+                OptValueType::Real,
+            ),
+            "((x).trunc()%(2.0_f64).trunc())"
         );
         assert_eq!(
             emit_unary_expr(
@@ -6223,6 +6368,7 @@ mod tests {
         assert_eq!(compact_scalar_identifier(13), "n_");
         assert_eq!(compact_scalar_identifier(15), "p_");
         assert_eq!(compact_scalar_identifier(52), "a0");
+        assert_eq!(compact_scalar_identifier(27_231), "gen_");
 
         let mut seen = HashSet::new();
         for index in 0..20_000 {

@@ -10898,6 +10898,103 @@ fn rust_backend_splits_large_local_variable_blocks_without_scratch() {
 }
 
 #[test]
+fn generated_runtime_loop_initializer_derivatives_compile_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module runtime_loop_initializer_derivatives(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    integer i;
+    real seed, acc, v0, v1, v2, v3, v4, v5, v6;
+    analog begin
+        v0 = V(p, n);
+        v1 = (v0 * v0) + (0.5 * v0) + 1.0;
+        v2 = (v1 * v1) + (0.25 * v0);
+        v3 = (v2 * v2) + (0.125 * v1);
+        v4 = sqrt((v3 * v3) + 1.0);
+        v5 = exp(0.01 * v4);
+        v6 = (v5 * v4) + (v3 / (v2 + 1.0));
+        seed = v6;
+        acc = seed;
+        for (i = 0; i < nf; i = i + 1) begin
+            acc = 0.5 * (acc + V(p, n));
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#,
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile runtime loop initializer derivatives with scalar backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("let mut r0_"), "{stamp}");
+    assert!(stamp.contains("let mut r0g=0usize;"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn generated_runtime_loop_initializer_derivatives_cross_loop_compile_with_runtime_stub() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module runtime_loop_initializer_derivatives_cross_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 4 from [0:inf);
+    parameter integer ng = 4 from [0:inf);
+    integer i, j;
+    real first, second, acc, v0, v1, v2;
+    analog begin
+        v0 = V(p, n);
+        v1 = (v0 * v0) + (0.5 * v0) + 1.0;
+        first = v1;
+        for (i = 0; i < nf; i = i + 1) begin
+            first = 0.5 * (first + (v1 / (i + 1.0)));
+        end
+        v2 = (first * first) + v1;
+        second = sqrt((v2 * v2) + 1.0);
+        acc = second;
+        for (j = 0; j < ng; j = j + 1) begin
+            acc = 0.5 * (acc + V(p, n));
+        end
+        I(p, n) <+ acc;
+    end
+endmodule
+"#,
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile cross-loop runtime initializer derivatives with scalar backend");
+    let stamp = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "stamp.rs")
+        .expect("stamp file")
+        .contents
+        .as_str();
+
+    assert!(stamp.contains("let mut r0_"), "{stamp}");
+    assert!(stamp.contains("let mut r1_"), "{stamp}");
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn generated_runtime_loop_rust_compiles_with_runtime_stub() {
     let artifact = VerilogACompiler::default()
         .compile_canonical_ir(loop_accumulator_source())

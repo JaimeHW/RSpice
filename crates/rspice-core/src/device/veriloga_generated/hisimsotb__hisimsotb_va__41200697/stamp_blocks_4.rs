@@ -811,53 +811,42 @@ impl Instance {
         stamper: &mut GeneratedReactiveStamper<'_>,
         p: &Parameters,
         nodes: &[usize; Instance::NODE_COUNT],
-        branches: &[usize; Instance::BRANCH_COUNT],
         multiplicity: f64,
         locals: &mut StampLocals,
     ) {
         let nv4 = ctx.node_voltage(nodes[4]);let nv7 = ctx.node_voltage(nodes[7]);let nv8 = ctx.node_voltage(nodes[8]);let nv9 = ctx.node_voltage(nodes[9]);let nv10 = ctx.node_voltage(nodes[10]);let eq10_e387: f64 = (locals.var_qg + locals.var_qg_nqs);let eq10_e387_d_n8: f64 = (locals.var_qg_dn8 + locals.var_qg_nqs_dn8);let eq10_e388_q: f64 = eq10_e387;let eq10_e389: f64 = (p.p33 * eq10_e387);let eq10_e389_d_n0: f64 = (p.p33 * locals.var_qg_dn0);let eq10_e389_d_n2: f64 = (p.p33 * locals.var_qg_dn2);let eq10_e389_d_n4: f64 = (p.p33 * locals.var_qg_dn4);let eq10_e389_d_n5: f64 = (p.p33 * locals.var_qg_dn5);let eq10_e389_d_n6: f64 = (p.p33 * locals.var_qg_dn6);let eq10_e389_d_n8: f64 = (p.p33 * eq10_e387_d_n8);let eq10_e389_d_n9: f64 = (p.p33 * locals.var_qg_nqs_dn9);let eq10_e389_d_n10: f64 = (p.p33 * locals.var_qg_dn10);let eq10_e389_d_n11: f64 = (p.p33 * locals.var_qg_dn11);let eq10_e389_d_n12: f64 = (p.p33 * locals.var_qg_dn12);let eq10_e389_q: f64 = (p.p33 * eq10_e388_q);let eq10_reactive_node_derivatives: [f64; 13] = [eq10_e389_d_n0, 0.0, eq10_e389_d_n2, 0.0, eq10_e389_d_n4, eq10_e389_d_n5, eq10_e389_d_n6, 0.0, eq10_e389_d_n8, eq10_e389_d_n9, eq10_e389_d_n10, eq10_e389_d_n11, eq10_e389_d_n12];let eq10_reactive_branch_derivatives: [f64; 8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[5]),
-            Some(nodes[12]),
-            nodes,
+        stamper.stamp_current_reactive_dense_local(
+            Some(5),
+            Some(12),
             &eq10_reactive_node_derivatives,
-            branches,
             &eq10_reactive_branch_derivatives,
             multiplicity,
         );let eq11_e393: f64 = (locals.var_qd + locals.var_qd_nqs);let eq11_e393_d_n0: f64 = (locals.var_qd_dn0 + locals.var_qd_nqs_dn0);let eq11_e393_d_n2: f64 = (locals.var_qd_dn2 + locals.var_qd_nqs_dn2);let eq11_e393_d_n4: f64 = (locals.var_qd_dn4 + locals.var_qd_nqs_dn4);let eq11_e393_d_n5: f64 = (locals.var_qd_dn5 + locals.var_qd_nqs_dn5);let eq11_e393_d_n6: f64 = (locals.var_qd_dn6 + locals.var_qd_nqs_dn6);let eq11_e393_d_n8: f64 = (locals.var_qd_dn8 + locals.var_qd_nqs_dn8);let eq11_e393_d_n10: f64 = (locals.var_qd_dn10 + locals.var_qd_nqs_dn10);let eq11_e393_d_n11: f64 = (locals.var_qd_dn11 + locals.var_qd_nqs_dn11);let eq11_e393_d_n12: f64 = (locals.var_qd_dn12 + locals.var_qd_nqs_dn12);let eq11_e394_q: f64 = eq11_e393;let eq11_e395: f64 = (p.p33 * eq11_e393);let eq11_e395_d_n0: f64 = (p.p33 * eq11_e393_d_n0);let eq11_e395_d_n2: f64 = (p.p33 * eq11_e393_d_n2);let eq11_e395_d_n4: f64 = (p.p33 * eq11_e393_d_n4);let eq11_e395_d_n5: f64 = (p.p33 * eq11_e393_d_n5);let eq11_e395_d_n6: f64 = (p.p33 * eq11_e393_d_n6);let eq11_e395_d_n8: f64 = (p.p33 * eq11_e393_d_n8);let eq11_e395_d_n10: f64 = (p.p33 * eq11_e393_d_n10);let eq11_e395_d_n11: f64 = (p.p33 * eq11_e393_d_n11);let eq11_e395_d_n12: f64 = (p.p33 * eq11_e393_d_n12);let eq11_e395_q: f64 = (p.p33 * eq11_e394_q);let eq11_reactive_node_derivatives: [f64; 13] = [eq11_e395_d_n0, 0.0, eq11_e395_d_n2, 0.0, eq11_e395_d_n4, eq11_e395_d_n5, eq11_e395_d_n6, 0.0, eq11_e395_d_n8, 0.0, eq11_e395_d_n10, eq11_e395_d_n11, eq11_e395_d_n12];let eq11_reactive_branch_derivatives: [f64; 8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[11]),
-            Some(nodes[12]),
-            nodes,
+        stamper.stamp_current_reactive_dense_local(
+            Some(11),
+            Some(12),
             &eq11_reactive_node_derivatives,
-            branches,
             &eq11_reactive_branch_derivatives,
             multiplicity,
         );let eq12_e399: f64 = (locals.var_qb + locals.var_qb_nqs);let eq12_e400_q: f64 = eq12_e399;let eq12_e401: f64 = (p.p33 * eq12_e399);let eq12_e401_d_n0: f64 = (p.p33 * locals.var_qb_dn0);let eq12_e401_d_n2: f64 = (p.p33 * locals.var_qb_dn2);let eq12_e401_d_n4: f64 = (p.p33 * locals.var_qb_dn4);let eq12_e401_d_n5: f64 = (p.p33 * locals.var_qb_dn5);let eq12_e401_d_n6: f64 = (p.p33 * locals.var_qb_dn6);let eq12_e401_d_n8: f64 = (p.p33 * locals.var_qb_dn8);let eq12_e401_d_n9: f64 = (p.p33 * locals.var_qb_nqs_dn9);let eq12_e401_d_n10: f64 = (p.p33 * locals.var_qb_dn10);let eq12_e401_d_n11: f64 = (p.p33 * locals.var_qb_dn11);let eq12_e401_d_n12: f64 = (p.p33 * locals.var_qb_dn12);let eq12_e401_q: f64 = (p.p33 * eq12_e400_q);let eq12_reactive_node_derivatives: [f64; 13] = [eq12_e401_d_n0, 0.0, eq12_e401_d_n2, 0.0, eq12_e401_d_n4, eq12_e401_d_n5, eq12_e401_d_n6, 0.0, eq12_e401_d_n8, eq12_e401_d_n9, eq12_e401_d_n10, eq12_e401_d_n11, eq12_e401_d_n12];let eq12_reactive_branch_derivatives: [f64; 8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[6]),
-            Some(nodes[12]),
-            nodes,
+        stamper.stamp_current_reactive_dense_local(
+            Some(6),
+            Some(12),
             &eq12_reactive_node_derivatives,
-            branches,
             &eq12_reactive_branch_derivatives,
             multiplicity,
         );let eq18_e430: f64 = ((nv7 - 0.0) * locals.var_sigrat_s);let eq18_e430_d_n0: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn0);let eq18_e430_d_n2: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn2);let eq18_e430_d_n4: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn4);let eq18_e430_d_n5: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn5);let eq18_e430_d_n6: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn6);let eq18_e430_d_n8: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn8);let eq18_e430_d_n10: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn10);let eq18_e430_d_n11: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn11);let eq18_e430_d_n12: f64 = ((nv7 - 0.0) * locals.var_sigrat_s_dn12);let eq18_e431_q: f64 = eq18_e430;let eq18_reactive_node_derivatives: [f64; 13] = [eq18_e430_d_n0, 0.0, eq18_e430_d_n2, 0.0, eq18_e430_d_n4, eq18_e430_d_n5, eq18_e430_d_n6, locals.var_sigrat_s, eq18_e430_d_n8, 0.0, eq18_e430_d_n10, eq18_e430_d_n11, eq18_e430_d_n12];let eq18_reactive_branch_derivatives: [f64; 8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[5]),
-            Some(nodes[12]),
-            nodes,
+        stamper.stamp_current_reactive_dense_local(
+            Some(5),
+            Some(12),
             &eq18_reactive_node_derivatives,
-            branches,
             &eq18_reactive_branch_derivatives,
             multiplicity,
         );let eq19_e434: f64 = ((nv7 - 0.0) * locals.var_sigrat_d);let eq19_e434_d_n0: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn0);let eq19_e434_d_n2: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn2);let eq19_e434_d_n4: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn4);let eq19_e434_d_n5: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn5);let eq19_e434_d_n6: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn6);let eq19_e434_d_n8: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn8);let eq19_e434_d_n10: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn10);let eq19_e434_d_n11: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn11);let eq19_e434_d_n12: f64 = ((nv7 - 0.0) * locals.var_sigrat_d_dn12);let eq19_e435_q: f64 = eq19_e434;let eq19_reactive_node_derivatives: [f64; 13] = [eq19_e434_d_n0, 0.0, eq19_e434_d_n2, 0.0, eq19_e434_d_n4, eq19_e434_d_n5, eq19_e434_d_n6, locals.var_sigrat_d, eq19_e434_d_n8, 0.0, eq19_e434_d_n10, eq19_e434_d_n11, eq19_e434_d_n12];let eq19_reactive_branch_derivatives: [f64; 8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[5]),
-            Some(nodes[11]),
-            nodes,
+        stamper.stamp_current_reactive_dense_local(
+            Some(5),
+            Some(11),
             &eq19_reactive_node_derivatives,
-            branches,
             &eq19_reactive_branch_derivatives,
             multiplicity,
         );
@@ -870,12 +859,10 @@ impl Instance {
     }
 };
         let eq28_reactive_node_derivatives: [f64; 13] = [eq28_e498_q_d_n0, 0.0, eq28_e498_q_d_n2, 0.0, eq28_e498_q_d_n4, eq28_e498_q_d_n5, eq28_e498_q_d_n6, 0.0, eq28_e498_q_d_n8, 0.0, eq28_e498_q_d_n10, eq28_e498_q_d_n11, eq28_e498_q_d_n12];let eq28_reactive_branch_derivatives: [f64; 8] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[4]),
+        stamper.stamp_current_reactive_dense_local(
+            Some(4),
             None,
-            nodes,
             &eq28_reactive_node_derivatives,
-            branches,
             &eq28_reactive_branch_derivatives,
             multiplicity,
         );
@@ -887,10 +874,10 @@ impl Instance {
         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[10]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(10),
             None,
-            nodes[10],
+            10,
             multiplicity * (eq30_e512_q_d_n10),
         );
         let (eq32_e526, eq32_e526_d_n0, eq32_e526_d_n2, eq32_e526_d_n4, eq32_e526_d_n5, eq32_e526_d_n6, eq32_e526_d_n8, eq32_e526_d_n10, eq32_e526_d_n11, eq32_e526_d_n12, eq32_e526_q, eq32_e526_q_d_n8,) = {
@@ -901,10 +888,10 @@ impl Instance {
         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[8]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(8),
             None,
-            nodes[8],
+            8,
             multiplicity * (eq32_e526_q_d_n8),
         );
         let (eq33_e535, eq33_e535_d_n0, eq33_e535_d_n2, eq33_e535_d_n4, eq33_e535_d_n5, eq33_e535_d_n6, eq33_e535_d_n8, eq33_e535_d_n9, eq33_e535_d_n10, eq33_e535_d_n11, eq33_e535_d_n12, eq33_e535_q, eq33_e535_q_d_n9,) = {
@@ -915,10 +902,10 @@ impl Instance {
         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,)
     }
 };
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[9]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(9),
             None,
-            nodes[9],
+            9,
             multiplicity * (eq33_e535_q_d_n9),
         );
     }

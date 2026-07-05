@@ -316,48 +316,48 @@ impl Instance {
         let sb=&self.scalar_static_bool;
         let b=ctx.node_voltage(n[2]);let e=((ctx.temperature()+b)+sf[0]);let g=1300.0;let h=173.14999999999998;let i=(e>h);let j=(if i{e}else{h});let k=(g<j);let l=(if k{g}else{j});let m_=1.0;let n_=0.0;let t=8.6170869e-5;let u=(l*t);let v=(l/sf[5]);let A=(v-m_);let B=(sf[7]*A);let H=((((v).ln()*sf[6])+(B/u))).exp();let I=(sf[9]*H);let Q=(sf[11]*(m_+(A*sf[12])));let V=(sf[13]*(m_+(A*sf[14])));let a2=300.15;let a4=(l/a2);let a6=0.000702;let a7=(l*a6);let a8=(l*a7);let aa=(l+1108.0);let ad=(-(1.16-(a8/aa)));let ae=1.3806226e-23;let ag=(ae*(l+l));let al=(-(u+u));let am=1.5;let ap=1.6021918e-19;let ar=((am*(a4).ln())+(((ad/ag)+1.3454442398941469e20)*ap));let as_=(al*ar);let av=((sf[19]-as_)/sf[18]);let aw=(sf[19]-av);let az=0.0004;let aE=(m_+(sf[20]*(sf[22]-(aw/av))));let aF=(sf[17]/aE);let aH=(as_+(a4*av));let aI=(aH-av);let aO=(m_+(sf[20]*((az*(l-a2))-(aI/av))));let aP=(aF*aO);let aU=(sf[23]*(ctx.node_voltage(n[3])-ctx.node_voltage(n[4])));let b2=(if (I>n_){m_}else{n_});let b4=(u*sf[24]);let b6=(if (b2!=0.0){(aU/b4)}else{n_});let b8=((-aU)-V);let ba=(u*sf[25]);let bc=(if (b2!=0.0){(b8/ba)}else{n_});let bd=(-V);let bf=(if (b2!=0.0){(bd/ba)}else{n_});let bg=80.0;let bi=(if (b6>bg){m_}else{n_});let bj=((b2!=0.0)&&(bi!=0.0));let bp=((b2!=0.0)&&(!(bi!=0.0)));let bq=(if bp{m_}else{(if bj{(m_+(b6-bg))}else{n_})});let br_=((if bj{bg}else{b6})).exp();let bu=37.0;let bv=(bc>=bu);let bw=(!bv);let bx=-37.0;let by=(bc<=bx);let bA=(bw&&(!by));let bB=(bc).exp();let bC=(m_+bB);let bE=(bw&&by);let bI=(bf>=bu);let bJ=(!bI);let bK=(bf<=bx);let bM=(bJ&&(!bK));let bN=(bf).exp();let bO=(m_+bN);let bQ=(bJ&&bK);let bV=(if (b2!=0.0){((if bA{(bC).ln()}else{(if bE{bB}else{(if bv{bc}else{n_})})})-(if bM{(bO).ln()}else{(if bQ{bN}else{(if bI{bf}else{n_})})}))}else{n_});let bW=((if (b2!=0.0){(bq*br_)}else{bq})-m_);let bY=(Q*bV);let c0=(aU).abs();let c1=f64::powf(c0,(sf[15]*(m_+(A*sf[16]))));let c3=(m_+(sf[26]*c1));let c7=(!(b2!=0.0));let dw=(sf[46]*(m_+((f64::powf((m_+f64::powf((((ctx.node_voltage(n[0])-ctx.node_voltage(n[1]))/sf[43])).abs(),sf[44])),sf[45])-m_)*sf[47])));let dN=(aU+((-aH)*sf[52]));let dP=(if (dN>n_){m_}else{n_});let dV=(if (dP!=0.0){sf[57]}else{n_});let dY=(m_-(sf[54]*(sf[54]*dV)));let e5=(dN*sf[59]);let e7=(sf[54]+(e5/aH));let eb=(!(dP!=0.0));let ed=(m_-(aU/aH));let eg=((sf[58]*(ed).ln())).exp();let eh=(m_-eg);let em=((if eb{((aH*eh)/sf[58])}else{(if (dP!=0.0){((aH*dY)/sf[58])}else{n_})})+(if eb{n_}else{(if (dP!=0.0){(dV*(dN*e7))}else{n_})}));let eY=0.0;let f8=(b*sf[75]);let f9=0.0;let fi=0.0;let fo=0.0;let fK=(if k{n_}else{(if i{m_}else{n_})});let fL=(t*fK);let fM=(fK/sf[5]);let g7=(fK/a2);let gw=((ar*(-(fL+fL)))+(al*((am*(g7/a4))+(ap*(((ag*(((aa*((a7*fK)+(l*(a6*fK))))-(a8*fK))/(aa*aa)))-(ad*(ae*(fK+fK))))/(ag*ag))))));let gy=((-gw)/sf[18]);let gD=(av*av);let gO=(gw+((av*g7)+(a4*gy)));let h8=(if (b2!=0.0){((-(aU*(sf[24]*fL)))/(b4*b4))}else{n_});let h9=(if (b2!=0.0){(sf[23]/b4)}else{n_});let ha=(if (b2!=0.0){(sf[77]/b4)}else{n_});let hc=(sf[25]*fL);let hd=(ba*(-(sf[13]*(sf[14]*fM))));let hg=(ba*ba);let hk=(if (b2!=0.0){((hd-(b8*hc))/hg)}else{n_});let hl=(if (b2!=0.0){(sf[77]/ba)}else{n_});let hm=(if (b2!=0.0){(sf[23]/ba)}else{n_});let hq=(if (b2!=0.0){((hd-(bd*hc))/hg)}else{n_});let hx=(if bp{n_}else{(if bj{h8}else{n_})});let hy=(if bp{n_}else{(if bj{h9}else{n_})});let hz=(if bp{n_}else{(if bj{ha}else{n_})});let hP=(bB*hk);let hQ=(bB*hl);let hR=(bB*hm);let i4=(bN*hq);let jW=(sf[52]*(-gO));let k6=(aH*aH);let lh=1.0;let lm=(sf[75]*lh);
 
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[6]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(6),
             None,
-            nodes[6],
+            6,
             multiplicity * ((if (sf[49]!=0.0){(dw*lh)}else{n_})),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[2]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(2),
             None,
-            nodes[2],
+            2,
             multiplicity * ((if (sf[62]!=0.0){lm}else{n_})),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[2]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(2),
             None,
-            nodes[2],
+            2,
             multiplicity * ((if sb[17]{lm}else{n_})),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[5]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(5),
             None,
-            nodes[5],
+            5,
             multiplicity * ((if sb[17]{(sf[76]*lh)}else{n_})),
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[3]),
-            Some(nodes[4]),
-            nodes[2],
+        stamper.stamp_current_reactive_node3_local(
+            Some(3),
+            Some(4),
+            2,
             multiplicity * ((sf[3]*(sf[23]*((em*((aO*((-(sf[17]*(sf[20]*(-(((av*(-gy))-(aw*gy))/gD)))))/(aE*aE)))+(aF*(sf[20]*((az*fK)-(((av*(gO-gy))-(aI*gy))/gD))))))+(aP*((if eb{(((eh*gO)+(aH*(-(eg*(sf[58]*((-((-(aU*gO))/k6))/ed))))))/sf[58])}else{(if (dP!=0.0){((dY*gO)/sf[58])}else{n_})})+(if eb{n_}else{(if (dP!=0.0){(dV*((e7*jW)+(dN*(((aH*(sf[59]*jW))-(e5*gO))/k6))))}else{n_})}))))))),
-            nodes[3],
+            3,
             multiplicity * ((sf[3]*(sf[23]*(aP*((if eb{((aH*(-(eg*(sf[58]*((-(sf[23]/aH))/ed)))))/sf[58])}else{n_})+(if eb{n_}else{(if (dP!=0.0){(dV*((sf[23]*e7)+(dN*(sf[80]/aH))))}else{n_})})))))),
-            nodes[4],
+            4,
             multiplicity * ((sf[3]*(sf[23]*(aP*((if eb{((aH*(-(eg*(sf[58]*((-(sf[77]/aH))/ed)))))/sf[58])}else{n_})+(if eb{n_}else{(if (dP!=0.0){(dV*((e7*sf[77])+(dN*(sf[81]/aH))))}else{n_})})))))),
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[3]),
-            Some(nodes[4]),
-            nodes[2],
+        stamper.stamp_current_reactive_node3_local(
+            Some(3),
+            Some(4),
+            2,
             multiplicity * ((sf[3]*(sf[23]*(dw*(if c7{n_}else{(if (b2!=0.0){(((bW*(sf[9]*(H*((sf[6]*(fM/v))+(((u*(sf[7]*fM))-(B*fL))/(u*u))))))+(I*(if (b2!=0.0){((br_*hx)+(bq*(br_*(if bj{n_}else{h8}))))}else{hx})))-(((c3*((bV*(sf[11]*(sf[12]*fM)))+(Q*(if (b2!=0.0){((if bA{(hP/bC)}else{(if bE{hP}else{(if bv{hk}else{n_})})})-(if bM{(i4/bO)}else{(if bQ{i4}else{(if bI{hq}else{n_})})}))}else{n_}))))-(bY*(sf[26]*((sf[15]*(sf[16]*fM))*(c1*(c0).ln())))))/(c3*c3)))}else{n_})}))))),
-            nodes[3],
+            3,
             multiplicity * ((sf[3]*(sf[23]*(dw*(if c7{n_}else{(if (b2!=0.0){((I*(if (b2!=0.0){((br_*hy)+(bq*(br_*(if bj{n_}else{h9}))))}else{hy}))-((Q*(if (b2!=0.0){(if bA{(hQ/bC)}else{(if bE{hQ}else{(if bv{hl}else{n_})})})}else{n_}))/c3))}else{n_})}))))),
-            nodes[4],
+            4,
             multiplicity * ((sf[3]*(sf[23]*(dw*(if c7{n_}else{(if (b2!=0.0){((I*(if (b2!=0.0){((br_*hz)+(bq*(br_*(if bj{n_}else{ha}))))}else{hz}))-((Q*(if (b2!=0.0){(if bA{(hR/bC)}else{(if bE{hR}else{(if bv{hm}else{n_})})})}else{n_}))/c3))}else{n_})}))))),
         );
     }

@@ -15478,9 +15478,13 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("    fn finish_set_parameter(&mut self, index: usize) {\n");
     out.push_str("        self.mark_param_given(index);\n");
     if !extensions.set_parameter_hook.is_empty() {
-        out.push_str("        ");
-        out.push_str(extensions.set_parameter_hook.as_str());
-        out.push('\n');
+        for line in extensions.set_parameter_hook.lines() {
+            if !line.trim().is_empty() {
+                out.push_str("        ");
+                out.push_str(line.trim_end());
+                out.push('\n');
+            }
+        }
     }
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
@@ -15607,10 +15611,15 @@ fn emit_parameter_struct_fields(
     const FIELDS_PER_LINE: usize = 8;
     for chunk in artifact.mir.parameters.chunks(FIELDS_PER_LINE) {
         out.push_str("    ");
-        for parameter in chunk {
-            let field = &parameter_fields[parameter.name.as_str()];
-            out.push_str(&format!("pub {field}: f64, "));
-        }
+        let fields = chunk
+            .iter()
+            .map(|parameter| {
+                let field = &parameter_fields[parameter.name.as_str()];
+                format!("pub {field}: f64")
+            })
+            .collect::<Vec<_>>();
+        out.push_str(&fields.join(", "));
+        out.push(',');
         out.push('\n');
     }
 }
@@ -15831,33 +15840,29 @@ fn emit_parameter_metadata(
 
 fn emit_parameter_name_lookup_entries(artifact: &CanonicalIrArtifact, out: &mut String) {
     const ENTRIES_PER_LINE: usize = 16;
-    let mut entries_on_line = 0usize;
-    out.push_str("    ");
+    let mut entries = Vec::new();
     for parameter in &artifact.mir.parameters {
-        emit_parameter_name_lookup_entry(parameter.name.as_str(), usize::from(parameter.id), out);
-        entries_on_line += 1;
-        if entries_on_line == ENTRIES_PER_LINE {
-            out.push('\n');
-            out.push_str("    ");
-            entries_on_line = 0;
-        }
+        entries.push(parameter_name_lookup_entry(
+            parameter.name.as_str(),
+            usize::from(parameter.id),
+        ));
         for alias in &parameter.aliases {
-            emit_parameter_name_lookup_entry(alias.as_str(), usize::from(parameter.id), out);
-            entries_on_line += 1;
-            if entries_on_line == ENTRIES_PER_LINE {
-                out.push('\n');
-                out.push_str("    ");
-                entries_on_line = 0;
-            }
+            entries.push(parameter_name_lookup_entry(
+                alias.as_str(),
+                usize::from(parameter.id),
+            ));
         }
     }
-    if entries_on_line != 0 {
-        out.push('\n');
+
+    for chunk in entries.chunks(ENTRIES_PER_LINE) {
+        out.push_str("    ");
+        out.push_str(&chunk.join(", "));
+        out.push_str(",\n");
     }
 }
 
-fn emit_parameter_name_lookup_entry(name: &str, index: usize, out: &mut String) {
-    out.push_str(&format!("({:?}, {index}), ", name.to_ascii_lowercase()));
+fn parameter_name_lookup_entry(name: &str, index: usize) -> String {
+    format!("({:?}, {index})", name.to_ascii_lowercase())
 }
 
 fn emit_chunked_parameter_metadata_array<F>(
@@ -15870,7 +15875,7 @@ where
     F: FnMut(&MirParameterSlot) -> Result<String, RustBackendError>,
 {
     for chunk in parameters_by_index.chunks(entries_per_line) {
-        out.push_str("    ");
+        let mut entries = Vec::with_capacity(chunk.len());
         for parameter in chunk {
             let Some(parameter) = parameter else {
                 return Err(RustBackendError::unsupported(
@@ -15879,11 +15884,11 @@ where
                     "missing generated parameter id",
                 ));
             };
-            let entry = emit_entry(parameter)?;
-            out.push_str(&entry);
-            out.push_str(", ");
+            entries.push(emit_entry(parameter)?);
         }
-        out.push('\n');
+        out.push_str("    ");
+        out.push_str(&entries.join(", "));
+        out.push_str(",\n");
     }
     Ok(())
 }

@@ -106,22 +106,6 @@ impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let n=self.nodes;
         let nodes=n;
-        let m=self.multiplicity;
-        let multiplicity=m;
-        let timestep = self.timestep;
-        let ddt_state_current = self.ddt_state_current.as_mut();
-        let ddt_state_previous = self.ddt_state_previous.as_mut();
-        let ddt_state_older = self.ddt_state_older.as_mut();
-        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
-        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
-        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
-        let ddt_active = self.ddt_coefficients.active;
-        let ddt_scale = self.ddt_coefficients.derivative_scale;
-        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
-        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
-        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let sf=&self.scalar_static_f64;
-        let sb=&self.scalar_static_bool;
         let CommonStampValues {
             b, m_, n_, s, t, u, v, H,
             J, M, ae, al, am, aq, ar, as_,
@@ -142,6 +126,22 @@ impl Instance {
             GL, GM, GN, GO, GS, GT, GU, GZ,
             H0, H1, H2, H3, H4, H5, H6,
         }=self.eval_common_stamp_values(ctx);
+        let m=self.multiplicity;
+        let multiplicity=m;
+        let timestep = self.timestep;
+        let ddt_state_current = self.ddt_state_current.as_mut();
+        let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_older = self.ddt_state_older.as_mut();
+        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
+        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
+        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
+        let ddt_active = self.ddt_coefficients.active;
+        let ddt_scale = self.ddt_coefficients.derivative_scale;
+        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
+        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
+        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
         let x=(v<n_);let z=(-(if x{v}else{n_}));let D=(m_+(sf[5]*f64::powf(z,sf[6])));let O=(M*sf[10]);let P=(D*O);let R=(M*sf[11]);let aw=((ae/sf[32])).exp();let ax=(sf[31]*aw);let ay=(ax/M);let ct=(cq-s);let cv=(ck-cn);let dN=-1.0;let e7=(e6-m_);let ea=(!(dG!=0.0));let f0=(ez-m_);let f2=(n_*eZ);let f6=(!(ed!=0.0));let g6=(if (ay>n_){m_}else{n_});let g7=(H*sf[32]);let g9=(if (g6!=0.0){(v/g7)}else{fn_});let ga=(if (g6!=0.0){fe}else{ff});let gb=(if (g6!=0.0){el}else{fg});let gd=(if (g9>cM){m_}else{n_});let ge=((g6!=0.0)&&(gd!=0.0));let gk=((g6!=0.0)&&(!(gd!=0.0)));let gl=(if gk{m_}else{(if ge{(m_+(g9-cM))}else{ft})});let gm=((if ge{cM}else{g9})).exp();let gp=(ga>=d0);let gq=(!gp);let gr=(ga<=d3);let gt=(gq&&(!gr));let gu=(ga).exp();let gv=(m_+gu);let gx=(gq&&gr);let gB=(gb>=d0);let gC=(!gB);let gD=(gb<=d3);let gF=(gC&&(!gD));let gG=(gb).exp();let gH=(m_+gG);let gJ=(gC&&gD);let gP=((if (g6!=0.0){(gl*gm)}else{gl})-m_);let gU=(m_+(sf[55]*f64::powf(fX,sf[37])));let gY=(!(g6!=0.0));let h3=1e-9;let h7=(((if (h0<cp){h0}else{cp})/(if (dw>h3){dw}else{h3}))).abs();let h8=(dE-(if ea{n_}else{(if (dG!=0.0){(am*e7)}else{n_})}));let ha=((if f6{n_}else{(if (ed!=0.0){((as_*f0)-(f2/dz))}else{n_})})+(h8/P));let hc=((if gY{n_}else{(if (g6!=0.0){((ay*gP)-((n_*(if (g6!=0.0){((if gt{(gv).ln()}else{(if gx{gu}else{(if gp{ga}else{n_})})})-(if gF{(gH).ln()}else{(if gJ{gG}else{(if gB{gb}else{n_})})}))}else{fT}))/gU))}else{n_})})+(g4/R));let hE=(dE*sf[63]);let hW=((J*sf[69])).exp();let hZ=f64::powf((m_+f64::powf((((sf[4]*ct)/sf[64])).abs(),sf[65])),sf[70]);let i0=((sf[68]*hW)*hZ);let i4=((J*sf[72])).exp();let i5=(sf[71]*i4);let i9=((J*sf[74])).exp();let ic=f64::powf((m_+f64::powf((((sf[4]*cv)/sf[66])).abs(),sf[67])),sf[75]);let id=((sf[73]*i9)*ic);let iF=(m_+f64::powf(((iz).abs()/sf[84]),sf[85]));let iH=(if (sf[83]!=0.0){(i0/iF)}else{i0});let lH=((if (sf[87]!=0.0){(iH+sf[88])}else{iH})/sf[3]);let lM=((if (sf[87]!=0.0){(id+sf[90])}else{id})/sf[3]);let lR=((if (sf[87]!=0.0){(i5+sf[89])}else{i5})/sf[3]);let lU=1e-6;let lX=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, h0);let m4=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, iz);let ma=ctx.node_voltage(n[0]);let me=((-((ha*ie)).abs())-((hc*(cq-ma))).abs());let mk=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, mj);let mt=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 3, mj);let mz=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 4, my);let mJ=(lH>sf[129]);let mK=(if mJ{lH}else{sf[129]});let mN=(lM>sf[129]);let mO=(if mN{lM}else{sf[129]});let mR=(ma-t);let mS=(lR>sf[129]);let mT=(if mS{lR}else{sf[129]});let nt=(sf[6]*f64::powf(z,sf[137]));let nC=(M*(sf[9]*nA));let nE=(D*(sf[10]*nC));let nF=(O*(sf[5]*((-(if x{sf[136]}else{n_}))*nt)));let nG=(O*(sf[5]*((-(if x{sf[4]}else{n_}))*nt)));let o1=(M*M);let w9=(if (g6!=0.0){((-(v*(sf[32]*ny)))/(g7*g7))}else{uw});let wa=(if (g6!=0.0){(sf[136]/g7)}else{ux});let wb=(if (g6!=0.0){(sf[4]/g7)}else{uy});let wc=(if (g6!=0.0){n_}else{uz});let wd=(if (g6!=0.0){um}else{un});let we=(if (g6!=0.0){sS}else{uo});let wf=(if (g6!=0.0){sR}else{up});let wg=(if (g6!=0.0){n_}else{uq});let wh=(if (g6!=0.0){sY}else{ur});
         let wq=(if gk{n_}else{(if ge{w9}else{uU})});let wr=(if gk{n_}else{(if ge{wa}else{uV})});let ws=(if gk{n_}else{(if ge{wb}else{uW})});let wt=(if gk{n_}else{(if ge{wc}else{uX})});let wO=(gu*wd);let wP=(gu*we);let wQ=(gu*wf);let wR=(gu*wg);let x8=(gG*wh);let xO=(P*P);let z9=(hZ*(sf[68]*(hW*(sf[69]*nA))));let Er=ddt_scale;let EW=(sf[134]*Er);let F6=-0.0;
 
@@ -555,11 +555,6 @@ impl Instance {
         let nodes=n;
         let br=self.branches;
         let branches=br;
-        let p=&(*self.params);
-        let m=self.multiplicity;
-        let multiplicity=m;
-        let sf=&self.scalar_static_f64;
-        let sb=&self.scalar_static_bool;
         let CommonStampValues {
             b, m_, n_, s, t, u, v, H,
             J, M, ae, al, am, aq, ar, as_,
@@ -580,108 +575,113 @@ impl Instance {
             GL, GM, GN, GO, GS, GT, GU, GZ,
             H0, H1, H2, H3, H4, H5, H6,
         }=self.eval_common_stamp_values(ctx);
+        let p=&(*self.params);
+        let m=self.multiplicity;
+        let multiplicity=m;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
         let lX=0.0;let m4=0.0;let mk=0.0;let mt=0.0;let mz=0.0;let Er=1.0;let EW=(sf[134]*Er);
 
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[9]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(9),
             None,
-            nodes[9],
+            9,
             multiplicity * ((sf[133]*Er)),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[8]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(8),
             None,
-            nodes[8],
+            8,
             multiplicity * ((if (sf[83]!=0.0){(is*Er)}else{n_})),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[3]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(3),
             None,
-            nodes[3],
+            3,
             multiplicity * ((if (sf[116]!=0.0){EW}else{n_})),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[3]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(3),
             None,
-            nodes[3],
+            3,
             multiplicity * ((if sb[28]{EW}else{n_})),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[7]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(7),
             None,
-            nodes[7],
+            7,
             multiplicity * ((if sb[28]{(sf[135]*Er)}else{n_})),
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[5]),
-            Some(nodes[6]),
-            nodes[3],
+        stamper.stamp_current_reactive_node3_local(
+            Some(5),
+            Some(6),
+            3,
             multiplicity * (Ge),
-            nodes[5],
+            5,
             multiplicity * (Gf),
-            nodes[6],
+            6,
             multiplicity * (Gg),
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[5]),
-            Some(nodes[6]),
-            nodes[3],
+        stamper.stamp_current_reactive_node3_local(
+            Some(5),
+            Some(6),
+            3,
             multiplicity * (Gk),
-            nodes[5],
+            5,
             multiplicity * (Gl),
-            nodes[6],
+            6,
             multiplicity * (Gm),
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[1]),
-            Some(nodes[4]),
-            &[nodes[1], nodes[3], nodes[4], nodes[5], nodes[6]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(1),
+            Some(4),
+            &[1, 3, 4, 5, 6],
             &[Gs, Gt, Gu, Gv, Gw],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[5]),
-            Some(nodes[4]),
-            &[nodes[1], nodes[3], nodes[4], nodes[5], nodes[6]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(5),
+            Some(4),
+            &[1, 3, 4, 5, 6],
             &[GC, GD, GE, GF, GG],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[5]),
-            Some(nodes[4]),
-            &[nodes[3], nodes[4], nodes[5], nodes[6]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(5),
+            Some(4),
+            &[3, 4, 5, 6],
             &[GL, GM, GN, GO],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[2]),
-            Some(nodes[4]),
-            nodes[2],
+        stamper.stamp_current_reactive_node3_local(
+            Some(2),
+            Some(4),
+            2,
             multiplicity * (GS),
-            nodes[3],
+            3,
             multiplicity * (GT),
-            nodes[4],
+            4,
             multiplicity * (GU),
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[5]),
-            Some(nodes[6]),
-            &[nodes[3], nodes[4], nodes[5], nodes[6]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(5),
+            Some(6),
+            &[3, 4, 5, 6],
             &[GZ, H0, H1, H2],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[5]),
-            Some(nodes[4]),
-            &[nodes[3], nodes[4], nodes[5], nodes[6]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(5),
+            Some(4),
+            &[3, 4, 5, 6],
             &[H3, H4, H5, H6],
             &[],
             &[],

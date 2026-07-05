@@ -148,22 +148,6 @@ impl Instance {
         let n=self.nodes;
         let nodes=n;
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
-        let m=self.multiplicity;
-        let multiplicity=m;
-        let timestep = self.timestep;
-        let ddt_state_current = self.ddt_state_current.as_mut();
-        let ddt_state_previous = self.ddt_state_previous.as_mut();
-        let ddt_state_older = self.ddt_state_older.as_mut();
-        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
-        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
-        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
-        let ddt_active = self.ddt_coefficients.active;
-        let ddt_scale = self.ddt_coefficients.derivative_scale;
-        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
-        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
-        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
-        let sf=&self.scalar_static_f64;
-        let sb=&self.scalar_static_bool;
         let CommonStampValues {
             a, b, c, s, A, K, N, X,
             aM, bb, bp, br_, fq, fL, fM, fN,
@@ -198,6 +182,22 @@ impl Instance {
             aJK, aJL, aJM, aJN, aJO, aJP, aJQ, aJR,
             aJS, aJT, aJU, aJV, aJW,
         }=self.eval_common_stamp_values(ctx);
+        let m=self.multiplicity;
+        let multiplicity=m;
+        let timestep = self.timestep;
+        let ddt_state_current = self.ddt_state_current.as_mut();
+        let ddt_state_previous = self.ddt_state_previous.as_mut();
+        let ddt_state_older = self.ddt_state_older.as_mut();
+        let ddt_state_initialized = self.ddt_state_initialized.as_mut();
+        let ddt_derivative_current = self.ddt_derivative_current.as_mut();
+        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();
+        let ddt_active = self.ddt_coefficients.active;
+        let ddt_scale = self.ddt_coefficients.derivative_scale;
+        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;
+        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;
+        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
         let d=0.01;let l=(if ((a!=0.0)&&sb[0]){1e-12}else{(if ((a!=0.0)&&(sf[0]!=0.0)){sf[1]}else{b})});let a2=(if (a!=0.0){sf[18]}else{b});let dw=((sf[69]*f64::powf(aM,sf[72]))*(((bb*sf[74])/sf[296])).exp());let dy=(if (dw>b){c}else{b});let dF=(if (!(dy!=0.0)){b}else{(if (dy!=0.0){(sf[296]*((c+(s/dw))).ln())}else{b})});let e4=f64::powf(aM,sf[82]);let eb=(((bb*sf[84])/sf[298])).exp();let ec=((sf[80]*e4)*eb);let ee=(if (ec>b){c}else{b});let el=(if (!(ee!=0.0)){b}else{(if (ee!=0.0){(sf[298]*((c+(s/ec))).ln())}else{b})});let eA=(eb*(e4*sf[86]));let eC=(if (eA>b){c}else{b});let eJ=(if (!(eC!=0.0)){b}else{(if (eC!=0.0){(sf[298]*((c+(s/eA))).ln())}else{b})});let fg=((sf[92]*f64::powf(aM,sf[94]))*(((bb*sf[96])/sf[300])).exp());let fi=(if (fg>b){c}else{b});let fp=(if (!(fi!=0.0)){b}else{(if (fi!=0.0){(sf[300]*((c+(s/fg))).ln())}else{b})});let fZ=f64::powf(fM,sf[101]);let g1=(if sb[13]{(sf[99]*fZ)}else{(if (sf[98]!=0.0){(sf[99]*f64::powf(fM,sf[100]))}else{b})});let ga=(if sb[14]{(fZ*sf[103])}else{(if (sf[102]!=0.0){(sf[103]*f64::powf(fM,sf[104]))}else{b})});let gj=f64::powf(fM,sf[108]);let gl=(if sb[15]{(sf[106]*gj)}else{(if (sf[105]!=0.0){(sf[106]*f64::powf(fM,sf[107]))}else{b})});let gu=(if sb[16]{(gj*sf[110])}else{(if (sf[109]!=0.0){(sf[110]*f64::powf(fM,sf[111]))}else{b})});let gy=(sf[112]*f64::powf(fM,sf[113]));let gC=(sf[114]*f64::powf(fM,sf[115]));let gL=(if sb[17]{(fZ*sf[117])}else{(if (sf[116]!=0.0){(sf[117]*f64::powf(fM,sf[118]))}else{b})});let gQ=(sf[119]*(c+(fN*sf[120])));let he=(sf[63]*f64::powf(fM,sf[66]));let hf=(sf[68]*gT);let hi=((hf/hg)).exp();let hj=(he*hi);let hl=(sf[69]*f64::powf(fM,sf[72]));let hm=(sf[74]*gT);let hp=((hm/hn)).exp();let hq=(hl*hp);let hr=f64::powf(fM,sf[77]);let hs=(sf[75]*hr);let ht=(sf[79]*gT);let hw=((ht/hu)).exp();let hx=(hs*hw);let hy=f64::powf(fM,sf[82]);let hz=(sf[80]*hy);let hA=(sf[84]*gT);let hD=((hA/hB)).exp();let hE=(hz*hD);let hF=(sf[85]*hr);let hG=(hw*hF);let hH=(sf[86]*hy);let hI=(hD*hH);let hK=(sf[87]*f64::powf(fM,sf[89]));let hL=(sf[91]*gT);let hO=((hL/hM)).exp();let hP=(hK*hO);let hR=(sf[92]*f64::powf(fM,sf[94]));let hS=(sf[96]*gT);let hT=(sf[93]*fL);let hV=((hS/hT)).exp();let hW=(hR*hV);let i6=(sf[122]*(c+(fN*sf[123])));let ib=(sf[124]*(c+(fN*sf[125])));let kg=(sf[146]*f64::powf(fM,sf[147]));let kk=((kh/ki)).exp();let kv=0.001;let kw=(g1>kv);let ky=1000.0;let kz=(if kw{(c/g1)}else{ky});let kA=(ga>kv);let kC=(if kA{(c/ga)}else{ky});let kD=(gl>kv);let kF=(if kD{(c/gl)}else{ky});let kG=(gu>kv);let kI=(if kG{(c/gu)}else{ky});let kJ=(gy>kv);let kL=(if kJ{(c/gy)}else{ky});let kM=(gL>kv);let kO=(if kM{(c/gL)}else{ky});let kP=(gC>kv);let kR=(if kP{(c/gC)}else{ky});let kS=(gQ>kv);let kU=(if kS{(c/gQ)}else{ky});let l4=(kg>b);let l6=(if l4{(c/kg)}else{b});let ll=(K*(lb-lh));let lt=(K*(le-l8));let lw=(lu-lh);let ly=(K*(lh-le));let lz=(lp-lb);let lA=(lb-l7);let lB=(lq-l8);let lC=(lm-lh);let lH=(K*(lb-lD));let lJ=(ctx.node_voltage(n[3])-lD);let rx=(qF/rw);let ry=(qn/rw);let sh=(if (sf[183]!=0.0){(c+(br_*(if (sf[183]!=0.0){(X*sc)}else{b})))}else{rj});let sj=(if (sh>qN){c}else{b});let sk=((sf[183]!=0.0)&&(sj!=0.0));let sl=(sh).sqrt();let sq=((sf[183]!=0.0)&&(!(sj!=0.0)));let ss=(if sq{0.50005}else{(if sk{(bp*(c+sl))}else{b})});let sG=(sF-c);let sJ=(sc-(if (sf[183]!=0.0){(hc*sG)}else{b}));let sO=(if sb[31]{c}else{ss});let sP=(if sb[31]{b}else{(if (sf[183]!=0.0){(sJ/ss)}else{b})});let td=(if (la<dF){c}else{b});let te=((sf[187]!=0.0)&&(td!=0.0));let tg=((la*tb)).exp();let ti=(!(td!=0.0));let tj=((sf[187]!=0.0)&&ti);let tl=((dF*tb)).exp();let tm=(la-dF);let to=(c+(tb*tm));let tq=(if tj{(tl*to)}else{(if te{tg}else{b})});let tx=(c+(sf[188]*(qS-c)));let ty=(hj*tx);let tz=(t9-c);let tB=(tq-c);let tC=(hq*tB);let tJ=(if sb[36]{(tC+(hj*tz))}else{(if sb[34]{((ty*tz)+tC)}else{b})});let ux=(if (ld<dF){c}else{b});let uy=(sb[41]&&(ux!=0.0));let uA=((ld*uv)).exp();let uC=(!(ux!=0.0));let uD=(sb[41]&&uC);let uF=((dF*uv)).exp();let uG=(ld-dF);let uI=(c+(uv*uG));let uK=(if uD{(uF*uI)}else{(if uy{uA}else{tq})});let uL=(uu-c);let uN=(uK-c);let uQ=(if sb[41]{((hj*uL)+(hq*uN))}else{b});let vs=((td!=0.0)&&sb[44]);
         let vu=((la*vr)).exp();let vw=(ti&&sb[44]);let vy=((dF*vr)).exp();let vA=(c+(tm*vr));let vC=(if vw{(vy*vA)}else{(if vs{vu}else{uK})});let vE=(vq-c);let vG=(vC-c);let vH=(hq*vG);let vP=(if sb[46]{(sf[186]*(vH+(hj*vE)))}else{(if sb[45]{(sf[186]*((ty*vE)+vH))}else{(if sb[41]{b}else{(if sb[38]{(tJ-(sf[34]*(u5-kk)))}else{tJ})})})});let wc=(if sb[47]{(vP-(sf[192]*(w7-kk)))}else{vP});let wq=((ux!=0.0)&&sb[44]);let ws=((ld*wp)).exp();let wu=(uC&&sb[44]);let ww=((dF*wp)).exp();let wy=(c+(uG*wp));let wA=(if wu{(ww*wy)}else{(if wq{ws}else{vC})});let wC=(wo-c);let wE=(wA-c);let wI=(if sb[44]{(sf[193]*((hj*wC)+(hq*wE)))}else{(if sb[42]{(uQ-(sf[34]*(v8-kk)))}else{uQ})});let x4=(if sb[47]{(wI-(sf[194]*(wZ-kk)))}else{wI});let xl=(if (lg<el){c}else{b});let xn=((lg*xj)).exp();let xp=(!(xl!=0.0));let xr=((el*xj)).exp();let xs=(lg-el);let xu=(c+(xj*xs));let xw=(if xp{(xr*xu)}else{(if (xl!=0.0){xn}else{wA})});let xx=(xi-c);let xz=(xw-c);let xB=((hx*xx)+(hE*xz));let xY=(if (lo<eJ){c}else{b});let xZ=((sf[195]!=0.0)&&(xY!=0.0));let y1=((lo*xW)).exp();let y4=((sf[195]!=0.0)&&(!(xY!=0.0)));let y6=((eJ*xW)).exp();let y7=(lo-eJ);let y9=(c+(xW*y7));let yb=(if y4{(y6*y9)}else{(if xZ{y1}else{xw})});let yc=(xV-c);let ye=(yb-c);let yj=(if sb[51]{b}else{(if (sf[195]!=0.0){((hG*yc)+(hI*ye))}else{b})});let yL=(kz*lw);let yM=(c+yH);let yN=(c+yK);let yO=(yM/yN);let yR=((yH-yK)-(yO).ln());let yT=(ly+(fL*yR));let yU=(kC*yT);let yV=(l6*yU);let yX=(a2*(bp*l6));let z0=((d+(ly*ly))).sqrt();let z2=(c+(yX*z0));let z3=(kC*z2);let z4=(yV/z3);let z7=((c+(z4*z4))).sqrt();let z8=(yU/z7);let z9=(kF*lz);let za=(lA*rw);let zb=(kI*za);let zc=(kL*lB);let zd=(lC*sO);let ze=(kO*zd);let zf=(kR*lJ);let zj=0.02;let zl=(zj*(c+i6));let zq=(if (sf[197]!=0.0){f64::powf(zl,sf[199])}else{b});let zs=((jo-lg)-zq);let zv=((d+(zs*zs))).sqrt();let zz=(if (sf[197]!=0.0){(zq+(bp*(zs+zv)))}else{b});let zA=(-i6);let zC=f64::powf(zz,sf[200]);let zE=(if (sf[197]!=0.0){(zA*zC)}else{b});let zG=(if (zE<N){c}else{b});let zH=((sf[197]!=0.0)&&(zG!=0.0));let zI=(zE).exp();let zL=((sf[197]!=0.0)&&(!(zG!=0.0)));let zM=(if zL{yq}else{b});let zQ=(if zL{(zM*(c+(zE-N)))}else{(if zH{zI}else{b})});let zR=(sf[196]*zz);let zT=(if (sf[197]!=0.0){(zQ*zR)}else{b});let zU=(lL-rx);let zV=(zU-xB);let A4=(zj*(c+ib));let A9=(if (sf[202]!=0.0){f64::powf(A4,sf[205])}else{b});let Ab=((b-ll)-A9);let Ae=((d+(Ab*Ab))).sqrt();let Ai=(if (sf[202]!=0.0){(A9+(bp*(Ab+Ae)))}else{b});let Aj=(-ib);let Al=f64::powf(Ai,sf[206]);let An=(if (sf[202]!=0.0){(Aj*Al)}else{b});let Ap=(if (An<N){c}else{b});let Aq=((sf[202]!=0.0)&&(Ap!=0.0));let Ar=(An).exp();let Au=((sf[202]!=0.0)&&(!(Ap!=0.0)));let Av=(if Au{yq}else{b});let Az=(if Au{(Av*(c+(An-N)))}else{(if Aq{Ar}else{b})});let AA=(sf[201]*Ai);let AC=(if (sf[202]!=0.0){(Az*AA)}else{zT});let AD=(-yL);let AU=0.1;let AW=(if sb[60]{((c-(lg/sf[210]))-AU)}else{b});let AZ=((qK+(AW*AW))).sqrt();let B8=(if sb[62]{sf[208]}else{(if sb[60]{(sf[208]*(if sb[60]{(AU+(bp*(AW+AZ)))}else{AW}))}else{b})});let Ba=((ry/B8)-c);let Bi=((xB-(if sb[53]{b}else{(if (sf[197]!=0.0){(zT*zV)}else{b})}))-(if sb[63]{b}else{(if (sf[209]!=0.0){(sf[207]*f64::powf(Ba,sf[212]))}else{b})}));let BF=(if (sf[213]!=0.0){(c/hT)}else{Bo});let BH=(if (lF<fp){c}else{b});let BI=((sf[213]!=0.0)&&(BH!=0.0));let BK=((lF*BF)).exp();let BN=((sf[213]!=0.0)&&(!(BH!=0.0)));let BP=((fp*BF)).exp();let BQ=(lF-fp);let BS=(c+(BF*BQ));let BV=(BD-c);let BX=((if BN{(BP*BS)}else{(if BI{BK}else{yb})})-c);let C2=(if sb[67]{b}else{(if (sf[213]!=0.0){((hP*BV)+(hW*BX))}else{b})});let CT=(K*z8);let CV=(K*sP);let It=(Ie*(sf[101]*f64::powf(fM,sf[237])));let IN=(Ie*(sf[108]*f64::powf(fM,sf[240])));let Kk=((hi*(sf[63]*(Ie*(sf[66]*f64::powf(fM,sf[248])))))+(he*(hi*(((hg*(sf[68]*Jn))-(hf*Kb))/Kf))));let KA=((hp*(sf[69]*(Ie*(sf[72]*f64::powf(fM,sf[249])))))+(hl*(hp*(((hn*(sf[74]*Jn))-(hm*Kr))/Kv))));let KE=(Ie*(sf[77]*f64::powf(fM,sf[250])));let KN=(hw*(((hu*(sf[79]*Jn))-(ht*KH))/KL));let KU=(Ie*(sf[82]*f64::powf(fM,sf[251])));let L3=(hD*(((hB*(sf[84]*Jn))-(hA*KX))/L1));let LB=(sf[93]*Id);let LF=(hT*hT);let LP=(sf[122]*(sf[123]*Ib));
         let LR=(sf[124]*(sf[125]*Ib));let OU=(kk*(((ki*OL)-(kh*OO))/OS));let P6=(if kA{((-(if sb[14]{(sf[103]*It)}else{(if (sf[102]!=0.0){(sf[103]*(Ie*(sf[104]*f64::powf(fM,sf[238]))))}else{b})}))/(ga*ga))}else{b});let PK=(if l4{((-(sf[146]*(Ie*(sf[147]*f64::powf(fM,sf[257])))))/(kg*kg))}else{b});let a21=(((rw*ZS)-(qF*a1T))/a20);let a25=(((rw*ZT)-(qF*a1U))/a20);let a29=(((rw*ZU)-(qF*a1V))/a20);let a2d=(((rw*ZV)-(qF*a1W))/a20);let a2h=(((rw*Zi)-(qn*a1T))/a20);let a2k=((-(qn*a1U))/a20);let a2o=(((rw*Zj)-(qn*a1V))/a20);let a2s=(((rw*Zk)-(qn*a1W))/a20);let a3Y=(in_*sl);let a4h=(if sq{b}else{(if sk{(bp*((if (sf[183]!=0.0){(br_*(if (sf[183]!=0.0){(X*a3u)}else{b}))}else{a1p})/a3Y))}else{b})});let a4i=(if sq{b}else{(if sk{(bp*((if (sf[183]!=0.0){(br_*(if (sf[183]!=0.0){(X*a3v)}else{b}))}else{a1q})/a3Y))}else{b})});let a4j=(if sq{b}else{(if sk{(bp*((if (sf[183]!=0.0){(br_*(if (sf[183]!=0.0){(X*a3w)}else{b}))}else{b})/a3Y))}else{b})});let a4k=(if sq{b}else{(if sk{(bp*((if (sf[183]!=0.0){(br_*(if (sf[183]!=0.0){(X*a3x)}else{b}))}else{a1r})/a3Y))}else{b})});let a4l=(if sq{b}else{(if sk{(bp*((if (sf[183]!=0.0){(br_*(if (sf[183]!=0.0){(X*a3y)}else{b}))}else{a1s})/a3Y))}else{b})});let a4m=(if sq{b}else{(if sk{(bp*((if (sf[183]!=0.0){(br_*(if (sf[183]!=0.0){(X*a3z)}else{b}))}else{b})/a3Y))}else{b})});let a59=(ss*ss);let a5P=(if sb[31]{b}else{(if (sf[183]!=0.0){(((ss*(a3u-(if (sf[183]!=0.0){((sG*K4)+(hc*a4C))}else{b})))-(sJ*a4h))/a59)}else{b})});let a5Q=(if sb[31]{b}else{(if (sf[183]!=0.0){(((ss*(a3v-(if (sf[183]!=0.0){(hc*a4D)}else{b})))-(sJ*a4i))/a59)}else{b})});let a5R=(if sb[31]{b}else{(if (sf[183]!=0.0){(((ss*(a3w-(if (sf[183]!=0.0){(hc*a4E)}else{b})))-(sJ*a4j))/a59)}else{b})});let a5S=(if sb[31]{b}else{(if (sf[183]!=0.0){(((ss*(a3x-(if (sf[183]!=0.0){(hc*a4F)}else{b})))-(sJ*a4k))/a59)}else{b})});let a5T=(if sb[31]{b}else{(if (sf[183]!=0.0){(((ss*(a3y-(if (sf[183]!=0.0){(hc*a4G)}else{b})))-(sJ*a4l))/a59)}else{b})});let a5U=(if sb[31]{b}else{(if (sf[183]!=0.0){(((ss*(a3z-(if (sf[183]!=0.0){(hc*a4H)}else{b})))-(sJ*a4m))/a59)}else{b})});let a5V=(if sb[31]{b}else{(if (sf[183]!=0.0){((-(if (sf[183]!=0.0){(hc*a4I)}else{b}))/ss)}else{b})});let a6v=(K*tb);let a6w=(tb*PL);let a6L=(if tj{((to*(tl*(dF*a6t)))+(tl*(tm*a6t)))}else{(if te{(tg*(la*a6t))}else{b})});let a6M=(if tj{(tl*a6v)}else{(if te{(tg*a6v)}else{b})});let a6N=(if tj{(tl*a6w)}else{(if te{(tg*a6w)}else{b})});let a6U=((tx*Kk)+(hj*(sf[188]*a0p)));let a6V=(hj*(sf[188]*a0q));let a6W=(hj*(sf[188]*a0r));let a6X=(hj*(sf[188]*a0s));let a7f=((tB*KA)+(hq*a6L));let a7g=(hq*a6M);let a7h=(hq*a6N);let a7E=(if sb[36]{(a7f+((tz*Kk)+(hj*a6k)))}else{(if sb[34]{(((tz*a6U)+(ty*a6k))+a7f)}else{b})});let a7F=(if sb[36]{(hj*a6l)}else{(if sb[34]{((tz*a6V)+(ty*a6l))}else{b})});let a7H=(if sb[36]{(a7g+(hj*a6n))}else{(if sb[34]{(((tz*a6W)+(ty*a6n))+a7g)}else{b})});let a7I=(if sb[36]{(a7h+(hj*a6o))}else{(if sb[34]{(((tz*a6X)+(ty*a6o))+a7h)}else{b})});let a95=(K*uv);let a96=(uv*PL);let a9m=(if uD{((uI*(uF*(dF*a93)))+(uF*(uG*a93)))}else{(if uy{(uA*(ld*a93))}else{a6L})});let a9n=(if uD{(uF*a95)}else{(if uy{(uA*a95)}else{b})});let a9o=(if uD{b}else{(if uy{b}else{a6M})});let a9p=(if uD{(uF*a96)}else{(if uy{(uA*a96)}else{a6N})});let a9J=(if sb[41]{(((uL*Kk)+(hj*a8W))+((uN*KA)+(hq*a9m)))}else{b});let a9K=(if sb[41]{(hj*a8X)}else{b});let a9M=(if sb[41]{((hj*a8Z)+(hq*a9o))}else{b});let a9N=(if sb[41]{((hj*a90)+(hq*a9p))}else{b});let ab1=(K*vr);let ab2=(vr*PL);let abi=(if vw{((vA*(vy*(dF*aaZ)))+(vy*(tm*aaZ)))}else{(if vs{(vu*(la*aaZ))}else{a9m})});let abj=(if vw{b}else{(if vs{b}else{a9n})});let abk=(if vw{(vy*ab1)}else{(if vs{(vu*ab1)}else{a9o})});let abl=(if vw{(vy*ab2)}else{(if vs{(vu*ab2)}else{a9p})});let abD=((vG*KA)+(hq*abi));let abE=(hq*abj);let abF=(hq*abk);let abG=(hq*abl);let acj=(if sb[46]{(sf[186]*(abD+((vE*Kk)+(hj*aaS))))}else{(if sb[45]{(sf[186]*(((vE*a6U)+(ty*aaS))+abD))}else{(if sb[41]{b}else{(if sb[38]{(a7E-(sf[34]*(a8c-OU)))}else{a7E})})})});let ack=(if sb[46]{(sf[186]*(hj*aaT))}else{(if sb[45]{(sf[186]*((vE*a6V)+(ty*aaT)))}else{(if sb[41]{b}else{(if sb[38]{(a7F-(sf[34]*a8d))}else{a7F})})})});
@@ -597,11 +597,6 @@ impl Instance {
         let br=self.branches;
         let branches=br;
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
-        let p=&(*self.params);
-        let m=self.multiplicity;
-        let multiplicity=m;
-        let sf=&self.scalar_static_f64;
-        let sb=&self.scalar_static_bool;
         let CommonStampValues {
             a, b, c, s, A, K, N, X,
             aM, bb, bp, br_, fq, fL, fM, fN,
@@ -636,94 +631,99 @@ impl Instance {
             aJK, aJL, aJM, aJN, aJO, aJP, aJQ, aJR,
             aJS, aJT, aJU, aJV, aJW,
         }=self.eval_common_stamp_values(ctx);
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[8]),
-            Some(nodes[9]),
-            &[nodes[4], nodes[6], nodes[7], nodes[8], nodes[9], nodes[10], nodes[11]],
+        let p=&(*self.params);
+        let m=self.multiplicity;
+        let multiplicity=m;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(8),
+            Some(9),
+            &[4, 6, 7, 8, 9, 10, 11],
             &[aJs, aJt, aJu, aJv, aJw, aJx, aJy],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[7]),
-            Some(nodes[9]),
-            nodes[4],
+        stamper.stamp_current_reactive_node3_local(
+            Some(7),
+            Some(9),
+            4,
             multiplicity * (aJz),
-            nodes[7],
+            7,
             multiplicity * (aJA),
-            nodes[9],
+            9,
             multiplicity * (aJB),
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[8]),
-            Some(nodes[6]),
-            &[nodes[4], nodes[6], nodes[7], nodes[8], nodes[9], nodes[10], nodes[11]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(8),
+            Some(6),
+            &[4, 6, 7, 8, 9, 10, 11],
             &[aJC, aJD, aJE, aJF, aJG, aJH, aJI],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[8]),
-            Some(nodes[5]),
-            &[nodes[4], nodes[5], nodes[6], nodes[8], nodes[9]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(8),
+            Some(5),
+            &[4, 5, 6, 8, 9],
             &[aJJ, aJK, aJL, aJM, aJN],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[7]),
-            Some(nodes[10]),
-            &[nodes[4], nodes[6], nodes[7], nodes[8], nodes[9], nodes[10]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(7),
+            Some(10),
+            &[4, 6, 7, 8, 9, 10],
             &[aJO, aJP, aJQ, aJR, aJS, aJT],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_node2(
-            Some(nodes[1]),
-            Some(nodes[2]),
-            nodes[1],
+        stamper.stamp_current_reactive_node2_local(
+            Some(1),
+            Some(2),
+            1,
             multiplicity * (sf[231]),
-            nodes[2],
+            2,
             multiplicity * (sf[269]),
         );
-        stamper.stamp_current_reactive_node2(
-            Some(nodes[1]),
-            Some(nodes[0]),
-            nodes[0],
+        stamper.stamp_current_reactive_node2_local(
+            Some(1),
+            Some(0),
+            0,
             multiplicity * (sf[270]),
-            nodes[1],
+            1,
             multiplicity * (sf[232]),
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[11]),
-            Some(nodes[10]),
-            nodes[4],
+        stamper.stamp_current_reactive_node3_local(
+            Some(11),
+            Some(10),
+            4,
             multiplicity * (aJU),
-            nodes[10],
+            10,
             multiplicity * (aJV),
-            nodes[11],
+            11,
             multiplicity * (aJW),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[12]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(12),
             None,
-            nodes[12],
+            12,
             multiplicity * (sf[234]),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[13]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(13),
             None,
-            nodes[13],
+            13,
             multiplicity * (sf[271]),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[4]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(4),
             None,
-            nodes[4],
+            4,
             multiplicity * (sf[233]),
         );
     }

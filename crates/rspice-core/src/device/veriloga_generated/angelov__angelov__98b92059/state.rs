@@ -5,17 +5,17 @@ use crate::device::veriloga_generated::GeneratedDdtCoefficients;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Parameters {
-    pub p0: f64, pub p1: f64, pub p2: f64, pub p3: f64, pub p4: f64, pub p5: f64, pub p6: f64, pub p7: f64, 
-    pub p8: f64, pub p9: f64, pub p10: f64, pub p11: f64, pub p12: f64, pub p13: f64, pub p14: f64, pub p15: f64, 
-    pub p16: f64, pub p17: f64, pub p18: f64, pub p19: f64, pub p20: f64, pub p21: f64, pub p22: f64, pub p23: f64, 
-    pub p24: f64, pub p25: f64, pub p26: f64, pub p27: f64, pub p28: f64, pub p29: f64, pub p30: f64, pub p31: f64, 
-    pub p32: f64, pub p33: f64, pub p34: f64, pub p35: f64, pub p36: f64, pub p37: f64, pub p38: f64, pub p39: f64, 
-    pub p40: f64, pub p41: f64, pub p42: f64, pub p43: f64, pub p44: f64, pub p45: f64, pub p46: f64, pub p47: f64, 
-    pub p48: f64, pub p49: f64, pub p50: f64, pub p51: f64, pub p52: f64, pub p53: f64, pub p54: f64, pub p55: f64, 
-    pub p56: f64, pub p57: f64, pub p58: f64, pub p59: f64, pub p60: f64, pub p61: f64, pub p62: f64, pub p63: f64, 
-    pub p64: f64, pub p65: f64, pub p66: f64, pub p67: f64, pub p68: f64, pub p69: f64, pub p70: f64, pub p71: f64, 
-    pub p72: f64, pub p73: f64, pub p74: f64, pub p75: f64, pub p76: f64, pub p77: f64, pub p78: f64, pub p79: f64, 
-    pub p80: f64, pub p81: f64, pub p82: f64, pub p83: f64, pub p84: f64, pub p85: f64, 
+    pub p0: f64, pub p1: f64, pub p2: f64, pub p3: f64, pub p4: f64, pub p5: f64, pub p6: f64, pub p7: f64,
+    pub p8: f64, pub p9: f64, pub p10: f64, pub p11: f64, pub p12: f64, pub p13: f64, pub p14: f64, pub p15: f64,
+    pub p16: f64, pub p17: f64, pub p18: f64, pub p19: f64, pub p20: f64, pub p21: f64, pub p22: f64, pub p23: f64,
+    pub p24: f64, pub p25: f64, pub p26: f64, pub p27: f64, pub p28: f64, pub p29: f64, pub p30: f64, pub p31: f64,
+    pub p32: f64, pub p33: f64, pub p34: f64, pub p35: f64, pub p36: f64, pub p37: f64, pub p38: f64, pub p39: f64,
+    pub p40: f64, pub p41: f64, pub p42: f64, pub p43: f64, pub p44: f64, pub p45: f64, pub p46: f64, pub p47: f64,
+    pub p48: f64, pub p49: f64, pub p50: f64, pub p51: f64, pub p52: f64, pub p53: f64, pub p54: f64, pub p55: f64,
+    pub p56: f64, pub p57: f64, pub p58: f64, pub p59: f64, pub p60: f64, pub p61: f64, pub p62: f64, pub p63: f64,
+    pub p64: f64, pub p65: f64, pub p66: f64, pub p67: f64, pub p68: f64, pub p69: f64, pub p70: f64, pub p71: f64,
+    pub p72: f64, pub p73: f64, pub p74: f64, pub p75: f64, pub p76: f64, pub p77: f64, pub p78: f64, pub p79: f64,
+    pub p80: f64, pub p81: f64, pub p82: f64, pub p83: f64, pub p84: f64, pub p85: f64,
 }
 
 impl Parameters {
@@ -63,6 +63,12 @@ fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
     let name = PARAMETER_DISPLAY_NAMES[index];
     let flags = PARAMETER_RANGE_FLAGS[index];
     validate_finite_parameter(name, value)?;
+    if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {
+        return Err(format!("parameter '{}' must be an integer, got {}", name, value));
+    }
+    if PARAMETER_INTEGER_FLAGS[index] && (value < i32::MIN as f64 || value > i32::MAX as f64) {
+        return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
+    }
     if let Some(min) = PARAMETER_MIN_BOUNDS[index] {
         if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
             if value <= min.value {
@@ -99,6 +105,7 @@ fn validate_finite_parameter(name: &str, value: f64) -> Result<(), String> {
 fn validate_parameter(
     name: &str,
     value: f64,
+    integer: bool,
     min: Option<(f64, &str)>,
     min_exclusive: bool,
     max: Option<(f64, &str)>,
@@ -106,6 +113,12 @@ fn validate_parameter(
     excluded: &[(f64, &str)],
 ) -> Result<(), String> {
     validate_finite_parameter(name, value)?;
+    if integer && value.fract() != 0.0 {
+        return Err(format!("parameter '{}' must be an integer, got {}", name, value));
+    }
+    if integer && (value < i32::MIN as f64 || value > i32::MAX as f64) {
+        return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
+    }
     if let Some((min, label)) = min {
         if min_exclusive {
             if value <= min {
@@ -132,69 +145,75 @@ fn validate_parameter(
     Ok(())
 }
 const PARAMETER_NAME_LOOKUP: [(&str, usize); 88] = [
-    ("noise", 0), ("selft", 1), ("trise", 2), ("temp", 3), ("idsmod", 4), ("igmod", 5), ("capmod", 6), ("noimod", 7), ("ipk0", 8), ("vpks", 9), ("dvpks", 10), ("p1", 11), ("p2", 12), ("p3", 13), ("alphar", 14), ("alphas", 15), 
-    ("lambda", 16), ("lvg", 17), ("b1", 18), ("b2", 19), ("lsb0", 20), ("vtr", 21), ("vsb2", 22), ("cds", 23), ("cgspi", 24), ("cgs0", 25), ("cgdpi", 26), ("cgdpe", 27), ("cgd0", 28), ("p10", 29), ("p11", 30), ("p20", 31), 
-    ("p21", 32), ("p30", 33), ("p31", 34), ("p40", 35), ("p41", 36), ("p111", 37), ("ij", 38), ("pg", 39), ("ne", 40), ("vjg", 41), ("rg", 42), ("rd", 43), ("rd2", 44), ("ri", 45), ("rs", 46), ("rgd", 47), 
-    ("ld", 48), ("ls", 49), ("lg", 50), ("tau", 51), ("rcmin", 52), ("rc", 53), ("crf", 54), ("rcin", 55), ("crfin", 56), ("rth", 57), ("rtherm", 57), ("cth", 58), ("ctherm", 58), ("tcipk0", 59), ("tcp1", 60), ("tccgs0", 61), 
-    ("tccgd0", 62), ("tclsb0", 63), ("tcrc", 64), ("tccrf", 65), ("tcrs", 66), ("tcrtherm", 67), ("tcvpk", 68), ("tcvjg", 69), ("tcvtr", 70), ("noiser", 71), ("noisep", 72), ("noisec", 73), ("fnc", 74), ("kf", 75), ("af", 76), ("ffe", 77), 
-    ("td", 78), ("td1", 79), ("tmn", 80), ("klf", 81), ("fgr", 82), ("np", 83), ("lw", 84), ("tnom", 85), 
+    ("noise", 0), ("selft", 1), ("trise", 2), ("temp", 3), ("idsmod", 4), ("igmod", 5), ("capmod", 6), ("noimod", 7), ("ipk0", 8), ("vpks", 9), ("dvpks", 10), ("p1", 11), ("p2", 12), ("p3", 13), ("alphar", 14), ("alphas", 15),
+    ("lambda", 16), ("lvg", 17), ("b1", 18), ("b2", 19), ("lsb0", 20), ("vtr", 21), ("vsb2", 22), ("cds", 23), ("cgspi", 24), ("cgs0", 25), ("cgdpi", 26), ("cgdpe", 27), ("cgd0", 28), ("p10", 29), ("p11", 30), ("p20", 31),
+    ("p21", 32), ("p30", 33), ("p31", 34), ("p40", 35), ("p41", 36), ("p111", 37), ("ij", 38), ("pg", 39), ("ne", 40), ("vjg", 41), ("rg", 42), ("rd", 43), ("rd2", 44), ("ri", 45), ("rs", 46), ("rgd", 47),
+    ("ld", 48), ("ls", 49), ("lg", 50), ("tau", 51), ("rcmin", 52), ("rc", 53), ("crf", 54), ("rcin", 55), ("crfin", 56), ("rth", 57), ("rtherm", 57), ("cth", 58), ("ctherm", 58), ("tcipk0", 59), ("tcp1", 60), ("tccgs0", 61),
+    ("tccgd0", 62), ("tclsb0", 63), ("tcrc", 64), ("tccrf", 65), ("tcrs", 66), ("tcrtherm", 67), ("tcvpk", 68), ("tcvjg", 69), ("tcvtr", 70), ("noiser", 71), ("noisep", 72), ("noisec", 73), ("fnc", 74), ("kf", 75), ("af", 76), ("ffe", 77),
+    ("td", 78), ("td1", 79), ("tmn", 80), ("klf", 81), ("fgr", 82), ("np", 83), ("lw", 84), ("tnom", 85),
 ];
 
 const PARAMETER_DISPLAY_NAMES: [&str; 86] = [
-    "Noise", "Selft", "Trise", "Temp", "Idsmod", "Igmod", "Capmod", "Noimod", "Ipk0", "Vpks", "Dvpks", "P1", "P2", "P3", "Alphar", "Alphas", 
-    "Lambda", "Lvg", "B1", "B2", "Lsb0", "Vtr", "Vsb2", "Cds", "Cgspi", "Cgs0", "Cgdpi", "Cgdpe", "Cgd0", "P10", "P11", "P20", 
-    "P21", "P30", "P31", "P40", "P41", "P111", "Ij", "Pg", "Ne", "Vjg", "Rg", "Rd", "Rd2", "Ri", "Rs", "Rgd", 
-    "Ld", "Ls", "Lg", "Tau", "Rcmin", "Rc", "Crf", "Rcin", "Crfin", "Rth", "Cth", "Tcipk0", "Tcp1", "Tccgs0", "Tccgd0", "Tclsb0", 
-    "Tcrc", "Tccrf", "Tcrs", "TcRtherm", "TcVpk", "TcVjg", "TcVtr", "NoiseR", "NoiseP", "NoiseC", "Fnc", "Kf", "Af", "Ffe", "Td", "Td1", 
-    "Tmn", "Klf", "Fgr", "Np", "Lw", "Tnom", 
+    "Noise", "Selft", "Trise", "Temp", "Idsmod", "Igmod", "Capmod", "Noimod", "Ipk0", "Vpks", "Dvpks", "P1", "P2", "P3", "Alphar", "Alphas",
+    "Lambda", "Lvg", "B1", "B2", "Lsb0", "Vtr", "Vsb2", "Cds", "Cgspi", "Cgs0", "Cgdpi", "Cgdpe", "Cgd0", "P10", "P11", "P20",
+    "P21", "P30", "P31", "P40", "P41", "P111", "Ij", "Pg", "Ne", "Vjg", "Rg", "Rd", "Rd2", "Ri", "Rs", "Rgd",
+    "Ld", "Ls", "Lg", "Tau", "Rcmin", "Rc", "Crf", "Rcin", "Crfin", "Rth", "Cth", "Tcipk0", "Tcp1", "Tccgs0", "Tccgd0", "Tclsb0",
+    "Tcrc", "Tccrf", "Tcrs", "TcRtherm", "TcVpk", "TcVjg", "TcVtr", "NoiseR", "NoiseP", "NoiseC", "Fnc", "Kf", "Af", "Ffe", "Td", "Td1",
+    "Tmn", "Klf", "Fgr", "Np", "Lw", "Tnom",
+];
+
+const PARAMETER_INTEGER_FLAGS: [bool; 86] = [
+    true, true, false, false, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
 ];
 
 const PARAMETER_MIN_BOUNDS: [Option<ParameterBound>; 86] = [
-    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, Some(ParameterBound { value: -273.15, label: "-273.15" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
-    None, None, None, None, None, None, None, None, 
-    None, None, None, None, None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), 
-    None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), None, Some(ParameterBound { value: -2.0, label: "-2.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -2.0, label: "-2.0" }), 
-    Some(ParameterBound { value: 0.01, label: "0.01" }), Some(ParameterBound { value: -2.0, label: "-2.0" }), Some(ParameterBound { value: 0.1, label: "0.1" }), Some(ParameterBound { value: -100.0, label: "-100.0" }), Some(ParameterBound { value: 0.1, label: "0.1" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
-    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
-    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, Some(ParameterBound { value: 0.0, label: "0.0" }), 
-    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 1e-7, label: "1e-7" }), Some(ParameterBound { value: 1e-8, label: "1e-8" }), Some(ParameterBound { value: -0.003, label: "-0.003" }), Some(ParameterBound { value: -0.003, label: "-0.003" }), Some(ParameterBound { value: -0.002, label: "-0.002" }), Some(ParameterBound { value: -0.002, label: "-0.002" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
-    None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -0.1, label: "-0.1" }), None, Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), 
-    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -273.15, label: "-273.15" }), None, 
-    None, None, None, None, None, Some(ParameterBound { value: -273.15, label: "-273.15" }), 
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, Some(ParameterBound { value: -273.15, label: "-273.15" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }),
+    None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }),
+    None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), None, Some(ParameterBound { value: -2.0, label: "-2.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -2.0, label: "-2.0" }),
+    Some(ParameterBound { value: 0.01, label: "0.01" }), Some(ParameterBound { value: -2.0, label: "-2.0" }), Some(ParameterBound { value: 0.1, label: "0.1" }), Some(ParameterBound { value: -100.0, label: "-100.0" }), Some(ParameterBound { value: 0.1, label: "0.1" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }),
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }),
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), None, Some(ParameterBound { value: 0.0, label: "0.0" }),
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 1e-7, label: "1e-7" }), Some(ParameterBound { value: 1e-8, label: "1e-8" }), Some(ParameterBound { value: -0.003, label: "-0.003" }), Some(ParameterBound { value: -0.003, label: "-0.003" }), Some(ParameterBound { value: -0.002, label: "-0.002" }), Some(ParameterBound { value: -0.002, label: "-0.002" }), Some(ParameterBound { value: 0.0, label: "0.0" }),
+    None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -0.1, label: "-0.1" }), None, Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }),
+    Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: -273.15, label: "-273.15" }), None,
+    None, None, None, None, None, Some(ParameterBound { value: -273.15, label: "-273.15" }),
 ];
 
 const PARAMETER_MAX_BOUNDS: [Option<ParameterBound>; 86] = [
-    Some(ParameterBound { value: 2.0, label: "2.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), None, None, Some(ParameterBound { value: 3.0, label: "3.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 2.0, label: "2.0" }), Some(ParameterBound { value: 2.0, label: "2.0" }), 
-    None, None, None, None, None, None, None, None, 
-    None, None, None, None, None, None, None, None, 
-    None, None, None, None, None, Some(ParameterBound { value: 100.0, label: "100.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 5.0, label: "5.0" }), 
-    Some(ParameterBound { value: 5.0, label: "5.0" }), Some(ParameterBound { value: 5.0, label: "5.0" }), Some(ParameterBound { value: 5.0, label: "5.0" }), Some(ParameterBound { value: 100.0, label: "100.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), None, None, 
-    None, None, None, None, None, None, None, None, 
-    None, None, None, None, None, None, None, None, 
-    None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.002, label: "0.002" }), Some(ParameterBound { value: 0.002, label: "0.002" }), Some(ParameterBound { value: 0.01, label: "0.01" }), 
-    None, None, Some(ParameterBound { value: 0.1, label: "0.1" }), Some(ParameterBound { value: 0.01, label: "0.01" }), Some(ParameterBound { value: 0.1, label: "0.1" }), None, Some(ParameterBound { value: 0.01, label: "0.01" }), None, 
-    None, None, None, None, None, None, None, None, 
-    None, None, None, None, None, None, 
+    Some(ParameterBound { value: 2.0, label: "2.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), None, None, Some(ParameterBound { value: 3.0, label: "3.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), Some(ParameterBound { value: 2.0, label: "2.0" }), Some(ParameterBound { value: 2.0, label: "2.0" }),
+    None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None,
+    None, None, None, None, None, Some(ParameterBound { value: 100.0, label: "100.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 5.0, label: "5.0" }),
+    Some(ParameterBound { value: 5.0, label: "5.0" }), Some(ParameterBound { value: 5.0, label: "5.0" }), Some(ParameterBound { value: 5.0, label: "5.0" }), Some(ParameterBound { value: 100.0, label: "100.0" }), Some(ParameterBound { value: 10.0, label: "10.0" }), Some(ParameterBound { value: 1.0, label: "1.0" }), None, None,
+    None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None,
+    None, None, None, Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.0, label: "0.0" }), Some(ParameterBound { value: 0.002, label: "0.002" }), Some(ParameterBound { value: 0.002, label: "0.002" }), Some(ParameterBound { value: 0.01, label: "0.01" }),
+    None, None, Some(ParameterBound { value: 0.1, label: "0.1" }), Some(ParameterBound { value: 0.01, label: "0.01" }), Some(ParameterBound { value: 0.1, label: "0.1" }), None, Some(ParameterBound { value: 0.01, label: "0.01" }), None,
+    None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None,
 ];
 
 const PARAMETER_RANGE_FLAGS: [u8; 86] = [
-    0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 1, 0, 
-    0, 0, 0, 0, 0, 0, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 2, 2, 2, 2, 2, 2, 0, 2, 2, 2, 2, 0, 0, 0, 0, 0, 
-    0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 
+    0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 1, 0,
+    0, 0, 0, 0, 0, 0, 2, 2, 3, 3, 3, 3, 2, 3, 3, 3, 2, 2, 2, 2, 2, 2, 0, 2, 2, 2, 2, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 ];
 
 const PARAMETER_EXCLUDED_BOUNDS: [&[ParameterBound]; 86] = [
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], &[], &[], 
-    &[], &[], &[], &[], &[], &[], 
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[],
 ];
 
 fn parameter_index_for_name(name: &str) -> Option<usize> {
@@ -402,7 +421,8 @@ impl Instance {
     #[inline]
     fn finish_set_parameter(&mut self, index: usize) {
         self.mark_param_given(index);
-        self.recompute_instance_static(); self.invalidate_temperature_static(); 
+        self.recompute_instance_static();
+        self.invalidate_temperature_static();
     }
 
     #[inline]

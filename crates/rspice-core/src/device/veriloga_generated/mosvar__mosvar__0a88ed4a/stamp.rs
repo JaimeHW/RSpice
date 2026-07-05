@@ -107,6 +107,19 @@ impl Instance {
         let n=self.nodes;
         let nodes=n;
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
+        let CommonStampValues {
+            b, c, k, O, T, aI, bb, bt,
+            bM, bQ, bX, fd, fe, ff, fj, fM,
+            fU, gv, gw, gx, gD, gT, gX, h3,
+            hp, ht, ib, ij, jo, jw, sA, xY,
+            y5, y8, yc, yo, yr, yz, yZ, zr,
+            zt, zE, LI, NY, OJ, a17, a19, a1a,
+            a1c, a3I, a3J, a3K, a3L, a3N, a3P, a42,
+            a43, a4x, a4y, aux, auy, aIn, aIo, aIy,
+            aIz, aJ1, aJ2, aLt, aLu, aLy, aLz, bq0,
+            bq1, bq2, bqu, bvF, bvG, bvH, bV0, bV1,
+            bV2,
+        }=self.eval_common_stamp_values(ctx);
         let m=self.multiplicity;
         let multiplicity=m;
         let timestep = self.timestep;
@@ -123,19 +136,6 @@ impl Instance {
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let sf=&self.scalar_static_f64;
         let sb=&self.scalar_static_bool;
-        let CommonStampValues {
-            b, c, k, O, T, aI, bb, bt,
-            bM, bQ, bX, fd, fe, ff, fj, fM,
-            fU, gv, gw, gx, gD, gT, gX, h3,
-            hp, ht, ib, ij, jo, jw, sA, xY,
-            y5, y8, yc, yo, yr, yz, yZ, zr,
-            zt, zE, LI, NY, OJ, a17, a19, a1a,
-            a1c, a3I, a3J, a3K, a3L, a3N, a3P, a42,
-            a43, a4x, a4y, aux, auy, aIn, aIo, aIy,
-            aIz, aJ1, aJ2, aLt, aLu, aLy, aLz, bq0,
-            bq1, bq2, bqu, bvF, bvG, bvH, bV0, bV1,
-            bV2,
-        }=self.eval_common_stamp_values(ctx);
         let f3=0.1;let yh=(((b/yc)-xY)-b);let yu=(b+xY);let yv=(gT*yu);let yB=((gD-xY)-ib);let yC=(T*yB);let yE=(b+(O*yB));let yG=(b+(yC*yE));let yI=(b+(yB*yG));let z9=(gT*h3);let za=(xY*z9);let zb=(xY*za);let zc=(xY*zb);let zd=1.75;let zf=(b+(xY*zd));let zh=(if yZ{(zc*zf)}else{(if yz{((if yz{(jw/yI)}else{yr})-yv)}else{(if yo{(yr-yv)}else{(if y8{(gT*yh)}else{c})})})});let zv=((zh+zr)).sqrt();let zy=(sf[172]*gx);let zz=(zh*zy);let zB=((if y5{(gw*zv)}else{c})+(gw*zt));let NZ=(hp-xY);let O0=(NZ>fj);let O2=0.01;let O4=(((NZ*NZ)+O2)).sqrt();let O8=(xY-hp);let O9=(O8>fj);let Oa=0.005;let Od=((O2+(O8*O8))).sqrt();let Oe=(O8+Od);let On=((-(if O0{(hp-(T*(NZ+O4)))}else{(if O9{(hp-(Oa/Oe))}else{(hp-(T*(f3+NZ)))})}))).exp();let Op=((sf[172]*On)).sqrt();let Oq=(gv*NY);let Ow=(((gX*gX)+0.04)).sqrt();let Oz=(sf[289]*(Op*Oq));let OC=(b+((T*((-gX)+Ow))*sf[157]));let OK=(fd-OJ);let ON=(sf[175]*(sf[20]*(OK-sf[335])));let OW=(if ((ON).abs()<=sf[231]){b}else{c});let OX=((sf[336]!=0.0)&&(OW!=0.0));let OY=(ON/sf[230]);let P1=(if (ON>sf[231]){b}else{c});let P3=((sf[336]!=0.0)&&(!(OW!=0.0)));let P4=((P1!=0.0)&&P3);let P9=(if P4{sf[340]}else{c});let Pb=(b+(ON*P9));let Pd=(if P4{(OY*Pb)}else{c});let Pf=(if (Pd<bQ){b}else{c});let Pg=(P4&&(Pf!=0.0));let Pi=((-Pd)).exp();let Pl=(P4&&(!(Pf!=0.0)));let Pm=(Pd-bQ);let Pn=(T*Pm);let Pp=(b+(O*Pm));let Pr=(b+(Pn*Pp));let Pt=(b+(Pm*Pr));let Pv=(if Pl{(bX/Pt)}else{(if Pg{Pi}else{c})});let Px=(if P4{(b-Pv)}else{c});let PD=(((ON+sf[342])-Px)).sqrt();let PG=(if P4{((ON+sf[341])-(sf[227]*PD))}else{c});let PI=(if (PG<bQ){b}else{c});let PJ=(P4&&(PI!=0.0));let PL=((-PG)).exp();let PO=(P4&&(!(PI!=0.0)));let PP=(PG-bQ);let PQ=(T*PP);let PS=(b+(O*PP));let PU=(b+(PQ*PS));let PW=(b+(PP*PU));let PY=(if PO{(bX/PW)}else{(if PJ{PL}else{c})});let Q1=(if P4{(b-(sf[341]*PY))}else{c});let Q2=(ON-PG);let Q7=(if P4{((k*Q2)+(sf[228]*(b-PY)))}else{c});let Qd=(if P4{((Q2*Q2)-(sf[228]*(PY+(PG-b))))}else{c});let Qf=(aI*Q1);let Qi=(if P4{((Q7*Q7)-(Qd*Qf))}else{Pv});let Qj=(k*Qd);let Qk=(Qi).sqrt();let Ql=(Q7+Qk);let Qr=(P3&&(!(P1!=0.0)));let Qt=(if Qr{(-ON)}else{c});let Qw=(if Qr{((bM*Qt)/sf[230])}else{c});let Qy=(Qw-bt);let QB=((ht+(Qy*Qy))).sqrt();let QE=(if Qr{(T*((hp+Qw)-QB))}else{c});let QF=(Qt-QE);let QK=(if Qr{((QF*QF)+(sf[228]*(b+QE)))}else{c});let QN=(if Qr{((k*QF)-sf[228])}else{c});let QO=(QK/sf[228]);let QR=(if Qr{((QO).ln()-QE)}else{c});let QT=(if Qr{(QK+QN)}else{c});let QV=(T*QN);let QX=((QN*QV)-QK);let R0=(if Qr{((QT*QT)+(QR*QX))}else{c});let R1=(QK*QT);let R2=(QR*R1);let R3=(QR*QT);let R4=(QR*R3);let R5=(R4/R0);let R6=(QN*R5);let R9=((O*(QN*QN))-QK);let Rb=(R0+(R6*R9));let Re=(if Qr{(QE+(R2/Rb))}else{c});let Rh=(if ((Re).abs()<ib){b}else{c});let Ri=(Qr&&(Rh!=0.0));let Rj=(Re).exp();let Rm=(if (Re<jo){b}else{c});let Ro=(Qr&&(!(Rh!=0.0)));let Rp=((Rm!=0.0)&&Ro);let Rq=(jo-Re);let Rr=(T*Rq);let Rt=(b+(O*Rq));let Rv=(b+(Rr*Rt));let Rx=(b+(Rq*Rv));let RB=(Ro&&(!(Rm!=0.0)));let RC=(Re-ib);let RD=(T*RC);let RF=(b+(O*RC));let RH=(b+(RD*RF));let RL=(if RB{(ij*(b+(RC*RH)))}else{(if Rp{(jw/Rx)}else{(if Ri{Rj}else{PY})})});let RP=(Qt-Re);let RU=(if Qr{((k*RP)+(sf[228]*(RL-b)))}else{Q7});let S0=(if Qr{((RP*RP)+(sf[228]*((b+Re)-RL)))}else{Qd});let S2=(aI*(if Qr{(b-(sf[341]*RL))}else{Q1}));let S6=(k*S0);let S7=((if Qr{((RU*RU)-(S0*S2))}else{Qi})).sqrt();let S8=(RU+S7);let Sd=(if Qr{(-(Re+(if Qr{(S6/S8)}else{Px})))}else{(if P4{(PG+(if P4{(Qj/Ql)}else{c}))}else{(if OX{OY}else{c})})});let Si=(if sb[40]{c}else{(if (sf[336]!=0.0){(sf[172]*(ON-Sd))}else{c})});let Ss=(sf[20]*Si);let Su=(if sb[43]{(sf[317]+Ss)}else{c});let Sv=(c-Su);let Sw=(Sv>fj);let Sz=((O2+(Sv*Sv))).sqrt();let SD=(Su>fj);let SG=((O2+(Su*Su))).sqrt();let SH=(Su+SG);let SP=(if sb[43]{(if Sw{(Su+(T*(Sv+Sz)))}else{(if SD{(Su+(Oa/SH))}else{(Su+(T*(f3+Sv)))})})}else{c});let SS=((fM+(Si*Si))).sqrt();let SU=(if sb[43]{(sf[136]*SS)}else{c});let SW=(sf[134]-SU);let SX=(SW>fj);let T0=((fM+(SW*SW))).sqrt();let T4=(SU-sf[134]);let T5=(T4>fj);let T8=((fM+(T4*T4))).sqrt();let T9=(T4+T8);
         let Th=(if sb[44]{(if SX{(sf[134]-(T*(SW+T0)))}else{(if T5{(sf[134]-(fU/T9))}else{(sf[134]-(T*(bb+SW)))})})}else{SU});let Tk=(sf[20]*(if sb[40]{c}else{Sd}));let Ty=(if sb[46]{(-(Tk+(sf[175]*(SP+sf[346]))))}else{(if sb[45]{(-(Tk+(sf[175]*(SP+sf[345]))))}else{c})});let TA=(if (Ty<ib){b}else{c});let TB=(sb[43]&&(TA!=0.0));let TC=(Ty).exp();let TD=(b+TC);let TH=(sb[43]&&(!(TA!=0.0)));let TI=(if TH{Ty}else{(if TB{(TD).ln()}else{c})});let TK=(sf[175]*(sf[20]*(if sb[41]{(sf[20]*OK)}else{c})));let TM=(if sb[43]{(Ty+TK)}else{c});let TO=(if (TM<ib){b}else{c});let TP=(sb[43]&&(TO!=0.0));let TQ=(TM).exp();let TR=(b+TQ);let TV=(sb[43]&&(!(TO!=0.0)));let TW=(if TV{TM}else{(if TP{(TR).ln()}else{c})});let TX=-1.5;let TZ=(sf[126]+(sf[124]*Th));let U3=(if sb[43]{(sf[140]*(TX+(Th*TZ)))}else{c});let U5=(if (U3>c){b}else{c});let U6=(sb[43]&&(U5!=0.0));let U7=(T*U3);let U9=(b+(O*U3));let Ub=(b+(U7*U9));let Ug=(if (U3>jo){b}else{c});let Ui=(sb[43]&&(!(U5!=0.0)));let Uj=((Ug!=0.0)&&Ui);let Uk=(U3).exp();let Un=(Ui&&(!(Ug!=0.0)));let Uo=(jo-U3);let Up=(T*Uo);let Ur=(b+(O*Uo));let Ut=(b+(Up*Ur));let Uv=(b+(Uo*Ut));let Ux=(if Un{(jw/Uv)}else{(if Uj{Uk}else{(if U6{(b+(U3*Ub))}else{c})})});let Uz=(sf[20]*(sf[315]*Ux));let UA=(TW-TI);let UC=(if sb[43]{(Uz*UA)}else{c});let UG=(if sb[47]{(sf[316]+Ss)}else{c});let UH=(UG>fj);let UK=((O2+(UG*UG))).sqrt();let UO=(c-UG);let UP=(UO>fj);let US=((O2+(UO*UO))).sqrt();let UT=(UO+US);let V1=(if sb[47]{(if UH{(UG-(T*(UG+UK)))}else{(if UP{(UG-(Oa/UT))}else{(UG-(T*(f3+UG)))})})}else{SP});let V3=(if sb[47]{(sf[135]*SS)}else{Th});let V5=(sf[133]-V3);let V6=(V5>fj);let V9=((fM+(V5*V5))).sqrt();let Vd=(V3-sf[133]);let Ve=(Vd>fj);let Vh=((fM+(Vd*Vd))).sqrt();let Vi=(Vd+Vh);let Vq=(if sb[48]{(if V6{(sf[133]-(T*(V5+V9)))}else{(if Ve{(sf[133]-(fU/Vi))}else{(sf[133]-(T*(bb+V5)))})})}else{V3});let VA=(if sb[50]{(Tk+(sf[175]*(V1-sf[318])))}else{(if sb[49]{(Tk+(sf[175]*(V1-sf[319])))}else{Ty})});let VC=(if (VA<ib){b}else{c});let VD=(sb[47]&&(VC!=0.0));let VE=(VA).exp();let VF=(b+VE);let VJ=(sb[47]&&(!(VC!=0.0)));let VM=(if sb[47]{(VA-TK)}else{TM});let VO=(if (VM<ib){b}else{c});let VP=(sb[47]&&(VO!=0.0));let VQ=(VM).exp();let VR=(b+VQ);let VV=(sb[47]&&(!(VO!=0.0)));let VY=(sf[119]+(sf[117]*Vq));let W2=(if sb[47]{(sf[138]*(TX+(Vq*VY)))}else{U3});let W5=(if ((W2).abs()<ib){b}else{c});let W6=(sb[47]&&(W5!=0.0));let W7=(W2).exp();let Wa=(if (W2<jo){b}else{c});let Wc=(sb[47]&&(!(W5!=0.0)));let Wd=((Wa!=0.0)&&Wc);let We=(jo-W2);let Wf=(T*We);let Wh=(b+(O*We));let Wj=(b+(Wf*Wh));let Wl=(b+(We*Wj));let Wp=(Wc&&(!(Wa!=0.0)));let Wq=(W2-ib);let Wr=(T*Wq);let Wt=(b+(O*Wq));let Wv=(b+(Wr*Wt));let WB=(sf[20]*(sf[313]*(if Wp{(ij*(b+(Wq*Wv)))}else{(if Wd{(jw/Wl)}else{(if W6{W7}else{Ux})})})));let WC=((if VJ{VA}else{(if VD{(VF).ln()}else{TI})})-(if VV{VM}else{(if VP{(VR).ln()}else{TW})}));let WP=(if sb[54]{(sf[172]*(sA-LI))}else{c});let WT=(sf[20]*WP);let WV=(if sb[56]{(sf[317]+WT)}else{c});let WW=(c-WV);let WX=(WW>fj);let X0=((O2+(WW*WW))).sqrt();let X4=(WV>fj);let X7=((O2+(WV*WV))).sqrt();let X8=(WV+X7);let Xg=(if sb[56]{(if WX{(WV+(T*(WW+X0)))}else{(if X4{(WV+(Oa/X8))}else{(WV+(T*(f3+WW)))})})}else{c});let Xj=((fM+(WP*WP))).sqrt();let Xl=(if sb[56]{(sf[136]*Xj)}else{c});let Xn=(sf[134]-Xl);let Xo=(Xn>fj);let Xr=((fM+(Xn*Xn))).sqrt();let Xv=(Xl-sf[134]);let Xw=(Xv>fj);let Xz=((fM+(Xv*Xv))).sqrt();let XA=(Xv+Xz);let XI=(if sb[57]{(if Xo{(sf[134]-(T*(Xn+Xr)))}else{(if Xw{(sf[134]-(fU/XA))}else{(sf[134]-(T*(bb+Xn)))})})}else{Xl});let XK=(sf[20]*LI);let XV=(if sb[59]{(-(XK+(sf[175]*(sf[346]+Xg))))}else{(if sb[58]{(-(XK+(sf[175]*(sf[345]+Xg))))}else{c})});let XX=(if (XV<ib){b}else{c});let XY=(sb[56]&&(XX!=0.0));let XZ=(XV).exp();let Y0=(b+XZ);let Y4=(sb[56]&&(!(XX!=0.0)));let Y5=(if Y4{XV}else{(if XY{(Y0).ln()}else{c})});let Y7=(sf[175]*(sf[20]*(if sb[54]{(sf[20]*ff)}else{c})));let Y9=(if sb[56]{(XV+Y7)}else{c});let Yb=(if (Y9<ib){b}else{c});let Yc=(sb[56]&&(Yb!=0.0));let Yd=(Y9).exp();let Ye=(b+Yd);let Yi=(sb[56]&&(!(Yb!=0.0)));let Yj=(if Yi{Y9}else{(if Yc{(Ye).ln()}else{c})});let Yl=(sf[126]+(sf[124]*XI));
         let Yp=(if sb[56]{(sf[139]*(TX+(XI*Yl)))}else{c});let Yr=(if (Yp>c){b}else{c});let Ys=(sb[56]&&(Yr!=0.0));let Yt=(T*Yp);let Yv=(b+(O*Yp));let Yx=(b+(Yt*Yv));let YC=(if (Yp>jo){b}else{c});let YE=(sb[56]&&(!(Yr!=0.0)));let YF=((YC!=0.0)&&YE);let YG=(Yp).exp();let YJ=(YE&&(!(YC!=0.0)));let YK=(jo-Yp);let YL=(T*YK);let YN=(b+(O*YK));let YP=(b+(YL*YN));let YR=(b+(YK*YP));let YT=(if YJ{(jw/YR)}else{(if YF{YG}else{(if Ys{(b+(Yp*Yx))}else{c})})});let YV=(sf[20]*(sf[314]*YT));let YW=(Yj-Y5);let YY=(if sb[56]{(YV*YW)}else{c});let Z2=(if sb[60]{(sf[316]+WT)}else{c});let Z3=(Z2>fj);let Z6=((O2+(Z2*Z2))).sqrt();let Za=(c-Z2);let Zb=(Za>fj);let Ze=((O2+(Za*Za))).sqrt();let Zf=(Za+Ze);let Zn=(if sb[60]{(if Z3{(Z2-(T*(Z2+Z6)))}else{(if Zb{(Z2-(Oa/Zf))}else{(Z2-(T*(f3+Z2)))})})}else{Xg});let Zp=(if sb[60]{(sf[135]*Xj)}else{XI});let Zr=(sf[133]-Zp);let Zs=(Zr>fj);let Zv=((fM+(Zr*Zr))).sqrt();let Zz=(Zp-sf[133]);let ZA=(Zz>fj);let ZD=((fM+(Zz*Zz))).sqrt();let ZE=(Zz+ZD);let ZM=(if sb[61]{(if Zs{(sf[133]-(T*(Zr+Zv)))}else{(if ZA{(sf[133]-(fU/ZE))}else{(sf[133]-(T*(bb+Zr)))})})}else{Zp});let ZW=(if sb[63]{(XK+(sf[175]*(Zn-sf[318])))}else{(if sb[62]{(XK+(sf[175]*(Zn-sf[319])))}else{XV})});let ZY=(if (ZW<ib){b}else{c});let ZZ=(sb[60]&&(ZY!=0.0));let a00=(ZW).exp();let a01=(b+a00);let a05=(sb[60]&&(!(ZY!=0.0)));let a08=(if sb[60]{(ZW-Y7)}else{Y9});let a0a=(if (a08<ib){b}else{c});let a0b=(sb[60]&&(a0a!=0.0));let a0c=(a08).exp();let a0d=(b+a0c);let a0h=(sb[60]&&(!(a0a!=0.0)));let a0k=(sf[119]+(sf[117]*ZM));let a0o=(if sb[60]{(sf[137]*(TX+(ZM*a0k)))}else{Yp});let a0r=(if ((a0o).abs()<ib){b}else{c});let a0s=(sb[60]&&(a0r!=0.0));let a0t=(a0o).exp();let a0w=(if (a0o<jo){b}else{c});let a0y=(sb[60]&&(!(a0r!=0.0)));let a0z=((a0w!=0.0)&&a0y);let a0A=(jo-a0o);let a0B=(T*a0A);let a0D=(b+(O*a0A));let a0F=(b+(a0B*a0D));let a0H=(b+(a0A*a0F));let a0L=(a0y&&(!(a0w!=0.0)));let a0M=(a0o-ib);let a0N=(T*a0M);let a0P=(b+(O*a0M));let a0R=(b+(a0N*a0P));let a0X=(sf[20]*(sf[312]*(if a0L{(ij*(b+(a0M*a0R)))}else{(if a0z{(jw/a0H)}else{(if a0s{a0t}else{YT})})})));let a0Y=((if a05{ZW}else{(if ZZ{(a01).ln()}else{Y5})})-(if a0h{a08}else{(if a0b{(a0d).ln()}else{Yj})}));let a1l=(fe-OJ);let a1m=(sf[288]+(Oz/OC));let aIJ=(yc*yc);let aJg=((yu*a4x)+(gT*aIn));let aJj=((yu*a4y)+(gT*aIo));let aJo=(a42-aIn);let aJp=(a43-aIo);let aJI=(yI*yI);let aLa=(if yZ{((zf*((zb*aIn)+(xY*((za*aIn)+(xY*((z9*aIn)+(xY*(h3*a4x))))))))+(zc*(zd*aIn)))}else{(if yz{((if yz{((-(jw*((yG*aJo)+(yB*((yE*(T*aJo))+(yC*(O*aJo)))))))/aJI)}else{aJ1})-aJg)}else{(if yo{(aJ1-aJg)}else{(if y8{((yh*a4x)+(gT*(((-aIy)/aIJ)-aIn)))}else{c})})})});let aLb=(if yZ{((zf*((zb*aIo)+(xY*((za*aIo)+(xY*((z9*aIo)+(xY*(h3*a4y))))))))+(zc*(zd*aIo)))}else{(if yz{((if yz{((-(jw*((yG*aJp)+(yB*((yE*(T*aJp))+(yC*(O*aJp)))))))/aJI)}else{aJ2})-aJj)}else{(if yo{(aJ2-aJj)}else{(if y8{((yh*a4y)+(gT*(((-aIz)/aIJ)-aIo)))}else{c})})})});let aLC=(k*zv);let aM6=(zB*zB);let bvI=(-aIn);let bvJ=(-aIo);let bvK=(NZ*bvI);let bvM=(NZ*bvJ);let bvO=(k*O4);let bvX=(O8*aIn);let bvZ=(O8*aIo);let bw1=(k*Od);let bw8=(Oe*Oe);let bwt=(k*Op);let bwK=(sf[20]*gX);let bwM=(gX*sf[150]);let bwO=(k*Ow);let bx3=(OC*OC);let bxm=(if P4{((Pb*sf[356])+(OY*(P9*sf[352])))}else{c});let bxn=(if P4{((Pb*sf[357])+(OY*(P9*sf[351])))}else{c});let bxM=(Pt*Pt);let bxR=(if Pl{((-(bX*((Pr*bxm)+(Pm*((Pp*(T*bxm))+(Pn*(O*bxm)))))))/bxM)}else{(if Pg{(Pi*(-bxm))}else{c})});let bxS=(if Pl{((-(bX*((Pr*bxn)+(Pm*((Pp*(T*bxn))+(Pn*(O*bxn)))))))/bxM)}else{(if Pg{(Pi*(-bxn))}else{c})});let bxV=(if P4{(-bxR)}else{c});let bxW=(if P4{(-bxS)}else{c});let bxZ=(k*PD);let by6=(if P4{(sf[352]-(sf[227]*((sf[352]-bxV)/bxZ)))}else{c});let by7=(if P4{(sf[351]-(sf[227]*((sf[351]-bxW)/bxZ)))}else{c});let byw=(PW*PW);let byB=(if PO{((-(bX*((PU*by6)+(PP*((PS*(T*by6))+(PQ*(O*by6)))))))/byw)}else{(if PJ{(PL*(-by6))}else{c})});let byC=(if PO{((-(bX*((PU*by7)+(PP*((PS*(T*by7))+(PQ*(O*by7)))))))/byw)}else{(if PJ{(PL*(-by7))}else{c})});let byH=(if P4{(-(sf[341]*byB))}else{c});let byI=(if P4{(-(sf[341]*byC))}else{c});let byJ=(sf[352]-by6);let byK=(sf[351]-by7);let byT=(if P4{((k*byJ)+(sf[228]*(-byB)))}else{c});
@@ -330,11 +330,6 @@ impl Instance {
         let br=self.branches;
         let branches=br;
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
-        let p=&(*self.params);
-        let m=self.multiplicity;
-        let multiplicity=m;
-        let sf=&self.scalar_static_f64;
-        let sb=&self.scalar_static_bool;
         let CommonStampValues {
             b, c, k, O, T, aI, bb, bt,
             bM, bQ, bX, fd, fe, ff, fj, fM,
@@ -348,28 +343,33 @@ impl Instance {
             bq1, bq2, bqu, bvF, bvG, bvH, bV0, bV1,
             bV2,
         }=self.eval_common_stamp_values(ctx);
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[4]),
-            Some(nodes[5]),
-            nodes[4],
+        let p=&(*self.params);
+        let m=self.multiplicity;
+        let multiplicity=m;
+        let sf=&self.scalar_static_f64;
+        let sb=&self.scalar_static_bool;
+        stamper.stamp_current_reactive_node3_local(
+            Some(4),
+            Some(5),
+            4,
             multiplicity * (bV0),
-            nodes[5],
+            5,
             multiplicity * (bV1),
-            nodes[6],
+            6,
             multiplicity * (bV2),
         );
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[6]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(6),
             None,
-            nodes[6],
+            6,
             multiplicity * (sf[160]),
         );
-        stamper.stamp_current_reactive_node2(
-            Some(nodes[3]),
-            Some(nodes[1]),
-            nodes[1],
+        stamper.stamp_current_reactive_node2_local(
+            Some(3),
+            Some(1),
+            1,
             multiplicity * (sf[163]),
-            nodes[3],
+            3,
             multiplicity * (sf[58]),
         );
     }

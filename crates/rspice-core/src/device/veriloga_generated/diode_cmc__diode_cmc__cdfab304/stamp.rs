@@ -92,6 +92,7 @@ impl Instance {
         let n=self.nodes;
         let nodes=n;
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
+        let common=self.eval_common_stamp_values(ctx);
         let m=self.multiplicity;
         let multiplicity=m;
         let timestep = self.timestep;
@@ -108,7 +109,6 @@ impl Instance {
         let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;
         let sf=&self.scalar_static_f64;
         let sb=&self.scalar_static_bool;
-        let common=self.eval_common_stamp_values(ctx);
         let cdU=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 0, common.cbG);let cdY=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 1, common.ccf);let ce3=eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, 2, common.cd2);let dhB=ddt_scale;let dhJ=(if (sf[540]!=0.0){(common.r*(sf[574]+(sf[572]*dhB)))}else{common.k});
 
         stamper.stamp_current_const_local(
@@ -253,59 +253,59 @@ impl Instance {
         let br=self.branches;
         let branches=br;
         self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());
+        let common=self.eval_common_stamp_values(ctx);
         let p=&(*self.params);
         let m=self.multiplicity;
         let multiplicity=m;
         let sf=&self.scalar_static_f64;
         let sb=&self.scalar_static_bool;
-        let common=self.eval_common_stamp_values(ctx);
         let cdU=0.0;let cdY=0.0;let ce3=0.0;let dhB=1.0;let dhJ=(if (sf[540]!=0.0){(common.r*(sf[574]+(sf[572]*dhB)))}else{common.k});
 
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[3]),
+        stamper.stamp_current_reactive_node3_local(
+            Some(3),
             None,
-            nodes[0],
+            0,
             multiplicity * (common.dhH),
-            nodes[2],
+            2,
             multiplicity * (common.dhI),
-            nodes[3],
+            3,
             multiplicity * (dhJ),
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[4]),
+        stamper.stamp_current_reactive_node3_local(
+            Some(4),
             None,
-            nodes[0],
+            0,
             multiplicity * (common.dhM),
-            nodes[2],
+            2,
             multiplicity * (common.dhN),
-            nodes[4],
+            4,
             multiplicity * (dhJ),
         );
-        stamper.stamp_current_reactive_node3(
-            Some(nodes[5]),
+        stamper.stamp_current_reactive_node3_local(
+            Some(5),
             None,
-            nodes[0],
+            0,
             multiplicity * (common.dhT),
-            nodes[2],
+            2,
             multiplicity * (common.dhU),
-            nodes[5],
+            5,
             multiplicity * ((if (sf[541]!=0.0){(common.ce2*(sf[582]+(sf[580]*dhB)))}else{common.k})),
         );
-        stamper.stamp_current_reactive_dense(
-            Some(nodes[0]),
-            Some(nodes[2]),
-            &[nodes[0], nodes[2], nodes[3], nodes[4], nodes[5]],
+        stamper.stamp_current_reactive_indexed_dense_local(
+            Some(0),
+            Some(2),
+            &[0, 2, 3, 4, 5],
             &[common.dhn, common.dho, common.dhp, common.dhq, common.dhr],
             &[],
             &[],
             multiplicity,
         );
-        stamper.stamp_current_reactive_node2(
-            Some(nodes[0]),
-            Some(nodes[2]),
-            nodes[0],
+        stamper.stamp_current_reactive_node2_local(
+            Some(0),
+            Some(2),
+            0,
             multiplicity * (common.dhu),
-            nodes[2],
+            2,
             multiplicity * (common.dhv),
         );
     }

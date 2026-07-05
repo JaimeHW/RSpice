@@ -93,6 +93,7 @@ fn is_rust_keyword(value: &str) -> bool {
             | "async"
             | "await"
             | "dyn"
+            | "gen"
             | "abstract"
             | "become"
             | "box"

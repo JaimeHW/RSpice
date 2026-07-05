@@ -175,10 +175,10 @@ impl Instance {
         let sb=&self.scalar_static_bool;
         let j=0.0;let lk=0.0;
 
-        stamper.stamp_current_reactive_node1(
-            Some(nodes[4]),
+        stamper.stamp_current_reactive_node1_local(
+            Some(4),
             None,
-            nodes[4],
+            4,
             multiplicity * ((if (sf[75]!=0.0){(sf[76]*1.0)}else{j})),
         );
     }
