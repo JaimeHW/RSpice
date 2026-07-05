@@ -6232,10 +6232,10 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         "fn store_add_scaled_inputs_product_second_ad(",
         "fn store_add_scaled_inputs_product_left_ad(",
         "fn store_add_scaled_inputs_product_right_ad(",
-        "fn store_add_scaled_products_left_left_ad(",
-        "fn store_add_scaled_products_left_right_ad(",
-        "fn store_add_scaled_products_right_left_ad(",
-        "fn store_add_scaled_products_right_right_ad(",
+        "fn store_add_scaled_products_mixed_aiii(",
+        "fn store_add_scaled_products_mixed_iaii(",
+        "fn store_add_scaled_products_mixed_iiai(",
+        "fn store_add_scaled_products_mixed_iiia(",
         "fn store_div_scaled_product_left_ad(",
         "fn store_div_scaled_product_right_ad(",
         "fn store_div_scaled_product_add_scaled_denominator_indices(",
@@ -6251,10 +6251,10 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
         "s.store_add_scaled_inputs_product_second_ad(",
         "s.store_add_scaled_inputs_product_left_ad(",
         "s.store_add_scaled_inputs_product_right_ad(",
-        "s.store_add_scaled_products_left_left_ad(",
-        "s.store_add_scaled_products_left_right_ad(",
-        "s.store_add_scaled_products_right_left_ad(",
-        "s.store_add_scaled_products_right_right_ad(",
+        "s.store_add_scaled_products_mixed_aiii(",
+        "s.store_add_scaled_products_mixed_iaii(",
+        "s.store_add_scaled_products_mixed_iiai(",
+        "s.store_add_scaled_products_mixed_iiia(",
         "s.store_div_scaled_product_left_ad(",
         "s.store_div_scaled_product_right_ad(",
         "s.store_div_scaled_product_add_scaled_denominator_indices(",
@@ -6273,6 +6273,14 @@ fn rust_backend_directly_stores_hybrid_index_product_helpers() {
     assert!(
         !stamp.contains("s.store_add_scaled_products("),
         "hybrid product-sum root assignments should avoid by-value product stores:\n{stamp}"
+    );
+    assert!(
+        !support.contains("fn store_add_scaled_products_left_left_ad("),
+        "legacy one-off product-sum helpers should be folded into mixed helpers:\n{support}"
+    );
+    assert!(
+        !stamp.contains("s.store_add_scaled_products_left_left_ad("),
+        "generated product-sum calls should use mixed helpers:\n{stamp}"
     );
     assert!(
         !stamp.contains("s.store_div_scaled_product("),
