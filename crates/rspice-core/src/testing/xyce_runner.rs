@@ -8079,12 +8079,21 @@ impl XyceTestRunner {
         for probe in &print.probes {
             Self::validate_ac_probe(probe, netlist)?;
         }
-        Self::validate_native_static_ac_contract(netlist)?;
+        Self::validate_native_static_ac_contract(netlist, ac)?;
 
         Ok(())
     }
 
-    fn validate_native_static_ac_contract(netlist: &Netlist) -> Result<(), String> {
+    fn validate_native_static_ac_contract(
+        netlist: &Netlist,
+        ac: &XyceAcAnalysis,
+    ) -> Result<(), String> {
+        let max_frequency = ac
+            .frequencies
+            .iter()
+            .copied()
+            .filter(|frequency| frequency.is_finite())
+            .fold(0.0_f64, f64::max);
         if netlist
             .elements
             .iter()
@@ -8178,9 +8187,12 @@ impl XyceTestRunner {
                         netlist,
                         &element.name,
                     ) => {}
+                ElementKind::Bjt { .. }
+                    if max_frequency <= 100.0
+                        && Self::netlist_device_is_native_legacy_bjt(netlist, &element.name) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, and single-device native MOSFET LEVEL=2/6; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, single-device native MOSFET LEVEL=2/6, and native legacy BJT sweeps up to 100 Hz; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -11685,6 +11697,56 @@ impl XyceTestRunner {
                 instance_name,
             )
         })
+    }
+
+    fn netlist_device_is_native_legacy_bjt(netlist: &Netlist, instance_name: &str) -> bool {
+        if Self::elements_device_is_native_legacy_bjt(
+            &netlist.elements,
+            &netlist.models,
+            &[],
+            instance_name,
+        ) {
+            return true;
+        }
+
+        crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
+            Self::elements_device_is_native_legacy_bjt(
+                &flattened.elements,
+                &netlist.models,
+                &flattened.scoped_models,
+                instance_name,
+            )
+        })
+    }
+
+    fn elements_device_is_native_legacy_bjt(
+        elements: &[crate::netlist::Element],
+        models: &[crate::netlist::ModelDef],
+        scoped_models: &[crate::netlist::ModelDef],
+        instance_name: &str,
+    ) -> bool {
+        elements.iter().any(|element| {
+            if !Self::device_instance_names_match(&element.name, instance_name) {
+                return false;
+            }
+            let ElementKind::Bjt { model, .. } = &element.kind else {
+                return false;
+            };
+            Self::find_model(scoped_models, model)
+                .or_else(|| Self::find_model(models, model))
+                .is_some_and(Self::model_is_native_legacy_bjt)
+        })
+    }
+
+    fn model_is_native_legacy_bjt(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NPN" | "PNP" | "LPNP"
+        ) {
+            return false;
+        }
+        Self::numeric_param_value(&model.params, "LEVEL")
+            .is_none_or(|level| level.is_finite() && (level - 1.0).abs() <= 1.0e-9)
     }
 
     fn netlist_device_is_single_native_ac_supported_bulk_mosfet(
