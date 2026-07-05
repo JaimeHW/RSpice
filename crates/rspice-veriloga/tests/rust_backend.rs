@@ -8420,6 +8420,13 @@ fn rust_backend_fuses_pow_mixed_multiply_store_helpers() {
         .as_str();
     let support = render_runtime_support_module();
 
+    for helper in ["store_mul_pow_indices", "store_mul_powf_mixed_ia"] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
     for helper in [
         "store_mul_pow_ad_lhs",
         "store_mul_pow_ad_rhs",
@@ -8427,10 +8434,13 @@ fn rust_backend_fuses_pow_mixed_multiply_store_helpers() {
         "store_mul_powf_ad_rhs",
     ] {
         assert!(
-            support.contains(&format!("pub(crate) fn {helper}(")),
+            !support.contains(&format!("pub(crate) fn {helper}(")),
             "{helper}\n{support}"
         );
-        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+        assert!(
+            !stamp.contains(&format!("s.{helper}(")),
+            "{helper}\n{stamp}"
+        );
     }
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");

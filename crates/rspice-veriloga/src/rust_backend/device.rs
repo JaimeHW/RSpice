@@ -7350,10 +7350,10 @@ fn stamp() {
         for signature in [
             "fn store_mul_powf_mixed_ia(",
             "fn store_mul_powf_mixed_ai(",
-            "fn store_mul_powf(",
+            "fn store_mul_powf_indices(",
             "fn store_mul_pow_mixed_aii(",
             "fn store_mul_pow_mixed_aai(",
-            "fn store_mul_pow(",
+            "fn store_mul_pow_indices(",
         ] {
             let body = helper_body(&support, signature);
             assert!(
@@ -8695,39 +8695,46 @@ fn stamp() {
             "{offset_pow_from_scalar}"
         );
 
-        for signature in ["fn store_mul_powf_ad_lhs(", "fn store_mul_powf_ad_rhs("] {
-            let body = helper_body(&support, signature);
-            assert!(
-                body.contains(
-                    "let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent);"
-                ),
-                "{body}"
-            );
-            assert!(
-                body.contains("value.node_derivatives[axis] * derivative_scale"),
-                "{body}"
-            );
-            assert!(
-                !body.contains(
-                    "let derivative = AdValue::pow_derivative(output, base, exponent, value.node_derivatives[axis], 0.0);"
-                ),
-                "{body}"
-            );
-        }
+        let mul_powf_mixed_ia = helper_body(&support, "fn store_mul_powf_mixed_ia(");
+        assert!(
+            mul_powf_mixed_ia.contains(
+                "let derivative_scale = AdValue::pow_base_derivative_scale(output, base_value, exponent);"
+            ),
+            "{mul_powf_mixed_ia}"
+        );
+        assert!(
+            mul_powf_mixed_ia.contains("base.node_derivatives[axis] * derivative_scale"),
+            "{mul_powf_mixed_ia}"
+        );
+        assert!(
+            !mul_powf_mixed_ia.contains(
+                "let derivative = AdValue::pow_derivative(output, base_value, exponent, base.node_derivatives[axis], 0.0);"
+            ),
+            "{mul_powf_mixed_ia}"
+        );
 
-        for signature in ["fn store_mul_powi_ad_lhs(", "fn store_mul_powi_ad_rhs("] {
-            let body = helper_body(&support, signature);
-            assert!(
-                body.contains(
-                    "let derivative_scale = integer_power_derivative_scale(base, exponent);"
-                ),
-                "{body}"
-            );
-            assert!(
-                body.contains("value.node_derivatives[axis] * derivative_scale"),
-                "{body}"
-            );
-            assert!(!body.contains("pow_base_derivative_scale"), "{body}");
+        let mul_powi_mixed_ia = helper_body(&support, "fn store_mul_powi_mixed_ia(");
+        assert!(
+            mul_powi_mixed_ia.contains(
+                "let derivative_scale = integer_power_derivative_scale(base_value, exponent);"
+            ),
+            "{mul_powi_mixed_ia}"
+        );
+        assert!(
+            mul_powi_mixed_ia.contains("base.node_derivatives[axis] * derivative_scale"),
+            "{mul_powi_mixed_ia}"
+        );
+        assert!(
+            !mul_powi_mixed_ia.contains("pow_base_derivative_scale"),
+            "{mul_powi_mixed_ia}"
+        );
+        for signature in [
+            "fn store_mul_powf_ad_lhs(",
+            "fn store_mul_powf_ad_rhs(",
+            "fn store_mul_powi_ad_lhs(",
+            "fn store_mul_powi_ad_rhs(",
+        ] {
+            assert!(!support.contains(signature), "{signature}\n{support}");
         }
 
         for signature in ["fn store_offset_powi_ad(", "fn store_scaled_powi_ad("] {
@@ -8860,8 +8867,7 @@ fn stamp() {
             "fn store_offset_pow_ad(",
             "fn store_div_from_scalar_pow_ad(",
             "fn store_mul_pow(",
-            "fn store_mul_pow_ad_lhs(",
-            "fn store_mul_pow_ad_rhs(",
+            "fn store_mul_pow_indices(",
             "fn store_mul_scaled_pow_ad_rhs(",
             "fn store_mul_pow_mixed_aii(",
         ] {
@@ -9514,8 +9520,6 @@ fn stamp() {
         let support = generate_scratch_operation_helpers();
         for helper in [
             "fn store_mul_powi(",
-            "fn store_mul_powi_ad_lhs(",
-            "fn store_mul_powi_ad_rhs(",
             "fn store_mul_powi_mixed_ai",
             "fn store_mul_powi_mixed_ia",
         ] {
@@ -9530,6 +9534,8 @@ fn stamp() {
             !support.contains("fn store_mul_powi_components"),
             "{support}"
         );
+        assert!(!support.contains("fn store_mul_powi_ad_lhs("), "{support}");
+        assert!(!support.contains("fn store_mul_powi_ad_rhs("), "{support}");
 
         let source = r#"
 fn stamp() {
@@ -9563,16 +9569,18 @@ fn stamp() {
         );
         assert!(
             compact.contains(
-                "s.store_mul_powi_ad_lhs(163, A::sqrt(s.ad_value(8)), (p.nf as i32), 9);"
+                "s.store_mul_powi_mixed_ia(163, 9, A::sqrt(s.ad_value(8)), (p.nf as i32));"
             ),
             "{compact}"
         );
         assert!(
             compact.contains(
-                "s.store_mul_powi_ad_rhs(164, 10, A::abs(s.ad_value(11)), (p.nf as i32));"
+                "s.store_mul_powi_mixed_ia(164, 10, A::abs(s.ad_value(11)), (p.nf as i32));"
             ),
             "{compact}"
         );
+        assert!(!compact.contains("s.store_mul_powi_ad_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_mul_powi_ad_rhs("), "{compact}");
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
         assert!(!compact.contains("A::mul("), "{compact}");
@@ -20508,45 +20516,6 @@ fn generate_scratch_operation_helpers() -> String {
         "        }",
         "    }",
     "",
-    "    #[inline]",
-    "    fn store_mul_pow_ad_lhs(&mut self, index: usize, left: AdValue, right: AdValue, source: usize) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let base = left.value;",
-        "        let exponent = right.value;",
-        "        let output = base.powf(exponent);",
-        "        self.values[index] = output * source_value;",
-        "        if base > 0.0 {",
-        "            let (base_derivative_scale, exponent_derivative_scale) = AdValue::pow_positive_derivative_scales(output, base, exponent);",
-        "            for axis in 0..Instance::NODE_COUNT { let derivative = left.node_derivatives[axis] * base_derivative_scale + right.node_derivatives[axis] * exponent_derivative_scale; self.node_derivatives[index][axis] = derivative * source_value + output * source_node_derivatives[axis]; }",
-        "            for axis in 0..Instance::BRANCH_COUNT { let derivative = left.branch_derivatives[axis] * base_derivative_scale + right.branch_derivatives[axis] * exponent_derivative_scale; self.branch_derivatives[index][axis] = derivative * source_value + output * source_branch_derivatives[axis]; }",
-        "        } else {",
-        "            for axis in 0..Instance::NODE_COUNT { let derivative = AdValue::pow_derivative(output, base, exponent, left.node_derivatives[axis], right.node_derivatives[axis]); self.node_derivatives[index][axis] = derivative * source_value + output * source_node_derivatives[axis]; }",
-        "            for axis in 0..Instance::BRANCH_COUNT { let derivative = AdValue::pow_derivative(output, base, exponent, left.branch_derivatives[axis], right.branch_derivatives[axis]); self.branch_derivatives[index][axis] = derivative * source_value + output * source_branch_derivatives[axis]; }",
-        "        }",
-        "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_pow_ad_rhs(&mut self, index: usize, source: usize, left: AdValue, right: AdValue) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let base = left.value;",
-        "        let exponent = right.value;",
-        "        let output = base.powf(exponent);",
-        "        self.values[index] = source_value * output;",
-        "        if base > 0.0 {",
-        "            let (base_derivative_scale, exponent_derivative_scale) = AdValue::pow_positive_derivative_scales(output, base, exponent);",
-        "            for axis in 0..Instance::NODE_COUNT { let derivative = left.node_derivatives[axis] * base_derivative_scale + right.node_derivatives[axis] * exponent_derivative_scale; self.node_derivatives[index][axis] = source_node_derivatives[axis] * output + source_value * derivative; }",
-        "            for axis in 0..Instance::BRANCH_COUNT { let derivative = left.branch_derivatives[axis] * base_derivative_scale + right.branch_derivatives[axis] * exponent_derivative_scale; self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * output + source_value * derivative; }",
-        "        } else {",
-        "            for axis in 0..Instance::NODE_COUNT { let derivative = AdValue::pow_derivative(output, base, exponent, left.node_derivatives[axis], right.node_derivatives[axis]); self.node_derivatives[index][axis] = source_node_derivatives[axis] * output + source_value * derivative; }",
-        "            for axis in 0..Instance::BRANCH_COUNT { let derivative = AdValue::pow_derivative(output, base, exponent, left.branch_derivatives[axis], right.branch_derivatives[axis]); self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * output + source_value * derivative; }",
-        "        }",
-        "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_scaled_pow_ad_rhs(&mut self, index: usize, source: usize, output_scale: f64, left: AdValue, right: AdValue) {",
     "        let source_value = self.values[source];",
     "        let scaled_source_value = source_value * output_scale;",
@@ -20577,33 +20546,6 @@ fn generate_scratch_operation_helpers() -> String {
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * output + factor_value * base.branch_derivatives[axis] * derivative_scale; }",
     "    }",
     "",
-    "    #[inline]",
-    "    fn store_mul_powf_ad_lhs(&mut self, index: usize, value: AdValue, exponent: f64, source: usize) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let base = value.value;",
-    "        let output = scalar_power_value(base, exponent);",
-    "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent);",
-    "        self.values[index] = output * source_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale * source_value + output * source_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale * source_value + output * source_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_powf_ad_rhs(&mut self, index: usize, source: usize, value: AdValue, exponent: f64) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let base = value.value;",
-    "        let output = scalar_power_value(base, exponent);",
-    "        let derivative_scale = AdValue::pow_base_derivative_scale(output, base, exponent);",
-    "        self.values[index] = source_value * output;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * output + source_value * value.node_derivatives[axis] * derivative_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * output + source_value * value.branch_derivatives[axis] * derivative_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_powi(&mut self, index: usize, factor: AdValue, base: AdValue, exponent: i32) {",
     "        let factor_value = factor.value;",
     "        let base_value = base.value;",
@@ -20614,33 +20556,6 @@ fn generate_scratch_operation_helpers() -> String {
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * output + factor_value * base.branch_derivatives[axis] * derivative_scale; }",
     "    }",
     "",
-    "    #[inline]",
-    "    fn store_mul_powi_ad_lhs(&mut self, index: usize, value: AdValue, exponent: i32, source: usize) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let base = value.value;",
-    "        let output = base.powi(exponent);",
-    "        let derivative_scale = integer_power_derivative_scale(base, exponent);",
-    "        self.values[index] = output * source_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * derivative_scale * source_value + output * source_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * derivative_scale * source_value + output * source_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_powi_ad_rhs(&mut self, index: usize, source: usize, value: AdValue, exponent: i32) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let base = value.value;",
-    "        let output = base.powi(exponent);",
-    "        let derivative_scale = integer_power_derivative_scale(base, exponent);",
-    "        self.values[index] = source_value * output;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * output + source_value * value.node_derivatives[axis] * derivative_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * output + source_value * value.branch_derivatives[axis] * derivative_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_div_lhs(&mut self, index: usize, numerator: usize, denominator: usize, source: usize) {",
     "        let numerator_value = self.values[numerator];",
     "        let denominator_value = self.values[denominator];",
@@ -38253,37 +38168,7 @@ fn compact_pow_mixed_lhs_helper_line(
     value: &str,
     source: usize,
 ) -> Option<String> {
-    if let Some(args) = compact_ad_call_args(value, "pow") {
-        if args.len() != 2 {
-            return None;
-        }
-        let base = compact_scratch_or_non_atomic_ad_arg(args[0])?;
-        let exponent = compact_scratch_or_non_atomic_ad_arg(args[1])?;
-        return Some(format!(
-            "scratch.store_mul_pow_ad_lhs({target_index}, {base}, {exponent}, {source});"
-        ));
-    }
-
-    if let Some(args) = compact_ad_call_args(value, "powi") {
-        if args.len() != 2 {
-            return None;
-        }
-        let base = compact_scratch_or_non_atomic_ad_arg(args[0])?;
-        return Some(format!(
-            "scratch.store_mul_powi_ad_lhs({target_index}, {base}, {}, {source});",
-            args[1]
-        ));
-    }
-
-    let args = compact_ad_call_args(value, "powf")?;
-    if args.len() != 2 {
-        return None;
-    }
-    let base = compact_scratch_or_non_atomic_ad_arg(args[0])?;
-    Some(format!(
-        "scratch.store_mul_powf_ad_lhs({target_index}, {base}, {}, {source});",
-        args[1]
-    ))
+    compact_pow_mixed_source_helper_line(target_index, source, value)
 }
 
 fn compact_pow_mixed_rhs_helper_line(
@@ -38291,37 +38176,40 @@ fn compact_pow_mixed_rhs_helper_line(
     source: usize,
     value: &str,
 ) -> Option<String> {
+    compact_pow_mixed_source_helper_line(target_index, source, value)
+}
+
+fn compact_pow_mixed_source_helper_line(
+    target_index: usize,
+    source: usize,
+    value: &str,
+) -> Option<String> {
+    let factor = format!("scratch.ad_value({source})");
+
     if let Some(args) = compact_ad_call_args(value, "pow") {
         if args.len() != 2 {
             return None;
         }
-        let base = compact_scratch_or_non_atomic_ad_arg(args[0])?;
-        let exponent = compact_scratch_or_non_atomic_ad_arg(args[1])?;
-        return Some(format!(
-            "scratch.store_mul_pow_ad_rhs({target_index}, {source}, {base}, {exponent});"
-        ));
+        return compact_index_or_mixed_mul_pow_helper_line(target_index, &factor, args[0], args[1]);
     }
 
     if let Some(args) = compact_ad_call_args(value, "powi") {
         if args.len() != 2 {
             return None;
         }
-        let base = compact_scratch_or_non_atomic_ad_arg(args[0])?;
-        return Some(format!(
-            "scratch.store_mul_powi_ad_rhs({target_index}, {source}, {base}, {});",
-            args[1]
-        ));
+        return compact_index_or_mixed_mul_powi_helper_line(
+            target_index,
+            &factor,
+            args[0],
+            args[1],
+        );
     }
 
     let args = compact_ad_call_args(value, "powf")?;
     if args.len() != 2 {
         return None;
     }
-    let base = compact_scratch_or_non_atomic_ad_arg(args[0])?;
-    Some(format!(
-        "scratch.store_mul_powf_ad_rhs({target_index}, {source}, {base}, {});",
-        args[1]
-    ))
+    compact_index_or_mixed_mul_powf_helper_line(target_index, &factor, args[0], args[1])
 }
 
 fn compact_fused_scaled_multiply_store_helper_call(
