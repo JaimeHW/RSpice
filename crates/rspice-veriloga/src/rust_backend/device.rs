@@ -20362,50 +20362,6 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_add_ad_lhs(&mut self, index: usize, left: AdValue, right: AdValue, source: usize) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let sum = left.value + right.value;",
-    "        self.values[index] = sum * source_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left.node_derivatives[axis] + right.node_derivatives[axis]) * source_value + sum * source_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left.branch_derivatives[axis] + right.branch_derivatives[axis]) * source_value + sum * source_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_add_ad_rhs(&mut self, index: usize, source: usize, left: AdValue, right: AdValue) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let sum = left.value + right.value;",
-    "        self.values[index] = source_value * sum;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * sum + source_value * (left.node_derivatives[axis] + right.node_derivatives[axis]); }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * sum + source_value * (left.branch_derivatives[axis] + right.branch_derivatives[axis]); }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_sub_ad_lhs(&mut self, index: usize, left: AdValue, right: AdValue, source: usize) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let difference = left.value - right.value;",
-    "        self.values[index] = difference * source_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left.node_derivatives[axis] - right.node_derivatives[axis]) * source_value + difference * source_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left.branch_derivatives[axis] - right.branch_derivatives[axis]) * source_value + difference * source_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_sub_ad_rhs(&mut self, index: usize, source: usize, left: AdValue, right: AdValue) {",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        let difference = left.value - right.value;",
-    "        self.values[index] = source_value * difference;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * difference + source_value * (left.node_derivatives[axis] - right.node_derivatives[axis]); }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * difference + source_value * (left.branch_derivatives[axis] - right.branch_derivatives[axis]); }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_sub_from_scalar_lhs(&mut self, index: usize, scalar: f64, value: usize, source: usize) {",
     "        let left_value = scalar - self.values[value];",
     "        let source_value = self.values[source];",
@@ -38355,9 +38311,13 @@ fn compact_add_sub_mixed_multiply_store_helper_call(
             }
             let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
             let middle = compact_scratch_or_non_atomic_ad_arg(middle_arg)?;
-            Some(format!(
-                "scratch.{helper}_ad_lhs({target_index}, {left}, {middle}, {right});"
-            ))
+            compact_index_or_mixed_mul_add_sub_helper_line(
+                target_index,
+                helper,
+                args[1],
+                &left,
+                &middle,
+            )
         }
         (Some(left), None) => {
             let (helper, middle_arg, right_arg) = compact_add_sub_args(args[1])?;
@@ -38371,9 +38331,13 @@ fn compact_add_sub_mixed_multiply_store_helper_call(
             }
             let middle = compact_scratch_or_non_atomic_ad_arg(middle_arg)?;
             let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.{helper}_ad_rhs({target_index}, {left}, {middle}, {right});"
-            ))
+            compact_index_or_mixed_mul_add_sub_helper_line(
+                target_index,
+                helper,
+                args[0],
+                &middle,
+                &right,
+            )
         }
         _ => None,
     }

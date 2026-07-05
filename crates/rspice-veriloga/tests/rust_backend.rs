@@ -8125,26 +8125,37 @@ fn rust_backend_fuses_general_add_sub_mixed_multiply_store_helpers() {
         .as_str();
     let support = render_runtime_support_module();
 
-    assert!(
-        support.contains("pub(crate) fn store_mul_add_ad_lhs("),
-        "{support}"
-    );
-    assert!(
-        support.contains("pub(crate) fn store_mul_add_ad_rhs("),
-        "{support}"
-    );
-    assert!(
-        support.contains("pub(crate) fn store_mul_sub_ad_lhs("),
-        "{support}"
-    );
-    assert!(
-        support.contains("pub(crate) fn store_mul_sub_ad_rhs("),
-        "{support}"
-    );
-    assert!(stamp.contains("s.store_mul_add_ad_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_add_ad_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_sub_ad_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_sub_ad_rhs("), "{stamp}");
+    for helper in [
+        "pub(crate) fn store_mul_add_mixed_iia(",
+        "pub(crate) fn store_mul_add_mixed_iai(",
+        "pub(crate) fn store_mul_sub_mixed_iia(",
+        "pub(crate) fn store_mul_sub_mixed_iai(",
+    ] {
+        assert!(support.contains(helper), "{helper}\n{support}");
+    }
+    for helper in [
+        "s.store_mul_add_mixed_iia(",
+        "s.store_mul_add_mixed_iai(",
+        "s.store_mul_sub_mixed_iia(",
+        "s.store_mul_sub_mixed_iai(",
+    ] {
+        assert!(stamp.contains(helper), "{helper}\n{stamp}");
+    }
+    for legacy_helper in [
+        "store_mul_add_ad_lhs",
+        "store_mul_add_ad_rhs",
+        "store_mul_sub_ad_lhs",
+        "store_mul_sub_ad_rhs",
+    ] {
+        assert!(
+            !support.contains(&format!("pub(crate) fn {legacy_helper}(")),
+            "legacy add/sub multiply helpers should be folded into mixed helpers:\n{support}"
+        );
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated add/sub multiply calls should use mixed helpers:\n{stamp}"
+        );
+    }
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
     assert_generated_rust_compiles(&generated);
