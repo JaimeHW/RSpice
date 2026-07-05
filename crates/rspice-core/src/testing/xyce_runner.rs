@@ -177,6 +177,7 @@ struct XyceExecutionPlan {
     expression_dialect: ExpressionDialect,
     print: XycePrintRequest,
     dc: XyceDcSweep,
+    dc_data: Option<XyceDcDataSweep>,
     steps: Vec<StepCommand>,
     contract: XyceStaticDcContract,
 }
@@ -190,6 +191,7 @@ struct XyceStaticDcPlan {
     print: XycePrintRequest,
     print_format: Option<String>,
     dc: XyceDcSweep,
+    dc_data: Option<XyceDcDataSweep>,
     steps: Vec<StepCommand>,
     diagnostics: Vec<crate::netlist::ParseDiagnostic>,
 }
@@ -598,6 +600,29 @@ struct XyceDcSweep {
     sweep2: Option<DcSecondSweep>,
 }
 
+#[derive(Debug, Clone)]
+struct XyceDcDataSweep {
+    rows: Vec<XyceDcDataRow>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceDcDataRow {
+    overrides: Vec<XyceDcDataOverride>,
+}
+
+#[derive(Debug, Clone)]
+enum XyceDcDataOverride {
+    Parameter {
+        name: String,
+        value: Value,
+    },
+    Device {
+        name: String,
+        param_name: Option<String>,
+        value: Value,
+    },
+}
+
 #[derive(Debug, Clone, Copy)]
 struct XyceTranAnalysis {
     step: Value,
@@ -683,6 +708,12 @@ struct XyceDcSweepPoint {
 struct XyceDcResultBatch {
     netlist: Netlist,
     results: Vec<DcSweepPointResult>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceDcDataPointResult {
+    netlist: Netlist,
+    point: DcSweepPointResult,
 }
 
 #[derive(Debug, Clone)]
@@ -1234,6 +1265,7 @@ impl XyceTestRunner {
             expression_dialect,
             print: static_plan.print,
             dc: static_plan.dc,
+            dc_data: static_plan.dc_data,
             steps: static_plan.steps,
             contract,
         })
@@ -1489,9 +1521,23 @@ impl XyceTestRunner {
         )
         .map_err(|err| format!("netlist parser does not yet accept this Xyce deck: {err}"))?;
         let diagnostics = netlist.diagnostics.clone();
-        let dc = Self::single_dc_sweep(&netlist)?;
+        let dc_data = Self::dc_data_sweep_for_source(&source, &netlist)?;
+        let dc = match &dc_data {
+            Some(dc_data) => Self::synthetic_dc_data_sweep(dc_data)?,
+            None => Self::single_dc_sweep(&netlist)?,
+        };
         let steps = Self::step_commands(&netlist)?;
-        Self::validate_static_dc_contract(&netlist, &dc, &print)?;
+        if dc_data.is_some() && !steps.is_empty() {
+            return Err(
+                ".STEP combined with .DC DATA is not covered by the native static DC adapter yet"
+                    .to_string(),
+            );
+        }
+        if let Some(dc_data) = &dc_data {
+            Self::validate_static_dc_data_contract(&netlist, dc_data, &print)?;
+        } else {
+            Self::validate_static_dc_contract(&netlist, &dc, &print)?;
+        }
 
         Ok(XyceStaticDcPlan {
             deck_path: deck_path.to_path_buf(),
@@ -1501,6 +1547,7 @@ impl XyceTestRunner {
             print,
             print_format: print_output.format,
             dc,
+            dc_data,
             steps,
             diagnostics,
         })
@@ -1608,6 +1655,11 @@ impl XyceTestRunner {
         }
 
         if Self::is_native_step_data_wrapper_candidate(source) {
+            Self::validate_default_prn_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperDefault);
+        }
+
+        if Self::is_native_dc_data_table_wrapper_candidate(source) {
             Self::validate_default_prn_wrapper_source(source)?;
             return Ok(XyceStaticDcContract::WrapperDefault);
         }
@@ -1818,6 +1870,10 @@ impl XyceTestRunner {
             }
         }
         has_data_table && has_step_data
+    }
+
+    fn is_native_dc_data_table_wrapper_candidate(source: &str) -> bool {
+        Self::dc_data_table_names(source).is_ok_and(|names| !names.is_empty())
     }
 
     fn is_native_gnuplot_splot_wrapper_candidate(source: &str) -> bool {
@@ -4081,6 +4137,79 @@ impl XyceTestRunner {
             return self.run_static_prn_step_dc_plan(deck, plan, netlist, reference, start);
         }
 
+        if let Some(dc_data) = &plan.dc_data {
+            let Some(reference) = reference.as_ref() else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    "file-output-only .DC DATA comparison is not implemented".to_string(),
+                    Vec::new(),
+                );
+            };
+            let results = match self.run_static_dc_data_results(&netlist, dc_data, start) {
+                Ok(results) => results,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "simulation exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!("RSpice runtime does not yet support this deck: {err}"),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mismatches = match self.compare_dc_data_prn_reference(
+                reference,
+                &plan.print,
+                &plan.source,
+                &plan.dc,
+                &results,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("reference comparison error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            return if mismatches.is_empty() {
+                self.passed_result(deck, start, contract)
+            } else {
+                self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("{} Xyce reference mismatch(es)", mismatches.len()),
+                    mismatches,
+                )
+            };
+        }
+
         let engine = self.create_dc_engine();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let results = match engine.run_dc_sweep2_spec_with_report_and_abort(
@@ -5842,6 +5971,100 @@ impl XyceTestRunner {
         Ok((netlist, results))
     }
 
+    fn run_static_dc_data_results(
+        &self,
+        base_netlist: &Netlist,
+        dc_data: &XyceDcDataSweep,
+        start: Instant,
+    ) -> Result<Vec<XyceDcDataPointResult>, SimulationError> {
+        let engine = self.create_dc_engine();
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let mut results = Vec::with_capacity(dc_data.rows.len());
+
+        for (row_index, row) in dc_data.rows.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let row_netlist = Self::materialize_dc_data_row_netlist(&engine, base_netlist, row)?;
+            let (result, device_op_report) =
+                engine.run_dc_op_with_report(&row_netlist).map_err(|err| {
+                    SimulationError::Circuit(format!(
+                        ".DC DATA row {} operating point failed: {}",
+                        row_index + 1,
+                        err
+                    ))
+                })?;
+            results.push(XyceDcDataPointResult {
+                netlist: row_netlist,
+                point: DcSweepPointResult {
+                    sweep_value: row_index as Value,
+                    result,
+                    device_op_report,
+                },
+            });
+        }
+
+        Ok(results)
+    }
+
+    fn materialize_dc_data_row_netlist(
+        engine: &Engine,
+        base_netlist: &Netlist,
+        row: &XyceDcDataRow,
+    ) -> Result<Netlist, SimulationError> {
+        let param_overrides = row
+            .overrides
+            .iter()
+            .filter_map(|override_| match override_ {
+                XyceDcDataOverride::Parameter { name, value } => Some((name.clone(), *value)),
+                XyceDcDataOverride::Device { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        let (mut row_netlist, param_bindings) = if param_overrides.is_empty() {
+            (base_netlist.clone(), 0)
+        } else {
+            Engine::create_perturbed_netlist_multi(base_netlist, &param_overrides)?
+        };
+        if !param_overrides.is_empty() && base_netlist.source_text.is_some() && param_bindings == 0
+        {
+            let names = param_overrides
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(SimulationError::Circuit(format!(
+                ".DC DATA parameter override(s) {names} are not bound to any netlist expression"
+            )));
+        }
+
+        for override_ in &row.overrides {
+            let XyceDcDataOverride::Device {
+                name,
+                param_name,
+                value,
+            } = override_
+            else {
+                continue;
+            };
+            let step = StepCommand {
+                target: StepTarget::Device,
+                name: name.clone(),
+                param_name: param_name.clone(),
+                sweep: StepSweep::List(vec![*value]),
+            };
+            let mut stepped = engine.step_netlists_for_command(&row_netlist, &step, &[*value])?;
+            let Some((_, next_netlist)) = stepped.pop() else {
+                return Err(SimulationError::Circuit(format!(
+                    ".DC DATA device override '{}' produced no stepped netlist",
+                    name
+                )));
+            };
+            row_netlist = next_netlist;
+        }
+
+        Ok(row_netlist)
+    }
+
     fn dc_results_to_prn_table(
         &self,
         plan: &XyceStaticDcPlan,
@@ -6028,6 +6251,142 @@ impl XyceTestRunner {
             results: results.to_vec(),
         }];
         self.compare_dc_prn_reference_batches(reference, print, source, dc, &batches)
+    }
+
+    fn compare_dc_data_prn_reference(
+        &self,
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        source: &str,
+        dc: &XyceDcSweep,
+        points: &[XyceDcDataPointResult],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if reference.columns.is_empty() {
+            return Err("reference table has no columns".to_string());
+        }
+        let has_stepnum_column = reference.columns[0].eq_ignore_ascii_case("STEPNUM");
+        let index_column = usize::from(has_stepnum_column);
+        let has_index_column = reference
+            .columns
+            .get(index_column)
+            .is_some_and(|column| column.eq_ignore_ascii_case("Index"));
+        let data_column_offset = usize::from(has_stepnum_column) + usize::from(has_index_column);
+        if data_column_offset == 0 && !Self::reference_columns_are_compact_probe_table(reference) {
+            return Err(format!(
+                "expected first Xyce .prn column to be Index, STEPNUM, or a compact probe label, got '{}'",
+                reference.columns[0]
+            ));
+        }
+        if reference.rows.len() != points.len() {
+            return Err(format!(
+                "reference row count ({}) does not match .DC DATA row count ({})",
+                reference.rows.len(),
+                points.len()
+            ));
+        }
+
+        let mapping_netlist = points
+            .first()
+            .map(|point| &point.netlist)
+            .ok_or_else(|| ".DC DATA comparison has no result rows".to_string())?;
+        let data_columns = self.reference_data_columns(
+            reference,
+            print,
+            mapping_netlist,
+            data_column_offset,
+            has_index_column,
+        )?;
+        let comp_tolerances = self.comp_tolerances(source, &data_columns)?;
+
+        let mut mismatches = Vec::new();
+        for (row_index, point) in points.iter().enumerate() {
+            let row = reference
+                .rows
+                .get(row_index)
+                .ok_or_else(|| format!("missing reference row for .DC DATA row {row_index}"))?;
+            if row.len() != reference.columns.len() {
+                return Err(format!(
+                    "row {} has {} values, expected {}",
+                    row_index,
+                    row.len(),
+                    reference.columns.len()
+                ));
+            }
+            if has_stepnum_column {
+                let expected_stepnum = row[0];
+                if (expected_stepnum - 0.0).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "STEPNUM".to_string(),
+                        expected: expected_stepnum,
+                        actual: 0.0,
+                        relative_error: 1.0,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+            if has_index_column {
+                let expected_index = row[index_column];
+                let actual_index = row_index as Value;
+                if (expected_index - actual_index).abs() > self.config.absolute_tolerance {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: "Index".to_string(),
+                        expected: expected_index,
+                        actual: actual_index,
+                        relative_error: 1.0,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+
+            let sweep_point = XyceDcSweepPoint {
+                primary: point.point.sweep_value,
+                secondary: None,
+            };
+            for (column_index, column) in data_columns.iter().enumerate() {
+                let expected = row[column_index + data_column_offset];
+                let (probe, actual) = match column {
+                    XyceReferenceColumn::PrimarySweep { name } => {
+                        (name.as_str(), sweep_point.primary)
+                    }
+                    XyceReferenceColumn::Probe { name } => (
+                        name.as_str(),
+                        Self::evaluate_dc_probe(
+                            name,
+                            &point.netlist,
+                            dc,
+                            sweep_point,
+                            &point.point.result,
+                            &point.point.device_op_report,
+                        )?,
+                    ),
+                };
+                let normalized_probe = Self::normalize_probe(probe);
+                let tolerance = comp_tolerances
+                    .get(&normalized_probe)
+                    .copied()
+                    .unwrap_or_else(|| self.default_comparison_tolerance(&normalized_probe));
+                if let Some(relative_error) = self.value_mismatch(expected, actual, tolerance) {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: probe.to_string(),
+                        expected,
+                        actual,
+                        relative_error,
+                    });
+                    if mismatches.len() >= self.config.max_mismatches {
+                        return Ok(mismatches);
+                    }
+                }
+            }
+        }
+
+        Ok(mismatches)
     }
 
     fn compare_dc_prn_reference_batches(
@@ -8232,6 +8591,240 @@ impl XyceTestRunner {
         Self::reject_unsupported_vbic_nested_current_source_sweeps(netlist, dc, print)?;
 
         Ok(())
+    }
+
+    fn validate_static_dc_data_contract(
+        netlist: &Netlist,
+        dc_data: &XyceDcDataSweep,
+        print: &XycePrintRequest,
+    ) -> Result<(), String> {
+        if dc_data.rows.is_empty() {
+            return Err(".DC DATA sweep produced no table rows".to_string());
+        }
+
+        for probe in &print.probes {
+            Self::validate_dc_probe(probe, netlist)?;
+        }
+        Self::reject_unsupported_static_dc_model_observables(netlist, print)?;
+
+        Ok(())
+    }
+
+    fn dc_data_sweep_for_source(
+        source: &str,
+        netlist: &Netlist,
+    ) -> Result<Option<XyceDcDataSweep>, String> {
+        let table_names = Self::dc_data_table_names(source)?;
+        if table_names.is_empty() {
+            return Ok(None);
+        }
+
+        let mut rows: Option<Vec<XyceDcDataRow>> = None;
+        let mut seen_columns = BTreeSet::new();
+        for table_name in table_names {
+            let table = netlist
+                .data_tables
+                .iter()
+                .find(|table| table.name.eq_ignore_ascii_case(&table_name))
+                .ok_or_else(|| format!(".DC DATA references unknown .DATA table '{table_name}'"))?;
+            if table.params.is_empty() {
+                return Err(format!(
+                    ".DC DATA table '{}' has no parameter columns",
+                    table.name
+                ));
+            }
+            if table.rows.is_empty() {
+                return Err(format!(".DC DATA table '{}' has no rows", table.name));
+            }
+            for (row_index, row) in table.rows.iter().enumerate() {
+                if row.len() != table.params.len() {
+                    return Err(format!(
+                        ".DC DATA table '{}' row {} has {} value(s), expected {}",
+                        table.name,
+                        row_index + 1,
+                        row.len(),
+                        table.params.len()
+                    ));
+                }
+            }
+
+            match rows.as_ref() {
+                Some(existing) if existing.len() != table.rows.len() => {
+                    return Err(format!(
+                        ".DC DATA table '{}' has {} row(s), expected {} to match the other TABLE-style .DC DATA sweeps",
+                        table.name,
+                        table.rows.len(),
+                        existing.len()
+                    ));
+                }
+                None => {
+                    rows = Some(
+                        (0..table.rows.len())
+                            .map(|_| XyceDcDataRow {
+                                overrides: Vec::new(),
+                            })
+                            .collect(),
+                    );
+                }
+                Some(_) => {}
+            }
+
+            for (column_index, column_name) in table.params.iter().enumerate() {
+                let column_key = Self::normalize_probe(column_name);
+                if !seen_columns.insert(column_key) {
+                    return Err(format!(
+                        ".DC DATA column '{}' is specified more than once across the active data tables",
+                        column_name
+                    ));
+                }
+
+                let rows = rows.as_mut().expect("rows initialized from table length");
+                for (row_index, row) in table.rows.iter().enumerate() {
+                    let value = row[column_index];
+                    if !value.is_finite() {
+                        return Err(format!(
+                            ".DC DATA table '{}' row {} column '{}' contains non-finite value {}",
+                            table.name,
+                            row_index + 1,
+                            column_name,
+                            value
+                        ));
+                    }
+                    rows[row_index]
+                        .overrides
+                        .push(Self::dc_data_override_for_column(
+                            netlist,
+                            column_name,
+                            value,
+                        )?);
+                }
+            }
+        }
+
+        let rows = rows.unwrap_or_default();
+        if rows.is_empty() {
+            return Err(".DC DATA sweep produced no table rows".to_string());
+        }
+        Ok(Some(XyceDcDataSweep { rows }))
+    }
+
+    fn dc_data_override_for_column(
+        netlist: &Netlist,
+        column_name: &str,
+        value: Value,
+    ) -> Result<XyceDcDataOverride, String> {
+        if let Some((device_name, param_name)) = Self::parse_device_parameter_probe(column_name)
+            && Self::netlist_has_top_level_element_named(netlist, &device_name)
+        {
+            return Ok(XyceDcDataOverride::Device {
+                name: device_name,
+                param_name: Some(param_name),
+                value,
+            });
+        }
+
+        if Self::netlist_has_top_level_element_named(netlist, column_name) {
+            return Ok(XyceDcDataOverride::Device {
+                name: column_name.to_string(),
+                param_name: None,
+                value,
+            });
+        }
+
+        if Self::netlist_has_numeric_parameter(netlist, column_name) {
+            return Ok(XyceDcDataOverride::Parameter {
+                name: column_name.to_string(),
+                value,
+            });
+        }
+
+        Err(format!(
+            ".DC DATA column '{}' does not resolve to a top-level device value, device parameter, or numeric parameter",
+            column_name
+        ))
+    }
+
+    fn netlist_has_top_level_element_named(netlist: &Netlist, name: &str) -> bool {
+        netlist
+            .elements
+            .iter()
+            .any(|element| element.name.eq_ignore_ascii_case(name))
+    }
+
+    fn netlist_has_numeric_parameter(netlist: &Netlist, name: &str) -> bool {
+        netlist
+            .params
+            .all_params()
+            .iter()
+            .any(|(param_name, _)| param_name.eq_ignore_ascii_case(name))
+    }
+
+    fn synthetic_dc_data_sweep(dc_data: &XyceDcDataSweep) -> Result<XyceDcSweep, String> {
+        if dc_data.rows.is_empty() {
+            return Err(".DC DATA sweep produced no table rows".to_string());
+        }
+        Ok(XyceDcSweep {
+            source: "DATA".to_string(),
+            start: 0.0,
+            stop: (dc_data.rows.len() - 1) as Value,
+            step: 1.0,
+            mode: crate::netlist::DcSweepMode::Linear,
+            sweep2: None,
+        })
+    }
+
+    fn dc_data_table_names(source: &str) -> Result<Vec<String>, String> {
+        let mut table_names = Vec::new();
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line);
+            let trimmed = stripped.trim();
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if !command.eq_ignore_ascii_case(".dc") {
+                continue;
+            }
+            if let Some(table_name) = Self::assignment_value(trimmed, "data")? {
+                table_names.push(table_name);
+            }
+        }
+        Ok(table_names)
+    }
+
+    fn assignment_value(line: &str, key: &str) -> Result<Option<String>, String> {
+        let normalized = Self::normalize_assignment_spacing(line);
+        for field in normalized.split_whitespace().skip(1) {
+            let Some((name, value)) = field.split_once('=') else {
+                continue;
+            };
+            if !name.eq_ignore_ascii_case(key) {
+                continue;
+            }
+            if value.is_empty() {
+                return Err(format!("assignment '{key}=' has no value"));
+            }
+            return Ok(Some(value.to_string()));
+        }
+        Ok(None)
+    }
+
+    fn normalize_assignment_spacing(line: &str) -> String {
+        let mut out = String::with_capacity(line.len());
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch.is_whitespace() {
+                while chars.peek().is_some_and(|next| next.is_whitespace()) {
+                    chars.next();
+                }
+                if chars.peek() == Some(&'=') || out.ends_with('=') {
+                    continue;
+                }
+                out.push(' ');
+                continue;
+            }
+            out.push(ch);
+        }
+        out
     }
 
     fn validate_static_tran_contract(
@@ -17493,6 +18086,94 @@ D1 1 0 DMOD
             .expect_err("advanced diode levels stay outside the native plain DC wrapper contract");
         assert!(
             err.contains("advanced diode model"),
+            "unexpected validation error: {err}"
+        );
+    }
+
+    #[test]
+    fn dc_data_tables_materialize_device_value_rows() {
+        let source = "\
+dc data table rows
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+.DATA R1table
++ r1
++ 1
++ 2
+.ENDDATA
+.DATA R2table
++ r2
++ 3
++ 4
+.ENDDATA
+.DC DATA=R1table
+.DC DATA=R2table
+.PRINT DC {R1:R} {R2:R} V(2)
+.END
+";
+
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("dc_data.cir"))
+            .expect(".DC DATA deck parses");
+        let dc_data = XyceTestRunner::dc_data_sweep_for_source(source, &netlist)
+            .expect(".DC DATA tables validate")
+            .expect(".DC DATA sweep is detected");
+        assert_eq!(dc_data.rows.len(), 2);
+
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+        let row_netlist =
+            XyceTestRunner::materialize_dc_data_row_netlist(&engine, &netlist, &dc_data.rows[1])
+                .expect("second .DC DATA row materializes");
+
+        let r1 = row_netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .expect("R1 retained");
+        let r2 = row_netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("R2"))
+            .expect("R2 retained");
+        assert!(
+            matches!(&r1.kind, ElementKind::Resistor { value, .. } if (*value - 2.0).abs() <= Value::EPSILON)
+        );
+        assert!(
+            matches!(&r2.kind, ElementKind::Resistor { value, .. } if (*value - 4.0).abs() <= Value::EPSILON)
+        );
+    }
+
+    #[test]
+    fn dc_data_tables_reject_mismatched_table_lengths() {
+        let source = "\
+dc data mismatched rows
+V1 1 0 1
+R1 1 2 1
+R2 2 0 1
+.DATA R1table
++ r1
++ 1
++ 2
+.ENDDATA
+.DATA R2table
++ r2
++ 3
+.ENDDATA
+.DC DATA=R1table
+.DC DATA=R2table
+.PRINT DC {R1:R} {R2:R} V(2)
+.END
+";
+
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("dc_data.cir"))
+            .expect(".DC DATA deck parses");
+        let err = XyceTestRunner::dc_data_sweep_for_source(source, &netlist)
+            .expect_err("mismatched TABLE-style .DC DATA row counts must reject");
+        assert!(
+            err.contains("expected 2"),
             "unexpected validation error: {err}"
         );
     }
