@@ -6720,6 +6720,9 @@ fn stamp() {
             "fn store_div_square_rhs(",
             "fn store_div_square_rhs_mixed_ai(",
             "fn store_div_square_rhs_mixed_ia(",
+            "fn store_offset_mul_offset_rhs(",
+            "fn store_offset_mul_offset_rhs_mixed_ai(",
+            "fn store_offset_mul_offset_rhs_mixed_ia(",
         ] {
             let body = helper_body(&support, signature);
             assert!(
@@ -6735,12 +6738,23 @@ fn stamp() {
             !support.contains("fn store_div_square_ad_rhs("),
             "{support}"
         );
+        assert!(
+            !support.contains("fn store_offset_mul_offset_rhs_ad_rhs("),
+            "{support}"
+        );
         let div_square_mixed = helper_body(&support, "fn store_div_square_rhs_mixed_ia(");
         assert!(
             div_square_mixed.contains(
                 "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * reciprocal + right.node_derivatives[axis] * right_scale;"
             ),
             "{div_square_mixed}"
+        );
+        let offset_mul_mixed = helper_body(&support, "fn store_offset_mul_offset_rhs_mixed_ia(");
+        assert!(
+            offset_mul_mixed.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * right_value + left_value * right.node_derivatives[axis];"
+            ),
+            "{offset_mul_mixed}"
         );
 
         for signature in [
@@ -11614,7 +11628,15 @@ fn stamp() {
             "{support}"
         );
         assert!(
-            support.contains("fn store_offset_mul_offset_rhs_ad_rhs"),
+            support.contains("fn store_offset_mul_offset_rhs_mixed_ia"),
+            "{support}"
+        );
+        assert!(
+            support.contains("fn store_offset_mul_offset_rhs_mixed_ai"),
+            "{support}"
+        );
+        assert!(
+            !support.contains("fn store_offset_mul_offset_rhs_ad_rhs"),
             "{support}"
         );
 
@@ -11622,6 +11644,7 @@ fn stamp() {
 fn stamp() {
     scratch.store_ad_value(17, AdValue::offset(AdValue::mul_offset_rhs(scratch.ad_value(2), scratch.ad_value(3), params.rhs_offset), params.output_offset));
     scratch.store_ad_value(18, AdValue::offset(AdValue::mul_offset_rhs(scratch.ad_value(4), AdValue::sqrt(scratch.ad_value(5)), params.rhs_offset), params.output_offset));
+    scratch.store_ad_value(19, AdValue::offset(AdValue::mul_offset_rhs(AdValue::sqrt(scratch.ad_value(6)), scratch.ad_value(7), params.rhs_offset), params.output_offset));
 }
 "#;
 
@@ -11635,8 +11658,18 @@ fn stamp() {
         );
         assert!(
             compact.contains(
-                "s.store_offset_mul_offset_rhs_ad_rhs(18, 4, A::sqrt(s.ad_value(5)), p.rhs_offset, p.output_offset);"
+                "s.store_offset_mul_offset_rhs_mixed_ia(18, 4, A::sqrt(s.ad_value(5)), p.rhs_offset, p.output_offset);"
             ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_offset_mul_offset_rhs_mixed_ai(19, A::sqrt(s.ad_value(6)), 7, p.rhs_offset, p.output_offset);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_offset_mul_offset_rhs_ad_rhs("),
             "{compact}"
         );
         assert!(!compact.contains("s.store_offset_ad("), "{compact}");
@@ -21275,24 +21308,9 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_offset_mul_offset_rhs(&mut self, index: usize, left: usize, right: usize, rhs_offset: f64, output_offset: f64) {",
     "        let left_value = self.values[left];",
     "        let right_value = self.values[right] + rhs_offset;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
     "        self.values[index] = left_value * right_value + output_offset;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_offset_mul_offset_rhs_ad_rhs(&mut self, index: usize, left: usize, right: AdValue, rhs_offset: f64, output_offset: f64) {",
-    "        let left_value = self.values[left];",
-    "        let right_value = right.value + rhs_offset;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        self.values[index] = left_value * right_value + output_offset;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right.node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right.branch_derivatives[axis]; }",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * right_value + left_value * self.node_derivatives[right][axis]; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * right_value + left_value * self.branch_derivatives[right][axis]; }",
     "    }",
     "",
     "    #[inline]",
@@ -22965,6 +22983,7 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
                 '-',
             ));
             out.push_str(&generate_index_or_mixed_scaled_offset_mul_offset_lhs_helper(&mask));
+            out.push_str(&generate_index_or_mixed_offset_mul_offset_rhs_helper(&mask));
             out.push_str(
                 &generate_index_or_mixed_div_from_scalar_offset_mul_sub_from_scalar_lhs_helper(
                     &mask,
@@ -23484,6 +23503,31 @@ fn generate_index_or_mixed_scaled_offset_mul_offset_lhs_helper(mask: &str) -> St
         self.values[index] = (left_value * right_value + output_offset) * output_scale;
         for axis in 0..Instance::NODE_COUNT {{ let product_derivative = {left_node_derivative} * right_value + left_value * {right_node_derivative}; self.node_derivatives[index][axis] = product_derivative * output_scale; }}
         for axis in 0..Instance::BRANCH_COUNT {{ let product_derivative = {left_branch_derivative} * right_value + left_value * {right_branch_derivative}; self.branch_derivatives[index][axis] = product_derivative * output_scale; }}
+    }}
+"#,
+        left_ty = mixed_helper_type(mask, 0),
+        right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_offset_mul_offset_rhs_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_offset_mul_offset_rhs", mask);
+    let left_value = index_or_mixed_value_expr(mask, 0, "left");
+    let left_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "left");
+    let left_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "left");
+    let right_value = index_or_mixed_value_expr(mask, 1, "right");
+    let right_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "right");
+    let right_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, right: {right_ty}, rhs_offset: f64, output_offset: f64) {{
+        let left_value = {left_value};
+        let right_value = {right_value} + rhs_offset;
+        self.values[index] = left_value * right_value + output_offset;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * right_value + left_value * {right_node_derivative}; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * right_value + left_value * {right_branch_derivative}; }}
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
@@ -44877,19 +44921,47 @@ fn compact_offset_mul_offset_rhs_store_helper_line(
         return None;
     }
 
-    let left = compact_scratch_ad_value_index(args[0])?;
-    if let Some(right) = compact_scratch_ad_value_index(args[1]) {
+    let left = args[0];
+    let right = args[1];
+    let left_index = compact_scratch_ad_value_index(left);
+    let right_index = compact_scratch_ad_value_index(right);
+    if let (Some(left), Some(right)) = (left_index, right_index) {
         return Some(format!(
             "scratch.store_offset_mul_offset_rhs({target_index}, {left}, {right}, {}, {output_offset});",
             args[2]
         ));
     }
 
-    let right = compact_scratch_or_non_atomic_ad_arg(args[1])?;
-    Some(format!(
-        "scratch.store_offset_mul_offset_rhs_ad_rhs({target_index}, {left}, {right}, {}, {output_offset});",
-        args[2]
-    ))
+    compact_index_or_mixed_offset_mul_offset_rhs_helper_line(
+        target_index,
+        left,
+        right,
+        args[2],
+        output_offset,
+    )
+}
+
+fn compact_index_or_mixed_offset_mul_offset_rhs_helper_line(
+    target_index: usize,
+    left: &str,
+    right: &str,
+    rhs_offset: &str,
+    output_offset: &str,
+) -> Option<String> {
+    let left_is_index = compact_scratch_ad_value_index(left).is_some();
+    let right_is_index = compact_scratch_ad_value_index(right).is_some();
+    if left_is_index == right_is_index {
+        return None;
+    }
+
+    let (helper, value_args) =
+        compact_index_or_mixed_value_args("store_offset_mul_offset_rhs", &[left, right])?;
+    let mut call_args = Vec::with_capacity(5);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    call_args.push(rhs_offset.to_string());
+    call_args.push(output_offset.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
 fn compact_scratch_or_non_atomic_ad_arg(value: &str) -> Option<String> {
