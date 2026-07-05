@@ -6716,6 +6716,32 @@ fn stamp() {
             ),
             "{div}"
         );
+        for signature in [
+            "fn store_div_square_rhs(",
+            "fn store_div_square_rhs_mixed_ai(",
+            "fn store_div_square_rhs_mixed_ia(",
+        ] {
+            let body = helper_body(&support, signature);
+            assert!(
+                !body.contains("_node_derivatives = self.node_derivatives"),
+                "{body}"
+            );
+            assert!(
+                !body.contains("_branch_derivatives = self.branch_derivatives"),
+                "{body}"
+            );
+        }
+        assert!(
+            !support.contains("fn store_div_square_ad_rhs("),
+            "{support}"
+        );
+        let div_square_mixed = helper_body(&support, "fn store_div_square_rhs_mixed_ia(");
+        assert!(
+            div_square_mixed.contains(
+                "self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * reciprocal + right.node_derivatives[axis] * right_scale;"
+            ),
+            "{div_square_mixed}"
+        );
 
         for signature in [
             "fn store_div_scaled_inputs_indices(",
@@ -9282,14 +9308,20 @@ fn stamp() {
     #[test]
     fn rewrites_square_denominator_division_as_direct_store() {
         let support = generate_scratch_operation_helpers();
-        for helper in ["fn store_div_square_rhs", "fn store_div_square_ad_rhs"] {
+        for helper in [
+            "fn store_div_square_rhs",
+            "fn store_div_square_rhs_mixed_ai",
+            "fn store_div_square_rhs_mixed_ia",
+        ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(!support.contains("fn store_div_square_ad_rhs"), "{support}");
 
         let source = r#"
 fn stamp() {
     scratch.store_ad_value(80, AdValue::div(scratch.ad_value(2), AdValue::square(scratch.ad_value(3))));
     scratch.store_ad_value(81, AdValue::div(scratch.ad_value(4), AdValue::square(AdValue::offset(scratch.ad_value(5), params.offset))));
+    scratch.store_ad_value(82, AdValue::div(AdValue::offset(scratch.ad_value(6), params.offset), AdValue::square(scratch.ad_value(7))));
 }
 "#;
 
@@ -9300,11 +9332,20 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact
-                .contains("s.store_div_square_ad_rhs(81, 4, A::offset(s.ad_value(5), p.offset));"),
+            compact.contains(
+                "s.store_div_square_rhs_mixed_ia(81, 4, A::offset(s.ad_value(5), p.offset));"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_div_square_rhs_mixed_ai(82, A::offset(s.ad_value(6), p.offset), 7);"
+            ),
             "{compact}"
         );
         assert!(!compact.contains("s.store_div_ad_rhs("), "{compact}");
+        assert!(!compact.contains("s.store_div_ad_lhs("), "{compact}");
+        assert!(!compact.contains("s.store_div_square_ad_rhs("), "{compact}");
         assert!(!compact.contains("A::square("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
@@ -21295,31 +21336,13 @@ fn generate_scratch_operation_helpers() -> String {
     "    fn store_div_square_rhs(&mut self, index: usize, left: usize, right: usize) {",
     "        let left_value = self.values[left];",
     "        let right_value = self.values[right];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
     "        let denominator = right_value * right_value;",
     "        let reciprocal = 1.0 / denominator;",
     "        let quotient = left_value * reciprocal;",
     "        let right_scale = -quotient * reciprocal * 2.0 * right_value;",
     "        self.values[index] = quotient;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * reciprocal + right_node_derivatives[axis] * right_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * reciprocal + right_branch_derivatives[axis] * right_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_div_square_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
-    "        let left_value = self.values[left];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let denominator = right.value * right.value;",
-    "        let reciprocal = 1.0 / denominator;",
-    "        let quotient = left_value * reciprocal;",
-    "        let right_scale = -quotient * reciprocal * 2.0 * right.value;",
-    "        self.values[index] = quotient;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * reciprocal + right.node_derivatives[axis] * right_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * reciprocal + right.branch_derivatives[axis] * right_scale; }",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * reciprocal + self.node_derivatives[right][axis] * right_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * reciprocal + self.branch_derivatives[right][axis] * right_scale; }",
     "    }",
     "",
         "    #[inline]",
@@ -22961,6 +22984,7 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
                 "store_sub_scaled_inputs",
                 '-',
             ));
+            out.push_str(&generate_index_or_mixed_div_square_rhs_helper(&mask));
             out.push_str(&generate_index_or_mixed_div_scaled_inputs_square_rhs_helper(&mask));
         }
         out.push_str(&generate_index_or_mixed_offset_add_scaled_inputs_helper(
@@ -23732,6 +23756,35 @@ fn generate_index_or_mixed_mul_scaled_inputs_rhs_helper(
 fn generate_index_or_mixed_div_scaled_inputs_helper(mask: &str) -> String {
     let helper = index_or_mixed_helper_name("store_div_scaled_inputs", mask);
     generate_index_or_mixed_div_scaled_inputs_body(mask, &helper, &[])
+}
+
+fn generate_index_or_mixed_div_square_rhs_helper(mask: &str) -> String {
+    let helper = index_or_mixed_helper_name("store_div_square_rhs", mask);
+    let left_value = index_or_mixed_value_expr(mask, 0, "left");
+    let left_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "left");
+    let left_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "left");
+    let right_value = index_or_mixed_value_expr(mask, 1, "right");
+    let right_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "right");
+    let right_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, left: {left_ty}, right: {right_ty}) {{
+        let left_value = {left_value};
+        let right_value = {right_value};
+        let denominator = right_value * right_value;
+        let reciprocal = 1.0 / denominator;
+        let quotient = left_value * reciprocal;
+        let right_scale = -quotient * reciprocal * 2.0 * right_value;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = {left_node_derivative} * reciprocal + {right_node_derivative} * right_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = {left_branch_derivative} * reciprocal + {right_branch_derivative} * right_scale; }}
+    }}
+"#,
+        left_ty = mixed_helper_type(mask, 0),
+        right_ty = mixed_helper_type(mask, 1),
+    )
 }
 
 fn generate_index_or_mixed_div_scaled_inputs_square_rhs_helper(mask: &str) -> String {
@@ -37594,6 +37647,12 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
         {
             return Some(line);
         }
+        if name == "div"
+            && let Some(line) =
+                compact_div_square_rhs_store_helper_line(target_index, args[0], args[1])
+        {
+            return Some(line);
+        }
         let left = compact_scratch_ad_value_index(args[0]);
         let right = compact_scratch_ad_value_index(args[1]);
         return match (left, right) {
@@ -37617,12 +37676,6 @@ fn compact_mixed_scratch_ad_store_helper_call(target_index: usize, value: &str) 
                         left,
                         args[1],
                     )
-                {
-                    return Some(line);
-                }
-                if name == "div"
-                    && let Some(line) =
-                        compact_div_square_rhs_store_helper_line(target_index, left, args[1])
                 {
                     return Some(line);
                 }
@@ -37708,22 +37761,42 @@ fn compact_binary_sqrt_lhs_store_helper_line(
 
 fn compact_div_square_rhs_store_helper_line(
     target_index: usize,
-    left: usize,
+    left: &str,
     denominator: &str,
 ) -> Option<String> {
     let args = compact_ad_call_args(denominator, "square")?;
     if args.len() != 1 {
         return None;
     }
-    if let Some(right) = compact_scratch_ad_value_index(args[0]) {
+    let square_input = args[0];
+    let left_index = compact_scratch_ad_value_index(left);
+    let right_index = compact_scratch_ad_value_index(square_input);
+    if let (Some(left), Some(right)) = (left_index, right_index) {
         return Some(format!(
             "scratch.store_div_square_rhs({target_index}, {left}, {right});"
         ));
     }
-    let right = compact_scratch_or_non_atomic_ad_arg(args[0])?;
-    Some(format!(
-        "scratch.store_div_square_ad_rhs({target_index}, {left}, {right});"
-    ))
+
+    compact_index_or_mixed_div_square_rhs_helper_line(target_index, left, square_input)
+}
+
+fn compact_index_or_mixed_div_square_rhs_helper_line(
+    target_index: usize,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    let left_is_index = compact_scratch_ad_value_index(left).is_some();
+    let right_is_index = compact_scratch_ad_value_index(right).is_some();
+    if left_is_index == right_is_index {
+        return None;
+    }
+
+    let (helper, value_args) =
+        compact_index_or_mixed_value_args("store_div_square_rhs", &[left, right])?;
+    let mut call_args = Vec::with_capacity(3);
+    call_args.push(target_index.to_string());
+    call_args.extend(value_args);
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
 fn compact_div_scaled_inputs_square_rhs_store_helper_line(
