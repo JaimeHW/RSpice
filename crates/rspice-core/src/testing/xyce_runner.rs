@@ -10479,7 +10479,7 @@ impl XyceTestRunner {
     fn validate_ac_expression_probe(expression: &str, netlist: &Netlist) -> Result<(), String> {
         let context = Self::print_eval_context(netlist, None, None);
         let mut call_value = |call: &str| {
-            Self::validate_ac_complex_probe(call, netlist)?;
+            Self::validate_ac_expression_call_probe(call, netlist)?;
             Ok(ExprComplexValue::real(1.0))
         };
         let (rewritten, context) =
@@ -10487,6 +10487,16 @@ impl XyceTestRunner {
         crate::netlist::expr::eval_expression_complex(&rewritten, &context)
             .map_err(|err| format!("unsupported .PRINT AC expression '{{{expression}}}': {err}"))?;
         Ok(())
+    }
+
+    fn validate_ac_expression_call_probe(call: &str, netlist: &Netlist) -> Result<(), String> {
+        let normalized = Self::normalize_probe(call);
+        if Self::parse_ac_voltage_probe(&normalized).is_some()
+            || Self::parse_ac_current_probe(&normalized).is_some()
+        {
+            return Self::validate_atomic_ac_probe(&normalized, call, netlist);
+        }
+        Self::validate_ac_complex_probe(call, netlist)
     }
 
     fn validate_atomic_tran_probe(
@@ -11387,10 +11397,8 @@ impl XyceTestRunner {
         result: &AcResult,
     ) -> Result<Complex64, String> {
         let context = Self::print_eval_context(netlist, None, None);
-        let mut call_value = |call: &str| {
-            let value = Self::evaluate_ac_complex_probe(call, netlist, result)?;
-            Ok(ExprComplexValue::new(value.re, value.im))
-        };
+        let mut call_value =
+            |call: &str| Self::evaluate_ac_expression_call_probe(call, netlist, result);
         let (rewritten, context) =
             Self::rewrite_ac_print_expression_complex(expression, context, &mut call_value)?;
         let value =
@@ -11398,6 +11406,48 @@ impl XyceTestRunner {
                 format!("failed to evaluate .PRINT AC expression '{{{expression}}}': {err}")
             })?;
         Ok(Complex64::new(value.re, value.im))
+    }
+
+    fn evaluate_ac_expression_call_probe(
+        call: &str,
+        netlist: &Netlist,
+        result: &AcResult,
+    ) -> Result<ExprComplexValue, String> {
+        let normalized = Self::normalize_probe(call);
+        if let Some(voltage_probe) = Self::parse_ac_voltage_probe(&normalized) {
+            let value = Self::evaluate_ac_voltage_probe(&voltage_probe, netlist, result)?;
+            return Ok(
+                match voltage_probe
+                    .accessor
+                    .evaluate_ac_scalar(value, false)
+                    .map(ExprComplexValue::real)
+                {
+                    Some(value) => value,
+                    None => ExprComplexValue::new(value.re, value.im),
+                },
+            );
+        }
+        if let Some(current_probe) = Self::parse_ac_current_probe(&normalized) {
+            let current = Self::ac_branch_current_named(result, &current_probe.element_name)
+                .ok_or_else(|| {
+                    format!(
+                        "branch '{}' not found in AC result",
+                        current_probe.element_name
+                    )
+                })?;
+            return Ok(
+                match current_probe
+                    .accessor
+                    .evaluate_ac_scalar(current, false)
+                    .map(ExprComplexValue::real)
+                {
+                    Some(value) => value,
+                    None => ExprComplexValue::new(current.re, current.im),
+                },
+            );
+        }
+        let value = Self::evaluate_ac_complex_probe(call, netlist, result)?;
+        Ok(ExprComplexValue::new(value.re, value.im))
     }
 
     fn evaluate_ac_voltage_probe(
@@ -16526,6 +16576,9 @@ impl XyceTestRunner {
             if line.trim().is_empty() {
                 continue;
             }
+            if Self::strip_netlist_comment(line).trim().is_empty() {
+                continue;
+            }
             if line.trim_start().starts_with('+') {
                 if let Some(previous) = lines.last_mut() {
                     previous.push(' ');
@@ -16977,6 +17030,36 @@ Values:
                     .into_iter()
                     .map(str::to_string)
                     .collect(),
+            }]
+        );
+    }
+
+    #[test]
+    fn print_output_requests_join_continuations_across_comment_lines() {
+        let requests = XyceTestRunner::print_output_requests(
+            r#"
+.PRINT AC
+*+ V(1)
+*+ V(2)
++ {0.001 + abs(VREAL - VR(1))}
++ {0.001 + abs(VIMAG - VI(1))}
+"#,
+            "AC",
+        )
+        .expect("comment-separated .PRINT AC continuations parse");
+
+        assert_eq!(
+            requests,
+            vec![XycePrintOutputRequest {
+                format: None,
+                file: None,
+                probes: [
+                    "{0.001 + abs(VREAL - VR(1))}",
+                    "{0.001 + abs(VIMAG - VI(1))}",
+                ]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
             }]
         );
     }
@@ -18209,6 +18292,39 @@ R2 b 0 2
             XyceTestRunner::validate_ac_complex_probe("IDB(V1)", &netlist)
                 .expect_err("scalar current accessor is not a complex probe")
                 .contains("complex I")
+        );
+    }
+
+    #[test]
+    fn ac_print_expression_evaluates_voltage_component_accessors() {
+        let netlist = Netlist::parse(
+            "\
+ac expression accessor probes
+V1 a 0 AC 1
+R1 a 0 1
+.AC DEC 1 1 10
+.PRINT AC {0.001 + abs(2.0 - VR(A)) + abs(0.25 - VI(A))}
+.END
+",
+        )
+        .expect("AC expression accessor deck parses");
+        let result = AcResult {
+            frequency: 1.0,
+            node_names: vec!["a".to_string()],
+            branch_names: vec!["v1".to_string()],
+            voltages: vec![Complex64::new(2.0, 0.25)],
+            currents: vec![Complex64::new(-2.0, -0.25)],
+        };
+        let probe = "{0.001 + abs(2.0 - VR(A)) + abs(0.25 - VI(A))}";
+
+        XyceTestRunner::validate_ac_probe(probe, &netlist)
+            .expect("AC expression accepts scalar voltage component accessors");
+        assert!(
+            (XyceTestRunner::evaluate_ac_probe(probe, &netlist, &result, false)
+                .expect("AC expression evaluates scalar voltage component accessors")
+                - 0.001)
+                .abs()
+                < 1.0e-12
         );
     }
 
