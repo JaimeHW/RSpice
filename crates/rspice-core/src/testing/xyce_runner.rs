@@ -8174,13 +8174,13 @@ impl XyceTestRunner {
                     )?;
                 }
                 ElementKind::Mosfet { .. }
-                    if Self::netlist_device_is_native_ac_supported_bulk_mosfet(
+                    if Self::netlist_device_is_single_native_ac_supported_bulk_mosfet(
                         netlist,
                         &element.name,
                     ) => {}
                 _ => {
                     return Err(format!(
-                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, and native MOSFET LEVEL=2/6; element '{}' requires a broader AC oracle contract",
+                        "native static .PRINT AC comparison currently supports independent sources, static R/L/C passives, mutual inductors, finite-gain linear controlled sources, time-independent behavioral sources, and single-device native MOSFET LEVEL=2/6; element '{}' requires a broader AC oracle contract",
                         element.name
                     ));
                 }
@@ -11687,46 +11687,52 @@ impl XyceTestRunner {
         })
     }
 
-    fn netlist_device_is_native_ac_supported_bulk_mosfet(
+    fn netlist_device_is_single_native_ac_supported_bulk_mosfet(
         netlist: &Netlist,
         instance_name: &str,
     ) -> bool {
-        if Self::elements_device_is_native_ac_supported_bulk_mosfet(
+        let direct = Self::elements_native_ac_supported_bulk_mosfet_match_and_count(
             &netlist.elements,
             &netlist.models,
             &[],
             instance_name,
-        ) {
+        );
+        if direct == (true, 1) {
             return true;
         }
 
         crate::netlist::flatten_netlist_with_models(netlist).is_ok_and(|flattened| {
-            Self::elements_device_is_native_ac_supported_bulk_mosfet(
+            Self::elements_native_ac_supported_bulk_mosfet_match_and_count(
                 &flattened.elements,
                 &netlist.models,
                 &flattened.scoped_models,
                 instance_name,
-            )
+            ) == (true, 1)
         })
     }
 
-    fn elements_device_is_native_ac_supported_bulk_mosfet(
+    fn elements_native_ac_supported_bulk_mosfet_match_and_count(
         elements: &[crate::netlist::Element],
         models: &[crate::netlist::ModelDef],
         scoped_models: &[crate::netlist::ModelDef],
         instance_name: &str,
-    ) -> bool {
-        elements.iter().any(|element| {
-            if !Self::device_instance_names_match(&element.name, instance_name) {
-                return false;
-            }
+    ) -> (bool, usize) {
+        let mut matched = false;
+        let mut count = 0usize;
+        for element in elements {
             let ElementKind::Mosfet { model, .. } = &element.kind else {
-                return false;
+                continue;
             };
-            Self::find_model(scoped_models, model)
+            let supported = Self::find_model(scoped_models, model)
                 .or_else(|| Self::find_model(models, model))
-                .is_some_and(Self::model_is_native_ac_supported_bulk_mosfet)
-        })
+                .is_some_and(Self::model_is_native_ac_supported_bulk_mosfet);
+            if !supported {
+                continue;
+            }
+            count += 1;
+            matched |= Self::device_instance_names_match(&element.name, instance_name);
+        }
+        (matched, count)
     }
 
     fn model_is_native_ac_supported_bulk_mosfet(model: &crate::netlist::ModelDef) -> bool {
