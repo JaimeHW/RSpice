@@ -8494,25 +8494,41 @@ fn rust_backend_fuses_negated_mixed_multiply_store_helpers() {
     let support = render_runtime_support_module();
 
     assert!(
-        support.contains("pub(crate) fn store_mul_neg_lhs("),
+        support.contains("pub(crate) fn store_mul_scale_offset_indices("),
         "{support}"
     );
     assert!(
-        support.contains("pub(crate) fn store_mul_neg_rhs("),
+        support.contains("pub(crate) fn store_mul_scale_offset_mixed_ia("),
         "{support}"
     );
     assert!(
-        support.contains("pub(crate) fn store_mul_neg_ad_lhs("),
+        !support.contains("pub(crate) fn store_mul_neg_lhs("),
         "{support}"
     );
     assert!(
-        support.contains("pub(crate) fn store_mul_neg_ad_rhs("),
+        !support.contains("pub(crate) fn store_mul_neg_rhs("),
         "{support}"
     );
-    assert!(stamp.contains("s.store_mul_neg_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_neg_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_neg_ad_lhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_neg_ad_rhs("), "{stamp}");
+    assert!(
+        !support.contains("pub(crate) fn store_mul_neg_ad_lhs("),
+        "{support}"
+    );
+    assert!(
+        !support.contains("pub(crate) fn store_mul_neg_ad_rhs("),
+        "{support}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_scale_offset_indices("),
+        "{stamp}"
+    );
+    assert!(
+        stamp.contains("s.store_mul_scale_offset_mixed_ia("),
+        "{stamp}"
+    );
+    assert!(!stamp.contains("s.store_mul_neg_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_neg_rhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_neg_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_neg_ad_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
     assert!(!stamp.contains("A::neg("), "{stamp}");

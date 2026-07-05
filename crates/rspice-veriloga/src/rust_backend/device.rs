@@ -8156,21 +8156,10 @@ fn stamp() {
             "{square_mul_double_sub_rhs}"
         );
 
-        let mul_neg_lhs = helper_body(&support, "fn store_mul_neg_lhs(");
-        assert!(
-            !mul_neg_lhs.contains("_node_derivatives = self.node_derivatives"),
-            "{mul_neg_lhs}"
-        );
-        assert!(
-            !mul_neg_lhs.contains("_branch_derivatives = self.branch_derivatives"),
-            "{mul_neg_lhs}"
-        );
-        assert!(
-            mul_neg_lhs.contains(
-                "self.node_derivatives[index][axis] = -self.node_derivatives[left][axis] * right_value + left_value * self.node_derivatives[right][axis];"
-            ),
-            "{mul_neg_lhs}"
-        );
+        assert!(!support.contains("fn store_mul_neg_lhs("), "{support}");
+        assert!(!support.contains("fn store_mul_neg_rhs("), "{support}");
+        assert!(!support.contains("fn store_mul_neg_ad_lhs("), "{support}");
+        assert!(!support.contains("fn store_mul_neg_ad_rhs("), "{support}");
 
         let div_scaled_product3_indices =
             helper_body(&support, "fn store_div_scaled_product3_indices(");
@@ -20649,50 +20638,6 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = source_value * output;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * output + source_value * value.node_derivatives[axis] * derivative_scale; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * output + source_value * value.branch_derivatives[axis] * derivative_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_neg_lhs(&mut self, index: usize, left: usize, right: usize) {",
-    "        let left_value = -self.values[left];",
-    "        let right_value = self.values[right];",
-    "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -self.node_derivatives[left][axis] * right_value + left_value * self.node_derivatives[right][axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -self.branch_derivatives[left][axis] * right_value + left_value * self.branch_derivatives[right][axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_neg_rhs(&mut self, index: usize, left: usize, right: usize) {",
-    "        let left_value = self.values[left];",
-    "        let right_value = -self.values[right];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value - left_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value - left_value * right_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_neg_ad_lhs(&mut self, index: usize, left: AdValue, right: usize) {",
-    "        let left_value = -left.value;",
-    "        let right_value = self.values[right];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = -left.node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = -left.branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_neg_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
-    "        let left_value = self.values[left];",
-    "        let right_value = -right.value;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value - left_value * right.node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value - left_value * right.branch_derivatives[axis]; }",
     "    }",
     "",
     "    #[inline]",
@@ -38870,25 +38815,41 @@ fn compact_fused_scaled_multiply_helper_line(
 
     if compact_scalar_is_negative_one(scale) {
         match (left_source, right_source) {
-            (Some(left), Some(right)) => {
+            (Some(_), Some(_)) => {
                 if scaled_left {
-                    return Some(format!(
-                        "scratch.store_mul_neg_lhs({target_index}, {left}, {right});"
-                    ));
+                    return compact_index_or_mixed_mul_scale_offset_helper_line(
+                        target_index,
+                        right,
+                        left,
+                        "-1.0",
+                        "0.0",
+                    );
                 }
-                return Some(format!(
-                    "scratch.store_mul_neg_rhs({target_index}, {left}, {right});"
-                ));
+                return compact_index_or_mixed_mul_scale_offset_helper_line(
+                    target_index,
+                    left,
+                    right,
+                    "-1.0",
+                    "0.0",
+                );
             }
-            (None, Some(right)) if scaled_left && compact_non_atomic_ad_value(left) => {
-                return Some(format!(
-                    "scratch.store_mul_neg_ad_lhs({target_index}, {left}, {right});"
-                ));
+            (None, Some(_)) if scaled_left && compact_non_atomic_ad_value(left) => {
+                return compact_index_or_mixed_mul_scale_offset_helper_line(
+                    target_index,
+                    right,
+                    left,
+                    "-1.0",
+                    "0.0",
+                );
             }
-            (Some(left), None) if !scaled_left && compact_non_atomic_ad_value(right) => {
-                return Some(format!(
-                    "scratch.store_mul_neg_ad_rhs({target_index}, {left}, {right});"
-                ));
+            (Some(_), None) if !scaled_left && compact_non_atomic_ad_value(right) => {
+                return compact_index_or_mixed_mul_scale_offset_helper_line(
+                    target_index,
+                    left,
+                    right,
+                    "-1.0",
+                    "0.0",
+                );
             }
             _ => {}
         }
@@ -41154,35 +41115,51 @@ fn compact_negated_mixed_multiply_store_helper_call(
     let left = compact_scratch_ad_value_index(args[0]);
     let right = compact_scratch_ad_value_index(args[1]);
     match (left, right) {
-        (None, Some(right)) => {
+        (None, Some(_)) => {
             let neg_args = compact_ad_call_args(args[0], "neg")?;
             if neg_args.len() != 1 {
                 return None;
             }
-            if let Some(left) = compact_scratch_ad_value_index(neg_args[0]) {
-                return Some(format!(
-                    "scratch.store_mul_neg_lhs({target_index}, {left}, {right});"
-                ));
+            if compact_scratch_ad_value_index(neg_args[0]).is_some() {
+                return compact_index_or_mixed_mul_scale_offset_helper_line(
+                    target_index,
+                    args[1],
+                    neg_args[0],
+                    "-1.0",
+                    "0.0",
+                );
             }
             let left = compact_scratch_or_non_atomic_ad_arg(neg_args[0])?;
-            Some(format!(
-                "scratch.store_mul_neg_ad_lhs({target_index}, {left}, {right});"
-            ))
+            compact_index_or_mixed_mul_scale_offset_helper_line(
+                target_index,
+                args[1],
+                &left,
+                "-1.0",
+                "0.0",
+            )
         }
-        (Some(left), None) => {
+        (Some(_), None) => {
             let neg_args = compact_ad_call_args(args[1], "neg")?;
             if neg_args.len() != 1 {
                 return None;
             }
-            if let Some(right) = compact_scratch_ad_value_index(neg_args[0]) {
-                return Some(format!(
-                    "scratch.store_mul_neg_rhs({target_index}, {left}, {right});"
-                ));
+            if compact_scratch_ad_value_index(neg_args[0]).is_some() {
+                return compact_index_or_mixed_mul_scale_offset_helper_line(
+                    target_index,
+                    args[0],
+                    neg_args[0],
+                    "-1.0",
+                    "0.0",
+                );
             }
             let right = compact_scratch_or_non_atomic_ad_arg(neg_args[0])?;
-            Some(format!(
-                "scratch.store_mul_neg_ad_rhs({target_index}, {left}, {right});"
-            ))
+            compact_index_or_mixed_mul_scale_offset_helper_line(
+                target_index,
+                args[0],
+                &right,
+                "-1.0",
+                "0.0",
+            )
         }
         _ => None,
     }
