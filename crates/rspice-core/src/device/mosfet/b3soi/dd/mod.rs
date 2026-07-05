@@ -1276,8 +1276,8 @@ impl B3SoiDd {
                     - op.gds * bias.vds
                     - gm * bias.vgs
                     - gmbs * bias.vbs
-                    - gme * bias.ves
-                    - gm_t * bias.del_temp);
+                    - gme * bias.ves)
+                - gm_t * bias.del_temp;
             ceqbs = op.cjs - op.gjs_t * bias.del_temp;
             ceqbd = op.cjd - op.gjd_t * bias.del_temp;
 
@@ -1316,8 +1316,8 @@ impl B3SoiDd {
                     + op.gds * bias.vds
                     + gm * vgd
                     + gmbs * vbd
-                    + gme * (bias.ves - bias.vds)
-                    + gm_t * bias.del_temp);
+                    + gme * (bias.ves - bias.vds))
+                - gm_t * bias.del_temp;
             ceqbs = op.cjd - op.gjd_t * bias.del_temp;
             ceqbd = op.cjs - op.gjs_t * bias.del_temp;
 
