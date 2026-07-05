@@ -6021,10 +6021,15 @@ fn stamp() {
             "fn store_div_scaled_inputs_indices",
             "fn store_div_scaled_inputs_mixed_ia",
             "fn store_div_scaled_inputs_mixed_ai",
+            "fn store_div_scaled_inputs_sqrt_rhs",
+            "fn store_div_scaled_inputs_ln_lhs",
             "fn store_div_scaled_inputs2_indices",
             "fn store_div_scaled_inputs2_mixed_iia",
             "fn store_div_scaled_inputs2_mixed_iai",
             "fn store_div_scaled_inputs2_mixed_aii",
+            "fn store_div_scaled_inputs2_sqrt_denominator",
+            "fn store_div_scaled_inputs2_ln_second",
+            "fn store_div_scaled_inputs2_exp_first",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
@@ -6050,11 +6055,15 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_div_scaled_inputs_mixed_ia(171, 4, p.left_scale, A::sqrt(s.ad_value(5)), p.right_scale);"),
+            compact.contains(
+                "s.store_div_scaled_inputs_sqrt_rhs(171, 4, p.left_scale, 5, p.right_scale);"
+            ),
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_div_scaled_inputs_mixed_ai(172, A::ln(s.ad_value(6)), p.left_scale, 7, p.right_scale);"),
+            compact.contains(
+                "s.store_div_scaled_inputs_ln_lhs(172, 6, p.left_scale, 7, p.right_scale);"
+            ),
             "{compact}"
         );
         assert!(
@@ -6062,15 +6071,15 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_div_scaled_inputs2_mixed_iia(174, 11, p.first_scale, 12, p.second_scale, A::sqrt(s.ad_value(13)), p.denominator_scale);"),
+            compact.contains("s.store_div_scaled_inputs2_sqrt_denominator(174, 11, p.first_scale, 12, p.second_scale, 13, p.denominator_scale);"),
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_div_scaled_inputs2_mixed_iai(175, 14, p.first_scale, A::ln(s.ad_value(15)), p.second_scale, 16, p.denominator_scale);"),
+            compact.contains("s.store_div_scaled_inputs2_ln_second(175, 14, p.first_scale, 15, p.second_scale, 16, p.denominator_scale);"),
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_div_scaled_inputs2_mixed_aii(176, A::exp(s.ad_value(17)), p.first_scale, 18, p.second_scale, 19, p.denominator_scale);"),
+            compact.contains("s.store_div_scaled_inputs2_exp_first(176, 17, p.first_scale, 18, p.second_scale, 19, p.denominator_scale);"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_div_scaled_inputs("), "{compact}");
@@ -6078,6 +6087,15 @@ fn stamp() {
             !compact.contains("s.store_div_scaled_inputs2("),
             "{compact}"
         );
+        for value in [
+            "A::sqrt(s.ad_value(5))",
+            "A::ln(s.ad_value(6))",
+            "A::sqrt(s.ad_value(13))",
+            "A::ln(s.ad_value(15))",
+            "A::exp(s.ad_value(17))",
+        ] {
+            assert!(!compact.contains(value), "{compact}");
+        }
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -8497,6 +8515,16 @@ fn stamp() {
             "fn store_sub_from_scalar_mul_sqrt_rhs(",
             "fn store_exp_mul_scaled_lhs_powf_rhs(",
             "fn store_exp_div_scaled_inputs_powf_rhs(",
+            "fn store_div_scaled_inputs_unary_lhs(",
+            "fn store_div_scaled_inputs_unary_rhs(",
+            "fn store_div_scaled_inputs_sqrt_rhs(",
+            "fn store_div_scaled_inputs_ln_lhs(",
+            "fn store_div_scaled_inputs2_unary_first(",
+            "fn store_div_scaled_inputs2_unary_second(",
+            "fn store_div_scaled_inputs2_unary_denominator(",
+            "fn store_div_scaled_inputs2_exp_first(",
+            "fn store_div_scaled_inputs2_ln_second(",
+            "fn store_div_scaled_inputs2_sqrt_denominator(",
             "fn store_mul_exp_scale_offset_lhs(",
             "fn store_mul_exp_scale_offset_rhs(",
             "fn store_mul_powf_scale_offset_lhs(",
@@ -23285,6 +23313,7 @@ fn generate_scratch_operation_helpers() -> String {
     out.push_str(&generate_mul_scaled_square_unary_rhs_helpers());
     out.push_str(&generate_mul_scaled_square_sub_from_scalar_unary_rhs_helpers());
     out.push_str(&generate_mul_scaled_power_unary_rhs_helpers());
+    out.push_str(&generate_div_scaled_inputs_unary_helpers());
     out.push_str(generate_hybrid_index_product_scratch_helpers());
     out.push_str(&generate_mixed_index_product_scratch_helpers());
     out.push_str(&generate_square_product_and_product3_scratch_helpers());
@@ -23390,6 +23419,155 @@ fn generate_mul_scaled_power_unary_rhs_helper(
         self.values[index] = scaled_source_value * power_value;
         for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = self.node_derivatives[source][axis] * output_scale * power_value + scaled_source_value * self.node_derivatives[value_source][axis] * power_derivative_scale; }}
         for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = self.branch_derivatives[source][axis] * output_scale * power_value + scaled_source_value * self.branch_derivatives[value_source][axis] * power_derivative_scale; }}
+    }}
+"#
+    )
+}
+
+fn generate_div_scaled_inputs_unary_helpers() -> String {
+    let mut out = r#"
+    #[inline]
+    fn store_div_scaled_inputs_unary_lhs(&mut self, index: usize, left_source: usize, left_scale: f64, right: usize, right_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let right_value = self.values[right] * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = unary_value * left_scale * reciprocal;
+        let left_derivative_scale = left_scale * reciprocal * unary_derivative_scale;
+        let right_derivative_scale = -quotient * reciprocal * right_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left_source][axis] * left_derivative_scale + self.node_derivatives[right][axis] * right_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left_source][axis] * left_derivative_scale + self.branch_derivatives[right][axis] * right_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs_unary_rhs(&mut self, index: usize, left: usize, left_scale: f64, right_source: usize, right_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let left_value = self.values[left] * left_scale;
+        let right_value = unary_value * right_scale;
+        let reciprocal = 1.0 / right_value;
+        let quotient = left_value * reciprocal;
+        let left_derivative_scale = left_scale * reciprocal;
+        let right_derivative_scale = -quotient * reciprocal * right_scale * unary_derivative_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right_source][axis] * right_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * left_derivative_scale + self.branch_derivatives[right_source][axis] * right_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs2_unary_first(&mut self, index: usize, first_source: usize, first_scale: f64, second: usize, second_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = unary_value * first_scale + self.values[second] * second_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal * unary_derivative_scale;
+        let second_derivative_scale = second_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[first_source][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[first_source][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs2_unary_second(&mut self, index: usize, first: usize, first_scale: f64, second_source: usize, second_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = self.values[first] * first_scale + unary_value * second_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal * unary_derivative_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second_source][axis] * second_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second_source][axis] * second_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs2_unary_denominator(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, denominator_source: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = self.values[first] * first_scale + self.values[second] * second_scale;
+        let denominator_value = unary_value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * unary_derivative_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale + self.node_derivatives[denominator_source][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale + self.branch_derivatives[denominator_source][axis] * denominator_derivative_scale; }
+    }
+"#
+    .to_string();
+    for &(name, _) in COMPACT_MUL_UNARY_HELPERS {
+        out.push_str(&generate_div_scaled_inputs_unary_helper(name, "lhs"));
+        out.push_str(&generate_div_scaled_inputs_unary_helper(name, "rhs"));
+        out.push_str(&generate_div_scaled_inputs2_unary_helper(name, "first"));
+        out.push_str(&generate_div_scaled_inputs2_unary_helper(name, "second"));
+        out.push_str(&generate_div_scaled_inputs2_unary_helper(
+            name,
+            "denominator",
+        ));
+    }
+    out
+}
+
+fn generate_div_scaled_inputs_unary_helper(unary: &str, position: &str) -> String {
+    let helper = format!("store_div_scaled_inputs_{unary}_{position}");
+    let unary_bindings = mul_unary_output_derivative_bindings(unary);
+    let (signature, call) = if position == "lhs" {
+        (
+            "left_source: usize, left_scale: f64, right: usize, right_scale: f64",
+            "self.store_div_scaled_inputs_unary_lhs(index, left_source, left_scale, right, right_scale, unary_value, derivative_scale);",
+        )
+    } else {
+        (
+            "left: usize, left_scale: f64, right_source: usize, right_scale: f64",
+            "self.store_div_scaled_inputs_unary_rhs(index, left, left_scale, right_source, right_scale, unary_value, derivative_scale);",
+        )
+    };
+    let value_source = if position == "lhs" {
+        "left_source"
+    } else {
+        "right_source"
+    };
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, {signature}) {{
+        let value_raw = self.values[{value_source}];
+        {unary_bindings}
+        {call}
+    }}
+"#
+    )
+}
+
+fn generate_div_scaled_inputs2_unary_helper(unary: &str, position: &str) -> String {
+    let helper = format!("store_div_scaled_inputs2_{unary}_{position}");
+    let unary_bindings = mul_unary_output_derivative_bindings(unary);
+    let (signature, call, value_source) = match position {
+        "first" => (
+            "first_source: usize, first_scale: f64, second: usize, second_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs2_unary_first(index, first_source, first_scale, second, second_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "first_source",
+        ),
+        "second" => (
+            "first: usize, first_scale: f64, second_source: usize, second_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs2_unary_second(index, first, first_scale, second_source, second_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "second_source",
+        ),
+        "denominator" => (
+            "first: usize, first_scale: f64, second: usize, second_scale: f64, denominator_source: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs2_unary_denominator(index, first, first_scale, second, second_scale, denominator_source, denominator_scale, unary_value, derivative_scale);",
+            "denominator_source",
+        ),
+        _ => unreachable!("unknown div_scaled_inputs2 unary position"),
+    };
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, {signature}) {{
+        let value_raw = self.values[{value_source}];
+        {unary_bindings}
+        {call}
     }}
 "#
     )
@@ -36806,6 +36984,15 @@ fn compact_common_fused_expression_store_helper_call(
         ) {
             return Some(line);
         }
+        if let Some(line) = compact_div_scaled_inputs_unary_store_helper_line(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+        ) {
+            return Some(line);
+        }
         if let Some(line) = compact_index_or_mixed_scaled_inputs_helper_line(
             target_index,
             "store_div_scaled_inputs",
@@ -36838,6 +37025,17 @@ fn compact_common_fused_expression_store_helper_call(
             ) {
                 return Some(line);
             }
+        }
+        if let Some(line) = compact_div_scaled_inputs2_unary_store_helper_line(
+            target_index,
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4],
+            args[5],
+        ) {
+            return Some(line);
         }
         if let Some(line) = compact_index_or_mixed_scaled_inputs_helper_line(
             target_index,
@@ -38646,6 +38844,71 @@ fn compact_index_or_mixed_div_scaled_inputs_square_rhs_helper_line(
     call_args.push(value_args[1].clone());
     call_args.push(right_scale.to_string());
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_div_scaled_inputs_unary_store_helper_line(
+    target_index: usize,
+    left: &str,
+    left_scale: &str,
+    right: &str,
+    right_scale: &str,
+) -> Option<String> {
+    if let Some(left) = compact_scratch_ad_value_index(left)
+        && let Some((unary, right_source)) = compact_index_unary_arg(right)
+    {
+        return Some(format!(
+            "scratch.store_div_scaled_inputs_{unary}_rhs({target_index}, {left}, {left_scale}, {right_source}, {right_scale});"
+        ));
+    }
+
+    if let Some((unary, left_source)) = compact_index_unary_arg(left)
+        && let Some(right) = compact_scratch_ad_value_index(right)
+    {
+        return Some(format!(
+            "scratch.store_div_scaled_inputs_{unary}_lhs({target_index}, {left_source}, {left_scale}, {right}, {right_scale});"
+        ));
+    }
+
+    None
+}
+
+fn compact_div_scaled_inputs2_unary_store_helper_line(
+    target_index: usize,
+    first: &str,
+    first_scale: &str,
+    second: &str,
+    second_scale: &str,
+    denominator: &str,
+    denominator_scale: &str,
+) -> Option<String> {
+    if let Some((unary, first_source)) = compact_index_unary_arg(first)
+        && let Some(second) = compact_scratch_ad_value_index(second)
+        && let Some(denominator) = compact_scratch_ad_value_index(denominator)
+    {
+        return Some(format!(
+            "scratch.store_div_scaled_inputs2_{unary}_first({target_index}, {first_source}, {first_scale}, {second}, {second_scale}, {denominator}, {denominator_scale});"
+        ));
+    }
+
+    if let Some(first) = compact_scratch_ad_value_index(first)
+        && let Some((unary, second_source)) = compact_index_unary_arg(second)
+        && let Some(denominator) = compact_scratch_ad_value_index(denominator)
+    {
+        return Some(format!(
+            "scratch.store_div_scaled_inputs2_{unary}_second({target_index}, {first}, {first_scale}, {second_source}, {second_scale}, {denominator}, {denominator_scale});"
+        ));
+    }
+
+    if let Some(first) = compact_scratch_ad_value_index(first)
+        && let Some(second) = compact_scratch_ad_value_index(second)
+        && let Some((unary, denominator_source)) = compact_index_unary_arg(denominator)
+    {
+        return Some(format!(
+            "scratch.store_div_scaled_inputs2_{unary}_denominator({target_index}, {first}, {first_scale}, {second}, {second_scale}, {denominator_source}, {denominator_scale});"
+        ));
+    }
+
+    None
 }
 
 fn compact_offset_mixed_add_sub_store_helper_line(
