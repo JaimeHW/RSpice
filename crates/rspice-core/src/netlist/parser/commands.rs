@@ -950,6 +950,11 @@ pub(super) fn parse_options_command(
             (_, "METHOD") => {
                 options.method = Some(parse_method_option(stream, line_num, params)?);
             }
+            (Some("OUTPUT"), "INITIAL_INTERVAL" | "INITIALINTERVAL") => {
+                let value = expect_value(stream, line_num, params)?;
+                let _ = parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
+                consume_output_initial_interval_schedule(stream, line_num, params)?;
+            }
             (_, "INTERP" | "NOACCT") => {
                 // Ngspice compatibility flags. INTERP affects rawfile storage
                 // density and NOACCT suppresses accounting output; neither
@@ -1034,7 +1039,26 @@ fn option_package_key_is_known(key_upper: &str) -> bool {
             | "NONLIN-TRANSIENT"
             | "NONLIN-CONTINUATION"
             | "LOCA"
+            | "OUTPUT"
     )
+}
+
+fn consume_output_initial_interval_schedule(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    loop {
+        skip_commas(stream);
+        if !matches!(
+            stream.peek().kind,
+            TokenKind::Number(_) | TokenKind::Expression(_)
+        ) {
+            return Ok(());
+        }
+        let value = expect_value(stream, line_num, params)?;
+        let _ = parse_positive_real_option("OUTPUT.INITIAL_INTERVAL", value, line_num)?;
+    }
 }
 
 fn parse_boolean_option(
@@ -2503,6 +2527,14 @@ mod tests {
         let netlist = Netlist::parse(&deck_with_options(".options ramptime=10n"))
             .expect("ramptime option parses");
         assert_eq!(netlist.options.ramptime, Some(10.0e-9));
+    }
+
+    #[test]
+    fn options_accept_xyce_output_initial_interval_schedule() {
+        Netlist::parse(&deck_with_options(
+            ".options output initial_interval=.001ms .5ms .01ms",
+        ))
+        .expect("Xyce OUTPUT INITIAL_INTERVAL schedule syntax parses");
     }
 
     #[test]

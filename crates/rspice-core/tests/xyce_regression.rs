@@ -1492,24 +1492,28 @@ fn test_xyce_output_initial_interval_transient_wrapper_case_runs_natively() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
-    let relative = "Netlists/Certification_Tests/BUG_256/bug_256.cir";
-    assert!(
-        runner.requires_upstream_wrapper(relative),
-        "{relative} should retain its removed upstream output-interval wrapper provenance"
-    );
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native output-interval transient PRN comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
-    assert_eq!(
-        result.contract, "wrapper_static_prn_tran",
-        "{relative} should report the native wrapper-origin transient .prn contract"
-    );
+    for relative in [
+        "Netlists/Certification_Tests/BUG_133/bug_133.cir",
+        "Netlists/Certification_Tests/BUG_256/bug_256.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream output-interval wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native output-interval transient PRN comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_tran",
+            "{relative} should report the native wrapper-origin transient .prn contract"
+        );
+    }
 }
 
 #[test]
