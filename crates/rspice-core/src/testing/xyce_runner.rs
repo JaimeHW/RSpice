@@ -2723,7 +2723,8 @@ impl XyceTestRunner {
     fn is_native_default_prn_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
         matches!(
             Self::normalize_manifest_key(relative_path).as_str(),
-            "netlists/output/tran/tran-gnuplot.cir"
+            "netlists/output/tran/op-prn.cir"
+                | "netlists/output/tran/tran-gnuplot.cir"
                 | "netlists/output/tran/tran-prn-comma.cir"
                 | "netlists/output/tran/tran-prn.cir"
                 | "netlists/output/tran/tran-prn-filter.cir"
