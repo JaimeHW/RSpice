@@ -2144,7 +2144,6 @@ impl XyceTestRunner {
         }
 
         let mut dc_count = 0usize;
-        let mut model_count = 0usize;
         let mut subckt_count = 0usize;
         let mut ends_count = 0usize;
         for line in Self::logical_netlist_lines(source) {
@@ -2161,12 +2160,11 @@ impl XyceTestRunner {
             match command.to_ascii_lowercase().as_str() {
                 ".dc" => dc_count += 1,
                 ".model" => {
-                    model_count += 1;
                     Self::validate_plain_static_dc_prn_wrapper_model_type(&trimmed)?;
                 }
                 ".subckt" => subckt_count += 1,
                 ".ends" => ends_count += 1,
-                ".print" | ".step" | ".param" | ".func" | ".options" | ".end" => {}
+                ".print" | ".op" | ".step" | ".param" | ".func" | ".options" | ".end" => {}
                 other => {
                     return Err(format!(
                         "wrapper-origin plain static DC contract does not cover {other} directives"
@@ -2186,11 +2184,6 @@ impl XyceTestRunner {
             )),
         }?;
 
-        if model_count > 1 {
-            return Err(format!(
-                "wrapper-origin plain static DC contract currently covers at most one .MODEL statement, found {model_count}"
-            ));
-        }
         if subckt_count > 1 {
             return Err(format!(
                 "wrapper-origin plain static DC contract currently covers at most one .SUBCKT statement, found {subckt_count}"
@@ -2223,12 +2216,6 @@ impl XyceTestRunner {
     }
 
     fn validate_plain_static_dc_prn_wrapper_netlist(netlist: &Netlist) -> Result<(), String> {
-        if netlist.models.len() > 1 {
-            return Err(format!(
-                "wrapper-origin plain static DC contract currently covers at most one parsed model, found {}",
-                netlist.models.len()
-            ));
-        }
         for model in &netlist.models {
             if !matches!(
                 model.model_type.to_ascii_uppercase().as_str(),
@@ -2250,6 +2237,14 @@ impl XyceTestRunner {
                 ));
             }
         }
+        if netlist.models.len() > 1
+            && !Self::models_form_single_binned_native_mos_family(&netlist.models)
+        {
+            return Err(format!(
+                "wrapper-origin plain static DC contract currently covers at most one parsed model unless all models form one binned native MOS model family, found {}",
+                netlist.models.len()
+            ));
+        }
         if netlist.subcircuits.len() > 1 {
             return Err(format!(
                 "wrapper-origin plain static DC contract currently covers at most one parsed subcircuit, found {}",
@@ -2257,6 +2252,38 @@ impl XyceTestRunner {
             ));
         }
         Ok(())
+    }
+
+    fn models_form_single_binned_native_mos_family(models: &[crate::netlist::ModelDef]) -> bool {
+        if models.len() < 2 {
+            return false;
+        }
+        let Some(first_base) = Self::binned_model_base_name(&models[0].name) else {
+            return false;
+        };
+        let first_type = models[0].model_type.to_ascii_uppercase();
+        if !matches!(first_type.as_str(), "NMOS" | "PMOS") {
+            return false;
+        }
+        models.iter().all(|model| {
+            model.model_type.eq_ignore_ascii_case(&first_type)
+                && Self::binned_model_base_name(&model.name)
+                    .is_some_and(|base| base.eq_ignore_ascii_case(first_base))
+                && Self::model_has_numeric_geometry_bin_range(model)
+        })
+    }
+
+    fn binned_model_base_name(name: &str) -> Option<&str> {
+        let (base, suffix) = name.split_once('.')?;
+        (!base.is_empty() && !suffix.is_empty()).then_some(base)
+    }
+
+    fn model_has_numeric_geometry_bin_range(model: &crate::netlist::ModelDef) -> bool {
+        const BIN_PARAMS: [&str; 6] = ["LMIN", "LMAX", "WMIN", "WMAX", "NFINMIN", "NFINMAX"];
+        model
+            .params
+            .iter()
+            .any(|(name, _)| BIN_PARAMS.iter().any(|bin| name.eq_ignore_ascii_case(bin)))
     }
 
     fn upstream_wrapper_required_reason() -> &'static str {
@@ -10713,11 +10740,16 @@ impl XyceTestRunner {
         scoped_models: &[crate::netlist::ModelDef],
     ) -> bool {
         elements.iter().any(|element| {
-            let ElementKind::Mosfet { model, .. } = &element.kind else {
+            let ElementKind::Mosfet {
+                model,
+                instance_params,
+                ..
+            } = &element.kind
+            else {
                 return false;
             };
-            Self::find_model(scoped_models, model)
-                .or_else(|| Self::find_model(models, model))
+            Self::find_model_or_binned(scoped_models, model, instance_params)
+                .or_else(|| Self::find_model_or_binned(models, model, instance_params))
                 .is_some_and(Self::model_is_ekv3_level301)
         })
     }
@@ -10728,11 +10760,16 @@ impl XyceTestRunner {
         scoped_models: &[crate::netlist::ModelDef],
     ) -> bool {
         elements.iter().any(|element| {
-            let ElementKind::Mosfet { model, .. } = &element.kind else {
+            let ElementKind::Mosfet {
+                model,
+                instance_params,
+                ..
+            } = &element.kind
+            else {
                 return false;
             };
-            Self::find_model(scoped_models, model)
-                .or_else(|| Self::find_model(models, model))
+            Self::find_model_or_binned(scoped_models, model, instance_params)
+                .or_else(|| Self::find_model_or_binned(models, model, instance_params))
                 .is_some_and(|model| {
                     Self::model_is_ekv3_level301(model)
                         && !Self::model_is_ekv3_level301_native_150nm_branch_current(model)
@@ -10762,6 +10799,98 @@ impl XyceTestRunner {
         models
             .iter()
             .find(|model| model.name.eq_ignore_ascii_case(name))
+    }
+
+    fn find_model_or_binned<'a>(
+        models: &'a [crate::netlist::ModelDef],
+        name: &str,
+        instance_params: &[(String, Value)],
+    ) -> Option<&'a crate::netlist::ModelDef> {
+        Self::find_model(models, name)
+            .or_else(|| Self::find_binned_model(models, name, instance_params))
+    }
+
+    fn find_binned_model<'a>(
+        models: &'a [crate::netlist::ModelDef],
+        name: &str,
+        instance_params: &[(String, Value)],
+    ) -> Option<&'a crate::netlist::ModelDef> {
+        let prefix = format!("{name}.");
+        models
+            .iter()
+            .filter(|model| {
+                model.name.len() > prefix.len()
+                    && model.name[..prefix.len()].eq_ignore_ascii_case(&prefix)
+                    && Self::model_matches_geometry_bin(model, instance_params)
+            })
+            .min_by(|left, right| {
+                Self::model_geometry_bin_range_size(left)
+                    .partial_cmp(&Self::model_geometry_bin_range_size(right))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
+    fn model_matches_geometry_bin(
+        model: &crate::netlist::ModelDef,
+        instance_params: &[(String, Value)],
+    ) -> bool {
+        let lmin = Self::numeric_param_value(&model.params, "LMIN");
+        let lmax = Self::numeric_param_value(&model.params, "LMAX");
+        let wmin = Self::numeric_param_value(&model.params, "WMIN");
+        let wmax = Self::numeric_param_value(&model.params, "WMAX");
+        let nfinmin = Self::numeric_param_value(&model.params, "NFINMIN");
+        let nfinmax = Self::numeric_param_value(&model.params, "NFINMAX");
+
+        if lmin.is_none()
+            && lmax.is_none()
+            && wmin.is_none()
+            && wmax.is_none()
+            && nfinmin.is_none()
+            && nfinmax.is_none()
+        {
+            return false;
+        }
+
+        let length = Self::numeric_param_value(instance_params, "L")
+            .or_else(|| Self::numeric_param_value(instance_params, "LENGTH"));
+        let width = Self::numeric_param_value(instance_params, "W")
+            .or_else(|| Self::numeric_param_value(instance_params, "WIDTH"));
+        let nfin = Self::numeric_param_value(instance_params, "NFIN");
+
+        Self::bin_range_contains(length, lmin, lmax)
+            && Self::bin_range_contains(width, wmin, wmax)
+            && Self::bin_range_contains(nfin, nfinmin, nfinmax)
+    }
+
+    fn bin_range_contains(value: Option<Value>, min: Option<Value>, max: Option<Value>) -> bool {
+        if min.is_none() && max.is_none() {
+            return true;
+        }
+        let Some(value) = value else {
+            return false;
+        };
+        min.is_none_or(|min| value >= min) && max.is_none_or(|max| value <= max)
+    }
+
+    fn model_geometry_bin_range_size(model: &crate::netlist::ModelDef) -> Value {
+        Self::bin_range_size(
+            Self::numeric_param_value(&model.params, "LMIN"),
+            Self::numeric_param_value(&model.params, "LMAX"),
+        ) + Self::bin_range_size(
+            Self::numeric_param_value(&model.params, "WMIN"),
+            Self::numeric_param_value(&model.params, "WMAX"),
+        ) + Self::bin_range_size(
+            Self::numeric_param_value(&model.params, "NFINMIN"),
+            Self::numeric_param_value(&model.params, "NFINMAX"),
+        )
+    }
+
+    fn bin_range_size(min: Option<Value>, max: Option<Value>) -> Value {
+        match (min, max) {
+            (Some(min), Some(max)) => max - min,
+            (Some(_), None) | (None, Some(_)) => Value::MAX / 4.0,
+            (None, None) => 0.0,
+        }
     }
 
     fn model_is_ekv3_level301(model: &crate::netlist::ModelDef) -> bool {
@@ -19077,6 +19206,54 @@ VMON 2 3 0
             .expect("legacy diode DC deck parses");
         XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
             .expect("plain static DC netlist accepts native legacy diode model");
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_accepts_binned_native_mos_model_family() {
+        let source = "\
+plain static binned mos dc
+M1 2 1 0 0 nch L=0.11u W=10.1u
+VGS 1 0 1.2
+VDS 2 0 1.2
+.DC VDS 0 1 1
+.PRINT DC V(2) I(VDS)
+.MODEL nch.1 NMOS (LEVEL=14 LMIN=0.1u LMAX=20u WMIN=0.1u WMAX=10u)
+.MODEL nch.2 NMOS (LEVEL=14 LMIN=0.1u LMAX=20u WMIN=10u WMAX=100u)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("source-level plain static DC wrapper validation accepts model bin cards");
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("dcModelBinning.cir"))
+            .expect("binned MOS DC deck parses");
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect("plain static DC netlist accepts one binned native MOS model family");
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_rejects_unrelated_multiple_models() {
+        let source = "\
+plain static unrelated models dc
+M1 2 1 0 0 nch L=1u W=1u
+VGS 1 0 1.2
+VDS 2 0 1.2
+.DC VDS 0 1 1
+.PRINT DC V(2)
+.MODEL nch.1 NMOS (LEVEL=14 LMIN=0.1u LMAX=20u WMIN=0.1u WMAX=10u)
+.MODEL pch.1 PMOS (LEVEL=14 LMIN=0.1u LMAX=20u WMIN=0.1u WMAX=10u)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("source-level validation accepts native MOS model syntax");
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("unrelated_models.cir"))
+            .expect("unrelated MOS model deck parses");
+        let err = XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect_err("unrelated multiple models stay outside the plain wrapper contract");
+        assert!(
+            err.contains("binned native MOS model family"),
+            "unexpected validation error: {err}"
+        );
     }
 
     #[test]
