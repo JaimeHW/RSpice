@@ -203,6 +203,7 @@ struct XyceStaticTranPlan {
     source: String,
     print: XycePrintRequest,
     output_override: bool,
+    timeint_conststep: bool,
     tran: XyceTranAnalysis,
     steps: Vec<StepCommand>,
     contract: XyceStaticTranContract,
@@ -1579,12 +1580,15 @@ impl XyceTestRunner {
         }
         Self::validate_static_tran_contract(&netlist, &tran, &print)?;
 
+        let timeint_conststep = Self::source_enables_constant_time_step_output(&source);
+
         Ok(XyceStaticTranPlan {
             deck_path: deck.path.clone(),
             reference_path,
             source,
             print,
             output_override,
+            timeint_conststep,
             tran,
             steps,
             wrapper_tolerance: Self::native_default_prn_tran_wrapper_tolerance(&deck.relative_path),
@@ -3196,9 +3200,6 @@ impl XyceTestRunner {
     ) -> bool {
         let normalized_path = Self::normalize_manifest_key(relative_path);
         if normalized_path.starts_with("netlists/output/") {
-            return false;
-        }
-        if Self::source_enables_constant_time_step_output(source) {
             return false;
         }
         Self::validate_native_static_prn_tran_wrapper_contract(source).is_ok()
@@ -5307,7 +5308,7 @@ impl XyceTestRunner {
         if !capacitor_branch_print {
             let backward_euler_engine = self
                 .create_xyce_static_tran_engine_with_integration_method(
-                    Some(reference_time_grid),
+                    Some(reference_time_grid.clone()),
                     crate::analysis::IntegrationMethod::BackwardEuler,
                     initial_step,
                 );
@@ -5353,6 +5354,58 @@ impl XyceTestRunner {
                 }
                 Err(err) => {
                     fallback_errors.push(format!("backward-Euler simulation error: {err}"));
+                }
+            }
+        }
+
+        if plan.timeint_conststep && !capacitor_branch_print {
+            let gear12_engine = self.create_xyce_static_tran_engine_with_integration_method(
+                Some(reference_time_grid),
+                crate::analysis::IntegrationMethod::Gear2,
+                initial_step,
+            );
+            match gear12_engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
+                Ok(gear12_result) => {
+                    match self.compare_tran_prn_reference(
+                        &reference,
+                        &plan.print,
+                        &netlist,
+                        &plan.source,
+                        &gear12_result,
+                        plan.wrapper_tolerance,
+                    ) {
+                        Ok(gear12_mismatches) => {
+                            if gear12_mismatches.is_empty() {
+                                return self.passed_or_tran_side_output_failure(
+                                    deck,
+                                    start,
+                                    contract,
+                                    &plan,
+                                    &netlist,
+                                    &gear12_result,
+                                );
+                            }
+                            if Self::candidate_mismatches_are_better(
+                                best_mismatches.as_deref(),
+                                &gear12_mismatches,
+                            ) {
+                                best_mismatches = Some(gear12_mismatches);
+                            }
+                        }
+                        Err(err) => {
+                            fallback_errors
+                                .push(format!("Xyce Gear12 reference comparison error: {err}"));
+                        }
+                    }
+                }
+                Err(SimulationError::Aborted) => {
+                    fallback_errors.push(format!(
+                        "Xyce Gear12 simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ));
+                }
+                Err(err) => {
+                    fallback_errors.push(format!("Xyce Gear12 simulation error: {err}"));
                 }
             }
         }

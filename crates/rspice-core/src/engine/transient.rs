@@ -765,9 +765,8 @@ impl Engine {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
             _ => None,
         });
-        let mut breakpoints = BreakpointManager::new_with_tolerance(
-            Self::ngspice_breakpoint_tolerance(hinted_max_step),
-        );
+        let breakpoint_tolerance = Self::ngspice_breakpoint_tolerance(hinted_max_step);
+        let mut breakpoints = BreakpointManager::new_with_tolerance(breakpoint_tolerance);
         Self::collect_transient_source_breakpoints(
             &circuit,
             tstop,
@@ -851,6 +850,20 @@ impl Engine {
         if let Some(method) = fixed_method {
             trapgear.force_method(method);
         }
+        let xyce_locked_gear12_order1_window = if self.config.locked_time_grid.is_some()
+            && self.config.spice_dialect == SpiceDialect::Xyce
+            && matches!(fixed_method, Some(IntegrationMethod::Gear2))
+        {
+            // Xyce's default Gear 1-2 integrator restarts at order 1 after
+            // source breakpoints before promoting back to BDF2. Locked-grid
+            // oracle replay bypasses the normal breakpoint restart path, so
+            // keep the same short first-order window explicitly.
+            4_usize
+        } else {
+            0_usize
+        };
+        let mut xyce_locked_gear12_order1_remaining = xyce_locked_gear12_order1_window;
+        let mut xyce_locked_gear12_last_restart: Option<Value> = None;
 
         // Track integration method order for LTE scaling
         let effective_method_order = |method: IntegrationMethod, trap_order: u8| -> u32 {
@@ -862,8 +875,15 @@ impl Engine {
                 _ => 2, // Trapezoidal and Gear2 are both order 2
             }
         };
-        let current_integration_method = |tg: &TrapGearController| -> IntegrationMethod {
-            fixed_method.unwrap_or_else(|| tg.current_method())
+        let current_integration_method = |tg: &TrapGearController,
+                                          gear12_order1_remaining: usize|
+         -> IntegrationMethod {
+            if matches!(fixed_method, Some(IntegrationMethod::Gear2)) && gear12_order1_remaining > 0
+            {
+                IntegrationMethod::BackwardEuler
+            } else {
+                fixed_method.unwrap_or_else(|| tg.current_method())
+            }
         };
 
         // Initialize result storage with actual node names from netlist
@@ -1216,6 +1236,13 @@ impl Engine {
             };
         }
 
+        macro_rules! consume_xyce_locked_gear12_order1_step {
+            () => {
+                xyce_locked_gear12_order1_remaining =
+                    xyce_locked_gear12_order1_remaining.saturating_sub(1);
+            };
+        }
+
         // Perform one breakpoint-style integration restart at `t`, unless
         // the previous restart happened within the spacing window (same
         // wall — restarting again cannot help). Returns whether it ran.
@@ -1389,7 +1416,18 @@ impl Engine {
                 hinted_max_step,
                 MAX_FORCE_ACCEPT_DELTA_V,
             );
-            let current_method = current_integration_method(&trapgear);
+            if xyce_locked_gear12_order1_window > 0
+                && source_breakpoint_times
+                    .iter()
+                    .any(|breakpoint| (t - *breakpoint).abs() <= breakpoint_tolerance)
+                && xyce_locked_gear12_last_restart
+                    .is_none_or(|restart| (t - restart).abs() > breakpoint_tolerance)
+            {
+                xyce_locked_gear12_order1_remaining = xyce_locked_gear12_order1_window;
+                xyce_locked_gear12_last_restart = Some(t);
+            }
+            let current_method =
+                current_integration_method(&trapgear, xyce_locked_gear12_order1_remaining);
             let locked_edge_order_reset = locked_edge_order && breakpoints.at_breakpoint(t);
             let step_trap_order = Self::step_trapezoidal_order(
                 current_method,
@@ -2253,7 +2291,8 @@ impl Engine {
                         circuit.update_nonlinear(&new_solution);
                     }
 
-                    let method_after_step = current_integration_method(&trapgear);
+                    let method_after_step =
+                        current_integration_method(&trapgear, xyce_locked_gear12_order1_remaining);
                     let accepted_step_trap_order =
                         Self::effective_trapezoidal_order(current_method, 1);
                     let force_accept_bjt_truncation_limit = if has_bjts {
@@ -2514,6 +2553,7 @@ impl Engine {
                         &derived_branch_currents,
                         record_device_op_traces,
                     );
+                    consume_xyce_locked_gear12_order1_step!();
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                         result.record_digital_snapshot(
@@ -3058,7 +3098,8 @@ impl Engine {
                         circuit.update_nonlinear(&new_solution);
                     }
 
-                    let method_after_step = current_integration_method(&trapgear);
+                    let method_after_step =
+                        current_integration_method(&trapgear, xyce_locked_gear12_order1_remaining);
                     let accepted_step_trap_order =
                         Self::effective_trapezoidal_order(current_method, 1);
                     let force_accept_bjt_truncation_limit = if has_bjts {
@@ -3319,6 +3360,7 @@ impl Engine {
                         &derived_branch_currents,
                         record_device_op_traces,
                     );
+                    consume_xyce_locked_gear12_order1_step!();
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                         result.record_digital_snapshot(
@@ -3423,7 +3465,8 @@ impl Engine {
             if hit_breakpoint {
                 t = breakpoints.snap_to_breakpoint(t);
             }
-            let method_after_step = current_integration_method(&trapgear);
+            let method_after_step =
+                current_integration_method(&trapgear, xyce_locked_gear12_order1_remaining);
             lte_estimator.record(&new_solution, dt);
             lte_estimator
                 .set_method_order(effective_method_order(method_after_step, step_trap_order));
@@ -3559,6 +3602,7 @@ impl Engine {
                 &derived_branch_currents,
                 record_device_op_traces,
             );
+            consume_xyce_locked_gear12_order1_step!();
             if record_xspice_event_traces {
                 circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                 result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
@@ -3877,6 +3921,48 @@ mod tests {
             1,
             "ulp-scale duplicates should still be folded: {normalized:?}"
         );
+    }
+
+    #[test]
+    fn xyce_locked_gear12_restarts_order1_at_source_breakpoint() {
+        let deck = "Xyce Gear12 locked-grid RC ramp\n\
+                    VIN 1 0 PULSE(0 1 10U 1U 1U 80U)\n\
+                    R1 1 2 1K\n\
+                    C1 2 0 20N\n\
+                    .TRAN 0.5U 11U\n\
+                    .END\n";
+        let netlist = crate::Netlist::parse(deck).expect("deck parses");
+        let grid = vec![
+            10.0e-6, 10.1e-6, 10.2e-6, 10.3e-6, 10.4e-6, 10.5e-6, 10.6e-6, 10.7e-6, 10.8e-6,
+            10.9e-6, 11.0e-6,
+        ];
+        let engine = Engine::new(crate::SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            integration_method: IntegrationMethod::Gear2,
+            transient_initial_timestep: Some(0.5e-6),
+            locked_time_grid: Some(std::sync::Arc::new(grid)),
+            ..Default::default()
+        });
+
+        let result = engine
+            .run_tran(&netlist, 11.0e-6, 0.5e-6)
+            .expect("transient runs");
+        let node2 = result
+            .node_names
+            .iter()
+            .position(|name| name == "2")
+            .expect("node 2 is present");
+        let voltage_at = |time: Value| -> Value {
+            let index = result
+                .time
+                .iter()
+                .position(|sample| (*sample - time).abs() <= 1.0e-18)
+                .unwrap_or_else(|| panic!("missing sample at {time:.12e}: {:?}", result.time));
+            result.voltages[node2][index]
+        };
+
+        assert!((voltage_at(10.4e-6) - 4.950_434_026_064e-3).abs() < 1.0e-14);
+        assert!((voltage_at(10.5e-6) - 7.251_345_484_406e-3).abs() < 1.0e-14);
     }
 
     #[test]
