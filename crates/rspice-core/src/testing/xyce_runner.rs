@@ -9540,8 +9540,12 @@ impl XyceTestRunner {
         }
 
         let mut tolerances = BTreeMap::new();
-        for line in Self::logical_netlist_lines(source) {
-            let trimmed = line.trim_start();
+        for line in source.lines() {
+            let trimmed = line
+                .split_once(';')
+                .map(|(head, _)| head)
+                .unwrap_or(line)
+                .trim_start();
             if !trimmed
                 .get(..5)
                 .is_some_and(|prefix| prefix.eq_ignore_ascii_case("*comp"))
