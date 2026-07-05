@@ -6168,8 +6168,10 @@ fn stamp() {
             "fn store_div_scaled_inputs3_indices",
             "fn store_div_scaled_inputs3_mixed_iiai",
             "fn store_div_scaled_inputs3_mixed_iaaa",
+            "fn store_div_scaled_inputs3_ln_third",
             "fn store_div_scaled_inputs4_indices",
             "fn store_div_scaled_inputs4_mixed_iiiia",
+            "fn store_div_scaled_inputs4_sqrt_denominator",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
@@ -6195,7 +6197,7 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_div_scaled_inputs3_mixed_iiai(191, 6, p.first_scale, 7, p.second_scale, A::ln(s.ad_value(8)), p.third_scale, 9, p.denominator_scale);"),
+            compact.contains("s.store_div_scaled_inputs3_ln_third(191, 6, p.first_scale, 7, p.second_scale, 8, p.third_scale, 9, p.denominator_scale);"),
             "{compact}"
         );
         assert!(
@@ -6207,7 +6209,7 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_div_scaled_inputs4_mixed_iiiia(194, 19, p.first_scale, 20, p.second_scale, 21, p.third_scale, 22, p.fourth_scale, A::sqrt(s.ad_value(23)), p.denominator_scale);"),
+            compact.contains("s.store_div_scaled_inputs4_sqrt_denominator(194, 19, p.first_scale, 20, p.second_scale, 21, p.third_scale, 22, p.fourth_scale, 23, p.denominator_scale);"),
             "{compact}"
         );
         assert!(
@@ -6218,6 +6220,8 @@ fn stamp() {
             !compact.contains("s.store_div_scaled_inputs4("),
             "{compact}"
         );
+        assert!(!compact.contains("A::ln(s.ad_value(8))"), "{compact}");
+        assert!(!compact.contains("A::sqrt(s.ad_value(23))"), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -8551,6 +8555,10 @@ fn stamp() {
             "fn store_offset_div_scaled_inputs2_exp_first(",
             "fn store_offset_div_scaled_inputs2_ln_second(",
             "fn store_offset_div_scaled_inputs2_sqrt_denominator(",
+            "fn store_div_scaled_inputs3_unary_third(",
+            "fn store_div_scaled_inputs3_ln_third(",
+            "fn store_div_scaled_inputs4_unary_denominator(",
+            "fn store_div_scaled_inputs4_sqrt_denominator(",
             "fn store_mul_exp_scale_offset_lhs(",
             "fn store_mul_exp_scale_offset_rhs(",
             "fn store_mul_powf_scale_offset_lhs(",
@@ -23518,6 +23526,146 @@ fn generate_div_scaled_inputs_unary_helpers() -> String {
         for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale + self.node_derivatives[denominator_source][axis] * denominator_derivative_scale; }
         for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale + self.branch_derivatives[denominator_source][axis] * denominator_derivative_scale; }
     }
+
+    #[inline]
+    fn store_div_scaled_inputs3_unary_first(&mut self, index: usize, first_source: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = (unary_value * first_scale + self.values[second] * second_scale) + self.values[third] * third_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal * unary_derivative_scale;
+        let second_derivative_scale = second_scale * reciprocal;
+        let third_derivative_scale = third_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (self.node_derivatives[first_source][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale) + self.node_derivatives[third][axis] * third_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (self.branch_derivatives[first_source][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale) + self.branch_derivatives[third][axis] * third_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs3_unary_second(&mut self, index: usize, first: usize, first_scale: f64, second_source: usize, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = (self.values[first] * first_scale + unary_value * second_scale) + self.values[third] * third_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal * unary_derivative_scale;
+        let third_derivative_scale = third_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second_source][axis] * second_derivative_scale) + self.node_derivatives[third][axis] * third_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second_source][axis] * second_derivative_scale) + self.branch_derivatives[third][axis] * third_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs3_unary_third(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third_source: usize, third_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = (self.values[first] * first_scale + self.values[second] * second_scale) + unary_value * third_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal;
+        let third_derivative_scale = third_scale * reciprocal * unary_derivative_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale) + self.node_derivatives[third_source][axis] * third_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale) + self.branch_derivatives[third_source][axis] * third_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs3_unary_denominator(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, denominator_source: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = (self.values[first] * first_scale + self.values[second] * second_scale) + self.values[third] * third_scale;
+        let denominator_value = unary_value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal;
+        let third_derivative_scale = third_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * unary_derivative_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale) + self.node_derivatives[third][axis] * third_derivative_scale + self.node_derivatives[denominator_source][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale) + self.branch_derivatives[third][axis] * third_derivative_scale + self.branch_derivatives[denominator_source][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs4_unary_first(&mut self, index: usize, first_source: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = ((unary_value * first_scale + self.values[second] * second_scale) + self.values[third] * third_scale) + self.values[fourth] * fourth_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal * unary_derivative_scale;
+        let second_derivative_scale = second_scale * reciprocal;
+        let third_derivative_scale = third_scale * reciprocal;
+        let fourth_derivative_scale = fourth_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((self.node_derivatives[first_source][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale) + self.node_derivatives[third][axis] * third_derivative_scale) + self.node_derivatives[fourth][axis] * fourth_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((self.branch_derivatives[first_source][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale) + self.branch_derivatives[third][axis] * third_derivative_scale) + self.branch_derivatives[fourth][axis] * fourth_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs4_unary_second(&mut self, index: usize, first: usize, first_scale: f64, second_source: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = ((self.values[first] * first_scale + unary_value * second_scale) + self.values[third] * third_scale) + self.values[fourth] * fourth_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal * unary_derivative_scale;
+        let third_derivative_scale = third_scale * reciprocal;
+        let fourth_derivative_scale = fourth_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second_source][axis] * second_derivative_scale) + self.node_derivatives[third][axis] * third_derivative_scale) + self.node_derivatives[fourth][axis] * fourth_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second_source][axis] * second_derivative_scale) + self.branch_derivatives[third][axis] * third_derivative_scale) + self.branch_derivatives[fourth][axis] * fourth_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs4_unary_third(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third_source: usize, third_scale: f64, fourth: usize, fourth_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = ((self.values[first] * first_scale + self.values[second] * second_scale) + unary_value * third_scale) + self.values[fourth] * fourth_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal;
+        let third_derivative_scale = third_scale * reciprocal * unary_derivative_scale;
+        let fourth_derivative_scale = fourth_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale) + self.node_derivatives[third_source][axis] * third_derivative_scale) + self.node_derivatives[fourth][axis] * fourth_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale) + self.branch_derivatives[third_source][axis] * third_derivative_scale) + self.branch_derivatives[fourth][axis] * fourth_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs4_unary_fourth(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth_source: usize, fourth_scale: f64, denominator: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = ((self.values[first] * first_scale + self.values[second] * second_scale) + self.values[third] * third_scale) + unary_value * fourth_scale;
+        let denominator_value = self.values[denominator] * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal;
+        let third_derivative_scale = third_scale * reciprocal;
+        let fourth_derivative_scale = fourth_scale * reciprocal * unary_derivative_scale;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale) + self.node_derivatives[third][axis] * third_derivative_scale) + self.node_derivatives[fourth_source][axis] * fourth_derivative_scale + self.node_derivatives[denominator][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale) + self.branch_derivatives[third][axis] * third_derivative_scale) + self.branch_derivatives[fourth_source][axis] * fourth_derivative_scale + self.branch_derivatives[denominator][axis] * denominator_derivative_scale; }
+    }
+
+    #[inline]
+    fn store_div_scaled_inputs4_unary_denominator(&mut self, index: usize, first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, denominator_source: usize, denominator_scale: f64, unary_value: f64, unary_derivative_scale: f64) {
+        let numerator_value = ((self.values[first] * first_scale + self.values[second] * second_scale) + self.values[third] * third_scale) + self.values[fourth] * fourth_scale;
+        let denominator_value = unary_value * denominator_scale;
+        let reciprocal = 1.0 / denominator_value;
+        let quotient = numerator_value * reciprocal;
+        let first_derivative_scale = first_scale * reciprocal;
+        let second_derivative_scale = second_scale * reciprocal;
+        let third_derivative_scale = third_scale * reciprocal;
+        let fourth_derivative_scale = fourth_scale * reciprocal;
+        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale * unary_derivative_scale;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = ((self.node_derivatives[first][axis] * first_derivative_scale + self.node_derivatives[second][axis] * second_derivative_scale) + self.node_derivatives[third][axis] * third_derivative_scale) + self.node_derivatives[fourth][axis] * fourth_derivative_scale + self.node_derivatives[denominator_source][axis] * denominator_derivative_scale; }
+        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = ((self.branch_derivatives[first][axis] * first_derivative_scale + self.branch_derivatives[second][axis] * second_derivative_scale) + self.branch_derivatives[third][axis] * third_derivative_scale) + self.branch_derivatives[fourth][axis] * fourth_derivative_scale + self.branch_derivatives[denominator_source][axis] * denominator_derivative_scale; }
+    }
 "#
     .to_string();
     for &(name, _) in COMPACT_MUL_UNARY_HELPERS {
@@ -23547,6 +23695,12 @@ fn generate_div_scaled_inputs_unary_helpers() -> String {
             "denominator",
             true,
         ));
+        for position in ["first", "second", "third", "denominator"] {
+            out.push_str(&generate_div_scaled_inputs3_unary_helper(name, position));
+        }
+        for position in ["first", "second", "third", "fourth", "denominator"] {
+            out.push_str(&generate_div_scaled_inputs4_unary_helper(name, position));
+        }
     }
     out
 }
@@ -23633,6 +23787,89 @@ fn generate_div_scaled_inputs2_unary_helper(unary: &str, position: &str, offset:
 
     #[inline]
     fn {helper}(&mut self, index: usize, {signature}{offset_arg}) {{
+        let value_raw = self.values[{value_source}];
+        {unary_bindings}
+        {call}
+    }}
+"#
+    )
+}
+
+fn generate_div_scaled_inputs3_unary_helper(unary: &str, position: &str) -> String {
+    let helper = format!("store_div_scaled_inputs3_{unary}_{position}");
+    let unary_bindings = mul_unary_output_derivative_bindings(unary);
+    let (signature, call, value_source) = match position {
+        "first" => (
+            "first_source: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs3_unary_first(index, first_source, first_scale, second, second_scale, third, third_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "first_source",
+        ),
+        "second" => (
+            "first: usize, first_scale: f64, second_source: usize, second_scale: f64, third: usize, third_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs3_unary_second(index, first, first_scale, second_source, second_scale, third, third_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "second_source",
+        ),
+        "third" => (
+            "first: usize, first_scale: f64, second: usize, second_scale: f64, third_source: usize, third_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs3_unary_third(index, first, first_scale, second, second_scale, third_source, third_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "third_source",
+        ),
+        "denominator" => (
+            "first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, denominator_source: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs3_unary_denominator(index, first, first_scale, second, second_scale, third, third_scale, denominator_source, denominator_scale, unary_value, derivative_scale);",
+            "denominator_source",
+        ),
+        _ => unreachable!("unknown div_scaled_inputs3 unary position"),
+    };
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, {signature}) {{
+        let value_raw = self.values[{value_source}];
+        {unary_bindings}
+        {call}
+    }}
+"#
+    )
+}
+
+fn generate_div_scaled_inputs4_unary_helper(unary: &str, position: &str) -> String {
+    let helper = format!("store_div_scaled_inputs4_{unary}_{position}");
+    let unary_bindings = mul_unary_output_derivative_bindings(unary);
+    let (signature, call, value_source) = match position {
+        "first" => (
+            "first_source: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs4_unary_first(index, first_source, first_scale, second, second_scale, third, third_scale, fourth, fourth_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "first_source",
+        ),
+        "second" => (
+            "first: usize, first_scale: f64, second_source: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs4_unary_second(index, first, first_scale, second_source, second_scale, third, third_scale, fourth, fourth_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "second_source",
+        ),
+        "third" => (
+            "first: usize, first_scale: f64, second: usize, second_scale: f64, third_source: usize, third_scale: f64, fourth: usize, fourth_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs4_unary_third(index, first, first_scale, second, second_scale, third_source, third_scale, fourth, fourth_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "third_source",
+        ),
+        "fourth" => (
+            "first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth_source: usize, fourth_scale: f64, denominator: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs4_unary_fourth(index, first, first_scale, second, second_scale, third, third_scale, fourth_source, fourth_scale, denominator, denominator_scale, unary_value, derivative_scale);",
+            "fourth_source",
+        ),
+        "denominator" => (
+            "first: usize, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, fourth: usize, fourth_scale: f64, denominator_source: usize, denominator_scale: f64",
+            "self.store_div_scaled_inputs4_unary_denominator(index, first, first_scale, second, second_scale, third, third_scale, fourth, fourth_scale, denominator_source, denominator_scale, unary_value, derivative_scale);",
+            "denominator_source",
+        ),
+        _ => unreachable!("unknown div_scaled_inputs4 unary position"),
+    };
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, {signature}) {{
         let value_raw = self.values[{value_source}];
         {unary_bindings}
         {call}
@@ -37123,6 +37360,15 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "div_scaled_inputs3")
         && args.len() == 8
     {
+        if let Some(line) = compact_index_unary_scaled_inputs_helper_line(
+            target_index,
+            "store_div_scaled_inputs3",
+            &["first", "second", "third", "denominator"],
+            &[args[0], args[2], args[4], args[6]],
+            &[args[1], args[3], args[5], args[7]],
+        ) {
+            return Some(line);
+        }
         if let Some(line) = compact_index_or_mixed_scaled_inputs_helper_line(
             target_index,
             "store_div_scaled_inputs3",
@@ -37141,6 +37387,15 @@ fn compact_common_fused_expression_store_helper_call(
     if let Some(args) = compact_ad_call_args(value, "div_scaled_inputs4")
         && args.len() == 10
     {
+        if let Some(line) = compact_index_unary_scaled_inputs_helper_line(
+            target_index,
+            "store_div_scaled_inputs4",
+            &["first", "second", "third", "fourth", "denominator"],
+            &[args[0], args[2], args[4], args[6], args[8]],
+            &[args[1], args[3], args[5], args[7], args[9]],
+        ) {
+            return Some(line);
+        }
         if let Some(line) = compact_index_or_mixed_scaled_inputs_helper_line(
             target_index,
             "store_div_scaled_inputs4",
@@ -38977,6 +39232,55 @@ fn compact_div_scaled_inputs2_unary_store_helper_line(
     }
 
     None
+}
+
+fn compact_index_unary_scaled_inputs_helper_line(
+    target_index: usize,
+    base: &str,
+    positions: &[&str],
+    values: &[&str],
+    scales: &[&str],
+) -> Option<String> {
+    if positions.len() != values.len() || values.len() != scales.len() {
+        return None;
+    }
+
+    let (unary, unary_position, sources) = compact_single_index_unary_operands(values)?;
+    let helper = format!("{base}_{unary}_{}", positions[unary_position]);
+    let mut call_args = Vec::with_capacity(1 + sources.len() * 2);
+    call_args.push(target_index.to_string());
+    for (source, scale) in sources.iter().zip(scales.iter()) {
+        call_args.push(source.to_string());
+        call_args.push((*scale).to_string());
+    }
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_single_index_unary_operands(
+    values: &[&str],
+) -> Option<(&'static str, usize, Vec<usize>)> {
+    let mut unary = None;
+    let mut sources = Vec::with_capacity(values.len());
+    for (position, value) in values.iter().enumerate() {
+        if let Some(source) = compact_scratch_ad_value_index(value) {
+            sources.push(source);
+            continue;
+        }
+
+        if let Some((name, source)) = compact_index_unary_arg(value) {
+            if unary.is_some() {
+                return None;
+            }
+            unary = Some((name, position));
+            sources.push(source);
+            continue;
+        }
+
+        return None;
+    }
+
+    let (name, position) = unary?;
+    Some((name, position, sources))
 }
 
 fn compact_offset_div_scaled_inputs_unary_store_helper_line(
