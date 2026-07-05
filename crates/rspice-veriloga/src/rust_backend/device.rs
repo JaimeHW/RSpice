@@ -21395,27 +21395,6 @@ fn generate_scratch_operation_helpers() -> String {
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis] * input_scale; }",
     "    }",
     "",
-    "    #[inline]",
-    "    fn store_mul_scaled_ad_rhs(&mut self, index: usize, left: usize, scale: f64, right: AdValue) {",
-    "        let left_value = self.values[left] * scale;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        self.values[index] = left_value * right.value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * scale * right.value + left_value * right.node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * scale * right.value + left_value * right.branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_scaled_ad_lhs(&mut self, index: usize, left: AdValue, right: usize, scale: f64) {",
-    "        let right_value = self.values[right] * scale;",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left.value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value + left.value * right_node_derivatives[axis] * scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value + left.value * right_branch_derivatives[axis] * scale; }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_div_ad_rhs(&mut self, index: usize, left: usize, right: AdValue) {",
     "        let left_value = self.values[left];",
     "        let left_node_derivatives = self.node_derivatives[left];",
@@ -38405,13 +38384,11 @@ fn compact_output_scaled_multiply_helper_line(
             {
                 return Some(line);
             }
-            Some(format!(
-                "scratch.store_mul_scaled_ad_rhs({target_index}, {left}, {scale}, {right});"
-            ))
+            compact_mul_scale_offset_index_factor_helper_line(target_index, left, right, scale)
         }
-        (None, Some(right)) if compact_non_atomic_ad_value(left) => Some(format!(
-            "scratch.store_mul_scaled_ad_lhs({target_index}, {left}, {right}, {scale});"
-        )),
+        (None, Some(right)) if compact_non_atomic_ad_value(left) => {
+            compact_mul_scale_offset_index_value_helper_line(target_index, left, right, scale)
+        }
         (None, None) if compact_non_atomic_ad_value(left) && compact_non_atomic_ad_value(right) => {
             Some(format!(
                 "scratch.store_scaled_mul_ad({target_index}, {left}, {right}, {scale});"
@@ -38894,33 +38871,28 @@ fn compact_fused_scaled_multiply_helper_line(
             {
                 return Some(line);
             }
-            if scaled_left {
-                Some(format!(
-                    "scratch.store_mul_scaled_ad_rhs({target_index}, {left_index}, {scale}, {right});"
-                ))
-            } else {
-                compact_index_or_mixed_mul_scale_offset_helper_line(
-                    target_index,
-                    left,
-                    right,
-                    scale,
-                    "0.0",
-                )
-            }
+            compact_mul_scale_offset_index_factor_helper_line(
+                target_index,
+                left_index,
+                right,
+                scale,
+            )
         }
         (None, Some(right_index)) if compact_non_atomic_ad_value(left) => {
             if scaled_left {
-                compact_index_or_mixed_mul_scale_offset_helper_line(
+                compact_mul_scale_offset_index_factor_helper_line(
                     target_index,
-                    right,
+                    right_index,
                     left,
                     scale,
-                    "0.0",
                 )
             } else {
-                Some(format!(
-                    "scratch.store_mul_scaled_ad_lhs({target_index}, {left}, {right_index}, {scale});"
-                ))
+                compact_mul_scale_offset_index_value_helper_line(
+                    target_index,
+                    left,
+                    right_index,
+                    scale,
+                )
             }
         }
         (None, None) if compact_non_atomic_ad_value(left) && compact_non_atomic_ad_value(right) => {
@@ -39459,6 +39431,38 @@ fn compact_index_or_mixed_mul_scale_offset_helper_line(
     call_args.push(input_scale.to_string());
     call_args.push(offset.to_string());
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_mul_scale_offset_index_factor_helper_line(
+    target_index: usize,
+    factor: usize,
+    value: &str,
+    input_scale: &str,
+) -> Option<String> {
+    let factor = format!("scratch.ad_value({factor})");
+    compact_index_or_mixed_mul_scale_offset_helper_line(
+        target_index,
+        &factor,
+        value,
+        input_scale,
+        "0.0",
+    )
+}
+
+fn compact_mul_scale_offset_index_value_helper_line(
+    target_index: usize,
+    factor: &str,
+    value: usize,
+    input_scale: &str,
+) -> Option<String> {
+    let value = format!("scratch.ad_value({value})");
+    compact_index_or_mixed_mul_scale_offset_helper_line(
+        target_index,
+        factor,
+        &value,
+        input_scale,
+        "0.0",
+    )
 }
 
 fn compact_index_or_mixed_mul_ad_product_lhs_helper_line(
@@ -41610,15 +41614,11 @@ fn compact_scaled_mixed_multiply_store_helper_call(
             {
                 return Some(line);
             }
-            Some(format!(
-                "scratch.store_mul_scaled_ad_rhs({target_index}, {left}, {scale}, {});",
-                args[1]
-            ))
+            compact_mul_scale_offset_index_factor_helper_line(target_index, left, args[1], &scale)
         }
-        (None, Some((right, scale))) if compact_non_atomic_ad_value(args[0]) => Some(format!(
-            "scratch.store_mul_scaled_ad_lhs({target_index}, {}, {right}, {scale});",
-            args[0]
-        )),
+        (None, Some((right, scale))) if compact_non_atomic_ad_value(args[0]) => {
+            compact_mul_scale_offset_index_value_helper_line(target_index, args[0], right, &scale)
+        }
         _ => None,
     }
 }
@@ -43561,17 +43561,21 @@ fn compact_nested_scale_store_helper_call(target_index: usize, value: &str) -> O
                 ) {
                     return Some(line);
                 }
-                return Some(format!(
-                    "scratch.store_mul_scaled_ad_rhs({target_index}, {}, {combined_scale}, {});",
-                    left.0, inner_args[1]
-                ));
+                return compact_mul_scale_offset_index_factor_helper_line(
+                    target_index,
+                    left.0,
+                    inner_args[1],
+                    &combined_scale,
+                );
             }
             (None, Some(right)) if compact_non_atomic_ad_value(inner_args[0]) => {
                 let combined_scale = compact_scale_product(&right.1, scale);
-                return Some(format!(
-                    "scratch.store_mul_scaled_ad_lhs({target_index}, {}, {}, {combined_scale});",
-                    inner_args[0], right.0
-                ));
+                return compact_mul_scale_offset_index_value_helper_line(
+                    target_index,
+                    inner_args[0],
+                    right.0,
+                    &combined_scale,
+                );
             }
             _ => {}
         }

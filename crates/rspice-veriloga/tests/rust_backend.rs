@@ -4248,14 +4248,15 @@ fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
     let support = render_runtime_support_module();
 
     assert!(
-        support.contains(
-            "fn store_mul_scaled_ad_rhs(&mut self, index: usize, left: usize, scale: f64, right: AdValue"
-        ),
+        support.contains("fn store_mul_scale_offset_mixed_ai("),
         "{support}"
     );
     assert!(
-        support.contains("fn store_mul_scaled_ad_lhs(&mut self, index: usize, left: AdValue")
-            && support.contains("right: usize, scale: f64)"),
+        !support.contains("fn store_mul_scaled_ad_rhs("),
+        "{support}"
+    );
+    assert!(
+        !support.contains("fn store_mul_scaled_ad_lhs("),
         "{support}"
     );
     assert!(
@@ -4287,7 +4288,11 @@ fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
     assert!(stamp.contains("s.store_mul_scaled_sin_rhs("), "{stamp}");
     assert!(!stamp.contains("A::offset(s.ad_value(1), p.p1)"), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_mul_scale_offset_mixed_ai("),
+        "{stamp}"
+    );
     assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
     assert_generated_rust_compiles(&generated);
 }
@@ -6938,7 +6943,11 @@ fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
     );
     assert!(!stamp.contains("A::offset(s.ad_value(1), p.p0)"), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
-    assert!(stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
+    assert!(!stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
+    assert!(
+        stamp.contains("s.store_mul_scale_offset_mixed_ai("),
+        "{stamp}"
+    );
     assert!(
         support.contains("fn store_scaled_div_ad_rhs(&mut self, index: usize, left: usize"),
         "{support}"
