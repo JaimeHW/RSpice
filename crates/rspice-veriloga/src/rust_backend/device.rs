@@ -21430,28 +21430,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_scale_ad_lhs(&mut self, index: usize, value: AdValue, scale: f64, source: usize) {",
-    "        let left_value = value.value * scale;",
-    "        let source_value = self.values[source];",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        self.values[index] = left_value * source_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = value.node_derivatives[axis] * scale * source_value + left_value * source_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = value.branch_derivatives[axis] * scale * source_value + left_value * source_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_scale_ad_rhs(&mut self, index: usize, source: usize, value: AdValue, scale: f64) {",
-    "        let source_value = self.values[source];",
-    "        let right_value = value.value * scale;",
-    "        let source_node_derivatives = self.node_derivatives[source];",
-    "        let source_branch_derivatives = self.branch_derivatives[source];",
-    "        self.values[index] = source_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = source_node_derivatives[axis] * right_value + source_value * value.node_derivatives[axis] * scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = source_branch_derivatives[axis] * right_value + source_value * value.branch_derivatives[axis] * scale; }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_mul_scale_offset(&mut self, index: usize, factor: AdValue, value: AdValue, input_scale: f64, offset: f64) {",
     "        let affine_value = value.value * input_scale + offset;",
     "        self.values[index] = factor.value * affine_value;",
@@ -38941,38 +38919,46 @@ fn compact_fused_scaled_multiply_helper_line(
     }
 
     match (left_source, right_source) {
-        (Some(left), Some(right)) => Some(format!(
-            "scratch.store_scaled_mul({target_index}, {left}, {right}, {scale});"
+        (Some(left_index), Some(right_index)) => Some(format!(
+            "scratch.store_scaled_mul({target_index}, {left_index}, {right_index}, {scale});"
         )),
-        (Some(left), None) if compact_non_atomic_ad_value(right) => {
+        (Some(left_index), None) if compact_non_atomic_ad_value(right) => {
             if let Some(line) =
-                super::compact::lower_scaled_rhs_multiply(target_index, left, scale, right)
+                super::compact::lower_scaled_rhs_multiply(target_index, left_index, scale, right)
             {
                 return Some(line);
             }
             if let Some(line) =
-                compact_mul_scaled_unary_rhs_helper_line(target_index, left, scale, right)
+                compact_mul_scaled_unary_rhs_helper_line(target_index, left_index, scale, right)
             {
                 return Some(line);
             }
             if scaled_left {
                 Some(format!(
-                    "scratch.store_mul_scaled_ad_rhs({target_index}, {left}, {scale}, {right});"
+                    "scratch.store_mul_scaled_ad_rhs({target_index}, {left_index}, {scale}, {right});"
                 ))
             } else {
-                Some(format!(
-                    "scratch.store_mul_scale_ad_rhs({target_index}, {left}, {right}, {scale});"
-                ))
+                compact_index_or_mixed_mul_scale_offset_helper_line(
+                    target_index,
+                    left,
+                    right,
+                    scale,
+                    "0.0",
+                )
             }
         }
-        (None, Some(right)) if compact_non_atomic_ad_value(left) => {
+        (None, Some(right_index)) if compact_non_atomic_ad_value(left) => {
             if scaled_left {
-                Some(format!(
-                    "scratch.store_mul_scale_ad_lhs({target_index}, {left}, {scale}, {right});"
-                ))
+                compact_index_or_mixed_mul_scale_offset_helper_line(
+                    target_index,
+                    right,
+                    left,
+                    scale,
+                    "0.0",
+                )
             } else {
                 Some(format!(
-                    "scratch.store_mul_scaled_ad_lhs({target_index}, {left}, {right}, {scale});"
+                    "scratch.store_mul_scaled_ad_lhs({target_index}, {left}, {right_index}, {scale});"
                 ))
             }
         }
@@ -41125,11 +41111,13 @@ fn compact_scale_mixed_multiply_store_helper_call(
                     scale_args[1]
                 ));
             }
-            let value = compact_scratch_or_non_atomic_ad_arg(scale_args[0])?;
-            Some(format!(
-                "scratch.store_mul_scale_ad_lhs({target_index}, {value}, {}, {right});",
-                scale_args[1]
-            ))
+            compact_index_or_mixed_mul_scale_offset_helper_line(
+                target_index,
+                args[1],
+                scale_args[0],
+                scale_args[1],
+                "0.0",
+            )
         }
         (Some(left), None) => {
             let scale_args = compact_ad_call_args(args[1], "scale")?;
@@ -41142,11 +41130,13 @@ fn compact_scale_mixed_multiply_store_helper_call(
                     scale_args[1]
                 ));
             }
-            let value = compact_scratch_or_non_atomic_ad_arg(scale_args[0])?;
-            Some(format!(
-                "scratch.store_mul_scale_ad_rhs({target_index}, {left}, {value}, {});",
-                scale_args[1]
-            ))
+            compact_index_or_mixed_mul_scale_offset_helper_line(
+                target_index,
+                args[0],
+                scale_args[0],
+                scale_args[1],
+                "0.0",
+            )
         }
         _ => None,
     }

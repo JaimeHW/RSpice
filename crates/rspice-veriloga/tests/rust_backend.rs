@@ -8308,7 +8308,7 @@ fn rust_backend_fuses_scaled_value_mixed_multiply_store_helpers() {
     let support = render_runtime_support_module();
 
     for helper in [
-        "store_mul_scale_ad_lhs",
+        "store_mul_scale_offset_mixed_ia",
         "store_mul_add_scaled_inputs_rhs_indices",
     ] {
         assert!(
@@ -8326,6 +8326,15 @@ fn rust_backend_fuses_scaled_value_mixed_multiply_store_helpers() {
         !stamp.contains("s.store_mul_add_scaled_inputs_rhs(6"),
         "{stamp}"
     );
+    assert!(
+        !support.contains("pub(crate) fn store_mul_scale_ad_lhs("),
+        "{support}"
+    );
+    assert!(
+        !support.contains("pub(crate) fn store_mul_scale_ad_rhs("),
+        "{support}"
+    );
+    assert!(!stamp.contains("s.store_mul_scale_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scale_ad_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
