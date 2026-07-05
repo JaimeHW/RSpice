@@ -1183,6 +1183,15 @@ impl XyceTestRunner {
         }
 
         let source = fs::read_to_string(&deck.path).ok()?;
+        if Self::is_expected_missing_inductor_value_error_deck(&deck.relative_path, &source) {
+            let contract = "expected_error_missing_inductor_value";
+            return Self::validate_expected_missing_inductor_value_error_source(
+                &source, &deck.path,
+            )
+            .ok()
+            .map(|()| self.passed_result(deck, start, contract));
+        }
+
         if !Self::source_may_have_pwl_repeat_option(&source) {
             return None;
         }
@@ -3146,6 +3155,37 @@ impl XyceTestRunner {
         })?;
 
         Self::validate_expected_pwl_repeat_value_error_source(&sibling_source, &sibling_path)
+    }
+
+    fn is_expected_missing_inductor_value_error_deck(relative_path: &str, source: &str) -> bool {
+        matches!(
+            Self::normalize_manifest_key(relative_path).as_str(),
+            "netlists/inductor/errormessagetest.cir"
+        ) && source
+            .to_ascii_lowercase()
+            .contains("l value missing from instance line")
+    }
+
+    fn validate_expected_missing_inductor_value_error_source(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<(), String> {
+        match Self::parse_xyce_netlist(source, deck_path) {
+            Ok(_) => Err(
+                "expected missing-inductor-value deck parsed successfully; expected a fatal parser diagnostic"
+                    .to_string(),
+            ),
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("Inductor requires either a value or a model") {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "expected missing-inductor-value diagnostic, got parser error: {message}"
+                    ))
+                }
+            }
+        }
     }
 
     fn validate_expected_pwl_repeat_value_error_source(
@@ -18189,6 +18229,52 @@ V1 1 0 DC 0
             .expect_err("printed deck is not no-output");
         assert!(
             err.contains(".PRINT") || err.contains(".print"),
+            "unexpected validation error: {err}"
+        );
+    }
+
+    #[test]
+    fn expected_missing_inductor_value_error_accepts_intended_diagnostic() {
+        let source = "\
+missing inductor value
+V1 1 0 DC 1
+L1 1 0
+.TRAN 1n 1u
+.PRINT TRAN V(1)
+.END
+";
+
+        assert!(
+            XyceTestRunner::is_expected_missing_inductor_value_error_deck(
+                "Netlists/INDUCTOR/ErrorMessageTest.cir",
+                "L value missing from instance line\n"
+            )
+        );
+        XyceTestRunner::validate_expected_missing_inductor_value_error_source(
+            source,
+            Path::new("ErrorMessageTest.cir"),
+        )
+        .expect("missing inductor value diagnostic validates");
+    }
+
+    #[test]
+    fn expected_missing_inductor_value_error_rejects_valid_inductor() {
+        let source = "\
+valid inductor
+V1 1 0 DC 1
+L1 1 0 1u
+.TRAN 1n 1u
+.PRINT TRAN V(1)
+.END
+";
+
+        let err = XyceTestRunner::validate_expected_missing_inductor_value_error_source(
+            source,
+            Path::new("valid_inductor.cir"),
+        )
+        .expect_err("valid inductor deck must not satisfy expected-error contract");
+        assert!(
+            err.contains("parsed successfully"),
             "unexpected validation error: {err}"
         );
     }
