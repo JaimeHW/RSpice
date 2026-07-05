@@ -383,6 +383,7 @@ enum XyceStaticDcContract {
     WrapperFilePrn,
     WrapperGnuplotSplot,
     WrapperHspiceMath,
+    WrapperNoOutput,
     WrapperRaw,
     WrapperResistorDefault,
     WrapperTopLevelExecutionDir,
@@ -410,6 +411,8 @@ impl XyceStaticDcContract {
             (Self::WrapperGnuplotSplot, true) => "wrapper_gnuplot_splot_prn_step_dc",
             (Self::WrapperHspiceMath, false) => "wrapper_hspice_math_prn_dc",
             (Self::WrapperHspiceMath, true) => "wrapper_hspice_math_prn_step_dc",
+            (Self::WrapperNoOutput, false) => "wrapper_no_output_dc",
+            (Self::WrapperNoOutput, true) => "wrapper_no_output_step_dc",
             (Self::WrapperRaw, false) => "wrapper_raw_dc",
             (Self::WrapperRaw, true) => "wrapper_raw_step_dc",
             (Self::WrapperResistorDefault, false) => "wrapper_resistor_default_prn_dc",
@@ -1249,7 +1252,12 @@ impl XyceTestRunner {
         let reference_path = self
             .static_output_reference_path(&deck.path, contract.reference_extension())
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
-        if !reference_path.is_file() && !matches!(contract, XyceStaticDcContract::WrapperFilePrn) {
+        if !reference_path.is_file()
+            && !matches!(
+                contract,
+                XyceStaticDcContract::WrapperFilePrn | XyceStaticDcContract::WrapperNoOutput
+            )
+        {
             return Err(format!(
                 "no checked-in static .{} oracle at {}",
                 contract.reference_extension(),
@@ -1509,7 +1517,17 @@ impl XyceTestRunner {
         }
         Self::reject_unsupported_source_directives(&source)?;
 
-        let print_output = Self::single_dc_or_file_output_request(&source)?;
+        let print_output = Self::single_dc_or_file_output_request(&source).or_else(|err| {
+            if Self::validate_no_output_dc_wrapper_source(&source).is_ok() {
+                Ok(XycePrintOutputRequest {
+                    format: None,
+                    file: None,
+                    probes: Vec::new(),
+                })
+            } else {
+                Err(err)
+            }
+        })?;
         let print = XycePrintRequest {
             probes: print_output.probes,
         };
@@ -1618,6 +1636,11 @@ impl XyceTestRunner {
             return Ok(XyceStaticDcContract::WrapperRaw);
         }
 
+        if Self::is_native_no_output_dc_wrapper_candidate(relative_path, source) {
+            Self::validate_no_output_dc_wrapper_source(source)?;
+            return Ok(XyceStaticDcContract::WrapperNoOutput);
+        }
+
         if Self::is_native_default_prn_wrapper_candidate_path(relative_path)
             || Self::is_native_multiplicity_static_prn_wrapper_candidate_path(relative_path)
         {
@@ -1718,6 +1741,13 @@ impl XyceTestRunner {
                         .is_some_and(|format| format.eq_ignore_ascii_case("PROBE"))
             })
         })
+    }
+
+    fn is_native_no_output_dc_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        matches!(
+            Self::normalize_manifest_key(relative_path).as_str(),
+            "netlists/output/dc/dc-noprn.cir"
+        ) && Self::validate_no_output_dc_wrapper_source(source).is_ok()
     }
 
     fn is_native_file_only_prn_wrapper_candidate(relative_path: &str, source: &str) -> bool {
@@ -2147,6 +2177,39 @@ impl XyceTestRunner {
 
     fn validate_default_prn_wrapper_source(source: &str) -> Result<(), String> {
         Self::validate_default_prn_wrapper_source_with_format_mode(source, false)
+    }
+
+    fn validate_no_output_dc_wrapper_source(source: &str) -> Result<(), String> {
+        let mut has_dc_or_op = false;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") || command.eq_ignore_ascii_case(".probe") {
+                return Err(format!(
+                    "wrapper-origin no-output DC contract does not cover {command} directives"
+                ));
+            }
+            if command.eq_ignore_ascii_case(".dc") || command.eq_ignore_ascii_case(".op") {
+                has_dc_or_op = true;
+                continue;
+            }
+            if Self::is_extra_wrapper_output_analysis_command(command) {
+                return Err(format!(
+                    "wrapper-origin no-output DC contract does not cover {command} directives"
+                ));
+            }
+        }
+
+        if has_dc_or_op {
+            Ok(())
+        } else {
+            Err("wrapper-origin no-output DC contract requires a .DC or .OP analysis".to_string())
+        }
     }
 
     fn validate_default_prn_wrapper_source_with_format_mode(
@@ -4097,7 +4160,10 @@ impl XyceTestRunner {
             }
         };
 
-        let reference = if matches!(plan.contract, XyceStaticDcContract::WrapperFilePrn) {
+        let reference = if matches!(
+            plan.contract,
+            XyceStaticDcContract::WrapperFilePrn | XyceStaticDcContract::WrapperNoOutput
+        ) {
             None
         } else {
             match Self::parse_dc_reference_file(plan.contract, &plan.reference_path) {
@@ -18086,6 +18152,43 @@ D1 1 0 DMOD
             .expect_err("advanced diode levels stay outside the native plain DC wrapper contract");
         assert!(
             err.contains("advanced diode model"),
+            "unexpected validation error: {err}"
+        );
+    }
+
+    #[test]
+    fn no_output_dc_wrapper_accepts_dc_without_print() {
+        let source = "\
+no output dc
+R1 1 0 10
+V1 1 0 DC 0
+.DC V1 0 10 1
+.END
+";
+
+        XyceTestRunner::validate_no_output_dc_wrapper_source(source)
+            .expect("no-output DC source validates");
+        assert!(XyceTestRunner::is_native_no_output_dc_wrapper_candidate(
+            "Netlists/Output/DC/dc-noprn.cir",
+            source
+        ));
+    }
+
+    #[test]
+    fn no_output_dc_wrapper_rejects_printed_deck() {
+        let source = "\
+printed dc
+R1 1 0 10
+V1 1 0 DC 0
+.DC V1 0 10 1
+.PRINT DC V(1)
+.END
+";
+
+        let err = XyceTestRunner::validate_no_output_dc_wrapper_source(source)
+            .expect_err("printed deck is not no-output");
+        assert!(
+            err.contains(".PRINT") || err.contains(".print"),
             "unexpected validation error: {err}"
         );
     }
