@@ -1053,6 +1053,36 @@ fn test_xyce_top_level_execution_dir_include_wrapper_case_runs_natively() {
 }
 
 #[test]
+fn test_xyce_absolute_include_library_wrapper_cases_run_natively() {
+    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/Certification_Tests/BUG_1325_SON/inc_lib_file_absolute_path.cir",
+        "Netlists/Certification_Tests/BUG_1325_SON/Win/inc_lib_file_absolute_path.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain its removed upstream absolute include/library wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce absolute include/library comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_dc",
+            "{relative} should report the native wrapper-origin static .prn DC contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_vpwl_delay_repeat_cases_run() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();

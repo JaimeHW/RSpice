@@ -959,6 +959,106 @@ impl XyceTestRunner {
         Ok(Self::source_with_param_bindings(source, &bindings))
     }
 
+    fn source_with_static_dc_wrapper_bindings(
+        source: &str,
+        deck_path: &Path,
+        requires_wrapper: bool,
+    ) -> Result<String, String> {
+        if !requires_wrapper {
+            return Ok(source.to_string());
+        }
+        Self::source_with_absolute_inc_lib_wrapper_bindings(source, deck_path)
+    }
+
+    fn source_with_absolute_inc_lib_wrapper_bindings(
+        source: &str,
+        deck_path: &Path,
+    ) -> Result<String, String> {
+        let blank_include_count = source
+            .lines()
+            .filter(|line| Self::is_blank_include_wrapper_directive(line))
+            .count();
+        let blank_lib_count = source
+            .lines()
+            .filter(|line| Self::is_blank_lib_wrapper_directive(line))
+            .count();
+        if blank_include_count == 0 && blank_lib_count == 0 {
+            return Ok(source.to_string());
+        }
+        if blank_include_count != 1 || blank_lib_count != 1 {
+            return Err(format!(
+                "wrapper-origin absolute include/library contract requires exactly one blank .INC and one blank .LIB placeholder, found {blank_include_count}/{blank_lib_count}"
+            ));
+        }
+
+        let parent = deck_path
+            .parent()
+            .ok_or_else(|| "wrapper deck has no parent directory".to_string())?;
+        let include_path = parent.join("sub1").join("sub2").join("include2_abs_path");
+        let library_path = parent.join("sub1").join("sub2").join("lib2_abs_path");
+        if !include_path.is_file() {
+            return Err(format!(
+                "wrapper-origin absolute include placeholder target is missing: {}",
+                include_path.display()
+            ));
+        }
+        if !library_path.is_file() {
+            return Err(format!(
+                "wrapper-origin absolute library placeholder target is missing: {}",
+                library_path.display()
+            ));
+        }
+
+        let include_arg = Self::quote_spice_path(&include_path)?;
+        let library_arg = Self::quote_spice_path(&library_path)?;
+        let mut rebound = String::new();
+        for line in source.lines() {
+            if Self::is_blank_include_wrapper_directive(line) {
+                rebound.push_str(".INC ");
+                rebound.push_str(&include_arg);
+                rebound.push('\n');
+            } else if Self::is_blank_lib_wrapper_directive(line) {
+                rebound.push_str(".LIB ");
+                rebound.push_str(&library_arg);
+                rebound.push_str(" LIB_ABS\n");
+            } else {
+                rebound.push_str(line);
+                rebound.push('\n');
+            }
+        }
+        Ok(rebound)
+    }
+
+    fn is_blank_include_wrapper_directive(line: &str) -> bool {
+        Self::blank_wrapper_directive_matches(line, &[".include", ".inc", ".incl"])
+    }
+
+    fn is_blank_lib_wrapper_directive(line: &str) -> bool {
+        Self::blank_wrapper_directive_matches(line, &[".lib"])
+    }
+
+    fn blank_wrapper_directive_matches(line: &str, directives: &[&str]) -> bool {
+        let stripped = Self::strip_netlist_comment(line);
+        let mut fields = stripped.split_whitespace();
+        let Some(command) = fields.next() else {
+            return false;
+        };
+        directives
+            .iter()
+            .any(|directive| command.eq_ignore_ascii_case(directive))
+            && fields.next().is_none()
+    }
+
+    fn quote_spice_path(path: &Path) -> Result<String, String> {
+        let path = path.to_string_lossy();
+        if path.contains('"') {
+            return Err(format!(
+                "wrapper-origin include/library path contains an unsupported quote character: {path}"
+            ));
+        }
+        Ok(format!("\"{path}\""))
+    }
+
     fn source_with_param_bindings(source: &str, bindings: &[(String, Value)]) -> String {
         let mut lines = source.lines();
         let title = lines.next().unwrap_or("Untitled");
@@ -1384,8 +1484,10 @@ impl XyceTestRunner {
 
     fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
-        let source =
+        let mut source =
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        source =
+            Self::source_with_static_dc_wrapper_bindings(&source, &deck.path, requires_wrapper)?;
 
         let wrapper_contract = if requires_wrapper {
             Some(Self::native_static_prn_wrapper_contract(
@@ -1421,11 +1523,23 @@ impl XyceTestRunner {
         } else {
             ExpressionDialect::Xyce
         };
-        let static_plan = self.static_dc_plan_for_path_with_execution_dir(
-            &execution_deck_path,
-            expression_dialect,
-            execution_dir.as_deref(),
-        )?;
+        let static_plan = if matches!(
+            wrapper_contract,
+            Some(XyceStaticDcContract::WrapperTopLevelExecutionDir)
+        ) {
+            self.static_dc_plan_for_path_with_execution_dir(
+                &execution_deck_path,
+                expression_dialect,
+                execution_dir.as_deref(),
+            )?
+        } else {
+            self.static_dc_plan_for_source_with_execution_dir(
+                &execution_deck_path,
+                source,
+                expression_dialect,
+                execution_dir.as_deref(),
+            )?
+        };
         let contract = if let Some(contract) = wrapper_contract {
             self.validate_native_static_prn_wrapper_contract(contract, &static_plan)?;
             contract
@@ -1751,6 +1865,21 @@ impl XyceTestRunner {
     ) -> Result<XyceStaticDcPlan, String> {
         let source =
             fs::read_to_string(deck_path).map_err(|err| format!("failed to read deck: {err}"))?;
+        self.static_dc_plan_for_source_with_execution_dir(
+            deck_path,
+            source,
+            expression_dialect,
+            execution_dir,
+        )
+    }
+
+    fn static_dc_plan_for_source_with_execution_dir(
+        &self,
+        deck_path: &Path,
+        source: String,
+        expression_dialect: ExpressionDialect,
+        execution_dir: Option<&Path>,
+    ) -> Result<XyceStaticDcPlan, String> {
         if Self::contains_control_block(&source) {
             return Err(
                 "deck uses a .control block; Xyce adapter does not interpret simulator scripting"
@@ -1917,6 +2046,10 @@ impl XyceTestRunner {
 
         if Self::is_native_top_level_execution_dir_wrapper_candidate(deck_path, source) {
             return Ok(XyceStaticDcContract::WrapperTopLevelExecutionDir);
+        }
+
+        if Self::is_native_absolute_inc_lib_wrapper_candidate(deck_path, source) {
+            return Ok(XyceStaticDcContract::WrapperDefault);
         }
 
         if Self::is_native_step_data_wrapper_candidate(source) {
@@ -2125,6 +2258,43 @@ impl XyceTestRunner {
             .parent()
             .ok_or_else(|| "wrapper deck has no parent directory".to_string())?;
         Ok(parent.join("top_level").join(file_name))
+    }
+
+    fn is_native_absolute_inc_lib_wrapper_candidate(deck_path: &Path, source: &str) -> bool {
+        if !Self::source_has_absolute_inc_lib_wrapper_bindings(source) {
+            return false;
+        }
+        let Ok(print) = Self::single_dc_print_request(source) else {
+            return false;
+        };
+        let Ok(netlist) = Self::parse_xyce_netlist(source, deck_path) else {
+            return false;
+        };
+        let Ok(dc) = Self::single_dc_sweep(&netlist) else {
+            return false;
+        };
+        Self::validate_static_dc_contract(&netlist, &dc, &print).is_ok()
+    }
+
+    fn source_has_absolute_inc_lib_wrapper_bindings(source: &str) -> bool {
+        let mut has_absolute_include = false;
+        let mut has_absolute_library = false;
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line);
+            let trimmed = stripped.trim();
+            if let Some(filename) = crate::netlist::parse_include_directive(trimmed)
+                && Path::new(&filename).is_absolute()
+            {
+                has_absolute_include = true;
+            }
+            if let Some((filename, section)) = crate::netlist::parse_lib_directive(trimmed)
+                && Path::new(&filename).is_absolute()
+                && section.is_some_and(|section| section.eq_ignore_ascii_case("LIB_ABS"))
+            {
+                has_absolute_library = true;
+            }
+        }
+        has_absolute_include && has_absolute_library
     }
 
     fn is_native_step_data_wrapper_candidate(source: &str) -> bool {
@@ -17516,6 +17686,65 @@ Values:
             err.contains("duplicate Xyce wrapper parameter"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn absolute_inc_lib_wrapper_binds_blank_placeholders_to_fixture_paths() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rspice-xyce-abs-inc-lib-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after epoch")
+                .as_nanos()
+        ));
+        let sub2 = fixture.join("sub1").join("sub2");
+        std::fs::create_dir_all(&sub2).expect("create absolute include/lib fixture");
+        std::fs::write(sub2.join("include2_abs_path"), "R2 2 0 1\n").expect("write include target");
+        std::fs::write(
+            sub2.join("lib2_abs_path"),
+            ".LIB LIB_ABS\n.PARAM RVAL=2\n.ENDL LIB_ABS\n",
+        )
+        .expect("write library target");
+
+        let source = "\
+absolute include wrapper
+.DC V1 1 5 1
+.PRINT DC V(1) V(2) I(R3)
+V1 1 0 1
+R1 1 2 1
+R3 1 0 {RVAL}
+.INC
+.LIB
+.END
+";
+        let deck_path = fixture.join("inc_lib_file_absolute_path.cir");
+
+        let rebound =
+            XyceTestRunner::source_with_absolute_inc_lib_wrapper_bindings(source, &deck_path)
+                .expect("blank include/library placeholders bind to absolute fixture paths");
+
+        assert!(
+            rebound.contains(".INC \"") && rebound.contains("include2_abs_path\""),
+            "include placeholder should be rebound to an absolute quoted path: {rebound}"
+        );
+        assert!(
+            rebound.contains(".LIB \"")
+                && rebound.contains("lib2_abs_path\" LIB_ABS")
+                && !rebound
+                    .lines()
+                    .any(XyceTestRunner::is_blank_include_wrapper_directive)
+                && !rebound
+                    .lines()
+                    .any(XyceTestRunner::is_blank_lib_wrapper_directive),
+            "library placeholder should be rebound to LIB_ABS and no blank placeholders should remain: {rebound}"
+        );
+        assert!(
+            XyceTestRunner::source_has_absolute_inc_lib_wrapper_bindings(&rebound),
+            "rebound source should be recognized as an absolute include/library wrapper"
+        );
+
+        std::fs::remove_dir_all(&fixture).expect("remove absolute include/lib fixture");
     }
 
     #[test]
