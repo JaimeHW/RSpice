@@ -11095,26 +11095,29 @@ fn stamp() {
 
         assert!(
             compact.contains(
-                "s.store_mul_offset_rhs_ad(9, A::exp(s.ad_value(2)), A::sqrt(s.ad_value(3)), p.shift);"
+                "s.store_mul_scale_offset(9, A::exp(s.ad_value(2)), A::sqrt(s.ad_value(3)), 1.0, p.shift);"
             ),
             "{compact}"
         );
         assert!(
             compact.contains(
-                "s.store_mul_offset_lhs_ad(10, A::exp(s.ad_value(2)), p.shift, A::sqrt(s.ad_value(3)));"
+                "s.store_mul_scale_offset(10, A::sqrt(s.ad_value(3)), A::exp(s.ad_value(2)), 1.0, p.shift);"
             ),
-            "{compact}"
-        );
-        assert!(
-            compact.contains("s.store_mul_offset_lhs_scaled_output(11, 4, p.shift, 5, p.scale);"),
             "{compact}"
         );
         assert!(
             compact.contains(
-                "s.store_mul_offset_rhs_scaled_ad_rhs(12, 6, A::sqrt(s.ad_value(7)), p.shift, p.scale);"
+                "s.store_mul_scale_offset_indices(11, 5, 4, p.scale, (p.shift) * (p.scale));"
             ),
             "{compact}"
         );
+        assert!(
+            compact.contains(
+                "s.store_mul_scale_offset_mixed_ia(12, 6, A::sqrt(s.ad_value(7)), p.scale, (p.shift) * (p.scale));"
+            ),
+            "{compact}"
+        );
+        assert!(!compact.contains("s.store_mul_offset_"), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -21566,32 +21569,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_offset_lhs(&mut self, index: usize, left: usize, offset: f64, right: usize) {",
-    "        let left_value = self.values[left] + offset;",
-    "        let right_value = self.values[right];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_rhs(&mut self, index: usize, left: usize, right: usize, offset: f64) {",
-    "        let left_value = self.values[left];",
-    "        let right_value = self.values[right] + offset;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
     "    fn store_offset_mul_offset_rhs(&mut self, index: usize, left: usize, right: usize, rhs_offset: f64, output_offset: f64) {",
     "        let left_value = self.values[left];",
     "        let right_value = self.values[right] + rhs_offset;",
@@ -21616,147 +21593,6 @@ fn generate_scratch_operation_helpers() -> String {
     "    }",
     "",
     "    #[inline]",
-    "    fn store_mul_offset_ad_lhs(&mut self, index: usize, left: AdValue, offset: f64, right: usize) {",
-    "        let left_value = left.value + offset;",
-    "        let right_value = self.values[right];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_ad_rhs(&mut self, index: usize, left: usize, right: AdValue, offset: f64) {",
-    "        let left_value = self.values[left];",
-    "        let right_value = right.value + offset;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        self.values[index] = left_value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right_value + left_value * right.node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right_value + left_value * right.branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_lhs_ad_rhs(&mut self, index: usize, left: usize, offset: f64, right: AdValue) {",
-    "        let left_value = self.values[left] + offset;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        self.values[index] = left_value * right.value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left_node_derivatives[axis] * right.value + left_value * right.node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left_branch_derivatives[axis] * right.value + left_value * right.branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_rhs_ad_lhs(&mut self, index: usize, left: AdValue, right: usize, offset: f64) {",
-    "        let right_value = self.values[right] + offset;",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left.value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value + left.value * right_node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value + left.value * right_branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_lhs_ad(&mut self, index: usize, left: AdValue, offset: f64, right: AdValue) {",
-    "        let left_value = left.value + offset;",
-    "        self.values[index] = left_value * right.value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right.value + left_value * right.node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right.value + left_value * right.branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_rhs_ad(&mut self, index: usize, left: AdValue, right: AdValue, offset: f64) {",
-    "        let right_value = right.value + offset;",
-    "        self.values[index] = left.value * right_value;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * right_value + left.value * right.node_derivatives[axis]; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * right_value + left.value * right.branch_derivatives[axis]; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_lhs_scaled_output(&mut self, index: usize, left: usize, offset: f64, right: usize, output_scale: f64) {",
-    "        let left_value = self.values[left] + offset;",
-    "        let right_value = self.values[right];",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left_value * right_value * output_scale;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]) * output_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]) * output_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_rhs_scaled_output(&mut self, index: usize, left: usize, right: usize, offset: f64, output_scale: f64) {",
-    "        let left_value = self.values[left];",
-    "        let right_value = self.values[right] + offset;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left_value * right_value * output_scale;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]) * output_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]) * output_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_lhs_scaled_ad_lhs(&mut self, index: usize, left: AdValue, offset: f64, right: usize, output_scale: f64) {",
-    "        let left_value = left.value + offset;",
-    "        let right_value = self.values[right];",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left_value * right_value * output_scale;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left.node_derivatives[axis] * right_value + left_value * right_node_derivatives[axis]) * output_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left.branch_derivatives[axis] * right_value + left_value * right_branch_derivatives[axis]) * output_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_lhs_scaled_ad_rhs(&mut self, index: usize, left: usize, offset: f64, right: AdValue, output_scale: f64) {",
-    "        let left_value = self.values[left] + offset;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        self.values[index] = left_value * right.value * output_scale;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * right.value + left_value * right.node_derivatives[axis]) * output_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * right.value + left_value * right.branch_derivatives[axis]) * output_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_rhs_scaled_ad_lhs(&mut self, index: usize, left: AdValue, right: usize, offset: f64, output_scale: f64) {",
-    "        let right_value = self.values[right] + offset;",
-    "        let right_node_derivatives = self.node_derivatives[right];",
-    "        let right_branch_derivatives = self.branch_derivatives[right];",
-    "        self.values[index] = left.value * right_value * output_scale;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left.node_derivatives[axis] * right_value + left.value * right_node_derivatives[axis]) * output_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left.branch_derivatives[axis] * right_value + left.value * right_branch_derivatives[axis]) * output_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_rhs_scaled_ad_rhs(&mut self, index: usize, left: usize, right: AdValue, offset: f64, output_scale: f64) {",
-    "        let left_value = self.values[left];",
-    "        let right_value = right.value + offset;",
-    "        let left_node_derivatives = self.node_derivatives[left];",
-    "        let left_branch_derivatives = self.branch_derivatives[left];",
-    "        self.values[index] = left_value * right_value * output_scale;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left_node_derivatives[axis] * right_value + left_value * right.node_derivatives[axis]) * output_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left_branch_derivatives[axis] * right_value + left_value * right.branch_derivatives[axis]) * output_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_lhs_scaled_ad(&mut self, index: usize, left: AdValue, offset: f64, right: AdValue, output_scale: f64) {",
-    "        let left_value = left.value + offset;",
-    "        self.values[index] = left_value * right.value * output_scale;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left.node_derivatives[axis] * right.value + left_value * right.node_derivatives[axis]) * output_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left.branch_derivatives[axis] * right.value + left_value * right.branch_derivatives[axis]) * output_scale; }",
-    "    }",
-    "",
-    "    #[inline]",
-    "    fn store_mul_offset_rhs_scaled_ad(&mut self, index: usize, left: AdValue, right: AdValue, offset: f64, output_scale: f64) {",
-    "        let right_value = right.value + offset;",
-    "        self.values[index] = left.value * right_value * output_scale;",
-    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = (left.node_derivatives[axis] * right_value + left.value * right.node_derivatives[axis]) * output_scale; }",
-    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = (left.branch_derivatives[axis] * right_value + left.value * right.branch_derivatives[axis]) * output_scale; }",
-    "    }",
-    "",
     "    fn store_mul_scale_ad_lhs(&mut self, index: usize, value: AdValue, scale: f64, source: usize) {",
     "        let left_value = value.value * scale;",
     "        let source_value = self.values[source];",
@@ -38458,54 +38294,14 @@ fn compact_mul_offset_lhs_store_helper_call(
     right_arg: &str,
     output_scale: Option<&str>,
 ) -> Option<String> {
-    let left_index = compact_scratch_ad_value_index(left_arg);
-    let right_index = compact_scratch_ad_value_index(right_arg);
-    match (left_index, right_index, output_scale) {
-        (Some(left), Some(right), None) => Some(format!(
-            "scratch.store_mul_offset_lhs({target_index}, {left}, {offset_arg}, {right});"
-        )),
-        (None, Some(right), None) => {
-            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_ad_lhs({target_index}, {left}, {offset_arg}, {right});"
-            ))
-        }
-        (Some(left), None, None) => {
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_lhs_ad_rhs({target_index}, {left}, {offset_arg}, {right});"
-            ))
-        }
-        (None, None, None) => {
-            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_lhs_ad({target_index}, {left}, {offset_arg}, {right});"
-            ))
-        }
-        (Some(left), Some(right), Some(scale)) => Some(format!(
-            "scratch.store_mul_offset_lhs_scaled_output({target_index}, {left}, {offset_arg}, {right}, {scale});"
-        )),
-        (None, Some(right), Some(scale)) => {
-            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_lhs_scaled_ad_lhs({target_index}, {left}, {offset_arg}, {right}, {scale});"
-            ))
-        }
-        (Some(left), None, Some(scale)) => {
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_lhs_scaled_ad_rhs({target_index}, {left}, {offset_arg}, {right}, {scale});"
-            ))
-        }
-        (None, None, Some(scale)) => {
-            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_lhs_scaled_ad({target_index}, {left}, {offset_arg}, {right}, {scale});"
-            ))
-        }
-    }
+    let (input_scale, offset) = compact_offset_affine_scale_args(offset_arg, output_scale);
+    compact_index_or_mixed_mul_scale_offset_helper_line(
+        target_index,
+        right_arg,
+        left_arg,
+        input_scale,
+        &offset,
+    )
 }
 
 fn compact_mul_offset_rhs_store_helper_call(
@@ -38515,53 +38311,23 @@ fn compact_mul_offset_rhs_store_helper_call(
     offset_arg: &str,
     output_scale: Option<&str>,
 ) -> Option<String> {
-    let left_index = compact_scratch_ad_value_index(left_arg);
-    let right_index = compact_scratch_ad_value_index(right_arg);
-    match (left_index, right_index, output_scale) {
-        (Some(left), Some(right), None) => Some(format!(
-            "scratch.store_mul_offset_rhs({target_index}, {left}, {right}, {offset_arg});"
-        )),
-        (None, Some(right), None) => {
-            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_rhs_ad_lhs({target_index}, {left}, {right}, {offset_arg});"
-            ))
-        }
-        (Some(left), None, None) => {
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_ad_rhs({target_index}, {left}, {right}, {offset_arg});"
-            ))
-        }
-        (None, None, None) => {
-            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_rhs_ad({target_index}, {left}, {right}, {offset_arg});"
-            ))
-        }
-        (Some(left), Some(right), Some(scale)) => Some(format!(
-            "scratch.store_mul_offset_rhs_scaled_output({target_index}, {left}, {right}, {offset_arg}, {scale});"
-        )),
-        (None, Some(right), Some(scale)) => {
-            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_rhs_scaled_ad_lhs({target_index}, {left}, {right}, {offset_arg}, {scale});"
-            ))
-        }
-        (Some(left), None, Some(scale)) => {
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_rhs_scaled_ad_rhs({target_index}, {left}, {right}, {offset_arg}, {scale});"
-            ))
-        }
-        (None, None, Some(scale)) => {
-            let left = compact_scratch_or_non_atomic_ad_arg(left_arg)?;
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_mul_offset_rhs_scaled_ad({target_index}, {left}, {right}, {offset_arg}, {scale});"
-            ))
-        }
+    let (input_scale, offset) = compact_offset_affine_scale_args(offset_arg, output_scale);
+    compact_index_or_mixed_mul_scale_offset_helper_line(
+        target_index,
+        left_arg,
+        right_arg,
+        input_scale,
+        &offset,
+    )
+}
+
+fn compact_offset_affine_scale_args<'a>(
+    offset_arg: &'a str,
+    output_scale: Option<&'a str>,
+) -> (&'a str, String) {
+    match output_scale {
+        Some(scale) => (scale, format!("({offset_arg}) * ({scale})")),
+        None => ("1.0", offset_arg.to_string()),
     }
 }
 
