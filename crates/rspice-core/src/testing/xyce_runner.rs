@@ -2075,12 +2075,23 @@ impl XyceTestRunner {
 
     fn voltage_probe_targets_subcircuit_node(normalized_probe: &str) -> bool {
         Self::parse_voltage_probe(normalized_probe).is_some_and(|probe| {
-            probe.node_pos.contains(':')
+            Self::node_name_targets_subcircuit_node(&probe.node_pos)
                 || probe
                     .node_neg
                     .as_deref()
-                    .is_some_and(|node| node.contains(':'))
+                    .is_some_and(Self::node_name_targets_subcircuit_node)
         })
+    }
+
+    fn node_name_targets_subcircuit_node(node: &str) -> bool {
+        node.contains(':') || Self::node_name_uses_period_hierarchy(node)
+    }
+
+    fn node_name_uses_period_hierarchy(node: &str) -> bool {
+        let Some((first_segment, _)) = node.split_once('.') else {
+            return false;
+        };
+        first_segment.len() > 1 && first_segment.starts_with('x')
     }
 
     fn is_native_voltage_accessor_wrapper_candidate(source: &str) -> bool {
@@ -18137,6 +18148,34 @@ default output
         assert!(
             XyceTestRunner::parse_tran_voltage_probe("N(M1:GM)").is_none(),
             "transient N(...) node alias must not steal device operating-point probes"
+        );
+    }
+
+    #[test]
+    fn subcircuit_node_probe_detection_accepts_period_hierarchy() {
+        assert!(
+            XyceTestRunner::voltage_probe_targets_subcircuit_node("v(x1.1.)"),
+            "Xyce/HSPICE period hierarchy should be recognized for subcircuit node probes"
+        );
+        assert!(
+            XyceTestRunner::voltage_probe_targets_subcircuit_node("v(x1..)"),
+            "subcircuit node names that are themselves periods remain hierarchy probes"
+        );
+        assert!(
+            XyceTestRunner::voltage_probe_targets_subcircuit_node("v(x1.x2.1.)"),
+            "nested period hierarchy should be recognized"
+        );
+        assert!(
+            XyceTestRunner::voltage_probe_targets_subcircuit_node("v(x1:x2::)"),
+            "existing colon hierarchy remains recognized"
+        );
+        assert!(
+            !XyceTestRunner::voltage_probe_targets_subcircuit_node("v(1.)"),
+            "top-level punctuation node names are not hierarchy probes"
+        );
+        assert!(
+            !XyceTestRunner::voltage_probe_targets_subcircuit_node("v(.)"),
+            "the top-level period node is not a hierarchy probe by itself"
         );
     }
 
