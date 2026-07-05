@@ -1624,6 +1624,18 @@ fn compact_exp_div_scaled_inputs_helper_call_replacement(
     if div_args.len() != 4 {
         return None;
     }
+    if let Some(left_source) = compact_scratch_ad_value_index(div_args[0])
+        && let Some((right_source, exponent)) = compact_powf_scratch_ad_value(div_args[2])
+    {
+        let line = format!(
+            "scratch.store_exp_div_scaled_inputs_powf_rhs({target_index}, {left_source}, {}, {right_source}, {exponent}, {});",
+            div_args[1], div_args[3]
+        );
+        let mut replacement = String::new();
+        push_indented_compact_line(&mut replacement, indent, &line);
+        let statement_end = compact_statement_end_after_call(source, close_paren)?;
+        return Some((statement_end, replacement));
+    }
     let line = compact_index_or_mixed_scaled_inputs_helper_line(
         target_index,
         "store_exp_div_scaled_inputs",
@@ -8483,6 +8495,8 @@ fn stamp() {
             "fn store_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia(",
             "fn store_mul_sub_from_scalar_sqrt_rhs_scaled_output(",
             "fn store_sub_from_scalar_mul_sqrt_rhs(",
+            "fn store_exp_mul_scaled_lhs_powf_rhs(",
+            "fn store_exp_div_scaled_inputs_powf_rhs(",
             "fn store_mul_exp_scale_offset_lhs(",
             "fn store_mul_exp_scale_offset_rhs(",
             "fn store_mul_powf_scale_offset_lhs(",
@@ -11064,6 +11078,7 @@ fn stamp() {
             "fn store_exp_mul_scaled_lhs_indices",
             "fn store_exp_mul_scaled_lhs_mixed_ai",
             "fn store_exp_mul_scaled_lhs_mixed_ia",
+            "fn store_exp_mul_scaled_lhs_powf_rhs",
         ] {
             assert!(support.contains(helper), "{helper}\n{support}");
         }
@@ -11092,13 +11107,18 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains("s.store_exp_mul_scaled_lhs_mixed_ia(82, 7, p.scale, A::powf(s.ad_value(8), p.power));"),
+            compact.contains("s.store_exp_mul_scaled_lhs_powf_rhs(82, 7, p.scale, 8, p.power);"),
             "{compact}"
         );
         assert!(
             compact.contains("s.store_exp_mul_scaled_lhs(83, A::sqrt(s.ad_value(9)), p.scale, A::neg(s.ad_value(10)));"),
             "{compact}"
         );
+        assert!(
+            !compact.contains("s.store_exp_mul_scaled_lhs_mixed_ia(82"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::powf(s.ad_value(8)"), "{compact}");
         assert!(!compact.contains("A::mul_scaled_lhs("), "{compact}");
         assert!(!compact.contains("s.store_exp_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
@@ -11112,6 +11132,7 @@ fn stamp() {
             "fn store_exp_div_scaled_inputs_indices",
             "fn store_exp_div_scaled_inputs_mixed_ai",
             "fn store_exp_div_scaled_inputs_mixed_ia",
+            "fn store_exp_div_scaled_inputs_powf_rhs",
         ] {
             assert!(support.contains(helper), "{helper}\n{support}");
         }
@@ -11141,7 +11162,7 @@ fn stamp() {
         );
         assert!(
             compact.contains(
-                "s.store_exp_div_scaled_inputs_mixed_ia(86, 7, p.left_scale, A::powf(s.ad_value(8), p.power), p.right_scale);"
+                "s.store_exp_div_scaled_inputs_powf_rhs(86, 7, p.left_scale, 8, p.power, p.right_scale);"
             ),
             "{compact}"
         );
@@ -11151,6 +11172,11 @@ fn stamp() {
             ),
             "{compact}"
         );
+        assert!(
+            !compact.contains("s.store_exp_div_scaled_inputs_mixed_ia(86"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::powf(s.ad_value(8)"), "{compact}");
         assert!(!compact.contains("A::div_scaled_inputs("), "{compact}");
         assert!(!compact.contains("s.store_exp_ad("), "{compact}");
     }
@@ -19043,6 +19069,23 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_exp_div_scaled_inputs_powf_rhs(&mut self, index: usize, left: usize, left_scale: f64, right_source: usize, exponent: f64, right_scale: f64) {",
+        "        let left_value = self.values[left] * left_scale;",
+        "        let right_base = self.values[right_source];",
+        "        let right_power = scalar_power_value(right_base, exponent);",
+        "        let right_power_derivative_scale = AdValue::pow_base_derivative_scale(right_power, right_base, exponent);",
+        "        let right_value = right_power * right_scale;",
+        "        let reciprocal = 1.0 / right_value;",
+        "        let quotient = left_value * reciprocal;",
+        "        let output = quotient.exp();",
+        "        let left_derivative_scale = left_scale * reciprocal * output;",
+        "        let right_derivative_scale = -quotient * reciprocal * right_scale * output * right_power_derivative_scale;",
+        "        self.values[index] = output;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right_source][axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * left_derivative_scale + self.branch_derivatives[right_source][axis] * right_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn store_limited_exp_div_scaled_inputs(&mut self, index: usize, left: AdValue, left_scale: f64, right: AdValue, right_scale: f64) {",
         "        let left_value = left.value * left_scale;",
         "        let right_value = right.value * right_scale;",
@@ -19099,6 +19142,20 @@ fn generate_scratch_operation_helpers() -> String {
         "        self.values[index] = output;",
         "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = left.node_derivatives[axis] * left_derivative_scale + right.node_derivatives[axis] * right_derivative_scale; }",
         "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = left.branch_derivatives[axis] * left_derivative_scale + right.branch_derivatives[axis] * right_derivative_scale; }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_exp_mul_scaled_lhs_powf_rhs(&mut self, index: usize, left: usize, scale: f64, right_source: usize, exponent: f64) {",
+        "        let scaled_left_value = self.values[left] * scale;",
+        "        let right_base = self.values[right_source];",
+        "        let right_value = scalar_power_value(right_base, exponent);",
+        "        let right_derivative_scale = AdValue::pow_base_derivative_scale(right_value, right_base, exponent);",
+        "        let output = (scaled_left_value * right_value).exp();",
+        "        let left_derivative_scale = output * scale * right_value;",
+        "        let right_derivative_scale = output * scaled_left_value * right_derivative_scale;",
+        "        self.values[index] = output;",
+        "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[left][axis] * left_derivative_scale + self.node_derivatives[right_source][axis] * right_derivative_scale; }",
+        "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[left][axis] * left_derivative_scale + self.branch_derivatives[right_source][axis] * right_derivative_scale; }",
         "    }",
         "",
         "    #[inline]",
@@ -43290,6 +43347,15 @@ fn compact_exp_mul_scaled_lhs_store_helper_call(
     }
     if right_index.is_none() && !compact_non_atomic_ad_value(product_args[2]) {
         return None;
+    }
+
+    if let Some(left_index) = left_index
+        && let Some((right_source, exponent)) = compact_powf_scratch_ad_value(product_args[2])
+    {
+        return Some(format!(
+            "scratch.store_exp_mul_scaled_lhs_powf_rhs({target_index}, {left_index}, {}, {right_source}, {exponent});",
+            product_args[1]
+        ));
     }
 
     let helper = compact_index_or_mixed_product_store_helper_name(
