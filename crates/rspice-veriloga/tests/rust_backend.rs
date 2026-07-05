@@ -8352,16 +8352,31 @@ fn rust_backend_fuses_div_from_scalar_mixed_multiply_store_helpers() {
     let support = render_runtime_support_module();
 
     for helper in [
-        "store_mul_div_from_scalar_lhs",
-        "store_mul_div_from_scalar_rhs",
-        "store_mul_div_from_scalar_ad_lhs",
-        "store_mul_div_from_scalar_ad_rhs",
+        "store_mul_div_from_scalar_lhs_ad",
+        "store_mul_div_from_scalar_lhs_ad_indices",
+        "store_mul_div_from_scalar_lhs_ad_mixed_ai",
+        "store_mul_div_from_scalar_lhs_ad_mixed_ia",
     ] {
         assert!(
             support.contains(&format!("pub(crate) fn {helper}(")),
             "{helper}\n{support}"
         );
         assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    for legacy_helper in [
+        "store_mul_div_from_scalar_lhs",
+        "store_mul_div_from_scalar_rhs",
+        "store_mul_div_from_scalar_ad_lhs",
+        "store_mul_div_from_scalar_ad_rhs",
+    ] {
+        assert!(
+            !support.contains(&format!("pub(crate) fn {legacy_helper}(")),
+            "legacy div-from-scalar multiply helpers should fold into mask helpers:\n{support}"
+        );
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated div-from-scalar multiply calls should use mask helpers:\n{stamp}"
+        );
     }
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
@@ -18419,6 +18434,8 @@ module compact_div_from_scalar_mixed_multiply_store(p, n);
     real e;
     real f;
     real g;
+    real h;
+    real i;
     analog begin
         a = V(p, n);
         b = V(n, p);
@@ -18427,7 +18444,9 @@ module compact_div_from_scalar_mixed_multiply_store(p, n);
         e = c * (numerator / b);
         f = (numerator / (a + b)) * c;
         g = c * (numerator / (a + b));
-        I(p, n) <+ d + e + f + g;
+        h = (numerator / a) * sqrt(c);
+        i = (numerator / sqrt(a)) * sqrt(c);
+        I(p, n) <+ d + e + f + g + h + i;
     end
 endmodule
 "#
