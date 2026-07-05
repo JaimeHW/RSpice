@@ -6852,8 +6852,8 @@ fn stamp() {
 
         for signature in [
             "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs(",
-            "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_lhs(",
-            "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_rhs(",
+            "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_mixed_ai(",
+            "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_mixed_ia(",
             "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad(",
             "fn store_div_from_scalar_offset_mul_offset_lhs_ad(",
             "fn store_div_from_scalar_offset_mul_offset_lhs_mixed_ai(",
@@ -6888,6 +6888,22 @@ fn stamp() {
                 "let denominator_derivative = -self.node_derivatives[value][axis] * right_raw + left_value * self.node_derivatives[right][axis]; self.node_derivatives[index][axis] = denominator_derivative * denominator_scale;"
             ),
             "{sub_from_scalar_quotient}"
+        );
+        let sub_from_scalar_quotient_mixed = helper_body(
+            &support,
+            "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_mixed_ia(",
+        );
+        assert!(
+            sub_from_scalar_quotient_mixed.contains(
+                "let denominator_derivative = -self.node_derivatives[value][axis] * right_raw + left_value * right.node_derivatives[axis]; self.node_derivatives[index][axis] = denominator_derivative * denominator_scale;"
+            ),
+            "{sub_from_scalar_quotient_mixed}"
+        );
+        assert!(
+            !support.contains("fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_lhs(")
+        );
+        assert!(
+            !support.contains("fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_rhs(")
         );
 
         let offset_product_quotient = helper_body(
@@ -12041,17 +12057,25 @@ fn stamp() {
         let support = generate_scratch_operation_helpers();
         for helper in [
             "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs(",
-            "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_rhs(",
+            "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_mixed_ai(",
+            "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_mixed_ia(",
             "fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad(",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
+        assert!(
+            !support.contains("fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_lhs(")
+        );
+        assert!(
+            !support.contains("fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_rhs(")
+        );
 
         let source = r#"
 fn stamp() {
     scratch.store_ad_value(120, AdValue::div_from_scalar(params.scalar, AdValue::offset(AdValue::mul_sub_from_scalar_lhs(params.inner_scalar, scratch.ad_value(2), scratch.ad_value(3)), params.offset)));
     scratch.store_ad_value(121, AdValue::div_from_scalar(params.scalar, AdValue::offset(AdValue::mul_sub_from_scalar_lhs(params.inner_scalar, AdValue::scale(scratch.ad_value(4), params.value_scale), AdValue::sqrt(scratch.ad_value(5))), params.offset)));
     scratch.store_ad_value(122, AdValue::div_from_scalar(params.scalar, AdValue::offset(AdValue::mul_sub_from_scalar_lhs(params.inner_scalar, scratch.ad_value(6), AdValue::sqrt(scratch.ad_value(7))), params.offset)));
+    scratch.store_ad_value(123, AdValue::div_from_scalar(params.scalar, AdValue::offset(AdValue::mul_sub_from_scalar_lhs(params.inner_scalar, AdValue::scale(scratch.ad_value(8), params.value_scale), scratch.ad_value(9)), params.offset)));
 }
 "#;
 
@@ -12071,7 +12095,13 @@ fn stamp() {
         );
         assert!(
             compact.contains(
-                "s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_rhs(122, p.scalar, p.inner_scalar, 6, A::sqrt(s.ad_value(7)), p.offset);"
+                "s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_mixed_ia(122, p.scalar, p.inner_scalar, 6, A::sqrt(s.ad_value(7)), p.offset);"
+            ),
+            "{compact}"
+        );
+        assert!(
+            compact.contains(
+                "s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_mixed_ai(123, p.scalar, p.inner_scalar, A::scale(s.ad_value(8), p.value_scale), 9, p.offset);"
             ),
             "{compact}"
         );
@@ -12081,6 +12111,14 @@ fn stamp() {
         );
         assert!(
             !compact.contains("s.store_div_from_scalar_offset_ad("),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_lhs("),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_rhs("),
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
@@ -18876,32 +18914,6 @@ fn generate_scratch_operation_helpers() -> String {
         "    }",
         "",
         "    #[inline]",
-        "    fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_lhs(&mut self, index: usize, scalar: f64, inner_scalar: f64, value: AdValue, right: usize, offset: f64) {",
-        "        let right_raw = self.values[right];",
-        "        let left_value = inner_scalar - value.value;",
-        "        let denominator = left_value * right_raw + offset;",
-        "        let reciprocal = 1.0 / denominator;",
-        "        let quotient = scalar * reciprocal;",
-        "        let denominator_scale = -quotient * reciprocal;",
-        "        self.values[index] = quotient;",
-        "        for axis in 0..Instance::NODE_COUNT { let denominator_derivative = -value.node_derivatives[axis] * right_raw + left_value * self.node_derivatives[right][axis]; self.node_derivatives[index][axis] = denominator_derivative * denominator_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { let denominator_derivative = -value.branch_derivatives[axis] * right_raw + left_value * self.branch_derivatives[right][axis]; self.branch_derivatives[index][axis] = denominator_derivative * denominator_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
-        "    fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_rhs(&mut self, index: usize, scalar: f64, inner_scalar: f64, value: usize, right: AdValue, offset: f64) {",
-        "        let value_raw = self.values[value];",
-        "        let left_value = inner_scalar - value_raw;",
-        "        let denominator = left_value * right.value + offset;",
-        "        let reciprocal = 1.0 / denominator;",
-        "        let quotient = scalar * reciprocal;",
-        "        let denominator_scale = -quotient * reciprocal;",
-        "        self.values[index] = quotient;",
-        "        for axis in 0..Instance::NODE_COUNT { let denominator_derivative = -self.node_derivatives[value][axis] * right.value + left_value * right.node_derivatives[axis]; self.node_derivatives[index][axis] = denominator_derivative * denominator_scale; }",
-        "        for axis in 0..Instance::BRANCH_COUNT { let denominator_derivative = -self.branch_derivatives[value][axis] * right.value + left_value * right.branch_derivatives[axis]; self.branch_derivatives[index][axis] = denominator_derivative * denominator_scale; }",
-        "    }",
-        "",
-        "    #[inline]",
         "    fn store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad(&mut self, index: usize, scalar: f64, inner_scalar: f64, value: AdValue, right: AdValue, offset: f64) {",
         "        let left_value = inner_scalar - value.value;",
         "        let denominator = left_value * right.value + offset;",
@@ -22910,6 +22922,11 @@ fn generate_mixed_index_product_scratch_helpers() -> String {
                 '-',
             ));
             out.push_str(&generate_index_or_mixed_scaled_offset_mul_offset_lhs_helper(&mask));
+            out.push_str(
+                &generate_index_or_mixed_div_from_scalar_offset_mul_sub_from_scalar_lhs_helper(
+                    &mask,
+                ),
+            );
             out.push_str(&generate_index_or_mixed_sub_from_scalar_scaled_mul_helper(
                 &mask,
             ));
@@ -23425,6 +23442,39 @@ fn generate_index_or_mixed_scaled_offset_mul_offset_lhs_helper(mask: &str) -> St
     }}
 "#,
         left_ty = mixed_helper_type(mask, 0),
+        right_ty = mixed_helper_type(mask, 1),
+    )
+}
+
+fn generate_index_or_mixed_div_from_scalar_offset_mul_sub_from_scalar_lhs_helper(
+    mask: &str,
+) -> String {
+    let helper =
+        index_or_mixed_helper_name("store_div_from_scalar_offset_mul_sub_from_scalar_lhs", mask);
+    let value = index_or_mixed_value_expr(mask, 0, "value");
+    let value_node_derivative = index_or_mixed_node_derivative_expr(mask, 0, "value");
+    let value_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 0, "value");
+    let right = index_or_mixed_value_expr(mask, 1, "right");
+    let right_node_derivative = index_or_mixed_node_derivative_expr(mask, 1, "right");
+    let right_branch_derivative = index_or_mixed_branch_derivative_expr(mask, 1, "right");
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, scalar: f64, inner_scalar: f64, value: {value_ty}, right: {right_ty}, offset: f64) {{
+        let value_raw = {value};
+        let right_raw = {right};
+        let left_value = inner_scalar - value_raw;
+        let denominator = left_value * right_raw + offset;
+        let reciprocal = 1.0 / denominator;
+        let quotient = scalar * reciprocal;
+        let denominator_scale = -quotient * reciprocal;
+        self.values[index] = quotient;
+        for axis in 0..Instance::NODE_COUNT {{ let denominator_derivative = -{value_node_derivative} * right_raw + left_value * {right_node_derivative}; self.node_derivatives[index][axis] = denominator_derivative * denominator_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ let denominator_derivative = -{value_branch_derivative} * right_raw + left_value * {right_branch_derivative}; self.branch_derivatives[index][axis] = denominator_derivative * denominator_scale; }}
+    }}
+"#,
+        value_ty = mixed_helper_type(mask, 0),
         right_ty = mixed_helper_type(mask, 1),
     )
 }
@@ -38714,6 +38764,33 @@ fn compact_index_or_mixed_scaled_offset_mul_offset_lhs_helper_line(
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
 }
 
+fn compact_index_or_mixed_div_from_scalar_offset_mul_sub_from_scalar_lhs_helper_line(
+    target_index: usize,
+    scalar: &str,
+    inner_scalar: &str,
+    value: &str,
+    right: &str,
+    offset: &str,
+) -> Option<String> {
+    let value_is_index = compact_scratch_ad_value_index(value).is_some();
+    let right_is_index = compact_scratch_ad_value_index(right).is_some();
+    if value_is_index == right_is_index {
+        return None;
+    }
+
+    let (helper, value_args) = compact_index_or_mixed_value_args(
+        "store_div_from_scalar_offset_mul_sub_from_scalar_lhs",
+        &[value, right],
+    )?;
+    let mut call_args = Vec::with_capacity(6);
+    call_args.push(target_index.to_string());
+    call_args.push(scalar.to_string());
+    call_args.push(inner_scalar.to_string());
+    call_args.extend(value_args);
+    call_args.push(offset.to_string());
+    Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
 fn compact_scaled_softlimit_poly_offset_lhs_args<'a>(
     left_arg: &str,
     left_offset: &str,
@@ -42820,11 +42897,15 @@ fn compact_div_from_scalar_offset_mul_sub_from_scalar_lhs_store_helper_line(
         (Some(value), Some(right)) => Some(format!(
             "scratch.store_div_from_scalar_offset_mul_sub_from_scalar_lhs({target_index}, {scalar}, {inner_scalar}, {value}, {right}, {offset});"
         )),
-        (None, Some(right)) => {
-            let value = compact_scratch_or_non_atomic_ad_arg(value_arg)?;
-            Some(format!(
-                "scratch.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_lhs({target_index}, {scalar}, {inner_scalar}, {value}, {right}, {offset});"
-            ))
+        (None, Some(_)) => {
+            compact_index_or_mixed_div_from_scalar_offset_mul_sub_from_scalar_lhs_helper_line(
+                target_index,
+                scalar,
+                inner_scalar,
+                value_arg,
+                right_arg,
+                offset,
+            )
         }
         (Some(value), None) => {
             if let Some((rhs_input_scale, rhs_inner_offset, rhs_output_scale, rhs_offset)) =
@@ -42838,10 +42919,14 @@ fn compact_div_from_scalar_offset_mul_sub_from_scalar_lhs_store_helper_line(
                     "scratch.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_self_offset_rhs({target_index}, {scalar}, {inner_scalar}, {value}, {rhs_input_scale}, {rhs_inner_offset}, {rhs_output_scale}, {rhs_offset}, {offset});"
                 ));
             }
-            let right = compact_scratch_or_non_atomic_ad_arg(right_arg)?;
-            Some(format!(
-                "scratch.store_div_from_scalar_offset_mul_sub_from_scalar_lhs_ad_rhs({target_index}, {scalar}, {inner_scalar}, {value}, {right}, {offset});"
-            ))
+            compact_index_or_mixed_div_from_scalar_offset_mul_sub_from_scalar_lhs_helper_line(
+                target_index,
+                scalar,
+                inner_scalar,
+                value_arg,
+                right_arg,
+                offset,
+            )
         }
         (None, None) => {
             if let Some((rhs_input_scale, rhs_inner_offset, rhs_output_scale, rhs_offset)) =
