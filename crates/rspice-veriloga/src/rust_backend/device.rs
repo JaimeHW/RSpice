@@ -8460,6 +8460,10 @@ fn stamp() {
             "fn store_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia(",
             "fn store_mul_sub_from_scalar_sqrt_rhs_scaled_output(",
             "fn store_sub_from_scalar_mul_sqrt_rhs(",
+            "fn store_mul_exp_scale_offset_lhs(",
+            "fn store_mul_exp_scale_offset_rhs(",
+            "fn store_mul_sqrt_scale_offset_lhs(",
+            "fn store_mul_sqrt_scale_offset_rhs(",
             "fn store_square_mul_sub_from_scalar_scaled_rhs_scaled_output_indices(",
             "fn store_square_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia(",
             "fn store_square_mul_sub_from_scalar_sqrt_rhs_scaled_output(",
@@ -10182,6 +10186,8 @@ fn stamp() {
         for helper in [
             "fn store_mul_scale_offset",
             "fn store_mul_scale_offset_mixed_ai",
+            "fn store_mul_exp_scale_offset_lhs",
+            "fn store_mul_sqrt_scale_offset_lhs",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
@@ -10200,15 +10206,23 @@ fn stamp() {
         let compact = compact_generated_stamp_surface(source.to_string());
 
         assert!(
-            compact.contains("s.store_mul_scale_offset_mixed_ai(220, A::exp(s.ad_value(2)), 3, p.scale, p.offset);"),
+            compact.contains("s.store_mul_exp_scale_offset_lhs(220, 2, 3, p.scale, p.offset);"),
             "{compact}"
         );
         assert!(
-            compact.contains(
-                "s.store_mul_scale_offset_mixed_ai(221, A::sqrt(s.ad_value(5)), 4, 2.0, 1.0);"
-            ),
+            compact.contains("s.store_mul_sqrt_scale_offset_lhs(221, 5, 4, 2.0, 1.0);"),
             "{compact}"
         );
+        assert!(
+            !compact.contains("s.store_mul_scale_offset_mixed_ai(220"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_scale_offset_mixed_ai(221"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::exp(s.ad_value(2))"), "{compact}");
+        assert!(!compact.contains("A::sqrt(s.ad_value(5))"), "{compact}");
         assert!(!compact.contains("s.store_mul_ad("), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
@@ -11523,8 +11537,12 @@ fn stamp() {
         );
         assert!(
             compact.contains(
-                "s.store_mul_scale_offset_mixed_ia(12, 6, A::sqrt(s.ad_value(7)), p.scale, (p.shift) * (p.scale));"
+                "s.store_mul_sqrt_scale_offset_rhs(12, 6, 7, p.scale, (p.shift) * (p.scale));"
             ),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_scale_offset_mixed_ia(12"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_mul_offset_"), "{compact}");
@@ -11983,9 +12001,7 @@ fn stamp() {
         let compact = compact_generated_stamp_surface(source.to_string());
 
         assert!(
-            compact.contains(
-                "s.store_mul_scale_offset_mixed_ai(17, A::exp(s.ad_value(2)), 3, -1.0, p.scalar);"
-            ),
+            compact.contains("s.store_mul_exp_scale_offset_lhs(17, 2, 3, -1.0, p.scalar);"),
             "{compact}"
         );
         assert!(
@@ -11995,9 +12011,7 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains(
-                "s.store_mul_scale_offset_mixed_ai(19, A::sqrt(s.ad_value(3)), 2, -1.0, p.scalar);"
-            ),
+            compact.contains("s.store_mul_sqrt_scale_offset_lhs(19, 3, 2, -1.0, p.scalar);"),
             "{compact}"
         );
         assert!(
@@ -12014,13 +12028,13 @@ fn stamp() {
         );
         assert!(
             compact.contains(
-                "s.store_mul_scale_offset_mixed_ia(22, 3, A::exp(s.ad_value(2)), -(p.scale), (p.scalar) * (p.scale));"
+                "s.store_mul_exp_scale_offset_rhs(22, 3, 2, -(p.scale), (p.scalar) * (p.scale));"
             ),
             "{compact}"
         );
         assert!(
             compact.contains(
-                "s.store_mul_scale_offset_mixed_ai(23, A::sqrt(s.ad_value(3)), 2, -(p.scale), (p.scalar) * (p.scale));"
+                "s.store_mul_sqrt_scale_offset_lhs(23, 3, 2, -(p.scale), (p.scalar) * (p.scale));"
             ),
             "{compact}"
         );
@@ -12040,6 +12054,22 @@ fn stamp() {
         );
         assert!(
             !compact.contains("s.store_mul_sub_from_scalar_ad_"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_scale_offset_mixed_ai(17"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_scale_offset_mixed_ai(19"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_scale_offset_mixed_ia(22"),
+            "{compact}"
+        );
+        assert!(
+            !compact.contains("s.store_mul_scale_offset_mixed_ai(23"),
             "{compact}"
         );
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
@@ -21555,6 +21585,47 @@ fn generate_scratch_operation_helpers() -> String {
     "        self.values[index] = factor.value * affine_value;",
     "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = factor.node_derivatives[axis] * affine_value + factor.value * value.node_derivatives[axis] * input_scale; }",
     "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = factor.branch_derivatives[axis] * affine_value + factor.value * value.branch_derivatives[axis] * input_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_exp_scale_offset_lhs(&mut self, index: usize, factor_source: usize, value: usize, input_scale: f64, offset: f64) {",
+    "        let factor_value = self.values[factor_source].exp();",
+    "        self.store_mul_unary_scale_offset_lhs(index, factor_source, value, input_scale, offset, factor_value, factor_value);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_exp_scale_offset_rhs(&mut self, index: usize, factor: usize, value_source: usize, input_scale: f64, offset: f64) {",
+    "        let unary_value = self.values[value_source].exp();",
+    "        self.store_mul_unary_scale_offset_rhs(index, factor, value_source, input_scale, offset, unary_value, unary_value);",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sqrt_scale_offset_lhs(&mut self, index: usize, factor_source: usize, value: usize, input_scale: f64, offset: f64) {",
+    "        let factor_value = self.values[factor_source].sqrt();",
+    "        self.store_mul_unary_scale_offset_lhs(index, factor_source, value, input_scale, offset, factor_value, 1.0 / (2.0 * factor_value));",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_sqrt_scale_offset_rhs(&mut self, index: usize, factor: usize, value_source: usize, input_scale: f64, offset: f64) {",
+    "        let unary_value = self.values[value_source].sqrt();",
+    "        self.store_mul_unary_scale_offset_rhs(index, factor, value_source, input_scale, offset, unary_value, 1.0 / (2.0 * unary_value));",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_unary_scale_offset_lhs(&mut self, index: usize, factor_source: usize, value: usize, input_scale: f64, offset: f64, factor_value: f64, factor_derivative_scale: f64) {",
+    "        let affine_value = self.values[value] * input_scale + offset;",
+    "        self.values[index] = factor_value * affine_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[factor_source][axis] * factor_derivative_scale * affine_value + factor_value * self.node_derivatives[value][axis] * input_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[factor_source][axis] * factor_derivative_scale * affine_value + factor_value * self.branch_derivatives[value][axis] * input_scale; }",
+    "    }",
+    "",
+    "    #[inline]",
+    "    fn store_mul_unary_scale_offset_rhs(&mut self, index: usize, factor: usize, value_source: usize, input_scale: f64, offset: f64, unary_value: f64, derivative_scale: f64) {",
+    "        let factor_value = self.values[factor];",
+    "        let affine_value = unary_value * input_scale + offset;",
+    "        self.values[index] = factor_value * affine_value;",
+    "        for axis in 0..Instance::NODE_COUNT { self.node_derivatives[index][axis] = self.node_derivatives[factor][axis] * affine_value + factor_value * self.node_derivatives[value_source][axis] * derivative_scale * input_scale; }",
+    "        for axis in 0..Instance::BRANCH_COUNT { self.branch_derivatives[index][axis] = self.branch_derivatives[factor][axis] * affine_value + factor_value * self.branch_derivatives[value_source][axis] * derivative_scale * input_scale; }",
     "    }",
     "",
     "    #[inline]",
@@ -40397,6 +40468,12 @@ fn compact_index_or_mixed_mul_scale_offset_helper_line(
     input_scale: &str,
     offset: &str,
 ) -> Option<String> {
+    if let Some(line) =
+        compact_mul_unary_scale_offset_helper_line(target_index, factor, value, input_scale, offset)
+    {
+        return Some(line);
+    }
+
     let (helper, value_args) =
         compact_index_or_mixed_value_args("store_mul_scale_offset", &[factor, value])?;
     let mut call_args = Vec::with_capacity(5);
@@ -40405,6 +40482,43 @@ fn compact_index_or_mixed_mul_scale_offset_helper_line(
     call_args.push(input_scale.to_string());
     call_args.push(offset.to_string());
     Some(format!("scratch.{helper}({});", call_args.join(", ")))
+}
+
+fn compact_mul_unary_scale_offset_helper_line(
+    target_index: usize,
+    factor: &str,
+    value: &str,
+    input_scale: &str,
+    offset: &str,
+) -> Option<String> {
+    for &(name, lhs_helper, rhs_helper) in &[
+        (
+            "exp",
+            "store_mul_exp_scale_offset_lhs",
+            "store_mul_exp_scale_offset_rhs",
+        ),
+        (
+            "sqrt",
+            "store_mul_sqrt_scale_offset_lhs",
+            "store_mul_sqrt_scale_offset_rhs",
+        ),
+    ] {
+        if let Some(factor_source) = compact_unary_scratch_ad_value_index(factor, name)
+            && let Some(value_source) = compact_scratch_ad_value_index(value)
+        {
+            return Some(format!(
+                "scratch.{lhs_helper}({target_index}, {factor_source}, {value_source}, {input_scale}, {offset});"
+            ));
+        }
+        if let Some(factor_source) = compact_scratch_ad_value_index(factor)
+            && let Some(value_source) = compact_unary_scratch_ad_value_index(value, name)
+        {
+            return Some(format!(
+                "scratch.{rhs_helper}({target_index}, {factor_source}, {value_source}, {input_scale}, {offset});"
+            ));
+        }
+    }
+    None
 }
 
 fn compact_mul_scale_offset_index_factor_helper_line(

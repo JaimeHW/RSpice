@@ -4290,7 +4290,11 @@ fn rust_backend_uses_compact_scaled_mixed_multiply_store_helpers() {
     assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
     assert!(
-        stamp.contains("s.store_mul_scale_offset_mixed_ai("),
+        stamp.contains("s.store_mul_exp_scale_offset_lhs("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_mul_scale_offset_mixed_ai("),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_mul_ad("), "{stamp}");
@@ -6949,7 +6953,11 @@ fn rust_backend_uses_compact_result_scaled_mixed_mul_div_store_helpers() {
     assert!(!stamp.contains("s.store_mul_scaled_ad_rhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_scaled_ad_lhs("), "{stamp}");
     assert!(
-        stamp.contains("s.store_mul_scale_offset_mixed_ai("),
+        stamp.contains("s.store_mul_exp_scale_offset_lhs("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_mul_scale_offset_mixed_ai("),
         "{stamp}"
     );
     assert!(
@@ -8249,7 +8257,7 @@ fn rust_backend_fuses_offset_mixed_multiply_store_helpers() {
     for helper in [
         "store_mul_scale_offset",
         "store_mul_scale_offset_indices",
-        "store_mul_scale_offset_mixed_ia",
+        "store_mul_exp_scale_offset_rhs",
     ] {
         assert!(
             support.contains(&format!("pub(crate) fn {helper}(")),
@@ -8259,10 +8267,14 @@ fn rust_backend_fuses_offset_mixed_multiply_store_helpers() {
     for helper in [
         "s.store_mul_scale_offset(",
         "s.store_mul_scale_offset_indices(",
-        "s.store_mul_scale_offset_mixed_ia(",
+        "s.store_mul_exp_scale_offset_rhs(",
     ] {
         assert!(stamp.contains(helper), "{helper}\n{stamp}");
     }
+    assert!(
+        !stamp.contains("s.store_mul_scale_offset_mixed_ia("),
+        "{stamp}"
+    );
     for legacy_helper in [
         "store_mul_offset_lhs",
         "store_mul_offset_rhs",
@@ -8317,8 +8329,9 @@ fn rust_backend_fuses_sub_from_scalar_mixed_multiply_store_helpers() {
     for helper in [
         "store_mul_scale_offset",
         "store_mul_scale_offset_indices",
-        "store_mul_scale_offset_mixed_ai",
-        "store_mul_scale_offset_mixed_ia",
+        "store_mul_exp_scale_offset_lhs",
+        "store_mul_exp_scale_offset_rhs",
+        "store_mul_sqrt_scale_offset_lhs",
     ] {
         assert!(
             support.contains(&format!("pub(crate) fn {helper}(")),
@@ -8326,6 +8339,14 @@ fn rust_backend_fuses_sub_from_scalar_mixed_multiply_store_helpers() {
         );
         assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
     }
+    assert!(
+        !stamp.contains("s.store_mul_scale_offset_mixed_ai("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_mul_scale_offset_mixed_ia("),
+        "{stamp}"
+    );
     for legacy_helper in [
         "store_mul_sub_from_scalar_lhs",
         "store_mul_sub_from_scalar_rhs",
@@ -8591,7 +8612,7 @@ fn rust_backend_fuses_negated_mixed_multiply_store_helpers() {
         "{support}"
     );
     assert!(
-        support.contains("pub(crate) fn store_mul_scale_offset_mixed_ia("),
+        support.contains("pub(crate) fn store_mul_exp_scale_offset_rhs("),
         "{support}"
     );
     assert!(
@@ -8615,7 +8636,11 @@ fn rust_backend_fuses_negated_mixed_multiply_store_helpers() {
         "{stamp}"
     );
     assert!(
-        stamp.contains("s.store_mul_scale_offset_mixed_ia("),
+        stamp.contains("s.store_mul_exp_scale_offset_rhs("),
+        "{stamp}"
+    );
+    assert!(
+        !stamp.contains("s.store_mul_scale_offset_mixed_ia("),
         "{stamp}"
     );
     assert!(!stamp.contains("s.store_mul_neg_lhs("), "{stamp}");
