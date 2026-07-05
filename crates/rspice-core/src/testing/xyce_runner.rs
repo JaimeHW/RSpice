@@ -2000,7 +2000,7 @@ impl XyceTestRunner {
         let normalized = model_type
             .trim_matches(|ch| matches!(ch, '(' | ')' | ','))
             .to_ascii_uppercase();
-        if matches!(normalized.as_str(), "NMOS" | "PMOS") {
+        if matches!(normalized.as_str(), "NMOS" | "PMOS" | "D" | "DIODE") {
             return Ok(());
         }
         Err(format!(
@@ -2018,10 +2018,20 @@ impl XyceTestRunner {
         for model in &netlist.models {
             if !matches!(
                 model.model_type.to_ascii_uppercase().as_str(),
-                "NMOS" | "PMOS"
+                "NMOS" | "PMOS" | "D" | "DIODE"
             ) {
                 return Err(format!(
                     "wrapper-origin plain static DC contract does not yet cover parsed model type {}",
+                    model.model_type
+                ));
+            }
+            if matches!(
+                model.model_type.to_ascii_uppercase().as_str(),
+                "D" | "DIODE"
+            ) && !Self::model_is_native_legacy_diode(model)
+            {
+                return Err(format!(
+                    "wrapper-origin plain static DC contract does not yet cover advanced diode model type {}",
                     model.model_type
                 ));
             }
@@ -11851,6 +11861,18 @@ impl XyceTestRunner {
             .is_none_or(|level| level.is_finite() && (level - 1.0).abs() <= 1.0e-9)
     }
 
+    fn model_is_native_legacy_diode(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "D" | "DIODE"
+        ) {
+            return false;
+        }
+        Self::numeric_param_value(&model.params, "LEVEL").is_none_or(|level| {
+            level.is_finite() && ((level - 0.0).abs() <= 1.0e-9 || (level - 1.0).abs() <= 1.0e-9)
+        })
+    }
+
     fn netlist_device_is_single_native_ac_supported_bulk_mosfet(
         netlist: &Netlist,
         instance_name: &str,
@@ -17286,6 +17308,52 @@ R2 2 0 10
                 .expect("generic wrapper PROBE contract resolves"),
             XyceStaticDcContract::WrapperCsd,
             "generic PROBE output remains CSDF; only the wrapper-origin PRN source validator normalizes this case"
+        );
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_accepts_native_legacy_diode_model() {
+        let source = "\
+plain static diode dc
+VIN 1 0 DC 5V
+R1 1 2 2K
+D1 3 0 DMOD
+VMON 2 3 0
+.MODEL DMOD D (IS=100FA)
+.DC VIN 5 5
+.PRINT DC V(1) I(VMON) V(3)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("plain static DC wrapper source accepts legacy diode model type");
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("bug204.cir"))
+            .expect("legacy diode DC deck parses");
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect("plain static DC netlist accepts native legacy diode model");
+    }
+
+    #[test]
+    fn plain_static_dc_wrapper_rejects_advanced_diode_model_level() {
+        let source = "\
+plain static advanced diode dc
+VIN 1 0 DC 5V
+D1 1 0 DMOD
+.MODEL DMOD D (LEVEL=200 IS=1e-14)
+.DC VIN 5 5
+.PRINT DC V(1)
+.END
+";
+
+        XyceTestRunner::validate_plain_static_dc_prn_wrapper_source(source)
+            .expect("source-level model type validation accepts diode syntax");
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, Path::new("advanced_diode.cir"))
+            .expect("advanced diode model deck parses at netlist level");
+        let err = XyceTestRunner::validate_plain_static_dc_prn_wrapper_netlist(&netlist)
+            .expect_err("advanced diode levels stay outside the native plain DC wrapper contract");
+        assert!(
+            err.contains("advanced diode model"),
+            "unexpected validation error: {err}"
         );
     }
 

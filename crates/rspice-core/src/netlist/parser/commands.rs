@@ -2327,13 +2327,8 @@ fn parse_dc_sweep_spec(
         }
     }
 
-    let start = expect_value(stream, line_num, params)?;
-    let stop = expect_value(stream, line_num, params)?;
-    let step = expect_value(stream, line_num, params)?;
-    Ok((
-        first,
-        crate::netlist::DcSweepSpec::linear(start, stop, step),
-    ))
+    let spec = parse_linear_dc_sweep_spec(stream, line_num, params)?;
+    Ok((first, spec))
 }
 
 fn parse_dc_sweep_spec_after_type(
@@ -2378,14 +2373,41 @@ fn parse_dc_sweep_spec_after_type(
             )?;
             Ok(crate::netlist::DcSweepSpec::octave(start, stop, points))
         }
-        "LIN" => {
-            let start = expect_value(stream, line_num, params)?;
-            let stop = expect_value(stream, line_num, params)?;
-            let step = expect_value(stream, line_num, params)?;
-            Ok(crate::netlist::DcSweepSpec::linear(start, stop, step))
-        }
+        "LIN" => parse_linear_dc_sweep_spec(stream, line_num, params),
         _ => unreachable!("validated DC sweep type"),
     }
+}
+
+fn parse_linear_dc_sweep_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<crate::netlist::DcSweepSpec, ParseError> {
+    let start = expect_value(stream, line_num, params)?;
+    let stop = expect_value(stream, line_num, params)?;
+    skip_commas(stream);
+    let step = if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if dc_bounds_are_same_point(start, stop) {
+            1.0
+        } else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".DC linear sweep requires a step value unless start and stop are equal"
+                    .to_string(),
+            });
+        }
+    } else {
+        expect_value(stream, line_num, params)?
+    };
+    Ok(crate::netlist::DcSweepSpec::linear(start, stop, step))
+}
+
+fn dc_bounds_are_same_point(start: Value, stop: Value) -> bool {
+    if !start.is_finite() || !stop.is_finite() {
+        return false;
+    }
+    let scale = start.abs().max(stop.abs()).max(1.0);
+    (start - stop).abs() <= Value::EPSILON * scale
 }
 
 fn is_dc_sweep_type(kind: &str) -> bool {
