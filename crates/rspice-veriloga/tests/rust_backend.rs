@@ -8249,6 +8249,18 @@ fn rust_backend_fuses_sub_from_scalar_mixed_multiply_store_helpers() {
     let support = render_runtime_support_module();
 
     for helper in [
+        "store_mul_scale_offset",
+        "store_mul_scale_offset_indices",
+        "store_mul_scale_offset_mixed_ai",
+        "store_mul_scale_offset_mixed_ia",
+    ] {
+        assert!(
+            support.contains(&format!("pub(crate) fn {helper}(")),
+            "{helper}\n{support}"
+        );
+        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+    }
+    for legacy_helper in [
         "store_mul_sub_from_scalar_lhs",
         "store_mul_sub_from_scalar_rhs",
         "store_mul_sub_from_scalar_ad_lhs",
@@ -8257,12 +8269,19 @@ fn rust_backend_fuses_sub_from_scalar_mixed_multiply_store_helpers() {
         "store_mul_sub_from_scalar_lhs_ad",
         "store_mul_sub_from_scalar_rhs_ad_lhs",
         "store_mul_sub_from_scalar_rhs_ad",
+        "store_mul_sub_from_scalar_lhs_scaled_output",
+        "store_mul_sub_from_scalar_lhs_scaled_ad_lhs",
+        "store_mul_sub_from_scalar_lhs_scaled_ad_rhs",
+        "store_mul_sub_from_scalar_lhs_scaled_ad",
     ] {
         assert!(
-            support.contains(&format!("pub(crate) fn {helper}(")),
-            "{helper}\n{support}"
+            !support.contains(&format!("pub(crate) fn {legacy_helper}(")),
+            "legacy sub-from-scalar multiply helpers should fold into scale-offset helpers:\n{support}"
         );
-        assert!(stamp.contains(&format!("s.{helper}(")), "{helper}\n{stamp}");
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated sub-from-scalar multiply calls should use scale-offset helpers:\n{stamp}"
+        );
     }
     assert!(!stamp.contains("s.store_mul_ad_lhs("), "{stamp}");
     assert!(!stamp.contains("s.store_mul_ad_rhs("), "{stamp}");
