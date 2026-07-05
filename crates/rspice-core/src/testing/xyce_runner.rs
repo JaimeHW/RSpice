@@ -2726,6 +2726,7 @@ impl XyceTestRunner {
             "netlists/output/tran/tran-gnuplot.cir"
                 | "netlists/output/tran/tran-prn-comma.cir"
                 | "netlists/output/tran/tran-prn.cir"
+                | "netlists/output/tran/tran-prn-filter.cir"
                 | "netlists/output/tran/tran-prn-noindex.cir"
                 | "netlists/output/tran/tran-prn-precision.cir"
                 | "netlists/output/tran/tran-prn-width.cir"
