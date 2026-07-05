@@ -643,11 +643,72 @@ impl Engine {
     ) -> Result<(), SimulationError> {
         match param_name {
             None | Some("DC") | Some("VALUE") => Self::set_source_dc_value(spec, value),
-            Some("VHI" | "VLO" | "TD" | "TR" | "TF" | "TSAMPLE") => {
+            Some(
+                "VO" | "OFFSET" | "VA" | "AMPLITUDE" | "F" | "FREQ" | "FREQUENCY" | "THETA"
+                | "DAMPING" | "PHASE",
+            ) => Self::set_sin_source_parameter(spec, param_name.unwrap(), value),
+            Some("TD") => Self::set_transient_delay_source_parameter(spec, value),
+            Some("VHI" | "VLO" | "TR" | "TF" | "TSAMPLE") => {
                 Self::set_pat_source_parameter(spec, param_name.unwrap(), value)
             }
             Some(other) => Err(SimulationError::Circuit(format!(
-                "Unsupported source step parameter '{other}'; use DC, VALUE, or PAT parameters VHI, VLO, TD, TR, TF, TSAMPLE"
+                "Unsupported source step parameter '{other}'; use DC, VALUE, SIN parameters VO, VA, FREQ, TD, THETA, PHASE, or PAT parameters VHI, VLO, TD, TR, TF, TSAMPLE"
+            ))),
+        }
+    }
+
+    fn set_transient_delay_source_parameter(
+        spec: &mut SourceSpec,
+        value: Value,
+    ) -> Result<(), SimulationError> {
+        match Self::set_sin_source_parameter(spec, "TD", value) {
+            Ok(()) => Ok(()),
+            Err(sin_error) => match Self::set_pat_source_parameter(spec, "TD", value) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(sin_error),
+            },
+        }
+    }
+
+    fn set_sin_source_parameter(
+        spec: &mut SourceSpec,
+        param_name: &str,
+        value: Value,
+    ) -> Result<(), SimulationError> {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "SIN source step parameter '{param_name}' must be finite, got {value}"
+            )));
+        }
+        match spec {
+            SourceSpec::RfPort { inner, .. } => {
+                Self::set_sin_source_parameter(inner, param_name, value)
+            }
+            SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::DcAcTransient { transient, .. } => {
+                Self::set_sin_source_parameter(transient, param_name, value)
+            }
+            SourceSpec::Sin {
+                offset,
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+            } => {
+                match param_name {
+                    "VO" | "OFFSET" => *offset = value,
+                    "VA" | "AMPLITUDE" => *amplitude = value,
+                    "F" | "FREQ" | "FREQUENCY" => *frequency = value,
+                    "TD" => *delay = value,
+                    "THETA" | "DAMPING" => *damping = value,
+                    "PHASE" => *phase = value.to_radians(),
+                    _ => unreachable!("validated SIN parameter"),
+                }
+                Ok(())
+            }
+            _ => Err(SimulationError::Circuit(format!(
+                "Source step parameter '{param_name}' requires a SIN source"
             ))),
         }
     }
@@ -793,7 +854,7 @@ fn validate_step_values(values: &[Value]) -> Result<(), SimulationError> {
 mod tests {
     use super::*;
     use crate::engine::{SimulationConfig, SpiceDialect};
-    use crate::netlist::{AnalysisCommand, Netlist};
+    use crate::netlist::{AnalysisCommand, ElementKind, Netlist, SourceSpec};
 
     fn first_step_command(netlist: &Netlist) -> &StepCommand {
         netlist
@@ -870,5 +931,80 @@ C3 in 0 C=32u M=2
             (capacitance - 32.0e-6).abs() < 1.0e-18,
             "resolved capacitance {capacitance}"
         );
+    }
+
+    #[test]
+    fn device_step_updates_sin_source_amplitude() {
+        let netlist = Netlist::parse(
+            "\
+sin amplitude source step
+VS1 out 0 SIN(0 1 1k 0 0)
+.STEP VS1:VA 2 2 1
+.END
+",
+        )
+        .expect("deck parses");
+        let step = first_step_command(&netlist);
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+
+        let stepped = engine
+            .step_netlists_for_command(&netlist, step, &[2.0])
+            .expect("SIN amplitude step materializes");
+        let source = stepped[0]
+            .1
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("VS1"))
+            .expect("stepped source exists");
+
+        match &source.kind {
+            ElementKind::VoltageSource(SourceSpec::Sin { amplitude, .. }) => {
+                assert!((*amplitude - 2.0).abs() < 1.0e-15);
+            }
+            other => panic!("unexpected stepped source kind: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn device_step_updates_wrapped_sin_source_phase_in_degrees() {
+        let netlist = Netlist::parse(
+            "\
+wrapped sin phase source step
+I1 out 0 DC 0 SIN(0 1 1k 0 0 0)
+.STEP I1:PHASE 90 90 1
+.END
+",
+        )
+        .expect("deck parses");
+        let step = first_step_command(&netlist);
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+
+        let stepped = engine
+            .step_netlists_for_command(&netlist, step, &[90.0])
+            .expect("wrapped SIN phase step materializes");
+        let source = stepped[0]
+            .1
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("I1"))
+            .expect("stepped source exists");
+
+        match &source.kind {
+            ElementKind::CurrentSource(SourceSpec::DcTransient { transient, .. }) => {
+                match transient.as_ref() {
+                    SourceSpec::Sin { phase, .. } => {
+                        assert!((*phase - std::f64::consts::FRAC_PI_2).abs() < 1.0e-15);
+                    }
+                    other => panic!("unexpected transient source kind: {other:?}"),
+                }
+            }
+            other => panic!("unexpected stepped source kind: {other:?}"),
+        }
     }
 }

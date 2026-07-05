@@ -1346,9 +1346,22 @@ impl XyceTestRunner {
         } else {
             Self::static_tran_contract_for_print_format(false, print_output.format.as_deref())?
         };
-        let reference_path = self
+        let primary_reference_path = self
             .static_output_reference_path(&deck.path, contract.reference_extension())
             .ok_or_else(|| "deck is not under tests/xyce/Netlists".to_string())?;
+        let reference_path = if primary_reference_path.is_file() {
+            primary_reference_path
+        } else if matches!(contract, XyceStaticTranContract::WrapperCsd) {
+            Self::tran_gsfile_reference_path(&deck.path).ok_or_else(|| {
+                format!(
+                    "no checked-in static .{} oracle at {}",
+                    contract.reference_extension(),
+                    self.display_path(&primary_reference_path)
+                )
+            })?
+        } else {
+            primary_reference_path
+        };
         if !reference_path.is_file() {
             return Err(format!(
                 "no checked-in static .{} oracle at {}",
@@ -15571,6 +15584,11 @@ impl XyceTestRunner {
 
     fn static_prn_reference_path(&self, deck_path: &Path) -> Option<PathBuf> {
         self.static_output_reference_path(deck_path, "prn")
+    }
+
+    fn tran_gsfile_reference_path(deck_path: &Path) -> Option<PathBuf> {
+        let candidate = deck_path.with_extension("cir.GSfile");
+        candidate.is_file().then_some(candidate)
     }
 
     fn static_output_reference_path(&self, deck_path: &Path, extension: &str) -> Option<PathBuf> {
