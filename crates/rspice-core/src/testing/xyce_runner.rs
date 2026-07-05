@@ -2729,6 +2729,7 @@ impl XyceTestRunner {
                 | "netlists/output/tran/tran-prn-filter.cir"
                 | "netlists/output/tran/tran-prn-noindex.cir"
                 | "netlists/output/tran/tran-prn-precision.cir"
+                | "netlists/output/tran/tran-prn-timescalefactor.cir"
                 | "netlists/output/tran/tran-prn-width.cir"
                 | "netlists/output/tran/tran-splot.cir"
                 | "netlists/output/tran/tran-touchstone-defaults-to-prn.cir"
@@ -6272,6 +6273,7 @@ impl XyceTestRunner {
             .collect::<Vec<_>>();
         let comp_tolerances = self.comp_tolerances(source, &comp_columns)?;
         let output_initial_interval = Self::output_initial_interval(source)?;
+        let tran_time_scale_factor = Self::tran_print_time_scale_factor(source)?;
         Self::validate_transient_result_time_grid(result)?;
 
         let mut mismatches = Vec::new();
@@ -6301,10 +6303,13 @@ impl XyceTestRunner {
                 }
             }
 
-            let time = row[layout.time_column];
-            if !time.is_finite() {
-                return Err(format!("row {row_index} has non-finite TIME value {time}"));
+            let reference_time = row[layout.time_column];
+            if !reference_time.is_finite() {
+                return Err(format!(
+                    "row {row_index} has non-finite TIME value {reference_time}"
+                ));
             }
+            let time = reference_time / tran_time_scale_factor;
 
             for (column_index, probe) in data_columns.iter().enumerate() {
                 let expected = row[column_index + layout.data_column_offset];
@@ -6339,6 +6344,7 @@ impl XyceTestRunner {
                         actual,
                         tolerance,
                         time_tolerance,
+                        tran_time_scale_factor,
                     ) {
                         continue;
                     }
@@ -6353,6 +6359,7 @@ impl XyceTestRunner {
                             expected,
                             tolerance,
                             output_interval,
+                            tran_time_scale_factor,
                         )?
                     {
                         continue;
@@ -6383,14 +6390,24 @@ impl XyceTestRunner {
         actual: Value,
         tolerance: XyceComparisonTolerance,
         time_tolerance: Value,
+        time_scale_factor: Value,
     ) -> bool {
-        if !actual.is_finite() || !time_tolerance.is_finite() || time_tolerance < 0.0 {
+        if !actual.is_finite()
+            || !time_tolerance.is_finite()
+            || time_tolerance < 0.0
+            || !time_scale_factor.is_finite()
+            || time_scale_factor <= 0.0
+        {
             return false;
         }
         let Some(row) = reference.rows.get(row_index) else {
             return false;
         };
-        let Some(&time) = row.get(time_column) else {
+        let Some(time) = row
+            .get(time_column)
+            .copied()
+            .map(|reference_time| reference_time / time_scale_factor)
+        else {
             return false;
         };
         if !time.is_finite() {
@@ -6401,7 +6418,10 @@ impl XyceTestRunner {
         while first_row > 0
             && Self::reference_time_is_in_prn_neighborhood(
                 time,
-                reference.rows[first_row - 1].get(time_column).copied(),
+                reference.rows[first_row - 1]
+                    .get(time_column)
+                    .copied()
+                    .map(|reference_time| reference_time / time_scale_factor),
                 time_tolerance,
             )
         {
@@ -6412,7 +6432,10 @@ impl XyceTestRunner {
         while last_row + 1 < reference.rows.len()
             && Self::reference_time_is_in_prn_neighborhood(
                 time,
-                reference.rows[last_row + 1].get(time_column).copied(),
+                reference.rows[last_row + 1]
+                    .get(time_column)
+                    .copied()
+                    .map(|reference_time| reference_time / time_scale_factor),
                 time_tolerance,
             )
         {
@@ -6480,14 +6503,24 @@ impl XyceTestRunner {
         expected: Value,
         tolerance: XyceComparisonTolerance,
         output_interval: Value,
+        time_scale_factor: Value,
     ) -> Result<bool, String> {
-        if !expected.is_finite() || !output_interval.is_finite() || output_interval <= 0.0 {
+        if !expected.is_finite()
+            || !output_interval.is_finite()
+            || output_interval <= 0.0
+            || !time_scale_factor.is_finite()
+            || time_scale_factor <= 0.0
+        {
             return Ok(false);
         }
         let Some(row) = reference.rows.get(row_index) else {
             return Ok(false);
         };
-        let Some(&time) = row.get(time_column) else {
+        let Some(time) = row
+            .get(time_column)
+            .copied()
+            .map(|reference_time| reference_time / time_scale_factor)
+        else {
             return Ok(false);
         };
         if !time.is_finite() {
@@ -6498,10 +6531,12 @@ impl XyceTestRunner {
             .iter()
             .rev()
             .filter_map(|row| row.get(time_column).copied())
+            .map(|reference_time| reference_time / time_scale_factor)
             .find(|candidate| candidate.is_finite() && *candidate < time);
         let upper_time = reference.rows[row_index + 1..]
             .iter()
             .filter_map(|row| row.get(time_column).copied())
+            .map(|reference_time| reference_time / time_scale_factor)
             .find(|candidate| candidate.is_finite() && *candidate > time);
         let (Some(lower_time), Some(upper_time)) = (lower_time, upper_time) else {
             return Ok(false);
@@ -6675,6 +6710,71 @@ impl XyceTestRunner {
         }
 
         Ok(interval)
+    }
+
+    fn tran_print_time_scale_factor(source: &str) -> Result<Value, String> {
+        let mut factor: Option<Value> = None;
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if !command.eq_ignore_ascii_case(".print") {
+                continue;
+            }
+
+            let tokens = Self::split_print_fields(&trimmed)?;
+            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            if token_refs
+                .get(1)
+                .is_none_or(|analysis| !analysis.eq_ignore_ascii_case("TRAN"))
+            {
+                continue;
+            }
+
+            let mut index = 2usize;
+            while index < token_refs.len() {
+                if let Some((raw_key, raw_value, consumed)) =
+                    Self::print_option_assignment(&token_refs, index)
+                {
+                    if raw_key.trim().eq_ignore_ascii_case("TIMESCALEFACTOR") {
+                        let parsed = crate::netlist::lexer::parse_spice_value(
+                            raw_value.trim().trim_matches(['"', '\'']),
+                        )
+                        .map_err(|err| {
+                            format!(
+                                "failed to parse .PRINT TRAN TIMESCALEFACTOR value '{}': {err}",
+                                raw_value.trim()
+                            )
+                        })?;
+                        if !parsed.is_finite() || parsed <= 0.0 {
+                            return Err(format!(
+                                ".PRINT TRAN TIMESCALEFACTOR must be positive and finite, got {parsed}"
+                            ));
+                        }
+                        if let Some(existing) = factor {
+                            let scale = existing.abs().max(parsed.abs()).max(1.0);
+                            if (existing - parsed).abs() > 1.0e-12 * scale {
+                                return Err(
+                                    "conflicting .PRINT TRAN TIMESCALEFACTOR options are not supported"
+                                        .to_string(),
+                                );
+                            }
+                        } else {
+                            factor = Some(parsed);
+                        }
+                    }
+                    index += consumed;
+                } else {
+                    index += 1;
+                }
+            }
+        }
+
+        Ok(factor.unwrap_or(1.0))
     }
 
     #[cfg(test)]
@@ -16048,7 +16148,7 @@ C1 out 0 40u IC=1
 
         assert!(
             runner.transient_probe_matches_reference_time_neighborhood(
-                &reference, 1, 0, 2, 2.0, tolerance, 0.0,
+                &reference, 1, 0, 2, 2.0, tolerance, 0.0, 1.0,
             ),
             "actual value inside duplicate printed-time oracle envelope should be accepted"
         );
@@ -16068,7 +16168,7 @@ C1 out 0 40u IC=1
 
         assert!(
             !runner.transient_probe_matches_reference_time_neighborhood(
-                &reference, 1, 0, 2, 4.0, tolerance, 0.0,
+                &reference, 1, 0, 2, 4.0, tolerance, 0.0, 1.0,
             ),
             "actual value outside duplicate printed-time oracle envelope should be rejected"
         );
@@ -16088,7 +16188,7 @@ C1 out 0 40u IC=1
 
         assert!(
             !runner.transient_probe_matches_reference_time_neighborhood(
-                &reference, 1, 0, 2, 2.0, tolerance, 0.0,
+                &reference, 1, 0, 2, 2.0, tolerance, 0.0, 1.0,
             ),
             "a single oracle row must still fail normal comparison"
         );
@@ -16121,6 +16221,7 @@ C1 out 0 40u IC=1
                 0.020293594015632306,
                 tolerance,
                 time_tolerance,
+                1.0,
             ),
             "actual value inside rounded printed-time oracle envelope should be accepted"
         );
@@ -16153,6 +16254,7 @@ C1 out 0 40u IC=1
                 8.189634498984992e-3,
                 tolerance,
                 time_tolerance,
+                1.0,
             ),
             "decimal timestamps at the PRN-neighborhood boundary should not fail due to binary roundoff"
         );
@@ -16171,6 +16273,34 @@ interval output
         .expect("initial interval is detected");
 
         assert!((interval - 5.0e-4).abs() <= 1.0e-15);
+    }
+
+    #[test]
+    fn tran_print_time_scale_factor_parser_accepts_spaced_assignment() {
+        let factor = XyceTestRunner::tran_print_time_scale_factor(
+            "\
+timescale output
+.PRINT TRAN TIMESCALEFACTOR = 10 V(1)
+.END
+",
+        )
+        .expect("TRAN print time scale factor parses");
+
+        assert!((factor - 10.0).abs() <= 1.0e-15);
+    }
+
+    #[test]
+    fn tran_print_time_scale_factor_defaults_to_one() {
+        let factor = XyceTestRunner::tran_print_time_scale_factor(
+            "\
+default output
+.PRINT TRAN V(1)
+.END
+",
+        )
+        .expect("TRAN print line without a time scale factor parses");
+
+        assert!((factor - 1.0).abs() <= 1.0e-15);
     }
 
     #[test]
@@ -16228,6 +16358,7 @@ interval output
                     0.75,
                     tolerance,
                     0.5,
+                    1.0,
                 )
                 .expect("corridor comparison evaluates"),
             "expected interval-interpolated value should be accepted inside adjacent output rows"
@@ -16244,6 +16375,7 @@ interval output
                     1.5,
                     tolerance,
                     0.5,
+                    1.0,
                 )
                 .expect("corridor comparison evaluates"),
             "value outside the adjacent output-row envelope must not be accepted"
