@@ -369,7 +369,9 @@ fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
         "Netlists/COMPLEX_NUM/test3.cir",
         "Netlists/Certification_Tests/BUG_401_SON/bug_401.cir",
         "Netlists/Certification_Tests/BUG_407_SON/bug_407_ac.cir",
+        "Netlists/Certification_Tests/BUG_1035_SON/RC_AC_data_exprAlone.cir",
         "Netlists/Certification_Tests/BUG_1035_SON/RC_simple.cir",
+        "Netlists/Certification_Tests/BUG_1212_SON/bug1212.cir",
         "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir",
         "Netlists/Certification_Tests/BUG_701_SON/ac_files.cir",
         "Netlists/Output/AC/ac-phase-in-radians.cir",
@@ -3121,26 +3123,29 @@ fn test_xyce_standalone_punctuation_node_name_case_runs() {
     let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/INVALID_CHARS/colon_in_node_name.cir";
+    for relative in [
+        "Netlists/INVALID_CHARS/colon_in_node_name.cir",
+        "Netlists/INVALID_CHARS/colon_in_node_name2.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
 
-    assert!(
-        runner.requires_upstream_wrapper(relative),
-        "{relative} should retain removed wrapper provenance"
-    );
-    let result = runner.run_test(root.join(relative));
-
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a wrapper-origin Xyce punctuation-node DC comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
-    assert_eq!(
-        result.contract, "wrapper_static_prn_dc",
-        "{relative} should report the wrapper-origin static DC .prn contract"
-    );
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a wrapper-origin Xyce punctuation-node DC comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "wrapper_static_prn_dc",
+            "{relative} should report the wrapper-origin static DC .prn contract"
+        );
+    }
 }
 
 #[test]
@@ -3506,6 +3511,7 @@ fn test_xyce_plain_static_dc_wrapper_cases_run_natively() {
         "Netlists/XDM/HSPICE/OTHER_PARSING/mixed_param_and_func.cir",
         "Netlists/XDM/HSPICE/OTHER_PARSING/library_parsing.cir",
         "Netlists/XDM/HSPICE/MODELS/correct_instance_parameters_translation_inside_subckt.cir",
+        "Netlists/Certification_Tests/BUG_204/bug204.cir",
         "Netlists/XDM/HSPICE/TEMPERATURE/tnom_default_setting.cir",
         "Netlists/XDM/HSPICE/TEMPERATURE/tnom_option_setting.cir",
     ] {
