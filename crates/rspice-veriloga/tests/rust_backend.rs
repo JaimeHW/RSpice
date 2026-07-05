@@ -5827,20 +5827,35 @@ fn rust_backend_directly_stores_mixed_scaled_affine_helpers() {
     let support = render_runtime_support_module();
 
     for helper in [
-        "fn store_add_scaled_inputs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64)",
-        "fn store_add_scaled_inputs_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64)",
-        "fn store_sub_scaled_inputs_ad_lhs(&mut self, index: usize, left: AdValue<NODE_COUNT, BRANCH_COUNT>, left_scale: f64, right: usize, right_scale: f64)",
-        "fn store_sub_scaled_inputs_ad_rhs(&mut self, index: usize, left: usize, left_scale: f64, right: AdValue<NODE_COUNT, BRANCH_COUNT>, right_scale: f64)",
+        "fn store_add_scaled_inputs_mixed_ai(",
+        "fn store_add_scaled_inputs_mixed_ia(",
+        "fn store_sub_scaled_inputs_mixed_ai(",
+        "fn store_sub_scaled_inputs_mixed_ia(",
     ] {
         assert!(support.contains(helper), "{helper}\n{support}");
     }
     for helper in [
-        "s.store_add_scaled_inputs_ad_lhs(",
-        "s.store_add_scaled_inputs_ad_rhs(",
-        "s.store_sub_scaled_inputs_ad_lhs(",
-        "s.store_sub_scaled_inputs_ad_rhs(",
+        "s.store_add_scaled_inputs_mixed_ai(",
+        "s.store_add_scaled_inputs_mixed_ia(",
+        "s.store_sub_scaled_inputs_mixed_ai(",
+        "s.store_sub_scaled_inputs_mixed_ia(",
     ] {
         assert!(stamp.contains(helper), "{helper}\n{stamp}");
+    }
+    for legacy_helper in [
+        "store_add_scaled_inputs_ad_lhs",
+        "store_add_scaled_inputs_ad_rhs",
+        "store_sub_scaled_inputs_ad_lhs",
+        "store_sub_scaled_inputs_ad_rhs",
+    ] {
+        assert!(
+            !support.contains(&format!("fn {legacy_helper}(")),
+            "legacy affine one-off helpers should be folded into mixed helpers:\n{support}"
+        );
+        assert!(
+            !stamp.contains(&format!("s.{legacy_helper}(")),
+            "generated affine calls should use mixed helpers:\n{stamp}"
+        );
     }
     assert!(
         !stamp.contains("s.store_ad_value("),
