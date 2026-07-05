@@ -4926,6 +4926,7 @@ fn stamp() {
             "fn store_mul_scaled_offset_rhs",
             "fn store_mul_scaled_abs_rhs",
             "fn store_mul_scaled_exp_rhs",
+            "fn store_mul_scaled_powf_sqrt_rhs",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
         }
@@ -4938,6 +4939,7 @@ fn stamp() {
     scratch.store_ad_value(93, AdValue::mul_scaled_output(scratch.ad_value(8), AdValue::offset(scratch.ad_value(9), params.offset), params.scale));
     scratch.store_ad_value(94, AdValue::mul_scaled_output(scratch.ad_value(10), AdValue::abs(scratch.ad_value(11)), params.scale));
     scratch.store_ad_value(95, AdValue::mul_scaled_output(scratch.ad_value(12), AdValue::exp(scratch.ad_value(13)), params.scale));
+    scratch.store_ad_value(96, AdValue::mul_scaled_output(scratch.ad_value(14), AdValue::powf(AdValue::sqrt(scratch.ad_value(15)), params.exponent), params.scale));
 }
 "#;
 
@@ -4967,7 +4969,16 @@ fn stamp() {
             compact.contains("s.store_mul_scaled_exp_rhs(95, 12, p.scale, 13);"),
             "{compact}"
         );
+        assert!(
+            compact.contains("s.store_mul_scaled_powf_sqrt_rhs(96, 14, p.scale, 15, p.exponent);"),
+            "{compact}"
+        );
         assert!(!compact.contains("s.store_mul_scaled_ad_rhs("), "{compact}");
+        assert!(
+            !compact.contains("s.store_mul_scaled_powf_ad_rhs("),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::sqrt(s.ad_value(15))"), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
     }
 
@@ -8422,6 +8433,8 @@ fn stamp() {
             "fn store_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia(",
             "fn store_square_mul_sub_from_scalar_scaled_rhs_scaled_output_indices(",
             "fn store_square_mul_sub_from_scalar_scaled_rhs_scaled_output_mixed_ia(",
+            "fn store_mul_scaled_powf_sqrt_rhs(",
+            "fn store_mul_scaled_powi_sqrt_rhs(",
         ] {
             let body = helper_body(&support, signature);
             assert!(
@@ -9033,6 +9046,31 @@ fn stamp() {
             !mul_powi_mixed_ia.contains("pow_base_derivative_scale"),
             "{mul_powi_mixed_ia}"
         );
+
+        let mul_scaled_powf_sqrt = helper_body(&support, "fn store_mul_scaled_powf_sqrt_rhs(");
+        assert!(
+            mul_scaled_powf_sqrt.contains(
+                "let power_derivative_scale = AdValue::pow_base_derivative_scale(power_value, unary_value, exponent) * unary_derivative_scale;"
+            ),
+            "{mul_scaled_powf_sqrt}"
+        );
+        assert!(
+            !mul_scaled_powf_sqrt.contains("pow_derivative"),
+            "{mul_scaled_powf_sqrt}"
+        );
+
+        let mul_scaled_powi_sqrt = helper_body(&support, "fn store_mul_scaled_powi_sqrt_rhs(");
+        assert!(
+            mul_scaled_powi_sqrt.contains(
+                "let power_derivative_scale = integer_power_derivative_scale(unary_value, exponent) * unary_derivative_scale;"
+            ),
+            "{mul_scaled_powi_sqrt}"
+        );
+        assert!(
+            !mul_scaled_powi_sqrt.contains("pow_base_derivative_scale"),
+            "{mul_scaled_powi_sqrt}"
+        );
+
         for signature in [
             "fn store_mul_powf_ad_lhs(",
             "fn store_mul_powf_ad_rhs(",
@@ -9915,6 +9953,7 @@ fn stamp() {
             "fn store_div_from_scalar_powi_ad(",
             "fn store_mul_scaled_powi_rhs(",
             "fn store_mul_scaled_powi_ad_rhs(",
+            "fn store_mul_scaled_powi_sqrt_rhs(",
             "fn store_mul_scaled_powi_scale_offset_rhs(",
         ] {
             assert!(support.contains(helper), "missing {helper}:\n{support}");
@@ -9956,9 +9995,8 @@ fn stamp() {
             "{compact}"
         );
         assert!(
-            compact.contains(
-                "s.store_mul_scaled_powi_ad_rhs(174, 7, p.scale, A::sqrt(s.ad_value(8)), (p.nf as i32));"
-            ),
+            compact
+                .contains("s.store_mul_scaled_powi_sqrt_rhs(174, 7, p.scale, 8, (p.nf as i32));"),
             "{compact}"
         );
         assert!(
@@ -9973,6 +10011,11 @@ fn stamp() {
             !compact.contains("s.store_div_from_scalar_powf_ad("),
             "{compact}"
         );
+        assert!(
+            !compact.contains("s.store_mul_scaled_powi_ad_rhs(174"),
+            "{compact}"
+        );
+        assert!(!compact.contains("A::sqrt(s.ad_value(8))"), "{compact}");
         assert!(!compact.contains("s.store_mul_scaled_powf_"), "{compact}");
         assert!(!compact.contains("s.store_ad_value("), "{compact}");
         assert!(!compact.contains("A::scale("), "{compact}");
@@ -22904,10 +22947,56 @@ fn generate_scratch_operation_helpers() -> String {
         "",
     ]
     .join("\n");
+    out.push_str(&generate_mul_scaled_power_unary_rhs_helpers());
     out.push_str(generate_hybrid_index_product_scratch_helpers());
     out.push_str(&generate_mixed_index_product_scratch_helpers());
     out.push_str(&generate_square_product_and_product3_scratch_helpers());
     out
+}
+
+fn generate_mul_scaled_power_unary_rhs_helpers() -> String {
+    let mut out = String::new();
+    for &(name, _) in COMPACT_MUL_UNARY_HELPERS {
+        out.push_str(&generate_mul_scaled_power_unary_rhs_helper(
+            "powf",
+            name,
+            "f64",
+            "let power_value = scalar_power_value(unary_value, exponent);\n        let power_derivative_scale = AdValue::pow_base_derivative_scale(power_value, unary_value, exponent) * unary_derivative_scale;",
+        ));
+        out.push_str(&generate_mul_scaled_power_unary_rhs_helper(
+            "powi",
+            name,
+            "i32",
+            "let power_value = unary_value.powi(exponent);\n        let power_derivative_scale = integer_power_derivative_scale(unary_value, exponent) * unary_derivative_scale;",
+        ));
+    }
+    out
+}
+
+fn generate_mul_scaled_power_unary_rhs_helper(
+    power: &str,
+    unary: &str,
+    exponent_ty: &str,
+    power_bindings: &str,
+) -> String {
+    let helper = format!("store_mul_scaled_{power}_{unary}_rhs");
+    let unary_bindings = mul_unary_output_derivative_bindings(unary);
+    format!(
+        r#"
+
+    #[inline]
+    fn {helper}(&mut self, index: usize, source: usize, output_scale: f64, value_source: usize, exponent: {exponent_ty}) {{
+        let value_raw = self.values[value_source];
+        {unary_bindings}
+        let unary_derivative_scale = derivative_scale;
+        {power_bindings}
+        let scaled_source_value = self.values[source] * output_scale;
+        self.values[index] = scaled_source_value * power_value;
+        for axis in 0..Instance::NODE_COUNT {{ self.node_derivatives[index][axis] = self.node_derivatives[source][axis] * output_scale * power_value + scaled_source_value * self.node_derivatives[value_source][axis] * power_derivative_scale; }}
+        for axis in 0..Instance::BRANCH_COUNT {{ self.branch_derivatives[index][axis] = self.branch_derivatives[source][axis] * output_scale * power_value + scaled_source_value * self.branch_derivatives[value_source][axis] * power_derivative_scale; }}
+    }}
+"#
+    )
 }
 
 fn generate_hybrid_index_product_scratch_helpers() -> &'static str {
@@ -42342,6 +42431,19 @@ fn compact_scaled_mixed_multiply_store_helper_call(
     }
 }
 
+fn compact_index_unary_arg(value: &str) -> Option<(&'static str, usize)> {
+    for &(name, _) in COMPACT_MUL_UNARY_HELPERS {
+        let Some(args) = compact_ad_call_args(value, name) else {
+            continue;
+        };
+        if args.len() != 1 {
+            return None;
+        }
+        return compact_scratch_ad_value_index(args[0]).map(|source| (name, source));
+    }
+    None
+}
+
 fn compact_mul_scaled_unary_rhs_helper_line(
     target_index: usize,
     source: usize,
@@ -42389,6 +42491,12 @@ fn compact_mul_scaled_unary_rhs_helper_line(
                 args[1]
             ));
         }
+        if let Some((unary, value_source)) = compact_index_unary_arg(args[0]) {
+            return Some(format!(
+                "scratch.store_mul_scaled_powf_{unary}_rhs({target_index}, {source}, {output_scale}, {value_source}, {});",
+                args[1]
+            ));
+        }
         let value = compact_scratch_or_non_atomic_ad_arg(args[0])?;
         return Some(format!(
             "scratch.store_mul_scaled_powf_ad_rhs({target_index}, {source}, {output_scale}, {value}, {});",
@@ -42403,6 +42511,12 @@ fn compact_mul_scaled_unary_rhs_helper_line(
         if let Some(value_source) = compact_scratch_ad_value_index(args[0]) {
             return Some(format!(
                 "scratch.store_mul_scaled_powi_rhs({target_index}, {source}, {output_scale}, {value_source}, {});",
+                args[1]
+            ));
+        }
+        if let Some((unary, value_source)) = compact_index_unary_arg(args[0]) {
+            return Some(format!(
+                "scratch.store_mul_scaled_powi_{unary}_rhs({target_index}, {source}, {output_scale}, {value_source}, {});",
                 args[1]
             ));
         }
