@@ -12,15 +12,22 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &AcAnalysisConfig,
     ) -> Result<SimulationResult, SimulationError> {
-        let engine = self.engine_for_netlist(netlist);
         let frequencies = config.generate_frequencies();
+        self.run_ac_frequencies(netlist, frequencies)
+    }
 
+    pub(super) fn run_ac_frequencies(
+        &self,
+        netlist: &rspice_core::Netlist,
+        frequencies: Vec<f64>,
+    ) -> Result<SimulationResult, SimulationError> {
         if frequencies.is_empty() {
             return Err(SimulationError::InvalidConfig(
                 "Invalid frequency sweep configuration".to_string(),
             ));
         }
 
+        let engine = self.engine_for_netlist(netlist);
         let ac_results = engine
             .run_ac(netlist, &frequencies)
             .map_err(|e| self.translate_error(e))?;

@@ -40,6 +40,12 @@ pub(super) fn run_spec_request(
         AnalysisSpec::MonteCarlo | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
             sweeps::run_sweep_spec(spec, options, netlist, source_path)
         }
+        AnalysisSpec::AcData { frequencies, .. } => bridge.run_ac_frequencies_with_source_path(
+            netlist,
+            source_path,
+            frequencies,
+            abort_flag,
+        ),
         AnalysisSpec::Reliability { .. }
         | AnalysisSpec::Optimization { .. }
         | AnalysisSpec::Soa { .. } => device::run_device_spec(spec, netlist, source_path),
@@ -99,6 +105,7 @@ fn spec_variant_name(spec: &AnalysisSpec) -> &'static str {
         AnalysisSpec::DcSweep { .. } => "AnalysisSpec::DcSweep",
         AnalysisSpec::Transient { .. } => "AnalysisSpec::Transient",
         AnalysisSpec::Ac { .. } => "AnalysisSpec::Ac",
+        AnalysisSpec::AcData { .. } => "AnalysisSpec::AcData",
         AnalysisSpec::Noise { .. } => "AnalysisSpec::Noise",
         AnalysisSpec::PoleZero { .. } => "AnalysisSpec::PoleZero",
         AnalysisSpec::Sensitivity { .. } => "AnalysisSpec::Sensitivity",

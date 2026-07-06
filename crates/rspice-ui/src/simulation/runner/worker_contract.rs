@@ -589,6 +589,10 @@ mod tests {
                 points_per_unit: 10,
                 sweep: FrequencySweep::Decade,
             },
+            AnalysisSpec::AcData {
+                table_name: "pts".to_string(),
+                frequencies: vec![1.0, 2.5, 10.0],
+            },
             AnalysisSpec::Noise {
                 output_node: "out".to_string(),
                 start_freq: 10.0,
@@ -2532,6 +2536,10 @@ pub(crate) enum WorkerAnalysisSpec {
         points_per_unit: usize,
         sweep: WorkerSweepType,
     },
+    AcData {
+        table_name: String,
+        frequencies: Vec<f64>,
+    },
     Noise {
         output_node: String,
         start_freq: f64,
@@ -2696,6 +2704,13 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 stop_freq: *stop_freq,
                 points_per_unit: *points_per_unit,
                 sweep: WorkerSweepType::from(*sweep),
+            }),
+            AnalysisSpec::AcData {
+                table_name,
+                frequencies,
+            } => Ok(Self::AcData {
+                table_name: table_name.clone(),
+                frequencies: frequencies.clone(),
             }),
             AnalysisSpec::Noise {
                 output_node,
@@ -2954,6 +2969,13 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 stop_freq,
                 points_per_unit,
                 sweep: FrequencySweep::from(sweep),
+            },
+            WorkerAnalysisSpec::AcData {
+                table_name,
+                frequencies,
+            } => Self::AcData {
+                table_name,
+                frequencies,
             },
             WorkerAnalysisSpec::Noise {
                 output_node,

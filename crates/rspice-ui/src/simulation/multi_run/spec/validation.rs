@@ -74,6 +74,26 @@ impl AnalysisSpec {
                 }
                 Ok(())
             }
+            AnalysisSpec::AcData {
+                table_name,
+                frequencies,
+            } => {
+                if table_name.trim().is_empty() {
+                    return Err("AC DATA table_name is required".to_string());
+                }
+                if frequencies.is_empty() {
+                    return Err("AC DATA frequencies must not be empty".to_string());
+                }
+                for (idx, frequency) in frequencies.iter().enumerate() {
+                    if !frequency.is_finite() || *frequency < 0.0 {
+                        return Err(format!(
+                            "AC DATA frequency {} must be finite and >= 0",
+                            idx + 1
+                        ));
+                    }
+                }
+                Ok(())
+            }
             AnalysisSpec::Disto {
                 start_freq,
                 stop_freq,

@@ -137,6 +137,23 @@ impl EngineBridge {
         )
     }
 
+    pub(crate) fn run_ac_frequencies_with_source_path(
+        &self,
+        netlist_str: &str,
+        source_path: Option<&Path>,
+        frequencies: Vec<f64>,
+        abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        if abort_flag.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        let netlist = self.parse_netlist_with_source_path(netlist_str, source_path)?;
+        if abort_flag.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        self.run_ac_frequencies(&netlist, frequencies)
+    }
+
     fn run_request(
         &self,
         input: SimulationInput<'_>,

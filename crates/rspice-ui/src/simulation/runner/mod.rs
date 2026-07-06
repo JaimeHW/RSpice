@@ -461,6 +461,10 @@ fn initial_status_for_spec(
             freq: *start_freq,
             stop_freq: *stop_freq,
         },
+        AnalysisSpec::AcData { frequencies, .. } => SimulationStatus::AcAnalysis {
+            freq: frequencies.first().copied().unwrap_or(0.0),
+            stop_freq: frequencies.last().copied().unwrap_or(0.0),
+        },
         AnalysisSpec::Noise {
             start_freq,
             stop_freq,

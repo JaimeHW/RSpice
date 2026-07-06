@@ -8,7 +8,7 @@ impl AnalysisSpec {
         match self {
             AnalysisSpec::DcOp => AnalysisRunType::DcOp,
             AnalysisSpec::DcSweep { .. } => AnalysisRunType::DcSweep,
-            AnalysisSpec::Ac { .. } => AnalysisRunType::Ac,
+            AnalysisSpec::Ac { .. } | AnalysisSpec::AcData { .. } => AnalysisRunType::Ac,
             AnalysisSpec::Disto { .. } => AnalysisRunType::Disto,
             AnalysisSpec::Transient { .. } => AnalysisRunType::Transient,
             AnalysisSpec::Noise { .. } => AnalysisRunType::Noise,

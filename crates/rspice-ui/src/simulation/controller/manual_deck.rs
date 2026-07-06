@@ -367,6 +367,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Op => ".op",
         AnalysisCommand::Dc { .. } => ".dc",
         AnalysisCommand::Ac { .. } => ".ac",
+        AnalysisCommand::AcData { .. } => ".ac data",
         AnalysisCommand::Sp { .. } => ".sp",
         AnalysisCommand::Stb { .. } => ".stb",
         AnalysisCommand::Disto { .. } => ".disto",
@@ -487,6 +488,47 @@ fn pz_config_type(analysis_type: PoleZeroAnalysisType) -> PzAnalysisType {
     }
 }
 
+fn ac_data_table_frequencies(netlist: &Netlist, table_name: &str) -> Result<Vec<f64>, String> {
+    let table = netlist
+        .data_tables
+        .iter()
+        .find(|table| table.name.eq_ignore_ascii_case(table_name))
+        .ok_or_else(|| format!(".AC DATA table '{table_name}' not found"))?;
+    let freq_column = table
+        .params
+        .iter()
+        .position(|param| param.eq_ignore_ascii_case("FREQ"))
+        .ok_or_else(|| format!(".AC DATA table '{}' must contain a FREQ column", table.name))?;
+
+    if table.rows.is_empty() {
+        return Err(format!(".AC DATA table '{}' has no rows", table.name));
+    }
+
+    let mut frequencies = Vec::with_capacity(table.rows.len());
+    for (row_idx, row) in table.rows.iter().enumerate() {
+        if row.len() != table.params.len() {
+            return Err(format!(
+                ".AC DATA table '{}' row {} has {} value(s), expected {}",
+                table.name,
+                row_idx + 1,
+                row.len(),
+                table.params.len()
+            ));
+        }
+        let frequency = row[freq_column];
+        if !frequency.is_finite() || frequency < 0.0 {
+            return Err(format!(
+                ".AC DATA table '{}' row {} has invalid frequency {}",
+                table.name,
+                row_idx + 1,
+                frequency
+            ));
+        }
+        frequencies.push(frequency);
+    }
+    Ok(frequencies)
+}
+
 fn command_to_queue_item(
     state: &AppState,
     netlist: &Netlist,
@@ -567,6 +609,15 @@ fn command_to_queue_item(
                 spec_options,
             })
         }
+        AnalysisCommand::AcData { table_name } => Ok(QueuedAnalysis {
+            spec: AnalysisSpec::AcData {
+                table_name: table_name.clone(),
+                frequencies: ac_data_table_frequencies(netlist, table_name)?,
+            },
+            config: None,
+            spec_options,
+            analysis_line: format!(".ac data={table_name}"),
+        }),
         AnalysisCommand::Sp {
             variation,
             points,
@@ -838,6 +889,62 @@ mod tests {
                 && (stop_time - 1e-6).abs() < 1e-18
                 && start_time == 0.0
         ));
+    }
+
+    #[test]
+    fn manual_deck_ac_data_uses_table_frequencies() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(
+            &state,
+            "deck\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 1k\n\
+             .ac data=pts\n\
+             .data pts\n\
+             + FREQ\n\
+             + 10\n\
+             + 1\n\
+             + 2.5\n\
+             .enddata\n\
+             .end\n",
+        )
+        .expect("manual AC DATA deck should queue");
+
+        assert_eq!(queue.len(), 1);
+        assert!(queue[0].config.is_none());
+        assert!(queue[0].analysis_line.eq_ignore_ascii_case(".ac data=pts"));
+        let AnalysisSpec::AcData {
+            table_name,
+            frequencies,
+        } = &queue[0].spec
+        else {
+            panic!("expected AC DATA analysis");
+        };
+        assert!(table_name.eq_ignore_ascii_case("pts"));
+        assert_eq!(frequencies.as_slice(), [10.0, 1.0, 2.5]);
+    }
+
+    #[test]
+    fn manual_deck_ac_data_requires_freq_column() {
+        let state = AppState::default();
+        let err = build_manual_deck_queue(
+            &state,
+            "deck\n\
+             I1 out 0 AC 1\n\
+             R1 out 0 1k\n\
+             .ac data=pts\n\
+             .data pts\n\
+             + TEMP\n\
+             + 25\n\
+             .enddata\n\
+             .end\n",
+        )
+        .expect_err("AC DATA table without FREQ should be rejected");
+
+        assert!(
+            err.iter().any(|message| message.contains("FREQ")),
+            "expected FREQ diagnostic, got {err:?}"
+        );
     }
 
     #[test]

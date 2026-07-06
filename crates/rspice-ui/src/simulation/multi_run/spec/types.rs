@@ -115,6 +115,11 @@ pub enum AnalysisSpec {
         points_per_unit: usize,
         sweep: FrequencySweep,
     },
+    /// AC analysis at explicit table-provided frequency points
+    AcData {
+        table_name: String,
+        frequencies: Vec<f64>,
+    },
     /// Distortion analysis
     Disto {
         start_freq: f64,
