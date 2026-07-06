@@ -67,7 +67,7 @@ raw-window-handle = "0.6.2"
 winit = "0.30"
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
-egui = "0.34.3"
+egui = "0.35.0"
 eframe = { version = "0.34.3", default-features = false, features = ["wgpu", "persistence"] }
 
 # SVG parsing for component symbols (lightweight, pure Rust)
