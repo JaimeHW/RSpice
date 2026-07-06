@@ -11857,12 +11857,14 @@ mod tests {
         encoder.into_bytes()
     }
 
+    #[cfg(windows)]
     fn callee_saved_xmm_store_bytes(register: Xmm, disp: i32) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.movdqu_m128_base_disp32_xmm(Gpr::Rsp, disp, register);
         encoder.into_bytes()
     }
 
+    #[cfg(windows)]
     fn callee_saved_xmm_load_bytes(register: Xmm, disp: i32) -> Vec<u8> {
         let mut encoder = X64Encoder::new();
         encoder.movdqu_xmm_m128_base_disp32(register, Gpr::Rsp, disp);
