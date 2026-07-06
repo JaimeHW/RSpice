@@ -125,6 +125,9 @@ pub struct B3SoiPd {
     /// DC/operating-point mode. Cleared during transient and set by the engine
     /// before each analysis phase.
     dc_mode: std::cell::Cell<bool>,
+    /// During electrothermal startup, solve the electrical floating-body
+    /// operating point with the allocated thermal node anchored at zero.
+    self_heating_startup_disabled: std::cell::Cell<bool>,
     /// Whether the limiter anchor has been seeded (first iterate uses the raw
     /// node solution).
     limit_anchor_valid: std::cell::Cell<bool>,
@@ -231,6 +234,7 @@ impl B3SoiPd {
             vbd_limit_anchor: 0.0,
             del_temp_limit_anchor: 0.0,
             dc_mode: std::cell::Cell::new(true),
+            self_heating_startup_disabled: std::cell::Cell::new(false),
             limit_anchor_valid: std::cell::Cell::new(false),
             startup_seed_pending: std::cell::Cell::new(false),
             bypass_tolerances: std::cell::Cell::new(None),
@@ -254,6 +258,31 @@ impl B3SoiPd {
         self.limit_anchor_valid.set(false);
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
+    }
+
+    /// Clear the cached operating-point linearization before a fresh DC path.
+    pub(crate) fn reset_operating_point_history(&mut self) {
+        self.op = B3SoiPdOp::default();
+        let zero_bias = B3SoiPdBias {
+            vbs: 0.0,
+            vgs: 0.0,
+            vds: 0.0,
+            ves: 0.0,
+            vps: 0.0,
+            del_temp: 0.0,
+        };
+        self.bias = zero_bias;
+        self.converged_ref = zero_bias;
+        self.has_history = false;
+        self.vbs_limit_anchor = 0.0;
+        self.vbd_limit_anchor = 0.0;
+        self.del_temp_limit_anchor = 0.0;
+        self.dc_mode.set(true);
+        self.limit_anchor_valid.set(false);
+        self.startup_seed_pending.set(false);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+        self.last_limited.set(false);
     }
 
     /// Enable the ngspice-style transient device bypass with the engine's
@@ -307,7 +336,51 @@ impl B3SoiPd {
     }
 
     pub fn self_heating_active(&self) -> bool {
+        !self.self_heating_startup_disabled.get() && self.has_self_heating_node()
+    }
+
+    pub(crate) fn has_self_heating_node(&self) -> bool {
         self.node_temp != 0 && self.sized.rth.is_finite() && self.sized.rth > 0.0
+    }
+
+    pub(crate) fn set_self_heating_startup_disabled(&self, disabled: bool) {
+        self.self_heating_startup_disabled.set(disabled);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+        self.last_limited.set(false);
+    }
+
+    pub(crate) fn seed_self_heating_temperature_from_power(&self, solution: &mut [Value]) {
+        if !self.has_self_heating_node() {
+            return;
+        }
+        let mut bias = self.raw_branch_voltages(solution);
+        bias.del_temp = 0.0;
+        let sized = self.sized_for_bias(bias);
+        let op = eval::eval_dc(&sized, &self.consts, bias, self.mtype);
+        let vds = if op.mode >= 0 { bias.vds } else { -bias.vds };
+        let delta_temp = (op.ids * vds * self.sized.rth).clamp(0.0, 1.0e3);
+        if delta_temp.is_finite() {
+            if let Some(slot) = solution.get_mut(self.node_temp - 1) {
+                *slot = delta_temp;
+            }
+        }
+    }
+
+    pub(crate) fn prime_operating_point_from_solution(&mut self, solution: &[Value]) {
+        let bias = self.raw_branch_voltages(solution);
+        self.converged_ref = bias;
+        self.bias = bias;
+        self.op = self.eval_op_for_bias(bias);
+        self.has_history = true;
+        self.vbs_limit_anchor = bias.vbs;
+        self.vbd_limit_anchor = bias.vbs - bias.vds;
+        self.del_temp_limit_anchor = bias.del_temp;
+        self.limit_anchor_valid.set(true);
+        self.startup_seed_pending.set(false);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(false);
+        self.last_limited.set(false);
     }
 
     pub fn thermal_capacitance(&self) -> Value {
@@ -1117,6 +1190,9 @@ impl B3SoiPd {
 
     fn stamp_thermal_matrix(&self, op: &B3SoiPdOp, matrix: &mut impl MatrixStamper) {
         if !self.self_heating_active() {
+            if self.self_heating_startup_disabled.get() && self.has_self_heating_node() {
+                stamp(matrix, self.node_temp, self.node_temp, 1.0);
+            }
             return;
         }
 

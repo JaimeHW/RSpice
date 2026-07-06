@@ -24,8 +24,7 @@ impl Engine {
     fn startup_warmup_iteration_budget(&self) -> usize {
         self.config
             .max_iterations
-            .max(STARTUP_WARMUP_MIN_ITERS)
-            .min(STARTUP_WARMUP_MAX_ITERS)
+            .clamp(STARTUP_WARMUP_MIN_ITERS, STARTUP_WARMUP_MAX_ITERS)
     }
 
     #[inline]
@@ -432,8 +431,8 @@ impl Engine {
             }
         }
 
-        if !circuit.b3soi.is_empty() {
-            circuit.reset_b3soi_dd_operating_point_history();
+        if circuit.has_b3soi_devices() {
+            circuit.reset_b3soi_operating_point_history();
         }
         match self.solve_direct_dc_startup_with_abort(netlist, circuit, matrix, abort) {
             Ok(solution) => {
@@ -455,8 +454,8 @@ impl Engine {
         }
 
         if Self::should_try_configured_dc_startup_aids(circuit) {
-            if !circuit.b3soi.is_empty() {
-                circuit.reset_b3soi_dd_operating_point_history();
+            if circuit.has_b3soi_devices() {
+                circuit.reset_b3soi_operating_point_history();
             }
             match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
                 Ok(solution) => {

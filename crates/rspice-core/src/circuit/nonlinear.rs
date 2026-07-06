@@ -176,33 +176,71 @@ impl CircuitData {
         }
     }
 
-    pub(crate) fn reset_b3soi_dd_operating_point_history(&mut self) {
+    pub(crate) fn reset_b3soi_operating_point_history(&mut self) {
         for dev in &mut self.b3soi.devices {
+            dev.reset_operating_point_history();
+        }
+        for dev in &mut self.b3soi_pd.devices {
             dev.reset_operating_point_history();
         }
     }
 
-    pub(crate) fn seed_b3soi_dd_self_heating_temperature_guess(&self, solution: &mut [Value]) {
+    pub(crate) fn seed_b3soi_self_heating_temperature_guess(&self, solution: &mut [Value]) {
         for dev in &self.b3soi.devices {
+            dev.seed_self_heating_temperature_from_power(solution);
+        }
+        for dev in &self.b3soi_pd.devices {
             dev.seed_self_heating_temperature_from_power(solution);
         }
     }
 
-    pub(crate) fn prime_b3soi_dd_operating_point_from_solution(&mut self, solution: &[Value]) {
+    pub(crate) fn zero_b3soi_self_heating_temperature_guess(&self, solution: &mut [Value]) {
+        for node in self
+            .b3soi
+            .devices
+            .iter()
+            .filter(|dev| dev.has_self_heating_node())
+            .map(|dev| dev.node_temp)
+            .chain(
+                self.b3soi_pd
+                    .devices
+                    .iter()
+                    .filter(|dev| dev.has_self_heating_node())
+                    .map(|dev| dev.node_temp),
+            )
+        {
+            if let Some(slot) = solution.get_mut(node - 1) {
+                *slot = 0.0;
+            }
+        }
+    }
+
+    pub(crate) fn prime_b3soi_operating_point_from_solution(&mut self, solution: &[Value]) {
         for dev in &mut self.b3soi.devices {
+            dev.prime_operating_point_from_solution(solution);
+        }
+        for dev in &mut self.b3soi_pd.devices {
             dev.prime_operating_point_from_solution(solution);
         }
     }
 
-    pub(crate) fn has_b3soi_dd_self_heating(&self) -> bool {
+    pub(crate) fn has_b3soi_self_heating(&self) -> bool {
         self.b3soi
             .devices
             .iter()
             .any(|dev| dev.has_self_heating_node())
+            || self
+                .b3soi_pd
+                .devices
+                .iter()
+                .any(|dev| dev.has_self_heating_node())
     }
 
-    pub(crate) fn set_b3soi_dd_self_heating_startup_disabled(&self, disabled: bool) {
+    pub(crate) fn set_b3soi_self_heating_startup_disabled(&self, disabled: bool) {
         for dev in &self.b3soi.devices {
+            dev.set_self_heating_startup_disabled(disabled);
+        }
+        for dev in &self.b3soi_pd.devices {
             dev.set_self_heating_startup_disabled(disabled);
         }
     }

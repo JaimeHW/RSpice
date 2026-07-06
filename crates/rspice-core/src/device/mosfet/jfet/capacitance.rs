@@ -674,7 +674,7 @@ impl Jfet {
         // GATEMOD=1's gmg/gmd are deliberately not part of the AC stamp:
         // ngspice's hfetacl.c omits them too (only ggd/ggs/gm/gds appear),
         // so dropping them here is reference-exact.
-        let (_, gm_base, gds_base, _, _, ggs, ggd, _, _gmg, _gmd) =
+        let (ids_base, gm_base, gds_base, _, igd_base, ggs, ggd, _, _gmg, _gmd) =
             self.compute_operating_terms_with_terminals(vgs, vds, vgd, external_vd, external_vs);
 
         let (gm, gds) = match self.params.channel_model {
@@ -683,10 +683,11 @@ impl Jfet {
             | JfetChannelModel::XyceModifiedShockley
             | JfetChannelModel::LegacyMesfet => (gm_base, gds_base),
             JfetChannelModel::ParkerSkellern => {
+                let cd_base = ids_base - igd_base;
                 let (gm, _, gds, _) = self.jfet2_ac_feedback_terms(
                     vgs,
                     vds,
-                    self.eval_ids,
+                    cd_base,
                     frequency_hz,
                     gm_base,
                     gds_base,
@@ -754,11 +755,17 @@ impl Jfet {
             return None;
         }
 
-        let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
-        let (_, gm_base, gds_base, _, _, _, _, _, _, _) =
+        let vd = Self::node_voltage(voltages, self.drain);
+        let vg = Self::node_voltage(voltages, self.gate);
+        let vs = Self::node_voltage(voltages, self.source);
+        let vgs = vg - vs;
+        let vgd = vg - vd;
+        let vds = vgs - vgd;
+        let (ids_base, gm_base, gds_base, _, igd_base, _, _, _, _, _) =
             self.compute_operating_terms(vgs, vds, vgd);
+        let cd_base = ids_base - igd_base;
         let (_, xgm, _, xgds) =
-            self.jfet2_ac_feedback_terms(vgs, vds, self.eval_ids, frequency_hz, gm_base, gds_base);
+            self.jfet2_ac_feedback_terms(vgs, vds, cd_base, frequency_hz, gm_base, gds_base);
         Some((xgm, xgds))
     }
 
@@ -768,7 +775,12 @@ impl Jfet {
         frequency_hz: Value,
         matrix: &mut impl MatrixStamper,
     ) {
-        let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
+        let vd = Self::node_voltage(voltages, self.drain);
+        let vg = Self::node_voltage(voltages, self.gate);
+        let vs = Self::node_voltage(voltages, self.source);
+        let vgs = vg - vs;
+        let vgd = vg - vd;
+        let vds = vgs - vgd;
         let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
         let (gm, gds, ggs, ggd) = self.ac_real_terms_at_frequency_with_terminals(
             vgs,

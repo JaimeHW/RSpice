@@ -3481,7 +3481,7 @@ pub(super) fn parse_bjt(
         }
         TokenKind::LBracket => {
             stream.advance();
-            let substrate = expect_node(stream, line_num)?;
+            let substrate = expect_node_before_rbracket(stream, line_num)?;
             if !stream.consume(&TokenKind::RBracket) {
                 return Err(ParseError::Syntax {
                     line: line_num,

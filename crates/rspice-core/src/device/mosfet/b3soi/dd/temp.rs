@@ -65,6 +65,7 @@ pub struct B3SoiDdSized {
     pub b0: Value,
     pub b1: Value,
     pub keta: Value,
+    pub ketas: Value,
     pub abp: Value,
     pub mxc: Value,
     pub adice0: Value,
@@ -397,6 +398,7 @@ impl B3SoiDdSized {
         bin!(b0);
         bin!(b1);
         bin!(keta);
+        bin!(ketas);
         bin!(abp);
         bin!(mxc);
         bin!(adice0);

@@ -320,6 +320,10 @@ pub fn eval_with_self_heat(
     }
 
     let leff = p.leff;
+    let qsi = match m.dialect {
+        B3SoiDialect::Ngspice => m.qsi,
+        B3SoiDialect::Xyce => m.qsi * (1.0 + p.nlx / leff),
+    };
     let v0 = vbi - phi;
 
     // --- Vbs0t (b3soiddld.c:923-933) ---
@@ -328,40 +332,86 @@ pub fn eval_with_self_heat(
         let t0 = -p.dvbd1 * p.leff / p.litl;
         let t1 = p.dvbd0 * ((0.5 * t0).exp() + 2.0 * t0.exp());
         let t2 = t1 * (vbi - phi);
-        let t3 = 0.5 * m.qsi / m.csi;
+        let t3 = 0.5 * qsi / m.csi;
         vbs0t = phi - t3 + p.vbsa + t2;
         dvbs0t_dt = t1 * sh.dvbi_dt;
     }
 
-    // --- Vbs0 / Vbs0mos (b3soiddld.c:935-985) ---
+    // --- Vbs0 / Vbs0mos (ngspice b3soiddld.c:935-985; Xyce B3SOI.C:9448-9485) ---
     let (vbs0, dvbs0_dve, dvbs0_dt);
     let (vbs0mos, dvbs0mos_dve, dvbs0mos_dt);
-    {
-        let t0 = 1.0 + m.csieff / cbox;
-        let t1 = p.kb1 / t0;
-        let t2 = t1 * (vbs0t - vesfb);
-        let t6 = vbs0t - t2;
-        let dt6_dve = t1;
-        let dt6_dt = (1.0 - t1) * dvbs0t_dt - t1 * sh.dvfbb_dt;
+    match m.dialect {
+        B3SoiDialect::Ngspice => {
+            let t0 = 1.0 + m.csieff / cbox;
+            let t1 = p.kb1 / t0;
+            let t2 = t1 * (vbs0t - vesfb);
+            let t6 = vbs0t - t2;
+            let dt6_dve = t1;
+            let dt6_dt = (1.0 - t1) * dvbs0t_dt - t1 * sh.dvfbb_dt;
 
-        // limit Vbs0 below phi
-        let l1 = phi - p.delp;
-        let t2b = l1 - t6 - DELT_VBSEFF;
-        let t3 = (t2b * t2b + 4.0 * DELT_VBSEFF).sqrt();
-        vbs0 = l1 - 0.5 * (t2b + t3);
-        let t4 = 0.5 * (1.0 + t2b / t3);
-        dvbs0_dve = t4 * dt6_dve;
-        dvbs0_dt = t4 * dt6_dt;
+            // limit Vbs0 below phi
+            let l1 = phi - p.delp;
+            let t2b = l1 - t6 - DELT_VBSEFF;
+            let t3 = (t2b * t2b + 4.0 * DELT_VBSEFF).sqrt();
+            vbs0 = l1 - 0.5 * (t2b + t3);
+            let t4 = 0.5 * (1.0 + t2b / t3);
+            dvbs0_dve = t4 * dt6_dve;
+            dvbs0_dt = t4 * dt6_dt;
 
-        let t1b = vbs0t - vbs0 - DELT_VBSMOS;
-        let t2c = (t1b * t1b + DELT_VBSMOS * DELT_VBSMOS).sqrt();
-        let t3b = 0.5 * (t1b + t2c);
-        let t4b = t3b * m.csieff / m.qsieff;
-        vbs0mos = vbs0 - 0.5 * t3b * t4b;
-        let t5 = 0.5 * t4b * (1.0 + t1b / t2c);
-        dvbs0mos_dve = dvbs0_dve * (1.0 + t5);
-        let dt3b_dt = 0.5 * (1.0 + t1b / t2c) * (dvbs0t_dt - dvbs0_dt);
-        dvbs0mos_dt = dvbs0_dt - t4b * dt3b_dt;
+            let t1b = vbs0t - vbs0 - DELT_VBSMOS;
+            let t2c = (t1b * t1b + DELT_VBSMOS * DELT_VBSMOS).sqrt();
+            let t3b = 0.5 * (t1b + t2c);
+            let t4b = t3b * m.csieff / m.qsieff;
+            vbs0mos = vbs0 - 0.5 * t3b * t4b;
+            let t5 = 0.5 * t4b * (1.0 + t1b / t2c);
+            dvbs0mos_dve = dvbs0_dve * (1.0 + t5);
+            let dt3b_dt = 0.5 * (1.0 + t1b / t2c) * (dvbs0t_dt - dvbs0_dt);
+            dvbs0mos_dt = dvbs0_dt - t4b * dt3b_dt;
+        }
+        B3SoiDialect::Xyce => {
+            let t0 = 1.0 + m.csi / cbox;
+            let t3 = -m.dk2b * p.leff / p.litl;
+            let t5 = m.k2b * ((0.5 * t3).exp() + 2.0 * t3.exp());
+            let t1 = (m.k1b - t5) / t0;
+            let t2 = t1 * vesfb;
+            let t4 = 1.0 / (1.0 + cbox / m.csi);
+            vbs0 = t4 * vbs0t + t2;
+            dvbs0_dve = t1;
+            dvbs0_dt = if selfheat {
+                t4 * dvbs0t_dt - t1 * sh.dvfbb_dt
+            } else {
+                0.0
+            };
+
+            let t1b = vbs0t - vbs0 - DELT_VBSMOS;
+            let t2b = (t1b * t1b + DELT_VBSMOS * DELT_VBSMOS).sqrt();
+            let t3b = 0.5 * (t1b + t2b);
+            let t4b = t3b * m.csi / qsi;
+            let mut xyce_vbs0mos = vbs0 - 0.5 * t3b * t4b;
+            let t5b = 0.5 * t4b * (1.0 + t1b / t2b);
+            let mut xyce_dvbs0mos_dve = dvbs0_dve * (1.0 + t5b);
+            let mut xyce_dvbs0mos_dt = if selfheat {
+                dvbs0_dt * (1.0 + t5b) - t5b * dvbs0t_dt
+            } else {
+                0.0
+            };
+
+            let t1c = phi - 0.02;
+            let t2c = t1c - xyce_vbs0mos - DELT_VBSMOS;
+            let t3c = (t2c * t2c + 4.0 * DELT_VBSMOS).sqrt();
+            xyce_vbs0mos = t1c - 0.5 * (t2c + t3c);
+            let t4c = 0.5 * (1.0 + t2c / t3c);
+            xyce_dvbs0mos_dve *= t4c;
+            if selfheat {
+                xyce_dvbs0mos_dt *= t4c;
+            } else {
+                xyce_dvbs0mos_dt = 0.0;
+            }
+
+            vbs0mos = xyce_vbs0mos;
+            dvbs0mos_dve = xyce_dvbs0mos_dve;
+            dvbs0mos_dt = xyce_dvbs0mos_dt;
+        }
     }
 
     // --- Vthfd (treat Vbs0mos as Vb), b3soiddld.c:990-1083 ---
@@ -444,97 +494,358 @@ pub fn eval_with_self_heat(
         dvthfd_dvd = -ddibl_sft_dvd;
         let t7 = p.k1 * dsqrt_phis_dvb - ddelt_vth_dvb - ddelt_vthw_dvb + t6 - ddibl_sft_dvb;
         dvthfd_dve = t7 * dvbs0mos_dve;
-        dvthfd_dt = ddelt_vthtemp_dt - ddelt_vth_dt - ddelt_vthw_dt;
+        dvthfd_dt = if selfheat {
+            ddelt_vthtemp_dt - ddelt_vth_dt - ddelt_vthw_dt + t7 * dvbs0mos_dt
+        } else {
+            0.0
+        };
     }
 
-    // --- Vbs0teff / nfb / Vbs0eff (b3soiddld.c:1085-1145) ---
-    let (vbs0teff, dvbs0teff_dvg, dvbs0teff_dvd, dvbs0teff_dve, dvbs0teff_dt);
-    let (vbs0eff, dvbs0eff_dvg, dvbs0eff_dvd, dvbs0eff_dve, dvbs0eff_dt);
-    {
-        let t1 = vthfd - vgs_eff - DELT_VBS0EFF;
-        let t2 = (t1 * t1 + DELT_VBS0EFF * DELT_VBS0EFF).sqrt();
-        vbs0teff = vbs0t - 0.5 * (t1 + t2);
-        let half = 0.5 * (1.0 + t1 / t2);
-        dvbs0teff_dvg = half * dvgs_eff_dvg;
-        dvbs0teff_dvd = -half * dvthfd_dvd;
-        dvbs0teff_dve = -half * dvthfd_dve;
-        dvbs0teff_dt = dvbs0t_dt - half * dvthfd_dt;
+    let (
+        charge_vbs0t,
+        charge_vbs0,
+        charge_dvbs0_dve,
+        charge_vbs0mos,
+        charge_dvbs0mos_dve,
+        vbs0eff,
+        dvbs0eff_dvg,
+        dvbs0eff_dvd,
+        dvbs0eff_dve,
+        vbsdio,
+        dvbsdio_dvg,
+        dvbsdio_dvd,
+        dvbsdio_dve,
+        dvbsdio_dvb,
+        vcs,
+        dvcs_dvg,
+        dvcs_dvd,
+        dvcs_dvb,
+        dvcs_dve,
+        vbseff,
+        dvbseff_dvg,
+        dvbseff_dvd,
+        dvbseff_dvb,
+        dvbseff_dve,
+        dvbseff_dt,
+        vbsh,
+        dvbsh_dvb_eff,
+    ) = match m.dialect {
+        B3SoiDialect::Ngspice => {
+            // --- Vbs0teff / nfb / Vbs0eff (b3soiddld.c:1085-1145) ---
+            let (vbs0teff, dvbs0teff_dvg, dvbs0teff_dvd, dvbs0teff_dve, dvbs0teff_dt);
+            let (vbs0eff, dvbs0eff_dvg, dvbs0eff_dvd, dvbs0eff_dve, dvbs0eff_dt);
+            {
+                let t1 = vthfd - vgs_eff - DELT_VBS0EFF;
+                let t2 = (t1 * t1 + DELT_VBS0EFF * DELT_VBS0EFF).sqrt();
+                vbs0teff = vbs0t - 0.5 * (t1 + t2);
+                let half = 0.5 * (1.0 + t1 / t2);
+                dvbs0teff_dvg = half * dvgs_eff_dvg;
+                dvbs0teff_dvd = -half * dvthfd_dvd;
+                dvbs0teff_dve = -half * dvthfd_dve;
+                dvbs0teff_dt = dvbs0t_dt - half * dvthfd_dt;
 
-        // nfb
-        let t3 = 1.0 / (k1 * k1);
-        let t4 = p.kb3 * cbox / m.cox;
-        let t8 = (phi - vbs0mos).sqrt();
-        let t5 = (1.0 + 4.0 * t3 * (phi + k1 * t8 - vbs0mos)).sqrt();
-        let t6 = 1.0 + t4 * t5;
-        let nfb = 1.0 / t6;
-        let t7 = 2.0 * t3 * t4 * nfb * nfb / t5 * (0.5 * k1 / t8 + 1.0);
-        vbs0eff = vbs0 - nfb * 0.5 * (t1 + t2);
-        dvbs0eff_dvg = nfb * half * dvgs_eff_dvg;
-        dvbs0eff_dvd = -nfb * half * dvthfd_dvd;
-        dvbs0eff_dve = dvbs0_dve - nfb * half * dvthfd_dve - t7 * 0.5 * (t1 + t2) * dvbs0mos_dve;
-        dvbs0eff_dt = dvbs0_dt - nfb * half * dvthfd_dt - t7 * 0.5 * (t1 + t2) * dvbs0mos_dt;
-    }
+                let t3 = 1.0 / (k1 * k1);
+                let t4 = p.kb3 * cbox / m.cox;
+                let t8 = (phi - vbs0mos).sqrt();
+                let t5 = (1.0 + 4.0 * t3 * (phi + k1 * t8 - vbs0mos)).sqrt();
+                let t6 = 1.0 + t4 * t5;
+                let nfb = 1.0 / t6;
+                let t7 = 2.0 * t3 * t4 * nfb * nfb / t5 * (0.5 * k1 / t8 + 1.0);
+                vbs0eff = vbs0 - nfb * 0.5 * (t1 + t2);
+                dvbs0eff_dvg = nfb * half * dvgs_eff_dvg;
+                dvbs0eff_dvd = -nfb * half * dvthfd_dvd;
+                dvbs0eff_dve =
+                    dvbs0_dve - nfb * half * dvthfd_dve - t7 * 0.5 * (t1 + t2) * dvbs0mos_dve;
+                dvbs0eff_dt =
+                    dvbs0_dt - nfb * half * dvthfd_dt - t7 * 0.5 * (t1 + t2) * dvbs0mos_dt;
+            }
 
-    // --- Vbsdio (b3soiddld.c:1147-1162) ---
-    let (vbsdio, dvbsdio_dvg, dvbsdio_dvd, dvbsdio_dve, dvbsdio_dvb, dvbsdio_dt);
-    {
-        let t1 = vbs - (vbs0eff + OFF_VBSDIO) - DELT_VBSDIO;
-        let t2 = (t1 * t1 + DELT_VBSDIO * DELT_VBSDIO).sqrt();
-        let t3 = 0.5 * (1.0 + t1 / t2);
-        vbsdio = vbs0eff + OFF_VBSDIO + 0.5 * (t1 + t2);
-        dvbsdio_dvg = (1.0 - t3) * dvbs0eff_dvg;
-        dvbsdio_dvd = (1.0 - t3) * dvbs0eff_dvd;
-        dvbsdio_dve = (1.0 - t3) * dvbs0eff_dve;
-        dvbsdio_dvb = t3;
-        dvbsdio_dt = (1.0 - t3) * dvbs0eff_dt;
-    }
+            // --- Vbsdio (b3soiddld.c:1147-1162) ---
+            let (vbsdio, dvbsdio_dvg, dvbsdio_dvd, dvbsdio_dve, dvbsdio_dvb, dvbsdio_dt);
+            {
+                let t1 = vbs - (vbs0eff + OFF_VBSDIO) - DELT_VBSDIO;
+                let t2 = (t1 * t1 + DELT_VBSDIO * DELT_VBSDIO).sqrt();
+                let t3 = 0.5 * (1.0 + t1 / t2);
+                vbsdio = vbs0eff + OFF_VBSDIO + 0.5 * (t1 + t2);
+                dvbsdio_dvg = (1.0 - t3) * dvbs0eff_dvg;
+                dvbsdio_dvd = (1.0 - t3) * dvbs0eff_dvd;
+                dvbsdio_dve = (1.0 - t3) * dvbs0eff_dve;
+                dvbsdio_dvb = t3;
+                dvbsdio_dt = (1.0 - t3) * dvbs0eff_dt;
+            }
 
-    // --- Vbsmos (b3soiddld.c:1164-1183) ---
-    let (vbsmos, dvbsmos_dvg, dvbsmos_dvd, dvbsmos_dvb, dvbsmos_dve, dvbsmos_dt);
-    {
-        let t1 = vbs0teff - vbsdio - DELT_VBSMOS;
-        let t2 = (t1 * t1 + DELT_VBSMOS * DELT_VBSMOS).sqrt();
-        let t3 = 0.5 * (t1 + t2);
-        let t5 = 0.5 * (1.0 + t1 / t2);
-        let dt3_dvg = t5 * (dvbs0teff_dvg - dvbsdio_dvg);
-        let dt3_dvd = t5 * (dvbs0teff_dvd - dvbsdio_dvd);
-        let dt3_dvb = -t5 * dvbsdio_dvb;
-        let dt3_dve = t5 * (dvbs0teff_dve - dvbsdio_dve);
-        let dt3_dt = t5 * (dvbs0teff_dt - dvbsdio_dt);
-        let t4 = t3 * m.csieff / m.qsieff;
-        vbsmos = vbsdio - 0.5 * t3 * t4;
-        dvbsmos_dvg = dvbsdio_dvg - t4 * dt3_dvg;
-        dvbsmos_dvd = dvbsdio_dvd - t4 * dt3_dvd;
-        dvbsmos_dvb = dvbsdio_dvb - t4 * dt3_dvb;
-        dvbsmos_dve = dvbsdio_dve - t4 * dt3_dve;
-        dvbsmos_dt = dvbsdio_dt - t4 * dt3_dt;
-    }
+            // --- Vbsmos (b3soiddld.c:1164-1183) ---
+            let (vbsmos, dvbsmos_dvg, dvbsmos_dvd, dvbsmos_dvb, dvbsmos_dve, dvbsmos_dt);
+            {
+                let t1 = vbs0teff - vbsdio - DELT_VBSMOS;
+                let t2 = (t1 * t1 + DELT_VBSMOS * DELT_VBSMOS).sqrt();
+                let t3 = 0.5 * (t1 + t2);
+                let t5 = 0.5 * (1.0 + t1 / t2);
+                let dt3_dvg = t5 * (dvbs0teff_dvg - dvbsdio_dvg);
+                let dt3_dvd = t5 * (dvbs0teff_dvd - dvbsdio_dvd);
+                let dt3_dvb = -t5 * dvbsdio_dvb;
+                let dt3_dve = t5 * (dvbs0teff_dve - dvbsdio_dve);
+                let dt3_dt = t5 * (dvbs0teff_dt - dvbsdio_dt);
+                let t4 = t3 * m.csieff / m.qsieff;
+                vbsmos = vbsdio - 0.5 * t3 * t4;
+                dvbsmos_dvg = dvbsdio_dvg - t4 * dt3_dvg;
+                dvbsmos_dvd = dvbsdio_dvd - t4 * dt3_dvd;
+                dvbsmos_dvb = dvbsdio_dvb - t4 * dt3_dvb;
+                dvbsmos_dve = dvbsdio_dve - t4 * dt3_dve;
+                dvbsmos_dt = dvbsdio_dt - t4 * dt3_dt;
+            }
 
-    // --- Vcs (b3soiddld.c:1185-1191) ---
-    let vcs = vbsdio - vbs0eff;
-    let dvcs_dvb = dvbsdio_dvb;
-    let dvcs_dvg = dvbsdio_dvg - dvbs0eff_dvg;
-    let dvcs_dvd = dvbsdio_dvd - dvbs0eff_dvd;
-    let dvcs_dve = dvbsdio_dve - dvbs0eff_dve;
+            let vcs = vbsdio - vbs0eff;
+            let dvcs_dvb = dvbsdio_dvb;
+            let dvcs_dvg = dvbsdio_dvg - dvbs0eff_dvg;
+            let dvcs_dvd = dvbsdio_dvd - dvbs0eff_dvd;
+            let dvcs_dve = dvbsdio_dve - dvbs0eff_dve;
+
+            let (vbseff, dvbseff_dvg, dvbseff_dvd, dvbseff_dvb, dvbseff_dve, dvbseff_dt);
+            {
+                let t1 = phi - p.delp;
+                let t2 = t1 - vbsmos - DELT_VBSEFF;
+                let t3 = (t2 * t2 + 4.0 * DELT_VBSEFF * t1).sqrt();
+                vbseff = t1 - 0.5 * (t2 + t3);
+                let t4 = 0.5 * (1.0 + t2 / t3);
+                dvbseff_dvg = t4 * dvbsmos_dvg;
+                dvbseff_dvd = t4 * dvbsmos_dvd;
+                dvbseff_dvb = t4 * dvbsmos_dvb;
+                dvbseff_dve = t4 * dvbsmos_dve;
+                dvbseff_dt = t4 * dvbsmos_dt;
+            }
+
+            (
+                vbs0t,
+                vbs0,
+                dvbs0_dve,
+                vbs0mos,
+                dvbs0mos_dve,
+                vbs0eff,
+                dvbs0eff_dvg,
+                dvbs0eff_dvd,
+                dvbs0eff_dve,
+                vbsdio,
+                dvbsdio_dvg,
+                dvbsdio_dvd,
+                dvbsdio_dve,
+                dvbsdio_dvb,
+                vcs,
+                dvcs_dvg,
+                dvcs_dvd,
+                dvcs_dvb,
+                dvcs_dve,
+                vbseff,
+                dvbseff_dvg,
+                dvbseff_dvd,
+                dvbseff_dvb,
+                dvbseff_dve,
+                dvbseff_dt,
+                vbseff,
+                dvbseff_dvb,
+            )
+        }
+        B3SoiDialect::Xyce => {
+            let t10 = m.nofffd * vtm;
+            let vtgs_fd = vthfd - vgs_eff;
+            let (exp_vtgs_fd, mut t0) = cexp100((vtgs_fd - m.vofffd) / t10);
+            let vtgseff_fd = t10 * (1.0 + exp_vtgs_fd).ln();
+            t0 /= 1.0 + exp_vtgs_fd;
+            let dvtgseff_fd_dvd = t0 * dvthfd_dvd;
+            let dvtgseff_fd_dvg = -t0 * dvgs_eff_dvg;
+            let dvtgseff_fd_dve = t0 * dvthfd_dve;
+            let dvtgseff_fd_dt = if selfheat {
+                t0 * (dvthfd_dt - (vtgs_fd - m.vofffd) / p.temp) + vtgseff_fd / p.temp
+            } else {
+                0.0
+            };
+
+            let vgst_fd = vgs_eff - vthfd;
+            let (exp_vgst_fd, mut t0) = cexp100((vgst_fd - m.vofffd) / t10);
+            let vgsteff_fd = t10 * (1.0 + exp_vgst_fd).ln();
+            t0 /= 1.0 + exp_vgst_fd;
+            let dvgsteff_fd_dvd = -t0 * dvthfd_dvd;
+            let dvgsteff_fd_dvg = t0 * dvgs_eff_dvg;
+            let dvgsteff_fd_dve = -t0 * dvthfd_dve;
+            let dvgsteff_fd_dt = if selfheat {
+                t0 * (-dvthfd_dt - (vgst_fd - m.vofffd) / p.temp) + vgsteff_fd / p.temp
+            } else {
+                0.0
+            };
+
+            let t1 = m.moin_fd * k1 * vtm * vtm;
+            let dt1_dt = if selfheat { 2.0 * t1 / p.temp } else { 0.0 };
+            let t2 = vgsteff_fd + 2.0 * k1 * sqrt_phi;
+            let dt2_dvg = dvgsteff_fd_dvg;
+            let dt2_dvd = dvgsteff_fd_dvd;
+            let dt2_dve = dvgsteff_fd_dve;
+            let dt2_dt = if selfheat { dvgsteff_fd_dt } else { 0.0 };
+            let t0 = 1.0 + vgsteff_fd * t2 / t1;
+            let dt0_dvg = (vgsteff_fd * dt2_dvg + t2 * dvgsteff_fd_dvg) / t1;
+            let dt0_dvd = (vgsteff_fd * dt2_dvd + t2 * dvgsteff_fd_dvd) / t1;
+            let dt0_dve = (vgsteff_fd * dt2_dve + t2 * dvgsteff_fd_dve) / t1;
+            let dt0_dt = if selfheat {
+                (vgsteff_fd * (dt2_dt - t2 / t1 * dt1_dt) + t2 * dvgsteff_fd_dt) / t1
+            } else {
+                0.0
+            };
+
+            let phi_on = phi + vtm * t0.ln();
+            let dphi_on_dvg = vtm * dt0_dvg / t0;
+            let dphi_on_dvd = vtm * dt0_dvd / t0;
+            let dphi_on_dve = vtm * dt0_dve / t0;
+            let dphi_on_dt = if selfheat {
+                vtm * dt0_dt / t0 + (phi_on - phi) / p.temp
+            } else {
+                0.0
+            };
+
+            let t0 = m.cox / (m.cox + 1.0 / (1.0 / m.csi + 1.0 / cbox));
+            let phi_fd = phi_on - t0 * vtgseff_fd;
+            let dphi_fd_dvg = dphi_on_dvg - t0 * dvtgseff_fd_dvg;
+            let dphi_fd_dvd = dphi_on_dvd - t0 * dvtgseff_fd_dvd;
+            let dphi_fd_dve = dphi_on_dve - t0 * dvtgseff_fd_dve;
+            let dphi_fd_dt = if selfheat {
+                dphi_on_dt - t0 * dvtgseff_fd_dt
+            } else {
+                0.0
+            };
+
+            let t0 = -p.dvbd1 * p.leff / p.litl;
+            let t1 = p.dvbd0 * ((0.5 * t0).exp() + 2.0 * t0.exp());
+            let t2 = t1 * (vbi - phi);
+            let t3 = 0.5 * qsi / m.csi;
+            let xyce_vbs0t = phi_fd - t3 + p.vbsa + t2;
+            let dxyce_vbs0t_dvg = dphi_fd_dvg;
+            let dxyce_vbs0t_dvd = dphi_fd_dvd;
+            let dxyce_vbs0t_dve = dphi_fd_dve;
+            let dxyce_vbs0t_dt = if selfheat {
+                dphi_fd_dt + t1 * sh.dvbi_dt
+            } else {
+                0.0
+            };
+
+            let t0 = 1.0 + m.csi / cbox;
+            let t3 = -m.dk2b * p.leff / p.litl;
+            let t5 = m.k2b * ((0.5 * t3).exp() + 2.0 * t3.exp());
+            let t1 = (m.k1b - t5) / t0;
+            let t2 = t1 * vesfb;
+            let t0 = 1.0 / (1.0 + cbox / m.csi);
+            let xyce_vbs0 = t0 * xyce_vbs0t + t2;
+            let dxyce_vbs0_dvg = t0 * dxyce_vbs0t_dvg;
+            let dxyce_vbs0_dvd = t0 * dxyce_vbs0t_dvd;
+            let dxyce_vbs0_dve = t0 * dxyce_vbs0t_dve + t1;
+            let dxyce_vbs0_dt = if selfheat {
+                t0 * dxyce_vbs0t_dt - t1 * sh.dvfbb_dt
+            } else {
+                0.0
+            };
+
+            let t1 = vbs - (xyce_vbs0 + 0.02) - 0.01;
+            let t2 = (t1 * t1 + 0.0001).sqrt();
+            let t3 = 0.5 * (1.0 + t1 / t2);
+            let vbsitf = xyce_vbs0 + 0.02 + 0.5 * (t1 + t2);
+            let dvbsitf_dvg = (1.0 - t3) * dxyce_vbs0_dvg;
+            let dvbsitf_dvd = (1.0 - t3) * dxyce_vbs0_dvd;
+            let dvbsitf_dve = (1.0 - t3) * dxyce_vbs0_dve;
+            let dvbsitf_dvb = t3;
+            let dvbsitf_dt = if selfheat {
+                (1.0 - t3) * dxyce_vbs0_dt
+            } else {
+                0.0
+            };
+
+            let t1 = xyce_vbs0t - vbsitf - DELT_VBSMOS;
+            let t2 = (t1 * t1 + DELT_VBSMOS * DELT_VBSMOS).sqrt();
+            let t3 = 0.5 * (t1 + t2);
+            let t4 = t3 * m.csi / qsi;
+            let vbsmos = vbsitf - 0.5 * t3 * t4;
+            let t5 = 0.5 * t4 * (1.0 + t1 / t2);
+            let dvbsmos_dvg = dvbsitf_dvg * (1.0 + t5) - t5 * dxyce_vbs0t_dvg;
+            let dvbsmos_dvd = dvbsitf_dvd * (1.0 + t5) - t5 * dxyce_vbs0t_dvd;
+            let dvbsmos_dvb = dvbsitf_dvb * (1.0 + t5);
+            let dvbsmos_dve = dvbsitf_dve * (1.0 + t5) - t5 * dxyce_vbs0t_dve;
+            let dvbsmos_dt = if selfheat {
+                dvbsitf_dt * (1.0 + t5) - t5 * dxyce_vbs0t_dt
+            } else {
+                0.0
+            };
+
+            let t0 = vbsmos + 5.0 - 0.001;
+            let t1 = (t0 * t0 + 0.02).sqrt();
+            let scale = 0.5 * (1.0 + t0 / t1);
+            let t2 = -5.0 + 0.5 * (t0 + t1);
+            let dt2_dvg = scale * dvbsmos_dvg;
+            let dt2_dvd = scale * dvbsmos_dvd;
+            let dt2_dvb = scale * dvbsmos_dvb;
+            let dt2_dve = scale * dvbsmos_dve;
+            let dt2_dt = if selfheat { scale * dvbsmos_dt } else { 0.0 };
+
+            let t0 = 1.5;
+            let t1 = t0 - t2 - 0.002;
+            let t3 = (t1 * t1 + 0.008 * t0).sqrt();
+            let vbsh = t0 - 0.5 * (t1 + t3);
+            let scale = 0.5 * (1.0 + t1 / t3);
+            let dvbsh_dvg = scale * dt2_dvg;
+            let dvbsh_dvd = scale * dt2_dvd;
+            let dvbsh_dvb = scale * dt2_dvb;
+            let dvbsh_dve = scale * dt2_dve;
+            let dvbsh_dt = if selfheat { scale * dt2_dt } else { 0.0 };
+
+            let t0 = 0.95 * phi;
+            let t1 = t0 - vbsh - 0.002;
+            let t2 = (t1 * t1 + 0.008 * t0).sqrt();
+            let xyce_vbseff = t0 - 0.5 * (t1 + t2);
+            let scale = 0.5 * (1.0 + t1 / t2);
+            let dvbseff_dvg = scale * dvbsh_dvg;
+            let dvbseff_dvd = scale * dvbsh_dvd;
+            let mut dvbseff_dvb = scale * dvbsh_dvb;
+            let dvbseff_dve = scale * dvbsh_dve;
+            let dvbseff_dt = if selfheat { scale * dvbsh_dt } else { 0.0 };
+            let dvbsh_dvb_eff = if dvbseff_dvb < 1.0e-20 {
+                dvbsh_dvb * 1.0e20
+            } else {
+                dvbsh_dvb / dvbseff_dvb
+            };
+            if dvbseff_dvb < 1.0e-20 {
+                dvbseff_dvb = 1.0e-20;
+            }
+
+            (
+                xyce_vbs0t,
+                xyce_vbs0,
+                dxyce_vbs0_dve,
+                vbsmos,
+                dvbsmos_dve,
+                xyce_vbs0,
+                dxyce_vbs0_dvg,
+                dxyce_vbs0_dvd,
+                dxyce_vbs0_dve,
+                vbsitf,
+                dvbsitf_dvg,
+                dvbsitf_dvd,
+                dvbsitf_dve,
+                dvbsitf_dvb,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                xyce_vbseff,
+                dvbseff_dvg,
+                dvbseff_dvd,
+                dvbseff_dvb,
+                dvbseff_dve,
+                dvbseff_dt,
+                vbsh,
+                dvbsh_dvb_eff,
+            )
+        }
+    };
 
     // --- Vps check / Vpsdio / Vbp (b3soiddld.c:1193-1230) ---
     // bodyMod 0/2: Ibp == 0 so Vbp/Vpsdio derivatives are not needed downstream.
     let _ = (vps, DELT_VBS0DIO);
-
-    // --- Vbseff (b3soiddld.c:1235-1252) ---
-    let (vbseff, dvbseff_dvg, dvbseff_dvd, dvbseff_dvb, dvbseff_dve, dvbseff_dt);
-    {
-        let t1 = phi - p.delp;
-        let t2 = t1 - vbsmos - DELT_VBSEFF;
-        let t3 = (t2 * t2 + 4.0 * DELT_VBSEFF * t1).sqrt();
-        vbseff = t1 - 0.5 * (t2 + t3);
-        let t4 = 0.5 * (1.0 + t2 / t3);
-        dvbseff_dvg = t4 * dvbsmos_dvg;
-        dvbseff_dvd = t4 * dvbsmos_dvd;
-        dvbseff_dvb = t4 * dvbsmos_dvb;
-        dvbseff_dve = t4 * dvbsmos_dve;
-        dvbseff_dt = t4 * dvbsmos_dt;
-    }
 
     // --- Vth (with Vbseff), b3soiddld.c:1254-1360 ---
     let phis = phi - vbseff;
@@ -603,14 +914,26 @@ pub fn eval_with_self_heat(
     let ddibl_sft_dvd = p.theta0vb0 * t3e;
     let ddibl_sft_dvb = p.theta0vb0 * vds * dt3_dvb_eta;
 
-    let vth = mtype * p.vth0 + p.k1 * (sqrt_phis - sqrt_phi) - p.k2 * vbseff - delt_vth - deltvthw
-        + (p.k3 + p.k3b * vbseff) * tmp2
-        + delt_vthtemp
-        - dibl_sft;
+    let (sqrt_phis_vth, dsqrt_phis_vth_dvb) = match m.dialect {
+        B3SoiDialect::Ngspice => (sqrt_phis, dsqrt_phis_dvb),
+        B3SoiDialect::Xyce => {
+            let t9 = 2.2361 / sqrt_phi;
+            (
+                sqrt_phis - t9 * (vbsh - vbseff),
+                dsqrt_phis_dvb - t9 * (dvbsh_dvb_eff - 1.0),
+            )
+        }
+    };
+
+    let vth =
+        mtype * p.vth0 + p.k1 * (sqrt_phis_vth - sqrt_phi) - p.k2 * vbseff - delt_vth - deltvthw
+            + (p.k3 + p.k3b * vbseff) * tmp2
+            + delt_vthtemp
+            - dibl_sft;
     op.von = vth;
 
     let t6v = p.k3b * tmp2 - p.k2 + p.kt2 * temp_ratio;
-    let dvth_dvb = p.k1 * dsqrt_phis_dvb - ddelt_vth_dvb - ddeltvthw_dvb + t6v - ddibl_sft_dvb;
+    let dvth_dvb = p.k1 * dsqrt_phis_vth_dvb - ddelt_vth_dvb - ddeltvthw_dvb + t6v - ddibl_sft_dvb;
     let dvth_dvd = -ddibl_sft_dvd;
     let dvth_dt = ddelt_vthtemp_dt - ddelt_vth_dt - ddeltvthw_dt;
 
@@ -740,62 +1063,142 @@ pub fn eval_with_self_heat(
         }
     }
 
-    // --- Abulk / Abulk0 (b3soiddld.c:1558-1620) ---
-    let (mut abulk0, mut abulk, mut dabulk0_dvb, mut dabulk_dvg, mut dabulk_dvb);
-    if p.a0 == 0.0 {
-        abulk0 = 0.0;
-        abulk = 0.0;
-        dabulk0_dvb = 0.0;
-        dabulk_dvg = 0.0;
-        dabulk_dvb = 0.0;
-    } else {
-        let t1 = 0.5 * p.k1 / sqrt_phi;
-        let t9 = (m.xj * xdep).sqrt();
-        let tmp1 = leff + 2.0 * t9;
-        let t5 = leff / tmp1;
-        let tmp2b = p.a0 * t5;
-        let tmp3 = p.weff + p.b1;
-        let tmp4 = p.b0 / tmp3;
-        let t2 = tmp2b + tmp4;
-        let dt2_dvb = -t9 * tmp2b / tmp1 / xdep * dxdep_dvb;
-        let t6 = t5 * t5;
-        let t7 = t5 * t6;
-        abulk0 = t1 * t2;
-        dabulk0_dvb = t1 * dt2_dvb;
-        let t8 = p.ags * p.a0 * t7;
-        dabulk_dvg = -t1 * t8;
-        abulk = abulk0 + dabulk_dvg * vgsteff;
-        dabulk_dvb = dabulk0_dvb - t8 * vgsteff * 3.0 * t1 * dt2_dvb / tmp2b;
-    }
-    if abulk0 < 0.01 {
-        let t9 = 1.0 / (3.0 - 200.0 * abulk0);
-        abulk0 = (0.02 - abulk0) * t9;
-        dabulk0_dvb *= t9 * t9;
-    }
-    if abulk < 0.01 {
-        let t9 = 1.0 / (3.0 - 200.0 * abulk);
-        abulk = (0.02 - abulk) * t9;
-        dabulk_dvb *= t9 * t9;
-    }
-    {
-        let t2 = p.keta * vbseff;
-        let (t0, dt0_dvb);
-        if t2 >= -0.9 {
-            t0 = 1.0 / (1.0 + t2);
-            dt0_dvb = -p.keta * t0 * t0;
-        } else {
-            let t1 = 1.0 / (0.8 + t2);
-            t0 = (17.0 + 20.0 * t2) * t1;
-            dt0_dvb = -p.keta * t1 * t1;
+    // --- Abulk / Abulk0 ---
+    let (abulk0, abulk, dabulk0_dvb, dabulk_dvg, dabulk_dvb) = match m.dialect {
+        B3SoiDialect::Ngspice => {
+            // ngspice b3soiddld.c:1558-1620.
+            let (mut abulk0, mut abulk, mut dabulk0_dvb, mut dabulk_dvg, mut dabulk_dvb);
+            if p.a0 == 0.0 {
+                abulk0 = 0.0;
+                abulk = 0.0;
+                dabulk0_dvb = 0.0;
+                dabulk_dvg = 0.0;
+                dabulk_dvb = 0.0;
+            } else {
+                let t1 = 0.5 * p.k1 / sqrt_phi;
+                let t9 = (m.xj * xdep).sqrt();
+                let tmp1 = leff + 2.0 * t9;
+                let t5 = leff / tmp1;
+                let tmp2b = p.a0 * t5;
+                let tmp3 = p.weff + p.b1;
+                let tmp4 = p.b0 / tmp3;
+                let t2 = tmp2b + tmp4;
+                let dt2_dvb = -t9 * tmp2b / tmp1 / xdep * dxdep_dvb;
+                let t6 = t5 * t5;
+                let t7 = t5 * t6;
+                abulk0 = t1 * t2;
+                dabulk0_dvb = t1 * dt2_dvb;
+                let t8 = p.ags * p.a0 * t7;
+                dabulk_dvg = -t1 * t8;
+                abulk = abulk0 + dabulk_dvg * vgsteff;
+                dabulk_dvb = dabulk0_dvb - t8 * vgsteff * 3.0 * t1 * dt2_dvb / tmp2b;
+            }
+            if abulk0 < 0.01 {
+                let t9 = 1.0 / (3.0 - 200.0 * abulk0);
+                abulk0 = (0.02 - abulk0) * t9;
+                dabulk0_dvb *= t9 * t9;
+            }
+            if abulk < 0.01 {
+                let t9 = 1.0 / (3.0 - 200.0 * abulk);
+                abulk = (0.02 - abulk) * t9;
+                dabulk_dvg *= t9 * t9;
+                dabulk_dvb *= t9 * t9;
+            }
+            {
+                let t2 = p.keta * vbseff;
+                let (t0, dt0_dvb);
+                if t2 >= -0.9 {
+                    t0 = 1.0 / (1.0 + t2);
+                    dt0_dvb = -p.keta * t0 * t0;
+                } else {
+                    let t1 = 1.0 / (0.8 + t2);
+                    t0 = (17.0 + 20.0 * t2) * t1;
+                    dt0_dvb = -p.keta * t1 * t1;
+                }
+                dabulk_dvg *= t0;
+                dabulk_dvb = dabulk_dvb * t0 + abulk * dt0_dvb;
+                dabulk0_dvb = dabulk0_dvb * t0 + abulk0 * dt0_dvb;
+                abulk *= t0;
+                abulk0 *= t0;
+            }
+            (
+                abulk0 + 1.0,
+                abulk + 1.0,
+                dabulk0_dvb,
+                dabulk_dvg,
+                dabulk_dvb,
+            )
         }
-        dabulk_dvg *= t0;
-        dabulk_dvb = dabulk_dvb * t0 + abulk * dt0_dvb;
-        dabulk0_dvb = dabulk0_dvb * t0 + abulk0 * dt0_dvb;
-        abulk *= t0;
-        abulk0 *= t0;
-    }
-    abulk += 1.0;
-    abulk0 += 1.0;
+        B3SoiDialect::Xyce => {
+            // Xyce N_DEV_MOSFET_B3SOI.C:10134-10196.
+            let (mut abulk0, mut abulk, mut dabulk0_dvb, mut dabulk_dvg, mut dabulk_dvb);
+            if p.a0 == 0.0 {
+                abulk0 = 1.0;
+                abulk = 1.0;
+                dabulk0_dvb = 0.0;
+                dabulk_dvg = 0.0;
+                dabulk_dvb = 0.0;
+            } else {
+                let t10 = p.keta * vbsh;
+                let (t11, dt11_dvb);
+                if t10 >= -0.9 {
+                    let t = 1.0 / (1.0 + t10);
+                    t11 = t;
+                    dt11_dvb = -p.keta * t * t * dvbsh_dvb_eff;
+                } else {
+                    let t12 = 1.0 / (0.8 + t10);
+                    t11 = (17.0 + 20.0 * t10) * t12;
+                    dt11_dvb = -p.keta * t12 * t12 * dvbsh_dvb_eff;
+                }
+
+                let t10 = phi + p.ketas;
+                let t13 = vbsh * t11 / t10;
+                let dt13_dvb = (vbsh * dt11_dvb + t11 * dvbsh_dvb_eff) / t10;
+                let (t14, dt14_dvb);
+                if t13 < 0.96 {
+                    let t = 1.0 / (1.0 - t13).sqrt();
+                    t14 = t;
+                    dt14_dvb = 0.5 * t / (1.0 - t13) * dt13_dvb;
+                } else {
+                    let t11b = 1.0 / (1.0 - 1.043406 * t13);
+                    t14 = (6.00167 - 6.26044 * t13) * t11b;
+                    dt14_dvb = 0.001742 * t11b * t11b * dt13_dvb;
+                }
+
+                let t1 = 0.5 * p.k1 / (phi + p.ketas).sqrt() * t14;
+                let dt1_dvb = 0.5 * p.k1 / (phi + p.ketas).sqrt() * dt14_dvb;
+                let t9 = (m.xj * xdep).sqrt();
+                let tmp1 = leff + 2.0 * t9;
+                let t5 = leff / tmp1;
+                let tmp2b = p.a0 * t5;
+                let tmp3 = p.weff + p.b1;
+                let tmp4 = p.b0 / tmp3;
+                let t2 = tmp2b + tmp4;
+                let dt2_dvb = -t9 * tmp2b / tmp1 / xdep * dxdep_dvb;
+                let t6 = t5 * t5;
+                let t7 = t5 * t6;
+
+                abulk0 = 1.0 + t1 * t2;
+                dabulk0_dvb = t1 * dt2_dvb + t2 * dt1_dvb;
+                let t8 = p.ags * p.a0 * t7;
+                dabulk_dvg = -t1 * t8;
+                abulk = abulk0 + dabulk_dvg * vgsteff;
+                dabulk_dvb = dabulk0_dvb - t8 * vgsteff * (dt1_dvb + 3.0 * t1 * dt2_dvb / tmp2b);
+            }
+            if abulk0 < 0.01 {
+                let t9 = 1.0 / (3.0 - 200.0 * abulk0);
+                abulk0 = (0.02 - abulk0) * t9;
+                dabulk0_dvb *= t9 * t9;
+            }
+            if abulk < 0.01 {
+                let t9 = 1.0 / (3.0 - 200.0 * abulk);
+                abulk = (0.02 - abulk) * t9;
+                dabulk_dvb *= t9 * t9;
+                dabulk_dvg *= t9 * t9;
+            }
+            (abulk0, abulk, dabulk0_dvb, dabulk_dvg, dabulk_dvb)
+        }
+    };
 
     let (abeff, dabeff_dvg, dabeff_dvb, dabeff_dvc) = match m.dialect {
         B3SoiDialect::Ngspice => {
@@ -1608,24 +2011,13 @@ pub fn eval_with_self_heat(
             }
         };
 
-        let t0a = 1.0 - p.arfabjt;
-        if t0a < 1.0e-2 {
-            ibs3 = 0.0;
-            dibs3_dvb = 0.0;
-            dibs3_dvd = 0.0;
-            ibd3 = 0.0;
-            dibd3_dvb = 0.0;
-            dibd3_dvd = 0.0;
-        } else {
-            let t1 = t0a * ien;
-            ibs3 = t1 * (exp_vbs_n - 1.0) * ehlis_factor;
-            dibs3_dvb =
-                t1 * (dexp_vbs_n_dvb * ehlis_factor + (exp_vbs_n - 1.0) * dehlis_factor_dvb);
-            dibs3_dvd = 0.0;
-            ibd3 = t1 * (exp_vbd_n - 1.0) * ehlid_factor;
-            dibd3_dvb = t1 * (dexp_vbd_n_dvb * ehlid_factor + (exp_vbd_n - 1.0) * ehlid_factor_dvb);
-            dibd3_dvd = -dibd3_dvb;
-        }
+        let t1 = (1.0 - p.arfabjt) * ien;
+        ibs3 = t1 * (exp_vbs_n - 1.0) * ehlis_factor;
+        dibs3_dvb = t1 * (dexp_vbs_n_dvb * ehlis_factor + (exp_vbs_n - 1.0) * dehlis_factor_dvb);
+        dibs3_dvd = 0.0;
+        ibd3 = t1 * (exp_vbd_n - 1.0) * ehlid_factor;
+        dibd3_dvb = t1 * (dexp_vbd_n_dvb * ehlid_factor + (exp_vbd_n - 1.0) * ehlid_factor_dvb);
+        dibd3_dvd = -dibd3_dvb;
 
         let iendif = w_tsi * jbjt * p.lratiodif;
         let diendif_dt = w_tsi * sh.djbjt_dt * p.lratiodif;
@@ -2068,11 +2460,11 @@ pub fn eval_with_self_heat(
                 dvdseff_dvc,
                 abulk0,
                 dabulk0_dvb,
-                vbs0t,
-                vbs0,
-                dvbs0_dve,
-                vbs0mos,
-                dvbs0mos_dve,
+                vbs0t: charge_vbs0t,
+                vbs0: charge_vbs0,
+                dvbs0_dve: charge_dvbs0_dve,
+                vbs0mos: charge_vbs0mos,
+                dvbs0mos_dve: charge_dvbs0mos_dve,
                 vbs0eff,
                 dvbs0eff_dvg,
                 dvbs0eff_dvd,
@@ -2114,6 +2506,12 @@ pub struct ModelConsts {
     pub cap_mod: i32,
     pub rgate_mod: i32,
     pub dialect: B3SoiDialect,
+    pub k1b: Value,
+    pub k2b: Value,
+    pub dk2b: Value,
+    pub nofffd: Value,
+    pub vofffd: Value,
+    pub moin_fd: Value,
     pub cox: Value,
     pub cbox: Value,
     pub csi: Value,

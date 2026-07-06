@@ -529,7 +529,7 @@ impl Engine {
         const VCE_SAT: Value = 0.2; // Saturation voltage
 
         for bjt in &circuit.bjts.devices {
-            if bjt.is_initially_off() {
+            if bjt.is_initially_off() || bjt.vbic_mna_promoted() {
                 continue;
             }
 
@@ -643,11 +643,22 @@ impl Engine {
             let vb = node_voltage(guess, bjt.node_base);
             let ve = node_voltage(guess, bjt.node_emitter);
             let vs = node_voltage(guess, bjt.node_substrate);
+            let base_split_seed =
+                if bjt.wbe > 1.0 && bjt.node_bx != bjt.node_base && bjt.node_bi != bjt.node_bx {
+                    let polarity = match bjt.bjt_type {
+                        crate::device::semiconductor::BjtType::Npn => 1.0,
+                        crate::device::semiconductor::BjtType::Pnp => -1.0,
+                    };
+                    Some((vb - polarity * 0.01, vb - polarity * 0.03))
+                } else {
+                    None
+                };
+            let (vbx, vbi) = base_split_seed.unwrap_or((vb, vb));
 
             set_node(guess, bjt.node_cx, vc);
             set_node(guess, bjt.node_ci, vc);
-            set_node(guess, bjt.node_bx, vb);
-            set_node(guess, bjt.node_bi, vb);
+            set_node(guess, bjt.node_bx, vbx);
+            set_node(guess, bjt.node_bi, vbi);
             set_node(guess, bjt.node_ei, ve);
             set_node(guess, bjt.node_bp, vc);
             set_node(guess, bjt.node_si, vs);

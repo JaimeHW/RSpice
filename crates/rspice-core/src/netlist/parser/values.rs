@@ -1487,12 +1487,50 @@ pub(super) fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<S
     })
 }
 
+pub(super) fn expect_node_before_rbracket(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    skip_commas(stream);
+
+    if let Some(node) = consume_node_label_before_rbracket(stream) {
+        return Ok(node);
+    }
+
+    let other = &stream.peek().kind;
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!("Expected node name before ']', found {:?}", other),
+    })
+}
+
 fn consume_node_label(stream: &mut TokenStream) -> Option<String> {
     let mut node = node_label_piece(stream.peek())?;
     let mut end = stream.peek().span.end;
     stream.advance();
 
     while stream.peek().span.start == end {
+        let Some(piece) = node_label_piece(stream.peek()) else {
+            break;
+        };
+        node.push_str(&piece);
+        end = stream.peek().span.end;
+        stream.advance();
+    }
+
+    Some(node)
+}
+
+fn consume_node_label_before_rbracket(stream: &mut TokenStream) -> Option<String> {
+    if matches!(stream.peek().kind, TokenKind::RBracket) {
+        return None;
+    }
+
+    let mut node = node_label_piece(stream.peek())?;
+    let mut end = stream.peek().span.end;
+    stream.advance();
+
+    while stream.peek().span.start == end && !matches!(stream.peek().kind, TokenKind::RBracket) {
         let Some(piece) = node_label_piece(stream.peek()) else {
             break;
         };

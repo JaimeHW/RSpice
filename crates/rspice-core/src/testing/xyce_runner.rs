@@ -2899,8 +2899,8 @@ impl XyceTestRunner {
                         match raw_key.trim().to_ascii_lowercase().as_str() {
                             "file" => has_file_output = true,
                             "format" => {
-                                if !Self::tran_print_format_is_prn_compatible(value)
-                                    && !(allow_wrapper_probe_primary_prn
+                                if !(Self::tran_print_format_is_prn_compatible(value)
+                                    || allow_wrapper_probe_primary_prn
                                         && value.eq_ignore_ascii_case("PROBE"))
                                 {
                                     return Err(format!(

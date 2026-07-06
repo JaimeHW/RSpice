@@ -191,8 +191,8 @@ impl Engine {
         let node_count = circuit.num_nodes().min(size);
         let entry_state = circuit.nonlinear_state_snapshot();
 
-        if !circuit.b3soi.is_empty() {
-            circuit.reset_b3soi_dd_operating_point_history();
+        if circuit.has_b3soi_devices() {
+            circuit.reset_b3soi_operating_point_history();
         }
         let zero_guess = vec![0.0; size];
         let mut solution = if circuit.has_b3soi_devices() {
@@ -200,6 +200,7 @@ impl Engine {
         } else {
             self.prefer_lower_merit_scaled_seed(circuit, matrix, initial_guess, &zero_guess, 0.0)
         };
+        Self::apply_b3soi_pd_initial_guess_correction(&mut solution, circuit);
         let mut damping_state = NewtonDampingState::default();
         let source_iterations = self.continuation_iteration_budget(20, 16);
         let mut total_iterations = 0usize;
@@ -686,8 +687,8 @@ impl Engine {
                 })
                 .collect()
         };
-        if !circuit.b3soi.is_empty() {
-            circuit.reset_b3soi_dd_operating_point_history();
+        if circuit.has_b3soi_devices() {
+            circuit.reset_b3soi_operating_point_history();
         }
         let mut damping_state = NewtonDampingState::default();
         let gmin_iterations = self.continuation_iteration_budget(10, 12);

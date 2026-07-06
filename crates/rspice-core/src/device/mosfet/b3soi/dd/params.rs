@@ -61,6 +61,12 @@ pub struct B3SoiDdModel {
     pub vbsa: Binned,
     pub delp: Binned,
     pub kb1: Binned,
+    pub k1b: Value,
+    pub k2b: Value,
+    pub dk2b: Value,
+    pub nofffd: Value,
+    pub vofffd: Value,
+    pub moin_fd: Value,
     pub kb3: Binned,
     pub dvbd0: Binned,
     pub dvbd1: Binned,
@@ -82,6 +88,7 @@ pub struct B3SoiDdModel {
     pub b0: Binned,
     pub b1: Binned,
     pub keta: Binned,
+    pub ketas: Binned,
     pub abp: Binned,
     pub mxc: Binned,
     pub adice0: Binned,
@@ -322,6 +329,14 @@ impl B3SoiDdModel {
         let drout = binned(p, "DROUT", 0.56, 0.0, 0.0, 0.0);
         // dsub defaults to drout (the nominal value only; bins default to 0).
         let dsub = binned(p, "DSUB", drout.v, 0.0, 0.0, 0.0);
+        let dvbd_bin_default = match dialect {
+            B3SoiDialect::Ngspice => 1.0,
+            B3SoiDialect::Xyce => 0.0,
+        };
+        let beta0_default = match dialect {
+            B3SoiDialect::Ngspice => 30.0,
+            B3SoiDialect::Xyce => 0.0,
+        };
 
         let tsi = val(p, "TSI", 1e-7);
         let xj = val(p, "XJ", tsi);
@@ -389,12 +404,33 @@ impl B3SoiDdModel {
             vbsa: binned(p, "VBSA", 0.0, 0.0, 0.0, 0.0),
             delp: binned(p, "DELP", 0.02, 0.0, 0.0, 0.0),
             kb1: binned(p, "KB1", 1.0, 0.0, 0.0, 0.0),
+            k1b: val(p, "K1B", 1.0),
+            k2b: val(p, "K2B", 0.0),
+            dk2b: val(p, "DK2B", 0.0),
+            nofffd: val(p, "NOFFFD", 1.0),
+            vofffd: val(p, "VOFFFD", 0.0),
+            moin_fd: val(p, "MOINFD", 1.0e3),
             // NOTE: lkb3/wkb3/pkb3 default to 1.0 in b3soiddset.c (lines
             // 351-352, 511-512, 671-672) — transcribed verbatim.
             kb3: binned(p, "KB3", 1.0, 1.0, 1.0, 1.0),
-            // NOTE: ldvbd0/ldvbd1 (and w/p variants) default to 1.0 as well.
-            dvbd0: binned(p, "DVBD0", 0.0, 1.0, 1.0, 1.0),
-            dvbd1: binned(p, "DVBD1", 0.0, 1.0, 1.0, 1.0),
+            // ngspice B3SOIDD defaults the DVBD L/W/P bins to 1.0, while
+            // Xyce LEVEL=10 exposes only the nominal DVBD0/DVBD1 defaults.
+            dvbd0: binned(
+                p,
+                "DVBD0",
+                0.0,
+                dvbd_bin_default,
+                dvbd_bin_default,
+                dvbd_bin_default,
+            ),
+            dvbd1: binned(
+                p,
+                "DVBD1",
+                0.0,
+                dvbd_bin_default,
+                dvbd_bin_default,
+                dvbd_bin_default,
+            ),
             w0: binned(p, "W0", 2.5e-6, 0.0, 0.0, 0.0),
             nlx: binned(p, "NLX", 1.74e-7, 0.0, 0.0, 0.0),
             dvt0: binned(p, "DVT0", 2.2, 0.0, 0.0, 0.0),
@@ -420,6 +456,7 @@ impl B3SoiDdModel {
             b0: binned(p, "B0", 0.0, 0.0, 0.0, 0.0),
             b1: binned(p, "B1", 0.0, 0.0, 0.0, 0.0),
             keta: binned(p, "KETA", -0.6, 0.0, 0.0, 0.0),
+            ketas: binned(p, "KETAS", 0.0, 0.0, 0.0, 0.0),
             abp: binned(p, "ABP", 1.0, 0.0, 0.0, 0.0),
             mxc: binned(p, "MXC", -0.9, 0.0, 0.0, 0.0),
             adice0: binned(p, "ADICE0", 1.0, 0.0, 0.0, 0.0),
@@ -468,7 +505,7 @@ impl B3SoiDdModel {
             dii: binned(p, "DII", -1.0, 0.0, 0.0, 0.0),
             alpha0: binned(p, "ALPHA0", 0.0, 0.0, 0.0, 0.0),
             alpha1: binned(p, "ALPHA1", 1.0, 0.0, 0.0, 0.0),
-            beta0: binned(p, "BETA0", 0.0, 0.0, 0.0, 0.0),
+            beta0: binned(p, "BETA0", beta0_default, 0.0, 0.0, 0.0),
             beta1: binned(p, "BETA1", 0.0, 0.0, 0.0, 0.0),
             beta2: binned(p, "BETA2", 0.1, 0.0, 0.0, 0.0),
             vdsatii0: binned(p, "VDSATII0", 0.9, 0.0, 0.0, 0.0),
