@@ -106,6 +106,57 @@ endmodule
     let _ = std::fs::remove_file(model);
 }
 
+#[test]
+fn veriloga_transient_step_events_mark_exact_endpoints() {
+    let model = write_model(
+        "step_events",
+        r#"
+`include "disciplines.vams"
+module va_step_events(p, n);
+    inout p, n;
+    electrical p, n;
+    real g;
+    analog begin
+        g = 1.0e-6;
+        @(initial_step("tran")) g = 1.0e-3;
+        @(final_step("tran")) g = 2.0e-3;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* transient lifecycle events\n\
+         V1 in 0 1.0\n\
+         R1 in out 1k\n\
+         X1 out 0 va_step_events\n\
+         .va \"{}\" va_step_events\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 2.0e-6, 1.0e-6)
+        .expect("transient run");
+    let out = node_series(&result.node_names, &result.voltages, "out");
+
+    assert!((out[0] - 0.5).abs() < 1.0e-9, "initial point: {out:?}");
+    assert!(
+        (out[out.len() - 1] - 1.0 / 3.0).abs() < 1.0e-9,
+        "final point: {out:?}"
+    );
+    assert!(
+        out[1..out.len() - 1]
+            .iter()
+            .all(|voltage| (*voltage - 1.0 / 1.001).abs() < 1.0e-9),
+        "interior points must not retain a lifecycle flag: {out:?}"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
 /// Optional trailing terminals must remain observable to Verilog-A through
 /// `$port_connected`; omitting `opt` below selects the weak conductance path.
 #[test]

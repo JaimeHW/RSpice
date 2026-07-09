@@ -32,6 +32,8 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) baseline_diag_gmin: Value,
     pub(super) tline_dc_refs: &'a [(Value, Value)],
     pub(super) coupled_tline_refs: &'a [CoupledTlineReferenceState],
+    pub(super) analysis_initial_step: bool,
+    pub(super) analysis_final_step: bool,
 }
 
 impl Engine {
@@ -209,11 +211,22 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             #[cfg(feature = "veriloga")]
             if circuit.has_veriloga_devices() {
-                circuit.prepare_veriloga_timepoint(time, dt);
+                circuit.prepare_veriloga_timepoint(
+                    time,
+                    dt,
+                    ctx.analysis_initial_step,
+                    ctx.analysis_final_step,
+                );
             }
             #[cfg(feature = "veriloga-builtins")]
             if circuit.has_generated_veriloga_devices() {
-                circuit.prepare_generated_veriloga_timepoint(time, dt, ctx.coeff);
+                circuit.prepare_generated_veriloga_timepoint(
+                    time,
+                    dt,
+                    ctx.coeff,
+                    ctx.analysis_initial_step,
+                    ctx.analysis_final_step,
+                );
             }
             circuit
                 .stamp_nonlinear(matrix, rhs, solution)
@@ -458,6 +471,8 @@ Q1 C B E 0 QN
             baseline_diag_gmin: engine.config.convergence_config.gmin_target.max(0.0),
             tline_dc_refs: &tline_dc_refs,
             coupled_tline_refs: &coupled_tline_refs,
+            analysis_initial_step: false,
+            analysis_final_step: false,
         };
 
         let size = circuit.matrix_size();
@@ -893,6 +908,8 @@ Q1 C B E 0 QN
                 baseline_diag_gmin: engine.config.convergence_config.gmin_target.max(0.0),
                 tline_dc_refs: &tline_dc_refs,
                 coupled_tline_refs: &coupled_tline_refs,
+                analysis_initial_step: false,
+                analysis_final_step: false,
             };
 
             // Reference mode: the dt=1e-12 power-iteration dominant. If it

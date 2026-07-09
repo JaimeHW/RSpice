@@ -633,6 +633,16 @@ impl Engine {
                 )
             });
 
+        // Establish transient lifecycle state before the t=0 operating point.
+        // UIC has no t=0 solve, so its first candidate carries the initial flag
+        // below instead.
+        #[cfg(feature = "veriloga")]
+        circuit.prepare_veriloga_timepoint(0.0, 0.0, resume.is_none() && !uic_requested, false);
+        #[cfg(feature = "veriloga-builtins")]
+        circuit
+            .generated_veriloga_devices_mut()
+            .set_analysis_step(resume.is_none() && !uic_requested, false);
+
         // Get DC operating point as initial condition.
         let (mut solution, initial_solution_mode) = if uic_requested {
             log::info!("Transient UIC startup: skipping the operating point");
@@ -1383,6 +1393,8 @@ impl Engine {
                 trapgear.force_method(method);
             }
             let step_time = t + dt;
+            let analysis_initial_step = resume.is_none() && uic_requested && result.time.len() == 1;
+            let analysis_final_step = step_time >= tstop;
             let retry_floor_source_activity_delta =
                 Self::startup_source_activity_delta_for_retry_floor(
                     &circuit,
@@ -1639,6 +1651,8 @@ impl Engine {
                         baseline_diag_gmin: transient_baseline_diag_gmin,
                         tline_dc_refs: &tline_dc_refs,
                         coupled_tline_refs: &coupled_tline_refs,
+                        analysis_initial_step,
+                        analysis_final_step,
                     },
                     &mut vbic_snapshot_cache,
                     VbicCachedSnapshotReuse::NewtonBypass,
@@ -1942,6 +1956,8 @@ impl Engine {
                                     baseline_diag_gmin: transient_baseline_diag_gmin,
                                     tline_dc_refs: &tline_dc_refs,
                                     coupled_tline_refs: &coupled_tline_refs,
+                                    analysis_initial_step,
+                                    analysis_final_step,
                                 },
                                 &mut vbic_snapshot_cache,
                                 VbicCachedSnapshotReuse::NewtonBypass,
@@ -2045,6 +2061,8 @@ impl Engine {
                             baseline_diag_gmin: transient_baseline_diag_gmin,
                             tline_dc_refs: &tline_dc_refs,
                             coupled_tline_refs: &coupled_tline_refs,
+                            analysis_initial_step,
+                            analysis_final_step,
                         },
                         &mut vbic_snapshot_cache,
                     )?

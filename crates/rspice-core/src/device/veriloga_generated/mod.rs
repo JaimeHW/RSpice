@@ -77,6 +77,8 @@ pub struct BuiltinVerilogAInstance {
     pub nodes: Vec<usize>,
     pub branches: Vec<usize>,
     temperature: Value,
+    analysis_initial_step: bool,
+    analysis_final_step: bool,
     static_stamp_cache: GeneratedStaticStampCache,
     kind: builtins::GeneratedBuiltinKind,
 }
@@ -179,6 +181,13 @@ impl BuiltinVerilogADevices {
     }
 
     #[inline]
+    pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
+        for device in &mut self.devices {
+            device.set_analysis_step(initial, final_step);
+        }
+    }
+
+    #[inline]
     pub fn accept_timestep(&mut self) {
         for device in &mut self.devices {
             device.accept_timestep();
@@ -218,6 +227,8 @@ impl BuiltinVerilogAInstance {
         debug_assert_eq!(self.nodes, snapshot.nodes);
         debug_assert_eq!(self.branches, snapshot.branches);
         self.temperature = snapshot.temperature;
+        self.analysis_initial_step = snapshot.analysis_initial_step;
+        self.analysis_final_step = snapshot.analysis_final_step;
         self.kind.restore_from_snapshot(snapshot.kind);
     }
 
@@ -238,8 +249,14 @@ impl BuiltinVerilogAInstance {
     ) {
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
-        let ctx =
-            GeneratedEvalContext::with_analysis(voltages, self.temperature, num_nodes, analysis);
+        let ctx = GeneratedEvalContext::with_analysis_step(
+            voltages,
+            self.temperature,
+            num_nodes,
+            analysis,
+            self.analysis_initial_step,
+            self.analysis_final_step,
+        );
         let mut stamper = GeneratedStamper::new_with_static_cache(
             matrix,
             rhs,
@@ -268,6 +285,12 @@ impl BuiltinVerilogAInstance {
     }
 
     #[inline]
+    pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
+        self.analysis_initial_step = initial;
+        self.analysis_final_step = final_step;
+    }
+
+    #[inline]
     pub fn accept_timestep(&mut self) {
         self.kind.accept_timestep();
     }
@@ -279,11 +302,13 @@ impl BuiltinVerilogAInstance {
         voltages: &[Value],
         num_nodes: usize,
     ) {
-        let ctx = GeneratedEvalContext::with_analysis(
+        let ctx = GeneratedEvalContext::with_analysis_step(
             voltages,
             self.temperature,
             num_nodes,
             GeneratedAnalysisKind::Ac,
+            self.analysis_initial_step,
+            self.analysis_final_step,
         );
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
@@ -304,11 +329,13 @@ impl BuiltinVerilogAInstance {
         num_nodes: usize,
         omega: Value,
     ) {
-        let ctx = GeneratedEvalContext::with_analysis(
+        let ctx = GeneratedEvalContext::with_analysis_step(
             voltages,
             self.temperature,
             num_nodes,
             GeneratedAnalysisKind::Ac,
+            self.analysis_initial_step,
+            self.analysis_final_step,
         );
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
@@ -419,6 +446,8 @@ pub fn instantiate_builtin(
         nodes,
         branches,
         temperature: crate::constants::TEMP_REFERENCE,
+        analysis_initial_step: false,
+        analysis_final_step: false,
         static_stamp_cache: GeneratedStaticStampCache::default(),
         kind,
     }))
@@ -455,6 +484,8 @@ pub struct GeneratedEvalContext<'a> {
     temperature: Value,
     num_nodes: usize,
     analysis: GeneratedAnalysisKind,
+    analysis_initial_step: bool,
+    analysis_final_step: bool,
 }
 
 impl<'a> GeneratedEvalContext<'a> {
@@ -470,11 +501,25 @@ impl<'a> GeneratedEvalContext<'a> {
         num_nodes: usize,
         analysis: GeneratedAnalysisKind,
     ) -> Self {
+        Self::with_analysis_step(voltages, temperature, num_nodes, analysis, false, false)
+    }
+
+    #[inline]
+    pub fn with_analysis_step(
+        voltages: &'a [Value],
+        temperature: Value,
+        num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
+        initial: bool,
+        final_step: bool,
+    ) -> Self {
         Self {
             voltages,
             temperature,
             num_nodes,
             analysis,
+            analysis_initial_step: initial,
+            analysis_final_step: final_step,
         }
     }
 
@@ -543,10 +588,7 @@ impl<'a> GeneratedEvalContext<'a> {
     pub fn analysis_static(&self) -> bool {
         matches!(
             self.analysis,
-            GeneratedAnalysisKind::Dc
-                | GeneratedAnalysisKind::Ac
-                | GeneratedAnalysisKind::Noise
-                | GeneratedAnalysisKind::Ic
+            GeneratedAnalysisKind::Dc | GeneratedAnalysisKind::Ic
         )
     }
 
@@ -556,6 +598,16 @@ impl<'a> GeneratedEvalContext<'a> {
             self.analysis,
             GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise
         )
+    }
+
+    #[inline]
+    pub fn analysis_initial_step(&self) -> bool {
+        self.analysis_initial_step
+    }
+
+    #[inline]
+    pub fn analysis_final_step(&self) -> bool {
+        self.analysis_final_step
     }
 }
 
@@ -5038,5 +5090,35 @@ impl<'a> GeneratedReactiveStamper<'a> {
             GeneratedDerivativeAxis::Node(node) => cache.node_axis(node),
             GeneratedDerivativeAxis::Branch(branch) => cache.branch_axis(branch),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GeneratedAnalysisKind, GeneratedEvalContext};
+
+    #[test]
+    fn generated_analysis_predicates_match_runtime_contract() {
+        let voltages = [0.0];
+        let dc = GeneratedEvalContext::with_analysis_step(
+            &voltages,
+            300.15,
+            1,
+            GeneratedAnalysisKind::Dc,
+            true,
+            true,
+        );
+        assert!(dc.analysis_dc());
+        assert!(dc.analysis_static());
+        assert!(!dc.analysis_smallsig());
+        assert!(dc.analysis_initial_step());
+        assert!(dc.analysis_final_step());
+
+        let ac =
+            GeneratedEvalContext::with_analysis(&voltages, 300.15, 1, GeneratedAnalysisKind::Ac);
+        assert!(!ac.analysis_static());
+        assert!(ac.analysis_smallsig());
+        assert!(!ac.analysis_initial_step());
+        assert!(!ac.analysis_final_step());
     }
 }

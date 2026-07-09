@@ -1655,6 +1655,8 @@ impl CircuitData {
         time: Value,
         dt: Value,
         coefficients: &crate::analysis::CompanionCoefficients,
+        initial_step: bool,
+        final_step: bool,
     ) {
         let ddt_coefficients =
             crate::device::veriloga_generated::GeneratedDdtCoefficients::from_companion(
@@ -1663,6 +1665,8 @@ impl CircuitData {
             );
         self.generated_veriloga_devices
             .set_timepoint(time, dt, ddt_coefficients);
+        self.generated_veriloga_devices
+            .set_analysis_step(initial_step, final_step);
     }
 
     /// Commit build-time generated Verilog-A integrator state after acceptance.
@@ -1676,9 +1680,16 @@ impl CircuitData {
     /// Sets the simulation time, integration timestep, and analysis type so
     /// ddt/idt and event operators see transient semantics.
     #[cfg(feature = "veriloga")]
-    pub fn prepare_veriloga_timepoint(&mut self, time: Value, dt: Value) {
+    pub fn prepare_veriloga_timepoint(
+        &mut self,
+        time: Value,
+        dt: Value,
+        initial_step: bool,
+        final_step: bool,
+    ) {
         for device in self.veriloga_devices.iter_mut() {
             device.set_analysis_type(2);
+            device.set_analysis_step(initial_step, final_step);
             device.set_time(time);
             device.set_timestep(dt);
         }
