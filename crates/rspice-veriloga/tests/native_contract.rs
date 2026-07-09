@@ -2189,6 +2189,7 @@ endmodule
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 }
 
@@ -2216,6 +2217,7 @@ endmodule
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 }
 
@@ -2296,6 +2298,7 @@ endmodule
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 
     device.set_time(1.25);
@@ -2340,6 +2343,7 @@ endmodule
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 }
 
@@ -3270,6 +3274,7 @@ fn native_device_executes_transition_assignments_without_fallback() {
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 }
 
@@ -3296,6 +3301,7 @@ fn native_device_executes_slew_assignments_without_fallback() {
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 }
 
@@ -3330,6 +3336,7 @@ fn native_device_executes_absdelay_assignments_without_fallback() {
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 
     device.set_time(1.25);
