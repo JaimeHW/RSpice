@@ -3496,10 +3496,11 @@ fn native_device_executes_logical_assignments() {
 fn native_device_preserves_logical_truthiness_boundaries() {
     let model = logical_truthiness_model();
     let cases = [
-        ("within-epsilon", 0.5e-15, 4.0),
-        ("at-epsilon", 1.0e-15, 0.0),
-        ("outside-epsilon", 2.0e-15, 3.0),
-        ("unordered", f64::NAN, 0.0),
+        ("zero", 0.0, 4.0),
+        ("tiny-nonzero", 0.5e-15, 3.0),
+        ("former-epsilon-boundary", 1.0e-15, 3.0),
+        ("positive-nonzero", 2.0e-15, 3.0),
+        ("unordered", f64::NAN, 3.0),
     ];
 
     for (name, time, expected_gain) in cases {
@@ -3526,10 +3527,11 @@ fn native_device_preserves_logical_truthiness_boundaries() {
 fn native_device_executes_ifelse_assignments() {
     let model = ifelse_assignment_model();
     let cases = [
-        ("within-epsilon", 0.5e-15, 3.0),
-        ("at-epsilon", 1.0e-15, 3.0),
-        ("outside-epsilon", 2.0e-15, 2.0),
-        ("unordered", f64::NAN, 3.0),
+        ("zero", 0.0, 3.0),
+        ("tiny-nonzero", 0.5e-15, 2.0),
+        ("former-epsilon-boundary", 1.0e-15, 2.0),
+        ("positive-nonzero", 2.0e-15, 2.0),
+        ("unordered", f64::NAN, 2.0),
     ];
 
     for (name, time, expected_gain) in cases {
