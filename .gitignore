@@ -44,4 +44,4 @@ __pycache__/
 .agent/
 .worktrees/
 /_site
-site/**/pkg/
+/_site-source/

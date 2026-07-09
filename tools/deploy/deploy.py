@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
-r"""Take committed site/ changes live on rspice.app - git only, no gh.
+r"""Deploy a client commit with the current RSpice-Site main - git only, no gh.
 
     python3 tools/deploy/deploy.py [--ref BRANCH] [--tag NAME] [--allow-dirty]
     # Windows:  py tools\deploy\deploy.py
 
-The deploy-site workflow triggers on a `site-v*` tag push, so shipping needs
-nothing but `git`: this pushes your branch and a new `site-vN` tag. GitHub
-Actions then builds (tools/deploy/build_site.py), gates, and force-pushes
-cf-pages, which Cloudflare Pages serves as production. The build stays in CI
-for a clean-room, reproducible result; nothing is built or published locally.
+The deploy-site workflow triggers on a `site-v*` tag push, so the normal path
+needs nothing but `git`: this pushes the selected client branch and a new
+`site-vN` tag. GitHub Actions checks out RSpice-Site main, records both exact
+commits, builds and gates both browser runtimes, and force-pushes cf-pages,
+which Cloudflare Pages serves as production. Use workflow_dispatch when an
+older or non-main site revision must be selected explicitly.
 
 It prints the Actions URL to watch the run; if you have the GitHub CLI you can
 stream it with `gh run watch`, but `gh` is never required.
 """
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
 import sys
+
+
+DEFAULT_SITE_REMOTE = "https://github.com/JaimeHW/RSpice-Site.git"
 
 
 def out(cmd):
@@ -46,6 +51,21 @@ def actions_url():
             if m else None)
 
 
+def site_main_revision():
+    """Resolve the immutable RSpice-Site main commit embedded in the deploy tag."""
+    remote = os.environ.get("RSPICE_SITE_REMOTE", DEFAULT_SITE_REMOTE)
+    try:
+        result = out(["git", "ls-remote", remote, "refs/heads/main"])
+    except subprocess.CalledProcessError as error:
+        sys.exit("failed to resolve RSpice-Site main from %s: %s" % (remote, error))
+    fields = result.split()
+    if len(fields) != 2 or fields[1] != "refs/heads/main" or not re.fullmatch(
+        r"[0-9a-f]{40}", fields[0]
+    ):
+        sys.exit("RSpice-Site remote did not return exactly one valid main commit")
+    return fields[0]
+
+
 def commit_for_ref(ref):
     """Resolve the deploy ref once so push/tag target the same commit."""
     try:
@@ -57,11 +77,6 @@ def commit_for_ref(ref):
 def validate_site_tag(tag):
     if not re.fullmatch(r"site-v[1-9][0-9]*", tag):
         sys.exit("deploy tag must match site-vN with N >= 1, got '%s'" % tag)
-
-
-def is_site_path(path):
-    norm = path.replace("\\", "/")
-    return norm == "site" or norm.startswith("site/")
 
 
 def main():
@@ -81,34 +96,26 @@ def main():
     branch = args.ref or out(["git", "rev-parse", "--abbrev-ref", "HEAD"])
     commit = commit_for_ref(branch)
 
-    # Clean-tree guard. Untracked scratch files outside site/ are fine; tracked
-    # edits and untracked site files are the deploy foot-guns.
+    # Clean-tree guard. CI builds the pushed commit, never this working tree.
+    # Untracked scratch files are not deploy inputs and are intentionally ignored.
     status = out(["git", "status", "--porcelain"])
     tracked_dirty = [ln for ln in status.splitlines() if not ln.startswith("??")]
-    untracked_site = [ln[3:] for ln in status.splitlines()
-                      if ln.startswith("?? ") and is_site_path(ln[3:])]
-    if (tracked_dirty or untracked_site) and not args.allow_dirty:
-        if tracked_dirty:
-            print("Uncommitted changes to tracked files - these will NOT be deployed\n"
-                  "(CI builds the pushed commit, not your working tree):\n", file=sys.stderr)
-            print("\n".join(tracked_dirty), file=sys.stderr)
-        if untracked_site:
-            if tracked_dirty:
-                print("", file=sys.stderr)
-            print("Untracked site files - these will NOT be deployed\n"
-                  "(CI builds the pushed commit, not your working tree):\n", file=sys.stderr)
-            print("\n".join(untracked_site), file=sys.stderr)
+    if tracked_dirty and not args.allow_dirty:
+        print("Uncommitted changes to tracked files - these will NOT be deployed\n"
+              "(CI builds the pushed commit, not your working tree):\n", file=sys.stderr)
+        print("\n".join(tracked_dirty), file=sys.stderr)
         sys.exit("\ncommit them first, or re-run with --allow-dirty")
 
     if branch != "main":
         if not args.allow_non_main:
             sys.exit("ref '%s' is not main; pass --allow-non-main only for an intentional rollback or hotfix deploy" % branch)
-        print("WARNING: deploying ref '%s' (not main). The site's source of truth "
-              "is main; this will publish %s's site/ to production." % (branch, branch))
+        print("WARNING: deploying client ref '%s' (not main). This will combine "
+              "that client commit with RSpice-Site main." % branch)
 
     tag = args.tag or next_site_tag()
     validate_site_tag(tag)
     short = out(["git", "rev-parse", "--short", commit])
+    site_sha = site_main_revision()
 
     print("-> pushing %s to origin..." % branch)
     subprocess.run(["git", "push", "origin", branch], check=True)
@@ -116,17 +123,21 @@ def main():
     print("-> tagging %s at %s and pushing it (this is what triggers the deploy)..."
           % (tag, short))
     subprocess.run(["git", "tag", "-a", tag, commit,
-                    "-m", "deploy site (%s %s)" % (branch, short)], check=True)
+                    "-m", "deploy site (%s %s)\n\nsite-source-sha: %s"
+                    % (branch, short, site_sha)], check=True)
     subprocess.run(["git", "push", "origin", tag], check=True)
 
     url = actions_url()
     print("\nDeploy triggered by tag %s (commit %s)." % (tag, short))
+    print("  pinned site:    " + site_sha)
     if url:
         print("  watch the run:  " + url)
         if shutil.which("gh"):
             print("  or stream it:   gh run watch  (gh detected, optional)")
     print("Cloudflare serves cf-pages within ~a minute after every gate passes.")
-    print("  verify live:    https://rspice.app/build.json   (source_sha should be %s)" % short)
+    print("  verify live:    https://rspice.app/build.json")
+    print("                  client_source_sha should begin with %s" % short)
+    print("                  site_source_sha identifies the assembled RSpice-Site commit")
 
 
 if __name__ == "__main__":

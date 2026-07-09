@@ -20,6 +20,46 @@ def assert_gate_fails(testcase: unittest.TestCase, func, *args) -> None:
 
 
 class BuildSiteGateTests(unittest.TestCase):
+    def test_site_source_boundary_rejects_client_runtime_routes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            site = Path(tmp) / "public"
+            (site / "assets").mkdir(parents=True)
+            (site / "index.html").write_text("index", encoding="utf-8")
+            (site / "404.html").write_text("missing", encoding="utf-8")
+
+            build_site.validate_site_source(site)
+            (site / "ide").mkdir()
+            assert_gate_fails(self, build_site.validate_site_source, site)
+
+    def test_assembly_overlays_only_canonical_client_shell_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            site = root / "site-source" / "public"
+            out = root / "assembled"
+            ui = root / "crates" / "rspice-ui" / "web"
+            play = root / "crates" / "rspice-wasm" / "web"
+            (site / "assets").mkdir(parents=True)
+            ui.mkdir(parents=True)
+            play.mkdir(parents=True)
+
+            (site / "index.html").write_text("marketing", encoding="utf-8")
+            (site / "404.html").write_text("missing", encoding="utf-8")
+            (site / "assets" / "site.css").write_text("body{}", encoding="utf-8")
+            (ui / "index.html").write_text("ide", encoding="utf-8")
+            (ui / "simulation-worker.js").write_text("ide worker", encoding="utf-8")
+            (ui / "README.md").write_text("do not deploy", encoding="utf-8")
+            (play / "index.html").write_text("play", encoding="utf-8")
+            (play / "engine-worker.js").write_text("play worker", encoding="utf-8")
+            (play / ".gitignore").write_text("pkg", encoding="utf-8")
+
+            build_site.assemble_site_sources(root, site, out)
+
+            self.assertEqual((out / "index.html").read_text(encoding="utf-8"), "marketing")
+            self.assertEqual((out / "ide" / "index.html").read_text(encoding="utf-8"), "ide")
+            self.assertEqual((out / "play" / "index.html").read_text(encoding="utf-8"), "play")
+            self.assertFalse((out / "ide" / "README.md").exists())
+            self.assertFalse((out / "play" / ".gitignore").exists())
+
     def test_headless_chrome_args_keep_webgpu_available(self) -> None:
         args = build_site.chrome_headless_args("chrome", "http://127.0.0.1:8000/ide/")
 

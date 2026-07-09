@@ -230,13 +230,23 @@ class CiConfigurationTests(unittest.TestCase):
 
     def test_ci_runs_browser_site_smoke_before_deploy(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
+        deploy_workflow = read_text(".github/workflows/deploy-site.yml")
         build_script = read_text("tools/deploy/build_site.py")
+        deploy_script = read_text("tools/deploy/deploy.py")
 
         self.assertIn("Browser site smoke (wasm)", workflow)
-        self.assertIn("python3 tools/deploy/build_site.py --out _site-ci", workflow)
+        self.assertIn("repository: JaimeHW/RSpice-Site", workflow)
+        self.assertIn(
+            "python3 tools/deploy/build_site.py --site-source _site-source/public --out _site-ci",
+            workflow,
+        )
         self.assertIn("wasm-bindgen-cli (pinned to Cargo.lock)", workflow)
         self.assertIn("site-smoke-bundle", workflow)
         self.assertIn("if-no-files-found: error", workflow)
+        self.assertIn("site-source-sha:", deploy_script)
+        self.assertIn('"git", "ls-remote"', deploy_script)
+        self.assertIn("deployment tag is missing a valid site-source-sha", deploy_workflow)
+        self.assertIn("steps.site-source.outputs.ref", deploy_workflow)
         self.assertIn('"tablet", 820, 1180', build_script)
         self.assertIn('"phone", 390, 844', build_script)
         self.assertIn("cargo\", \"build\", \"--locked\"", build_script)
@@ -301,24 +311,14 @@ class CiConfigurationTests(unittest.TestCase):
     def test_browser_surface_docs_distinguish_ide_and_playground(self) -> None:
         ui_readme = read_text("crates/rspice-ui/README.md")
         playground_readme = read_text("crates/rspice-wasm/web/README.md")
-        site_index = read_text("site/index.html")
+        deployment = read_text(".github/workflows/deploy-site.yml")
 
         self.assertNotIn("later milestone", playground_readme)
         self.assertNotIn("not this crate", ui_readme)
         self.assertIn("experimental browser IDE", ui_readme)
         self.assertIn("experimental browser IDE", playground_readme)
-        self.assertIn("rspice.app/play", site_index)
-
-    def test_site_mobile_copy_matches_experimental_support_matrix(self) -> None:
-        index = read_text("site/index.html")
-        download = read_text("site/download.html")
-
-        self.assertIn("Experimental tablet/mobile preview", index)
-        self.assertIn("repeatable device matrix", index)
-        self.assertNotIn("ipad &amp; android browsers", index)
-        self.assertNotIn("available today", download)
-        self.assertIn("web/source available", download)
-        self.assertIn("mobile browser preview", download)
+        self.assertIn("repository: JaimeHW/RSpice-Site", deployment)
+        self.assertIn("--site-source _site-source/public", deployment)
 
     def test_notice_includes_vendored_compact_model_attributions(self) -> None:
         notice = read_text("NOTICE")
@@ -370,47 +370,9 @@ class CiConfigurationTests(unittest.TestCase):
                     f"{path} is referenced by tracked code/docs but is not tracked",
                 )
 
-    def test_site_validation_copy_does_not_overclaim_release_data(self) -> None:
-        parity = read_text("site/parity.html")
-        changelog = read_text("site/changelog.html")
-
-        for page in (parity, changelog):
-            self.assertNotIn("Every release", page)
-
-        self.assertIn("pre-release validation snapshot", parity)
-        self.assertIn("static engineering snapshot", parity)
-        self.assertNotIn("sample data", parity)
-        self.assertNotIn("wired to CI", parity)
-
-        self.assertIn("Release candidates", changelog)
-        self.assertIn("Release targets and history", changelog)
-
-    def test_public_copy_uses_bounded_pre_release_claims(self) -> None:
-        index = read_text("site/index.html")
-        parity = read_text("site/parity.html")
-        download = read_text("site/download.html")
+    def test_veriloga_docs_do_not_overclaim_language_support(self) -> None:
         veriloga_lib = read_text("crates/rspice-veriloga/src/lib.rs")
 
-        public_pages = "\n".join([index, parity, download])
-        for overclaim in (
-            "111 / 113",
-            "111/113",
-            "2.4 M",
-            "< 1e-9 V",
-            "the same deck gives the same answer, every time",
-            "takes your foundry's .va decks, NDA and all",
-            "bring your foundry's .va decks",
-            "Cloud simulation runners",
-            "On-prem cloud runners",
-            "SLAs",
-            "escrow",
-            "rspice-1.0.0",
-        ):
-            self.assertNotIn(overclaim, public_pages)
-
-        self.assertIn("supported Verilog-A modules", index)
-        self.assertIn("documented build and thread settings", index)
-        self.assertIn("example manifest format", download)
         self.assertIn("supported analog subset", veriloga_lib)
         self.assertNotIn("full Verilog-A Language Reference Manual", veriloga_lib)
 
