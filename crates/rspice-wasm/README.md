@@ -7,9 +7,10 @@ a netlist and run DC operating-point, AC, and transient analyses entirely
 client-side. All numerical work happens in `rspice-core`; this crate only
 adapts inputs and serializes results across the JS boundary.
 
-This is what powers the "run it in your browser" demo on the project site:
-`site/play/index.html` and the local playground in [`web/`](web/) both load
-the same `pkg/rspice_wasm.js` module built from this crate.
+This is what powers the "run it in your browser" demo on the project site.
+The client-owned [`web/`](web/) shell is overlaid onto the standalone
+`RSpice-Site` static source during the verified deployment build and loads the
+`pkg/rspice_wasm.js` module built from this crate.
 
 ## Public API (the contract JavaScript sees)
 
@@ -83,9 +84,9 @@ uses one single-threaded engine instance rather than wasm threads.
 
 The crate has no standalone Rust test suite (`test = false`, `doctest = false`
 in `Cargo.toml`). Validation is exercised through the playground page and the
-deployed site demo for summary, DC operating-point, AC, and transient flows.
+assembled site demo for summary, DC operating-point, AC, and transient flows.
 The static browser contract is guarded by `tools/ci/test_wasm_playground.py`,
-which verifies that both playground pages route engine calls through
+which verifies that the canonical playground routes engine calls through
 `engine-worker.js`, that AC controls are present, and that the worker calls the
 `runAcAnalysis` export instead of importing synchronous solve functions on the
 main page. The engine logic itself is tested in `rspice-core`.

@@ -46,5 +46,5 @@ after engine changes. The wasm-bindgen CLI version must match the
   — expect meaningful size wins when the toolchain is added.
 - The bindings expose op/ac/tran only; `.meas`, sweeps, and noise come with
   the full app.
-- `tools/ci/test_wasm_playground.py` guards the worker contract for this page
-  and the deployed `site/play` copy.
+- `tools/ci/test_wasm_playground.py` guards this canonical worker contract;
+  the deployment build copies it into the assembled site's `/play/` route.

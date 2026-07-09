@@ -6,7 +6,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 IDE_DIRS = [
     ROOT / "crates" / "rspice-ui" / "web",
-    ROOT / "site" / "ide",
 ]
 RUNNER = ROOT / "crates" / "rspice-ui" / "src" / "simulation" / "runner" / "mod.rs"
 WASM_WORKER = (
@@ -20,15 +19,6 @@ APP = ROOT / "crates" / "rspice-ui" / "src" / "common" / "app" / "mod.rs"
 
 
 class IdeWorkerRoutingTests(unittest.TestCase):
-    def test_checked_in_ide_workers_stay_in_sync(self) -> None:
-        canonical = (IDE_DIRS[0] / "simulation-worker.js").read_text(encoding="utf-8")
-        deployed = (IDE_DIRS[1] / "simulation-worker.js").read_text(encoding="utf-8")
-        self.assertEqual(
-            deployed,
-            canonical,
-            "site/ide worker must stay byte-identical to crates/rspice-ui/web worker",
-        )
-
     def test_browser_ide_constructs_a_simulation_worker(self) -> None:
         for ide in IDE_DIRS:
             with self.subTest(ide=ide.relative_to(ROOT)):
