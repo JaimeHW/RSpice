@@ -59,8 +59,12 @@ pub struct ParamDef {
     /// Default expression when it does not fold to a constant (may
     /// reference previously declared parameters)
     pub default_expr: Option<IrExpr>,
+    pub is_integer: bool,
     pub min: Option<f64>,
     pub max: Option<f64>,
+    pub min_exclusive: bool,
+    pub max_exclusive: bool,
+    pub exclude: Vec<f64>,
 }
 
 /// Variable definition  
@@ -494,19 +498,22 @@ impl DeviceIR {
 
         // Build parameters
         for param in &module.parameters {
-            let (min, max) = param
+            let range = param
                 .range
-                .as_ref()
-                .map(|r| (r.min, r.max))
-                .unwrap_or((None, None));
+                .clone()
+                .unwrap_or_else(crate::types::ParameterRange::unrestricted);
 
             ir.parameters.push(ParamDef {
                 name: param.name.clone(),
                 aliases: Vec::new(),
                 default: param.default.unwrap_or(0.0),
                 default_expr: None,
-                min,
-                max,
+                is_integer: param.param_type == crate::ast::ParamType::Integer,
+                min: range.min,
+                max: range.max,
+                min_exclusive: range.min_exclusive,
+                max_exclusive: range.max_exclusive,
+                exclude: range.exclude,
             });
         }
 

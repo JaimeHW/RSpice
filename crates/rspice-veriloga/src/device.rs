@@ -32,7 +32,7 @@
 //! targeted audit before expanding that boundary.
 
 use crate::canonical_ir::CanonicalIrArtifact;
-use crate::codegen::{CompiledModel, Instruction, StampIndex};
+use crate::codegen::{CompiledModel, CompiledParameter, Instruction, StampIndex};
 #[cfg(feature = "native")]
 use crate::vm::terminal_pair_current_endpoints;
 use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmContext, VmError};
@@ -61,6 +61,61 @@ struct NativeEntryDependencies<'a> {
     prior_currents: &'a [usize],
     branch_unknowns: &'a [usize],
 }
+
+/// Invalid instance parameter value reported before it can enter a model.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParameterValueError {
+    NonFinite {
+        parameter: SmolStr,
+        value: f64,
+    },
+    NonInteger {
+        parameter: SmolStr,
+        value: f64,
+    },
+    OutOfRange {
+        parameter: SmolStr,
+        value: f64,
+        constraint: String,
+    },
+    Excluded {
+        parameter: SmolStr,
+        value: f64,
+    },
+}
+
+impl std::fmt::Display for ParameterValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonFinite { parameter, value } => {
+                write!(
+                    f,
+                    "parameter '{parameter}' requires a finite value, got {value}"
+                )
+            }
+            Self::NonInteger { parameter, value } => {
+                write!(
+                    f,
+                    "integer parameter '{parameter}' requires an exact integer, got {value}"
+                )
+            }
+            Self::OutOfRange {
+                parameter,
+                value,
+                constraint,
+            } => write!(
+                f,
+                "parameter '{parameter}' value {value} violates range {constraint}"
+            ),
+            Self::Excluded { parameter, value } => write!(
+                f,
+                "parameter '{parameter}' value {value} is explicitly excluded"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ParameterValueError {}
 
 #[cfg(feature = "native")]
 #[derive(Clone, PartialEq, Eq)]
@@ -573,6 +628,26 @@ impl VerilogADevice {
     /// aliasparam names resolve to their target parameter, so setting an
     /// alias is identical to setting the target directly.
     pub fn set_parameter(&mut self, name: &str, value: f64) -> bool {
+        match self.try_set_parameter(name, value) {
+            Ok(found) => found,
+            Err(error) => {
+                log::error!(
+                    "Verilog-A instance '{}' rejected parameter assignment: {}",
+                    self.name,
+                    error
+                );
+                false
+            }
+        }
+    }
+
+    /// Checked parameter assignment. `Ok(false)` means the name is not a
+    /// model parameter; malformed or constraint-violating values are errors.
+    pub fn try_set_parameter(
+        &mut self,
+        name: &str,
+        value: f64,
+    ) -> Result<bool, ParameterValueError> {
         // Verilog-A is case-sensitive but SPICE decks are not: prefer an
         // exact match (parameter, then alias), then accept a
         // case-insensitive one (industry netlists write PSP's TOXO as
@@ -597,28 +672,69 @@ impl VerilogADevice {
                     .iter()
                     .position(|p| p.aliases.iter().any(|a| a.eq_ignore_ascii_case(name)))
             });
-        let Some(i) = index else { return false };
+        let Some(i) = index else { return Ok(false) };
         let param = &self.model.parameters[i];
-
-        // Apply min/max clamping
-        let clamped = match (param.min, param.max) {
-            (Some(min), Some(max)) => value.clamp(min, max),
-            (Some(min), None) => value.max(min),
-            (None, Some(max)) => value.min(max),
-            (None, None) => value,
-        };
-        if (clamped - value).abs() > 0.0 {
-            log::warn!(
-                "Parameter '{}' of '{}' clamped from {} to {} (range bound)",
-                name,
-                self.name,
-                value,
-                clamped
-            );
-        }
-        self.context.set_param(i, clamped);
+        Self::validate_parameter_value(param, value)?;
+        self.context.set_param(i, value);
         self.context.mark_param_given(i);
-        true
+        Ok(true)
+    }
+
+    fn validate_parameter_value(
+        parameter: &CompiledParameter,
+        value: f64,
+    ) -> Result<(), ParameterValueError> {
+        if !value.is_finite() {
+            return Err(ParameterValueError::NonFinite {
+                parameter: parameter.name.clone(),
+                value,
+            });
+        }
+        if parameter.is_integer
+            && (value.fract() != 0.0 || value < f64::from(i32::MIN) || value > f64::from(i32::MAX))
+        {
+            return Err(ParameterValueError::NonInteger {
+                parameter: parameter.name.clone(),
+                value,
+            });
+        }
+
+        let below_min = parameter.min.is_some_and(|min| {
+            if parameter.min_exclusive {
+                value <= min
+            } else {
+                value < min
+            }
+        });
+        let above_max = parameter.max.is_some_and(|max| {
+            if parameter.max_exclusive {
+                value >= max
+            } else {
+                value > max
+            }
+        });
+        if below_min || above_max {
+            let left = if parameter.min_exclusive { '(' } else { '[' };
+            let right = if parameter.max_exclusive { ')' } else { ']' };
+            let min = parameter
+                .min
+                .map_or_else(|| "-inf".to_string(), |bound| bound.to_string());
+            let max = parameter
+                .max
+                .map_or_else(|| "inf".to_string(), |bound| bound.to_string());
+            return Err(ParameterValueError::OutOfRange {
+                parameter: parameter.name.clone(),
+                value,
+                constraint: format!("{left}{min}:{max}{right}"),
+            });
+        }
+        if parameter.exclude.contains(&value) {
+            return Err(ParameterValueError::Excluded {
+                parameter: parameter.name.clone(),
+                value,
+            });
+        }
+        Ok(())
     }
 
     /// Evaluate dependent parameter defaults for parameters the instance
@@ -661,29 +777,9 @@ impl VerilogADevice {
                 vm.execute(&default_program)?
             };
 
-            #[cfg(not(feature = "native"))]
-            {
-                let (min, max) = (self.model.parameters[i].min, self.model.parameters[i].max);
-                let clamped = match (min, max) {
-                    (Some(min), Some(max)) => value.clamp(min, max),
-                    (Some(min), None) => value.max(min),
-                    (None, Some(max)) => value.min(max),
-                    (None, None) => value,
-                };
-                self.context.set_param(i, clamped);
-            }
-
-            #[cfg(feature = "native")]
-            {
-                let (min, max) = (self.model.parameters[i].min, self.model.parameters[i].max);
-                let clamped = match (min, max) {
-                    (Some(min), Some(max)) => value.clamp(min, max),
-                    (Some(min), None) => value.max(min),
-                    (None, Some(max)) => value.min(max),
-                    (None, None) => value,
-                };
-                self.context.set_param(i, clamped);
-            }
+            Self::validate_parameter_value(&self.model.parameters[i], value)
+                .map_err(|error| VmError::ParameterValue(error.to_string()))?;
+            self.context.set_param(i, value);
         }
 
         // Topology guards depend on final parameter values.
@@ -2781,7 +2877,18 @@ impl DeviceBuilder {
         device.try_set_temperature(temperature)?;
 
         for (name, value) in params {
-            device.set_parameter(&name, value);
+            match device
+                .try_set_parameter(&name, value)
+                .map_err(|error| VmError::ParameterValue(error.to_string()))?
+            {
+                true => {}
+                false => {
+                    return Err(VmError::ParameterValue(format!(
+                        "unknown parameter '{name}' for model '{}'",
+                        device.model.name
+                    )));
+                }
+            }
         }
         device.try_resolve_parameter_defaults()?;
 

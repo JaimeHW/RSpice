@@ -120,8 +120,20 @@ pub struct CompiledParameter {
     /// Program computing the default from other parameters (evaluated in
     /// declaration order for parameters the instance did not set)
     pub default_program: Option<BytecodeProgram>,
+    /// Whether the declared parameter type is `integer`.
+    #[serde(default)]
+    pub is_integer: bool,
     pub min: Option<f64>,
     pub max: Option<f64>,
+    /// Whether equality with the lower bound is forbidden.
+    #[serde(default)]
+    pub min_exclusive: bool,
+    /// Whether equality with the upper bound is forbidden.
+    #[serde(default)]
+    pub max_exclusive: bool,
+    /// Explicitly excluded values.
+    #[serde(default)]
+    pub exclude: Vec<f64>,
 }
 
 /// Stamp program for a contribution

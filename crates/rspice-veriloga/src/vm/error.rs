@@ -5,6 +5,8 @@ pub enum VmError {
     InvalidInstruction(&'static str),
     /// Native JIT compilation failed while native execution was required.
     NativeJit(String),
+    /// Invalid model or instance parameter value.
+    ParameterValue(String),
     /// Runtime array index outside the declared bounds
     IndexOutOfBounds {
         index: i64,
@@ -19,6 +21,7 @@ impl std::fmt::Display for VmError {
             VmError::StackUnderflow(msg) => write!(f, "Stack underflow: {}", msg),
             VmError::InvalidInstruction(msg) => write!(f, "Invalid instruction: {}", msg),
             VmError::NativeJit(msg) => write!(f, "native JIT error: {}", msg),
+            VmError::ParameterValue(msg) => write!(f, "parameter value error: {msg}"),
             VmError::IndexOutOfBounds {
                 index,
                 lower,

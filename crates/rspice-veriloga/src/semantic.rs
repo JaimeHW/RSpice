@@ -448,6 +448,51 @@ impl SemanticAnalyzer {
                 param.default.as_ref().and_then(|e| self.eval_const(e))
             };
 
+            if param.param_type == ParamType::Integer
+                && let Some(default) = default
+                && (default.fract() != 0.0
+                    || default < f64::from(i32::MIN)
+                    || default > f64::from(i32::MAX))
+            {
+                self.record_error_at(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: "32-bit integer".into(),
+                        found: default.to_string(),
+                        context: format!("default of parameter '{}'", param.name),
+                    },
+                    param.span,
+                );
+            }
+
+            if let Some(declared_range) = &param.range {
+                if declared_range.bounds.len() > 1 {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "multiple parameter 'from' ranges are not yet supported".into(),
+                        ),
+                        declared_range.span,
+                    );
+                }
+                let dependent_constraint = declared_range.bounds.iter().any(|bound| {
+                    bound.lower.as_ref().is_some_and(|expression| {
+                        Self::references_identifiers(expression, &param_names)
+                    }) || bound.upper.as_ref().is_some_and(|expression| {
+                        Self::references_identifiers(expression, &param_names)
+                    })
+                }) || declared_range
+                    .exclude
+                    .iter()
+                    .any(|expression| Self::references_identifiers(expression, &param_names));
+                if dependent_constraint {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "parameter-dependent range constraints are not yet supported".into(),
+                        ),
+                        declared_range.span,
+                    );
+                }
+            }
+
             // Parse parameter range if present
             let range = param
                 .range

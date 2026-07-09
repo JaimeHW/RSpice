@@ -4121,11 +4121,24 @@ fn native_runtime_loop_condition_uses_exact_zero_truthiness() {
         .expect("native loop exits on +0.0 condition");
     assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
 
-    let mut nan = native_contract_try_new("LOOPTRUTH3", model, &[1, 0])
+    let nan_model = compile(
+        r#"
+`include "disciplines.vams"
+module loop_nan_truth_native(p, n);
+    inout p, n;
+    electrical p, n;
+    integer i;
+    analog begin
+        i = 0;
+        while (sqrt(V(p, n) - 2.0))
+            i = i + 1;
+        I(p, n) <+ i * V(p, n);
+    end
+endmodule
+"#,
+    );
+    let mut nan = native_contract_try_new("LOOPTRUTH3", nan_model, &[1, 0])
         .expect("loop truthiness model uses native JIT");
-    assert!(nan.set_parameter("gate", f64::NAN));
-    nan.try_resolve_parameter_defaults()
-        .expect("loop truthiness parameter refresh succeeds");
     nan.update_voltages(&[1.0]);
     let err = nan
         .try_evaluate()

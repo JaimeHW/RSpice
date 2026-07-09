@@ -214,8 +214,12 @@ impl CodeGenerator {
                     aliases: p.aliases.clone(),
                     default: p.default,
                     default_program,
+                    is_integer: p.is_integer,
                     min: p.min,
                     max: p.max,
+                    min_exclusive: p.min_exclusive,
+                    max_exclusive: p.max_exclusive,
+                    exclude: p.exclude.clone(),
                 })
             })
             .collect::<CompileResult<Vec<_>>>()?;
