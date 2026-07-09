@@ -1592,6 +1592,14 @@ mod tests {
             timer_event_bound: std::ptr::null_mut(),
             analysis_initial_step: 0,
             analysis_final_step: 0,
+            state_older: std::ptr::null(),
+            state_derivatives: std::ptr::null_mut(),
+            state_derivatives_prev: std::ptr::null(),
+            integration_derivative_scale: 0.0,
+            integration_previous_value_scale: 0.0,
+            integration_older_value_scale: 0.0,
+            integration_previous_derivative_scale: 0.0,
+            integration_active: 0,
         }
     }
 }

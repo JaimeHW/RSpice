@@ -637,7 +637,13 @@ impl Engine {
         // UIC has no t=0 solve, so its first candidate carries the initial flag
         // below instead.
         #[cfg(feature = "veriloga")]
-        circuit.prepare_veriloga_timepoint(0.0, 0.0, resume.is_none() && !uic_requested, false);
+        circuit.prepare_veriloga_timepoint(
+            0.0,
+            0.0,
+            &CompanionCoefficients::backward_euler(),
+            resume.is_none() && !uic_requested,
+            false,
+        );
         #[cfg(feature = "veriloga-builtins")]
         circuit
             .generated_veriloga_devices_mut()

@@ -893,6 +893,14 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         timer_event_bound: &mut context.timer_event_bound,
         analysis_initial_step: u8::from(context.analysis_initial_step),
         analysis_final_step: u8::from(context.analysis_final_step),
+        state_older: context.state_values_older.as_ptr(),
+        state_derivatives: context.state_derivatives.as_mut_ptr(),
+        state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
+        integration_derivative_scale: context.integration.derivative_scale,
+        integration_previous_value_scale: context.integration.previous_value_scale,
+        integration_older_value_scale: context.integration.older_value_scale,
+        integration_previous_derivative_scale: context.integration.previous_derivative_scale,
+        integration_active: u8::from(context.integration.active),
     }
 }
 

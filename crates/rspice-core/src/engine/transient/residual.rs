@@ -214,6 +214,7 @@ impl Engine {
                 circuit.prepare_veriloga_timepoint(
                     time,
                     dt,
+                    ctx.coeff,
                     ctx.analysis_initial_step,
                     ctx.analysis_final_step,
                 );

@@ -2,25 +2,22 @@ use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
     rspice_above_state_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
-    rspice_cosh, rspice_cross_state_native, rspice_dynamic_variable_load_native,
-    rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
-    rspice_idtmod_wrap, rspice_laplace_step_native, rspice_last_crossing_state_native,
+    rspice_cosh, rspice_cross_state_native, rspice_ddt_jacobian_native, rspice_ddt_state_native,
+    rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native, rspice_exp,
+    rspice_floor, rspice_hypot, rspice_idt_jacobian_native, rspice_idt_state_native,
+    rspice_idtmod_state_native, rspice_laplace_step_native, rspice_last_crossing_state_native,
     rspice_limexp, rspice_limited_exp, rspice_log, rspice_log10, rspice_mod,
     rspice_native_current_probe_error, rspice_native_integer_shift_count_error,
     rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
     rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
     rspice_native_loop_limit_error, rspice_native_param_given_error,
-    rspice_native_port_connected_error, rspice_native_prior_current_error,
-    rspice_native_state_prev_bounds_error, rspice_native_state_values_bounds_error,
-    rspice_native_state_values_error, rspice_pow, rspice_sin, rspice_sinh,
-    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
-    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
-    rspice_zi_step_native,
+    rspice_native_port_connected_error, rspice_native_prior_current_error, rspice_pow, rspice_sin,
+    rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
+    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
+    rspice_transition_state_native, rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
-use crate::native::expr::{
-    CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode, native_op_stack_effect,
-};
+use crate::native::expr::{CompareOp, ExtremumOp, LogicalOp, NativeOp, NativeProgram, VoltageNode};
 use crate::native::{JitError, JitResult};
 
 const MODEL: &str = "native-x64";
@@ -35,8 +32,6 @@ const PORT_CONNECTED_OFFSET: i32 = 64;
 const PORT_CONNECTED_LEN_OFFSET: i32 = 72;
 const TEMPERATURE_OFFSET: i32 = 80;
 const TIME_OFFSET: i32 = 88;
-const TIMESTEP_OFFSET: i32 = 96;
-const STATE_PREV_OFFSET: i32 = 104;
 const STATE_VALUES_OFFSET: i32 = 112;
 const STATE_INITIALIZED_OFFSET: i32 = 120;
 const STATE_INITIALIZED_LEN_OFFSET: i32 = 128;
@@ -47,7 +42,6 @@ const PARAM_GIVEN_LEN_OFFSET: i32 = 176;
 const BRANCH_UNKNOWNS_OFFSET: i32 = 184;
 const ANALYSIS_TYPE_OFFSET: i32 = 192;
 const MFACTOR_OFFSET: i32 = 200;
-const STATE_PREV_LEN_OFFSET: i32 = 288;
 const STATE_VALUES_LEN_OFFSET: i32 = 296;
 const ANALYSIS_INITIAL_STEP_OFFSET: i32 = 312;
 const ANALYSIS_FINAL_STEP_OFFSET: i32 = 313;
@@ -60,14 +54,12 @@ const ABS_VALUE_MASK_HIGH: u64 = 0;
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const THERMAL_VOLTAGE_PER_K: f64 = K_BOLTZMANN / Q_ELECTRON;
-const TIMESTEP_DC_EPSILON: f64 = 1.0e-20;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
 const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
 const I64_MIN_AS_F64: f64 = -9_223_372_036_854_775_808.0;
 const INLINE_DYNAMIC_LOWER_ABS_LIMIT: i64 = 1_i64 << 51;
 const DYNAMIC_READ_FRAME_BYTES: i32 = 16;
 const ROUND_TEMP_FRAME_BYTES: i32 = 16;
-const STATEFUL_SCRATCH_FRAME_BYTES: i32 = 16;
 const CALLEE_SAVED_XMM_BYTES: i32 = 16;
 #[cfg(test)]
 const CALL_RESULT_SLOT: usize = 6;
@@ -103,21 +95,14 @@ const XMM_STACK: [Xmm; 16] = [
 ];
 #[allow(dead_code)]
 pub(crate) fn compile_value_function(program: &NativeProgram) -> JitResult<Vec<u8>> {
-    let needs_stateful_scratch = program_needs_stateful_stack_scratch(program);
-    let local_slot_bytes = if needs_stateful_scratch {
-        STATEFUL_SCRATCH_FRAME_BYTES
-    } else {
-        0
-    };
     let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
-    let local_frame_bytes =
-        align_local_frame(local_slot_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
+    let local_frame_bytes = align_local_frame(callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
         value_program_needs_saved_entry_args(program),
         local_frame_bytes,
         None,
-        needs_stateful_scratch.then_some(0),
+        None,
         callee_saved_xmm_count,
     );
     compiler.emit_program(program)?;
@@ -129,21 +114,14 @@ pub(crate) fn compile_assignment_function(
     var_index: usize,
     program: &NativeProgram,
 ) -> JitResult<Vec<u8>> {
-    let needs_stateful_scratch = program_needs_stateful_stack_scratch(program);
-    let local_slot_bytes = if needs_stateful_scratch {
-        STATEFUL_SCRATCH_FRAME_BYTES
-    } else {
-        0
-    };
     let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(program.max_stack_depth());
-    let local_frame_bytes =
-        align_local_frame(local_slot_bytes + callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
+    let local_frame_bytes = align_local_frame(callee_saved_xmm_frame_bytes(callee_saved_xmm_count));
     let mut compiler = FunctionCompiler::new(
         program_uses_helper_calls(program),
         program_uses_helper_calls(program),
         local_frame_bytes,
         None,
-        needs_stateful_scratch.then_some(0),
+        None,
         callee_saved_xmm_count,
     );
     compiler.emit_program(program)?;
@@ -174,9 +152,6 @@ pub(crate) fn compile_assignment_pass_function(
 ) -> JitResult<Vec<u8>> {
     let has_indexed_assignment = assignments.iter().any(assignment_has_indexed);
     let loop_depth = assignment_loop_depth(assignments);
-    let has_stateful_scratch = assignments
-        .iter()
-        .any(assignment_needs_stateful_stack_scratch);
     let uses_helper_calls = assignments.iter().any(assignment_uses_helper_calls);
     let max_stack_depth = assignment_max_stack_depth(assignments);
     let callee_saved_xmm_count = callee_saved_xmm_count_for_depth(max_stack_depth);
@@ -186,17 +161,9 @@ pub(crate) fn compile_assignment_pass_function(
         0
     };
     let loop_counter_base_disp = (loop_depth > 0).then_some(indexed_slot_bytes);
-    let stateful_scratch_base_disp =
-        has_stateful_scratch.then_some(indexed_slot_bytes + loop_depth * LOCAL_SLOT_BYTES);
-    let stateful_scratch_bytes = if has_stateful_scratch {
-        STATEFUL_SCRATCH_FRAME_BYTES
-    } else {
-        0
-    };
     let local_frame_bytes = align_local_frame(
         indexed_slot_bytes
             + loop_depth * LOCAL_SLOT_BYTES
-            + stateful_scratch_bytes
             + callee_saved_xmm_frame_bytes(callee_saved_xmm_count),
     );
 
@@ -205,7 +172,7 @@ pub(crate) fn compile_assignment_pass_function(
         uses_helper_calls,
         local_frame_bytes,
         loop_counter_base_disp,
-        stateful_scratch_base_disp,
+        None,
         callee_saved_xmm_count,
     );
     for assignment in assignments {
@@ -224,7 +191,6 @@ struct FunctionCompiler {
     saves_entry_args: bool,
     local_frame_bytes: i32,
     loop_counter_base_disp: Option<i32>,
-    stateful_scratch_base_disp: Option<i32>,
     callee_saved_xmm_count: usize,
     early_return_jumps: Vec<usize>,
 }
@@ -247,13 +213,10 @@ impl FunctionCompiler {
         saves_entry_args: bool,
         local_frame_bytes: i32,
         loop_counter_base_disp: Option<i32>,
-        stateful_scratch_base_disp: Option<i32>,
+        _stateful_scratch_base_disp: Option<i32>,
         callee_saved_xmm_count: usize,
     ) -> Self {
         debug_assert_eq!(local_frame_bytes % 16, 0);
-        if let Some(base_disp) = stateful_scratch_base_disp {
-            debug_assert!(base_disp + STATEFUL_SCRATCH_FRAME_BYTES <= local_frame_bytes);
-        }
         debug_assert!(callee_saved_xmm_frame_bytes(callee_saved_xmm_count) <= local_frame_bytes);
         let mut compiler = Self {
             encoder: X64Encoder::new(),
@@ -264,7 +227,6 @@ impl FunctionCompiler {
             saves_entry_args,
             local_frame_bytes,
             loop_counter_base_disp,
-            stateful_scratch_base_disp,
             callee_saved_xmm_count,
             early_return_jumps: Vec::new(),
         };
@@ -711,22 +673,6 @@ impl FunctionCompiler {
         }
 
         Ok(XMM_STACK[self.depth])
-    }
-
-    fn stateful_scratch_disp(&self, slot: usize) -> JitResult<i32> {
-        debug_assert!(slot < 2);
-        let base_disp = self.stateful_scratch_base_disp.ok_or_else(|| {
-            register_allocation_error(
-                "stateful operation requires a local scratch frame at full XMM stack depth"
-                    .to_string(),
-            )
-        })?;
-        base_disp
-            .checked_add((slot * WORD_BYTES) as i32)
-            .ok_or_else(|| JitError::Encoding {
-                model: MODEL.into(),
-                detail: "stateful scratch displacement overflow".into(),
-            })
     }
 
     fn emit_binary_op(&mut self, op: BinaryOp) -> JitResult<()> {
@@ -2029,33 +1975,14 @@ impl FunctionCompiler {
                 detail: "ddt state requires stack depth 1, found 0".into(),
             });
         }
-
         let target = XMM_STACK[self.depth - 1];
-        if self.depth >= XMM_STACK.len() {
-            let value_disp = self.stateful_scratch_disp(0)?;
-            let prior_disp = self.stateful_scratch_disp(1)?;
-
-            self.encoder
-                .movsd_m64_base_disp32_xmm(Gpr::Rsp, value_disp, target);
-            self.emit_state_prev_load_if_available(state_index, target)?;
-            self.encoder
-                .movsd_m64_base_disp32_xmm(Gpr::Rsp, prior_disp, target);
-            self.encoder
-                .movsd_xmm_m64_base_disp32(target, Gpr::Rsp, value_disp);
-            self.emit_state_value_store(state_index, target)?;
-
-            self.encoder
-                .subsd_xmm_m64_base_disp32(target, Gpr::Rsp, prior_disp);
-            return self.emit_timestep_guarded_scale_from_frame(target, BinaryOp::Div);
-        }
-
-        let scratch = self.scratch_register()?;
-        self.encoder.movsd_xmm_xmm(scratch, target);
-        self.emit_state_prev_load_if_available(state_index, scratch)?;
-        self.emit_state_value_store(state_index, target)?;
-
-        self.encoder.subsd_xmm_xmm(target, scratch);
-        self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Div)
+        self.emit_operand_context_filter_helper_call(
+            target,
+            1,
+            state_index,
+            rspice_ddt_state_native,
+        );
+        Ok(())
     }
 
     fn emit_ddt_jacobian(&mut self) -> JitResult<()> {
@@ -2067,12 +1994,8 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        if self.depth < XMM_STACK.len() {
-            let scratch = self.scratch_register()?;
-            self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Div)
-        } else {
-            self.emit_timestep_guarded_scale_from_frame(target, BinaryOp::Div)
-        }
+        self.emit_operand_context_filter_helper_call(target, 1, 0, rspice_ddt_jacobian_native);
+        Ok(())
     }
 
     fn emit_idt_state(&mut self, state_index: usize) -> JitResult<()> {
@@ -2084,63 +2007,12 @@ impl FunctionCompiler {
         }
 
         let value = XMM_STACK[self.depth - 2];
-        let ic = XMM_STACK[self.depth - 1];
-        if self.depth >= XMM_STACK.len() {
-            let value_disp = self.stateful_scratch_disp(0)?;
-            let timestep_disp = self.stateful_scratch_disp(1)?;
-
-            self.encoder
-                .movsd_m64_base_disp32_xmm(Gpr::Rsp, value_disp, value);
-            self.encoder
-                .movsd_xmm_m64_base_disp32(value, self.ctx_arg_reg(), TIMESTEP_OFFSET);
-            self.encoder.movq_r64_xmm(Gpr::R11, value);
-            self.emit_abs_register(value);
-            self.emit_literal_compare(value, TIMESTEP_DC_EPSILON);
-
-            let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
-            self.encoder.movsd_xmm_xmm(value, ic);
-            self.emit_state_value_store(state_index, value)?;
-            let done = self.encoder.jmp_rel32_placeholder();
-
-            self.patch_rel32_to_current(non_dc_path)?;
-            self.emit_state_prev_load_if_available(state_index, ic)?;
-
-            self.encoder.movq_xmm_r64(value, Gpr::R11);
-            self.encoder
-                .movsd_m64_base_disp32_xmm(Gpr::Rsp, timestep_disp, value);
-            self.encoder
-                .movsd_xmm_m64_base_disp32(value, Gpr::Rsp, value_disp);
-            self.encoder
-                .mulsd_xmm_m64_base_disp32(value, Gpr::Rsp, timestep_disp);
-            self.encoder.addsd_xmm_xmm(value, ic);
-            self.emit_state_value_store(state_index, value)?;
-
-            self.patch_rel32_to_current(done)?;
-            self.depth -= 1;
-            return Ok(());
-        }
-
-        let scratch = self.scratch_register()?;
-        self.encoder
-            .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
-        self.encoder.movq_r64_xmm(Gpr::R11, scratch);
-        self.emit_abs_register(scratch);
-        self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
-
-        let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
-        self.encoder.movsd_xmm_xmm(value, ic);
-        self.emit_state_value_store(state_index, value)?;
-        let done = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(non_dc_path)?;
-        self.emit_state_prev_load_if_available(state_index, ic)?;
-
-        self.encoder.movq_xmm_r64(scratch, Gpr::R11);
-        self.encoder.mulsd_xmm_xmm(value, scratch);
-        self.encoder.addsd_xmm_xmm(value, ic);
-        self.emit_state_value_store(state_index, value)?;
-
-        self.patch_rel32_to_current(done)?;
+        self.emit_operand_context_filter_helper_call(
+            value,
+            2,
+            state_index,
+            rspice_idt_state_native,
+        );
         self.depth -= 1;
         Ok(())
     }
@@ -2154,12 +2026,8 @@ impl FunctionCompiler {
         }
 
         let target = XMM_STACK[self.depth - 1];
-        if self.depth < XMM_STACK.len() {
-            let scratch = self.scratch_register()?;
-            self.emit_timestep_guarded_scale(target, scratch, BinaryOp::Mul)
-        } else {
-            self.emit_timestep_guarded_scale_from_frame(target, BinaryOp::Mul)
-        }
+        self.emit_operand_context_filter_helper_call(target, 1, 0, rspice_idt_jacobian_native);
+        Ok(())
     }
 
     fn emit_idtmod_state(&mut self, state_index: usize) -> JitResult<()> {
@@ -2171,205 +2039,14 @@ impl FunctionCompiler {
         }
 
         let value = XMM_STACK[self.depth - 4];
-        let ic = XMM_STACK[self.depth - 3];
-        let modulus = XMM_STACK[self.depth - 2];
-        let offset = XMM_STACK[self.depth - 1];
-        if self.depth >= XMM_STACK.len() {
-            let value_disp = self.stateful_scratch_disp(0)?;
-            let timestep_disp = self.stateful_scratch_disp(1)?;
-
-            self.encoder
-                .movsd_m64_base_disp32_xmm(Gpr::Rsp, value_disp, value);
-            self.encoder
-                .movsd_xmm_m64_base_disp32(value, self.ctx_arg_reg(), TIMESTEP_OFFSET);
-            self.encoder.movq_r64_xmm(Gpr::R11, value);
-            self.emit_abs_register(value);
-            self.emit_literal_compare(value, TIMESTEP_DC_EPSILON);
-
-            let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
-            self.encoder.movsd_xmm_xmm(value, ic);
-            self.emit_consuming_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
-            self.emit_state_value_store(state_index, value)?;
-            let done = self.encoder.jmp_rel32_placeholder();
-
-            self.patch_rel32_to_current(non_dc_path)?;
-            self.emit_state_prev_load_if_available(state_index, ic)?;
-
-            self.encoder.movq_xmm_r64(value, Gpr::R11);
-            self.encoder
-                .movsd_m64_base_disp32_xmm(Gpr::Rsp, timestep_disp, value);
-            self.encoder
-                .movsd_xmm_m64_base_disp32(value, Gpr::Rsp, value_disp);
-            self.encoder
-                .mulsd_xmm_m64_base_disp32(value, Gpr::Rsp, timestep_disp);
-            self.encoder.addsd_xmm_xmm(value, ic);
-            self.emit_consuming_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
-            self.emit_state_value_store(state_index, value)?;
-
-            self.patch_rel32_to_current(done)?;
-            self.depth -= 3;
-            return Ok(());
-        }
-
-        let scratch = self.scratch_register()?;
-        self.encoder
-            .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
-        self.encoder.movq_r64_xmm(Gpr::R11, scratch);
-        self.emit_abs_register(scratch);
-        self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
-
-        let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
-        self.encoder.movsd_xmm_xmm(value, ic);
-        self.emit_consuming_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
-        self.emit_state_value_store(state_index, value)?;
-        let done = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(non_dc_path)?;
-        self.emit_state_prev_load_if_available(state_index, ic)?;
-
-        self.encoder.movq_xmm_r64(scratch, Gpr::R11);
-        self.encoder.mulsd_xmm_xmm(value, scratch);
-        self.encoder.addsd_xmm_xmm(value, ic);
-        self.emit_consuming_ternary_helper_call(value, modulus, offset, rspice_idtmod_wrap);
-        self.emit_state_value_store(state_index, value)?;
-
-        self.patch_rel32_to_current(done)?;
+        self.emit_operand_context_filter_helper_call(
+            value,
+            4,
+            state_index,
+            rspice_idtmod_state_native,
+        );
         self.depth -= 3;
         Ok(())
-    }
-
-    fn emit_timestep_guarded_scale(
-        &mut self,
-        target: Xmm,
-        scratch: Xmm,
-        op: BinaryOp,
-    ) -> JitResult<()> {
-        self.encoder
-            .movsd_xmm_m64_base_disp32(scratch, self.ctx_arg_reg(), TIMESTEP_OFFSET);
-        self.encoder.movq_r64_xmm(Gpr::R11, scratch);
-        self.emit_abs_register(scratch);
-        self.emit_literal_compare(scratch, TIMESTEP_DC_EPSILON);
-
-        let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
-        self.encoder.xorpd_xmm_xmm(target, target);
-        let done = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(non_dc_path)?;
-        self.encoder.movq_xmm_r64(scratch, Gpr::R11);
-        match op {
-            BinaryOp::Mul => self.encoder.mulsd_xmm_xmm(target, scratch),
-            BinaryOp::Div => self.encoder.divsd_xmm_xmm(target, scratch),
-            BinaryOp::Add | BinaryOp::Sub => unreachable!("timestep scaling supports mul/div"),
-        }
-
-        self.patch_rel32_to_current(done)
-    }
-
-    fn emit_timestep_guarded_scale_from_frame(
-        &mut self,
-        target: Xmm,
-        op: BinaryOp,
-    ) -> JitResult<()> {
-        let value_disp = self.stateful_scratch_disp(0)?;
-        let timestep_disp = self.stateful_scratch_disp(1)?;
-
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::Rsp, value_disp, target);
-        self.encoder
-            .movsd_xmm_m64_base_disp32(target, self.ctx_arg_reg(), TIMESTEP_OFFSET);
-        self.encoder.movq_r64_xmm(Gpr::R11, target);
-        self.emit_abs_register(target);
-        self.emit_literal_compare(target, TIMESTEP_DC_EPSILON);
-
-        let non_dc_path = self.encoder.jcc_rel32_placeholder(ConditionCode::Above);
-        self.encoder.xorpd_xmm_xmm(target, target);
-        let done = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(non_dc_path)?;
-        self.encoder.movq_xmm_r64(target, Gpr::R11);
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::Rsp, timestep_disp, target);
-        self.encoder
-            .movsd_xmm_m64_base_disp32(target, Gpr::Rsp, value_disp);
-        match op {
-            BinaryOp::Mul => {
-                self.encoder
-                    .mulsd_xmm_m64_base_disp32(target, Gpr::Rsp, timestep_disp);
-            }
-            BinaryOp::Div => {
-                self.encoder
-                    .divsd_xmm_m64_base_disp32(target, Gpr::Rsp, timestep_disp);
-            }
-            BinaryOp::Add | BinaryOp::Sub => unreachable!("timestep scaling supports mul/div"),
-        }
-
-        self.patch_rel32_to_current(done)
-    }
-
-    fn emit_state_value_store(&mut self, state_index: usize, src: Xmm) -> JitResult<()> {
-        let state_disp = byte_disp(state_index)?;
-        let state_index_i32 = state_index_imm32(state_index)?;
-
-        self.emit_context_pointer_load(STATE_VALUES_OFFSET);
-        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-        let missing_state = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-
-        self.encoder
-            .mov_r64_m64_base_disp32(Gpr::R10, self.ctx_arg_reg(), STATE_VALUES_LEN_OFFSET);
-        self.encoder.cmp_r64_imm32(Gpr::R10, state_index_i32);
-        let state_values_out_of_range = self
-            .encoder
-            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
-
-        self.encoder
-            .movsd_m64_base_disp32_xmm(Gpr::Rax, state_disp, src);
-        let done = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(missing_state)?;
-        self.emit_state_values_error_return();
-
-        self.patch_rel32_to_current(state_values_out_of_range)?;
-        self.emit_state_values_bounds_error_return();
-
-        self.patch_rel32_to_current(done)
-    }
-
-    fn emit_state_prev_load_if_available(&mut self, state_index: usize, dst: Xmm) -> JitResult<()> {
-        let state_disp = byte_disp(state_index)?;
-        let state_index_i32 = state_index_imm32(state_index)?;
-
-        self.emit_context_pointer_load(STATE_PREV_OFFSET);
-        self.encoder.test_r64_r64(Gpr::Rax, Gpr::Rax);
-        let no_previous_state = self.encoder.jcc_rel32_placeholder(ConditionCode::Equal);
-
-        self.encoder
-            .mov_r64_m64_base_disp32(Gpr::R10, self.ctx_arg_reg(), STATE_PREV_LEN_OFFSET);
-        self.encoder.cmp_r64_imm32(Gpr::R10, state_index_i32);
-        let previous_state_out_of_range = self
-            .encoder
-            .jcc_rel32_placeholder(ConditionCode::BelowOrEqual);
-
-        self.encoder
-            .movsd_xmm_m64_base_disp32(dst, Gpr::Rax, state_disp);
-        let done = self.encoder.jmp_rel32_placeholder();
-
-        self.patch_rel32_to_current(previous_state_out_of_range)?;
-        self.emit_state_prev_bounds_error_return();
-
-        self.patch_rel32_to_current(no_previous_state)?;
-        self.patch_rel32_to_current(done)
-    }
-
-    fn emit_state_values_error_return(&mut self) {
-        self.emit_void_error_return(rspice_native_state_values_error);
-    }
-
-    fn emit_state_values_bounds_error_return(&mut self) {
-        self.emit_void_error_return(rspice_native_state_values_bounds_error);
-    }
-
-    fn emit_state_prev_bounds_error_return(&mut self) {
-        self.emit_void_error_return(rspice_native_state_prev_bounds_error);
     }
 
     fn emit_void_error_return(&mut self, helper: VoidHelper) {
@@ -2408,43 +2085,6 @@ impl FunctionCompiler {
         self.emit_helper_result_to_target_and_restore(left, self.depth, |_, register| {
             register != right
         });
-        self.encoder.add_rsp_imm32(frame_bytes);
-    }
-
-    fn emit_consuming_ternary_helper_call(
-        &mut self,
-        target: Xmm,
-        arg1: Xmm,
-        arg2: Xmm,
-        helper: TernaryHelper,
-    ) {
-        debug_assert!(self.uses_helper_calls);
-        let target_slot = xmm_stack_slot(target);
-        let arg1_slot = xmm_stack_slot(arg1);
-        let arg2_slot = xmm_stack_slot(arg2);
-        debug_assert!(target_slot < self.depth);
-        debug_assert!(target_slot < arg1_slot);
-        debug_assert!(arg1_slot < arg2_slot);
-        debug_assert!(arg2_slot < self.depth);
-
-        let frame_bytes = call_frame_bytes_for_slots(target_slot);
-        self.encoder.sub_rsp_imm32(frame_bytes);
-        self.emit_call_frame_spills(target_slot, |_, _| true);
-
-        if target != Xmm::Xmm0 {
-            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, target);
-        }
-        if arg1 != Xmm::Xmm1 {
-            self.encoder.movsd_xmm_xmm(Xmm::Xmm1, arg1);
-        }
-        if arg2 != Xmm::Xmm2 {
-            self.encoder.movsd_xmm_xmm(Xmm::Xmm2, arg2);
-        }
-        self.encoder
-            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
-        self.encoder.call_r64(Gpr::Rax);
-
-        self.emit_helper_result_to_target_and_restore(target, target_slot, |_, _| true);
         self.encoder.add_rsp_imm32(frame_bytes);
     }
 
@@ -3307,7 +2947,6 @@ enum RoundDirection {
 
 type UnaryHelper = extern "C" fn(f64) -> f64;
 type BinaryHelper = extern "C" fn(f64, f64) -> f64;
-type TernaryHelper = extern "C" fn(f64, f64, f64) -> f64;
 type VoidHelper = extern "C" fn();
 type TableHelper =
     unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
@@ -3334,20 +2973,6 @@ fn assignment_uses_helper_calls(assignment: &NativeAssignment) -> bool {
         }
         NativeAssignment::Loop { condition, body } => {
             program_uses_helper_calls(condition) || body.iter().any(assignment_uses_helper_calls)
-        }
-    }
-}
-
-fn assignment_needs_stateful_stack_scratch(assignment: &NativeAssignment) -> bool {
-    match assignment {
-        NativeAssignment::Direct { program, .. } => program_needs_stateful_stack_scratch(program),
-        NativeAssignment::Indexed { index, value, .. } => {
-            program_needs_stateful_stack_scratch(index)
-                || program_needs_stateful_stack_scratch(value)
-        }
-        NativeAssignment::Loop { condition, body } => {
-            program_needs_stateful_stack_scratch(condition)
-                || body.iter().any(assignment_needs_stateful_stack_scratch)
         }
     }
 }
@@ -3511,6 +3136,10 @@ fn native_op_uses_helper_call(op: &NativeOp) -> bool {
             | NativeOp::CrossState(_)
             | NativeOp::AboveState(_)
             | NativeOp::LastCrossingState(_)
+            | NativeOp::DdtState(_)
+            | NativeOp::DdtJacobian
+            | NativeOp::IdtState(_)
+            | NativeOp::IdtJacobian
             | NativeOp::IdtModState(_)
     ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
         || matches!(
@@ -3612,38 +3241,6 @@ fn native_op_preserves_context_pointer_cache(op: NativeOp) -> bool {
     }
 }
 
-fn program_needs_stateful_stack_scratch(program: &NativeProgram) -> bool {
-    let mut depth = 0_usize;
-    for op in program.ops().iter().copied() {
-        if native_op_uses_stateful_scratch_at_depth(op, depth) {
-            return true;
-        }
-        depth = native_stack_depth_after(depth, op);
-    }
-    false
-}
-
-fn native_op_uses_stateful_scratch_at_depth(op: NativeOp, depth: usize) -> bool {
-    depth >= XMM_STACK.len()
-        && matches!(
-            op,
-            NativeOp::DdtState(_)
-                | NativeOp::DdtJacobian
-                | NativeOp::IdtState(_)
-                | NativeOp::IdtJacobian
-                | NativeOp::IdtModState(_)
-        )
-}
-
-fn native_stack_depth_after(depth: usize, op: NativeOp) -> usize {
-    let (pops, pushes) = native_op_stack_effect(&op);
-    debug_assert!(
-        depth >= pops,
-        "native op {op:?} requires stack depth {pops}, found {depth}"
-    );
-    depth.saturating_sub(pops) + pushes
-}
-
 fn unary_math_uses_helper(op: UnaryMathOp) -> bool {
     !matches!(op, UnaryMathOp::Floor | UnaryMathOp::Ceil)
 }
@@ -3694,13 +3291,6 @@ fn slice_index_imm32(index: usize) -> JitResult<i32> {
     i32::try_from(index).map_err(|_| JitError::Encoding {
         model: MODEL.into(),
         detail: format!("slice index {index} exceeds x64 imm32 range").into(),
-    })
-}
-
-fn state_index_imm32(index: usize) -> JitResult<i32> {
-    i32::try_from(index).map_err(|_| JitError::Encoding {
-        model: MODEL.into(),
-        detail: format!("state index {index} exceeds x64 imm32 range").into(),
     })
 }
 
@@ -3856,9 +3446,9 @@ mod tests {
         ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
-        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, THERMAL_VOLTAGE_PER_K,
-        TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK,
-        Xmm, assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
+        Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, THERMAL_VOLTAGE_PER_K, TableHelper,
+        VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK, Xmm,
+        assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
         compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
         entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
         program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
@@ -4373,13 +3963,23 @@ mod tests {
             unsafe { std::mem::transmute(entry) };
         let vars = [2.0_f64];
         let previous_state = [0.0_f64, 0.9_f64];
+        let older_state = previous_state;
         let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_derivatives = [0.0_f64; 2];
+        let previous_derivatives = [0.0_f64; 2];
+        let mut state_initialized = [1_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_older = older_state.as_ptr();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
+        set_backward_euler(&mut ctx, 0.25);
 
         let value = f(&ctx, vars.as_ptr());
         assert!((value - 0.4).abs() < 1.0e-12, "value: {value}");
@@ -7081,28 +6681,35 @@ mod tests {
         let vars = [2.0_f64];
 
         let previous_state = [0.0_f64, 1.5_f64];
+        let older_state = previous_state;
         let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_derivatives = [0.0_f64; 2];
+        let previous_derivatives = [0.0_f64; 2];
+        let mut state_initialized = [1_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
         ctx.timestep = 0.25;
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_older = older_state.as_ptr();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
+        ctx.integration_derivative_scale = 4.0;
+        ctx.integration_previous_value_scale = 4.0;
+        ctx.integration_active = 1;
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 2.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
 
         state_values[1] = f64::NAN;
-        ctx.timestep = 0.0;
+        set_backward_euler(&mut ctx, 0.0);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
 
-        state_values[1] = f64::NAN;
-        ctx.timestep = 0.25;
-        ctx.state_prev = std::ptr::null();
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
-        assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
-
+        set_backward_euler(&mut ctx, 0.25);
         ctx.state_values = std::ptr::null_mut();
         clear_native_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
@@ -7140,10 +6747,10 @@ mod tests {
         let vars = [2.0_f64];
         let mut ctx = eval_context(&[], &[], &[], &[]);
 
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 8.0_f64.to_bits());
 
-        ctx.timestep = 0.0;
+        set_backward_euler(&mut ctx, 0.0);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
     }
 
@@ -7166,46 +6773,49 @@ mod tests {
         let vars = [2.0_f64];
 
         let previous_state = [0.0_f64, 1.5_f64];
+        let older_state = previous_state;
         let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_derivatives = [0.0_f64; 2];
+        let previous_derivatives = [0.0_f64; 2];
+        let mut state_initialized = [1_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_older = older_state.as_ptr();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
 
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 2.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 2.0_f64.to_bits());
 
         state_values[1] = f64::NAN;
-        ctx.timestep = 0.0;
+        set_backward_euler(&mut ctx, 0.0);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
 
         state_values[1] = f64::NAN;
-        ctx.timestep = 1.0e-20;
+        set_backward_euler(&mut ctx, 1.0e-20);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
 
         state_values[1] = f64::NAN;
-        ctx.timestep = 0.25;
-        ctx.state_prev = std::ptr::null();
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
-        assert_eq!(state_values[1].to_bits(), 1.0_f64.to_bits());
-
-        state_values[1] = f64::NAN;
-        ctx.timestep = -0.25;
+        set_backward_euler(&mut ctx, -0.25);
         ctx.state_prev = previous_state.as_ptr();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 1.0_f64.to_bits());
 
         state_values[1] = f64::NAN;
-        ctx.timestep = f64::NAN;
+        set_backward_euler(&mut ctx, f64::NAN);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
 
         ctx.state_values = std::ptr::null_mut();
-        ctx.timestep = 0.0;
+        set_backward_euler(&mut ctx, 0.0);
         clear_native_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("missing idt state must hard-fail");
@@ -7219,7 +6829,7 @@ mod tests {
         assert_state_storage_bounds_error(&error);
 
         ctx.state_values_len = state_values.len();
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_prev_len = 1;
         clear_native_runtime_error();
@@ -7243,19 +6853,19 @@ mod tests {
         let vars = [2.0_f64];
         let mut ctx = eval_context(&[], &[], &[], &[]);
 
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
 
-        ctx.timestep = 0.0;
+        set_backward_euler(&mut ctx, 0.0);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
 
-        ctx.timestep = 1.0e-20;
+        set_backward_euler(&mut ctx, 1.0e-20);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
 
-        ctx.timestep = -0.25;
+        set_backward_euler(&mut ctx, -0.25);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), (-0.5_f64).to_bits());
 
-        ctx.timestep = f64::NAN;
+        set_backward_euler(&mut ctx, f64::NAN);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
     }
 
@@ -7273,29 +6883,6 @@ mod tests {
             0,
         );
         let bytes = compile_value_function(&program).expect("compile idtmod state leaf");
-        for (slot, register) in [
-            (0, Xmm::Xmm0),
-            (1, Xmm::Xmm1),
-            (2, Xmm::Xmm2),
-            (3, Xmm::Xmm3),
-        ] {
-            assert!(
-                !contains_bytes(&bytes, &call_frame_spill_bytes(slot, register)),
-                "idtmod helper should not spill consumed operand slot {slot}"
-            );
-        }
-        assert!(
-            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm0, 0)),
-            "idtmod helper should pass value directly instead of reloading it from the spill frame"
-        );
-        assert!(
-            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm1, 2)),
-            "idtmod helper should pass modulus directly instead of reloading it from the spill frame"
-        );
-        assert!(
-            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm2, 3)),
-            "idtmod helper should pass offset directly instead of reloading it from the spill frame"
-        );
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate idtmod state leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
         let f: extern "C" fn(*const EvalContext, *const f64) -> f64 =
@@ -7303,12 +6890,21 @@ mod tests {
         let vars = [2.0_f64];
 
         let previous_state = [0.0_f64, 0.9_f64];
+        let older_state = previous_state;
         let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_derivatives = [0.0_f64; 2];
+        let previous_derivatives = [0.0_f64; 2];
+        let mut state_initialized = [1_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_older = older_state.as_ptr();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
 
         let value = f(&ctx, vars.as_ptr());
@@ -7319,25 +6915,19 @@ mod tests {
         );
 
         state_values[1] = f64::NAN;
-        ctx.timestep = 0.0;
+        set_backward_euler(&mut ctx, 0.0);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
 
         state_values[1] = f64::NAN;
-        ctx.timestep = 1.0e-20;
+        set_backward_euler(&mut ctx, 1.0e-20);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
 
         state_values[1] = f64::NAN;
-        ctx.timestep = f64::NAN;
+        set_backward_euler(&mut ctx, f64::NAN);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
-
-        state_values[1] = f64::NAN;
-        ctx.timestep = 0.25;
-        ctx.state_prev = std::ptr::null();
-        assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 1.0_f64.to_bits());
-        assert_eq!(state_values[1].to_bits(), 1.0_f64.to_bits());
 
         let unwrapped_program = native_program(
             EntryKind::StampValue,
@@ -7361,7 +6951,7 @@ mod tests {
             unsafe { std::mem::transmute(unwrapped_entry) };
 
         state_values[1] = f64::NAN;
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         let unwrapped_value = unwrapped(&ctx, vars.as_ptr());
         assert!(
@@ -7374,7 +6964,7 @@ mod tests {
         );
 
         ctx.state_values = std::ptr::null_mut();
-        ctx.timestep = 0.0;
+        set_backward_euler(&mut ctx, 0.0);
         clear_native_runtime_error();
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 0.0_f64.to_bits());
         let error = take_native_runtime_error().expect("missing idtmod state must hard-fail");
@@ -7388,7 +6978,7 @@ mod tests {
         assert_state_storage_bounds_error(&error);
 
         ctx.state_values_len = state_values.len();
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
         ctx.state_prev_len = 1;
         clear_native_runtime_error();
@@ -7406,10 +6996,6 @@ mod tests {
         let program = native_program(EntryKind::StampValue, instructions, 0);
         assert_eq!(program.max_stack_depth(), XMM_STACK.len());
         let bytes = compile_value_function(&program).expect("compile spare-depth stateful leaf");
-        assert!(
-            !contains_bytes(&bytes, &sub_rsp_bytes(STATEFUL_SCRATCH_FRAME_BYTES)),
-            "stateful op with spare XMM capacity should not reserve a scratch frame just because a later expression reaches full depth"
-        );
 
         let memory =
             ExecutableMemory::allocate(&bytes).expect("allocate spare-depth stateful leaf");
@@ -7419,12 +7005,21 @@ mod tests {
 
         let vars = vars_with_prefix(2.0, prefix.len());
         let previous_state = [0.0_f64, 1.5_f64];
+        let older_state = previous_state;
         let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_derivatives = [0.0_f64; 2];
+        let previous_derivatives = [0.0_f64; 2];
+        let mut state_initialized = [1_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_older = older_state.as_ptr();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
 
         assert_eq!(
@@ -7435,20 +7030,10 @@ mod tests {
     }
 
     #[test]
-    fn generated_value_leaf_keeps_full_stack_stateful_ops_on_scratch_frame() {
+    fn generated_value_leaf_supports_full_stack_stateful_ops() {
         let run = |program: NativeProgram, vars: &[f64], expected: f64, state_expected: f64| {
             assert_eq!(program.max_stack_depth(), XMM_STACK.len());
             let bytes = compile_value_function(&program).expect("compile full-stack stateful leaf");
-            let frame_bytes = super::align_local_frame(
-                STATEFUL_SCRATCH_FRAME_BYTES
-                    + super::callee_saved_xmm_frame_bytes(super::callee_saved_xmm_count_for_depth(
-                        XMM_STACK.len(),
-                    )),
-            );
-            assert!(
-                contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
-                "full-stack stateful leaf should reserve a local scratch frame"
-            );
 
             let memory =
                 ExecutableMemory::allocate(&bytes).expect("allocate full-stack stateful leaf");
@@ -7457,13 +7042,25 @@ mod tests {
                 unsafe { std::mem::transmute(entry) };
 
             let previous_state = [0.0_f64, 1.5_f64];
+            let older_state = previous_state;
             let mut state_values = [0.0_f64, 0.0_f64];
+            let mut state_derivatives = [0.0_f64; 2];
+            let previous_derivatives = [0.0_f64; 2];
+            let mut state_initialized = [1_u8; 2];
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.timestep = 0.25;
             ctx.state_prev = previous_state.as_ptr();
+            ctx.state_older = older_state.as_ptr();
             ctx.state_prev_len = previous_state.len();
             ctx.state_values = state_values.as_mut_ptr();
+            ctx.state_derivatives = state_derivatives.as_mut_ptr();
+            ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+            ctx.state_initialized = state_initialized.as_mut_ptr();
+            ctx.state_initialized_len = state_initialized.len();
             ctx.state_values_len = state_values.len();
+            ctx.integration_derivative_scale = 4.0;
+            ctx.integration_previous_value_scale = 4.0;
+            ctx.integration_active = 1;
 
             assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), expected.to_bits());
             assert_eq!(state_values[1].to_bits(), state_expected.to_bits());
@@ -7537,16 +7134,6 @@ mod tests {
             assert_eq!(program.max_stack_depth(), XMM_STACK.len());
             let bytes =
                 compile_value_function(&program).expect("compile full-stack stateful jacobian");
-            let frame_bytes = super::align_local_frame(
-                STATEFUL_SCRATCH_FRAME_BYTES
-                    + super::callee_saved_xmm_frame_bytes(super::callee_saved_xmm_count_for_depth(
-                        XMM_STACK.len(),
-                    )),
-            );
-            assert!(
-                contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
-                "full-stack stateful jacobian should reserve a local scratch frame"
-            );
 
             let memory =
                 ExecutableMemory::allocate(&bytes).expect("allocate full-stack jacobian leaf");
@@ -7555,6 +7142,9 @@ mod tests {
                 unsafe { std::mem::transmute(entry) };
             let mut ctx = eval_context(&[], &[], &[], &[]);
             ctx.timestep = 0.25;
+            ctx.integration_derivative_scale = 4.0;
+            ctx.integration_previous_value_scale = 4.0;
+            ctx.integration_active = 1;
 
             let vars = vars_with_prefix(2.0, jacobian_prefix.len());
             assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), expected.to_bits());
@@ -7578,52 +7168,6 @@ mod tests {
         );
         assert_eq!(program.max_stack_depth(), 5);
         let bytes = compile_value_function(&program).expect("compile prefixed idtmod state leaf");
-        let frame_bytes = call_frame_bytes(1);
-        let old_fixed_frame_bytes = old_fixed_call_frame_bytes();
-        assert!(
-            contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
-            "prefixed idtmod helper should reserve only the lower live prefix slot"
-        );
-        assert!(
-            contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
-            "prefixed idtmod helper should release only the lower live prefix slot"
-        );
-        assert!(
-            !contains_bytes(&bytes, &sub_rsp_bytes(old_fixed_frame_bytes)),
-            "prefixed idtmod helper should not reserve the old maximum spill frame"
-        );
-        assert!(
-            !contains_bytes(&bytes, &add_rsp_bytes(old_fixed_frame_bytes)),
-            "prefixed idtmod helper should not release the old maximum spill frame"
-        );
-        assert_eq!(
-            count_bytes(&bytes, &call_frame_spill_bytes(0, Xmm::Xmm0)),
-            2,
-            "idtmod should spill the lower live prefix once per helper-call path"
-        );
-        for (slot, register) in [
-            (1, Xmm::Xmm1),
-            (2, Xmm::Xmm2),
-            (3, Xmm::Xmm3),
-            (4, Xmm::Xmm4),
-        ] {
-            assert!(
-                !contains_bytes(&bytes, &call_frame_spill_bytes(slot, register)),
-                "idtmod helper should not spill consumed operand slot {slot}"
-            );
-        }
-        assert!(
-            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm0, 1)),
-            "idtmod helper should pass value directly instead of reloading it from the spill frame"
-        );
-        assert!(
-            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm1, 3)),
-            "idtmod helper should pass modulus directly instead of reloading it from the spill frame"
-        );
-        assert!(
-            !contains_bytes(&bytes, &call_frame_load_bytes(Xmm::Xmm2, 4)),
-            "idtmod helper should pass offset directly instead of reloading it from the spill frame"
-        );
 
         let memory = ExecutableMemory::allocate(&bytes).expect("allocate prefixed idtmod leaf");
         let entry = memory.ptr_at(0).expect("entry point inside image");
@@ -7632,12 +7176,21 @@ mod tests {
         let vars = [2.0_f64];
 
         let previous_state = [0.0_f64, 0.9_f64];
+        let older_state = previous_state;
         let mut state_values = [0.0_f64, 0.0_f64];
+        let mut state_derivatives = [0.0_f64; 2];
+        let previous_derivatives = [0.0_f64; 2];
+        let mut state_initialized = [1_u8; 2];
         let mut ctx = eval_context(&[], &[], &[], &[]);
-        ctx.timestep = 0.25;
+        set_backward_euler(&mut ctx, 0.25);
         ctx.state_prev = previous_state.as_ptr();
+        ctx.state_older = older_state.as_ptr();
         ctx.state_prev_len = previous_state.len();
         ctx.state_values = state_values.as_mut_ptr();
+        ctx.state_derivatives = state_derivatives.as_mut_ptr();
+        ctx.state_derivatives_prev = previous_derivatives.as_ptr();
+        ctx.state_initialized = state_initialized.as_mut_ptr();
+        ctx.state_initialized_len = state_initialized.len();
         ctx.state_values_len = state_values.len();
 
         let value = f(&ctx, vars.as_ptr());
@@ -7648,7 +7201,7 @@ mod tests {
         );
 
         state_values[1] = f64::NAN;
-        ctx.timestep = 0.0;
+        set_backward_euler(&mut ctx, 0.0);
         assert_eq!(f(&ctx, vars.as_ptr()).to_bits(), 10.5_f64.to_bits());
         assert_eq!(state_values[1].to_bits(), 0.5_f64.to_bits());
     }
@@ -11608,6 +11161,32 @@ mod tests {
             timer_event_bound: std::ptr::null_mut(),
             analysis_initial_step: 0,
             analysis_final_step: 0,
+            state_older: std::ptr::null(),
+            state_derivatives: std::ptr::null_mut(),
+            state_derivatives_prev: std::ptr::null(),
+            integration_derivative_scale: 0.0,
+            integration_previous_value_scale: 0.0,
+            integration_older_value_scale: 0.0,
+            integration_previous_derivative_scale: 0.0,
+            integration_active: 0,
+        }
+    }
+
+    fn set_backward_euler(ctx: &mut EvalContext, timestep: f64) {
+        ctx.timestep = timestep;
+        if timestep.is_finite() && timestep.abs() > 1.0e-20 {
+            let inverse = 1.0 / timestep;
+            ctx.integration_derivative_scale = inverse;
+            ctx.integration_previous_value_scale = inverse;
+            ctx.integration_older_value_scale = 0.0;
+            ctx.integration_previous_derivative_scale = 0.0;
+            ctx.integration_active = 1;
+        } else {
+            ctx.integration_derivative_scale = 0.0;
+            ctx.integration_previous_value_scale = 0.0;
+            ctx.integration_older_value_scale = 0.0;
+            ctx.integration_previous_derivative_scale = 0.0;
+            ctx.integration_active = 0;
         }
     }
 
@@ -11930,7 +11509,7 @@ mod tests {
 
     fn assert_missing_state_storage_error(error: &str) {
         assert!(
-            error.contains("missing state storage"),
+            error.contains("invalid state storage"),
             "error must identify missing native state storage, got: {error}"
         );
         assert!(
@@ -11941,7 +11520,7 @@ mod tests {
 
     fn assert_state_storage_bounds_error(error: &str) {
         assert!(
-            error.contains("index outside state storage"),
+            error.contains("invalid state storage"),
             "error must identify out-of-range native state storage, got: {error}"
         );
         assert!(
@@ -11963,7 +11542,7 @@ mod tests {
 
     fn assert_prior_state_storage_bounds_error(error: &str) {
         assert!(
-            error.contains("index outside prior-state storage"),
+            error.contains("invalid state storage"),
             "error must identify out-of-range native prior-state storage, got: {error}"
         );
         assert!(

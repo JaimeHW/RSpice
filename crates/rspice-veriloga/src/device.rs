@@ -839,6 +839,15 @@ impl VerilogADevice {
         self.context.set_timestep(dt);
     }
 
+    /// Select the transient solver's companion coefficients for analog
+    /// integration operators at the current candidate timepoint.
+    pub fn set_integration_coefficients(
+        &mut self,
+        coefficients: crate::vm::IntegrationCoefficients,
+    ) {
+        self.context.set_integration_coefficients(coefficients);
+    }
+
     /// Set the analysis type (0=dc, 1=ac, 2=tran, 3=noise, 4=ic)
     pub fn set_analysis_type(&mut self, analysis: u8) {
         self.try_set_analysis_type(analysis).unwrap_or_else(|err| {
@@ -1619,6 +1628,14 @@ impl VerilogADevice {
             timer_event_bound: &mut context.timer_event_bound,
             analysis_initial_step: u8::from(context.analysis_initial_step),
             analysis_final_step: u8::from(context.analysis_final_step),
+            state_older: context.state_values_older.as_ptr(),
+            state_derivatives: context.state_derivatives.as_mut_ptr(),
+            state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
+            integration_derivative_scale: context.integration.derivative_scale,
+            integration_previous_value_scale: context.integration.previous_value_scale,
+            integration_older_value_scale: context.integration.older_value_scale,
+            integration_previous_derivative_scale: context.integration.previous_derivative_scale,
+            integration_active: u8::from(context.integration.active),
         }
     }
 

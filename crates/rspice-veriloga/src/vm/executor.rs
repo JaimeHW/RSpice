@@ -252,60 +252,84 @@ impl<'a> Vm<'a> {
             }
             Instruction::Not => self.unary_op(|a| if a == 0.0 { 1.0 } else { 0.0 })?,
 
-            // State-based ddt: (current_expr - prev_state) / dt
-            // The operand is recorded into the state slot so the next
-            // accepted timestep sees its history.
+            // State-based ddt using the transient solver's companion rule.
             Instruction::DdtState(idx) => {
                 let current_value = self.pop()?;
+                if self.context.state_values.len() <= *idx {
+                    self.context.allocate_states(*idx + 1);
+                }
+                let initialized = self.context.state_initialized[*idx];
                 let prev_value = self
                     .context
                     .state_values_prev
                     .get(*idx)
                     .copied()
+                    .filter(|_| initialized)
                     .unwrap_or(current_value);
+                let older_value = self
+                    .context
+                    .state_values_older
+                    .get(*idx)
+                    .copied()
+                    .filter(|_| initialized)
+                    .unwrap_or(prev_value);
+                let previous_derivative = self
+                    .context
+                    .state_derivatives_prev
+                    .get(*idx)
+                    .copied()
+                    .filter(|_| initialized)
+                    .unwrap_or(0.0);
 
-                // Record the operand for the next timestep
-                if self.context.state_values.len() <= *idx {
-                    self.context.state_values.resize(*idx + 1, 0.0);
-                }
                 self.context.state_values[*idx] = current_value;
-
-                // Compute derivative: (current - prev) / dt
-                // For DC analysis (dt=0), ddt = 0 and the recorded state
-                // seeds the first transient step.
-                let dt = self.context.timestep;
-                let derivative = if dt.abs() > 1e-20 {
-                    (current_value - prev_value) / dt
+                let coefficients = self.context.integration;
+                let derivative = if coefficients.active {
+                    coefficients.derivative_scale * current_value
+                        - coefficients.previous_value_scale * prev_value
+                        - coefficients.older_value_scale * older_value
+                        - coefficients.previous_derivative_scale * previous_derivative
                 } else {
                     0.0
                 };
+                self.context.state_derivatives[*idx] = derivative;
+                self.context.state_initialized[*idx] = true;
                 self.stack.push(derivative);
             }
 
-            // State-based idt: prev_state + expr * dt
-            // Stack: [expr, ic]; at DC the integral sits at its initial
-            // condition, which also seeds the transient state.
+            // State-based idt, algebraically inverted from the same companion
+            // derivative rule used by ddt.
             Instruction::IdtState(idx) => {
                 let ic = self.pop()?;
                 let current_value = self.pop()?;
-
-                let dt = self.context.timestep;
-                let new_integral = if dt.abs() > 1e-20 {
-                    let prev_integral = self
-                        .context
-                        .state_values_prev
-                        .get(*idx)
-                        .copied()
-                        .unwrap_or(ic);
-                    prev_integral + current_value * dt
+                if self.context.state_values.len() <= *idx {
+                    self.context.allocate_states(*idx + 1);
+                }
+                let initialized = self.context.state_initialized[*idx];
+                let prev_integral = self.context.state_values_prev[*idx];
+                let prev_integral = if initialized { prev_integral } else { ic };
+                let older_integral = if initialized {
+                    self.context.state_values_older[*idx]
+                } else {
+                    prev_integral
+                };
+                let previous_input = if initialized {
+                    self.context.state_derivatives_prev[*idx]
+                } else {
+                    current_value
+                };
+                let coefficients = self.context.integration;
+                let new_integral = if coefficients.active {
+                    (current_value
+                        + coefficients.previous_value_scale * prev_integral
+                        + coefficients.older_value_scale * older_integral
+                        + coefficients.previous_derivative_scale * previous_input)
+                        / coefficients.derivative_scale
                 } else {
                     ic
                 };
-
-                if self.context.state_values.len() <= *idx {
-                    self.context.state_values.resize(*idx + 1, 0.0);
-                }
                 self.context.state_values[*idx] = new_integral;
+                self.context.state_derivatives[*idx] = current_value;
+                self.context.state_initialized[*idx] = true;
 
                 self.stack.push(new_integral);
             }
@@ -318,16 +342,32 @@ impl<'a> Vm<'a> {
                 let modulus = self.pop()?;
                 let ic = self.pop()?;
                 let current_value = self.pop()?;
-
-                let dt = self.context.timestep;
-                let raw = if dt.abs() > 1e-20 {
-                    let prev = self
-                        .context
-                        .state_values_prev
-                        .get(*idx)
-                        .copied()
-                        .unwrap_or(ic);
-                    prev + current_value * dt
+                if self.context.state_values.len() <= *idx {
+                    self.context.allocate_states(*idx + 1);
+                }
+                let initialized = self.context.state_initialized[*idx];
+                let prev = if initialized {
+                    self.context.state_values_prev[*idx]
+                } else {
+                    ic
+                };
+                let older = if initialized {
+                    self.context.state_values_older[*idx]
+                } else {
+                    prev
+                };
+                let previous_input = if initialized {
+                    self.context.state_derivatives_prev[*idx]
+                } else {
+                    current_value
+                };
+                let coefficients = self.context.integration;
+                let raw = if coefficients.active {
+                    (current_value
+                        + coefficients.previous_value_scale * prev
+                        + coefficients.older_value_scale * older
+                        + coefficients.previous_derivative_scale * previous_input)
+                        / coefficients.derivative_scale
                 } else {
                     ic
                 };
@@ -340,24 +380,35 @@ impl<'a> Vm<'a> {
                     raw
                 };
 
-                if self.context.state_values.len() <= *idx {
-                    self.context.state_values.resize(*idx + 1, 0.0);
-                }
                 self.context.state_values[*idx] = wrapped;
+                self.context.state_derivatives[*idx] = current_value;
+                self.context.state_initialized[*idx] = true;
 
                 self.stack.push(wrapped);
             }
 
             // Companion Jacobian factor for ddt: a / dt (0 at DC)
             Instruction::DdtJacobian => {
-                let dt = self.context.timestep;
-                self.unary_op(|a| if dt.abs() > 1e-20 { a / dt } else { 0.0 })?
+                let coefficients = self.context.integration;
+                self.unary_op(|a| {
+                    if coefficients.active {
+                        a * coefficients.derivative_scale
+                    } else {
+                        0.0
+                    }
+                })?
             }
 
             // Companion Jacobian factor for idt: a * dt (0 at DC)
             Instruction::IdtJacobian => {
-                let dt = self.context.timestep;
-                self.unary_op(|a| if dt.abs() > 1e-20 { a * dt } else { 0.0 })?
+                let coefficients = self.context.integration;
+                self.unary_op(|a| {
+                    if coefficients.active {
+                        a / coefficients.derivative_scale
+                    } else {
+                        0.0
+                    }
+                })?
             }
 
             // Slope of a lookup table at the input point

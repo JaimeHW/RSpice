@@ -70,6 +70,48 @@ fn terminal_pair_current_storage_len(num_terminals: usize) -> usize {
         .expect("terminal-pair current table dimensions overflow")
 }
 
+/// Runtime companion coefficients for `ddt`, `idt`, and `idtmod`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IntegrationCoefficients {
+    pub active: bool,
+    pub derivative_scale: f64,
+    pub previous_value_scale: f64,
+    pub older_value_scale: f64,
+    pub previous_derivative_scale: f64,
+}
+
+impl IntegrationCoefficients {
+    pub const fn inactive() -> Self {
+        Self {
+            active: false,
+            derivative_scale: 0.0,
+            previous_value_scale: 0.0,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 0.0,
+        }
+    }
+
+    pub fn backward_euler(timestep: f64) -> Self {
+        if !timestep.is_finite() || timestep.abs() <= 1.0e-20 {
+            return Self::inactive();
+        }
+        let inverse_timestep = 1.0 / timestep;
+        Self {
+            active: true,
+            derivative_scale: inverse_timestep,
+            previous_value_scale: inverse_timestep,
+            older_value_scale: 0.0,
+            previous_derivative_scale: 0.0,
+        }
+    }
+}
+
+impl Default for IntegrationCoefficients {
+    fn default() -> Self {
+        Self::inactive()
+    }
+}
+
 /// Execution context providing runtime state to the VM.
 #[derive(Debug, Clone)]
 pub struct VmContext {
@@ -100,11 +142,19 @@ pub struct VmContext {
     pub state_values: Vec<f64>,
     /// State variable values (previous timestep) - for ddt/idt
     pub state_values_prev: Vec<f64>,
+    /// State values from two accepted points ago (Gear-2 history).
+    pub state_values_older: Vec<f64>,
+    /// Candidate derivative/input values for the current point.
+    pub state_derivatives: Vec<f64>,
+    /// Derivative/input values at the previous accepted point.
+    pub state_derivatives_prev: Vec<f64>,
     /// Per-slot flag marking state slots that have been written at least
     /// once (used by $limit to detect its first evaluation)
     pub state_initialized: Vec<bool>,
     /// Current timestep (delta t) for transient analysis
     pub timestep: f64,
+    /// Companion coefficients selected by the transient solver.
+    pub integration: IntegrationCoefficients,
     /// Lookup tables for $table_model interpolation
     pub lookup_tables: Vec<LookupTable>,
     /// Delay buffers for absdelay function
@@ -149,8 +199,12 @@ impl Default for VmContext {
             temperature: 300.15, // 27C default
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
+            state_values_older: Vec::new(),
+            state_derivatives: Vec::new(),
+            state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
             timestep: 0.0,
+            integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
             transition_filters: Vec::new(),
@@ -187,8 +241,12 @@ impl VmContext {
             temperature: 300.15,
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
+            state_values_older: Vec::new(),
+            state_derivatives: Vec::new(),
+            state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
             timestep: 0.0,
+            integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
             transition_filters: Vec::new(),
@@ -223,8 +281,12 @@ impl VmContext {
             temperature: 300.15,
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
+            state_values_older: Vec::new(),
+            state_derivatives: Vec::new(),
+            state_derivatives_prev: Vec::new(),
             state_initialized: Vec::new(),
             timestep: 0.0,
+            integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
             transition_filters: Vec::new(),
@@ -259,8 +321,12 @@ impl VmContext {
             temperature: 300.15,
             state_values: vec![0.0; num_states],
             state_values_prev: vec![0.0; num_states],
+            state_values_older: vec![0.0; num_states],
+            state_derivatives: vec![0.0; num_states],
+            state_derivatives_prev: vec![0.0; num_states],
             state_initialized: vec![false; num_states],
             timestep: 0.0,
+            integration: IntegrationCoefficients::inactive(),
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
             transition_filters: Vec::new(),
@@ -278,7 +344,10 @@ impl VmContext {
 
     /// Advance state for a new timestep (copy current to prev).
     pub fn advance_state(&mut self) {
+        self.state_values_older.clone_from(&self.state_values_prev);
         self.state_values_prev.clone_from(&self.state_values);
+        self.state_derivatives_prev
+            .clone_from(&self.state_derivatives);
         for buffer in &mut self.delay_buffers {
             buffer.commit();
         }
@@ -304,6 +373,23 @@ impl VmContext {
     /// Set the timestep for transient analysis.
     pub fn set_timestep(&mut self, dt: f64) {
         self.timestep = dt;
+        self.set_integration_coefficients(IntegrationCoefficients::backward_euler(dt));
+    }
+
+    /// Select solver-provided companion coefficients for this timepoint.
+    pub fn set_integration_coefficients(&mut self, coefficients: IntegrationCoefficients) {
+        if !self.integration.active && coefficients.active {
+            // The DC operating-point evaluation establishes each operator's
+            // current state but is not an accepted transient step.  Promote
+            // that state to both history lanes when transient integration
+            // starts so a biased ddt() differentiates from the operating
+            // point and idt() starts from its DC initial condition.
+            self.state_values_prev.clone_from(&self.state_values);
+            self.state_values_older.clone_from(&self.state_values);
+            self.state_derivatives_prev
+                .clone_from(&self.state_derivatives);
+        }
+        self.integration = coefficients;
     }
 
     /// Reset timer scheduling before a fresh device evaluation.
@@ -328,6 +414,9 @@ impl VmContext {
     pub fn allocate_states(&mut self, count: usize) {
         self.state_values.resize(count, 0.0);
         self.state_values_prev.resize(count, 0.0);
+        self.state_values_older.resize(count, 0.0);
+        self.state_derivatives.resize(count, 0.0);
+        self.state_derivatives_prev.resize(count, 0.0);
         self.state_initialized.resize(count, false);
     }
 

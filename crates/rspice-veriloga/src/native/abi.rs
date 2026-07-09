@@ -92,6 +92,22 @@ pub struct EvalContext {
     pub analysis_initial_step: u8,
     /// Nonzero at the final point of the current analysis.
     pub analysis_final_step: u8,
+    /// State values from two accepted points ago.
+    pub state_older: *const f64,
+    /// Candidate derivative/input values for the current point.
+    pub state_derivatives: *mut f64,
+    /// Derivative/input values from the previous accepted point.
+    pub state_derivatives_prev: *const f64,
+    /// Current-value coefficient in the solver's derivative formula.
+    pub integration_derivative_scale: f64,
+    /// Previous-value coefficient in the solver's derivative formula.
+    pub integration_previous_value_scale: f64,
+    /// Older-value coefficient in the solver's derivative formula.
+    pub integration_older_value_scale: f64,
+    /// Previous-derivative coefficient in the solver's derivative formula.
+    pub integration_previous_derivative_scale: f64,
+    /// Nonzero when transient integration is active.
+    pub integration_active: u8,
 }
 
 thread_local! {
@@ -657,6 +673,211 @@ pub unsafe extern "C" fn rspice_zi_step_native(
 
     let filters = unsafe { std::slice::from_raw_parts_mut(ctx.zi_filters, ctx.zi_filters_len) };
     filters[filter_id].eval(input, ctx.time, ctx.analysis_type == 2)
+}
+
+fn invalid_native_integration_context(operator: &str, state_id: usize, detail: &str) -> f64 {
+    set_native_runtime_error(format!(
+        "native {operator} state {state_id} {detail}; no interpreter fallback"
+    ));
+    0.0
+}
+
+unsafe fn native_state_storage_is_valid(ctx: &EvalContext, state_id: usize) -> bool {
+    state_id < ctx.state_values_len
+        && state_id < ctx.state_prev_len
+        && state_id < ctx.state_initialized_len
+        && !ctx.state_values.is_null()
+        && !ctx.state_prev.is_null()
+        && !ctx.state_older.is_null()
+        && !ctx.state_derivatives.is_null()
+        && !ctx.state_derivatives_prev.is_null()
+        && !ctx.state_initialized.is_null()
+}
+
+/// Native companion evaluation for `ddt`.
+///
+/// # Safety
+/// `operands` points to one f64 and `ctx` points to a live evaluation context.
+#[unsafe(export_name = "rspice_ddt_state_native")]
+pub unsafe extern "C" fn rspice_ddt_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    if operands.is_null() || ctx.is_null() {
+        return invalid_native_integration_context("ddt", state_id, "missing operands or context");
+    }
+    let ctx = unsafe { &*ctx };
+    if !unsafe { native_state_storage_is_valid(ctx, state_id) } {
+        return invalid_native_integration_context("ddt", state_id, "has invalid state storage");
+    }
+
+    let value = unsafe { *operands };
+    let initialized = unsafe { *ctx.state_initialized.add(state_id) != 0 };
+    let previous = if initialized {
+        unsafe { *ctx.state_prev.add(state_id) }
+    } else {
+        value
+    };
+    let older = if initialized {
+        unsafe { *ctx.state_older.add(state_id) }
+    } else {
+        previous
+    };
+    let previous_derivative = if initialized {
+        unsafe { *ctx.state_derivatives_prev.add(state_id) }
+    } else {
+        0.0
+    };
+    let derivative = if ctx.integration_active != 0 {
+        value * ctx.integration_derivative_scale
+            - previous * ctx.integration_previous_value_scale
+            - older * ctx.integration_older_value_scale
+            - previous_derivative * ctx.integration_previous_derivative_scale
+    } else {
+        0.0
+    };
+    unsafe {
+        *ctx.state_values.add(state_id) = value;
+        *ctx.state_derivatives.add(state_id) = derivative;
+        *ctx.state_initialized.add(state_id) = 1;
+    }
+    derivative
+}
+
+/// Native companion Jacobian evaluation for `ddt`.
+///
+/// # Safety
+/// `operands` points to one f64 and `ctx` points to a live evaluation context.
+#[unsafe(export_name = "rspice_ddt_jacobian_native")]
+pub unsafe extern "C" fn rspice_ddt_jacobian_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    _state_id: usize,
+) -> f64 {
+    if operands.is_null() || ctx.is_null() {
+        return invalid_native_integration_context(
+            "ddt Jacobian",
+            0,
+            "missing operands or context",
+        );
+    }
+    let ctx = unsafe { &*ctx };
+    if ctx.integration_active != 0 {
+        (unsafe { *operands }) * ctx.integration_derivative_scale
+    } else {
+        0.0
+    }
+}
+
+unsafe fn rspice_integral_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+    wrapped: bool,
+) -> f64 {
+    let operator = if wrapped { "idtmod" } else { "idt" };
+    if operands.is_null() || ctx.is_null() {
+        return invalid_native_integration_context(
+            operator,
+            state_id,
+            "missing operands or context",
+        );
+    }
+    let ctx = unsafe { &*ctx };
+    if !unsafe { native_state_storage_is_valid(ctx, state_id) } {
+        return invalid_native_integration_context(operator, state_id, "has invalid state storage");
+    }
+    let operands = unsafe { std::slice::from_raw_parts(operands, if wrapped { 4 } else { 2 }) };
+    let input = operands[0];
+    let initial_condition = operands[1];
+    let initialized = unsafe { *ctx.state_initialized.add(state_id) != 0 };
+    let previous = if initialized {
+        unsafe { *ctx.state_prev.add(state_id) }
+    } else {
+        initial_condition
+    };
+    let older = if initialized {
+        unsafe { *ctx.state_older.add(state_id) }
+    } else {
+        previous
+    };
+    let previous_input = if initialized {
+        unsafe { *ctx.state_derivatives_prev.add(state_id) }
+    } else {
+        input
+    };
+    let raw = if ctx.integration_active != 0 {
+        (input
+            + previous * ctx.integration_previous_value_scale
+            + older * ctx.integration_older_value_scale
+            + previous_input * ctx.integration_previous_derivative_scale)
+            / ctx.integration_derivative_scale
+    } else {
+        initial_condition
+    };
+    let value = if wrapped {
+        rspice_idtmod_wrap(raw, operands[2], operands[3])
+    } else {
+        raw
+    };
+    unsafe {
+        *ctx.state_values.add(state_id) = value;
+        *ctx.state_derivatives.add(state_id) = input;
+        *ctx.state_initialized.add(state_id) = 1;
+    }
+    value
+}
+
+/// Native companion evaluation for `idt`.
+///
+/// # Safety
+/// `operands` points to two f64 values and `ctx` points to a live context.
+#[unsafe(export_name = "rspice_idt_state_native")]
+pub unsafe extern "C" fn rspice_idt_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    unsafe { rspice_integral_state_native(operands, ctx, state_id, false) }
+}
+
+/// Native companion evaluation for `idtmod`.
+///
+/// # Safety
+/// `operands` points to four f64 values and `ctx` points to a live context.
+#[unsafe(export_name = "rspice_idtmod_state_native")]
+pub unsafe extern "C" fn rspice_idtmod_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    state_id: usize,
+) -> f64 {
+    unsafe { rspice_integral_state_native(operands, ctx, state_id, true) }
+}
+
+/// Native companion Jacobian evaluation for `idt` and `idtmod`.
+///
+/// # Safety
+/// `operands` points to one f64 and `ctx` points to a live context.
+#[unsafe(export_name = "rspice_idt_jacobian_native")]
+pub unsafe extern "C" fn rspice_idt_jacobian_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    _state_id: usize,
+) -> f64 {
+    if operands.is_null() || ctx.is_null() {
+        return invalid_native_integration_context(
+            "idt Jacobian",
+            0,
+            "missing operands or context",
+        );
+    }
+    let ctx = unsafe { &*ctx };
+    if ctx.integration_active != 0 {
+        (unsafe { *operands }) / ctx.integration_derivative_scale
+    } else {
+        0.0
+    }
 }
 
 /// External helper function for native x64 one-shot and periodic timer events.
@@ -1306,7 +1527,21 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, timer_event_bound), 304);
         assert_eq!(offset_of!(EvalContext, analysis_initial_step), 312);
         assert_eq!(offset_of!(EvalContext, analysis_final_step), 313);
-        assert_eq!(size_of::<EvalContext>(), 320);
+        assert_eq!(offset_of!(EvalContext, state_older), 320);
+        assert_eq!(offset_of!(EvalContext, state_derivatives), 328);
+        assert_eq!(offset_of!(EvalContext, state_derivatives_prev), 336);
+        assert_eq!(offset_of!(EvalContext, integration_derivative_scale), 344);
+        assert_eq!(
+            offset_of!(EvalContext, integration_previous_value_scale),
+            352
+        );
+        assert_eq!(offset_of!(EvalContext, integration_older_value_scale), 360);
+        assert_eq!(
+            offset_of!(EvalContext, integration_previous_derivative_scale),
+            368
+        );
+        assert_eq!(offset_of!(EvalContext, integration_active), 376);
+        assert_eq!(size_of::<EvalContext>(), 384);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -1491,6 +1726,14 @@ mod tests {
             timer_event_bound: &mut timer_bound,
             analysis_initial_step: 0,
             analysis_final_step: 0,
+            state_older: std::ptr::null(),
+            state_derivatives: std::ptr::null_mut(),
+            state_derivatives_prev: std::ptr::null(),
+            integration_derivative_scale: 0.0,
+            integration_previous_value_scale: 0.0,
+            integration_older_value_scale: 0.0,
+            integration_previous_derivative_scale: 0.0,
+            integration_active: 0,
         };
 
         assert_eq!(
@@ -2195,6 +2438,14 @@ mod tests {
             timer_event_bound: std::ptr::null_mut(),
             analysis_initial_step: 0,
             analysis_final_step: 0,
+            state_older: std::ptr::null(),
+            state_derivatives: std::ptr::null_mut(),
+            state_derivatives_prev: std::ptr::null(),
+            integration_derivative_scale: 0.0,
+            integration_previous_value_scale: 0.0,
+            integration_older_value_scale: 0.0,
+            integration_previous_derivative_scale: 0.0,
+            integration_active: 0,
         }
     }
 }

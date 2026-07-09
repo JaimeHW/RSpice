@@ -1684,14 +1684,37 @@ impl CircuitData {
         &mut self,
         time: Value,
         dt: Value,
+        coefficients: &crate::analysis::CompanionCoefficients,
         initial_step: bool,
         final_step: bool,
     ) {
+        const INTEGRATION_EPSILON: Value = 1.0e-20;
+        let integration = if dt.is_finite() && dt.abs() > INTEGRATION_EPSILON {
+            let inverse_timestep = 1.0 / dt;
+            rspice_veriloga::vm::IntegrationCoefficients {
+                active: true,
+                derivative_scale: coefficients.coeff_g * inverse_timestep,
+                previous_value_scale: coefficients.coeff_v_n * inverse_timestep,
+                older_value_scale: if coefficients.needs_two_history {
+                    coefficients.coeff_v_n_minus_1 * inverse_timestep
+                } else {
+                    0.0
+                },
+                previous_derivative_scale: if coefficients.needs_current_history {
+                    1.0
+                } else {
+                    0.0
+                },
+            }
+        } else {
+            rspice_veriloga::vm::IntegrationCoefficients::inactive()
+        };
         for device in self.veriloga_devices.iter_mut() {
             device.set_analysis_type(2);
             device.set_analysis_step(initial_step, final_step);
             device.set_time(time);
             device.set_timestep(dt);
+            device.set_integration_coefficients(integration);
         }
     }
 

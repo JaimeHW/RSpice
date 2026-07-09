@@ -7827,6 +7827,14 @@ endmodule
             timer_event_bound: &mut context.timer_event_bound,
             analysis_initial_step: u8::from(context.analysis_initial_step),
             analysis_final_step: u8::from(context.analysis_final_step),
+            state_older: context.state_values_older.as_ptr(),
+            state_derivatives: context.state_derivatives.as_mut_ptr(),
+            state_derivatives_prev: context.state_derivatives_prev.as_ptr(),
+            integration_derivative_scale: context.integration.derivative_scale,
+            integration_previous_value_scale: context.integration.previous_value_scale,
+            integration_older_value_scale: context.integration.older_value_scale,
+            integration_previous_derivative_scale: context.integration.previous_derivative_scale,
+            integration_active: u8::from(context.integration.active),
         }
     }
 
@@ -8140,6 +8148,14 @@ endmodule
             timer_event_bound: std::ptr::null_mut(),
             analysis_initial_step: 0,
             analysis_final_step: 0,
+            state_older: std::ptr::null(),
+            state_derivatives: std::ptr::null_mut(),
+            state_derivatives_prev: std::ptr::null(),
+            integration_derivative_scale: 0.0,
+            integration_previous_value_scale: 0.0,
+            integration_older_value_scale: 0.0,
+            integration_previous_derivative_scale: 0.0,
+            integration_active: 0,
         }
     }
 }
