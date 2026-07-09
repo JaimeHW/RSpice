@@ -571,16 +571,33 @@ impl VerilogADevice {
     /// Set the instance multiplicity (`m=` / $mfactor): the device stamps
     /// as m parallel copies. Non-positive values are rejected.
     pub fn set_multiplicity(&mut self, m: f64) {
-        if m.is_finite() && m > 0.0 {
-            self.context.multiplicity = m;
-            // Static guards may reference $mfactor.
-            self.refresh_static_conditions();
-        } else {
-            log::warn!(
-                "Verilog-A instance '{}': ignoring non-positive multiplicity {m}",
-                self.name
-            );
+        self.try_set_multiplicity(m).unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' multiplicity update failed: {}",
+                self.name, self.model.name, err
+            )
+        });
+    }
+
+    /// Checked multiplicity update. The previous context remains intact when
+    /// validation or a dependent static-condition refresh fails.
+    pub fn try_set_multiplicity(&mut self, m: f64) -> Result<(), VmError> {
+        if !m.is_finite() || m <= 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "multiplicity must be finite and greater than zero, got {m}"
+            )));
         }
+        if self.context.multiplicity == m {
+            return Ok(());
+        }
+
+        let previous = self.context.clone();
+        self.context.multiplicity = m;
+        if let Err(error) = self.try_refresh_static_conditions() {
+            self.context = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Instance multiplicity ($mfactor)
@@ -844,21 +861,66 @@ impl VerilogADevice {
     /// Checked temperature update for callers that can surface native static
     /// guard refresh failures as diagnostics instead of panicking.
     pub fn try_set_temperature(&mut self, temp_k: f64) -> Result<(), VmError> {
+        if !temp_k.is_finite() || temp_k <= 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "temperature must be finite and greater than zero kelvin, got {temp_k}"
+            )));
+        }
+        if self.context.temperature == temp_k {
+            return Ok(());
+        }
+
+        let previous = self.context.clone();
         self.context.temperature = temp_k;
         // Static guards may reference $temperature
-        self.try_refresh_static_conditions()?;
+        if let Err(error) = self.try_refresh_static_conditions() {
+            self.context = previous;
+            return Err(error);
+        }
 
         Ok(())
     }
 
     /// Set simulation time
     pub fn set_time(&mut self, time: f64) {
+        self.try_set_time(time).unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' time update failed: {}",
+                self.name, self.model.name, err
+            )
+        });
+    }
+
+    /// Checked simulation-time update.
+    pub fn try_set_time(&mut self, time: f64) -> Result<(), VmError> {
+        if !time.is_finite() || time < 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "simulation time must be finite and non-negative, got {time}"
+            )));
+        }
         self.context.time = time;
+        Ok(())
     }
 
     /// Set the transient timestep (0 selects DC semantics for ddt/idt)
     pub fn set_timestep(&mut self, dt: f64) {
+        self.try_set_timestep(dt).unwrap_or_else(|err| {
+            panic!(
+                "Verilog-A device '{}' model '{}' timestep update failed: {}",
+                self.name, self.model.name, err
+            )
+        });
+    }
+
+    /// Checked transient-timestep update.
+    pub fn try_set_timestep(&mut self, dt: f64) -> Result<(), VmError> {
+        if !dt.is_finite() || dt < 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "transient timestep must be finite and non-negative, got {dt}"
+            )));
+        }
         self.context.set_timestep(dt);
+        Ok(())
     }
 
     /// Select the transient solver's companion coefficients for analog
@@ -867,7 +929,44 @@ impl VerilogADevice {
         &mut self,
         coefficients: crate::vm::IntegrationCoefficients,
     ) {
+        self.try_set_integration_coefficients(coefficients)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Verilog-A device '{}' model '{}' integration update failed: {}",
+                    self.name, self.model.name, err
+                )
+            });
+    }
+
+    /// Checked companion-coefficient update.
+    pub fn try_set_integration_coefficients(
+        &mut self,
+        coefficients: crate::vm::IntegrationCoefficients,
+    ) -> Result<(), VmError> {
+        let scales = [
+            coefficients.derivative_scale,
+            coefficients.previous_value_scale,
+            coefficients.older_value_scale,
+            coefficients.previous_derivative_scale,
+        ];
+        if scales.iter().any(|value| !value.is_finite()) {
+            return Err(VmError::InvalidRuntimeConfiguration(
+                "integration coefficients must all be finite".to_string(),
+            ));
+        }
+        if coefficients.active && coefficients.derivative_scale <= 0.0 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "active integration requires a positive derivative scale, got {}",
+                coefficients.derivative_scale
+            )));
+        }
+        if !coefficients.active && scales.iter().any(|value| *value != 0.0) {
+            return Err(VmError::InvalidRuntimeConfiguration(
+                "inactive integration coefficients must have zero scales".to_string(),
+            ));
+        }
         self.context.set_integration_coefficients(coefficients);
+        Ok(())
     }
 
     /// Set the analysis type (0=dc, 1=ac, 2=tran, 3=noise, 4=ic)
@@ -883,13 +982,21 @@ impl VerilogADevice {
     /// Checked analysis update for callers that can surface native static
     /// guard refresh failures as diagnostics instead of panicking.
     pub fn try_set_analysis_type(&mut self, analysis: u8) -> Result<(), VmError> {
+        if analysis > 4 {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "analysis type must be one of 0=dc, 1=ac, 2=tran, 3=noise, or 4=ic, got {analysis}"
+            )));
+        }
         if self.context.analysis_type == analysis {
             return Ok(());
         }
 
+        let previous = self.context.clone();
         self.context.analysis_type = analysis;
-
-        self.try_refresh_static_conditions()?;
+        if let Err(error) = self.try_refresh_static_conditions() {
+            self.context = previous;
+            return Err(error);
+        }
 
         Ok(())
     }
@@ -919,9 +1026,13 @@ impl VerilogADevice {
             return Ok(());
         }
 
+        let previous = self.context.clone();
         self.context.analysis_initial_step = initial;
         self.context.analysis_final_step = final_step;
-        self.try_refresh_static_conditions()?;
+        if let Err(error) = self.try_refresh_static_conditions() {
+            self.context = previous;
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -942,12 +1053,21 @@ impl VerilogADevice {
     ///
     /// Called during circuit setup when the solver allocates nodes for internal nodes.
     pub fn set_internal_node_indices(&mut self, indices: &[usize]) {
-        for (i, &idx) in indices.iter().enumerate() {
-            if i < self.internal_node_indices.len() {
-                self.internal_node_indices[i] = idx;
-            }
-        }
+        self.try_set_internal_node_indices(indices)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Verilog-A device '{}' model '{}' internal-node mapping failed: {}",
+                    self.name, self.model.name, err
+                )
+            });
+    }
+
+    /// Checked internal-node mapping update.
+    pub fn try_set_internal_node_indices(&mut self, indices: &[usize]) -> Result<(), VmError> {
+        Self::validate_solver_indices("internal-node", indices, self.internal_node_indices.len())?;
+        self.internal_node_indices.copy_from_slice(indices);
         self.rebuild_matrix_indices();
+        Ok(())
     }
 
     /// Number of branch-current unknowns required by this device's
@@ -959,12 +1079,51 @@ impl VerilogADevice {
 
     /// Set the circuit node indices allocated for branch-current unknowns
     pub fn set_branch_current_indices(&mut self, indices: &[usize]) {
-        for (i, &idx) in indices.iter().enumerate() {
-            if i < self.branch_current_indices.len() {
-                self.branch_current_indices[i] = idx;
-            }
-        }
+        self.try_set_branch_current_indices(indices)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Verilog-A device '{}' model '{}' branch-current mapping failed: {}",
+                    self.name, self.model.name, err
+                )
+            });
+    }
+
+    /// Checked branch-current unknown mapping update.
+    pub fn try_set_branch_current_indices(&mut self, indices: &[usize]) -> Result<(), VmError> {
+        Self::validate_solver_indices(
+            "branch-current",
+            indices,
+            self.branch_current_indices.len(),
+        )?;
+        self.branch_current_indices.copy_from_slice(indices);
         self.rebuild_matrix_indices();
+        Ok(())
+    }
+
+    fn validate_solver_indices(
+        kind: &str,
+        indices: &[usize],
+        expected: usize,
+    ) -> Result<(), VmError> {
+        if indices.len() != expected {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "{kind} mapping requires exactly {expected} index(es), got {}",
+                indices.len()
+            )));
+        }
+        if let Some(position) = indices.iter().position(|index| *index == 0) {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "{kind} mapping index {position} resolves to ground"
+            )));
+        }
+        let mut sorted = indices.to_vec();
+        sorted.sort_unstable();
+        if sorted.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(VmError::InvalidRuntimeConfiguration(format!(
+                "{kind} mapping contains duplicate solver indices"
+            )));
+        }
+        Ok(())
     }
 
     /// Re-evaluate instance-static activation conditions (mode guards
@@ -972,16 +1131,6 @@ impl VerilogADevice {
     /// derived purely from parameters). A potential contribution whose
     /// guard is false leaves its branch open; a branch driven by no
     /// active potential contribution is forced to zero current.
-    #[cfg(feature = "native")]
-    fn refresh_static_conditions(&mut self) {
-        self.try_refresh_static_conditions().unwrap_or_else(|err| {
-            panic!(
-                "Verilog-A device '{}' model '{}' static-condition evaluation failed: {}",
-                self.name, self.model.name, err
-            )
-        });
-    }
-
     #[cfg(feature = "native")]
     fn try_refresh_static_conditions(&mut self) -> Result<(), VmError> {
         let model = &self.model;
@@ -1153,16 +1302,6 @@ impl VerilogADevice {
         VmError::NativeJit(format!(
             "native JIT {label} has {available} slot(s), but compiled image requires {required}; no interpreter fallback"
         ))
-    }
-
-    #[cfg(not(feature = "native"))]
-    fn refresh_static_conditions(&mut self) {
-        self.try_refresh_static_conditions().unwrap_or_else(|err| {
-            panic!(
-                "Verilog-A device '{}' model '{}' static-condition evaluation failed: {}",
-                self.name, self.model.name, err
-            )
-        });
     }
 
     #[cfg(not(feature = "native"))]
@@ -3838,7 +3977,9 @@ endmodule
         })];
 
         let mut device = native_test_device(model);
-        device.refresh_static_conditions();
+        device
+            .try_refresh_static_conditions()
+            .expect("models without static conditions require no assignment evaluation");
 
         assert!(device.program_active.iter().all(|active| *active));
         assert!(device.branch_active.iter().all(|active| *active));

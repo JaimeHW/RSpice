@@ -9,6 +9,8 @@ pub enum VmError {
     ParameterValue(String),
     /// A model expression produced NaN or infinity at a solver boundary.
     InvalidNumericResult(String),
+    /// Invalid simulator-to-device runtime configuration.
+    InvalidRuntimeConfiguration(String),
     /// Runtime array index outside the declared bounds
     IndexOutOfBounds {
         index: i64,
@@ -25,6 +27,9 @@ impl std::fmt::Display for VmError {
             VmError::NativeJit(msg) => write!(f, "native JIT error: {}", msg),
             VmError::ParameterValue(msg) => write!(f, "parameter value error: {msg}"),
             VmError::InvalidNumericResult(msg) => write!(f, "invalid numeric result: {msg}"),
+            VmError::InvalidRuntimeConfiguration(msg) => {
+                write!(f, "invalid runtime configuration: {msg}")
+            }
             VmError::IndexOutOfBounds {
                 index,
                 lower,
