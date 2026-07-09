@@ -82,6 +82,7 @@ pub(crate) enum NativeOp {
     SlewState(usize),
     AbsDelayState(usize),
     CrossState(usize),
+    AboveState(usize),
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
@@ -1920,9 +1921,9 @@ impl NativeProgram {
                         entry_kind,
                         instruction_name(instruction),
                         depth,
-                        2,
+                        5,
                     )?;
-                    depth -= 1;
+                    depth -= 4;
                     ops.push(NativeOp::CrossState(*detector_id));
                 }
                 Instruction::WhiteNoise => {
@@ -2166,21 +2167,16 @@ impl NativeProgram {
                     }
                     ops.push(NativeOp::Extremum(extremum_op(instruction)));
                 }
-                Instruction::AboveState(_) => {
-                    pop_binary_stack(
+                Instruction::AboveState(detector_id) => {
+                    require_stack(
                         model.clone(),
                         entry_kind,
                         instruction_name(instruction),
                         depth,
+                        4,
                     )?;
-                    depth -= 1;
-                    if lower_constant_binary_compare(&mut ops, CompareOp::Gt) {
-                        continue;
-                    }
-                    if lower_constant_rhs_compare(&mut ops, CompareOp::Gt) {
-                        continue;
-                    }
-                    ops.push(NativeOp::Compare(CompareOp::Gt));
+                    depth -= 3;
+                    ops.push(NativeOp::AboveState(*detector_id));
                 }
                 Instruction::PushCurrent(pos, neg) => {
                     if let Some(pair_index) =
@@ -5894,12 +5890,27 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_cross_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
-        let (expr, direction) = match args {
-            [expr] => (*expr, None),
-            [expr, direction] => (*expr, Some(*direction)),
+        let (expr, direction, time_tol, expr_tol, enable) = match args {
+            [expr] => (*expr, None, None, None, None),
+            [expr, direction] => (*expr, Some(*direction), None, None, None),
+            [expr, direction, time_tol] => (*expr, Some(*direction), Some(*time_tol), None, None),
+            [expr, direction, time_tol, expr_tol] => (
+                *expr,
+                Some(*direction),
+                Some(*time_tol),
+                Some(*expr_tol),
+                None,
+            ),
+            [expr, direction, time_tol, expr_tol, enable] => (
+                *expr,
+                Some(*direction),
+                Some(*time_tol),
+                Some(*expr_tol),
+                Some(*enable),
+            ),
             _ => {
                 return Err(self.unsupported(format!(
-                    "analog operator cross expects one or two operands, found {}",
+                    "analog operator cross expects one to five operands, found {}",
                     args.len()
                 )));
             }
@@ -5915,42 +5926,79 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         } else {
             self.push(NativeOp::Const(0.0))?;
         }
-        self.pop_binary("canonical cross")?;
+        if let Some(time_tol) = time_tol {
+            self.lower(time_tol)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        if let Some(expr_tol) = expr_tol {
+            self.lower(expr_tol)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        if let Some(enable) = enable {
+            self.lower(enable)?;
+        } else {
+            self.push(NativeOp::Const(1.0))?;
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical cross",
+            self.depth,
+            5,
+        )?;
+        self.depth -= 4;
         self.ops.push(NativeOp::CrossState(slot));
         Ok(())
     }
 
     fn lower_above_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
-        let (expr, threshold) = match args {
-            [expr] => (*expr, None),
-            [expr, threshold] => (*expr, Some(*threshold)),
+        let (expr, time_tol, expr_tol, enable) = match args {
+            [expr] => (*expr, None, None, None),
+            [expr, time_tol] => (*expr, Some(*time_tol), None, None),
+            [expr, time_tol, expr_tol] => (*expr, Some(*time_tol), Some(*expr_tol), None),
+            [expr, time_tol, expr_tol, enable] => {
+                (*expr, Some(*time_tol), Some(*expr_tol), Some(*enable))
+            }
             _ => {
                 return Err(self.unsupported(format!(
-                    "analog operator above expects one or two operands, found {}",
+                    "analog operator above expects one to four operands, found {}",
                     args.len()
                 )));
             }
         };
-        let Some(_slot) = self.limits.canonical_above_slot(expr_id) else {
+        let Some(slot) = self.limits.canonical_above_slot(expr_id) else {
             return Err(self.unsupported(format!(
                 "analog operator above expression {expr_id} detector slot"
             )));
         };
         self.lower(expr)?;
-        if let Some(threshold) = threshold {
-            self.lower(threshold)?;
+        if let Some(time_tol) = time_tol {
+            self.lower(time_tol)?;
         } else {
             self.push(NativeOp::Const(0.0))?;
         }
-        self.pop_binary("canonical above")?;
-        if lower_constant_binary_compare(&mut self.ops, CompareOp::Gt)
-            || lower_constant_rhs_compare(&mut self.ops, CompareOp::Gt)
-        {
-            Ok(())
+        if let Some(expr_tol) = expr_tol {
+            self.lower(expr_tol)?;
         } else {
-            self.ops.push(NativeOp::Compare(CompareOp::Gt));
-            Ok(())
+            self.push(NativeOp::Const(0.0))?;
         }
+        if let Some(enable) = enable {
+            self.lower(enable)?;
+        } else {
+            self.push(NativeOp::Const(1.0))?;
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical above",
+            self.depth,
+            4,
+        )?;
+        self.depth -= 3;
+        self.ops.push(NativeOp::AboveState(slot));
+        Ok(())
     }
 
     fn lower_timer_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
@@ -7327,6 +7375,7 @@ fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::SlewState(_) => "SlewState",
         NativeOp::AbsDelayState(_) => "AbsDelayState",
         NativeOp::CrossState(_) => "CrossState",
+        NativeOp::AboveState(_) => "AboveState",
         NativeOp::WhiteNoise => "WhiteNoise",
         NativeOp::FlickerNoise => "FlickerNoise",
         NativeOp::DdtState(_) => "DdtState",
@@ -8289,12 +8338,15 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::IntegerBinary(_)
         | NativeOp::LimitState(_)
         | NativeOp::AbsDelayState(_)
-        | NativeOp::CrossState(_)
         | NativeOp::FlickerNoise
         | NativeOp::IdtState(_) => (2, 1),
 
         NativeOp::SlewState(_) | NativeOp::IfElse => (3, 1),
-        NativeOp::TransitionState(_) | NativeOp::TimerState(_) | NativeOp::IdtModState(_) => (4, 1),
+        NativeOp::TransitionState(_)
+        | NativeOp::TimerState(_)
+        | NativeOp::AboveState(_)
+        | NativeOp::IdtModState(_) => (4, 1),
+        NativeOp::CrossState(_) => (5, 1),
     }
 }
 
@@ -9315,7 +9367,7 @@ endmodule
     }
 
     #[test]
-    fn lowers_canonical_constant_above_to_ordered_literal() {
+    fn keeps_canonical_constant_above_as_stateful_event() {
         let source = r#"
 module mir_constant_above(p, n);
   inout p, n;
@@ -9351,8 +9403,17 @@ endmodule
         )
         .expect("lower canonical constant above to native program");
 
-        assert_eq!(program.ops(), &[NativeOp::Const(1.0)]);
-        assert_eq!(program.max_stack_depth(), 1);
+        assert_eq!(
+            program.ops(),
+            &[
+                NativeOp::Const(2.0),
+                NativeOp::Const(1.0),
+                NativeOp::Const(0.0),
+                NativeOp::Const(1.0),
+                NativeOp::AboveState(0),
+            ]
+        );
+        assert_eq!(program.max_stack_depth(), 4);
     }
 
     #[test]
@@ -12912,11 +12973,13 @@ endmodule
     }
 
     #[test]
-    fn lowers_above_state_as_native_ordered_compare() {
+    fn lowers_above_state_as_native_context_detector() {
         let program = BytecodeProgram {
             instructions: vec![
                 Instruction::PushTemperature,
-                Instruction::PushConst(300.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
                 Instruction::AboveState(7),
             ],
         };
@@ -12929,66 +12992,39 @@ endmodule
             lowered.ops(),
             &[
                 NativeOp::LoadTemperature,
-                NativeOp::CompareConst(CompareOp::Gt, 300.0),
+                NativeOp::Const(0.0),
+                NativeOp::Const(0.0),
+                NativeOp::Const(1.0),
+                NativeOp::AboveState(7),
             ]
         );
-        assert_eq!(lowered.max_stack_depth(), 1);
+        assert_eq!(lowered.max_stack_depth(), 4);
     }
 
     #[test]
-    fn folds_constant_above_state_to_ordered_literal() {
-        let left_nan_bits = 0x7ff8_0000_0000_0001_u64;
-        let right_nan_bits = 0x7ff8_0000_0000_0002_u64;
-        let cases = [
-            (
-                "true",
-                2.0_f64.to_bits(),
-                1.0_f64.to_bits(),
-                1.0_f64.to_bits(),
-            ),
-            (
-                "false",
-                1.0_f64.to_bits(),
-                2.0_f64.to_bits(),
-                0.0_f64.to_bits(),
-            ),
-            (
-                "left-nan",
-                left_nan_bits,
-                1.0_f64.to_bits(),
-                0.0_f64.to_bits(),
-            ),
-            (
-                "right-nan",
-                1.0_f64.to_bits(),
-                right_nan_bits,
-                0.0_f64.to_bits(),
-            ),
-        ];
+    fn constant_above_state_is_not_folded_away() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushConst(2.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
+                Instruction::AboveState(7),
+            ],
+        };
+        let lowered = NativeProgram::from_bytecode(
+            "above-literal",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect("constant above must retain event history");
 
-        for (case, left_bits, right_bits, expected_bits) in cases {
-            let program = BytecodeProgram {
-                instructions: vec![
-                    Instruction::PushConst(f64::from_bits(left_bits)),
-                    Instruction::PushConst(f64::from_bits(right_bits)),
-                    Instruction::AboveState(7),
-                ],
-            };
-
-            let lowered = NativeProgram::from_bytecode(
-                "above-literal",
-                EntryKind::Assignment,
-                &program,
-                limits(0, 0),
-            )
-            .expect("constant above state should fold to ordered literal");
-
-            assert_eq!(lowered.max_stack_depth(), 1, "{case}");
-            match lowered.ops() {
-                [NativeOp::Const(value)] => assert_eq!(value.to_bits(), expected_bits, "{case}"),
-                ops => panic!("{case}: expected folded above literal, got {ops:?}"),
-            }
-        }
+        assert!(matches!(
+            lowered.ops().last(),
+            Some(NativeOp::AboveState(7))
+        ));
+        assert_eq!(lowered.max_stack_depth(), 4);
     }
 
     #[test]
@@ -13326,6 +13362,9 @@ endmodule
             instructions: vec![
                 Instruction::PushTemperature,
                 Instruction::PushConst(1.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
                 Instruction::CrossState(4),
             ],
         };
@@ -13339,10 +13378,13 @@ endmodule
             &[
                 NativeOp::LoadTemperature,
                 NativeOp::Const(1.0),
+                NativeOp::Const(0.0),
+                NativeOp::Const(0.0),
+                NativeOp::Const(1.0),
                 NativeOp::CrossState(4),
             ]
         );
-        assert_eq!(lowered.max_stack_depth(), 2);
+        assert_eq!(lowered.max_stack_depth(), 5);
     }
 
     #[test]
@@ -13357,10 +13399,10 @@ endmodule
             &program,
             limits(0, 0),
         )
-        .expect_err("cross state requires value and direction operands");
+        .expect_err("cross state requires all event operands");
         let msg = error.to_string();
         assert!(
-            msg.contains("CrossState requires stack depth 2"),
+            msg.contains("CrossState requires stack depth 5"),
             "got: {msg}"
         );
         assert!(msg.contains("no interpreter fallback"), "got: {msg}");
@@ -13375,6 +13417,9 @@ endmodule
             let program = BytecodeProgram {
                 instructions: vec![
                     Instruction::PushConst(1.0),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(0.0),
                     Instruction::PushConst(1.0),
                     Instruction::CrossState(0),
                 ],

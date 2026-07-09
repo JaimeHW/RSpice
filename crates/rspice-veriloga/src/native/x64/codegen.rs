@@ -1,8 +1,8 @@
 use super::encoder::{ConditionCode, Gpr, X64Encoder, Xmm};
 use crate::native::abi::{
-    rspice_absdelay_state_native, rspice_acos, rspice_acosh, rspice_asin, rspice_asinh,
-    rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos, rspice_cosh,
-    rspice_cross_state_native, rspice_dynamic_variable_load_native,
+    rspice_above_state_native, rspice_absdelay_state_native, rspice_acos, rspice_acosh,
+    rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
+    rspice_cosh, rspice_cross_state_native, rspice_dynamic_variable_load_native,
     rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
     rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_limited_exp, rspice_log,
     rspice_log10, rspice_mod, rspice_native_current_probe_error,
@@ -423,6 +423,7 @@ impl FunctionCompiler {
                 NativeOp::SlewState(filter_id) => self.emit_slew_state(filter_id)?,
                 NativeOp::AbsDelayState(buffer_id) => self.emit_absdelay_state(buffer_id)?,
                 NativeOp::CrossState(detector_id) => self.emit_cross_state(detector_id)?,
+                NativeOp::AboveState(detector_id) => self.emit_above_state(detector_id)?,
                 NativeOp::WhiteNoise => self.emit_white_noise()?,
                 NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
@@ -1955,21 +1956,40 @@ impl FunctionCompiler {
     }
 
     fn emit_cross_state(&mut self, detector_id: usize) -> JitResult<()> {
-        if self.depth < 2 {
+        if self.depth < 5 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
-                detail: format!("cross state requires stack depth 2, found {}", self.depth).into(),
+                detail: format!("cross state requires stack depth 5, found {}", self.depth).into(),
             });
         }
 
-        let input = XMM_STACK[self.depth - 2];
+        let input = XMM_STACK[self.depth - 5];
         self.emit_operand_context_filter_helper_call(
             input,
-            2,
+            5,
             detector_id,
             rspice_cross_state_native,
         );
-        self.depth -= 1;
+        self.depth -= 4;
+        Ok(())
+    }
+
+    fn emit_above_state(&mut self, detector_id: usize) -> JitResult<()> {
+        if self.depth < 4 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!("above state requires stack depth 4, found {}", self.depth).into(),
+            });
+        }
+
+        let input = XMM_STACK[self.depth - 4];
+        self.emit_operand_context_filter_helper_call(
+            input,
+            4,
+            detector_id,
+            rspice_above_state_native,
+        );
+        self.depth -= 3;
         Ok(())
     }
 
@@ -3449,6 +3469,7 @@ fn native_op_uses_helper_call(op: &NativeOp) -> bool {
             | NativeOp::SlewState(_)
             | NativeOp::AbsDelayState(_)
             | NativeOp::CrossState(_)
+            | NativeOp::AboveState(_)
             | NativeOp::IdtModState(_)
     ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
         || matches!(
@@ -4378,6 +4399,7 @@ mod tests {
             ("slew", NativeOp::SlewState(0), false),
             ("absdelay", NativeOp::AbsDelayState(0), false),
             ("cross", NativeOp::CrossState(0), false),
+            ("above", NativeOp::AboveState(0), false),
             ("idtmod", NativeOp::IdtModState(0), true),
             (
                 "dynamic-variable-slow-path",
@@ -4445,6 +4467,7 @@ mod tests {
             ("slew", NativeOp::SlewState(0)),
             ("absdelay", NativeOp::AbsDelayState(0)),
             ("cross", NativeOp::CrossState(0)),
+            ("above", NativeOp::AboveState(0)),
             ("idtmod", NativeOp::IdtModState(0)),
             (
                 "dynamic-variable-slow-path",
@@ -8327,6 +8350,9 @@ mod tests {
                 instructions: vec![
                     Instruction::PushTemperature,
                     Instruction::PushVoltage(0, usize::MAX),
+                    Instruction::PushConst(1.0),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(0.0),
                     Instruction::PushConst(1.0),
                     Instruction::CrossState(0),
                     Instruction::Add,

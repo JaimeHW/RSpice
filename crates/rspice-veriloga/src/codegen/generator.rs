@@ -42,7 +42,6 @@ impl CodeGenerator {
             transition_filter_count: std::cell::Cell::new(0),
             slew_filter_count: std::cell::Cell::new(0),
             cross_detector_count: std::cell::Cell::new(0),
-            above_detector_count: std::cell::Cell::new(0),
             timer_state_count: std::cell::Cell::new(0),
             zi_filters: std::cell::RefCell::new(Vec::new()),
         }
@@ -198,7 +197,6 @@ impl CodeGenerator {
         self.transition_filter_count.set(0);
         self.slew_filter_count.set(0);
         self.cross_detector_count.set(0);
-        self.above_detector_count.set(0);
         self.timer_state_count.set(0);
 
         let phase_start = std::time::Instant::now();
@@ -946,15 +944,32 @@ impl CodeGenerator {
             IrExpr::Cross {
                 expr,
                 direction,
-                time_tol: _,
+                time_tol,
+                expr_tol,
+                enable,
             } => {
-                // cross(expr, direction, time_tol)
+                // cross(expr, direction, time_tol, expr_tol, enable)
                 self.emit_expr(expr, emit_ctx, program)?;
                 // Push direction constant (-1, 0, or +1)
                 let dir = direction.unwrap_or(0);
                 program
                     .instructions
                     .push(Instruction::PushConst(dir as f64));
+                if let Some(tolerance) = time_tol {
+                    self.emit_expr(tolerance, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(tolerance) = expr_tol {
+                    self.emit_expr(tolerance, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(enable) = enable {
+                    self.emit_expr(enable, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(1.0));
+                }
                 let detector_id = Self::allocate_slot(&self.cross_detector_count);
                 program
                     .instructions
@@ -1023,13 +1038,28 @@ impl CodeGenerator {
             }
             IrExpr::Above {
                 expr,
-                threshold,
-                time_tol: _,
+                time_tol,
+                expr_tol,
+                enable,
             } => {
-                // above(expr, threshold) - level crossing
+                // above(expr, time_tol, expr_tol, enable)
                 self.emit_expr(expr, emit_ctx, program)?;
-                self.emit_expr(threshold, emit_ctx, program)?;
-                let detector_id = Self::allocate_slot(&self.above_detector_count);
+                if let Some(tolerance) = time_tol {
+                    self.emit_expr(tolerance, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(tolerance) = expr_tol {
+                    self.emit_expr(tolerance, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(enable) = enable {
+                    self.emit_expr(enable, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(1.0));
+                }
+                let detector_id = Self::allocate_slot(&self.cross_detector_count);
                 program
                     .instructions
                     .push(Instruction::AboveState(detector_id));

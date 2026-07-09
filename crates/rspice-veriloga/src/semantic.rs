@@ -1967,8 +1967,10 @@ impl SemanticAnalyzer {
             EventExpr::Cross {
                 signal,
                 direction,
+                time_tol,
+                expr_tol,
+                enable,
                 span,
-                ..
             } => {
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
                 let dir_value = match direction {
@@ -1976,9 +1978,23 @@ impl SemanticAnalyzer {
                     Some(CrossDirection::Falling) => -1.0,
                     Some(CrossDirection::Both) | None => 0.0,
                 };
+                let mut args = vec![signal, Self::number_expr(dir_value, *span)];
+                if let Some(time_tol) = time_tol {
+                    args.push(self.lower_expression_with_side_effects(time_tol, module, sink)?);
+                } else if expr_tol.is_some() || enable.is_some() {
+                    args.push(Self::number_expr(0.0, *span));
+                }
+                if let Some(expr_tol) = expr_tol {
+                    args.push(self.lower_expression_with_side_effects(expr_tol, module, sink)?);
+                } else if enable.is_some() {
+                    args.push(Self::number_expr(0.0, *span));
+                }
+                if let Some(enable) = enable {
+                    args.push(self.lower_expression_with_side_effects(enable, module, sink)?);
+                }
                 EventLowering::Guard(Expression::Call(CallExpr {
                     name: "cross".into(),
-                    args: vec![signal, Self::number_expr(dir_value, *span)],
+                    args,
                     span: *span,
                 }))
             }
@@ -1998,11 +2014,31 @@ impl SemanticAnalyzer {
                     span: *span,
                 }))
             }
-            EventExpr::Above { signal, span } => {
+            EventExpr::Above {
+                signal,
+                time_tol,
+                expr_tol,
+                enable,
+                span,
+            } => {
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
+                let mut args = vec![signal];
+                if let Some(time_tol) = time_tol {
+                    args.push(self.lower_expression_with_side_effects(time_tol, module, sink)?);
+                } else if expr_tol.is_some() || enable.is_some() {
+                    args.push(Self::number_expr(0.0, *span));
+                }
+                if let Some(expr_tol) = expr_tol {
+                    args.push(self.lower_expression_with_side_effects(expr_tol, module, sink)?);
+                } else if enable.is_some() {
+                    args.push(Self::number_expr(0.0, *span));
+                }
+                if let Some(enable) = enable {
+                    args.push(self.lower_expression_with_side_effects(enable, module, sink)?);
+                }
                 EventLowering::Guard(Expression::Call(CallExpr {
                     name: "above".into(),
-                    args: vec![signal, Self::number_expr(0.0, *span)],
+                    args,
                     span: *span,
                 }))
             }

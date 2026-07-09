@@ -1203,15 +1203,20 @@ impl<'a> Parser<'a> {
                     }
                     None => None,
                 };
+                let time_tol = args.next().map(Box::new);
+                let expr_tol = args.next().map(Box::new);
+                let enable = args.next().map(Box::new);
                 if args.next().is_some() {
                     return Err(self.error(ParseErrorKind::InvalidEventExpression(
-                        "cross event time tolerance is not supported".into(),
+                        "cross event accepts at most 5 arguments".into(),
                     )));
                 }
                 Ok(EventExpr::Cross {
                     signal,
                     direction,
-                    tolerance: None,
+                    time_tol,
+                    expr_tol,
+                    enable,
                     span: start.extend(self.previous_span()),
                 })
             }
@@ -1223,13 +1228,19 @@ impl<'a> Parser<'a> {
                 }
                 let mut args = args.into_iter();
                 let signal = args.next().unwrap();
+                let time_tol = args.next().map(Box::new);
+                let expr_tol = args.next().map(Box::new);
+                let enable = args.next().map(Box::new);
                 if args.next().is_some() {
                     return Err(self.error(ParseErrorKind::InvalidEventExpression(
-                        "above event accepts exactly 1 argument".into(),
+                        "above event accepts at most 4 arguments".into(),
                     )));
                 }
                 Ok(EventExpr::Above {
                     signal,
+                    time_tol,
+                    expr_tol,
+                    enable,
                     span: start.extend(self.previous_span()),
                 })
             }
@@ -1291,7 +1302,9 @@ impl<'a> Parser<'a> {
                         Ok(EventExpr::Cross {
                             signal,
                             direction: None,
-                            tolerance: None,
+                            time_tol: None,
+                            expr_tol: None,
+                            enable: None,
                             span: start.extend(self.previous_span()),
                         })
                     }
@@ -1302,7 +1315,9 @@ impl<'a> Parser<'a> {
                 Ok(EventExpr::Cross {
                     signal,
                     direction: None,
-                    tolerance: None,
+                    time_tol: None,
+                    expr_tol: None,
+                    enable: None,
                     span: start.extend(self.previous_span()),
                 })
             }

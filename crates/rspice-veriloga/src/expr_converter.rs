@@ -568,14 +568,8 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "cross" => {
-                // cross(expr, direction, time_tol)
-                validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "cross requires at least one argument".into(),
-                    ))
-                    .into());
-                }
+                // cross(expr [, direction [, time_tol [, expr_tol [, enable]]]])
+                validate_arg_range(&func.name, func.args.len(), 1, Some(5))?;
                 let expr = self.convert(&func.args[0])?;
                 // Direction: +1=rising, -1=falling, 0=both (default)
                 let direction = func
@@ -583,10 +577,18 @@ impl<'a> ExprConverter<'a> {
                     .get(1)
                     .map(|arg| self.const_cross_direction(arg, "cross"))
                     .transpose()?;
+                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
+                    func.args
+                        .get(index)
+                        .map(|expr| self.convert(expr).map(Box::new))
+                        .transpose()
+                };
                 Ok(IrExpr::Cross {
                     expr: Box::new(expr),
                     direction,
-                    time_tol: None,
+                    time_tol: optional(2)?,
+                    expr_tol: optional(3)?,
+                    enable: optional(4)?,
                 })
             }
             "$white_noise" | "white_noise" => {
@@ -639,17 +641,19 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::Analysis(analysis_type))
             }
             "above" => {
-                validate_arg_range(&func.name, func.args.len(), 1, Some(2))?;
+                validate_arg_range(&func.name, func.args.len(), 1, Some(4))?;
                 let expr = self.convert(&func.args[0])?;
-                let threshold = if let Some(threshold) = func.args.get(1) {
-                    self.convert(threshold)?
-                } else {
-                    IrExpr::Const(0.0)
+                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
+                    func.args
+                        .get(index)
+                        .map(|expr| self.convert(expr).map(Box::new))
+                        .transpose()
                 };
                 Ok(IrExpr::Above {
                     expr: Box::new(expr),
-                    threshold: Box::new(threshold),
-                    time_tol: None,
+                    time_tol: optional(1)?,
+                    expr_tol: optional(2)?,
+                    enable: optional(3)?,
                 })
             }
             "timer" => {
@@ -1033,30 +1037,41 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "cross" => {
-                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
+                validate_arg_range(&call.name, call.args.len(), 1, Some(5))?;
                 let expr = self.convert(require_arg(0)?)?;
                 let direction = call
                     .args
                     .get(1)
                     .map(|arg| self.const_cross_direction(arg, "cross"))
                     .transpose()?;
+                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
+                    call.args
+                        .get(index)
+                        .map(|expr| self.convert(expr).map(Box::new))
+                        .transpose()
+                };
                 Ok(IrExpr::Cross {
                     expr: Box::new(expr),
                     direction,
-                    time_tol: None,
+                    time_tol: optional(2)?,
+                    expr_tol: optional(3)?,
+                    enable: optional(4)?,
                 })
             }
             "above" => {
-                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
+                validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
                 let expr = self.convert(require_arg(0)?)?;
-                let threshold = match call.args.get(1) {
-                    Some(t) => self.convert(t)?,
-                    None => IrExpr::Const(0.0),
+                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
+                    call.args
+                        .get(index)
+                        .map(|expr| self.convert(expr).map(Box::new))
+                        .transpose()
                 };
                 Ok(IrExpr::Above {
                     expr: Box::new(expr),
-                    threshold: Box::new(threshold),
-                    time_tol: None,
+                    time_tol: optional(1)?,
+                    expr_tol: optional(2)?,
+                    enable: optional(3)?,
                 })
             }
             "timer" => {

@@ -301,6 +301,22 @@ mod tests {
         assert_eq!(cross.eval(1.0, 1.0, 1), 1.0);
         assert_eq!(cross.eval(1.0, 1.0, 1), 1.0);
     }
+
+    #[test]
+    fn cross_time_tolerance_coalesces_nearby_events() {
+        let mut cross = CrossDetector::default();
+        assert_eq!(cross.eval_event(-1.0, 0.0, 0, 1.0, 0.0, true), 0.0);
+        cross.commit();
+        assert_eq!(cross.eval_event(1.0, 1.0, 0, 1.0, 0.0, true), 1.0);
+        cross.commit();
+
+        assert_eq!(cross.eval_event(-1.0, 1.2, 0, 1.0, 0.0, true), 0.0);
+        cross.commit();
+        assert_eq!(cross.eval_event(1.0, 1.4, 0, 1.0, 0.0, true), 0.0);
+        cross.commit();
+
+        assert_eq!(cross.eval_event(-1.0, 2.0, 0, 1.0, 0.0, true), 1.0);
+    }
 }
 
 impl Default for DelayBuffer {
@@ -455,11 +471,27 @@ impl SlewFilter {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 struct CrossState {
     value: f64,
     time: f64,
+    side: i8,
+    last_event_time: f64,
+    last_crossing_time: f64,
     initialized: bool,
+}
+
+impl Default for CrossState {
+    fn default() -> Self {
+        Self {
+            value: 0.0,
+            time: 0.0,
+            side: 0,
+            last_event_time: f64::NEG_INFINITY,
+            last_crossing_time: -1.0,
+            initialized: false,
+        }
+    }
 }
 
 /// Cross detector for threshold crossing events.
@@ -478,27 +510,141 @@ impl CrossDetector {
     /// Check for zero crossing, returns 1.0 if crossed, 0.0 otherwise.
     /// direction: +1 = rising only, -1 = falling only, 0 = both.
     pub fn eval(&mut self, value: f64, time: f64, direction: i32) -> f64 {
-        let result = if !self.committed.initialized || time <= self.committed.time {
-            0.0
+        self.eval_event(value, time, direction, 0.0, 0.0, true)
+    }
+
+    /// Evaluate `cross(expr, direction, time_tol, expr_tol, enable)`.
+    pub fn eval_event(
+        &mut self,
+        value: f64,
+        time: f64,
+        direction: i32,
+        time_tol: f64,
+        expr_tol: f64,
+        enabled: bool,
+    ) -> f64 {
+        self.eval_impl(value, time, direction, time_tol, expr_tol, enabled, false)
+    }
+
+    /// Evaluate `above(expr, time_tol, expr_tol, enable)`.
+    ///
+    /// Unlike `cross`, `above` also fires during the initial operating-point
+    /// evaluation when the expression starts on the positive side.
+    pub fn eval_above(
+        &mut self,
+        value: f64,
+        time: f64,
+        time_tol: f64,
+        expr_tol: f64,
+        enabled: bool,
+    ) -> f64 {
+        self.eval_impl(value, time, 1, time_tol, expr_tol, enabled, true)
+    }
+
+    fn eval_impl(
+        &mut self,
+        value: f64,
+        time: f64,
+        direction: i32,
+        time_tol: f64,
+        expr_tol: f64,
+        enabled: bool,
+        initial_above: bool,
+    ) -> f64 {
+        let expr_tol = if expr_tol.is_finite() {
+            expr_tol.abs()
         } else {
-            let crossed = match direction {
-                1 => self.committed.value < 0.0 && value >= 0.0, // Rising
-                -1 => self.committed.value > 0.0 && value <= 0.0, // Falling
-                _ => {
-                    (self.committed.value < 0.0 && value >= 0.0)
-                        || (self.committed.value > 0.0 && value <= 0.0)
-                }
-            };
-            if crossed { 1.0 } else { 0.0 }
+            0.0
+        };
+        let time_tol = if time_tol.is_finite() {
+            time_tol.max(0.0)
+        } else {
+            0.0
         };
 
-        self.candidate = CrossState {
+        if !self.committed.initialized {
+            let side = Self::side(value, expr_tol);
+            let mut candidate = CrossState {
+                value,
+                time,
+                side,
+                initialized: true,
+                ..CrossState::default()
+            };
+            let fired = initial_above && enabled && side > 0;
+            if fired {
+                candidate.last_event_time = time;
+                candidate.last_crossing_time = time;
+            }
+            self.candidate = candidate;
+            self.candidate_valid = true;
+            return if fired { 1.0 } else { 0.0 };
+        }
+
+        if !value.is_finite() || !time.is_finite() || time <= self.committed.time {
+            self.candidate = self.committed;
+            self.candidate_valid = true;
+            return 0.0;
+        }
+
+        let rising = self.committed.side < 0 && value >= -expr_tol;
+        let falling = self.committed.side > 0 && value <= expr_tol;
+        let crossing_direction = if rising {
+            1
+        } else if falling {
+            -1
+        } else {
+            0
+        };
+        let crossing_time = if crossing_direction != 0 {
+            self.estimate_crossing_time(value, time)
+        } else {
+            -1.0
+        };
+        let direction_matches = direction == 0 || direction == crossing_direction;
+        let separated = crossing_time - self.committed.last_event_time > time_tol;
+        let fired = enabled && crossing_direction != 0 && direction_matches && separated;
+
+        let stable_side = Self::side(value, expr_tol);
+        let side = if stable_side != 0 {
+            stable_side
+        } else if crossing_direction != 0 {
+            crossing_direction as i8
+        } else {
+            self.committed.side
+        };
+        let mut candidate = CrossState {
             value,
             time,
-            initialized: true,
+            side,
+            ..self.committed
         };
+        if fired {
+            candidate.last_event_time = crossing_time;
+            candidate.last_crossing_time = crossing_time;
+        }
+        self.candidate = candidate;
         self.candidate_valid = true;
-        result
+        if fired { 1.0 } else { 0.0 }
+    }
+
+    fn side(value: f64, tolerance: f64) -> i8 {
+        if value > tolerance {
+            1
+        } else if value < -tolerance {
+            -1
+        } else {
+            0
+        }
+    }
+
+    fn estimate_crossing_time(&self, value: f64, time: f64) -> f64 {
+        let delta = value - self.committed.value;
+        if delta == 0.0 || !delta.is_finite() {
+            return time;
+        }
+        let fraction = (-self.committed.value / delta).clamp(0.0, 1.0);
+        self.committed.time + fraction * (time - self.committed.time)
     }
 
     pub fn commit(&mut self) {

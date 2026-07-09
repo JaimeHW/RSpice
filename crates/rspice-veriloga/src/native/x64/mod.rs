@@ -7667,7 +7667,7 @@ endmodule
                     Instruction::SlewState(idx) => {
                         update_max_slot(&mut max_slew_filter, *idx);
                     }
-                    Instruction::CrossState(idx) => {
+                    Instruction::CrossState(idx) | Instruction::AboveState(idx) => {
                         update_max_slot(&mut max_cross_detector, *idx);
                     }
                     _ => {}

@@ -502,11 +502,19 @@ pub enum EventExpr {
     Cross {
         signal: Expression,
         direction: Option<CrossDirection>,
-        tolerance: Option<Expression>,
+        time_tol: Option<Box<Expression>>,
+        expr_tol: Option<Box<Expression>>,
+        enable: Option<Box<Expression>>,
         span: Span,
     },
     /// Above threshold event
-    Above { signal: Expression, span: Span },
+    Above {
+        signal: Expression,
+        time_tol: Option<Box<Expression>>,
+        expr_tol: Option<Box<Expression>>,
+        enable: Option<Box<Expression>>,
+        span: Span,
+    },
     /// Timer event: timer(start [, period [, time_tol [, enable]]])
     Timer {
         start: Expression,

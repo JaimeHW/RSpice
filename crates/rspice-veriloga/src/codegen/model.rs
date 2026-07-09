@@ -16,8 +16,6 @@ pub struct CodeGenerator {
     pub(super) slew_filter_count: std::cell::Cell<usize>,
     /// Stateful slot allocator for `cross`.
     pub(super) cross_detector_count: std::cell::Cell<usize>,
-    /// Stateful slot allocator for `above`.
-    pub(super) above_detector_count: std::cell::Cell<usize>,
     /// Stateful slot allocator for `timer`.
     pub(super) timer_state_count: std::cell::Cell<usize>,
     /// Collected z-domain filters (`zi_*`).
@@ -378,7 +376,7 @@ pub enum Instruction {
     /// Stack: [expr, max_pos_slew, max_neg_slew] -> [limited_value]  
     SlewState(usize),
     /// Cross (threshold crossing detection)
-    /// Stack: [expr] -> [0 or 1]
+    /// Stack: [expr, direction, time_tol, expr_tol, enable] -> [0 or 1]
     CrossState(usize),
     /// White noise source (returns 0 in time domain, contributes to noise analysis)
     /// Stack: [power] -> [0]
@@ -389,8 +387,8 @@ pub enum Instruction {
     /// Analysis check: returns 1 if analysis matches, else 0
     /// Parameter: analysis type ID (0=dc, 1=ac, 2=tran, etc.)
     Analysis(u8),
-    /// Above event: level crossing detection above threshold
-    /// Stack: [expr, threshold] -> [0 or 1]
+    /// Above event: initial-positive and rising zero-crossing detection
+    /// Stack: [expr, time_tol, expr_tol, enable] -> [0 or 1]
     AboveState(usize),
     /// Timer event: one-shot or periodic time-based trigger
     /// Stack: [start_time, period, time_tol, enable] -> [0 or 1]

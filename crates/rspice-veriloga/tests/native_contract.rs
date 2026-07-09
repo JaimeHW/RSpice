@@ -322,7 +322,7 @@ module native_above_assignment(p, n);
     electrical p, n;
     real gate;
     analog begin
-        gate = above(V(p, n), 1.5);
+        gate = above(V(p, n) - 1.5);
         I(p, n) <+ gate;
     end
 endmodule
@@ -2489,6 +2489,7 @@ endmodule
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 }
 
@@ -2500,7 +2501,7 @@ fn native_device_with_canonical_ir_executes_above_current_without_fallback() {
 module native_canonical_above_current(p, n);
     inout p, n;
     electrical p, n;
-    analog I(p, n) <+ above(V(p, n), 1.5);
+    analog I(p, n) <+ above(V(p, n) - 1.5);
 endmodule
 "#;
     let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -2518,7 +2519,9 @@ endmodule
         .try_evaluate()
         .expect("canonical below-threshold above evaluation succeeds");
     assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
+    device.advance_state();
 
+    device.set_time(1.0);
     device.update_voltages(&[2.0]);
     let currents = device
         .try_evaluate()
@@ -3213,7 +3216,9 @@ fn native_device_executes_above_assignments_without_fallback() {
         .expect("native below-threshold above evaluation succeeds");
     assert_eq!(device.variable("gate"), Some(0.0));
     assert_eq!(currents[0].to_bits(), 0.0_f64.to_bits());
+    device.advance_state();
 
+    device.set_time(1.0);
     device.update_voltages(&[2.0]);
     let currents = device
         .try_evaluate()
@@ -3367,6 +3372,7 @@ fn native_device_executes_cross_assignments_without_fallback() {
             (currents[0] - expected).abs() < 1e-12,
             "time: {time}, currents: {currents:?}"
         );
+        device.advance_state();
     }
 }
 

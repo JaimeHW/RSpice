@@ -319,7 +319,9 @@ impl VerilogADevice {
                         update_max(&mut max_transition_filter, *idx)
                     }
                     Instruction::SlewState(idx) => update_max(&mut max_slew_filter, *idx),
-                    Instruction::CrossState(idx) => update_max(&mut max_cross_detector, *idx),
+                    Instruction::CrossState(idx) | Instruction::AboveState(idx) => {
+                        update_max(&mut max_cross_detector, *idx)
+                    }
                     _ => {}
                 }
             }
@@ -3017,7 +3019,11 @@ endmodule
                 instructions: vec![Instruction::IdtState(5), Instruction::SlewState(4)],
             },
             exponent_program: Some(BytecodeProgram {
-                instructions: vec![Instruction::LimitState(6), Instruction::CrossState(5)],
+                instructions: vec![
+                    Instruction::LimitState(6),
+                    Instruction::CrossState(5),
+                    Instruction::AboveState(7),
+                ],
             }),
             table: None,
             name: None,
@@ -3033,7 +3039,7 @@ endmodule
         assert_eq!(context.delay_buffers.len(), 7);
         assert_eq!(context.transition_filters.len(), 2);
         assert_eq!(context.slew_filters.len(), 5);
-        assert_eq!(context.cross_detectors.len(), 6);
+        assert_eq!(context.cross_detectors.len(), 8);
     }
 
     #[test]

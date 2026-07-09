@@ -290,6 +290,8 @@ pub enum IrExpr {
         expr: Box<IrExpr>,
         direction: Option<i32>, // +1=rising, -1=falling, 0=both
         time_tol: Option<Box<IrExpr>>,
+        expr_tol: Option<Box<IrExpr>>,
+        enable: Option<Box<IrExpr>>,
     },
     /// white_noise - white noise source for AC noise analysis
     /// Args: (power, name)
@@ -315,12 +317,13 @@ pub enum IrExpr {
     /// analysis(name) - check current analysis type
     /// Returns 1.0 if running specified analysis, else 0.0
     Analysis(String),
-    /// above(expr, threshold, time_tol) - level crossing event
-    /// Returns 1 when expr crosses above threshold, else 0
+    /// above(expr, time_tol, expr_tol, enable) - rising zero-crossing event
+    /// Returns 1 initially when positive and on each subsequent rising event.
     Above {
         expr: Box<IrExpr>,
-        threshold: Box<IrExpr>,
         time_tol: Option<Box<IrExpr>>,
+        expr_tol: Option<Box<IrExpr>>,
+        enable: Option<Box<IrExpr>>,
     },
     /// timer(start, period, time_tol, enable) - time event
     /// Returns 1 at time=start and every positive period thereafter.
@@ -997,19 +1000,38 @@ impl DeviceIR {
                 }
                 IrExpr::Transition { expr, .. }
                 | IrExpr::Slew { expr, .. }
-                | IrExpr::Cross { expr, .. }
                 | IrExpr::LaplaceZP { expr, .. }
                 | IrExpr::LaplaceND { expr, .. }
                 | IrExpr::ZiFilter { expr, .. }
                 | IrExpr::Ddx { expr, .. } => contains_ddt(expr),
+                IrExpr::Cross {
+                    expr,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                    ..
+                } => {
+                    contains_ddt(expr)
+                        || time_tol.as_deref().is_some_and(contains_ddt)
+                        || expr_tol.as_deref().is_some_and(contains_ddt)
+                        || enable.as_deref().is_some_and(contains_ddt)
+                }
                 IrExpr::WhiteNoise { power, .. } => contains_ddt(power),
                 IrExpr::FlickerNoise {
                     power, exponent, ..
                 } => contains_ddt(power) || contains_ddt(exponent),
                 IrExpr::NoiseTable { .. } => false,
                 IrExpr::Above {
-                    expr, threshold, ..
-                } => contains_ddt(expr) || contains_ddt(threshold),
+                    expr,
+                    time_tol,
+                    expr_tol,
+                    enable,
+                } => {
+                    contains_ddt(expr)
+                        || time_tol.as_deref().is_some_and(contains_ddt)
+                        || expr_tol.as_deref().is_some_and(contains_ddt)
+                        || enable.as_deref().is_some_and(contains_ddt)
+                }
                 IrExpr::Timer {
                     start_time,
                     period,

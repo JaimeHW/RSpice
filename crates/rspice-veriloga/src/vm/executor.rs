@@ -510,8 +510,11 @@ impl<'a> Vm<'a> {
             }
 
             // CrossState: threshold crossing detection
-            // Stack: [expr, direction] -> [0 or 1]
+            // Stack: [expr, direction, time_tol, expr_tol, enable] -> [0 or 1]
             Instruction::CrossState(detector_id) => {
+                let enable = self.pop()?;
+                let expr_tol = self.pop()?;
+                let time_tol = self.pop()?;
                 let direction = self.pop()?;
                 let value = self.pop()?;
                 let time = self.context.time;
@@ -530,7 +533,8 @@ impl<'a> Vm<'a> {
                         .resize_with(*detector_id + 1, Default::default);
                 }
                 let detector = &mut self.context.cross_detectors[*detector_id];
-                let crossed = detector.eval(value, time, direction);
+                let crossed =
+                    detector.eval_event(value, time, direction, time_tol, expr_tol, enable != 0.0);
 
                 // Cross events only trigger in transient analysis.
                 let result = if is_transient { crossed } else { 0.0 };
@@ -603,14 +607,26 @@ impl<'a> Vm<'a> {
                 self.stack.push(result);
             }
 
-            // AboveState: level crossing event detection
-            // Stack: [expr, threshold] -> [0 or 1]
-            Instruction::AboveState(_detector_id) => {
-                let threshold = self.pop()?;
+            // AboveState: initial-positive and rising crossing event detection
+            // Stack: [expr, time_tol, expr_tol, enable] -> [0 or 1]
+            Instruction::AboveState(detector_id) => {
+                let enable = self.pop()?;
+                let expr_tol = self.pop()?;
+                let time_tol = self.pop()?;
                 let value = self.pop()?;
-                // For DC analysis, simply check if value > threshold
-                // In transient, this would generate events on crossing
-                let result = if value > threshold { 1.0 } else { 0.0 };
+                if self.context.cross_detectors.len() <= *detector_id {
+                    self.context
+                        .cross_detectors
+                        .resize_with(*detector_id + 1, Default::default);
+                }
+                let detector = &mut self.context.cross_detectors[*detector_id];
+                let result = detector.eval_above(
+                    value,
+                    self.context.time,
+                    time_tol,
+                    expr_tol,
+                    enable != 0.0,
+                );
                 self.stack.push(result);
             }
 

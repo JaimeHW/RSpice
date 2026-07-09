@@ -886,14 +886,15 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
 
 /// External helper function for native x64 threshold-crossing detectors.
 ///
-/// `operands` points to two contiguous f64 values emitted by the JIT in VM
-/// stack order: expression value and direction. Native mode requires
+/// `operands` points to five contiguous f64 values emitted by the JIT in VM
+/// stack order: expression, direction, time tolerance, expression tolerance,
+/// and enable. Native mode requires
 /// preallocated detector storage and hard-fails through the native runtime
 /// error channel when it is missing.
 ///
 /// # Safety
 /// This function is called from JIT-compiled code with a valid EvalContext
-/// pointer and a valid two-element operand slice. Invalid pointers are reported
+/// pointer and a valid five-element operand slice. Invalid pointers are reported
 /// through the native runtime error channel.
 #[unsafe(export_name = "rspice_cross_state_native")]
 pub unsafe extern "C" fn rspice_cross_state_native(
@@ -912,9 +913,12 @@ pub unsafe extern "C" fn rspice_cross_state_native(
         return 0.0;
     }
 
-    let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
+    let operands = unsafe { std::slice::from_raw_parts(operands, 5) };
     let value = operands[0];
     let direction_raw = operands[1];
+    let time_tol = operands[2];
+    let expr_tol = operands[3];
+    let enabled = operands[4] != 0.0;
     let direction = if direction_raw > 0.5 {
         1
     } else if direction_raw < -0.5 {
@@ -940,8 +944,63 @@ pub unsafe extern "C" fn rspice_cross_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    let crossed = detectors[detector_id].eval(value, ctx.time, direction);
+    let crossed =
+        detectors[detector_id].eval_event(value, ctx.time, direction, time_tol, expr_tol, enabled);
     if ctx.analysis_type == 2 { crossed } else { 0.0 }
+}
+
+/// External helper function for native x64 `above(...)` event detectors.
+///
+/// `operands` contains expression, time tolerance, expression tolerance, and
+/// enable. Detector storage is shared with `cross(...)`, with a distinct slot
+/// allocated for every expression.
+///
+/// # Safety
+/// Called from JIT code with a valid four-element operand slice and evaluation
+/// context. Invalid pointers and state slots are reported through the native
+/// runtime error channel.
+#[unsafe(export_name = "rspice_above_state_native")]
+pub unsafe extern "C" fn rspice_above_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    detector_id: usize,
+) -> f64 {
+    if operands.is_null() {
+        set_native_runtime_error("native above helper missing operands; no interpreter fallback");
+        return 0.0;
+    }
+    if ctx.is_null() {
+        set_native_runtime_error(
+            "native above helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+
+    let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
+    let ctx = unsafe { &*ctx };
+    if ctx.cross_detectors.is_null() {
+        set_native_runtime_error(format!(
+            "native above helper missing detector storage for detector {detector_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if detector_id >= ctx.cross_detectors_len {
+        set_native_runtime_error(format!(
+            "native above helper detector {detector_id} outside detector table length {}; no interpreter fallback",
+            ctx.cross_detectors_len
+        ));
+        return 0.0;
+    }
+
+    let detectors =
+        unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
+    detectors[detector_id].eval_above(
+        operands[0],
+        ctx.time,
+        operands[1],
+        operands[2],
+        operands[3] != 0.0,
+    )
 }
 
 /// External helper function for native x64 runtime-indexed variable reads.
@@ -1131,12 +1190,13 @@ pub unsafe extern "C" fn rspice_current_lookup(
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        EvalContext, clear_native_runtime_error, rspice_absdelay_state_native,
-        rspice_cross_state_native, rspice_current_lookup, rspice_dynamic_variable_load_native,
-        rspice_dynamic_variable_slot_native, rspice_laplace_step, rspice_laplace_step_native,
-        rspice_limit, rspice_slew_state_native, rspice_table_derivative_native,
-        rspice_table_lookup, rspice_table_lookup_native, rspice_timer_state_native,
-        rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
+        EvalContext, clear_native_runtime_error, rspice_above_state_native,
+        rspice_absdelay_state_native, rspice_cross_state_native, rspice_current_lookup,
+        rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native,
+        rspice_laplace_step, rspice_laplace_step_native, rspice_limit, rspice_slew_state_native,
+        rspice_table_derivative_native, rspice_table_lookup, rspice_table_lookup_native,
+        rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
+        take_native_runtime_error,
     };
     use crate::codegen::LookupTable;
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
@@ -1724,7 +1784,7 @@ mod tests {
 
     #[test]
     fn cross_native_helper_records_runtime_error_for_invalid_pointers() {
-        let operands = [1.0, 1.0];
+        let operands = [1.0, 1.0, 0.0, 0.0, 1.0];
         clear_native_runtime_error();
 
         let missing_operands =
@@ -1761,7 +1821,7 @@ mod tests {
 
     #[test]
     fn cross_native_helper_hard_fails_missing_detector_storage() {
-        let operands = [1.0, 1.0];
+        let operands = [1.0, 1.0, 0.0, 0.0, 1.0];
         let ctx = empty_eval_context();
         clear_native_runtime_error();
 
@@ -1781,7 +1841,7 @@ mod tests {
 
     #[test]
     fn cross_native_helper_uses_vm_detector_state() {
-        let mut operands = [-1.0, 1.0];
+        let mut operands = [-1.0, 1.0, 0.0, 0.0, 1.0];
         let mut detectors = [CrossDetector::default()];
         let mut ctx = empty_eval_context();
         ctx.cross_detectors = detectors.as_mut_ptr();
@@ -1816,7 +1876,7 @@ mod tests {
 
         detectors[0] = CrossDetector::default();
         std::hint::black_box(&detectors);
-        operands = [1.0, -1.0];
+        operands = [1.0, -1.0, 0.0, 0.0, 1.0];
         ctx.time = 0.0;
         assert_eq!(
             unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
@@ -1830,6 +1890,44 @@ mod tests {
             unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             1.0_f64.to_bits(),
             "falling edge should obey negative direction"
+        );
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn above_native_helper_uses_stateful_initial_and_rising_events() {
+        let mut operands = [1.0, 0.0, 0.0, 1.0];
+        let mut detectors = [CrossDetector::default()];
+        let mut ctx = empty_eval_context();
+        ctx.cross_detectors = detectors.as_mut_ptr();
+        ctx.cross_detectors_len = detectors.len();
+
+        assert_eq!(
+            unsafe { rspice_above_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            1.0_f64.to_bits(),
+            "initial positive value must trigger above"
+        );
+        detectors[0].commit();
+
+        ctx.time = 1.0;
+        assert_eq!(
+            unsafe { rspice_above_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits(),
+            "steady positive values must not retrigger above"
+        );
+        operands[0] = -1.0;
+        assert_eq!(
+            unsafe { rspice_above_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
+        );
+        detectors[0].commit();
+
+        ctx.time = 2.0;
+        operands[0] = 1.0;
+        assert_eq!(
+            unsafe { rspice_above_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            1.0_f64.to_bits(),
+            "subsequent rising crossings must trigger above"
         );
         assert!(take_native_runtime_error().is_none());
     }
