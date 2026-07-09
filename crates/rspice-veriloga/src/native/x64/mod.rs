@@ -7100,7 +7100,7 @@ endmodule
                     reference,
                     actual,
                 )?;
-                reference.abs() > 1.0e-15
+                reference != 0.0
             } else {
                 true
             };
@@ -7110,8 +7110,7 @@ endmodule
                 native
                     .run_static_condition(stamp_index, &ctx, native_context.variables.as_ptr())
                     .ok_or_else(|| format!("missing native static condition {stamp_index}"))?
-                    .abs()
-                    > 1.0e-15
+                    != 0.0
             } else {
                 true
             };
@@ -7367,7 +7366,7 @@ endmodule
             ctx = eval_context_from_vm_context(context);
             if let Some(active) =
                 native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr())
-                && active.abs() <= 1.0e-15
+                && active == 0.0
             {
                 continue;
             }
@@ -7475,11 +7474,7 @@ endmodule
         let mut prior_current_probes = Vec::new();
         for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
             if let Some(condition) = &stamp.static_condition
-                && vm
-                    .execute(condition)
-                    .map_err(|error| error.to_string())?
-                    .abs()
-                    <= 1.0e-15
+                && vm.execute(condition).map_err(|error| error.to_string())? == 0.0
             {
                 push_prior_current_probe_aliases_for_stamp(
                     model,
@@ -7633,7 +7628,7 @@ endmodule
                 }
                 AssignmentStep::Loop { condition, body } => {
                     let mut iterations = 0usize;
-                    while vm.execute(condition)?.abs() > 1.0e-15 {
+                    while vm.execute(condition)? != 0.0 {
                         execute_bytecode_assignment_steps(vm, body)?;
                         iterations += 1;
                         assert!(

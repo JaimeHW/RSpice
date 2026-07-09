@@ -231,11 +231,7 @@ impl<'a> Vm<'a> {
                 let else_val = self.pop()?;
                 let then_val = self.pop()?;
                 let cond = self.pop()?;
-                let result = if cond.abs() > 1e-15 {
-                    then_val
-                } else {
-                    else_val
-                };
+                let result = if cond != 0.0 { then_val } else { else_val };
                 self.stack.push(result);
             }
 
@@ -244,29 +240,17 @@ impl<'a> Vm<'a> {
             Instruction::Lt => self.binary_op(|a, b| if a < b { 1.0 } else { 0.0 })?,
             Instruction::Ge => self.binary_op(|a, b| if a >= b { 1.0 } else { 0.0 })?,
             Instruction::Le => self.binary_op(|a, b| if a <= b { 1.0 } else { 0.0 })?,
-            Instruction::Eq => {
-                self.binary_op(|a, b| if (a - b).abs() < 1e-15 { 1.0 } else { 0.0 })?
-            }
-            Instruction::Ne => {
-                self.binary_op(|a, b| if (a - b).abs() >= 1e-15 { 1.0 } else { 0.0 })?
-            }
+            Instruction::Eq => self.binary_op(|a, b| if a == b { 1.0 } else { 0.0 })?,
+            Instruction::Ne => self.binary_op(|a, b| if a != b { 1.0 } else { 0.0 })?,
 
             // Logical operations
-            Instruction::And => self.binary_op(|a, b| {
-                if a.abs() > 1e-15 && b.abs() > 1e-15 {
-                    1.0
-                } else {
-                    0.0
-                }
-            })?,
-            Instruction::Or => self.binary_op(|a, b| {
-                if a.abs() > 1e-15 || b.abs() > 1e-15 {
-                    1.0
-                } else {
-                    0.0
-                }
-            })?,
-            Instruction::Not => self.unary_op(|a| if a.abs() < 1e-15 { 1.0 } else { 0.0 })?,
+            Instruction::And => {
+                self.binary_op(|a, b| if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 })?
+            }
+            Instruction::Or => {
+                self.binary_op(|a, b| if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 })?
+            }
+            Instruction::Not => self.unary_op(|a| if a == 0.0 { 1.0 } else { 0.0 })?,
 
             // State-based ddt: (current_expr - prev_state) / dt
             // The operand is recorded into the state slot so the next

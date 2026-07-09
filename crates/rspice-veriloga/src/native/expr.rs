@@ -9,8 +9,6 @@ use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
 use smol_str::SmolStr;
 
-const LOGICAL_EPSILON: f64 = 1.0e-15;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntryKind {
     Assignment,
@@ -8005,11 +8003,7 @@ fn lower_constant_logical_not(ops: &mut Vec<NativeOp>) -> bool {
     let Some(NativeOp::Const(value)) = ops.last_mut() else {
         return false;
     };
-    *value = if value.abs() < LOGICAL_EPSILON {
-        1.0
-    } else {
-        0.0
-    };
+    *value = if *value == 0.0 { 1.0 } else { 0.0 };
     true
 }
 
@@ -8034,7 +8028,7 @@ fn lower_constant_ifelse(ops: &mut Vec<NativeOp>) -> bool {
 }
 
 fn constant_truthy(value: f64) -> bool {
-    value.abs() > LOGICAL_EPSILON
+    value != 0.0
 }
 
 fn constant_compare(op: CompareOp, left: f64, right: f64) -> bool {
@@ -8043,8 +8037,8 @@ fn constant_compare(op: CompareOp, left: f64, right: f64) -> bool {
         CompareOp::Lt => left < right,
         CompareOp::Ge => left >= right,
         CompareOp::Le => left <= right,
-        CompareOp::Eq => (left - right).abs() < LOGICAL_EPSILON,
-        CompareOp::Ne => (left - right).abs() >= LOGICAL_EPSILON,
+        CompareOp::Eq => left == right,
+        CompareOp::Ne => left != right,
     }
 }
 
@@ -9294,7 +9288,7 @@ endmodule
         .expect("lower canonical constant ifelse to native program");
 
         match program.ops() {
-            [NativeOp::Const(value)] => assert_eq!(value.to_bits(), (-0.0_f64).to_bits()),
+            [NativeOp::Const(value)] => assert_eq!(value.to_bits(), 7.0_f64.to_bits()),
             ops => panic!("expected folded ifelse literal, got {ops:?}"),
         }
         assert_eq!(program.max_stack_depth(), 1);
@@ -11184,12 +11178,12 @@ endmodule
             ("lt-true", Instruction::Lt, 3.0, 4.0, 1.0),
             ("le-equal", Instruction::Le, 4.0, 4.0, 1.0),
             ("le-unordered", Instruction::Le, 4.0, f64::NAN, 0.0),
-            ("eq-within-epsilon", Instruction::Eq, 0.0, 0.5e-15, 1.0),
-            ("eq-at-epsilon", Instruction::Eq, 0.0, 1.0e-15, 0.0),
+            ("eq-tiny-nonzero", Instruction::Eq, 0.0, 0.5e-15, 0.0),
+            ("eq-larger-nonzero", Instruction::Eq, 0.0, 1.0e-15, 0.0),
             ("eq-unordered", Instruction::Eq, f64::NAN, 0.0, 0.0),
-            ("ne-within-epsilon", Instruction::Ne, 0.0, 0.5e-15, 0.0),
-            ("ne-at-epsilon", Instruction::Ne, 0.0, 1.0e-15, 1.0),
-            ("ne-unordered", Instruction::Ne, 0.0, f64::NAN, 0.0),
+            ("ne-tiny-nonzero", Instruction::Ne, 0.0, 0.5e-15, 1.0),
+            ("ne-larger-nonzero", Instruction::Ne, 0.0, 1.0e-15, 1.0),
+            ("ne-unordered", Instruction::Ne, 0.0, f64::NAN, 1.0),
         ];
 
         for (case, instruction, left, right, expected) in cases {
@@ -11308,11 +11302,11 @@ endmodule
     fn lowers_constant_rhs_logical_ops_without_extra_stack_slot() {
         let cases = [
             (Instruction::And, 2.0e-15, LogicalOp::And, true),
-            (Instruction::And, 1.0e-15, LogicalOp::And, false),
-            (Instruction::And, f64::NAN, LogicalOp::And, false),
+            (Instruction::And, 1.0e-15, LogicalOp::And, true),
+            (Instruction::And, f64::NAN, LogicalOp::And, true),
             (Instruction::Or, -2.0e-15, LogicalOp::Or, true),
-            (Instruction::Or, 0.5e-15, LogicalOp::Or, false),
-            (Instruction::Or, f64::NAN, LogicalOp::Or, false),
+            (Instruction::Or, 0.5e-15, LogicalOp::Or, true),
+            (Instruction::Or, f64::NAN, LogicalOp::Or, true),
         ];
 
         for (instruction, rhs, expected_op, expected_truthy) in cases {
@@ -11357,12 +11351,19 @@ endmodule
     #[test]
     fn lowers_constant_lhs_logical_ops_without_extra_stack_slot() {
         let cases = [
-            (Instruction::And, 2.0e-15, LogicalOp::And, true),
-            (Instruction::Or, 0.5e-15, LogicalOp::Or, false),
-            (Instruction::Or, f64::NAN, LogicalOp::Or, false),
+            (
+                Instruction::And,
+                2.0e-15,
+                vec![
+                    NativeOp::LoadTemperature,
+                    NativeOp::LogicalConst(LogicalOp::And, true),
+                ],
+            ),
+            (Instruction::Or, 0.5e-15, vec![NativeOp::Const(1.0)]),
+            (Instruction::Or, f64::NAN, vec![NativeOp::Const(1.0)]),
         ];
 
-        for (instruction, lhs, expected_op, expected_truthy) in cases {
+        for (instruction, lhs, expected_ops) in cases {
             let instruction_name = format!("{instruction:?}");
             let program = BytecodeProgram {
                 instructions: vec![
@@ -11389,15 +11390,9 @@ endmodule
                 !lowered.ops().iter().any(
                     |op| matches!(op, NativeOp::Const(value) if value.to_bits() == lhs.to_bits())
                 ),
-                "{expected_op:?} should consume the LHS literal in the logical op"
+                "the logical lowering should consume the LHS literal"
             );
-            assert_eq!(
-                lowered.ops(),
-                &[
-                    NativeOp::LoadTemperature,
-                    NativeOp::LogicalConst(expected_op, expected_truthy)
-                ]
-            );
+            assert_eq!(lowered.ops(), expected_ops.as_slice());
         }
     }
 
@@ -11407,14 +11402,14 @@ endmodule
             (
                 "and-false-temperature",
                 Instruction::And,
-                1.0e-15,
+                0.0,
                 vec![Instruction::PushTemperature],
                 0.0,
             ),
             (
-                "and-nan-time",
+                "and-false-time",
                 Instruction::And,
-                f64::NAN,
+                0.0,
                 vec![Instruction::PushTime],
                 0.0,
             ),
@@ -11518,7 +11513,7 @@ endmodule
             lowered.ops(),
             &[
                 NativeOp::LoadParam(0),
-                NativeOp::LogicalConst(LogicalOp::And, false)
+                NativeOp::LogicalConst(LogicalOp::And, true)
             ]
         );
         assert_eq!(lowered.max_stack_depth(), 1);
@@ -11533,18 +11528,18 @@ endmodule
                 Instruction::And,
                 1.0e-15,
                 2.0e-15,
-                0.0,
+                1.0,
             ),
             (
                 "and-right-unordered",
                 Instruction::And,
                 2.0e-15,
                 f64::NAN,
-                0.0,
+                1.0,
             ),
             ("or-right-true", Instruction::Or, 0.5e-15, -2.0e-15, 1.0),
-            ("or-both-false", Instruction::Or, 1.0e-15, 0.5e-15, 0.0),
-            ("or-left-unordered", Instruction::Or, f64::NAN, 0.5e-15, 0.0),
+            ("or-both-nonzero", Instruction::Or, 1.0e-15, 0.5e-15, 1.0),
+            ("or-left-unordered", Instruction::Or, f64::NAN, 0.5e-15, 1.0),
         ];
 
         for (case, instruction, left, right, expected) in cases {
@@ -11655,21 +11650,21 @@ endmodule
                 0.5e-15_f64.to_bits(),
                 7.0_f64.to_bits(),
                 3.0_f64.to_bits(),
-                3.0_f64.to_bits(),
+                7.0_f64.to_bits(),
             ),
             (
                 "at-epsilon",
                 1.0e-15_f64.to_bits(),
                 7.0_f64.to_bits(),
                 3.0_f64.to_bits(),
-                3.0_f64.to_bits(),
+                7.0_f64.to_bits(),
             ),
             (
                 "unordered-condition",
                 condition_nan_bits,
                 7.0_f64.to_bits(),
                 3.0_f64.to_bits(),
-                3.0_f64.to_bits(),
+                7.0_f64.to_bits(),
             ),
             (
                 "selected-then-bits",

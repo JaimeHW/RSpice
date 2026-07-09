@@ -57,7 +57,6 @@ const ABS_VALUE_MASK_HIGH: u64 = 0;
 const K_BOLTZMANN: f64 = 1.380649e-23;
 const Q_ELECTRON: f64 = 1.602176634e-19;
 const THERMAL_VOLTAGE_PER_K: f64 = K_BOLTZMANN / Q_ELECTRON;
-const BOOLEAN_EPSILON: f64 = 1.0e-15;
 const TIMESTEP_DC_EPSILON: f64 = 1.0e-20;
 const F64_EXACT_INTEGER_LIMIT_ABS_BITS: u64 = 0x4330_0000_0000_0000;
 const I64_MAX_EXCLUSIVE_AS_F64: f64 = 9_223_372_036_854_775_808.0;
@@ -2478,41 +2477,32 @@ impl FunctionCompiler {
 
         let left = XMM_STACK[self.depth - 2];
         let right = XMM_STACK[self.depth - 1];
-        let condition = match op {
+        match op {
             CompareOp::Gt => {
                 self.encoder.ucomisd_xmm_xmm(left, right);
-                ConditionCode::Above
+                self.emit_condition_result(left, ConditionCode::Above);
             }
             CompareOp::Ge => {
                 self.encoder.ucomisd_xmm_xmm(left, right);
-                ConditionCode::AboveOrEqual
+                self.emit_condition_result(left, ConditionCode::AboveOrEqual);
             }
             CompareOp::Lt => {
                 self.encoder.ucomisd_xmm_xmm(right, left);
-                ConditionCode::Above
+                self.emit_condition_result(left, ConditionCode::Above);
             }
             CompareOp::Le => {
                 self.encoder.ucomisd_xmm_xmm(right, left);
-                ConditionCode::AboveOrEqual
+                self.emit_condition_result(left, ConditionCode::AboveOrEqual);
             }
             CompareOp::Eq => {
-                self.encoder.subsd_xmm_xmm(left, right);
-                self.emit_abs_register(left);
-                self.emit_literal_load(right, BOOLEAN_EPSILON);
-                self.encoder.ucomisd_xmm_xmm(right, left);
-                ConditionCode::Above
+                self.encoder.ucomisd_xmm_xmm(left, right);
+                self.emit_ordered_condition_result(left, ConditionCode::Equal);
             }
             CompareOp::Ne => {
-                self.encoder.subsd_xmm_xmm(left, right);
-                self.emit_abs_register(left);
-                self.emit_literal_load(right, BOOLEAN_EPSILON);
                 self.encoder.ucomisd_xmm_xmm(left, right);
-                ConditionCode::AboveOrEqual
+                self.emit_unordered_or_condition_result(left, ConditionCode::NotEqual);
             }
-        };
-        self.encoder.setcc_r8(condition, Gpr::R10);
-        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
-        self.encoder.cvtsi2sd_xmm_r32(left, Gpr::R10);
+        }
         self.depth -= 1;
         Ok(())
     }
@@ -2544,20 +2534,12 @@ impl FunctionCompiler {
                 self.emit_ordered_condition_result(target, ConditionCode::BelowOrEqual);
             }
             CompareOp::Eq => {
-                if value != 0.0 {
-                    self.emit_literal_binary_op(target, value, BinaryOp::Sub);
-                }
-                self.emit_abs_register(target);
-                self.emit_literal_compare(target, BOOLEAN_EPSILON);
-                self.emit_ordered_condition_result(target, ConditionCode::Below);
+                self.emit_literal_compare(target, value);
+                self.emit_ordered_condition_result(target, ConditionCode::Equal);
             }
             CompareOp::Ne => {
-                if value != 0.0 {
-                    self.emit_literal_binary_op(target, value, BinaryOp::Sub);
-                }
-                self.emit_abs_register(target);
-                self.emit_literal_compare(target, BOOLEAN_EPSILON);
-                self.emit_condition_result(target, ConditionCode::AboveOrEqual);
+                self.emit_literal_compare(target, value);
+                self.emit_unordered_or_condition_result(target, ConditionCode::NotEqual);
             }
         }
         Ok(())
@@ -2573,6 +2555,14 @@ impl FunctionCompiler {
         self.encoder.setcc_r8(condition, Gpr::R10);
         self.encoder.setcc_r8(ConditionCode::NotParity, Gpr::R11);
         self.encoder.and_r8_r8(Gpr::R10, Gpr::R11);
+        self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
+        self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
+    }
+
+    fn emit_unordered_or_condition_result(&mut self, dst: Xmm, condition: ConditionCode) {
+        self.encoder.setcc_r8(condition, Gpr::R10);
+        self.encoder.setcc_r8(ConditionCode::Parity, Gpr::R11);
+        self.encoder.or_r8_r8(Gpr::R10, Gpr::R11);
         self.encoder.movzx_r32_r8(Gpr::R10, Gpr::R10);
         self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
     }
@@ -2643,9 +2633,10 @@ impl FunctionCompiler {
     }
 
     fn emit_truthy_to_gpr(&mut self, value: Xmm, dst: Gpr) {
-        self.emit_abs_register(value);
-        self.emit_literal_compare(value, BOOLEAN_EPSILON);
-        self.encoder.setcc_r8(ConditionCode::Above, dst);
+        self.emit_literal_compare(value, 0.0);
+        self.encoder.setcc_r8(ConditionCode::NotEqual, dst);
+        self.encoder.setcc_r8(ConditionCode::Parity, Gpr::R9);
+        self.encoder.or_r8_r8(dst, Gpr::R9);
     }
 
     fn emit_bool_result(&mut self, dst: Xmm, value: bool) {
@@ -2663,9 +2654,8 @@ impl FunctionCompiler {
     }
 
     fn emit_falsy_to_gpr(&mut self, value: Xmm, dst: Gpr, scratch: Gpr) {
-        self.emit_abs_register(value);
-        self.emit_literal_compare(value, BOOLEAN_EPSILON);
-        self.encoder.setcc_r8(ConditionCode::Below, dst);
+        self.emit_literal_compare(value, 0.0);
+        self.encoder.setcc_r8(ConditionCode::Equal, dst);
         self.encoder.setcc_r8(ConditionCode::NotParity, scratch);
         self.encoder.and_r8_r8(dst, scratch);
     }
@@ -3841,8 +3831,8 @@ fn dynamic_variable_lower_arg_reg() -> Gpr {
 #[cfg(all(test, feature = "native", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        ABS_VALUE_MASK_HIGH, ABS_VALUE_MASK_LOW, BOOLEAN_EPSILON, BRANCH_CURRENTS_OFFSET,
-        ConditionCode, ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
+        ABS_VALUE_MASK_HIGH, ABS_VALUE_MASK_LOW, BRANCH_CURRENTS_OFFSET, ConditionCode,
+        ContextFilterHelper, DYNAMIC_READ_FRAME_BYTES, FunctionCompiler, Gpr,
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
         Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, THERMAL_VOLTAGE_PER_K,
@@ -5297,7 +5287,7 @@ mod tests {
             (Instruction::Lt, f64::NAN, 0.0_f64),
             (Instruction::Le, f64::NAN, 0.0_f64),
             (Instruction::Eq, f64::NAN, 0.0_f64),
-            (Instruction::Ne, f64::NAN, 0.0_f64),
+            (Instruction::Ne, f64::NAN, 1.0_f64),
         ];
 
         for (instruction, input, expected) in cases {
@@ -5348,8 +5338,8 @@ mod tests {
         let inputs = [
             ("positive-zero", 0.0_f64),
             ("negative-zero", -0.0_f64),
-            ("within-epsilon", 0.5e-15_f64),
-            ("at-epsilon", 1.0e-15_f64),
+            ("tiny-nonzero", 0.5e-15_f64),
+            ("larger-nonzero", 1.0e-15_f64),
             ("infinity", f64::INFINITY),
             ("unordered", f64::NAN),
         ];
@@ -5383,12 +5373,7 @@ mod tests {
                 compile_value_function(&program).expect("compile zero literal comparison leaf");
             assert!(
                 !contains_bytes(&bytes, &subsd_xmm_m64_rip_prefix_bytes(Xmm::Xmm0)),
-                "{name} should not subtract a zero literal before the epsilon compare"
-            );
-            assert_eq!(
-                count_bytes(&bytes, &BOOLEAN_EPSILON.to_le_bytes()),
-                1,
-                "{name} should keep exactly one epsilon comparison literal"
+                "{name} should compare directly against zero"
             );
 
             let memory = ExecutableMemory::allocate(&bytes).expect("allocate zero comparison leaf");
@@ -5399,19 +5384,19 @@ mod tests {
             for (input_name, input) in inputs {
                 let params = [input];
                 let ctx = eval_context(&params, &[], &[], &[]);
-                let expected = match expected_op {
+                let expected: f64 = match expected_op {
                     CompareOp::Eq => {
-                        if input.is_nan() || input.abs() >= BOOLEAN_EPSILON {
-                            0.0_f64
+                        if input == literal {
+                            1.0
                         } else {
-                            1.0_f64
+                            0.0
                         }
                     }
                     CompareOp::Ne => {
-                        if input.is_nan() || input.abs() < BOOLEAN_EPSILON {
-                            0.0_f64
+                        if input != literal {
+                            1.0
                         } else {
-                            1.0_f64
+                            0.0
                         }
                     }
                     CompareOp::Gt | CompareOp::Ge | CompareOp::Lt | CompareOp::Le => {
@@ -5440,7 +5425,7 @@ mod tests {
             (Instruction::Gt, CompareOp::Lt, f64::NAN, 0.0_f64),
             (Instruction::Ge, CompareOp::Le, f64::NAN, 0.0_f64),
             (Instruction::Eq, CompareOp::Eq, f64::NAN, 0.0_f64),
-            (Instruction::Ne, CompareOp::Ne, f64::NAN, 0.0_f64),
+            (Instruction::Ne, CompareOp::Ne, f64::NAN, 1.0_f64),
         ];
 
         for (instruction, expected_op, input, expected) in cases {
@@ -5497,12 +5482,12 @@ mod tests {
             ("lt-true", Instruction::Lt, 3.0, 4.0, 1.0),
             ("le-equal", Instruction::Le, 4.0, 4.0, 1.0),
             ("le-unordered", Instruction::Le, 4.0, f64::NAN, 0.0),
-            ("eq-within-epsilon", Instruction::Eq, 0.0, 0.5e-15, 1.0),
-            ("eq-at-epsilon", Instruction::Eq, 0.0, 1.0e-15, 0.0),
+            ("eq-tiny-nonzero", Instruction::Eq, 0.0, 0.5e-15, 0.0),
+            ("eq-larger-nonzero", Instruction::Eq, 0.0, 1.0e-15, 0.0),
             ("eq-unordered", Instruction::Eq, f64::NAN, 0.0, 0.0),
-            ("ne-within-epsilon", Instruction::Ne, 0.0, 0.5e-15, 0.0),
-            ("ne-at-epsilon", Instruction::Ne, 0.0, 1.0e-15, 1.0),
-            ("ne-unordered", Instruction::Ne, 0.0, f64::NAN, 0.0),
+            ("ne-tiny-nonzero", Instruction::Ne, 0.0, 0.5e-15, 1.0),
+            ("ne-larger-nonzero", Instruction::Ne, 0.0, 1.0e-15, 1.0),
+            ("ne-unordered", Instruction::Ne, 0.0, f64::NAN, 1.0),
         ];
 
         for (name, instruction, left, right, expected) in cases {
@@ -8484,17 +8469,17 @@ mod tests {
     fn generated_value_leaf_computes_equality_comparisons() {
         let cases = [
             ("eq-exact", Instruction::Eq, 1.0, 1.0, 1.0),
-            ("eq-within-epsilon", Instruction::Eq, 0.0, 0.5e-15, 1.0),
-            ("eq-at-epsilon", Instruction::Eq, 0.0, 1.0e-15, 0.0),
-            ("eq-outside-epsilon", Instruction::Eq, 0.0, 1.5e-15, 0.0),
+            ("eq-tiny-nonzero", Instruction::Eq, 0.0, 0.5e-15, 0.0),
+            ("eq-larger-nonzero", Instruction::Eq, 0.0, 1.0e-15, 0.0),
+            ("eq-nonzero", Instruction::Eq, 0.0, 1.5e-15, 0.0),
             ("ne-exact", Instruction::Ne, 1.0, 1.0, 0.0),
-            ("ne-within-epsilon", Instruction::Ne, 0.0, 0.5e-15, 0.0),
-            ("ne-at-epsilon", Instruction::Ne, 0.0, 1.0e-15, 1.0),
-            ("ne-outside-epsilon", Instruction::Ne, 0.0, 1.5e-15, 1.0),
+            ("ne-tiny-nonzero", Instruction::Ne, 0.0, 0.5e-15, 1.0),
+            ("ne-larger-nonzero", Instruction::Ne, 0.0, 1.0e-15, 1.0),
+            ("ne-nonzero", Instruction::Ne, 0.0, 1.5e-15, 1.0),
             ("eq-left-unordered", Instruction::Eq, f64::NAN, 1.0, 0.0),
             ("eq-right-unordered", Instruction::Eq, 1.0, f64::NAN, 0.0),
-            ("ne-left-unordered", Instruction::Ne, f64::NAN, 1.0, 0.0),
-            ("ne-right-unordered", Instruction::Ne, 1.0, f64::NAN, 0.0),
+            ("ne-left-unordered", Instruction::Ne, f64::NAN, 1.0, 1.0),
+            ("ne-right-unordered", Instruction::Ne, 1.0, f64::NAN, 1.0),
         ];
 
         for (name, op, left, right, expected) in cases {
@@ -8527,31 +8512,31 @@ mod tests {
                 Instruction::And,
                 1.0e-15,
                 2.0e-15,
-                0.0,
+                1.0,
             ),
             (
                 "and-left-unordered",
                 Instruction::And,
                 f64::NAN,
                 2.0e-15,
-                0.0,
+                1.0,
             ),
             (
                 "and-right-unordered",
                 Instruction::And,
                 2.0e-15,
                 f64::NAN,
-                0.0,
+                1.0,
             ),
             ("or-right-true", Instruction::Or, 0.5e-15, -2.0e-15, 1.0),
-            ("or-both-false", Instruction::Or, 1.0e-15, 0.5e-15, 0.0),
-            ("or-left-unordered", Instruction::Or, f64::NAN, 0.5e-15, 0.0),
+            ("or-both-nonzero", Instruction::Or, 1.0e-15, 0.5e-15, 1.0),
+            ("or-left-unordered", Instruction::Or, f64::NAN, 0.5e-15, 1.0),
             (
                 "or-right-unordered",
                 Instruction::Or,
                 0.5e-15,
                 f64::NAN,
-                0.0,
+                1.0,
             ),
         ];
 
@@ -8588,15 +8573,15 @@ mod tests {
                 Instruction::And,
                 0.5e-15,
                 -2.0e-15,
-                0.0,
+                1.0,
             ),
-            ("and-rhs-false", Instruction::And, 2.0e-15, 1.0e-15, 0.0),
+            ("and-rhs-nonzero", Instruction::And, 2.0e-15, 1.0e-15, 1.0),
             (
                 "and-rhs-unordered",
                 Instruction::And,
                 2.0e-15,
                 f64::NAN,
-                0.0,
+                1.0,
             ),
             ("or-rhs-true", Instruction::Or, 0.5e-15, -2.0e-15, 1.0),
             (
@@ -8611,9 +8596,9 @@ mod tests {
                 Instruction::Or,
                 0.5e-15,
                 1.0e-15,
-                0.0,
+                1.0,
             ),
-            ("or-rhs-unordered", Instruction::Or, 0.5e-15, f64::NAN, 0.0),
+            ("or-rhs-unordered", Instruction::Or, 0.5e-15, f64::NAN, 1.0),
         ];
 
         for (name, op, input, rhs, expected) in const_rhs_cases {
@@ -8673,15 +8658,15 @@ mod tests {
                 Instruction::And,
                 -2.0e-15,
                 0.5e-15,
-                0.0,
+                1.0,
             ),
-            ("and-lhs-false", Instruction::And, 1.0e-15, 2.0e-15, 0.0),
+            ("and-lhs-nonzero", Instruction::And, 1.0e-15, 2.0e-15, 1.0),
             (
                 "and-lhs-unordered",
                 Instruction::And,
                 f64::NAN,
                 2.0e-15,
-                0.0,
+                1.0,
             ),
             ("or-lhs-true", Instruction::Or, -2.0e-15, 0.5e-15, 1.0),
             (
@@ -8696,9 +8681,9 @@ mod tests {
                 Instruction::Or,
                 1.0e-15,
                 0.5e-15,
-                0.0,
+                1.0,
             ),
-            ("or-lhs-unordered", Instruction::Or, f64::NAN, 0.5e-15, 0.0),
+            ("or-lhs-unordered", Instruction::Or, f64::NAN, 0.5e-15, 1.0),
         ];
 
         for (name, op, lhs, input, expected) in const_lhs_cases {
@@ -8736,7 +8721,7 @@ mod tests {
         }
 
         let not_cases = [
-            ("not-within-epsilon", 0.5e-15, 1.0),
+            ("not-tiny-nonzero", 0.5e-15, 0.0),
             ("not-at-epsilon", 1.0e-15, 0.0),
             ("not-outside-epsilon", 2.0e-15, 0.0),
             ("not-unordered", f64::NAN, 0.0),
@@ -8768,18 +8753,18 @@ mod tests {
                 Instruction::And,
                 1.0e-15,
                 2.0e-15,
-                0.0,
+                1.0,
             ),
             (
                 "and-right-unordered",
                 Instruction::And,
                 2.0e-15,
                 f64::NAN,
-                0.0,
+                1.0,
             ),
             ("or-right-true", Instruction::Or, 0.5e-15, -2.0e-15, 1.0),
-            ("or-both-false", Instruction::Or, 1.0e-15, 0.5e-15, 0.0),
-            ("or-left-unordered", Instruction::Or, f64::NAN, 0.5e-15, 0.0),
+            ("or-both-nonzero", Instruction::Or, 1.0e-15, 0.5e-15, 1.0),
+            ("or-left-unordered", Instruction::Or, f64::NAN, 0.5e-15, 1.0),
         ];
 
         for (name, instruction, left, right, expected) in cases {
@@ -9748,9 +9733,9 @@ mod tests {
         let else_neg_zero = -0.0_f64;
         let cases = [
             ("true", 2.0e-15, 7.0, 3.0, 7.0_f64.to_bits()),
-            ("within-epsilon", 0.5e-15, 7.0, 3.0, 3.0_f64.to_bits()),
-            ("at-epsilon", 1.0e-15, 7.0, 3.0, 3.0_f64.to_bits()),
-            ("unordered", f64::NAN, 7.0, 3.0, 3.0_f64.to_bits()),
+            ("tiny-nonzero", 0.5e-15, 7.0, 3.0, 7.0_f64.to_bits()),
+            ("larger-nonzero", 1.0e-15, 7.0, 3.0, 7.0_f64.to_bits()),
+            ("unordered", f64::NAN, 7.0, 3.0, 7.0_f64.to_bits()),
             (
                 "selected-then-bits",
                 2.0e-15,

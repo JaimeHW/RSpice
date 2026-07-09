@@ -527,7 +527,7 @@ fn run_native_sweep(
         ctx = eval_context_from_vm_context(context);
         if let Some(active) =
             native.run_static_condition(stamp_index, &ctx, context.variables.as_ptr())
-            && active.abs() <= 1.0e-15
+            && active == 0.0
         {
             continue;
         }
@@ -592,12 +592,9 @@ fn run_bytecode_evaluate_sweep(
     for (stamp_index, stamp) in model.stamp_programs.iter().enumerate() {
         let active = if let Some(condition) = &stamp.static_condition {
             let mut vm = Vm::new(context);
-            vm.execute(condition)
-                .map_err(|error| {
-                    format!("bytecode evaluate static condition {stamp_index}: {error}")
-                })?
-                .abs()
-                > 1.0e-15
+            vm.execute(condition).map_err(|error| {
+                format!("bytecode evaluate static condition {stamp_index}: {error}")
+            })? != 0.0
         } else {
             true
         };
@@ -633,8 +630,7 @@ fn run_bytecode_sweep(model: &CompiledModel, context: &mut VmContext) -> Result<
             let mut vm = Vm::new(context);
             vm.execute(condition)
                 .map_err(|error| format!("bytecode static condition {stamp_index}: {error}"))?
-                .abs()
-                > 1.0e-15
+                != 0.0
         } else {
             true
         };
@@ -701,7 +697,7 @@ fn execute_assignment_steps(vm: &mut Vm<'_>, steps: &[AssignmentStep]) -> Result
             }
             AssignmentStep::Loop { condition, body } => {
                 let mut iterations = 0usize;
-                while vm.execute(condition)?.abs() > 1.0e-15 {
+                while vm.execute(condition)? != 0.0 {
                     execute_assignment_steps(vm, body)?;
                     iterations += 1;
                     if iterations >= MAX_RUNTIME_LOOP_ITERATIONS {
