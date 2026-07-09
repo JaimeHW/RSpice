@@ -13061,7 +13061,7 @@ fn rust_backend_uses_compact_parameter_state_initialization_and_validation() {
         "unconstrained defaults should not emit the full range validator call:\n{state}"
     );
     assert!(
-        state.contains("validate_parameter_metadata(index, value)?"),
+        state.contains("validate_parameter_scalar_metadata(index, value)?"),
         "set_parameter should validate through compact shared metadata instead of per-parameter calls:\n{state}"
     );
     assert!(
@@ -13122,6 +13122,64 @@ endmodule
     assert!(
         state.contains("validate_parameter(\"nf\", params.p1, true"),
         "integer parameter defaults that require runtime validation should pass the integer flag:\n{state}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_preserves_parameter_dependent_ranges() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module generated_dependent_range(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real lower = 1.0;
+    parameter real upper = 5.0;
+    parameter real forbidden = 4.0;
+    parameter real value = 3.0 from [lower:upper] exclude forbidden;
+    analog I(p, n) <+ value * V(p, n);
+endmodule
+"#,
+        )
+        .expect("canonical IR");
+    let generated = RustTranspiler::new_legacy(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile dependent parameter ranges");
+    let state = generated
+        .files
+        .iter()
+        .find(|file| file.relative_path == "state.rs")
+        .expect("state file")
+        .contents
+        .as_str();
+
+    assert!(
+        state.contains("const PARAMETER_MIN_REFERENCES: [Option<usize>; 4]")
+            && state.contains("None, None, None, Some(0)"),
+        "generated metadata must preserve the referenced lower bound:\n{state}"
+    );
+    assert!(
+        state.contains("const PARAMETER_MAX_REFERENCES: [Option<usize>; 4]")
+            && state.contains("None, None, None, Some(1)"),
+        "generated metadata must preserve the referenced upper bound:\n{state}"
+    );
+    assert!(
+        state.contains("const PARAMETER_EXCLUDED_REFERENCES: [&[usize]; 4]")
+            && state.contains("&[], &[], &[], &[2]"),
+        "generated metadata must preserve referenced exclusions:\n{state}"
+    );
+    assert!(
+        state.contains("validate_parameter_scalar_metadata(index, value)?")
+            && state.contains("pub fn validate_parameters(&self) -> Result<(), String>")
+            && state.contains("validate_parameter_metadata(self.params.as_ref(), index, value)?"),
+        "generated setters must defer cross-parameter checks until the completed vector is available:\n{state}"
+    );
+    assert!(
+        state.contains("generated Verilog-A parameter defaults must satisfy declared ranges"),
+        "generated defaults must receive a complete-vector range check:\n{state}"
     );
     assert_generated_rust_compiles(&generated);
 }

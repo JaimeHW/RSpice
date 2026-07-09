@@ -473,21 +473,61 @@ impl SemanticAnalyzer {
                         declared_range.span,
                     );
                 }
-                let dependent_constraint = declared_range.bounds.iter().any(|bound| {
-                    bound.lower.as_ref().is_some_and(|expression| {
-                        Self::references_identifiers(expression, &param_names)
-                    }) || bound.upper.as_ref().is_some_and(|expression| {
-                        Self::references_identifiers(expression, &param_names)
-                    })
-                }) || declared_range
-                    .exclude
+                let has_complex_dependent_constraint = declared_range
+                    .bounds
                     .iter()
-                    .any(|expression| Self::references_identifiers(expression, &param_names));
-                if dependent_constraint {
+                    .flat_map(|bound| [bound.lower.as_ref(), bound.upper.as_ref()])
+                    .flatten()
+                    .chain(declared_range.exclude.iter())
+                    .any(|expression| {
+                        Self::references_identifiers(expression, &param_names)
+                            && Self::direct_parameter_reference(expression, &param_names).is_none()
+                    });
+                if has_complex_dependent_constraint {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(
-                            "parameter-dependent range constraints are not yet supported".into(),
+                            "parameter-dependent range expressions must be direct parameter references"
+                                .into(),
                         ),
+                        declared_range.span,
+                    );
+                }
+                let has_unresolved_constraint = declared_range
+                    .bounds
+                    .iter()
+                    .flat_map(|bound| [bound.lower.as_ref(), bound.upper.as_ref()])
+                    .flatten()
+                    .chain(declared_range.exclude.iter())
+                    .any(|expression| {
+                        !Self::references_identifiers(expression, &param_names)
+                            && self.eval_const(expression).is_none()
+                            && Self::direct_parameter_reference(expression, &param_names).is_none()
+                    });
+                if has_unresolved_constraint {
+                    self.record_error_at(
+                        SemanticErrorKind::UnsupportedFeature(
+                            "parameter range expressions must be constant expressions or direct parameter references"
+                                .into(),
+                        ),
+                        declared_range.span,
+                    );
+                }
+                let has_self_referential_constraint = declared_range
+                    .bounds
+                    .iter()
+                    .flat_map(|bound| [bound.lower.as_ref(), bound.upper.as_ref()])
+                    .flatten()
+                    .chain(declared_range.exclude.iter())
+                    .any(|expression| {
+                        Self::direct_parameter_reference(expression, &param_names)
+                            .is_some_and(|name| name == param.name)
+                    });
+                if has_self_referential_constraint {
+                    self.record_error_at(
+                        SemanticErrorKind::CircularDependency(format!(
+                            "range of parameter '{}'",
+                            param.name
+                        )),
                         declared_range.span,
                     );
                 }
@@ -4315,10 +4355,8 @@ impl SemanticAnalyzer {
         range: &ParameterRange,
         param_names: &std::collections::HashSet<SmolStr>,
     ) -> TypedParameterRange {
-        // A bound that references another parameter must not fold against
-        // that parameter's default: the instance may override it, and a
-        // baked-in bound would clamp against the wrong limit. Such bounds
-        // stay unchecked (None).
+        // Bounds that directly reference another parameter remain dynamic;
+        // they must be checked against the final instance parameter vector.
         let fold = |e: &Expression| -> Option<f64> {
             if Self::references_identifiers(e, param_names) {
                 None
@@ -4331,14 +4369,30 @@ impl SemanticAnalyzer {
         if let Some(bound) = range.bounds.first() {
             let min = bound.lower.as_ref().and_then(fold);
             let max = bound.upper.as_ref().and_then(fold);
+            let min_parameter = bound
+                .lower
+                .as_ref()
+                .and_then(|expression| Self::direct_parameter_reference(expression, param_names));
+            let max_parameter = bound
+                .upper
+                .as_ref()
+                .and_then(|expression| Self::direct_parameter_reference(expression, param_names));
             let exclude: Vec<f64> = range.exclude.iter().filter_map(fold).collect();
+            let exclude_parameters = range
+                .exclude
+                .iter()
+                .filter_map(|expression| Self::direct_parameter_reference(expression, param_names))
+                .collect();
 
             TypedParameterRange {
                 min,
                 max,
+                min_parameter,
+                max_parameter,
                 min_exclusive: !bound.lower_inclusive,
                 max_exclusive: !bound.upper_inclusive,
                 exclude,
+                exclude_parameters,
             }
         } else {
             TypedParameterRange::unrestricted()
@@ -4384,6 +4438,18 @@ impl SemanticAnalyzer {
             | Expression::AnalogOperator(_)
             | Expression::NoiseSource(_) => false,
         }
+    }
+
+    fn direct_parameter_reference(
+        expression: &Expression,
+        names: &std::collections::HashSet<SmolStr>,
+    ) -> Option<SmolStr> {
+        let Expression::Identifier(identifier) = expression else {
+            return None;
+        };
+        names
+            .contains(&identifier.name)
+            .then(|| identifier.name.clone())
     }
 }
 

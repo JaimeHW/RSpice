@@ -528,7 +528,7 @@ endmodule
         assert!(state.contains("const PARAMETER_NAME_LOOKUP"), "{state}");
         assert!(state.contains("(\"aa\", 0)"), "{state}");
         assert!(
-            state.contains("validate_parameter_metadata(index, value)?"),
+            state.contains("validate_parameter_scalar_metadata(index, value)?"),
             "{state}"
         );
         assert!(

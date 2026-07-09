@@ -1263,6 +1263,7 @@ fn write_registry(registry_root: &Path, devices: &[GeneratedRustDevice]) -> Buil
             out.push_str("                    }\n");
             out.push_str("                }\n");
             out.push_str("            }\n");
+            out.push_str("            instance.validate_parameters()?;\n");
             writeln!(
                 out,
                 "            Ok(Some(GeneratedBuiltinKind::Device{index}(instance)))"

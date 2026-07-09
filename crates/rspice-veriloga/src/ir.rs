@@ -62,9 +62,12 @@ pub struct ParamDef {
     pub is_integer: bool,
     pub min: Option<f64>,
     pub max: Option<f64>,
+    pub min_parameter: Option<SmolStr>,
+    pub max_parameter: Option<SmolStr>,
     pub min_exclusive: bool,
     pub max_exclusive: bool,
     pub exclude: Vec<f64>,
+    pub exclude_parameters: Vec<SmolStr>,
 }
 
 /// Variable definition  
@@ -511,9 +514,12 @@ impl DeviceIR {
                 is_integer: param.param_type == crate::ast::ParamType::Integer,
                 min: range.min,
                 max: range.max,
+                min_parameter: range.min_parameter,
+                max_parameter: range.max_parameter,
                 min_exclusive: range.min_exclusive,
                 max_exclusive: range.max_exclusive,
                 exclude: range.exclude,
+                exclude_parameters: range.exclude_parameters,
             });
         }
 

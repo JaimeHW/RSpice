@@ -204,6 +204,21 @@ impl CodeGenerator {
             .parameters
             .iter()
             .map(|p| {
+                let resolve_bound = |name: &SmolStr| {
+                    emit_ctx
+                        .parameter_indices
+                        .get(name)
+                        .copied()
+                        .ok_or_else(|| {
+                            crate::error::CodeGenError::new(
+                                crate::error::CodeGenErrorKind::Internal(format!(
+                                    "parameter '{}' range references unknown parameter '{name}'",
+                                    p.name
+                                )),
+                            )
+                            .into()
+                        })
+                };
                 let default_program = p
                     .default_expr
                     .as_ref()
@@ -217,9 +232,16 @@ impl CodeGenerator {
                     is_integer: p.is_integer,
                     min: p.min,
                     max: p.max,
+                    min_parameter: p.min_parameter.as_ref().map(resolve_bound).transpose()?,
+                    max_parameter: p.max_parameter.as_ref().map(resolve_bound).transpose()?,
                     min_exclusive: p.min_exclusive,
                     max_exclusive: p.max_exclusive,
                     exclude: p.exclude.clone(),
+                    exclude_parameters: p
+                        .exclude_parameters
+                        .iter()
+                        .map(resolve_bound)
+                        .collect::<CompileResult<Vec<_>>>()?,
                 })
             })
             .collect::<CompileResult<Vec<_>>>()?;

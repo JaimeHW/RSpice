@@ -125,6 +125,12 @@ pub struct CompiledParameter {
     pub is_integer: bool,
     pub min: Option<f64>,
     pub max: Option<f64>,
+    /// Runtime parameter index supplying the lower bound.
+    #[serde(default)]
+    pub min_parameter: Option<usize>,
+    /// Runtime parameter index supplying the upper bound.
+    #[serde(default)]
+    pub max_parameter: Option<usize>,
     /// Whether equality with the lower bound is forbidden.
     #[serde(default)]
     pub min_exclusive: bool,
@@ -134,6 +140,9 @@ pub struct CompiledParameter {
     /// Explicitly excluded values.
     #[serde(default)]
     pub exclude: Vec<f64>,
+    /// Runtime parameter indices whose values are explicitly excluded.
+    #[serde(default)]
+    pub exclude_parameters: Vec<usize>,
 }
 
 /// Stamp program for a contribution

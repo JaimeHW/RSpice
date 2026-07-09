@@ -1235,9 +1235,19 @@ fn range_label(range: Option<&HirParamRange>) -> String {
     range
         .map(|range| {
             format!(
-                "min:{} max:{} min_exclusive:{} max_exclusive:{} exclude:{}",
+                "min:{} max:{} min_parameter:{} max_parameter:{} min_exclusive:{} max_exclusive:{} exclude:{} exclude_parameters:{}",
                 option_f64(range.min),
                 option_f64(range.max),
+                range
+                    .min_parameter
+                    .as_deref()
+                    .map(enc_str)
+                    .unwrap_or_else(|| "-".to_string()),
+                range
+                    .max_parameter
+                    .as_deref()
+                    .map(enc_str)
+                    .unwrap_or_else(|| "-".to_string()),
                 range.min_exclusive,
                 range.max_exclusive,
                 enc_list(
@@ -1246,7 +1256,14 @@ fn range_label(range: Option<&HirParamRange>) -> String {
                         .iter()
                         .map(|value| f64_label(*value))
                         .collect::<Vec<_>>()
-                )
+                ),
+                enc_list(
+                    range
+                        .exclude_parameters
+                        .iter()
+                        .map(|name| name.to_string())
+                        .collect::<Vec<_>>()
+                ),
             )
         })
         .unwrap_or_else(|| "-".to_string())

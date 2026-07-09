@@ -148,12 +148,18 @@ pub struct ParameterRange {
     pub min: Option<f64>,
     /// Maximum value (exclusive if `max_exclusive`)
     pub max: Option<f64>,
+    /// Parameter supplying the lower bound at instance setup time.
+    pub min_parameter: Option<smol_str::SmolStr>,
+    /// Parameter supplying the upper bound at instance setup time.
+    pub max_parameter: Option<smol_str::SmolStr>,
     /// Whether minimum is exclusive (uses `from (min:max)` vs `from [min:max]`)
     pub min_exclusive: bool,
     /// Whether maximum is exclusive
     pub max_exclusive: bool,
     /// Excluded values
     pub exclude: Vec<f64>,
+    /// Parameters whose current values are explicitly excluded.
+    pub exclude_parameters: Vec<smol_str::SmolStr>,
 }
 
 impl ParameterRange {
@@ -162,9 +168,12 @@ impl ParameterRange {
         Self {
             min: None,
             max: None,
+            min_parameter: None,
+            max_parameter: None,
             min_exclusive: false,
             max_exclusive: false,
             exclude: Vec::new(),
+            exclude_parameters: Vec::new(),
         }
     }
 
@@ -173,9 +182,12 @@ impl ParameterRange {
         Self {
             min: Some(min),
             max: Some(max),
+            min_parameter: None,
+            max_parameter: None,
             min_exclusive: true,
             max_exclusive: true,
             exclude: Vec::new(),
+            exclude_parameters: Vec::new(),
         }
     }
 
@@ -184,9 +196,12 @@ impl ParameterRange {
         Self {
             min: Some(min),
             max: Some(max),
+            min_parameter: None,
+            max_parameter: None,
             min_exclusive: false,
             max_exclusive: false,
             exclude: Vec::new(),
+            exclude_parameters: Vec::new(),
         }
     }
 
@@ -195,9 +210,12 @@ impl ParameterRange {
         Self {
             min: Some(min),
             max: Some(max),
+            min_parameter: None,
+            max_parameter: None,
             min_exclusive: true,
             max_exclusive: false,
             exclude: Vec::new(),
+            exclude_parameters: Vec::new(),
         }
     }
 
@@ -256,20 +274,33 @@ impl fmt::Display for ParameterRange {
         let open = if self.min_exclusive { "(" } else { "[" };
         let close = if self.max_exclusive { ")" } else { "]" };
 
-        match (self.min, self.max) {
-            (Some(min), Some(max)) => write!(f, "{open}{min}:{max}{close}")?,
-            (Some(min), None) => write!(f, "{open}{min}:inf)")?,
-            (None, Some(max)) => write!(f, "(-inf:{max}{close}")?,
-            (None, None) => write!(f, "(-inf:inf)")?,
-        }
+        let min = self
+            .min_parameter
+            .as_ref()
+            .map(ToString::to_string)
+            .or_else(|| self.min.map(|value| value.to_string()))
+            .unwrap_or_else(|| "-inf".to_string());
+        let max = self
+            .max_parameter
+            .as_ref()
+            .map(ToString::to_string)
+            .or_else(|| self.max.map(|value| value.to_string()))
+            .unwrap_or_else(|| "inf".to_string());
+        write!(f, "{open}{min}:{max}{close}")?;
 
-        if !self.exclude.is_empty() {
+        if !self.exclude.is_empty() || !self.exclude_parameters.is_empty() {
             write!(f, " exclude ")?;
-            for (i, v) in self.exclude.iter().enumerate() {
+            for (i, value) in self
+                .exclude
+                .iter()
+                .map(ToString::to_string)
+                .chain(self.exclude_parameters.iter().map(ToString::to_string))
+                .enumerate()
+            {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{v}")?;
+                write!(f, "{value}")?;
             }
         }
 

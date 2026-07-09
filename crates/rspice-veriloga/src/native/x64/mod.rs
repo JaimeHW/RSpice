@@ -2449,6 +2449,89 @@ fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel
                 .into(),
             });
         }
+
+        let resolve_range_parameter = |name: &SmolStr| {
+            mir.parameters
+                .iter()
+                .position(|parameter| parameter.name == *name)
+                .ok_or_else(|| JitError::InvalidCanonicalIr {
+                    model: model.name.clone(),
+                    detail: format!(
+                        "canonical parameter '{}' range references unknown parameter '{}'",
+                        canonical.name, name
+                    )
+                    .into(),
+                })
+        };
+        let canonical_min = canonical.range.as_ref().and_then(|range| range.min);
+        let canonical_max = canonical.range.as_ref().and_then(|range| range.max);
+        let canonical_min_parameter = canonical
+            .range
+            .as_ref()
+            .and_then(|range| range.min_parameter.as_ref())
+            .map(resolve_range_parameter)
+            .transpose()?;
+        let canonical_max_parameter = canonical
+            .range
+            .as_ref()
+            .and_then(|range| range.max_parameter.as_ref())
+            .map(resolve_range_parameter)
+            .transpose()?;
+        let canonical_exclude_parameters = canonical
+            .range
+            .as_ref()
+            .map(|range| {
+                range
+                    .exclude_parameters
+                    .iter()
+                    .map(resolve_range_parameter)
+                    .collect::<JitResult<Vec<_>>>()
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let canonical_exclude = canonical
+            .range
+            .as_ref()
+            .map(|range| range.exclude.as_slice())
+            .unwrap_or_default();
+        let same_optional_float = |left: Option<f64>, right: Option<f64>| match (left, right) {
+            (Some(left), Some(right)) => left.to_bits() == right.to_bits(),
+            (None, None) => true,
+            _ => false,
+        };
+        let same_float_slice = |left: &[f64], right: &[f64]| {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| left.to_bits() == right.to_bits())
+        };
+        if !same_optional_float(canonical_min, compiled.min)
+            || !same_optional_float(canonical_max, compiled.max)
+            || canonical_min_parameter != compiled.min_parameter
+            || canonical_max_parameter != compiled.max_parameter
+            || canonical
+                .range
+                .as_ref()
+                .is_some_and(|range| range.min_exclusive)
+                != compiled.min_exclusive
+            || canonical
+                .range
+                .as_ref()
+                .is_some_and(|range| range.max_exclusive)
+                != compiled.max_exclusive
+            || !same_float_slice(canonical_exclude, &compiled.exclude)
+            || canonical_exclude_parameters != compiled.exclude_parameters
+        {
+            return Err(JitError::InvalidCanonicalIr {
+                model: model.name.clone(),
+                detail: format!(
+                    "canonical parameter '{}' range metadata does not match compiled parameter metadata",
+                    canonical.name
+                )
+                .into(),
+            });
+        }
     }
 
     Ok(())

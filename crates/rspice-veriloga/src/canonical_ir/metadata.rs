@@ -36,7 +36,7 @@ pub struct CanonicalMetadata {
 impl CanonicalMetadata {
     pub fn for_source(source_package: impl Into<SmolStr>, source_text: &str) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             source_package: source_package.into(),
             source_digest: StableDigest::from_text(source_text).as_hex().into(),
             compiler_version: env!("CARGO_PKG_VERSION").into(),

@@ -32,7 +32,7 @@
 //! targeted audit before expanding that boundary.
 
 use crate::canonical_ir::CanonicalIrArtifact;
-use crate::codegen::{CompiledModel, CompiledParameter, Instruction, StampIndex};
+use crate::codegen::{CompiledModel, Instruction, StampIndex};
 #[cfg(feature = "native")]
 use crate::vm::terminal_pair_current_endpoints;
 use crate::vm::{CURRENT_PAIR_GROUND, Vm, VmContext, VmError};
@@ -82,6 +82,10 @@ pub enum ParameterValueError {
         parameter: SmolStr,
         value: f64,
     },
+    InvalidConstraint {
+        parameter: SmolStr,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for ParameterValueError {
@@ -111,6 +115,12 @@ impl std::fmt::Display for ParameterValueError {
                 f,
                 "parameter '{parameter}' value {value} is explicitly excluded"
             ),
+            Self::InvalidConstraint { parameter, detail } => {
+                write!(
+                    f,
+                    "parameter '{parameter}' has invalid range metadata: {detail}"
+                )
+            }
         }
     }
 }
@@ -681,7 +691,9 @@ impl VerilogADevice {
     }
 
     /// Checked parameter assignment. `Ok(false)` means the name is not a
-    /// model parameter; malformed or constraint-violating values are errors.
+    /// model parameter; malformed values and scalar constraint violations are
+    /// errors. Call [`Self::try_resolve_parameter_defaults`] after applying all
+    /// instance assignments to validate constraints that reference parameters.
     pub fn try_set_parameter(
         &mut self,
         name: &str,
@@ -712,17 +724,27 @@ impl VerilogADevice {
                     .position(|p| p.aliases.iter().any(|a| a.eq_ignore_ascii_case(name)))
             });
         let Some(i) = index else { return Ok(false) };
-        let param = &self.model.parameters[i];
-        Self::validate_parameter_value(param, value)?;
+        // Cross-parameter constraints are checked after all instance
+        // assignments have been applied. Checking them here would make a
+        // valid instance depend on the textual order of its assignments.
+        self.validate_parameter_value(i, value, false)?;
         self.context.set_param(i, value);
         self.context.mark_param_given(i);
         Ok(true)
     }
 
     fn validate_parameter_value(
-        parameter: &CompiledParameter,
+        &self,
+        parameter_index: usize,
         value: f64,
+        resolve_dynamic_constraints: bool,
     ) -> Result<(), ParameterValueError> {
+        let parameter = self.model.parameters.get(parameter_index).ok_or_else(|| {
+            ParameterValueError::InvalidConstraint {
+                parameter: "<unknown>".into(),
+                detail: format!("parameter index {parameter_index} is out of bounds"),
+            }
+        })?;
         if !value.is_finite() {
             return Err(ParameterValueError::NonFinite {
                 parameter: parameter.name.clone(),
@@ -738,14 +760,86 @@ impl VerilogADevice {
             });
         }
 
-        let below_min = parameter.min.is_some_and(|min| {
+        if parameter.min.is_some() && parameter.min_parameter.is_some() {
+            return Err(ParameterValueError::InvalidConstraint {
+                parameter: parameter.name.clone(),
+                detail: "lower bound has both a constant and parameter reference".to_string(),
+            });
+        }
+        if parameter.max.is_some() && parameter.max_parameter.is_some() {
+            return Err(ParameterValueError::InvalidConstraint {
+                parameter: parameter.name.clone(),
+                detail: "upper bound has both a constant and parameter reference".to_string(),
+            });
+        }
+
+        let dynamic_bound = |index: Option<usize>, label: &str| {
+            index
+                .map(|index| {
+                    let bound_parameter = self.model.parameters.get(index).ok_or_else(|| {
+                        ParameterValueError::InvalidConstraint {
+                            parameter: parameter.name.clone(),
+                            detail: format!("{label} parameter index {index} is out of bounds"),
+                        }
+                    })?;
+                    let value = self.context.parameters.get(index).copied().ok_or_else(|| {
+                        ParameterValueError::InvalidConstraint {
+                            parameter: parameter.name.clone(),
+                            detail: format!(
+                                "{label} parameter '{}' has no runtime value",
+                                bound_parameter.name
+                            ),
+                        }
+                    })?;
+                    if !value.is_finite() {
+                        return Err(ParameterValueError::InvalidConstraint {
+                            parameter: parameter.name.clone(),
+                            detail: format!(
+                                "{label} parameter '{}' has non-finite value {value}",
+                                bound_parameter.name
+                            ),
+                        });
+                    }
+                    Ok((value, bound_parameter.name.to_string()))
+                })
+                .transpose()
+        };
+        let dynamic_min = if resolve_dynamic_constraints {
+            dynamic_bound(parameter.min_parameter, "lower-bound")?
+        } else {
+            None
+        };
+        let dynamic_max = if resolve_dynamic_constraints {
+            dynamic_bound(parameter.max_parameter, "upper-bound")?
+        } else {
+            None
+        };
+        let min = dynamic_min
+            .as_ref()
+            .map(|(value, _)| *value)
+            .or(parameter.min);
+        let max = dynamic_max
+            .as_ref()
+            .map(|(value, _)| *value)
+            .or(parameter.max);
+
+        if let (Some(min), Some(max)) = (min, max)
+            && (min > max || (min == max && (parameter.min_exclusive || parameter.max_exclusive)))
+        {
+            return Err(ParameterValueError::InvalidConstraint {
+                parameter: parameter.name.clone(),
+                detail: format!("range is empty for lower bound {min} and upper bound {max}"),
+            });
+        }
+
+        let below_min = min.is_some_and(|min| {
             if parameter.min_exclusive {
                 value <= min
             } else {
                 value < min
             }
         });
-        let above_max = parameter.max.is_some_and(|max| {
+        let above_max = max.is_some_and(|max| {
             if parameter.max_exclusive {
                 value >= max
             } else {
@@ -755,19 +849,37 @@ impl VerilogADevice {
         if below_min || above_max {
             let left = if parameter.min_exclusive { '(' } else { '[' };
             let right = if parameter.max_exclusive { ')' } else { ']' };
-            let min = parameter
-                .min
-                .map_or_else(|| "-inf".to_string(), |bound| bound.to_string());
-            let max = parameter
-                .max
-                .map_or_else(|| "inf".to_string(), |bound| bound.to_string());
+            let min = dynamic_min.map_or_else(
+                || min.map_or_else(|| "-inf".to_string(), |bound| bound.to_string()),
+                |(bound, name)| format!("{name}={bound}"),
+            );
+            let max = dynamic_max.map_or_else(
+                || max.map_or_else(|| "inf".to_string(), |bound| bound.to_string()),
+                |(bound, name)| format!("{name}={bound}"),
+            );
             return Err(ParameterValueError::OutOfRange {
                 parameter: parameter.name.clone(),
                 value,
                 constraint: format!("{left}{min}:{max}{right}"),
             });
         }
-        if parameter.exclude.contains(&value) {
+        let dynamically_excluded = if resolve_dynamic_constraints {
+            parameter
+                .exclude_parameters
+                .iter()
+                .try_fold(false, |excluded, index| {
+                    match dynamic_bound(Some(*index), "excluded-value")? {
+                        Some((bound, _)) => Ok(excluded || value == bound),
+                        None => Err(ParameterValueError::InvalidConstraint {
+                            parameter: parameter.name.clone(),
+                            detail: "excluded-value reference is missing".to_string(),
+                        }),
+                    }
+                })?
+        } else {
+            false
+        };
+        if parameter.exclude.contains(&value) || dynamically_excluded {
             return Err(ParameterValueError::Excluded {
                 parameter: parameter.name.clone(),
                 value,
@@ -816,9 +928,19 @@ impl VerilogADevice {
                 vm.execute(&default_program)?
             };
 
-            Self::validate_parameter_value(&self.model.parameters[i], value)
+            self.validate_parameter_value(i, value, false)
                 .map_err(|error| VmError::ParameterValue(error.to_string()))?;
             self.context.set_param(i, value);
+        }
+
+        // A later override can tighten the range of an earlier parameter.
+        // Revalidate the complete final vector after every default has been
+        // resolved so declaration and instance assignment order cannot hide
+        // a cross-parameter violation.
+        for i in 0..self.model.parameters.len() {
+            let value = self.context.parameters[i];
+            self.validate_parameter_value(i, value, true)
+                .map_err(|error| VmError::ParameterValue(error.to_string()))?;
         }
 
         // Topology guards depend on final parameter values.

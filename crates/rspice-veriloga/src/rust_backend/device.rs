@@ -3,6 +3,8 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
 };
 
+use smol_str::SmolStr;
+
 use crate::canonical_ir::{
     CanonicalIrArtifact, CanonicalValueType, EquationId, ExprId, HirAnalogOperator, HirExprKind,
     HirStatement, MirBranchRef, MirEquation, MirEquationKind, MirParameterSlot, ValueId,
@@ -15147,6 +15149,11 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str("            let ptr = boxed.as_mut_ptr();\n");
         out.push_str("            std::ptr::write_bytes(ptr, 0, 1);\n");
         emit_parameter_defaults(artifact, parameter_fields, &mut out)?;
+        out.push_str("            let params = &*ptr;\n");
+        out.push_str("            for index in 0..PARAMETER_DISPLAY_NAMES.len() {\n");
+        out.push_str("                let value = read_parameter_slot(params, index);\n");
+        out.push_str("                validate_parameter_metadata(params, index, value).expect(\"generated Verilog-A parameter defaults must satisfy declared ranges\");\n");
+        out.push_str("            }\n");
         out.push_str("            boxed.assume_init()\n");
         out.push_str("        }\n");
     }
@@ -15458,13 +15465,29 @@ pub(super) fn generate_state_file_with_extensions(
             artifact.mir.module_name
         ));
         out.push_str("        };\n");
-        out.push_str("        validate_parameter_metadata(index, value)?;\n");
+        out.push_str("        validate_parameter_scalar_metadata(index, value)?;\n");
         out.push_str("        self.write_parameter_slot(index, value);\n");
         out.push_str("        self.finish_set_parameter(index);\n");
         out.push_str("        Ok(())\n");
     }
     out.push_str("    }\n");
     out.push('\n');
+    out.push_str(
+        "    /// Validate the complete parameter vector after applying all instance overrides.\n",
+    );
+    out.push_str("    pub fn validate_parameters(&self) -> Result<(), String> {\n");
+    if artifact.mir.parameters.is_empty() {
+        out.push_str("        Ok(())\n");
+    } else {
+        out.push_str("        for index in 0..Self::PARAMETER_COUNT {\n");
+        out.push_str("            let value = read_parameter_slot(self.params.as_ref(), index);\n");
+        out.push_str(
+            "            validate_parameter_metadata(self.params.as_ref(), index, value)?;\n",
+        );
+        out.push_str("        }\n");
+        out.push_str("        Ok(())\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
     out.push_str("    fn write_parameter_slot(&mut self, index: usize, value: f64) {\n");
     out.push_str("        debug_assert!(index < Self::PARAMETER_COUNT, \"generated parameter index out of range\");\n");
@@ -15738,6 +15761,18 @@ fn emit_parameter_metadata(
         }
         parameters_by_index[index] = Some(parameter);
     }
+    let mut parameter_indices = HashMap::with_capacity(parameter_count);
+    for parameter in &artifact.mir.parameters {
+        if parameter_indices
+            .insert(parameter.name.as_str(), usize::from(parameter.id))
+            .is_some()
+        {
+            return Err(unsupported(
+                artifact,
+                format!("duplicate canonical parameter name '{}'", parameter.name),
+            ));
+        }
+    }
 
     let lookup_count = artifact
         .mir
@@ -15752,12 +15787,73 @@ fn emit_parameter_metadata(
     out.push_str("];\n\n");
 
     out.push_str(&format!(
+        "const PARAMETER_MIN_REFERENCES: [Option<usize>; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        16,
+        |parameter| {
+            parameter_reference_option_literal(
+                parameter.name.as_str(),
+                parameter
+                    .range
+                    .as_ref()
+                    .and_then(|range| range.min_parameter.as_deref()),
+                &parameter_indices,
+            )
+        },
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_MAX_REFERENCES: [Option<usize>; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        16,
+        |parameter| {
+            parameter_reference_option_literal(
+                parameter.name.as_str(),
+                parameter
+                    .range
+                    .as_ref()
+                    .and_then(|range| range.max_parameter.as_deref()),
+                &parameter_indices,
+            )
+        },
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
         "const PARAMETER_DISPLAY_NAMES: [&str; {parameter_count}] = [\n"
     ));
     emit_chunked_parameter_metadata_array(
         &parameters_by_index,
         16,
         |parameter| Ok(format!("{:?}", parameter.name.as_str())),
+        out,
+    )?;
+    out.push_str("];\n\n");
+
+    out.push_str(&format!(
+        "const PARAMETER_EXCLUDED_REFERENCES: [&[usize]; {parameter_count}] = [\n"
+    ));
+    emit_chunked_parameter_metadata_array(
+        &parameters_by_index,
+        8,
+        |parameter| {
+            parameter_excluded_references_literal(
+                parameter.name.as_str(),
+                parameter
+                    .range
+                    .as_ref()
+                    .map(|range| range.exclude_parameters.as_slice())
+                    .unwrap_or_default(),
+                &parameter_indices,
+            )
+        },
         out,
     )?;
     out.push_str("];\n\n");
@@ -15898,6 +15994,58 @@ fn parameter_bound_option_literal(value: Option<f64>) -> String {
         .filter(|value| value.is_finite())
         .map(|value| format!("Some({})", parameter_bound_literal(value)))
         .unwrap_or_else(|| "None".to_string())
+}
+
+fn parameter_reference_option_literal(
+    parameter_name: &str,
+    reference: Option<&str>,
+    parameter_indices: &HashMap<&str, usize>,
+) -> Result<String, RustBackendError> {
+    let Some(reference) = reference else {
+        return Ok("None".to_string());
+    };
+    let index = parameter_indices.get(reference).copied().ok_or_else(|| {
+        RustBackendError::unsupported(
+            "<generated>",
+            parameter_name,
+            format!("range references unknown parameter '{reference}'"),
+        )
+    })?;
+    Ok(format!("Some({index})"))
+}
+
+fn parameter_excluded_references_literal(
+    parameter_name: &str,
+    references: &[SmolStr],
+    parameter_indices: &HashMap<&str, usize>,
+) -> Result<String, RustBackendError> {
+    let indices = references
+        .iter()
+        .map(|reference| {
+            parameter_indices
+                .get(reference.as_str())
+                .copied()
+                .ok_or_else(|| {
+                    RustBackendError::unsupported(
+                        "<generated>",
+                        parameter_name,
+                        format!("range excludes unknown parameter '{reference}'"),
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if indices.is_empty() {
+        Ok("&[]".to_string())
+    } else {
+        Ok(format!(
+            "&[{}]",
+            indices
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
 }
 
 fn parameter_excluded_bounds_literal(
@@ -16253,7 +16401,10 @@ fn parameter_range_has_runtime_constraints(
     }
     Ok(range.min.is_some_and(|value| value.is_finite())
         || range.max.is_some_and(|value| value.is_finite())
-        || !range.exclude.is_empty())
+        || range.min_parameter.is_some()
+        || range.max_parameter.is_some()
+        || !range.exclude.is_empty()
+        || !range.exclude_parameters.is_empty())
 }
 
 fn range_bound_arg(value: f64) -> String {
@@ -16267,103 +16418,193 @@ fn range_excluded_arg(value: f64) -> String {
 }
 
 fn generate_shared_parameter_validator() -> String {
-    [
-        "#[derive(Copy, Clone)]",
-        "struct ParameterBound {",
-        "    value: f64,",
-        "    label: &'static str,",
-        "}",
-        "",
-        "const PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;",
-        "const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;",
-        "",
-        "fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {",
-        "    let name = PARAMETER_DISPLAY_NAMES[index];",
-        "    let flags = PARAMETER_RANGE_FLAGS[index];",
-        "    validate_finite_parameter(name, value)?;",
-        "    if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {",
-        "        return Err(format!(\"parameter '{}' must be an integer, got {}\", name, value));",
-        "    }",
-        "    if PARAMETER_INTEGER_FLAGS[index] && (value < i32::MIN as f64 || value > i32::MAX as f64) {",
-        "        return Err(format!(\"parameter '{}' must fit in a 32-bit signed integer, got {}\", name, value));",
-        "    }",
-        "    if let Some(min) = PARAMETER_MIN_BOUNDS[index] {",
-        "        if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {",
-        "            if value <= min.value {",
-        "                return Err(format!(\"parameter '{}' must be > {}, got {}\", name, min.label, value));",
-        "            }",
-        "        } else if value < min.value {",
-        "            return Err(format!(\"parameter '{}' must be >= {}, got {}\", name, min.label, value));",
-        "        }",
-        "    }",
-        "    if let Some(max) = PARAMETER_MAX_BOUNDS[index] {",
-        "        if flags & PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {",
-        "            if value >= max.value {",
-        "                return Err(format!(\"parameter '{}' must be < {}, got {}\", name, max.label, value));",
-        "            }",
-        "        } else if value > max.value {",
-        "            return Err(format!(\"parameter '{}' must be <= {}, got {}\", name, max.label, value));",
-        "        }",
-        "    }",
-        "    for excluded in PARAMETER_EXCLUDED_BOUNDS[index] {",
-        "        if value == excluded.value {",
-        "            return Err(format!(\"parameter '{}' must not equal {}, got {}\", name, excluded.label, value));",
-        "        }",
-        "    }",
-        "    Ok(())",
-        "}",
-        "",
-        "fn validate_finite_parameter(name: &str, value: f64) -> Result<(), String> {",
-        "    if !value.is_finite() {",
-        "        return Err(format!(\"parameter '{}' must be finite, got {}\", name, value));",
-        "    }",
-        "    Ok(())",
-        "}",
-        "",
-        "fn validate_parameter(",
-        "    name: &str,",
-        "    value: f64,",
-        "    integer: bool,",
-        "    min: Option<(f64, &str)>,",
-        "    min_exclusive: bool,",
-        "    max: Option<(f64, &str)>,",
-        "    max_exclusive: bool,",
-        "    excluded: &[(f64, &str)],",
-        ") -> Result<(), String> {",
-        "    validate_finite_parameter(name, value)?;",
-        "    if integer && value.fract() != 0.0 {",
-        "        return Err(format!(\"parameter '{}' must be an integer, got {}\", name, value));",
-        "    }",
-        "    if integer && (value < i32::MIN as f64 || value > i32::MAX as f64) {",
-        "        return Err(format!(\"parameter '{}' must fit in a 32-bit signed integer, got {}\", name, value));",
-        "    }",
-        "    if let Some((min, label)) = min {",
-        "        if min_exclusive {",
-        "            if value <= min {",
-        "                return Err(format!(\"parameter '{}' must be > {}, got {}\", name, label, value));",
-        "            }",
-        "        } else if value < min {",
-        "            return Err(format!(\"parameter '{}' must be >= {}, got {}\", name, label, value));",
-        "        }",
-        "    }",
-        "    if let Some((max, label)) = max {",
-        "        if max_exclusive {",
-        "            if value >= max {",
-        "                return Err(format!(\"parameter '{}' must be < {}, got {}\", name, label, value));",
-        "            }",
-        "        } else if value > max {",
-        "            return Err(format!(\"parameter '{}' must be <= {}, got {}\", name, label, value));",
-        "        }",
-        "    }",
-        "    for (excluded, label) in excluded {",
-        "        if value == *excluded {",
-        "            return Err(format!(\"parameter '{}' must not equal {}, got {}\", name, label, value));",
-        "        }",
-        "    }",
-        "    Ok(())",
-        "}",
-    ]
-    .join("\n")
+    r###"
+#[derive(Copy, Clone)]
+struct ParameterBound {
+    value: f64,
+    label: &'static str,
+}
+
+const PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
+const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
+
+#[inline]
+fn read_parameter_slot(parameters: &Parameters, index: usize) -> f64 {
+    debug_assert!(index < PARAMETER_DISPLAY_NAMES.len(), "generated parameter index out of range");
+    // SAFETY: Parameters is repr(C), contains only f64 fields, and every caller validates or generates the index.
+    unsafe { *((parameters as *const Parameters as *const f64).add(index)) }
+}
+
+fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), String> {
+    let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
+        return Err(format!("generated parameter index {} is out of range", index));
+    };
+    let flags = PARAMETER_RANGE_FLAGS[index];
+    validate_finite_parameter(name, value)?;
+    if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {
+        return Err(format!("parameter '{}' must be an integer, got {}", name, value));
+    }
+    if PARAMETER_INTEGER_FLAGS[index] && (value < i32::MIN as f64 || value > i32::MAX as f64) {
+        return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
+    }
+    validate_parameter_bounds(
+        name,
+        value,
+        flags,
+        PARAMETER_MIN_BOUNDS[index],
+        PARAMETER_MAX_BOUNDS[index],
+        PARAMETER_EXCLUDED_BOUNDS[index],
+    )
+}
+
+fn validate_parameter_metadata(
+    parameters: &Parameters,
+    index: usize,
+    value: f64,
+) -> Result<(), String> {
+    validate_parameter_scalar_metadata(index, value)?;
+    let name = PARAMETER_DISPLAY_NAMES[index];
+    let flags = PARAMETER_RANGE_FLAGS[index];
+    let min = match PARAMETER_MIN_REFERENCES[index] {
+        Some(reference) => {
+            if PARAMETER_MIN_BOUNDS[index].is_some() {
+                return Err(format!("parameter '{}' has conflicting constant and referenced lower bounds", name));
+            }
+            Some(parameter_bound_from_reference(parameters, reference)?)
+        }
+        None => PARAMETER_MIN_BOUNDS[index],
+    };
+    let max = match PARAMETER_MAX_REFERENCES[index] {
+        Some(reference) => {
+            if PARAMETER_MAX_BOUNDS[index].is_some() {
+                return Err(format!("parameter '{}' has conflicting constant and referenced upper bounds", name));
+            }
+            Some(parameter_bound_from_reference(parameters, reference)?)
+        }
+        None => PARAMETER_MAX_BOUNDS[index],
+    };
+    if let (Some(min), Some(max)) = (min, max) {
+        let empty = min.value > max.value
+            || (min.value == max.value
+                && flags & (PARAMETER_MIN_EXCLUSIVE_FLAG | PARAMETER_MAX_EXCLUSIVE_FLAG) != 0);
+        if empty {
+            return Err(format!(
+                "parameter '{}' has an empty range: lower bound {}={} exceeds upper bound {}={}",
+                name, min.label, min.value, max.label, max.value
+            ));
+        }
+    }
+    validate_parameter_bounds(name, value, flags, min, max, PARAMETER_EXCLUDED_BOUNDS[index])?;
+    for &reference in PARAMETER_EXCLUDED_REFERENCES[index] {
+        let excluded = parameter_bound_from_reference(parameters, reference)?;
+        if value == excluded.value {
+            return Err(format!(
+                "parameter '{}' must not equal {}={}, got {}",
+                name, excluded.label, excluded.value, value
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn parameter_bound_from_reference(
+    parameters: &Parameters,
+    index: usize,
+) -> Result<ParameterBound, String> {
+    let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
+        return Err(format!("generated parameter range reference {} is out of range", index));
+    };
+    let value = read_parameter_slot(parameters, index);
+    validate_finite_parameter(name, value)?;
+    Ok(ParameterBound { value, label: name })
+}
+
+fn validate_parameter_bounds(
+    name: &str,
+    value: f64,
+    flags: u8,
+    min: Option<ParameterBound>,
+    max: Option<ParameterBound>,
+    excluded: &[ParameterBound],
+) -> Result<(), String> {
+    if let Some(min) = min {
+        if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
+            if value <= min.value {
+                return Err(format!("parameter '{}' must be > {}, got {}", name, min.label, value));
+            }
+        } else if value < min.value {
+            return Err(format!("parameter '{}' must be >= {}, got {}", name, min.label, value));
+        }
+    }
+    if let Some(max) = max {
+        if flags & PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {
+            if value >= max.value {
+                return Err(format!("parameter '{}' must be < {}, got {}", name, max.label, value));
+            }
+        } else if value > max.value {
+            return Err(format!("parameter '{}' must be <= {}, got {}", name, max.label, value));
+        }
+    }
+    for excluded in excluded {
+        if value == excluded.value {
+            return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
+        }
+    }
+    Ok(())
+}
+
+fn validate_finite_parameter(name: &str, value: f64) -> Result<(), String> {
+    if !value.is_finite() {
+        return Err(format!("parameter '{}' must be finite, got {}", name, value));
+    }
+    Ok(())
+}
+
+fn validate_parameter(
+    name: &str,
+    value: f64,
+    integer: bool,
+    min: Option<(f64, &str)>,
+    min_exclusive: bool,
+    max: Option<(f64, &str)>,
+    max_exclusive: bool,
+    excluded: &[(f64, &str)],
+) -> Result<(), String> {
+    validate_finite_parameter(name, value)?;
+    if integer && value.fract() != 0.0 {
+        return Err(format!("parameter '{}' must be an integer, got {}", name, value));
+    }
+    if integer && (value < i32::MIN as f64 || value > i32::MAX as f64) {
+        return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
+    }
+    if let Some((min, label)) = min {
+        if min_exclusive {
+            if value <= min {
+                return Err(format!("parameter '{}' must be > {}, got {}", name, label, value));
+            }
+        } else if value < min {
+            return Err(format!("parameter '{}' must be >= {}, got {}", name, label, value));
+        }
+    }
+    if let Some((max, label)) = max {
+        if max_exclusive {
+            if value >= max {
+                return Err(format!("parameter '{}' must be < {}, got {}", name, label, value));
+            }
+        } else if value > max {
+            return Err(format!("parameter '{}' must be <= {}, got {}", name, label, value));
+        }
+    }
+    for (excluded, label) in excluded {
+        if value == *excluded {
+            return Err(format!("parameter '{}' must not equal {}, got {}", name, label, value));
+        }
+    }
+    Ok(())
+}
+"###
+        .trim_start()
+        .to_string()
 }
 
 fn emit_stamp_common_bindings(

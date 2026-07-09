@@ -785,7 +785,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 1);
+    assert_eq!(metadata.schema_version, 2);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -840,6 +840,35 @@ fn hir_lowering_preserves_analyzed_module_surface() {
     assert_eq!(hir.contributions.len(), 1);
     assert_eq!(hir.contributions[0].kind, HirContributionKind::Current);
     assert!(hir.validate().is_ok());
+}
+
+#[test]
+fn canonical_ir_preserves_parameter_dependent_ranges() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module canonical_dependent_range(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real lower = 1.0;
+    parameter real upper = 5.0;
+    parameter real forbidden = 4.0;
+    parameter real value = 3.0 from [lower:upper] exclude forbidden;
+    analog I(p, n) <+ value * V(p, n);
+endmodule
+"#,
+        )
+        .expect("canonical IR");
+    let range = artifact.hir.parameters[3]
+        .range
+        .as_ref()
+        .expect("dependent range");
+
+    assert_eq!(range.min_parameter.as_deref(), Some("lower"));
+    assert_eq!(range.max_parameter.as_deref(), Some("upper"));
+    assert_eq!(range.exclude_parameters, ["forbidden"]);
+    assert_eq!(artifact.mir.parameters[3].range.as_ref(), Some(range));
+    assert!(artifact.validate().is_ok());
 }
 
 #[test]
@@ -2300,7 +2329,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=1"));
+    assert!(first.contains("schema_version=2"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("compiler_version="));

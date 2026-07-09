@@ -45,9 +45,15 @@ impl From<ValueType> for CanonicalValueType {
 pub struct HirParamRange {
     pub min: Option<f64>,
     pub max: Option<f64>,
+    #[serde(default)]
+    pub min_parameter: Option<SmolStr>,
+    #[serde(default)]
+    pub max_parameter: Option<SmolStr>,
     pub min_exclusive: bool,
     pub max_exclusive: bool,
     pub exclude: Vec<f64>,
+    #[serde(default)]
+    pub exclude_parameters: Vec<SmolStr>,
 }
 
 impl HirParamRange {
@@ -55,9 +61,12 @@ impl HirParamRange {
         Self {
             min: range.min,
             max: range.max,
+            min_parameter: range.min_parameter.clone(),
+            max_parameter: range.max_parameter.clone(),
             min_exclusive: range.min_exclusive,
             max_exclusive: range.max_exclusive,
             exclude: range.exclude.clone(),
+            exclude_parameters: range.exclude_parameters.clone(),
         }
     }
 }
