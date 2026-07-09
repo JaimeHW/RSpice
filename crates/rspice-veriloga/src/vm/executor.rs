@@ -542,6 +542,33 @@ impl<'a> Vm<'a> {
                 self.stack.push(result);
             }
 
+            // LastCrossingState: interpolated time of the last zero crossing
+            // Stack: [expr, direction] -> [time or -1]
+            Instruction::LastCrossingState(detector_id) => {
+                let direction = self.pop()?;
+                let value = self.pop()?;
+                let direction = if direction > 0.5 {
+                    1
+                } else if direction < -0.5 {
+                    -1
+                } else {
+                    0
+                };
+                if self.context.cross_detectors.len() <= *detector_id {
+                    self.context
+                        .cross_detectors
+                        .resize_with(*detector_id + 1, Default::default);
+                }
+                let detector = &mut self.context.cross_detectors[*detector_id];
+                let crossing_time =
+                    detector.eval_last_crossing(value, self.context.time, direction);
+                self.stack.push(if self.context.analysis_type == 2 {
+                    crossing_time
+                } else {
+                    -1.0
+                });
+            }
+
             // WhiteNoise: white noise source
             // Stack: [power] -> [0]
             // In time domain, noise returns 0

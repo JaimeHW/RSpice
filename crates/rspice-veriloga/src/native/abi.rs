@@ -1003,6 +1003,63 @@ pub unsafe extern "C" fn rspice_above_state_native(
     )
 }
 
+/// External helper for native x64 `last_crossing(...)` history.
+///
+/// # Safety
+/// Called from JIT code with a valid two-element operand slice containing the
+/// expression value and direction, plus a valid evaluation context.
+#[unsafe(export_name = "rspice_last_crossing_state_native")]
+pub unsafe extern "C" fn rspice_last_crossing_state_native(
+    operands: *const f64,
+    ctx: *const EvalContext,
+    detector_id: usize,
+) -> f64 {
+    if operands.is_null() {
+        set_native_runtime_error(
+            "native last_crossing helper missing operands; no interpreter fallback",
+        );
+        return 0.0;
+    }
+    if ctx.is_null() {
+        set_native_runtime_error(
+            "native last_crossing helper missing EvalContext; no interpreter fallback",
+        );
+        return 0.0;
+    }
+
+    let operands = unsafe { std::slice::from_raw_parts(operands, 2) };
+    let direction = if operands[1] > 0.5 {
+        1
+    } else if operands[1] < -0.5 {
+        -1
+    } else {
+        0
+    };
+    let ctx = unsafe { &*ctx };
+    if ctx.cross_detectors.is_null() {
+        set_native_runtime_error(format!(
+            "native last_crossing helper missing detector storage for detector {detector_id}; no interpreter fallback"
+        ));
+        return 0.0;
+    }
+    if detector_id >= ctx.cross_detectors_len {
+        set_native_runtime_error(format!(
+            "native last_crossing helper detector {detector_id} outside detector table length {}; no interpreter fallback",
+            ctx.cross_detectors_len
+        ));
+        return 0.0;
+    }
+
+    let detectors =
+        unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
+    let crossing_time = detectors[detector_id].eval_last_crossing(operands[0], ctx.time, direction);
+    if ctx.analysis_type == 2 {
+        crossing_time
+    } else {
+        -1.0
+    }
+}
+
 /// External helper function for native x64 runtime-indexed variable reads.
 ///
 /// `base_ptr` points at the first element of the array variable run. The helper
@@ -1193,10 +1250,10 @@ mod tests {
         EvalContext, clear_native_runtime_error, rspice_above_state_native,
         rspice_absdelay_state_native, rspice_cross_state_native, rspice_current_lookup,
         rspice_dynamic_variable_load_native, rspice_dynamic_variable_slot_native,
-        rspice_laplace_step, rspice_laplace_step_native, rspice_limit, rspice_slew_state_native,
-        rspice_table_derivative_native, rspice_table_lookup, rspice_table_lookup_native,
-        rspice_timer_state_native, rspice_transition_state_native, rspice_zi_step_native,
-        take_native_runtime_error,
+        rspice_laplace_step, rspice_laplace_step_native, rspice_last_crossing_state_native,
+        rspice_limit, rspice_slew_state_native, rspice_table_derivative_native,
+        rspice_table_lookup, rspice_table_lookup_native, rspice_timer_state_native,
+        rspice_transition_state_native, rspice_zi_step_native, take_native_runtime_error,
     };
     use crate::codegen::LookupTable;
     use crate::vm::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
@@ -1928,6 +1985,35 @@ mod tests {
             unsafe { rspice_above_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             1.0_f64.to_bits(),
             "subsequent rising crossings must trigger above"
+        );
+        assert!(take_native_runtime_error().is_none());
+    }
+
+    #[test]
+    fn last_crossing_native_helper_interpolates_accepted_history() {
+        let mut operands = [-1.0, 1.0];
+        let mut detectors = [CrossDetector::default()];
+        let mut ctx = empty_eval_context();
+        ctx.analysis_type = 2;
+        ctx.cross_detectors = detectors.as_mut_ptr();
+        ctx.cross_detectors_len = detectors.len();
+
+        assert_eq!(
+            unsafe { rspice_last_crossing_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            (-1.0_f64).to_bits()
+        );
+        detectors[0].commit();
+
+        ctx.time = 2.0;
+        operands[0] = 3.0;
+        assert_eq!(
+            unsafe { rspice_last_crossing_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.5_f64.to_bits()
+        );
+        assert_eq!(
+            unsafe { rspice_last_crossing_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
+            0.5_f64.to_bits(),
+            "native Newton reevaluation must be idempotent"
         );
         assert!(take_native_runtime_error().is_none());
     }

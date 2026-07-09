@@ -541,6 +541,50 @@ impl CrossDetector {
         self.eval_impl(value, time, 1, time_tol, expr_tol, enabled, true)
     }
 
+    /// Return the linearly interpolated time of the most recent crossing.
+    /// Returns -1.0 until a crossing matching `direction` has occurred.
+    pub fn eval_last_crossing(&mut self, value: f64, time: f64, direction: i32) -> f64 {
+        if !self.committed.initialized {
+            self.candidate = CrossState {
+                value,
+                time,
+                side: Self::side(value, 0.0),
+                initialized: true,
+                ..CrossState::default()
+            };
+            self.candidate_valid = true;
+            return -1.0;
+        }
+
+        if !value.is_finite() || !time.is_finite() || time <= self.committed.time {
+            self.candidate = self.committed;
+            self.candidate_valid = true;
+            return self.committed.last_crossing_time;
+        }
+
+        let rising = self.committed.value < 0.0 && value >= 0.0;
+        let falling = self.committed.value > 0.0 && value <= 0.0;
+        let crossing_direction = if rising {
+            1
+        } else if falling {
+            -1
+        } else {
+            0
+        };
+        let mut candidate = CrossState {
+            value,
+            time,
+            side: Self::side(value, 0.0),
+            ..self.committed
+        };
+        if crossing_direction != 0 && (direction == 0 || direction == crossing_direction) {
+            candidate.last_crossing_time = self.estimate_crossing_time(value, time);
+        }
+        self.candidate = candidate;
+        self.candidate_valid = true;
+        candidate.last_crossing_time
+    }
+
     fn eval_impl(
         &mut self,
         value: f64,

@@ -731,7 +731,9 @@ fn preallocate_context(context: &mut VmContext, model: &CompiledModel) {
                     update_max_slot(&mut max_transition_filter, *idx);
                 }
                 Instruction::SlewState(idx) => update_max_slot(&mut max_slew_filter, *idx),
-                Instruction::CrossState(idx) | Instruction::AboveState(idx) => {
+                Instruction::CrossState(idx)
+                | Instruction::AboveState(idx)
+                | Instruction::LastCrossingState(idx) => {
                     update_max_slot(&mut max_cross_detector, *idx)
                 }
                 _ => {}

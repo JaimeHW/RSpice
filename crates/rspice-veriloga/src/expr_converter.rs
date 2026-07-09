@@ -1090,10 +1090,19 @@ impl<'a> ExprConverter<'a> {
                     enable: optional(3)?,
                 })
             }
-            "last_crossing" => Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                "last_crossing() requires crossing-time history; it is not implemented yet".into(),
-            ))
-            .into()),
+            "last_crossing" => {
+                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
+                let expr = self.convert(require_arg(0)?)?;
+                let direction = call
+                    .args
+                    .get(1)
+                    .map(|arg| self.const_cross_direction(arg, "last_crossing"))
+                    .transpose()?;
+                Ok(IrExpr::LastCrossing {
+                    expr: Box::new(expr),
+                    direction,
+                })
+            }
             "analysis" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(1))?;
                 let analysis_type = match call.args.first() {
@@ -1471,9 +1480,16 @@ impl<'a> ExprConverter<'a> {
                 // Slew rate limiter - return expression for static
                 self.convert(expr)
             }
-            AnalogOperator::LastCrossing { .. } => {
-                // Returns time of last crossing - not meaningful for DC
-                Ok(IrExpr::Const(0.0))
+            AnalogOperator::LastCrossing { expr, edge, .. } => {
+                let direction = edge.map(|edge| match edge {
+                    crate::ast::CrossDirection::Rising => 1,
+                    crate::ast::CrossDirection::Falling => -1,
+                    crate::ast::CrossDirection::Both => 0,
+                });
+                Ok(IrExpr::LastCrossing {
+                    expr: Box::new(self.convert(expr)?),
+                    direction,
+                })
             }
             AnalogOperator::Laplace { expr, .. } | AnalogOperator::Zi { expr, .. } => {
                 // Laplace/Z-transform filters - simplified to just expression

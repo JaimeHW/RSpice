@@ -293,6 +293,11 @@ pub enum IrExpr {
         expr_tol: Option<Box<IrExpr>>,
         enable: Option<Box<IrExpr>>,
     },
+    /// Time of the most recent zero crossing, or -1 before any crossing.
+    LastCrossing {
+        expr: Box<IrExpr>,
+        direction: Option<i32>,
+    },
     /// white_noise - white noise source for AC noise analysis
     /// Args: (power, name)
     WhiteNoise {
@@ -1016,6 +1021,7 @@ impl DeviceIR {
                         || expr_tol.as_deref().is_some_and(contains_ddt)
                         || enable.as_deref().is_some_and(contains_ddt)
                 }
+                IrExpr::LastCrossing { expr, .. } => contains_ddt(expr),
                 IrExpr::WhiteNoise { power, .. } => contains_ddt(power),
                 IrExpr::FlickerNoise {
                     power, exponent, ..
@@ -1635,6 +1641,7 @@ pub mod autodiff {
             // Event detectors and noise sources are piecewise constant
             // (or zero) in the DC Jacobian
             IrExpr::Cross { .. }
+            | IrExpr::LastCrossing { .. }
             | IrExpr::Above { .. }
             | IrExpr::Timer { .. }
             | IrExpr::WhiteNoise { .. }

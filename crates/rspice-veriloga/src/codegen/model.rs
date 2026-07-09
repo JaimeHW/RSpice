@@ -378,6 +378,9 @@ pub enum Instruction {
     /// Cross (threshold crossing detection)
     /// Stack: [expr, direction, time_tol, expr_tol, enable] -> [0 or 1]
     CrossState(usize),
+    /// Last zero-crossing time with linear interpolation.
+    /// Stack: [expr, direction] -> [time or -1]
+    LastCrossingState(usize),
     /// White noise source (returns 0 in time domain, contributes to noise analysis)
     /// Stack: [power] -> [0]
     WhiteNoise,

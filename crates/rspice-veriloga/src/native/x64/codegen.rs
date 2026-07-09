@@ -4,17 +4,18 @@ use crate::native::abi::{
     rspice_asin, rspice_asinh, rspice_atan, rspice_atan2, rspice_atanh, rspice_ceil, rspice_cos,
     rspice_cosh, rspice_cross_state_native, rspice_dynamic_variable_load_native,
     rspice_dynamic_variable_slot_native, rspice_exp, rspice_floor, rspice_hypot,
-    rspice_idtmod_wrap, rspice_laplace_step_native, rspice_limexp, rspice_limited_exp, rspice_log,
-    rspice_log10, rspice_mod, rspice_native_current_probe_error,
-    rspice_native_integer_shift_count_error, rspice_native_limit_state_bounds_error,
-    rspice_native_limit_state_initialized_error, rspice_native_limit_state_values_bounds_error,
-    rspice_native_limit_state_values_error, rspice_native_loop_limit_error,
-    rspice_native_param_given_error, rspice_native_port_connected_error,
-    rspice_native_prior_current_error, rspice_native_state_prev_bounds_error,
-    rspice_native_state_values_bounds_error, rspice_native_state_values_error, rspice_pow,
-    rspice_sin, rspice_sinh, rspice_slew_state_native, rspice_table_derivative_native,
-    rspice_table_lookup_native, rspice_tan, rspice_tanh, rspice_timer_state_native,
-    rspice_transition_state_native, rspice_zi_step_native,
+    rspice_idtmod_wrap, rspice_laplace_step_native, rspice_last_crossing_state_native,
+    rspice_limexp, rspice_limited_exp, rspice_log, rspice_log10, rspice_mod,
+    rspice_native_current_probe_error, rspice_native_integer_shift_count_error,
+    rspice_native_limit_state_bounds_error, rspice_native_limit_state_initialized_error,
+    rspice_native_limit_state_values_bounds_error, rspice_native_limit_state_values_error,
+    rspice_native_loop_limit_error, rspice_native_param_given_error,
+    rspice_native_port_connected_error, rspice_native_prior_current_error,
+    rspice_native_state_prev_bounds_error, rspice_native_state_values_bounds_error,
+    rspice_native_state_values_error, rspice_pow, rspice_sin, rspice_sinh,
+    rspice_slew_state_native, rspice_table_derivative_native, rspice_table_lookup_native,
+    rspice_tan, rspice_tanh, rspice_timer_state_native, rspice_transition_state_native,
+    rspice_zi_step_native,
 };
 use crate::native::expr::{BinaryMathOp, IntegerBinaryOp, UnaryMathOp};
 use crate::native::expr::{
@@ -424,6 +425,9 @@ impl FunctionCompiler {
                 NativeOp::AbsDelayState(buffer_id) => self.emit_absdelay_state(buffer_id)?,
                 NativeOp::CrossState(detector_id) => self.emit_cross_state(detector_id)?,
                 NativeOp::AboveState(detector_id) => self.emit_above_state(detector_id)?,
+                NativeOp::LastCrossingState(detector_id) => {
+                    self.emit_last_crossing_state(detector_id)?
+                }
                 NativeOp::WhiteNoise => self.emit_white_noise()?,
                 NativeOp::FlickerNoise => self.emit_flicker_noise()?,
                 NativeOp::DdtState(index) => self.emit_ddt_state(index)?,
@@ -1993,6 +1997,29 @@ impl FunctionCompiler {
         Ok(())
     }
 
+    fn emit_last_crossing_state(&mut self, detector_id: usize) -> JitResult<()> {
+        if self.depth < 2 {
+            return Err(JitError::Encoding {
+                model: MODEL.into(),
+                detail: format!(
+                    "last_crossing state requires stack depth 2, found {}",
+                    self.depth
+                )
+                .into(),
+            });
+        }
+
+        let input = XMM_STACK[self.depth - 2];
+        self.emit_operand_context_filter_helper_call(
+            input,
+            2,
+            detector_id,
+            rspice_last_crossing_state_native,
+        );
+        self.depth -= 1;
+        Ok(())
+    }
+
     fn emit_ddt_state(&mut self, state_index: usize) -> JitResult<()> {
         if self.depth == 0 {
             return Err(JitError::Encoding {
@@ -3470,6 +3497,7 @@ fn native_op_uses_helper_call(op: &NativeOp) -> bool {
             | NativeOp::AbsDelayState(_)
             | NativeOp::CrossState(_)
             | NativeOp::AboveState(_)
+            | NativeOp::LastCrossingState(_)
             | NativeOp::IdtModState(_)
     ) || matches!(op, NativeOp::UnaryMath(op) if unary_math_uses_helper(*op))
         || matches!(
@@ -4400,6 +4428,7 @@ mod tests {
             ("absdelay", NativeOp::AbsDelayState(0), false),
             ("cross", NativeOp::CrossState(0), false),
             ("above", NativeOp::AboveState(0), false),
+            ("last-crossing", NativeOp::LastCrossingState(0), false),
             ("idtmod", NativeOp::IdtModState(0), true),
             (
                 "dynamic-variable-slow-path",
@@ -4468,6 +4497,7 @@ mod tests {
             ("absdelay", NativeOp::AbsDelayState(0)),
             ("cross", NativeOp::CrossState(0)),
             ("above", NativeOp::AboveState(0)),
+            ("last-crossing", NativeOp::LastCrossingState(0)),
             ("idtmod", NativeOp::IdtModState(0)),
             (
                 "dynamic-variable-slow-path",

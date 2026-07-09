@@ -2,8 +2,8 @@
 
 use super::{JitError, JitResult};
 use crate::canonical_ir::{
-    EquationId, ExprId, HirAnalogOperator, HirExprKind, HirLaplaceKind, HirZiKind, MirEquationKind,
-    MirModel, NodeId,
+    EquationId, ExprId, HirAnalogOperator, HirCrossDirection, HirExprKind, HirLaplaceKind,
+    HirZiKind, MirEquationKind, MirModel, NodeId,
 };
 use crate::codegen::{BytecodeProgram, CompiledModel, Instruction};
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
@@ -83,6 +83,7 @@ pub(crate) enum NativeOp {
     AbsDelayState(usize),
     CrossState(usize),
     AboveState(usize),
+    LastCrossingState(usize),
     WhiteNoise,
     FlickerNoise,
     DdtState(usize),
@@ -1032,7 +1033,8 @@ impl CanonicalStateOperator {
             (Self::Absdelay, Instruction::AbsDelayState(slot)) => Some(*slot),
             (Self::Laplace, Instruction::LaplaceState(slot)) => Some(*slot),
             (Self::Zi, Instruction::ZiState(slot)) => Some(*slot),
-            (Self::Cross, Instruction::CrossState(slot)) => Some(*slot),
+            (Self::Cross, Instruction::CrossState(slot))
+            | (Self::Cross, Instruction::LastCrossingState(slot)) => Some(*slot),
             (Self::Above, Instruction::AboveState(slot)) => Some(*slot),
             (Self::Timer, Instruction::TimerState(slot)) => Some(*slot),
             (Self::Limit, Instruction::LimitState(slot)) => Some(*slot),
@@ -1051,6 +1053,7 @@ impl CanonicalStateOperator {
             };
         }
         match self {
+            Self::Cross => matches!(normalized.as_str(), "cross" | "last_crossing"),
             Self::Laplace => matches!(
                 normalized.as_str(),
                 "laplace_zp" | "laplace_zd" | "laplace_np" | "laplace_nd"
@@ -1074,6 +1077,7 @@ impl CanonicalStateOperator {
             (Self::Transition, HirAnalogOperator::Transition { .. }) => true,
             (Self::Slew, HirAnalogOperator::Slew { .. }) => true,
             (Self::Absdelay, HirAnalogOperator::Absdelay { .. }) => true,
+            (Self::Cross, HirAnalogOperator::LastCrossing { .. }) => true,
             _ => false,
         }
     }
@@ -1926,6 +1930,17 @@ impl NativeProgram {
                     depth -= 4;
                     ops.push(NativeOp::CrossState(*detector_id));
                 }
+                Instruction::LastCrossingState(detector_id) => {
+                    require_stack(
+                        model.clone(),
+                        entry_kind,
+                        instruction_name(instruction),
+                        depth,
+                        2,
+                    )?;
+                    depth -= 1;
+                    ops.push(NativeOp::LastCrossingState(*detector_id));
+                }
                 Instruction::WhiteNoise => {
                     require_stack(
                         model.clone(),
@@ -2686,6 +2701,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.lower_zi_call(expression.id, args.as_slice())
                 }
                 "cross" => self.lower_cross_call(expression.id, args.as_slice()),
+                "last_crossing" => self.lower_last_crossing_call(expression.id, args.as_slice()),
                 "above" => self.lower_above_call(expression.id, args.as_slice()),
                 "timer" => self.lower_timer_call(expression.id, args.as_slice()),
                 "ddx" => self.lower_ddx_call(args.as_slice()),
@@ -2787,7 +2803,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))
                 }
             }
-            _ => Err(self.unsupported(format!("analog operator {}", analog_operator_name(op)))),
+            HirAnalogOperator::LastCrossing { expr, edge } => {
+                self.lower_last_crossing_operator(expr_id, *expr, *edge)
+            }
         }
     }
 
@@ -5953,6 +5971,56 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
+    fn lower_last_crossing_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
+        let (expr, direction) = match args {
+            [expr] => (*expr, None),
+            [expr, direction] => (*expr, Some(*direction)),
+            _ => {
+                return Err(self.unsupported(format!(
+                    "analog operator last_crossing expects one or two operands, found {}",
+                    args.len()
+                )));
+            }
+        };
+        let Some(slot) = self.limits.canonical_cross_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator last_crossing expression {expr_id} detector slot"
+            )));
+        };
+        self.lower(expr)?;
+        if let Some(direction) = direction {
+            self.lower(direction)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        self.pop_binary("canonical last_crossing")?;
+        self.ops.push(NativeOp::LastCrossingState(slot));
+        Ok(())
+    }
+
+    fn lower_last_crossing_operator(
+        &mut self,
+        expr_id: ExprId,
+        expr: ExprId,
+        edge: Option<HirCrossDirection>,
+    ) -> JitResult<()> {
+        let Some(slot) = self.limits.canonical_cross_slot(expr_id) else {
+            return Err(self.unsupported(format!(
+                "analog operator last_crossing expression {expr_id} detector slot"
+            )));
+        };
+        self.lower(expr)?;
+        let direction = match edge {
+            Some(HirCrossDirection::Rising) => 1.0,
+            Some(HirCrossDirection::Falling) => -1.0,
+            Some(HirCrossDirection::Both) | None => 0.0,
+        };
+        self.push(NativeOp::Const(direction))?;
+        self.pop_binary("canonical last_crossing")?;
+        self.ops.push(NativeOp::LastCrossingState(slot));
+        Ok(())
+    }
+
     fn lower_above_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
         let (expr, time_tol, expr_tol, enable) = match args {
             [expr] => (*expr, None, None, None),
@@ -7376,6 +7444,7 @@ fn native_op_name(op: &NativeOp) -> &'static str {
         NativeOp::AbsDelayState(_) => "AbsDelayState",
         NativeOp::CrossState(_) => "CrossState",
         NativeOp::AboveState(_) => "AboveState",
+        NativeOp::LastCrossingState(_) => "LastCrossingState",
         NativeOp::WhiteNoise => "WhiteNoise",
         NativeOp::FlickerNoise => "FlickerNoise",
         NativeOp::DdtState(_) => "DdtState",
@@ -8338,6 +8407,7 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::IntegerBinary(_)
         | NativeOp::LimitState(_)
         | NativeOp::AbsDelayState(_)
+        | NativeOp::LastCrossingState(_)
         | NativeOp::FlickerNoise
         | NativeOp::IdtState(_) => (2, 1),
 
@@ -8560,6 +8630,7 @@ fn instruction_name(instruction: &Instruction) -> &'static str {
         Instruction::TransitionState(_) => "TransitionState",
         Instruction::SlewState(_) => "SlewState",
         Instruction::CrossState(_) => "CrossState",
+        Instruction::LastCrossingState(_) => "LastCrossingState",
         Instruction::WhiteNoise => "WhiteNoise",
         Instruction::FlickerNoise => "FlickerNoise",
         Instruction::Analysis(_) => "Analysis",
@@ -13435,6 +13506,35 @@ endmodule
                 "{entry_kind:?}: got {msg}"
             );
         }
+    }
+
+    #[test]
+    fn lowers_last_crossing_state_as_native_context_history() {
+        let program = BytecodeProgram {
+            instructions: vec![
+                Instruction::PushTemperature,
+                Instruction::PushConst(1.0),
+                Instruction::LastCrossingState(4),
+            ],
+        };
+
+        let lowered = NativeProgram::from_bytecode(
+            "last-crossing",
+            EntryKind::Assignment,
+            &program,
+            limits(0, 0),
+        )
+        .expect("last_crossing has native helper-call lowering");
+
+        assert_eq!(
+            lowered.ops(),
+            &[
+                NativeOp::LoadTemperature,
+                NativeOp::Const(1.0),
+                NativeOp::LastCrossingState(4),
+            ]
+        );
+        assert_eq!(lowered.max_stack_depth(), 2);
     }
 
     #[test]

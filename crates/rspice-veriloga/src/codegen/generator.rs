@@ -975,6 +975,16 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::CrossState(detector_id));
             }
+            IrExpr::LastCrossing { expr, direction } => {
+                self.emit_expr(expr, emit_ctx, program)?;
+                program
+                    .instructions
+                    .push(Instruction::PushConst(direction.unwrap_or(0) as f64));
+                let detector_id = Self::allocate_slot(&self.cross_detector_count);
+                program
+                    .instructions
+                    .push(Instruction::LastCrossingState(detector_id));
+            }
             IrExpr::WhiteNoise { power: _, name: _ } => {
                 // The large-signal contribution is zero. The PSD operand is
                 // compiled separately into model.noise_sources for noise
