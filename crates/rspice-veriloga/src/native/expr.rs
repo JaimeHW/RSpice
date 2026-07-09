@@ -6336,23 +6336,33 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_analysis_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {
-        self.require_intrinsic_arity(name, args, 1)?;
-        let analysis_name = self.string_literal_argument(name, args[0])?;
-        let analysis_id = match analysis_name.to_ascii_lowercase().as_str() {
-            "dc" | "op" => 0,
-            "ac" => 1,
-            "tran" | "transient" => 2,
-            "noise" => 3,
-            "ic" => 4,
-            "static" => 5,
-            "smallsig" | "smallsignal" | "small_signal" => 6,
-            _ => {
-                return Err(self.unsupported(format!(
-                    "intrinsic function '{name}' analysis name '{analysis_name}'"
-                )));
+        if args.is_empty() {
+            return Err(self.unsupported(format!(
+                "intrinsic function '{name}' expects at least one argument"
+            )));
+        }
+        for (index, argument) in args.iter().copied().enumerate() {
+            let analysis_name = self.string_literal_argument(name, argument)?;
+            let analysis_id = match analysis_name.to_ascii_lowercase().as_str() {
+                "dc" | "op" => Some(0),
+                "ac" => Some(1),
+                "tran" | "transient" => Some(2),
+                "noise" => Some(3),
+                "ic" => Some(4),
+                "static" => Some(5),
+                "smallsig" | "smallsignal" | "small_signal" => Some(6),
+                _ => None,
+            };
+            if let Some(analysis_id) = analysis_id {
+                self.push(NativeOp::Analysis(analysis_id))?;
+            } else {
+                self.push(NativeOp::Const(0.0))?;
             }
-        };
-        self.push(NativeOp::Analysis(analysis_id))
+            if index > 0 {
+                self.append_logical("Or")?;
+            }
+        }
+        Ok(())
     }
 
     fn lower_white_noise_intrinsic(&mut self, name: &str, args: &[ExprId]) -> JitResult<()> {

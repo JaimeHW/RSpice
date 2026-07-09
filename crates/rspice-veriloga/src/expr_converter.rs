@@ -68,23 +68,43 @@ fn validate_arg_range(
     Ok(())
 }
 
-fn validate_analysis_name(name: &str) -> CompileResult<String> {
+fn normalize_analysis_name(name: &str) -> Option<String> {
     let normalized = name.to_ascii_lowercase();
     match normalized.as_str() {
-        "dc" | "op" => Ok("dc".to_string()),
-        "ac" => Ok("ac".to_string()),
-        "tran" | "transient" => Ok("tran".to_string()),
-        "noise" => Ok("noise".to_string()),
-        "ic" => Ok("ic".to_string()),
-        "static" => Ok("static".to_string()),
-        "smallsig" | "smallsignal" | "small_signal" => Ok("smallsig".to_string()),
-        _ => Err(
-            CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                "analysis() unknown analysis name '{name}'"
-            )))
-            .into(),
-        ),
+        "dc" | "op" => Some("dc".to_string()),
+        "ac" => Some("ac".to_string()),
+        "tran" | "transient" => Some("tran".to_string()),
+        "noise" => Some("noise".to_string()),
+        "ic" => Some("ic".to_string()),
+        "static" => Some("static".to_string()),
+        "smallsig" | "smallsignal" | "small_signal" => Some("smallsig".to_string()),
+        _ => None,
     }
+}
+
+fn analysis_expression(name: &str, args: &[Expression]) -> CompileResult<IrExpr> {
+    validate_arg_range(name, args.len(), 1, None)?;
+    let mut queries = args.iter().map(|arg| -> CompileResult<IrExpr> {
+        let Expression::StringLit(value) = arg else {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "analysis() requires string arguments".into(),
+            ))
+            .into());
+        };
+        Ok(match normalize_analysis_name(value.value.as_str()) {
+            Some(query) => IrExpr::Analysis(query),
+            None => IrExpr::Const(0.0),
+        })
+    });
+    let mut expression = queries.next().transpose()?.ok_or_else(|| {
+        CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+            "analysis() requires at least one string argument".into(),
+        ))
+    })?;
+    for query in queries {
+        expression = IrExpr::Binary(BinaryOp::Or, Box::new(expression), Box::new(query?));
+    }
+    Ok(expression)
 }
 
 fn optional_string_arg(
@@ -624,22 +644,7 @@ impl<'a> ExprConverter<'a> {
                     name,
                 })
             }
-            "analysis" => {
-                // analysis("dc"), analysis("ac"), analysis("tran")
-                validate_arg_range(&func.name, func.args.len(), 1, Some(1))?;
-                let analysis_type = match func.args.first() {
-                    Some(crate::ast::Expression::StringLit(s)) => {
-                        validate_analysis_name(s.value.as_str())?
-                    }
-                    _ => {
-                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                            "analysis() requires a string argument".into(),
-                        ))
-                        .into());
-                    }
-                };
-                Ok(IrExpr::Analysis(analysis_type))
-            }
+            "analysis" => analysis_expression(&func.name, &func.args),
             "above" => {
                 validate_arg_range(&func.name, func.args.len(), 1, Some(4))?;
                 let expr = self.convert(&func.args[0])?;
@@ -1103,19 +1108,7 @@ impl<'a> ExprConverter<'a> {
                     direction,
                 })
             }
-            "analysis" => {
-                validate_arg_range(&call.name, call.args.len(), 1, Some(1))?;
-                let analysis_type = match call.args.first() {
-                    Some(Expression::StringLit(s)) => validate_analysis_name(s.value.as_str())?,
-                    _ => {
-                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                            "analysis() requires a string argument".into(),
-                        ))
-                        .into());
-                    }
-                };
-                Ok(IrExpr::Analysis(analysis_type))
-            }
+            "analysis" => analysis_expression(&call.name, &call.args),
             "white_noise" => {
                 validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
                 let power = self.convert(require_arg(0)?)?;

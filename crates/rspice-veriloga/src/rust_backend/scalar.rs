@@ -4796,7 +4796,7 @@ fn coerce_value_expr(expr: String, source_type: OptValueType, target_type: OptVa
 fn truth_expr(expr: String, value_type: OptValueType) -> String {
     match value_type {
         OptValueType::Boolean => expr,
-        OptValueType::Real => format!("({expr}!=0.0)"),
+        OptValueType::Real => format!("(({expr})!=0.0)"),
     }
 }
 

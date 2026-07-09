@@ -1874,28 +1874,32 @@ impl ExprEmitter<'_> {
     }
 
     fn analysis_condition(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
-        let query = self.analysis_query(args)?;
-        Ok(analysis_predicate_expr(&query).to_string())
-    }
-
-    fn analysis_query(&self, args: &[ExprId]) -> Result<String, RustBackendError> {
-        let [name] = args else {
-            return Err(self.unsupported(format!(
-                "analysis expects one argument, found {}",
-                args.len()
-            )));
-        };
-        let expression = self
-            .artifact
-            .mir
-            .expressions
-            .get(usize::from(*name))
-            .ok_or_else(|| self.internal(format!("analysis query {name} is outside MIR arena")))?;
-        let HirExprKind::StringLiteral { value } = &expression.kind else {
-            return Err(self.unsupported("analysis expects a string literal argument"));
-        };
-        normalize_analysis_query(value)
-            .ok_or_else(|| self.unsupported(format!("analysis() unknown analysis name '{value}'")))
+        if args.is_empty() {
+            return Err(self.unsupported("analysis expects at least one argument"));
+        }
+        let mut predicates = Vec::with_capacity(args.len());
+        for name in args {
+            let expression = self
+                .artifact
+                .mir
+                .expressions
+                .get(usize::from(*name))
+                .ok_or_else(|| {
+                    self.internal(format!("analysis query {name} is outside MIR arena"))
+                })?;
+            let HirExprKind::StringLiteral { value } = &expression.kind else {
+                return Err(self.unsupported("analysis expects string literal arguments"));
+            };
+            let predicate = normalize_analysis_query(value)
+                .map(|query| analysis_predicate_expr(&query))
+                .unwrap_or("false");
+            predicates.push(predicate);
+        }
+        if predicates.len() == 1 {
+            Ok(predicates[0].to_string())
+        } else {
+            Ok(format!("({})", predicates.join(" || ")))
+        }
     }
 
     fn simparam_default(&self, name: ExprId) -> Result<f64, RustBackendError> {

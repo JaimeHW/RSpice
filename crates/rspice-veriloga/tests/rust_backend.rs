@@ -15092,6 +15092,7 @@ fn rust_backend_lowers_analysis_call() {
         .as_str();
 
     assert!(stamp.contains("ctx.analysis_dc()"), "{stamp}");
+    assert!(stamp.contains("ctx.analysis_tran()"), "{stamp}");
     assert!(stamp.contains("ctx.analysis_smallsig()"), "{stamp}");
     assert!(!stamp.contains("ctx.analysis(\""), "{stamp}");
 }
@@ -15115,6 +15116,7 @@ fn rust_backend_auto_scalarizes_analysis_call() {
         .as_str();
 
     assert!(stamp.contains("ctx.analysis_dc()"), "{stamp}");
+    assert!(stamp.contains("ctx.analysis_tran()"), "{stamp}");
     assert!(stamp.contains("ctx.analysis_smallsig()"), "{stamp}");
     assert!(stamp.contains("stamp_current_node2_local"), "{stamp}");
     assert!(!stamp.contains("Scratch"), "{stamp}");
@@ -20017,8 +20019,8 @@ module analysis_call(p, n);
     electrical p, n;
     real scale;
     analog begin
-        scale = analysis("dc") ? 1.0 : 2.0;
-        I(p, n) <+ (scale + analysis("smallsig")) * V(p, n);
+        scale = analysis("dc", "tran", "vendor_private") ? 1.0 : 2.0;
+        I(p, n) <+ (scale + analysis("smallsig", "unknown_mode")) * V(p, n);
     end
 endmodule
 "#

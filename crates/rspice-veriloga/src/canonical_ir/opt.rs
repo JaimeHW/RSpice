@@ -7575,11 +7575,49 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn lower_analysis_call(&mut self, args: &[ExprId]) -> Option<ValueId> {
-        let [query] = args else {
+        if args.is_empty() {
             return None;
-        };
-        let query = self.analysis_query(*query)?;
-        Some(self.push_value(OptValueType::Real, OptValueKind::Analysis { query }))
+        }
+        let mut result = None;
+        for argument in args {
+            let expression = self.mir.expressions.get(usize::from(*argument))?;
+            let HirExprKind::StringLiteral { value } = &expression.kind else {
+                return None;
+            };
+            let query = normalize_analysis_query(value.as_str()).map(SmolStr::new);
+            let value = match query {
+                Some(query) => {
+                    self.push_value(OptValueType::Real, OptValueKind::Analysis { query })
+                }
+                None => self.zero_real(),
+            };
+            result = Some(match result {
+                Some(previous) => self.push_value(
+                    OptValueType::Boolean,
+                    OptValueKind::Binary {
+                        op: OptBinaryOp::Or,
+                        left: previous,
+                        right: value,
+                    },
+                ),
+                None => value,
+            });
+        }
+        let result = result?;
+        if args.len() == 1 {
+            Some(result)
+        } else {
+            let one = self.push_value(OptValueType::Real, OptValueKind::RealConstant(1.0));
+            let zero = self.zero_real();
+            Some(self.push_value(
+                OptValueType::Real,
+                OptValueKind::Select {
+                    condition: result,
+                    then_value: one,
+                    else_value: zero,
+                },
+            ))
+        }
     }
 
     fn lower_ddx_call(&mut self, args: &[ExprId]) -> Option<ValueId> {
@@ -7727,14 +7765,6 @@ impl<'a> ScalarGraphBuilder<'a> {
             "temp" | "temperature" => Some(27.0),
             _ => None,
         }
-    }
-
-    fn analysis_query(&self, expr: ExprId) -> Option<SmolStr> {
-        let expression = self.mir.expressions.get(usize::from(expr))?;
-        let HirExprKind::StringLiteral { value } = &expression.kind else {
-            return None;
-        };
-        normalize_analysis_query(value.as_str()).map(SmolStr::new)
     }
 }
 
