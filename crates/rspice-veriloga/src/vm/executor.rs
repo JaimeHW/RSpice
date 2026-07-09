@@ -447,14 +447,14 @@ impl<'a> Vm<'a> {
                         .resize_with(*buffer_id + 1, Default::default);
                 }
 
-                if is_transient {
-                    self.context.delay_buffers[*buffer_id].record(current_time, current_value);
-                }
-
                 let result = if !is_transient || delay_time <= 0.0 {
                     current_value
                 } else {
-                    self.context.delay_buffers[*buffer_id].get_delayed(current_time, delay_time)
+                    self.context.delay_buffers[*buffer_id].eval(
+                        current_time,
+                        current_value,
+                        delay_time,
+                    )
                 };
 
                 self.stack.push(result);
@@ -479,7 +479,7 @@ impl<'a> Vm<'a> {
                             .resize_with(*filter_id + 1, Default::default);
                     }
                     let filter = &mut self.context.transition_filters[*filter_id];
-                    filter.update(
+                    filter.eval(
                         input,
                         time,
                         delay.max(0.0),
@@ -519,7 +519,7 @@ impl<'a> Vm<'a> {
                     } else {
                         f64::INFINITY
                     };
-                    filter.update(input, time, max_pos, max_neg)
+                    filter.eval(input, time, max_pos, max_neg)
                 };
 
                 self.stack.push(result);
@@ -546,7 +546,7 @@ impl<'a> Vm<'a> {
                         .resize_with(*detector_id + 1, Default::default);
                 }
                 let detector = &mut self.context.cross_detectors[*detector_id];
-                let crossed = detector.update(value, time, direction);
+                let crossed = detector.eval(value, time, direction);
 
                 // Cross events only trigger in transient analysis.
                 let result = if is_transient { crossed } else { 0.0 };

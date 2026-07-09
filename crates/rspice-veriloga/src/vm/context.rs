@@ -261,7 +261,22 @@ impl VmContext {
     /// Advance state for a new timestep (copy current to prev).
     pub fn advance_state(&mut self) {
         self.state_values_prev.clone_from(&self.state_values);
-        // Commit sampled-data filter candidates for the accepted step
+        for buffer in &mut self.delay_buffers {
+            buffer.commit();
+        }
+        for filter in &mut self.transition_filters {
+            filter.commit();
+        }
+        for filter in &mut self.slew_filters {
+            filter.commit();
+        }
+        for detector in &mut self.cross_detectors {
+            detector.commit();
+        }
+        for filter in &mut self.laplace_filters {
+            filter.commit();
+        }
+        // Commit sampled-data filter candidates for the accepted step.
         let time = self.time;
         for filter in &mut self.zi_filters {
             filter.commit(time);

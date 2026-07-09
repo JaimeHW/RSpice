@@ -125,9 +125,9 @@ pub struct StateSpaceFilter {
     pub c: Vec<f64>,
     /// Feedthrough coefficient D (scalar)
     pub d: f64,
-    /// Current state vector x
+    /// Candidate state vector for the in-flight timestep
     pub state: Vec<f64>,
-    /// Previous state for multi-step methods
+    /// State at the last accepted timestep
     pub state_prev: Vec<f64>,
     /// System order
     pub order: usize,
@@ -355,18 +355,15 @@ impl StateSpaceFilter {
         Self::from_transfer_function(&[1.0], &[tau, 1.0])
     }
 
-    /// Step the filter forward using Backward Euler integration
+    /// Evaluate an in-flight Backward Euler candidate.
     ///
     /// This computes: x[n] = (I - h*A)^(-1) * (x[n-1] + h*B*u[n])
     ///                y[n] = C*x[n] + D*u[n]
     ///
-    /// Note: This method advances `state_prev = state` before computing,
-    /// then updates `state` with the new value. This supports sequential
-    /// timestep simulation in unit tests.
+    /// Repeated calls recompute from `state_prev`, which is the last accepted
+    /// state. The simulator calls [`Self::commit`] only after accepting the
+    /// timestep, keeping Newton reevaluations idempotent.
     pub fn step(&mut self, input: f64, timestep: f64) -> f64 {
-        // Advance state: state_prev <- state (synchronize for new timestep)
-        self.state_prev.copy_from_slice(&self.state);
-
         if self.order == 0 {
             return self.d * input;
         }
@@ -378,6 +375,11 @@ impl StateSpaceFilter {
             2 => self.step_second_order(input, timestep),
             _ => self.step_general(input, timestep),
         }
+    }
+
+    /// Commit the most recently evaluated candidate.
+    pub fn commit(&mut self) {
+        self.state_prev.copy_from_slice(&self.state);
     }
 
     /// First-order Backward Euler step
@@ -517,6 +519,7 @@ impl StateSpaceFilter {
         for (i, &val) in initial.iter().enumerate() {
             if i < self.state.len() {
                 self.state[i] = val;
+                self.state_prev[i] = val;
             }
         }
     }

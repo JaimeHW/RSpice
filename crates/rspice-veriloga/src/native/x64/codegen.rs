@@ -8101,9 +8101,22 @@ mod tests {
         ctx.analysis_type = 2;
         ctx.timestep = 0.5;
         let transient = f(&ctx, std::ptr::null());
+        let repeated = f(&ctx, std::ptr::null());
         assert!(
             (transient - (2.0 + 4.0 / 3.0)).abs() < 1.0e-12,
             "transient Laplace value: {transient}"
+        );
+        assert_eq!(
+            transient.to_bits(),
+            repeated.to_bits(),
+            "native Laplace evaluation must be Newton-idempotent"
+        );
+        filters[0].commit();
+
+        let next = f(&ctx, std::ptr::null());
+        assert!(
+            (next - (2.0 + 20.0 / 9.0)).abs() < 1.0e-12,
+            "accepted Laplace state must advance exactly once: {next}"
         );
     }
 
@@ -8228,10 +8241,12 @@ mod tests {
         ctx.time = 1.0;
         let first = f(&ctx, std::ptr::null());
         assert_eq!(first.to_bits(), 310.0_f64.to_bits());
+        filters[0].commit();
 
         ctx.time = 1.4;
         let mid = f(&ctx, std::ptr::null());
         assert!((mid - 310.5).abs() < 1.0e-12, "mid transition: {mid}");
+        filters[0].commit();
 
         ctx.time = 1.6;
         let done = f(&ctx, std::ptr::null());
@@ -8279,10 +8294,12 @@ mod tests {
         ctx.time = 0.0;
         let first = f(&ctx, std::ptr::null());
         assert_eq!(first.to_bits(), 310.0_f64.to_bits());
+        filters[0].commit();
 
         ctx.time = 0.5;
         let mid = f(&ctx, std::ptr::null());
         assert!((mid - 311.0).abs() < 1.0e-12, "mid slew: {mid}");
+        filters[0].commit();
 
         ctx.time = 1.0;
         let done = f(&ctx, std::ptr::null());
@@ -8332,18 +8349,21 @@ mod tests {
         std::hint::black_box(voltages[0]);
         let first = f(&ctx, std::ptr::null());
         assert_eq!(first.to_bits(), 310.0_f64.to_bits());
+        buffers[0].commit();
 
         ctx.time = 0.5;
         voltages[0] = 1.0;
         std::hint::black_box(voltages[0]);
         let delayed_start = f(&ctx, std::ptr::null());
         assert_eq!(delayed_start.to_bits(), 310.0_f64.to_bits());
+        buffers[0].commit();
 
         ctx.time = 1.0;
         voltages[0] = 3.0;
         std::hint::black_box(voltages[0]);
         let delayed = f(&ctx, std::ptr::null());
         assert!((delayed - 311.0).abs() < 1.0e-12, "delayed: {delayed}");
+        buffers[0].commit();
 
         ctx.time = 1.25;
         voltages[0] = 5.0;
@@ -8391,6 +8411,7 @@ mod tests {
             310.0_f64.to_bits(),
             "non-transient cross evaluation reports zero while preserving the stack"
         );
+        detectors[0].commit();
 
         ctx.analysis_type = 2;
 
@@ -8399,12 +8420,14 @@ mod tests {
         std::hint::black_box(voltages[0]);
         let first = f(&ctx, std::ptr::null());
         assert_eq!(first.to_bits(), 310.0_f64.to_bits());
+        detectors[0].commit();
 
         ctx.time = 0.5;
         voltages[0] = 1.0;
         std::hint::black_box(voltages[0]);
         let crossing = f(&ctx, std::ptr::null());
         assert_eq!(crossing.to_bits(), 311.0_f64.to_bits());
+        detectors[0].commit();
 
         ctx.time = 1.0;
         voltages[0] = 2.0;

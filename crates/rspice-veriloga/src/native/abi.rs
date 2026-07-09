@@ -752,7 +752,7 @@ pub unsafe extern "C" fn rspice_transition_state_native(
     let filters = unsafe {
         std::slice::from_raw_parts_mut(ctx.transition_filters, ctx.transition_filters_len)
     };
-    filters[filter_id].update(
+    filters[filter_id].eval(
         input,
         ctx.time,
         delay.max(0.0),
@@ -823,7 +823,7 @@ pub unsafe extern "C" fn rspice_slew_state_native(
     };
 
     let filters = unsafe { std::slice::from_raw_parts_mut(ctx.slew_filters, ctx.slew_filters_len) };
-    filters[filter_id].update(input, ctx.time, max_pos, max_neg)
+    filters[filter_id].eval(input, ctx.time, max_pos, max_neg)
 }
 
 /// External helper function for native x64 absolute-delay buffers.
@@ -881,14 +881,7 @@ pub unsafe extern "C" fn rspice_absdelay_state_native(
 
     let buffers =
         unsafe { std::slice::from_raw_parts_mut(ctx.delay_buffers, ctx.delay_buffers_len) };
-    let buffer = &mut buffers[buffer_id];
-    buffer.record(ctx.time, input);
-
-    if delay_time <= 0.0 {
-        input
-    } else {
-        buffer.get_delayed(ctx.time, delay_time)
-    }
+    buffers[buffer_id].eval(ctx.time, input, delay_time)
 }
 
 /// External helper function for native x64 threshold-crossing detectors.
@@ -947,7 +940,7 @@ pub unsafe extern "C" fn rspice_cross_state_native(
 
     let detectors =
         unsafe { std::slice::from_raw_parts_mut(ctx.cross_detectors, ctx.cross_detectors_len) };
-    let crossed = detectors[detector_id].update(value, ctx.time, direction);
+    let crossed = detectors[detector_id].eval(value, ctx.time, direction);
     if ctx.analysis_type == 2 { crossed } else { 0.0 }
 }
 
@@ -1491,10 +1484,12 @@ mod tests {
             unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             0.0_f64.to_bits()
         );
+        filters[0].commit();
 
         ctx.time = 1.4;
         let mid = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((mid - 0.5).abs() < 1.0e-12, "mid transition: {mid}");
+        filters[0].commit();
 
         ctx.time = 1.6;
         let done = unsafe { rspice_transition_state_native(operands.as_ptr(), &ctx, 0) };
@@ -1587,10 +1582,12 @@ mod tests {
             unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             0.0_f64.to_bits()
         );
+        filters[0].commit();
 
         ctx.time = 0.5;
         let mid = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((mid - 1.0).abs() < 1.0e-12, "mid slew: {mid}");
+        filters[0].commit();
 
         ctx.time = 1.0;
         let done = unsafe { rspice_slew_state_native(operands.as_ptr(), &ctx, 0) };
@@ -1683,6 +1680,7 @@ mod tests {
             unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             0.0_f64.to_bits()
         );
+        buffers[0].commit();
 
         ctx.time = 0.5;
         operands[0] = 1.0;
@@ -1690,11 +1688,13 @@ mod tests {
             unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             0.0_f64.to_bits()
         );
+        buffers[0].commit();
 
         ctx.time = 1.0;
         operands[0] = 3.0;
         let delayed = unsafe { rspice_absdelay_state_native(operands.as_ptr(), &ctx, 0) };
         assert!((delayed - 1.0).abs() < 1.0e-12, "delayed: {delayed}");
+        buffers[0].commit();
 
         ctx.time = 1.25;
         operands[0] = 5.0;
@@ -1778,6 +1778,7 @@ mod tests {
             0.0_f64.to_bits(),
             "non-transient cross evaluation reports zero but still records history"
         );
+        detectors[0].commit();
 
         ctx.analysis_type = 2;
         ctx.time = 0.5;
@@ -1787,6 +1788,7 @@ mod tests {
             1.0_f64.to_bits(),
             "rising edge should fire after non-transient history update"
         );
+        detectors[0].commit();
 
         ctx.time = 1.0;
         operands[0] = 2.0;
@@ -1804,6 +1806,7 @@ mod tests {
             unsafe { rspice_cross_state_native(operands.as_ptr(), &ctx, 0) }.to_bits(),
             0.0_f64.to_bits()
         );
+        detectors[0].commit();
 
         ctx.time = 0.5;
         operands[0] = -1.0;
