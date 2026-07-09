@@ -8691,7 +8691,13 @@ fn binary_switch_range(range: &HirParamRange) -> bool {
         && range.max == Some(1.0)
         && !range.min_exclusive
         && !range.max_exclusive
+        && range.min_parameter.is_none()
+        && range.max_parameter.is_none()
+        && range.min_expression.is_none()
+        && range.max_expression.is_none()
         && range.exclude.is_empty()
+        && range.exclude_parameters.is_empty()
+        && range.exclude_expressions.is_empty()
 }
 
 fn supported_assignment_value_type(value_type: CanonicalValueType) -> bool {

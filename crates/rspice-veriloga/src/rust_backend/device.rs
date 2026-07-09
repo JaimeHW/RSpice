@@ -15169,7 +15169,7 @@ pub(super) fn generate_state_file_with_extensions(
     if !artifact.mir.parameters.is_empty() {
         out.push_str(&generate_shared_parameter_validator());
         out.push('\n');
-        emit_parameter_metadata(artifact, &mut out)?;
+        emit_parameter_metadata(artifact, parameter_fields, &mut out)?;
     }
 
     out.push_str("fn boxed_zero_f64_array<const N: usize>() -> Box<[f64; N]> {\n");
@@ -15744,6 +15744,7 @@ fn emit_parameter_default_validation(
 
 fn emit_parameter_metadata(
     artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
     out: &mut String,
 ) -> Result<(), RustBackendError> {
     let parameter_count = artifact.mir.parameters.len();
@@ -15923,6 +15924,22 @@ fn emit_parameter_metadata(
     )?;
     out.push_str("];\n\n");
 
+    emit_computed_parameter_bound_function(
+        artifact,
+        parameter_fields,
+        true,
+        "parameter_computed_min_bound",
+        out,
+    )?;
+    emit_computed_parameter_bound_function(
+        artifact,
+        parameter_fields,
+        false,
+        "parameter_computed_max_bound",
+        out,
+    )?;
+    emit_computed_parameter_exclusion_function(artifact, parameter_fields, out)?;
+
     out.push_str("fn parameter_index_for_name(name: &str) -> Option<usize> {\n");
     out.push_str("    PARAMETER_NAME_LOOKUP\n");
     out.push_str("        .iter()\n");
@@ -15955,6 +15972,94 @@ fn emit_parameter_name_lookup_entries(artifact: &CanonicalIrArtifact, out: &mut 
         out.push_str(&chunk.join(", "));
         out.push_str(",\n");
     }
+}
+
+fn emit_computed_parameter_bound_function(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    lower: bool,
+    function_name: &str,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    let label = if lower {
+        "computed lower-bound expression"
+    } else {
+        "computed upper-bound expression"
+    };
+    out.push_str(&format!(
+        "fn {function_name}(parameters: &Parameters, index: usize) -> Result<Option<ParameterBound>, String> {{\n"
+    ));
+    out.push_str("    let params = parameters;\n");
+    out.push_str("    let bound: Option<ParameterBound> = match index {\n");
+    for parameter in &artifact.mir.parameters {
+        let expression = parameter.range.as_ref().and_then(|range| {
+            if lower {
+                range.min_expression.as_ref()
+            } else {
+                range.max_expression.as_ref()
+            }
+        });
+        let Some(expression) = expression else {
+            continue;
+        };
+        let value = lower_parameter_default_expr(artifact, expression.id, parameter_fields)?;
+        out.push_str(&format!(
+            "        {} => Some(ParameterBound {{ value: {value}, label: {label:?} }}),\n",
+            usize::from(parameter.id)
+        ));
+    }
+    out.push_str("        _ => None,\n");
+    out.push_str("    };\n");
+    out.push_str("    if let Some(bound) = bound {\n");
+    out.push_str("        validate_finite_parameter(bound.label, bound.value)?;\n");
+    out.push_str("    }\n");
+    out.push_str("    Ok(bound)\n");
+    out.push_str("}\n\n");
+    Ok(())
+}
+
+fn emit_computed_parameter_exclusion_function(
+    artifact: &CanonicalIrArtifact,
+    parameter_fields: &HashMap<String, String>,
+    out: &mut String,
+) -> Result<(), RustBackendError> {
+    out.push_str("fn validate_parameter_computed_exclusions(\n");
+    out.push_str("    parameters: &Parameters,\n");
+    out.push_str("    index: usize,\n");
+    out.push_str("    value: f64,\n");
+    out.push_str(") -> Result<(), String> {\n");
+    out.push_str("    let params = parameters;\n");
+    out.push_str("    match index {\n");
+    for parameter in &artifact.mir.parameters {
+        let expressions = parameter
+            .range
+            .as_ref()
+            .map(|range| range.exclude_expressions.as_slice())
+            .unwrap_or_default();
+        if expressions.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("        {} => {{\n", usize::from(parameter.id)));
+        for (expression_index, expression) in expressions.iter().enumerate() {
+            let excluded = lower_parameter_default_expr(artifact, expression.id, parameter_fields)?;
+            let label = format!("computed exclusion expression {expression_index}");
+            out.push_str(&format!("            let excluded = {excluded};\n"));
+            out.push_str(&format!(
+                "            validate_finite_parameter({label:?}, excluded)?;\n"
+            ));
+            out.push_str("            if value == excluded {\n");
+            out.push_str(&format!(
+                "                return Err(format!(\"parameter '{{}}' must not equal {label}={{}}, got {{}}\", PARAMETER_DISPLAY_NAMES[index], excluded, value));\n"
+            ));
+            out.push_str("            }\n");
+        }
+        out.push_str("        }\n");
+    }
+    out.push_str("        _ => {}\n");
+    out.push_str("    }\n");
+    out.push_str("    Ok(())\n");
+    out.push_str("}\n\n");
+    Ok(())
 }
 
 fn parameter_name_lookup_entry(name: &str, index: usize) -> String {
@@ -16403,8 +16508,11 @@ fn parameter_range_has_runtime_constraints(
         || range.max.is_some_and(|value| value.is_finite())
         || range.min_parameter.is_some()
         || range.max_parameter.is_some()
+        || range.min_expression.is_some()
+        || range.max_expression.is_some()
         || !range.exclude.is_empty()
-        || !range.exclude_parameters.is_empty())
+        || !range.exclude_parameters.is_empty()
+        || !range.exclude_expressions.is_empty())
 }
 
 fn range_bound_arg(value: f64) -> String {
@@ -16465,23 +16573,27 @@ fn validate_parameter_metadata(
     validate_parameter_scalar_metadata(index, value)?;
     let name = PARAMETER_DISPLAY_NAMES[index];
     let flags = PARAMETER_RANGE_FLAGS[index];
+    let computed_min = parameter_computed_min_bound(parameters, index)?;
+    let lower_source_count = usize::from(PARAMETER_MIN_BOUNDS[index].is_some())
+        + usize::from(PARAMETER_MIN_REFERENCES[index].is_some())
+        + usize::from(computed_min.is_some());
+    if lower_source_count > 1 {
+        return Err(format!("parameter '{}' has conflicting lower-bound sources", name));
+    }
     let min = match PARAMETER_MIN_REFERENCES[index] {
-        Some(reference) => {
-            if PARAMETER_MIN_BOUNDS[index].is_some() {
-                return Err(format!("parameter '{}' has conflicting constant and referenced lower bounds", name));
-            }
-            Some(parameter_bound_from_reference(parameters, reference)?)
-        }
-        None => PARAMETER_MIN_BOUNDS[index],
+        Some(reference) => Some(parameter_bound_from_reference(parameters, reference)?),
+        None => computed_min.or(PARAMETER_MIN_BOUNDS[index]),
     };
+    let computed_max = parameter_computed_max_bound(parameters, index)?;
+    let upper_source_count = usize::from(PARAMETER_MAX_BOUNDS[index].is_some())
+        + usize::from(PARAMETER_MAX_REFERENCES[index].is_some())
+        + usize::from(computed_max.is_some());
+    if upper_source_count > 1 {
+        return Err(format!("parameter '{}' has conflicting upper-bound sources", name));
+    }
     let max = match PARAMETER_MAX_REFERENCES[index] {
-        Some(reference) => {
-            if PARAMETER_MAX_BOUNDS[index].is_some() {
-                return Err(format!("parameter '{}' has conflicting constant and referenced upper bounds", name));
-            }
-            Some(parameter_bound_from_reference(parameters, reference)?)
-        }
-        None => PARAMETER_MAX_BOUNDS[index],
+        Some(reference) => Some(parameter_bound_from_reference(parameters, reference)?),
+        None => computed_max.or(PARAMETER_MAX_BOUNDS[index]),
     };
     if let (Some(min), Some(max)) = (min, max) {
         let empty = min.value > max.value
@@ -16504,6 +16616,7 @@ fn validate_parameter_metadata(
             ));
         }
     }
+    validate_parameter_computed_exclusions(parameters, index, value)?;
     Ok(())
 }
 

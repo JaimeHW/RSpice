@@ -13138,7 +13138,9 @@ module generated_dependent_range(p, n);
     parameter real upper = 5.0;
     parameter real forbidden = 4.0;
     parameter real value = 3.0 from [lower:upper] exclude forbidden;
-    analog I(p, n) <+ value * V(p, n);
+    parameter real computed = 6.0 from [lower:upper * 2.0 + 1.0]
+        exclude forbidden + 1.0;
+    analog I(p, n) <+ (value + computed) * V(p, n);
 endmodule
 "#,
         )
@@ -13157,18 +13159,18 @@ endmodule
         .as_str();
 
     assert!(
-        state.contains("const PARAMETER_MIN_REFERENCES: [Option<usize>; 4]")
-            && state.contains("None, None, None, Some(0)"),
+        state.contains("const PARAMETER_MIN_REFERENCES: [Option<usize>; 5]")
+            && state.contains("None, None, None, Some(0), Some(0)"),
         "generated metadata must preserve the referenced lower bound:\n{state}"
     );
     assert!(
-        state.contains("const PARAMETER_MAX_REFERENCES: [Option<usize>; 4]")
-            && state.contains("None, None, None, Some(1)"),
+        state.contains("const PARAMETER_MAX_REFERENCES: [Option<usize>; 5]")
+            && state.contains("None, None, None, Some(1), None"),
         "generated metadata must preserve the referenced upper bound:\n{state}"
     );
     assert!(
-        state.contains("const PARAMETER_EXCLUDED_REFERENCES: [&[usize]; 4]")
-            && state.contains("&[], &[], &[], &[2]"),
+        state.contains("const PARAMETER_EXCLUDED_REFERENCES: [&[usize]; 5]")
+            && state.contains("&[], &[], &[], &[2], &[]"),
         "generated metadata must preserve referenced exclusions:\n{state}"
     );
     assert!(
@@ -13180,6 +13182,13 @@ endmodule
     assert!(
         state.contains("generated Verilog-A parameter defaults must satisfy declared ranges"),
         "generated defaults must receive a complete-vector range check:\n{state}"
+    );
+    assert!(
+        state.contains("fn parameter_computed_max_bound(")
+            && state.contains("computed upper-bound expression")
+            && state.contains("fn validate_parameter_computed_exclusions(")
+            && state.contains("computed exclusion expression 0"),
+        "generated metadata must evaluate computed bounds and exclusions from final parameters:\n{state}"
     );
     assert_generated_rust_compiles(&generated);
 }

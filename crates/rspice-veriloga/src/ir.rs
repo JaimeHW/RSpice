@@ -5,6 +5,7 @@
 //! 2. Code generation for MNA matrix stamping
 
 use crate::ast::{BinaryOp, UnaryOp};
+use crate::error::CompileResult;
 use crate::semantic::AnalyzedModule;
 use smol_str::SmolStr;
 use std::collections::{HashMap, HashSet};
@@ -64,10 +65,13 @@ pub struct ParamDef {
     pub max: Option<f64>,
     pub min_parameter: Option<SmolStr>,
     pub max_parameter: Option<SmolStr>,
+    pub min_expr: Option<IrExpr>,
+    pub max_expr: Option<IrExpr>,
     pub min_exclusive: bool,
     pub max_exclusive: bool,
     pub exclude: Vec<f64>,
     pub exclude_parameters: Vec<SmolStr>,
+    pub exclude_exprs: Vec<IrExpr>,
 }
 
 /// Variable definition  
@@ -516,10 +520,13 @@ impl DeviceIR {
                 max: range.max,
                 min_parameter: range.min_parameter,
                 max_parameter: range.max_parameter,
+                min_expr: None,
+                max_expr: None,
                 min_exclusive: range.min_exclusive,
                 max_exclusive: range.max_exclusive,
                 exclude: range.exclude,
                 exclude_parameters: range.exclude_parameters,
+                exclude_exprs: Vec::new(),
             });
         }
 
@@ -571,6 +578,38 @@ impl DeviceIR {
                     .into());
                 }
                 ir.parameters[idx].default_expr = Some(converted);
+            }
+
+            if let Some(range) = &param.range {
+                let convert_range_expr =
+                    |expression: &crate::ast::Expression, label: &str| -> CompileResult<IrExpr> {
+                        let converted = converter.convert(expression)?;
+                        if !Self::is_range_parameter_expr(&converted) {
+                            return Err(crate::error::CodeGenError::new(
+                                crate::error::CodeGenErrorKind::InvalidExpression(format!(
+                                    "{label} of parameter '{}' must depend only on parameters",
+                                    param.name
+                                )),
+                            )
+                            .into());
+                        }
+                        Ok(converted)
+                    };
+                ir.parameters[idx].min_expr = range
+                    .min_expression
+                    .as_ref()
+                    .map(|expression| convert_range_expr(expression, "lower range bound"))
+                    .transpose()?;
+                ir.parameters[idx].max_expr = range
+                    .max_expression
+                    .as_ref()
+                    .map(|expression| convert_range_expr(expression, "upper range bound"))
+                    .transpose()?;
+                ir.parameters[idx].exclude_exprs = range
+                    .exclude_expressions
+                    .iter()
+                    .map(|expression| convert_range_expr(expression, "excluded range value"))
+                    .collect::<CompileResult<Vec<_>>>()?;
             }
         }
 
@@ -1276,6 +1315,22 @@ impl DeviceIR {
     /// (valid for instance-time parameter default evaluation)
     fn is_static_param_expr(expr: &IrExpr) -> bool {
         Self::is_instance_static_expr_with_options(expr, &HashSet::new(), false)
+    }
+
+    /// Range constraints are evaluated during instance setup and therefore
+    /// may only read final parameter values and pure numeric expressions.
+    fn is_range_parameter_expr(expr: &IrExpr) -> bool {
+        let recurse = Self::is_range_parameter_expr;
+        match expr {
+            IrExpr::Const(_) | IrExpr::Param(_) => true,
+            IrExpr::Binary(_, left, right) => recurse(left) && recurse(right),
+            IrExpr::Unary(_, operand) | IrExpr::Limexp(operand) => recurse(operand),
+            IrExpr::Call(_, arguments) => arguments.iter().all(recurse),
+            IrExpr::Conditional(condition, then_expr, else_expr) => {
+                recurse(condition) && recurse(then_expr) && recurse(else_expr)
+            }
+            _ => false,
+        }
     }
 
     /// Check whether an expression is fixed per instance: it depends only

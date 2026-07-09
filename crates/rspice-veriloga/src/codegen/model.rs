@@ -131,6 +131,12 @@ pub struct CompiledParameter {
     /// Runtime parameter index supplying the upper bound.
     #[serde(default)]
     pub max_parameter: Option<usize>,
+    /// Program computing a parameter-dependent lower bound.
+    #[serde(default)]
+    pub min_program: Option<BytecodeProgram>,
+    /// Program computing a parameter-dependent upper bound.
+    #[serde(default)]
+    pub max_program: Option<BytecodeProgram>,
     /// Whether equality with the lower bound is forbidden.
     #[serde(default)]
     pub min_exclusive: bool,
@@ -143,6 +149,9 @@ pub struct CompiledParameter {
     /// Runtime parameter indices whose values are explicitly excluded.
     #[serde(default)]
     pub exclude_parameters: Vec<usize>,
+    /// Programs computing parameter-dependent excluded values.
+    #[serde(default)]
+    pub exclude_programs: Vec<BytecodeProgram>,
 }
 
 /// Stamp program for a contribution

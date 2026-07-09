@@ -1446,6 +1446,32 @@ fn validate_parameter_default_exprs(
                 expressions,
             );
         }
+        if let Some(range) = &parameter.range {
+            if let Some(expression) = &range.min_expression {
+                validate_expr_ref(
+                    diagnostics,
+                    &format!("parameter '{}' lower range bound", parameter.name),
+                    expression,
+                    expressions,
+                );
+            }
+            if let Some(expression) = &range.max_expression {
+                validate_expr_ref(
+                    diagnostics,
+                    &format!("parameter '{}' upper range bound", parameter.name),
+                    expression,
+                    expressions,
+                );
+            }
+            for expression in &range.exclude_expressions {
+                validate_expr_ref(
+                    diagnostics,
+                    &format!("parameter '{}' excluded range value", parameter.name),
+                    expression,
+                    expressions,
+                );
+            }
+        }
     }
 }
 

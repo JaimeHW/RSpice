@@ -152,6 +152,10 @@ pub struct ParameterRange {
     pub min_parameter: Option<smol_str::SmolStr>,
     /// Parameter supplying the upper bound at instance setup time.
     pub max_parameter: Option<smol_str::SmolStr>,
+    /// Parameter-only expression supplying the lower bound at instance setup.
+    pub min_expression: Option<crate::ast::Expression>,
+    /// Parameter-only expression supplying the upper bound at instance setup.
+    pub max_expression: Option<crate::ast::Expression>,
     /// Whether minimum is exclusive (uses `from (min:max)` vs `from [min:max]`)
     pub min_exclusive: bool,
     /// Whether maximum is exclusive
@@ -160,6 +164,8 @@ pub struct ParameterRange {
     pub exclude: Vec<f64>,
     /// Parameters whose current values are explicitly excluded.
     pub exclude_parameters: Vec<smol_str::SmolStr>,
+    /// Parameter-only expressions whose final values are explicitly excluded.
+    pub exclude_expressions: Vec<crate::ast::Expression>,
 }
 
 impl ParameterRange {
@@ -170,10 +176,13 @@ impl ParameterRange {
             max: None,
             min_parameter: None,
             max_parameter: None,
+            min_expression: None,
+            max_expression: None,
             min_exclusive: false,
             max_exclusive: false,
             exclude: Vec::new(),
             exclude_parameters: Vec::new(),
+            exclude_expressions: Vec::new(),
         }
     }
 
@@ -184,10 +193,13 @@ impl ParameterRange {
             max: Some(max),
             min_parameter: None,
             max_parameter: None,
+            min_expression: None,
+            max_expression: None,
             min_exclusive: true,
             max_exclusive: true,
             exclude: Vec::new(),
             exclude_parameters: Vec::new(),
+            exclude_expressions: Vec::new(),
         }
     }
 
@@ -198,10 +210,13 @@ impl ParameterRange {
             max: Some(max),
             min_parameter: None,
             max_parameter: None,
+            min_expression: None,
+            max_expression: None,
             min_exclusive: false,
             max_exclusive: false,
             exclude: Vec::new(),
             exclude_parameters: Vec::new(),
+            exclude_expressions: Vec::new(),
         }
     }
 
@@ -212,10 +227,13 @@ impl ParameterRange {
             max: Some(max),
             min_parameter: None,
             max_parameter: None,
+            min_expression: None,
+            max_expression: None,
             min_exclusive: true,
             max_exclusive: false,
             exclude: Vec::new(),
             exclude_parameters: Vec::new(),
+            exclude_expressions: Vec::new(),
         }
     }
 
@@ -278,23 +296,41 @@ impl fmt::Display for ParameterRange {
             .min_parameter
             .as_ref()
             .map(ToString::to_string)
+            .or_else(|| {
+                self.min_expression
+                    .as_ref()
+                    .map(|_| "<expression>".to_string())
+            })
             .or_else(|| self.min.map(|value| value.to_string()))
             .unwrap_or_else(|| "-inf".to_string());
         let max = self
             .max_parameter
             .as_ref()
             .map(ToString::to_string)
+            .or_else(|| {
+                self.max_expression
+                    .as_ref()
+                    .map(|_| "<expression>".to_string())
+            })
             .or_else(|| self.max.map(|value| value.to_string()))
             .unwrap_or_else(|| "inf".to_string());
         write!(f, "{open}{min}:{max}{close}")?;
 
-        if !self.exclude.is_empty() || !self.exclude_parameters.is_empty() {
+        if !self.exclude.is_empty()
+            || !self.exclude_parameters.is_empty()
+            || !self.exclude_expressions.is_empty()
+        {
             write!(f, " exclude ")?;
             for (i, value) in self
                 .exclude
                 .iter()
                 .map(ToString::to_string)
                 .chain(self.exclude_parameters.iter().map(ToString::to_string))
+                .chain(
+                    self.exclude_expressions
+                        .iter()
+                        .map(|_| "<expression>".to_string()),
+                )
                 .enumerate()
             {
                 if i > 0 {

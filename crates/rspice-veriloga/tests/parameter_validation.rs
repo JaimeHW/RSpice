@@ -35,6 +35,26 @@ endmodule
     )
 }
 
+fn computed_range_model() -> DeviceFixture {
+    DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module computed_ranges(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real lower = 1.0;
+    parameter real upper_base = 5.0;
+    parameter real scale = 2.0;
+    parameter real offset = 1.0;
+    parameter real forbidden_offset = 1.5;
+    parameter real value = 10.0 from [lower:upper_base * scale + offset]
+        exclude lower + forbidden_offset;
+    analog I(p, n) <+ value * V(p, n);
+endmodule
+"#,
+    )
+}
+
 #[test]
 fn compiled_parameters_preserve_declared_constraints() {
     let model = parameter_model();
@@ -141,6 +161,49 @@ fn dependent_ranges_validate_the_completed_parameter_vector() {
 }
 
 #[test]
+fn computed_ranges_evaluate_against_final_parameter_values() {
+    let model = computed_range_model();
+    let value = &model.parameters[5];
+    assert_eq!(value.min_parameter, Some(0));
+    assert!(value.max_program.is_some());
+    assert_eq!(value.exclude_programs.len(), 1);
+
+    let mut valid_in_any_order = model.device("COMPUTED_OK", &[1, 0]);
+    valid_in_any_order
+        .try_set_parameter("value", 12.0)
+        .expect("scalar assignment is valid");
+    valid_in_any_order
+        .try_set_parameter("upper_base", 6.0)
+        .expect("scalar assignment is valid");
+    valid_in_any_order
+        .try_resolve_parameter_defaults()
+        .expect("computed upper bound uses the completed parameter vector");
+
+    let mut tightened = model.device("COMPUTED_HIGH", &[1, 0]);
+    tightened
+        .try_set_parameter("upper_base", 4.0)
+        .expect("scalar assignment is valid");
+    let error = tightened
+        .try_resolve_parameter_defaults()
+        .expect_err("computed upper-bound violations must fail setup");
+    assert!(
+        error
+            .to_string()
+            .contains("computed upper-bound expression=9"),
+        "{error}"
+    );
+
+    let mut excluded = model.device("COMPUTED_EXCLUDE", &[1, 0]);
+    excluded
+        .try_set_parameter("value", 2.5)
+        .expect("scalar assignment is valid");
+    let error = excluded
+        .try_resolve_parameter_defaults()
+        .expect_err("computed exclusions must fail setup");
+    assert!(error.to_string().contains("explicitly excluded"), "{error}");
+}
+
+#[test]
 fn invalid_dependent_range_defaults_fail_device_construction() {
     let model = DeviceFixture::compile(
         r#"
@@ -179,22 +242,23 @@ endmodule
         "{multiple}"
     );
 
-    let dependent = compiler
+    let non_parameter = compiler
         .compile(
             r#"
 module dependent_range(p, n);
     inout p, n;
     electrical p, n;
-    parameter real lower = 0.0;
-    parameter real x = 0.5 from [lower + 0.1:1];
+    parameter real x = 0.5 from [0:V(p, n)];
     analog I(p, n) <+ x * V(p, n);
 endmodule
 "#,
         )
-        .expect_err("complex dependent ranges must never be silently ignored");
+        .expect_err("runtime-signal ranges must never be silently ignored");
     assert!(
-        dependent.to_string().contains("parameter-dependent"),
-        "{dependent}"
+        non_parameter
+            .to_string()
+            .contains("constant or depend only on parameters"),
+        "{non_parameter}"
     );
 
     let self_referential = compiler
@@ -203,7 +267,7 @@ endmodule
 module self_referential_range(p, n);
     inout p, n;
     electrical p, n;
-    parameter real x = 0.5 from [x:1];
+    parameter real x = 0.5 from [x + 0.1:1];
     analog I(p, n) <+ x * V(p, n);
 endmodule
 "#,
@@ -229,7 +293,27 @@ endmodule
     assert!(
         unresolved
             .to_string()
-            .contains("constant expressions or direct parameter references"),
+            .contains("constant or depend only on parameters"),
         "{unresolved}"
+    );
+
+    let mixed_runtime = compiler
+        .compile(
+            r#"
+module runtime_dependent_range(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real upper = 1.0;
+    parameter real x = 0.5 from [0:upper + $temperature];
+    analog I(p, n) <+ x * V(p, n);
+endmodule
+"#,
+        )
+        .expect_err("parameter expressions must not hide simulator-state dependencies");
+    assert!(
+        mixed_runtime
+            .to_string()
+            .contains("upper range bound of parameter 'x' must depend only on parameters"),
+        "{mixed_runtime}"
     );
 }

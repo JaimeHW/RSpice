@@ -234,6 +234,16 @@ impl CodeGenerator {
                     max: p.max,
                     min_parameter: p.min_parameter.as_ref().map(resolve_bound).transpose()?,
                     max_parameter: p.max_parameter.as_ref().map(resolve_bound).transpose()?,
+                    min_program: p
+                        .min_expr
+                        .as_ref()
+                        .map(|expr| self.compile_expr(expr, &emit_ctx))
+                        .transpose()?,
+                    max_program: p
+                        .max_expr
+                        .as_ref()
+                        .map(|expr| self.compile_expr(expr, &emit_ctx))
+                        .transpose()?,
                     min_exclusive: p.min_exclusive,
                     max_exclusive: p.max_exclusive,
                     exclude: p.exclude.clone(),
@@ -241,6 +251,11 @@ impl CodeGenerator {
                         .exclude_parameters
                         .iter()
                         .map(resolve_bound)
+                        .collect::<CompileResult<Vec<_>>>()?,
+                    exclude_programs: p
+                        .exclude_exprs
+                        .iter()
+                        .map(|expr| self.compile_expr(expr, &emit_ctx))
                         .collect::<CompileResult<Vec<_>>>()?,
                 })
             })

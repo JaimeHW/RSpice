@@ -2513,6 +2513,18 @@ fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel
             || canonical
                 .range
                 .as_ref()
+                .and_then(|range| range.min_expression.as_ref())
+                .is_some()
+                != compiled.min_program.is_some()
+            || canonical
+                .range
+                .as_ref()
+                .and_then(|range| range.max_expression.as_ref())
+                .is_some()
+                != compiled.max_program.is_some()
+            || canonical
+                .range
+                .as_ref()
                 .is_some_and(|range| range.min_exclusive)
                 != compiled.min_exclusive
             || canonical
@@ -2522,6 +2534,12 @@ fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel
                 != compiled.max_exclusive
             || !same_float_slice(canonical_exclude, &compiled.exclude)
             || canonical_exclude_parameters != compiled.exclude_parameters
+            || canonical
+                .range
+                .as_ref()
+                .map(|range| range.exclude_expressions.len())
+                .unwrap_or_default()
+                != compiled.exclude_programs.len()
         {
             return Err(JitError::InvalidCanonicalIr {
                 model: model.name.clone(),

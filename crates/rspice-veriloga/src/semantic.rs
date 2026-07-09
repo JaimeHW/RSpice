@@ -473,25 +473,6 @@ impl SemanticAnalyzer {
                         declared_range.span,
                     );
                 }
-                let has_complex_dependent_constraint = declared_range
-                    .bounds
-                    .iter()
-                    .flat_map(|bound| [bound.lower.as_ref(), bound.upper.as_ref()])
-                    .flatten()
-                    .chain(declared_range.exclude.iter())
-                    .any(|expression| {
-                        Self::references_identifiers(expression, &param_names)
-                            && Self::direct_parameter_reference(expression, &param_names).is_none()
-                    });
-                if has_complex_dependent_constraint {
-                    self.record_error_at(
-                        SemanticErrorKind::UnsupportedFeature(
-                            "parameter-dependent range expressions must be direct parameter references"
-                                .into(),
-                        ),
-                        declared_range.span,
-                    );
-                }
                 let has_unresolved_constraint = declared_range
                     .bounds
                     .iter()
@@ -506,22 +487,20 @@ impl SemanticAnalyzer {
                 if has_unresolved_constraint {
                     self.record_error_at(
                         SemanticErrorKind::UnsupportedFeature(
-                            "parameter range expressions must be constant expressions or direct parameter references"
+                            "parameter range expressions must be constant or depend only on parameters"
                                 .into(),
                         ),
                         declared_range.span,
                     );
                 }
+                let own_name = std::collections::HashSet::from([param.name.clone()]);
                 let has_self_referential_constraint = declared_range
                     .bounds
                     .iter()
                     .flat_map(|bound| [bound.lower.as_ref(), bound.upper.as_ref()])
                     .flatten()
                     .chain(declared_range.exclude.iter())
-                    .any(|expression| {
-                        Self::direct_parameter_reference(expression, &param_names)
-                            .is_some_and(|name| name == param.name)
-                    });
+                    .any(|expression| Self::references_identifiers(expression, &own_name));
                 if has_self_referential_constraint {
                     self.record_error_at(
                         SemanticErrorKind::CircularDependency(format!(
@@ -4364,6 +4343,11 @@ impl SemanticAnalyzer {
                 self.eval_const(e)
             }
         };
+        let computed = |expression: &Expression| {
+            (Self::references_identifiers(expression, param_names)
+                && Self::direct_parameter_reference(expression, param_names).is_none())
+            .then(|| expression.clone())
+        };
 
         // Extract bounds from first range bound if present
         if let Some(bound) = range.bounds.first() {
@@ -4377,22 +4361,28 @@ impl SemanticAnalyzer {
                 .upper
                 .as_ref()
                 .and_then(|expression| Self::direct_parameter_reference(expression, param_names));
+            let min_expression = bound.lower.as_ref().and_then(computed);
+            let max_expression = bound.upper.as_ref().and_then(computed);
             let exclude: Vec<f64> = range.exclude.iter().filter_map(fold).collect();
             let exclude_parameters = range
                 .exclude
                 .iter()
                 .filter_map(|expression| Self::direct_parameter_reference(expression, param_names))
                 .collect();
+            let exclude_expressions = range.exclude.iter().filter_map(computed).collect();
 
             TypedParameterRange {
                 min,
                 max,
                 min_parameter,
                 max_parameter,
+                min_expression,
+                max_expression,
                 min_exclusive: !bound.lower_inclusive,
                 max_exclusive: !bound.upper_inclusive,
                 exclude,
                 exclude_parameters,
+                exclude_expressions,
             }
         } else {
             TypedParameterRange::unrestricted()

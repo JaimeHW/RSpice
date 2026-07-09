@@ -49,11 +49,17 @@ pub struct HirParamRange {
     pub min_parameter: Option<SmolStr>,
     #[serde(default)]
     pub max_parameter: Option<SmolStr>,
+    #[serde(default)]
+    pub min_expression: Option<HirExprRef>,
+    #[serde(default)]
+    pub max_expression: Option<HirExprRef>,
     pub min_exclusive: bool,
     pub max_exclusive: bool,
     pub exclude: Vec<f64>,
     #[serde(default)]
     pub exclude_parameters: Vec<SmolStr>,
+    #[serde(default)]
+    pub exclude_expressions: Vec<HirExprRef>,
 }
 
 impl HirParamRange {
@@ -63,10 +69,13 @@ impl HirParamRange {
             max: range.max,
             min_parameter: range.min_parameter.clone(),
             max_parameter: range.max_parameter.clone(),
+            min_expression: None,
+            max_expression: None,
             min_exclusive: range.min_exclusive,
             max_exclusive: range.max_exclusive,
             exclude: range.exclude.clone(),
             exclude_parameters: range.exclude_parameters.clone(),
+            exclude_expressions: Vec::new(),
         }
     }
 }
@@ -397,7 +406,23 @@ impl HirModel {
                     .default_expr
                     .as_ref()
                     .map(|expr| lowerer.lower_expr(expr)),
-                range: parameter.range.as_ref().map(HirParamRange::from_range),
+                range: parameter.range.as_ref().map(|range| {
+                    let mut lowered = HirParamRange::from_range(range);
+                    lowered.min_expression = range
+                        .min_expression
+                        .as_ref()
+                        .map(|expression| lowerer.lower_expr(expression));
+                    lowered.max_expression = range
+                        .max_expression
+                        .as_ref()
+                        .map(|expression| lowerer.lower_expr(expression));
+                    lowered.exclude_expressions = range
+                        .exclude_expressions
+                        .iter()
+                        .map(|expression| lowerer.lower_expr(expression))
+                        .collect();
+                    lowered
+                }),
                 aliases: Vec::new(),
             })
             .collect();
@@ -1026,6 +1051,29 @@ impl HirModel {
                     &format!("parameter '{}' default", parameter.name),
                     default_expr,
                 );
+            }
+            if let Some(range) = &parameter.range {
+                if let Some(expression) = &range.min_expression {
+                    self.validate_expr_ref(
+                        diagnostics,
+                        &format!("parameter '{}' lower range bound", parameter.name),
+                        expression,
+                    );
+                }
+                if let Some(expression) = &range.max_expression {
+                    self.validate_expr_ref(
+                        diagnostics,
+                        &format!("parameter '{}' upper range bound", parameter.name),
+                        expression,
+                    );
+                }
+                for expression in &range.exclude_expressions {
+                    self.validate_expr_ref(
+                        diagnostics,
+                        &format!("parameter '{}' excluded range value", parameter.name),
+                        expression,
+                    );
+                }
             }
         }
     }

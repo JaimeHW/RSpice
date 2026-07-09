@@ -734,17 +734,20 @@ impl VerilogADevice {
     }
 
     fn validate_parameter_value(
-        &self,
+        &mut self,
         parameter_index: usize,
         value: f64,
         resolve_dynamic_constraints: bool,
     ) -> Result<(), ParameterValueError> {
-        let parameter = self.model.parameters.get(parameter_index).ok_or_else(|| {
-            ParameterValueError::InvalidConstraint {
+        let parameter = self
+            .model
+            .parameters
+            .get(parameter_index)
+            .cloned()
+            .ok_or_else(|| ParameterValueError::InvalidConstraint {
                 parameter: "<unknown>".into(),
                 detail: format!("parameter index {parameter_index} is out of bounds"),
-            }
-        })?;
+            })?;
         if !value.is_finite() {
             return Err(ParameterValueError::NonFinite {
                 parameter: parameter.name.clone(),
@@ -760,18 +763,77 @@ impl VerilogADevice {
             });
         }
 
-        if parameter.min.is_some() && parameter.min_parameter.is_some() {
+        let lower_source_count = usize::from(parameter.min.is_some())
+            + usize::from(parameter.min_parameter.is_some())
+            + usize::from(parameter.min_program.is_some());
+        if lower_source_count > 1 {
             return Err(ParameterValueError::InvalidConstraint {
                 parameter: parameter.name.clone(),
-                detail: "lower bound has both a constant and parameter reference".to_string(),
+                detail: "lower bound has conflicting constant, parameter, or expression sources"
+                    .to_string(),
             });
         }
-        if parameter.max.is_some() && parameter.max_parameter.is_some() {
+        let upper_source_count = usize::from(parameter.max.is_some())
+            + usize::from(parameter.max_parameter.is_some())
+            + usize::from(parameter.max_program.is_some());
+        if upper_source_count > 1 {
             return Err(ParameterValueError::InvalidConstraint {
                 parameter: parameter.name.clone(),
-                detail: "upper bound has both a constant and parameter reference".to_string(),
+                detail: "upper bound has conflicting constant, parameter, or expression sources"
+                    .to_string(),
             });
         }
+
+        let mut evaluate_program = |program: &crate::codegen::BytecodeProgram, label: String| {
+            let mut vm = Vm::new(&mut self.context);
+            let bound =
+                vm.execute(program)
+                    .map_err(|error| ParameterValueError::InvalidConstraint {
+                        parameter: parameter.name.clone(),
+                        detail: format!("{label} evaluation failed: {error}"),
+                    })?;
+            if !bound.is_finite() {
+                return Err(ParameterValueError::InvalidConstraint {
+                    parameter: parameter.name.clone(),
+                    detail: format!("{label} evaluated to non-finite value {bound}"),
+                });
+            }
+            Ok::<_, ParameterValueError>((bound, label))
+        };
+        let computed_min = if resolve_dynamic_constraints {
+            parameter
+                .min_program
+                .as_ref()
+                .map(|program| {
+                    evaluate_program(program, "computed lower-bound expression".to_string())
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let computed_max = if resolve_dynamic_constraints {
+            parameter
+                .max_program
+                .as_ref()
+                .map(|program| {
+                    evaluate_program(program, "computed upper-bound expression".to_string())
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let computed_exclusions = if resolve_dynamic_constraints {
+            parameter
+                .exclude_programs
+                .iter()
+                .enumerate()
+                .map(|(index, program)| {
+                    evaluate_program(program, format!("computed exclusion expression {index}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            Vec::new()
+        };
 
         let dynamic_bound = |index: Option<usize>, label: &str| {
             index
@@ -804,16 +866,18 @@ impl VerilogADevice {
                 })
                 .transpose()
         };
-        let dynamic_min = if resolve_dynamic_constraints {
+        let referenced_min = if resolve_dynamic_constraints {
             dynamic_bound(parameter.min_parameter, "lower-bound")?
         } else {
             None
         };
-        let dynamic_max = if resolve_dynamic_constraints {
+        let referenced_max = if resolve_dynamic_constraints {
             dynamic_bound(parameter.max_parameter, "upper-bound")?
         } else {
             None
         };
+        let dynamic_min = computed_min.or(referenced_min);
+        let dynamic_max = computed_max.or(referenced_max);
         let min = dynamic_min
             .as_ref()
             .map(|(value, _)| *value)
@@ -879,7 +943,10 @@ impl VerilogADevice {
         } else {
             false
         };
-        if parameter.exclude.contains(&value) || dynamically_excluded {
+        let computed_excluded = computed_exclusions
+            .iter()
+            .any(|(excluded, _)| value == *excluded);
+        if parameter.exclude.contains(&value) || dynamically_excluded || computed_excluded {
             return Err(ParameterValueError::Excluded {
                 parameter: parameter.name.clone(),
                 value,
