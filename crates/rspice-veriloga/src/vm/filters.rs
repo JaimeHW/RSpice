@@ -21,6 +21,72 @@ pub struct DelayBuffer {
     candidate: Option<(f64, f64)>,
 }
 
+/// Evaluate a Verilog-A timer and return both its event level and the next
+/// absolute event time that the transient stepper must not skip.
+///
+/// A non-positive period denotes a one-shot timer.  The event is level-true
+/// throughout repeated Newton evaluations of the same candidate timepoint,
+/// but is excluded once that timepoint becomes the lower endpoint of the next
+/// step.  `time_tol` is an event-coalescing tolerance, while a small
+/// scale-aware floating-point tolerance protects endpoint comparisons.
+pub(crate) fn timer_event_evaluation(
+    start_time: f64,
+    period: f64,
+    time_tol: f64,
+    enable: f64,
+    current_time: f64,
+    timestep: f64,
+) -> (f64, Option<f64>) {
+    if !start_time.is_finite()
+        || !period.is_finite()
+        || !time_tol.is_finite()
+        || !enable.is_finite()
+        || !current_time.is_finite()
+        || !timestep.is_finite()
+        || enable == 0.0
+        || period < 0.0
+    {
+        return (0.0, None);
+    }
+
+    let scale = start_time.abs().max(current_time.abs());
+    let numeric_tol = (16.0 * f64::EPSILON * scale).max(f64::MIN_POSITIVE);
+    let event_tol = time_tol.max(0.0).max(numeric_tol);
+    let horizon = current_time + event_tol;
+    let previous_time = current_time - timestep.max(0.0);
+
+    let scheduled = if horizon + numeric_tol < start_time {
+        None
+    } else if period > 0.0 {
+        let cycles = ((horizon - start_time) / period).floor().max(0.0);
+        let candidate = start_time + cycles * period;
+        candidate.is_finite().then_some(candidate)
+    } else {
+        Some(start_time)
+    };
+
+    let fired = scheduled.is_some_and(|event_time| {
+        event_time <= horizon
+            && if timestep > numeric_tol {
+                event_time > previous_time + numeric_tol
+            } else {
+                (current_time - event_time).abs() <= event_tol
+            }
+    });
+
+    let next_event = if horizon + numeric_tol < start_time {
+        Some(start_time)
+    } else if period > 0.0 {
+        let cycles = ((horizon - start_time) / period).floor().max(0.0) + 1.0;
+        let next = start_time + cycles * period;
+        (next.is_finite() && next > current_time + numeric_tol).then_some(next)
+    } else {
+        None
+    };
+
+    (if fired { 1.0 } else { 0.0 }, next_event)
+}
+
 impl DelayBuffer {
     /// Create a new delay buffer with specified capacity.
     pub fn new(capacity: usize) -> Self {
@@ -158,7 +224,53 @@ impl DelayBuffer {
 
 #[cfg(test)]
 mod tests {
-    use super::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
+    use super::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter, timer_event_evaluation};
+
+    #[test]
+    fn one_shot_timer_fires_once_and_requests_its_timepoint() {
+        assert_eq!(
+            timer_event_evaluation(1.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+            (0.0, Some(1.0))
+        );
+        assert_eq!(
+            timer_event_evaluation(1.0, 0.0, 0.0, 1.0, 1.0, 1.0),
+            (1.0, None)
+        );
+        assert_eq!(
+            timer_event_evaluation(1.0, 0.0, 0.0, 1.0, 1.0, 1.0),
+            (1.0, None),
+            "repeated Newton evaluations must see the same event"
+        );
+        assert_eq!(
+            timer_event_evaluation(1.0, 0.0, 0.0, 1.0, 1.1, 0.1),
+            (0.0, None),
+            "an accepted event must not fire again at the next step"
+        );
+    }
+
+    #[test]
+    fn periodic_timer_reports_each_next_breakpoint() {
+        assert_eq!(
+            timer_event_evaluation(1.0, 0.5, 0.0, 1.0, 1.0, 1.0),
+            (1.0, Some(1.5))
+        );
+        assert_eq!(
+            timer_event_evaluation(1.0, 0.5, 0.0, 1.0, 1.5, 0.5),
+            (1.0, Some(2.0))
+        );
+    }
+
+    #[test]
+    fn disabled_and_invalid_timers_do_not_fire_or_schedule() {
+        assert_eq!(
+            timer_event_evaluation(1.0, 0.5, 0.0, 0.0, 0.0, 0.0),
+            (0.0, None)
+        );
+        assert_eq!(
+            timer_event_evaluation(1.0, -0.5, 0.0, 1.0, 0.0, 0.0),
+            (0.0, None)
+        );
+    }
 
     #[test]
     fn delay_history_grows_without_dropping_accepted_samples() {

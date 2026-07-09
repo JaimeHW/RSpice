@@ -7822,6 +7822,7 @@ endmodule
             cross_detectors_len: context.cross_detectors.len(),
             state_prev_len: context.state_values_prev.len(),
             state_values_len: context.state_values.len(),
+            timer_event_bound: &mut context.timer_event_bound,
         }
     }
 
@@ -8132,6 +8133,7 @@ endmodule
             cross_detectors_len: 0,
             state_prev_len: 0,
             state_values_len: 0,
+            timer_event_bound: std::ptr::null_mut(),
         }
     }
 }

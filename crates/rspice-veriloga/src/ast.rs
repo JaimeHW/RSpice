@@ -507,10 +507,12 @@ pub enum EventExpr {
     },
     /// Above threshold event
     Above { signal: Expression, span: Span },
-    /// Timer event: timer(start [, period])
+    /// Timer event: timer(start [, period [, time_tol [, enable]]])
     Timer {
         start: Expression,
-        period: Option<Expression>,
+        period: Option<Box<Expression>>,
+        time_tol: Option<Box<Expression>>,
+        enable: Option<Box<Expression>>,
         span: Span,
     },
     /// Initial step

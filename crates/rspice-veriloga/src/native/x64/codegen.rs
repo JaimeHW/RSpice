@@ -1880,18 +1880,17 @@ impl FunctionCompiler {
         self.emit_context_filter_helper_call(target, filter_id, rspice_zi_step_native)
     }
 
-    fn emit_timer_state(&mut self, _timer_id: usize) -> JitResult<()> {
-        if self.depth < 2 {
+    fn emit_timer_state(&mut self, timer_id: usize) -> JitResult<()> {
+        if self.depth < 4 {
             return Err(JitError::Encoding {
                 model: MODEL.into(),
-                detail: format!("timer state requires stack depth 2, found {}", self.depth).into(),
+                detail: format!("timer state requires stack depth 4, found {}", self.depth).into(),
             });
         }
 
-        let start = XMM_STACK[self.depth - 2];
-        let period = XMM_STACK[self.depth - 1];
-        self.emit_timer_helper_call(start, period, rspice_timer_state_native);
-        self.depth -= 1;
+        let start = XMM_STACK[self.depth - 4];
+        self.emit_operand_context_filter_helper_call(start, 4, timer_id, rspice_timer_state_native);
+        self.depth -= 3;
         Ok(())
     }
 
@@ -2397,35 +2396,6 @@ impl FunctionCompiler {
         self.encoder.call_r64(Gpr::Rax);
 
         self.emit_helper_result_to_target_and_restore(target, target_slot, |_, _| true);
-        self.encoder.add_rsp_imm32(frame_bytes);
-    }
-
-    fn emit_timer_helper_call(&mut self, start: Xmm, period: Xmm, helper: TimerHelper) {
-        debug_assert!(self.uses_helper_calls);
-        let frame_bytes =
-            call_frame_bytes_for_slots(call_frame_spill_slot_count(self.depth, |_, register| {
-                register != start && register != period
-            }));
-        self.encoder.sub_rsp_imm32(frame_bytes);
-        self.emit_call_frame_spills(self.depth, |_, register| {
-            register != start && register != period
-        });
-
-        if start != Xmm::Xmm0 {
-            self.encoder.movsd_xmm_xmm(Xmm::Xmm0, start);
-        }
-        if period != Xmm::Xmm1 {
-            self.encoder.movsd_xmm_xmm(Xmm::Xmm1, period);
-        }
-        self.encoder
-            .mov_r64_r64(timer_ctx_arg_reg(), self.ctx_arg_reg());
-        self.encoder
-            .movabs_r64_imm64(Gpr::Rax, helper as usize as u64);
-        self.encoder.call_r64(Gpr::Rax);
-
-        self.emit_helper_result_to_target_and_restore(start, self.depth, |_, register| {
-            register != period
-        });
         self.encoder.add_rsp_imm32(frame_bytes);
     }
 
@@ -3283,7 +3253,6 @@ type TableHelper =
     unsafe extern "C" fn(f64, *const crate::codegen::LookupTable, usize, usize) -> f64;
 type ContextFilterHelper =
     unsafe extern "C" fn(f64, *const crate::native::EvalContext, usize) -> f64;
-type TimerHelper = unsafe extern "C" fn(f64, f64, *const crate::native::EvalContext) -> f64;
 type OperandContextFilterHelper =
     unsafe extern "C" fn(*const f64, *const crate::native::EvalContext, usize) -> f64;
 type DynamicVariableHelper = unsafe extern "C" fn(f64, *const f64, usize, i64) -> f64;
@@ -3759,16 +3728,6 @@ fn context_filter_id_arg_reg() -> Gpr {
 }
 
 #[cfg(windows)]
-fn timer_ctx_arg_reg() -> Gpr {
-    Gpr::R8
-}
-
-#[cfg(not(windows))]
-fn timer_ctx_arg_reg() -> Gpr {
-    Gpr::Rdi
-}
-
-#[cfg(windows)]
 fn operand_filter_operands_arg_reg() -> Gpr {
     Gpr::Rcx
 }
@@ -3836,12 +3795,11 @@ mod tests {
         I64_MAX_EXCLUSIVE_AS_F64, I64_MIN_AS_F64, INTERNAL_VOLTAGES_OFFSET, K_BOLTZMANN,
         LITERAL_POOL_ALIGNMENT, NativeAssignment, OperandContextFilterHelper, PARAMS_OFFSET,
         Q_ELECTRON, ROUND_TEMP_FRAME_BYTES, STATEFUL_SCRATCH_FRAME_BYTES, THERMAL_VOLTAGE_PER_K,
-        TableHelper, TimerHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES,
-        X64Encoder, XMM_STACK, Xmm, assignment_uses_helper_calls, call_result_disp,
-        compile_assignment_function, compile_assignment_pass_function, compile_value_function,
-        entry_ctx_arg_reg, entry_vars_arg_reg, native_op_reads_entry_args,
-        native_op_uses_helper_call, program_uses_helper_calls, rspice_exp,
-        value_program_needs_saved_entry_args,
+        TableHelper, VECTOR_LITERAL_ALIGNMENT, VOLTAGES_OFFSET, WORD_BYTES, X64Encoder, XMM_STACK,
+        Xmm, assignment_uses_helper_calls, call_result_disp, compile_assignment_function,
+        compile_assignment_pass_function, compile_value_function, entry_ctx_arg_reg,
+        entry_vars_arg_reg, native_op_reads_entry_args, native_op_uses_helper_call,
+        program_uses_helper_calls, rspice_exp, value_program_needs_saved_entry_args,
     };
     use crate::codegen::{BytecodeProgram, Instruction, LookupTable};
     use crate::laplace::StateSpaceFilter;
@@ -4640,7 +4598,7 @@ mod tests {
             "context filter helper stack alignment",
         );
 
-        let timer_helper: TimerHelper = unsafe { std::mem::transmute(helper_ptr) };
+        let timer_helper: OperandContextFilterHelper = unsafe { std::mem::transmute(helper_ptr) };
         assert_f64_matches(
             run_timer_helper_sentinel(timer_helper, &ctx),
             1.0,
@@ -9888,21 +9846,23 @@ mod tests {
                 Instruction::PushTemperature,
                 Instruction::PushConst(1.0),
                 Instruction::PushConst(0.5),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
                 Instruction::TimerState(0),
                 Instruction::Add,
             ],
             0,
         );
         let bytes = compile_value_function(&program).expect("compile timer leaf");
-        let frame_bytes = call_frame_bytes(1);
+        let frame_bytes = call_frame_bytes(5);
         let old_fixed_frame_bytes = old_fixed_call_frame_bytes();
         assert!(
             contains_bytes(&bytes, &sub_rsp_bytes(frame_bytes)),
-            "timer helper should reserve only the lower live prefix slot"
+            "timer helper should reserve its live operands and lower prefix"
         );
         assert!(
             contains_bytes(&bytes, &add_rsp_bytes(frame_bytes)),
-            "timer helper should release only the lower live prefix slot"
+            "timer helper should release its live operand frame"
         );
         assert!(
             !contains_bytes(&bytes, &sub_rsp_bytes(old_fixed_frame_bytes)),
@@ -11372,11 +11332,13 @@ mod tests {
         run_abi_sentinel_value(compiler, ctx)
     }
 
-    fn run_timer_helper_sentinel(helper: TimerHelper, ctx: &EvalContext) -> f64 {
+    fn run_timer_helper_sentinel(helper: OperandContextFilterHelper, ctx: &EvalContext) -> f64 {
         let mut compiler = abi_sentinel_compiler();
         let start = push_abi_sentinel_const(&mut compiler, 1.25);
-        let period = push_abi_sentinel_const(&mut compiler, 0.75);
-        compiler.emit_timer_helper_call(start, period, helper);
+        push_abi_sentinel_const(&mut compiler, 0.75);
+        push_abi_sentinel_const(&mut compiler, 0.125);
+        push_abi_sentinel_const(&mut compiler, 1.0);
+        compiler.emit_operand_context_filter_helper_call(start, 4, 17, helper);
         run_abi_sentinel_value(compiler, ctx)
     }
 
@@ -11461,14 +11423,19 @@ mod tests {
     }
 
     unsafe extern "C" fn abi_sentinel_timer_helper(
-        start: f64,
-        period: f64,
+        operands: *const f64,
         ctx: *const EvalContext,
+        timer_id: usize,
     ) -> f64 {
-        if start.to_bits() != 1.25_f64.to_bits() {
+        if timer_id != 17 || operands.is_null() {
             return -20.0;
         }
-        if period.to_bits() != 0.75_f64.to_bits() {
+        let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
+        if operands[0].to_bits() != 1.25_f64.to_bits()
+            || operands[1].to_bits() != 0.75_f64.to_bits()
+            || operands[2].to_bits() != 0.125_f64.to_bits()
+            || operands[3].to_bits() != 1.0_f64.to_bits()
+        {
             return -21.0;
         }
         let Some(ctx) = (unsafe { ctx.as_ref() }) else {
@@ -11569,6 +11536,7 @@ mod tests {
             cross_detectors_len: 0,
             state_prev_len: 0,
             state_values_len: 0,
+            timer_event_bound: std::ptr::null_mut(),
         }
     }
 

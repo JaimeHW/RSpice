@@ -507,11 +507,18 @@ impl VerilogADevice {
         self.context.multiplicity
     }
 
-    /// Maximum next transient step requested by `$bound_step` during the
-    /// latest evaluation (None when unbounded or the model never calls it)
+    /// Maximum next transient step requested by `$bound_step` or a scheduled
+    /// timer event during the latest evaluation.
     pub fn transient_bound_step(&self) -> Option<f64> {
-        let bound = self.variable("$bound_step")?;
-        (bound.is_finite() && bound > 0.0).then_some(bound)
+        let model_bound = self
+            .variable("$bound_step")
+            .filter(|bound| bound.is_finite() && *bound > 0.0);
+        match (model_bound, self.context.timer_event_step_bound()) {
+            (Some(model), Some(timer)) => Some(model.min(timer)),
+            (Some(model), None) => Some(model),
+            (None, Some(timer)) => Some(timer),
+            (None, None) => None,
+        }
     }
 
     /// Whether `$discontinuity` fired during the latest evaluation
@@ -1343,6 +1350,7 @@ impl VerilogADevice {
     /// errors as diagnostics instead of panicking.
     pub fn try_evaluate(&mut self) -> Result<Vec<f64>, VmError> {
         self.context.clear_currents();
+        self.context.clear_timer_event_bound();
         // Pre-reserve so the currents pointer stays stable while native
         // snapshots reference it across pushes
         self.context
@@ -1477,6 +1485,7 @@ impl VerilogADevice {
             cross_detectors_len: context.cross_detectors.len(),
             state_prev_len: context.state_values_prev.len(),
             state_values_len: context.state_values.len(),
+            timer_event_bound: &mut context.timer_event_bound,
         }
     }
 

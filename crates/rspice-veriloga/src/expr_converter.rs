@@ -653,22 +653,20 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "timer" => {
-                // timer(start_time, period?) - period is optional
-                if func.args.is_empty() {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "timer() requires at least start_time argument".into(),
-                    ))
-                    .into());
-                }
+                // timer(start_time [, period [, time_tol [, enable]]])
+                validate_arg_range(&func.name, func.args.len(), 1, Some(4))?;
                 let start_time = self.convert(&func.args[0])?;
-                let period = if func.args.len() > 1 {
-                    Some(Box::new(self.convert(&func.args[1])?))
-                } else {
-                    None
+                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
+                    func.args
+                        .get(index)
+                        .map(|expr| self.convert(expr).map(Box::new))
+                        .transpose()
                 };
                 Ok(IrExpr::Timer {
                     start_time: Box::new(start_time),
-                    period,
+                    period: optional(1)?,
+                    time_tol: optional(2)?,
+                    enable: optional(3)?,
                 })
             }
             "laplace_zp" => {
@@ -1062,17 +1060,19 @@ impl<'a> ExprConverter<'a> {
                 })
             }
             "timer" => {
-                validate_arg_range(&call.name, call.args.len(), 1, Some(2))?;
+                validate_arg_range(&call.name, call.args.len(), 1, Some(4))?;
                 let start_time = self.convert(require_arg(0)?)?;
-                let period = call
-                    .args
-                    .get(1)
-                    .map(|e| self.convert(e))
-                    .transpose()?
-                    .map(Box::new);
+                let optional = |index: usize| -> CompileResult<Option<Box<IrExpr>>> {
+                    call.args
+                        .get(index)
+                        .map(|expr| self.convert(expr).map(Box::new))
+                        .transpose()
+                };
                 Ok(IrExpr::Timer {
                     start_time: Box::new(start_time),
-                    period,
+                    period: optional(1)?,
+                    time_tol: optional(2)?,
+                    enable: optional(3)?,
                 })
             }
             "last_crossing" => Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(

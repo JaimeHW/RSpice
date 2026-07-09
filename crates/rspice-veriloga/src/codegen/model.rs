@@ -392,8 +392,8 @@ pub enum Instruction {
     /// Above event: level crossing detection above threshold
     /// Stack: [expr, threshold] -> [0 or 1]
     AboveState(usize),
-    /// Timer event: periodic time-based trigger
-    /// Stack: [start_time, period] -> [0 or 1]
+    /// Timer event: one-shot or periodic time-based trigger
+    /// Stack: [start_time, period, time_tol, enable] -> [0 or 1]
     TimerState(usize),
     /// Laplace filter with poles/zeros (state-space form)
     /// Stack: [input] -> [filtered]

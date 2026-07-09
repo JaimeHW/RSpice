@@ -14,4 +14,5 @@ pub use context::{
 };
 pub use error::VmError;
 pub use executor::Vm;
+pub(crate) use filters::timer_event_evaluation;
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};

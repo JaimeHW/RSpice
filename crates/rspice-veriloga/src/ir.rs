@@ -322,11 +322,13 @@ pub enum IrExpr {
         threshold: Box<IrExpr>,
         time_tol: Option<Box<IrExpr>>,
     },
-    /// timer(start, period) - periodic time event
-    /// Returns 1 at time=start and every period thereafter
+    /// timer(start, period, time_tol, enable) - time event
+    /// Returns 1 at time=start and every positive period thereafter.
     Timer {
         start_time: Box<IrExpr>,
         period: Option<Box<IrExpr>>,
+        time_tol: Option<Box<IrExpr>>,
+        enable: Option<Box<IrExpr>>,
     },
     /// laplace_zp - s-domain filter with poles and zeros
     /// Args: (expr, zeros, poles, k_factor)
@@ -1008,8 +1010,16 @@ impl DeviceIR {
                 IrExpr::Above {
                     expr, threshold, ..
                 } => contains_ddt(expr) || contains_ddt(threshold),
-                IrExpr::Timer { start_time, period } => {
-                    contains_ddt(start_time) || period.as_deref().is_some_and(contains_ddt)
+                IrExpr::Timer {
+                    start_time,
+                    period,
+                    time_tol,
+                    enable,
+                } => {
+                    contains_ddt(start_time)
+                        || period.as_deref().is_some_and(contains_ddt)
+                        || time_tol.as_deref().is_some_and(contains_ddt)
+                        || enable.as_deref().is_some_and(contains_ddt)
                 }
                 // ddt() cannot appear in an element index (assignments
                 // reject it upstream), so an indexed read is resistive

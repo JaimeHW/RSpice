@@ -1585,6 +1585,7 @@ mod tests {
             cross_detectors_len: 0,
             state_prev_len: 0,
             state_values_len: 0,
+            timer_event_bound: std::ptr::null_mut(),
         }
     }
 }

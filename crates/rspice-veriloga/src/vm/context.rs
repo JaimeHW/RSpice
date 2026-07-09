@@ -125,6 +125,8 @@ pub struct VmContext {
     pub multiplicity: f64,
     /// Z-domain (sampled-data) filters for the zi_* operators
     pub zi_filters: Vec<crate::zfilter::ZiFilter>,
+    /// Earliest absolute timer event requested during the latest evaluation.
+    pub(crate) timer_event_bound: f64,
 }
 
 impl Default for VmContext {
@@ -154,6 +156,7 @@ impl Default for VmContext {
             laplace_filters: Vec::new(),
             multiplicity: 1.0,
             zi_filters: Vec::new(),
+            timer_event_bound: f64::INFINITY,
         }
     }
 }
@@ -189,6 +192,7 @@ impl VmContext {
             laplace_filters: Vec::new(),
             multiplicity: 1.0,
             zi_filters: Vec::new(),
+            timer_event_bound: f64::INFINITY,
         }
     }
 
@@ -222,6 +226,7 @@ impl VmContext {
             laplace_filters: Vec::new(),
             multiplicity: 1.0,
             zi_filters: Vec::new(),
+            timer_event_bound: f64::INFINITY,
         }
     }
 
@@ -255,6 +260,7 @@ impl VmContext {
             laplace_filters: Vec::new(),
             multiplicity: 1.0,
             zi_filters: Vec::new(),
+            timer_event_bound: f64::INFINITY,
         }
     }
 
@@ -286,6 +292,24 @@ impl VmContext {
     /// Set the timestep for transient analysis.
     pub fn set_timestep(&mut self, dt: f64) {
         self.timestep = dt;
+    }
+
+    /// Reset timer scheduling before a fresh device evaluation.
+    pub(crate) fn clear_timer_event_bound(&mut self) {
+        self.timer_event_bound = f64::INFINITY;
+    }
+
+    /// Record the earliest future timer event requested by any expression.
+    pub(crate) fn request_timer_event(&mut self, event_time: f64) {
+        if event_time.is_finite() && event_time > self.time {
+            self.timer_event_bound = self.timer_event_bound.min(event_time);
+        }
+    }
+
+    /// Maximum next step needed to land on the earliest scheduled timer.
+    pub(crate) fn timer_event_step_bound(&self) -> Option<f64> {
+        let bound = self.timer_event_bound - self.time;
+        (bound.is_finite() && bound > 0.0).then_some(bound)
     }
 
     /// Allocate state variables.

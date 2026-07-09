@@ -2009,11 +2009,23 @@ impl SemanticAnalyzer {
             EventExpr::Timer {
                 start,
                 period,
+                time_tol,
+                enable,
                 span,
             } => {
                 let mut args = vec![self.lower_expression_with_side_effects(start, module, sink)?];
                 if let Some(period) = period {
                     args.push(self.lower_expression_with_side_effects(period, module, sink)?);
+                } else if time_tol.is_some() || enable.is_some() {
+                    args.push(Self::number_expr(0.0, *span));
+                }
+                if let Some(time_tol) = time_tol {
+                    args.push(self.lower_expression_with_side_effects(time_tol, module, sink)?);
+                } else if enable.is_some() {
+                    args.push(Self::number_expr(0.0, *span));
+                }
+                if let Some(enable) = enable {
+                    args.push(self.lower_expression_with_side_effects(enable, module, sink)?);
                 }
                 EventLowering::Guard(Expression::Call(CallExpr {
                     name: "timer".into(),

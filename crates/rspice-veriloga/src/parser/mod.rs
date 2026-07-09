@@ -1241,15 +1241,19 @@ impl<'a> Parser<'a> {
                 }
                 let mut args = args.into_iter();
                 let start_time = args.next().unwrap();
-                let period = args.next();
+                let period = args.next().map(Box::new);
+                let time_tol = args.next().map(Box::new);
+                let enable = args.next().map(Box::new);
                 if args.next().is_some() {
                     return Err(self.error(ParseErrorKind::InvalidEventExpression(
-                        "timer event accepts at most 2 arguments".into(),
+                        "timer event accepts at most 4 arguments".into(),
                     )));
                 }
                 Ok(EventExpr::Timer {
                     start: start_time,
                     period,
+                    time_tol,
+                    enable,
                     span: start.extend(self.previous_span()),
                 })
             }

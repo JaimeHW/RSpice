@@ -886,6 +886,7 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         cross_detectors_len: context.cross_detectors.len(),
         state_prev_len: context.state_values_prev.len(),
         state_values_len: context.state_values.len(),
+        timer_event_bound: &mut context.timer_event_bound,
     }
 }
 

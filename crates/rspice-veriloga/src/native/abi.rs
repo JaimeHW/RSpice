@@ -86,6 +86,8 @@ pub struct EvalContext {
     pub state_prev_len: usize,
     /// Length of `state_values`.
     pub state_values_len: usize,
+    /// Earliest absolute timer event requested by native evaluation.
+    pub timer_event_bound: *mut f64,
 }
 
 thread_local! {
@@ -653,11 +655,7 @@ pub unsafe extern "C" fn rspice_zi_step_native(
     filters[filter_id].eval(input, ctx.time, ctx.analysis_type == 2)
 }
 
-/// External helper function for native x64 periodic timer events.
-///
-/// Argument order matches x64 helper-call codegen: scalar start/period in XMM0
-/// and XMM1, followed by the context pointer in the platform's integer
-/// argument register for the third C ABI argument.
+/// External helper function for native x64 one-shot and periodic timer events.
 ///
 /// # Safety
 /// This function is called from JIT-compiled code with a valid EvalContext
@@ -665,32 +663,34 @@ pub unsafe extern "C" fn rspice_zi_step_native(
 /// channel; native mode never dispatches the bytecode interpreter for recovery.
 #[unsafe(export_name = "rspice_timer_state_native")]
 pub unsafe extern "C" fn rspice_timer_state_native(
-    start_time: f64,
-    period: f64,
+    operands: *const f64,
     ctx: *const EvalContext,
+    _timer_id: usize,
 ) -> f64 {
-    if ctx.is_null() {
+    if operands.is_null() || ctx.is_null() {
         set_native_runtime_error(
-            "native timer helper missing EvalContext; no interpreter fallback",
+            "native timer helper missing operands or EvalContext; no interpreter fallback",
         );
         return 0.0;
     }
 
     let ctx = unsafe { &*ctx };
-    let current_time = ctx.time;
-    if current_time >= start_time && period > 0.0 {
-        let elapsed = current_time - start_time;
-        let cycles = (elapsed / period).floor();
-        let next_fire = start_time + cycles * period;
-        let tolerance = ctx.timestep.max(1e-15);
-        if (current_time - next_fire).abs() < tolerance {
-            1.0
-        } else {
-            0.0
-        }
-    } else {
-        0.0
+    let operands = unsafe { std::slice::from_raw_parts(operands, 4) };
+    let (result, next_event) = crate::vm::timer_event_evaluation(
+        operands[0],
+        operands[1],
+        operands[2],
+        operands[3],
+        ctx.time,
+        ctx.timestep,
+    );
+    if let Some(next_event) = next_event
+        && !ctx.timer_event_bound.is_null()
+    {
+        let bound = unsafe { &mut *ctx.timer_event_bound };
+        *bound = bound.min(next_event);
     }
+    result
 }
 
 /// External helper function for native x64 transition filters.
@@ -1182,7 +1182,8 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, cross_detectors_len), 280);
         assert_eq!(offset_of!(EvalContext, state_prev_len), 288);
         assert_eq!(offset_of!(EvalContext, state_values_len), 296);
-        assert_eq!(size_of::<EvalContext>(), 304);
+        assert_eq!(offset_of!(EvalContext, timer_event_bound), 304);
+        assert_eq!(size_of::<EvalContext>(), 312);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -1306,10 +1307,11 @@ mod tests {
     }
 
     #[test]
-    fn timer_native_helper_matches_vm_tolerance_and_reports_invalid_context() {
+    fn timer_native_helper_matches_vm_events_and_reports_invalid_context() {
         clear_native_runtime_error();
+        let periodic = [1.0, 0.5, 0.0, 1.0];
 
-        let value = unsafe { rspice_timer_state_native(1.0, 0.5, std::ptr::null()) };
+        let value = unsafe { rspice_timer_state_native(periodic.as_ptr(), std::ptr::null(), 0) };
 
         assert_eq!(value.to_bits(), 0.0_f64.to_bits());
         let error =
@@ -1323,6 +1325,7 @@ mod tests {
             "error must preserve the native hard-fail contract, got: {error}"
         );
 
+        let mut timer_bound = f64::INFINITY;
         let mut ctx = EvalContext {
             voltages: std::ptr::null(),
             internal_voltages: std::ptr::null(),
@@ -1335,8 +1338,8 @@ mod tests {
             port_connected: std::ptr::null(),
             port_connected_len: 0,
             temperature: 0.0,
-            time: 1.5,
-            timestep: 0.01,
+            time: 0.0,
+            timestep: 0.0,
             state_prev: std::ptr::null(),
             state_values: std::ptr::null_mut(),
             state_initialized: std::ptr::null_mut(),
@@ -1362,41 +1365,54 @@ mod tests {
             cross_detectors_len: 0,
             state_prev_len: 0,
             state_values_len: 0,
+            timer_event_bound: &mut timer_bound,
         };
 
         assert_eq!(
-            unsafe { rspice_timer_state_native(1.0, 0.5, &ctx) }.to_bits(),
-            1.0_f64.to_bits()
+            unsafe { rspice_timer_state_native(periodic.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits()
         );
+        assert_eq!(timer_bound.to_bits(), 1.0_f64.to_bits());
 
-        ctx.timestep = 0.001;
-        ctx.time = 1.0005;
-        assert_eq!(
-            unsafe { rspice_timer_state_native(1.0, 0.5, &ctx) }.to_bits(),
-            1.0_f64.to_bits(),
-            "timer should fire within timestep tolerance"
-        );
-
-        ctx.time = 1.0015;
-        assert_eq!(
-            unsafe { rspice_timer_state_native(1.0, 0.5, &ctx) }.to_bits(),
-            0.0_f64.to_bits(),
-            "timer should not fire outside timestep tolerance"
-        );
-
-        ctx.time = 0.75;
-        assert_eq!(
-            unsafe { rspice_timer_state_native(1.0, 0.5, &ctx) }.to_bits(),
-            0.0_f64.to_bits(),
-            "timer should not fire before start time"
-        );
-
+        timer_bound = f64::INFINITY;
+        ctx.timestep = 1.0;
         ctx.time = 1.0;
         assert_eq!(
-            unsafe { rspice_timer_state_native(1.0, 0.0, &ctx) }.to_bits(),
-            0.0_f64.to_bits(),
-            "non-positive timer period should never fire"
+            unsafe { rspice_timer_state_native(periodic.as_ptr(), &ctx, 0) }.to_bits(),
+            1.0_f64.to_bits(),
+            "periodic timer should fire at its first scheduled event"
         );
+        assert_eq!(timer_bound.to_bits(), 1.5_f64.to_bits());
+
+        timer_bound = f64::INFINITY;
+        ctx.timestep = 0.5;
+        ctx.time = 1.5;
+        assert_eq!(
+            unsafe { rspice_timer_state_native(periodic.as_ptr(), &ctx, 0) }.to_bits(),
+            1.0_f64.to_bits(),
+            "periodic timer should fire at every positive period"
+        );
+        assert_eq!(timer_bound.to_bits(), 2.0_f64.to_bits());
+
+        let one_shot = [1.0, 0.0, 0.0, 1.0];
+        timer_bound = f64::INFINITY;
+        ctx.time = 1.0;
+        ctx.timestep = 1.0;
+        assert_eq!(
+            unsafe { rspice_timer_state_native(one_shot.as_ptr(), &ctx, 0) }.to_bits(),
+            1.0_f64.to_bits(),
+            "zero-period timer must fire once"
+        );
+        assert!(timer_bound.is_infinite());
+
+        let disabled = [1.0, 0.5, 0.0, 0.0];
+        timer_bound = f64::INFINITY;
+        assert_eq!(
+            unsafe { rspice_timer_state_native(disabled.as_ptr(), &ctx, 0) }.to_bits(),
+            0.0_f64.to_bits(),
+            "disabled timer must not fire"
+        );
+        assert!(timer_bound.is_infinite());
     }
 
     #[test]
@@ -1984,6 +2000,7 @@ mod tests {
             cross_detectors_len: 0,
             state_prev_len: 0,
             state_values_len: 0,
+            timer_event_bound: std::ptr::null_mut(),
         }
     }
 }

@@ -1034,13 +1034,28 @@ impl CodeGenerator {
                     .instructions
                     .push(Instruction::AboveState(detector_id));
             }
-            IrExpr::Timer { start_time, period } => {
-                // timer(start, period) - periodic trigger
+            IrExpr::Timer {
+                start_time,
+                period,
+                time_tol,
+                enable,
+            } => {
+                // timer(start, period, time_tol, enable)
                 self.emit_expr(start_time, emit_ctx, program)?;
                 if let Some(p) = period {
                     self.emit_expr(p, emit_ctx, program)?;
                 } else {
                     program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(tolerance) = time_tol {
+                    self.emit_expr(tolerance, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(0.0));
+                }
+                if let Some(enable) = enable {
+                    self.emit_expr(enable, emit_ctx, program)?;
+                } else {
+                    program.instructions.push(Instruction::PushConst(1.0));
                 }
                 let timer_id = Self::allocate_slot(&self.timer_state_count);
                 program.instructions.push(Instruction::TimerState(timer_id));

@@ -614,29 +614,24 @@ impl<'a> Vm<'a> {
                 self.stack.push(result);
             }
 
-            // TimerState: periodic timer event
-            // Stack: [start_time, period] -> [0 or 1]
+            // TimerState: one-shot or periodic timer event
+            // Stack: [start_time, period, time_tol, enable] -> [0 or 1]
             Instruction::TimerState(_timer_id) => {
+                let enable = self.pop()?;
+                let time_tol = self.pop()?;
                 let period = self.pop()?;
                 let start_time = self.pop()?;
-                let current_time = self.context.time;
-
-                // Timer fires when: time >= start_time AND
-                // (time - start_time) is at a multiple of period
-                let result = if current_time >= start_time && period > 0.0 {
-                    let elapsed = current_time - start_time;
-                    let cycles = (elapsed / period).floor();
-                    let next_fire = start_time + cycles * period;
-                    // Check if current time is at (or very close to) a fire point
-                    let tolerance = self.context.timestep.max(1e-15);
-                    if (current_time - next_fire).abs() < tolerance {
-                        1.0
-                    } else {
-                        0.0
-                    }
-                } else {
-                    0.0
-                };
+                let (result, next_event) = crate::vm::timer_event_evaluation(
+                    start_time,
+                    period,
+                    time_tol,
+                    enable,
+                    self.context.time,
+                    self.context.timestep,
+                );
+                if let Some(next_event) = next_event {
+                    self.context.request_timer_event(next_event);
+                }
                 self.stack.push(result);
             }
 

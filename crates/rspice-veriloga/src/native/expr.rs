@@ -1876,9 +1876,9 @@ impl NativeProgram {
                         entry_kind,
                         instruction_name(instruction),
                         depth,
-                        2,
+                        4,
                     )?;
-                    depth -= 1;
+                    depth -= 3;
                     ops.push(NativeOp::TimerState(*timer_id));
                 }
                 Instruction::TransitionState(filter_id) => {
@@ -5954,12 +5954,16 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
     }
 
     fn lower_timer_call(&mut self, expr_id: ExprId, args: &[ExprId]) -> JitResult<()> {
-        let (start, period) = match args {
-            [start] => (*start, None),
-            [start, period] => (*start, Some(*period)),
+        let (start, period, time_tol, enable) = match args {
+            [start] => (*start, None, None, None),
+            [start, period] => (*start, Some(*period), None, None),
+            [start, period, time_tol] => (*start, Some(*period), Some(*time_tol), None),
+            [start, period, time_tol, enable] => {
+                (*start, Some(*period), Some(*time_tol), Some(*enable))
+            }
             _ => {
                 return Err(self.unsupported(format!(
-                    "analog operator timer expects one or two operands, found {}",
+                    "analog operator timer expects one to four operands, found {}",
                     args.len()
                 )));
             }
@@ -5975,7 +5979,24 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         } else {
             self.push(NativeOp::Const(0.0))?;
         }
-        self.pop_binary("canonical timer")?;
+        if let Some(time_tol) = time_tol {
+            self.lower(time_tol)?;
+        } else {
+            self.push(NativeOp::Const(0.0))?;
+        }
+        if let Some(enable) = enable {
+            self.lower(enable)?;
+        } else {
+            self.push(NativeOp::Const(1.0))?;
+        }
+        require_stack(
+            self.model.clone(),
+            self.entry_kind,
+            "canonical timer",
+            self.depth,
+            4,
+        )?;
+        self.depth -= 3;
         self.ops.push(NativeOp::TimerState(slot));
         Ok(())
     }
@@ -8267,14 +8288,13 @@ pub(crate) fn native_op_stack_effect(op: &NativeOp) -> (usize, usize) {
         | NativeOp::BinaryMath(_)
         | NativeOp::IntegerBinary(_)
         | NativeOp::LimitState(_)
-        | NativeOp::TimerState(_)
         | NativeOp::AbsDelayState(_)
         | NativeOp::CrossState(_)
         | NativeOp::FlickerNoise
         | NativeOp::IdtState(_) => (2, 1),
 
         NativeOp::SlewState(_) | NativeOp::IfElse => (3, 1),
-        NativeOp::TransitionState(_) | NativeOp::IdtModState(_) => (4, 1),
+        NativeOp::TransitionState(_) | NativeOp::TimerState(_) | NativeOp::IdtModState(_) => (4, 1),
     }
 }
 
@@ -12977,6 +12997,8 @@ endmodule
             instructions: vec![
                 Instruction::PushConst(1.0),
                 Instruction::PushConst(0.5),
+                Instruction::PushConst(0.0),
+                Instruction::PushConst(1.0),
                 Instruction::TimerState(3),
             ],
         };
@@ -12990,10 +13012,12 @@ endmodule
             &[
                 NativeOp::Const(1.0),
                 NativeOp::Const(0.5),
+                NativeOp::Const(0.0),
+                NativeOp::Const(1.0),
                 NativeOp::TimerState(3),
             ]
         );
-        assert_eq!(lowered.max_stack_depth(), 2);
+        assert_eq!(lowered.max_stack_depth(), 4);
     }
 
     #[test]
@@ -13008,10 +13032,10 @@ endmodule
             &program,
             limits(0, 0),
         )
-        .expect_err("timer state requires start and period operands");
+        .expect_err("timer state requires four operands");
         let msg = error.to_string();
         assert!(
-            msg.contains("TimerState requires stack depth 2"),
+            msg.contains("TimerState requires stack depth 4"),
             "got: {msg}"
         );
         assert!(msg.contains("no interpreter fallback"), "got: {msg}");
@@ -13027,6 +13051,8 @@ endmodule
                 instructions: vec![
                     Instruction::PushConst(1.0),
                     Instruction::PushConst(0.5),
+                    Instruction::PushConst(0.0),
+                    Instruction::PushConst(1.0),
                     Instruction::TimerState(0),
                 ],
             };
