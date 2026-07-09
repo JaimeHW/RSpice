@@ -48,14 +48,15 @@ class DeployScriptTest(unittest.TestCase):
         git(self.repo, "config", "user.email", "deploy-test@example.invalid")
         git(self.repo, "remote", "add", "origin", str(self.remote))
 
-        write_file(self.repo, "site/index.html", "main\n")
-        git(self.repo, "add", "site/index.html")
-        git(self.repo, "commit", "-m", "initial site")
+        write_file(self.repo, "client.txt", "main\n")
+        git(self.repo, "add", "client.txt")
+        git(self.repo, "commit", "-m", "initial client")
         git(self.repo, "push", "origin", "main")
 
     def deploy(self, *args):
         env = os.environ.copy()
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["RSPICE_SITE_REMOTE"] = str(self.remote)
         return subprocess.run(
             [sys.executable, str(DEPLOY), *args],
             cwd=self.repo,
@@ -66,9 +67,9 @@ class DeployScriptTest(unittest.TestCase):
 
     def test_non_main_ref_requires_explicit_override(self):
         git(self.repo, "switch", "-c", "site-work")
-        write_file(self.repo, "site/index.html", "site work\n")
-        git(self.repo, "add", "site/index.html")
-        git(self.repo, "commit", "-m", "site work")
+        write_file(self.repo, "client.txt", "client work\n")
+        git(self.repo, "add", "client.txt")
+        git(self.repo, "commit", "-m", "client work")
         git(self.repo, "switch", "main")
 
         result = self.deploy("--ref", "site-work", "--tag", "site-v999")
@@ -81,9 +82,9 @@ class DeployScriptTest(unittest.TestCase):
     def test_ref_tags_the_requested_ref_commit_when_override_is_explicit(self):
         main_commit = git(self.repo, "rev-parse", "HEAD").stdout.strip()
         git(self.repo, "switch", "-c", "site-work")
-        write_file(self.repo, "site/index.html", "site work\n")
-        git(self.repo, "add", "site/index.html")
-        git(self.repo, "commit", "-m", "site work")
+        write_file(self.repo, "client.txt", "client work\n")
+        git(self.repo, "add", "client.txt")
+        git(self.repo, "commit", "-m", "client work")
         target_commit = git(self.repo, "rev-parse", "HEAD").stdout.strip()
         git(self.repo, "switch", "main")
 
@@ -93,6 +94,13 @@ class DeployScriptTest(unittest.TestCase):
         tag_commit = git(self.remote, "rev-parse", "refs/tags/site-v999^{}").stdout.strip()
         self.assertEqual(target_commit, tag_commit)
         self.assertNotEqual(main_commit, tag_commit)
+        tag_message = git(
+            self.remote,
+            "for-each-ref",
+            "--format=%(contents)",
+            "refs/tags/site-v999",
+        ).stdout
+        self.assertIn("site-source-sha: %s" % main_commit, tag_message)
 
     def test_invalid_site_tag_is_rejected(self):
         result = self.deploy("--tag", "prod-latest")
@@ -100,16 +108,26 @@ class DeployScriptTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("deploy tag must match site-vN", result.stderr)
 
-    def test_untracked_site_files_block_deploy(self):
-        write_file(self.repo, "site/new-page.html", "untracked\n")
+    def test_tracked_worktree_changes_block_deploy(self):
+        write_file(self.repo, "client.txt", "not committed\n")
 
         result = self.deploy("--tag", "site-v1000")
 
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Untracked site files", result.stderr)
-        self.assertIn("site/new-page.html", result.stderr.replace("\\", "/"))
+        self.assertIn("Uncommitted changes to tracked files", result.stderr)
+        self.assertIn("client.txt", result.stderr)
         tag = git(self.remote, "rev-parse", "--verify", "refs/tags/site-v1000", check=False)
         self.assertNotEqual(tag.returncode, 0)
+
+    def test_untracked_scratch_files_do_not_change_the_deployed_commit(self):
+        expected = git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        write_file(self.repo, "scratch.txt", "not a deploy input\n")
+
+        result = self.deploy("--tag", "site-v1001")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        deployed = git(self.remote, "rev-parse", "refs/tags/site-v1001^{}").stdout.strip()
+        self.assertEqual(deployed, expected)
 
 
 class PublishScriptTest(unittest.TestCase):

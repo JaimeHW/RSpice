@@ -6,20 +6,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PLAYGROUND_DIRS = [
     ROOT / "crates" / "rspice-wasm" / "web",
-    ROOT / "site" / "play",
 ]
 
 
 class WasmPlaygroundWorkerTests(unittest.TestCase):
-    def test_checked_in_playground_workers_stay_in_sync(self) -> None:
-        canonical = (PLAYGROUND_DIRS[0] / "engine-worker.js").read_text(encoding="utf-8")
-        deployed = (PLAYGROUND_DIRS[1] / "engine-worker.js").read_text(encoding="utf-8")
-        self.assertEqual(
-            deployed,
-            canonical,
-            "site/play worker must stay byte-identical to crates/rspice-wasm/web worker",
-        )
-
     def test_playgrounds_run_engine_calls_in_module_worker(self) -> None:
         for playground in PLAYGROUND_DIRS:
             with self.subTest(playground=playground.relative_to(ROOT)):

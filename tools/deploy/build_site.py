@@ -4,14 +4,15 @@ r"""Build, verify, and assemble the public site into _site/.
 The single definition of a site build - used verbatim by
 .github/workflows/deploy-site.yml and runnable locally as a dry run:
 
-    python3 tools/deploy/build_site.py [--skip-headless] [--out DIR]
-    # Windows:  py tools\deploy\build_site.py --skip-headless
+    python3 tools/deploy/build_site.py --site-source ../RSpice-Site/public
+    # Windows:  py tools\deploy\build_site.py --site-source ..\RSpice-Site\public
 
 Stages:
   1. toolchain gate    - wasm-bindgen CLI must match Cargo.lock
   2. build             - rspice-ui (IDE, bin target) + rspice-wasm
                          (playground, lib) for wasm32, release
-  3. assemble          - site/ verbatim + both pkg/ bundles + build.json
+  3. assemble          - RSpice-Site/public + client-owned browser shells,
+                         generated wasm packages, and build.json
   4. static gates      - \0asm magic + wasm-bindgen export signature
   5. headless gate     - serve _site, load play/ and the IDE worker smoke
                          page in headless Chrome, require completed solves
@@ -397,17 +398,82 @@ def headless_solve_gate(out):
     print("ok: headless IDE worker - request solved")
 
 
+def validate_site_source(site_source):
+    """Validate the cross-repository static-source boundary before building."""
+    if not site_source.is_dir():
+        fail("site source directory does not exist: %s" % site_source)
+    for required in ("index.html", "404.html", "assets"):
+        if not (site_source / required).exists():
+            fail("site source is missing required path: %s" % (site_source / required))
+    for reserved in ("ide", "play"):
+        if (site_source / reserved).exists():
+            fail(
+                "site source must not provide the client-owned runtime route '%s/'"
+                % reserved
+            )
+    for path in site_source.rglob("*"):
+        if path.is_symlink():
+            fail("site source must not contain symlinks: %s" % path)
+
+
+def site_source_revision(site_source):
+    """Return the exact source commit for the standalone site checkout."""
+    try:
+        revision = capture(["git", "-C", str(site_source), "rev-parse", "HEAD"])
+    except subprocess.CalledProcessError:
+        revision = os.environ.get("RSPICE_SITE_SOURCE_SHA", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        fail(
+            "site source is not in a Git checkout and RSPICE_SITE_SOURCE_SHA "
+            "is not a full commit SHA"
+        )
+    return revision
+
+
+def copy_runtime_shell(source, destination, names):
+    destination.mkdir(parents=True)
+    for name in names:
+        path = source / name
+        if not path.is_file():
+            fail("browser runtime source is missing: %s" % path)
+        shutil.copy2(path, destination / name)
+
+
+def assemble_site_sources(root, site_source, out):
+    """Combine static site source with client-owned browser runtime shells."""
+    shutil.rmtree(out, ignore_errors=True)
+    shutil.copytree(site_source, out)
+    copy_runtime_shell(
+        root / "crates" / "rspice-ui" / "web",
+        out / "ide",
+        ("index.html", "simulation-worker.js"),
+    )
+    copy_runtime_shell(
+        root / "crates" / "rspice-wasm" / "web",
+        out / "play",
+        ("index.html", "engine-worker.js"),
+    )
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build, verify, and assemble _site/.")
     ap.add_argument("--skip-headless", action="store_true",
                     help="skip the headless playground solve gate (no local Chrome)")
     ap.add_argument("--out", default="_site", help="output directory (default: _site)")
+    ap.add_argument(
+        "--site-source",
+        default="_site-source/public",
+        help="RSpice-Site public directory (default: _site-source/public)",
+    )
     args = ap.parse_args()
 
     root = Path(capture(["git", "rev-parse", "--show-toplevel"]))
     os.chdir(root)
     target = Path("target/wasm32-unknown-unknown/release")
     out = Path(args.out)
+    site_source = Path(args.site_source).resolve()
+    validate_site_source(site_source)
+    site_sha = site_source_revision(site_source)
 
     # 1. toolchain gate
     locked = locked_wasm_bindgen(root)
@@ -425,9 +491,7 @@ def main():
          "--target", "wasm32-unknown-unknown", "--release"])
 
     # 3. assemble
-    shutil.rmtree(out, ignore_errors=True)
-    shutil.copytree("site", out)              # site/ verbatim
-    (out / "README.md").unlink(missing_ok=True)
+    assemble_site_sources(root, site_source, out)
 
     run(["wasm-bindgen", str(target / "rspice-ui.wasm"),
          "--out-dir", str(out / "ide" / "pkg"),
@@ -436,11 +500,23 @@ def main():
          "--out-dir", str(out / "play" / "pkg"),
          "--out-name", "rspice_wasm", "--target", "web", "--no-typescript"])
 
-    sha = capture(["git", "rev-parse", "HEAD"])
+    client_sha = capture(["git", "rev-parse", "HEAD"])
     built_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     (out / "build.json").write_text(
-        json.dumps({"source_sha": sha, "built_utc": built_utc, "wasm_bindgen": have},
-                   separators=(",", ":")) + "\n", encoding="utf-8")
+        json.dumps(
+            {
+                # Keep source_sha as a compatibility alias for existing monitors.
+                "source_sha": client_sha,
+                "client_source_sha": client_sha,
+                "site_source_sha": site_sha,
+                "built_utc": built_utc,
+                "wasm_bindgen": have,
+            },
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     # 4. static gates
     for stem in ("ide/pkg/rspice-ui", "play/pkg/rspice_wasm"):
@@ -455,7 +531,10 @@ def main():
     else:
         headless_solve_gate(out)
 
-    print("site assembled at %s (source %s)" % (out, sha))
+    print(
+        "site assembled at %s (client %s, site %s)"
+        % (out, client_sha, site_sha)
+    )
 
 
 if __name__ == "__main__":

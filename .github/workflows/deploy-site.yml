@@ -1,7 +1,8 @@
-# Deliberate site deploys. main is a shared live-dev branch, so the site
-# never deploys per-push: run tools/deploy/deploy.py (git only, no gh)
-# or push a site-v* tag. The build is tools/deploy/build_site.py - both
-# wasm bundles compiled from the dispatched ref, bundle-integrity gates,
+# Deliberate site deploys. RSpice-Site owns static source; this private client
+# repository owns browser runtime compilation and production verification.
+# Run tools/deploy/deploy.py (git only, no gh), push a site-v* tag, or dispatch
+# a client ref plus an explicit site ref. The build compiles both wasm bundles,
+# records both source commits, runs bundle-integrity gates,
 # a live headless solve of the playground, and a browser-IDE boot smoke;
 # nothing publishes unless
 # every gate passes. tools/deploy/publish.py force-pushes _site to the cf-pages tree, which
@@ -13,6 +14,11 @@ name: Deploy site
 
 on:
   workflow_dispatch:
+    inputs:
+      site_ref:
+        description: RSpice-Site branch, tag, or commit to assemble
+        required: true
+        default: main
   push:
     tags: ["site-v*"]
 
@@ -37,7 +43,34 @@ jobs:
       name: production
       url: https://rspice.app
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Check out RSpice client source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Resolve immutable site source revision
+        id: site-source
+        shell: bash
+        env:
+          REQUESTED_SITE_REF: ${{ inputs.site_ref }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/site-v* ]]; then
+            git fetch --force --no-tags origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+            SITE_REF="$(git for-each-ref --format='%(contents)' "refs/tags/${GITHUB_REF_NAME}" \
+              | sed -n 's/^site-source-sha: \([0-9a-f]\{40\}\)$/\1/p' \
+              | head -n 1)"
+            if [[ ! "$SITE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "deployment tag is missing a valid site-source-sha" >&2
+              exit 1
+            fi
+          else
+            SITE_REF="${REQUESTED_SITE_REF:-main}"
+          fi
+          echo "ref=$SITE_REF" >> "$GITHUB_OUTPUT"
+      - name: Check out standalone site source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: JaimeHW/RSpice-Site
+          ref: ${{ steps.site-source.outputs.ref }}
+          path: _site-source
+          persist-credentials: false
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
@@ -56,7 +89,7 @@ jobs:
           wasm-bindgen --version
 
       - name: Build and verify (_site)
-        run: python3 tools/deploy/build_site.py
+        run: python3 tools/deploy/build_site.py --site-source _site-source/public
 
       - name: Upload verified site bundle
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
