@@ -167,6 +167,9 @@ pub enum ParseErrorKind {
 
     #[error("Invalid nature declaration")]
     InvalidNature,
+
+    #[error("Unsupported {context}: {found}")]
+    UnsupportedConstruct { context: String, found: String },
 }
 
 /// Semantic analysis error

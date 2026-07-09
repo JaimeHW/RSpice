@@ -297,8 +297,7 @@ impl<'a> Parser<'a> {
                 }
             }
             _ => {
-                // Skip unknown items
-                self.skip_to_semicolon()?;
+                return Err(self.unsupported_current("module item"));
             }
         }
         Ok(())
@@ -365,9 +364,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // Unknown construct - skip to semicolon
-        self.skip_to_semicolon()?;
-        Ok(())
+        Err(self.unsupported_current("module item"))
     }
 
     /// Parse a named branch declaration: branch (a [, b]) name1 [, name2] ;
@@ -855,12 +852,10 @@ impl<'a> Parser<'a> {
                     statements.push(block);
                 }
                 _ => {
-                    // Try to parse as a statement or skip
                     if self.check(TokenKind::Semicolon) {
-                        self.advance(); // skip empty semicolons
+                        self.advance();
                     } else {
-                        // Unknown, skip to next semicolon
-                        self.skip_to_semicolon()?;
+                        statements.push(self.parse_analog_statement()?);
                     }
                 }
             }
@@ -2010,6 +2005,9 @@ impl<'a> Parser<'a> {
         self.advance(); // consume 'discipline'
 
         let name = self.expect_identifier("discipline name")?;
+        // Standard headers terminate the discipline name with a semicolon;
+        // retain compatibility with older headers that omit it.
+        self.match_token(TokenKind::Semicolon);
         let mut potential = None;
         let mut flow = None;
         let mut domain = None;
@@ -2029,7 +2027,7 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokenKind::Semicolon)?;
             } else {
-                self.skip_to_semicolon()?;
+                return Err(self.unsupported_current("discipline property"));
             }
         }
 
@@ -2090,7 +2088,7 @@ impl<'a> Parser<'a> {
                 ddt_nature = Some(self.expect_identifier("ddt_nature")?.into());
                 self.expect(TokenKind::Semicolon)?;
             } else {
-                self.skip_to_semicolon()?;
+                return Err(self.unsupported_current("nature property"));
             }
         }
 
@@ -2185,6 +2183,21 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn unsupported_current(&self, context: &str) -> ParseError {
+        let found = self
+            .current()
+            .text
+            .clone()
+            .unwrap_or_else(|| format!("{:?}", self.current().kind));
+        ParseError::new(
+            ParseErrorKind::UnsupportedConstruct {
+                context: context.to_string(),
+                found,
+            },
+            self.current_span(),
+        )
+    }
+
     fn expect_branch_endpoint(&mut self, context: &str) -> Result<String, ParseError> {
         if self.check(TokenKind::IntegerLiteral) {
             let text = self.current().text.clone().unwrap_or_default();
@@ -2214,16 +2227,6 @@ impl<'a> Parser<'a> {
     fn skip_directive(&mut self) -> Result<(), ParseError> {
         self.advance(); // Skip directive token
         // Skip until newline (handled by lexer in practice)
-        Ok(())
-    }
-
-    fn skip_to_semicolon(&mut self) -> Result<(), ParseError> {
-        while !self.check(TokenKind::Semicolon) && !self.at_end() {
-            self.advance();
-        }
-        if self.check(TokenKind::Semicolon) {
-            self.advance();
-        }
         Ok(())
     }
 
