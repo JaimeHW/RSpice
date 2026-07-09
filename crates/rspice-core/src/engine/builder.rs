@@ -4830,10 +4830,26 @@ impl Engine {
                                 // declare an m parameter is the standard
                                 // parallel-multiplicity ($mfactor); models
                                 // declaring their own m keep handling it
-                                if !device.set_parameter(name, resolved)
-                                    && name.eq_ignore_ascii_case("m")
-                                {
+                                let matched =
+                                    device.try_set_parameter(name, resolved).map_err(|error| {
+                                        SimulationError::Circuit(format!(
+                                            "Verilog-A device '{}' rejected parameter '{}': {}",
+                                            element.name, name, error
+                                        ))
+                                    })?;
+                                if !matched && name.eq_ignore_ascii_case("m") {
+                                    if !resolved.is_finite() || resolved <= 0.0 {
+                                        return Err(SimulationError::Circuit(format!(
+                                            "Verilog-A device '{}' multiplicity must be a positive finite value, got {}",
+                                            element.name, resolved
+                                        )));
+                                    }
                                     device.set_multiplicity(resolved);
+                                } else if !matched {
+                                    return Err(SimulationError::Circuit(format!(
+                                        "Verilog-A device '{}' model '{}' has no parameter named '{}'",
+                                        element.name, subckt_name, name
+                                    )));
                                 }
                             }
                             // Dependent parameter defaults must see the instance
