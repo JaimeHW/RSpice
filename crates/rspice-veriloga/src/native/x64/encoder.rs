@@ -1245,6 +1245,8 @@ mod tests {
             state_prev_len: 0,
             state_values_len: 0,
             timer_event_bound: std::ptr::null_mut(),
+            analysis_initial_step: 0,
+            analysis_final_step: 0,
         };
 
         let mut encoder = X64Encoder::new();

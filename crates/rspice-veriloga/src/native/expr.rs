@@ -6351,6 +6351,8 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 "ic" => Some(4),
                 "static" => Some(5),
                 "smallsig" | "smallsignal" | "small_signal" => Some(6),
+                "__rspice_initial_step" => Some(7),
+                "__rspice_final_step" => Some(8),
                 _ => None,
             };
             if let Some(analysis_id) = analysis_id {

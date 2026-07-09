@@ -523,10 +523,16 @@ pub enum EventExpr {
         enable: Option<Box<Expression>>,
         span: Span,
     },
-    /// Initial step
-    InitialStep { span: Span },
-    /// Final step
-    FinalStep { span: Span },
+    /// First accepted point of an analysis, optionally filtered by analysis name.
+    InitialStep {
+        analyses: Vec<StringLit>,
+        span: Span,
+    },
+    /// Last accepted point of an analysis, optionally filtered by analysis name.
+    FinalStep {
+        analyses: Vec<StringLit>,
+        span: Span,
+    },
     /// Or of events
     Or {
         left: Box<EventExpr>,

@@ -49,6 +49,8 @@ const ANALYSIS_TYPE_OFFSET: i32 = 192;
 const MFACTOR_OFFSET: i32 = 200;
 const STATE_PREV_LEN_OFFSET: i32 = 288;
 const STATE_VALUES_LEN_OFFSET: i32 = 296;
+const ANALYSIS_INITIAL_STEP_OFFSET: i32 = 312;
+const ANALYSIS_FINAL_STEP_OFFSET: i32 = 313;
 const WORD_BYTES: usize = std::mem::size_of::<f64>();
 const LITERAL_POOL_ALIGNMENT: usize = WORD_BYTES;
 const VECTOR_LITERAL_ALIGNMENT: usize = 16;
@@ -3052,7 +3054,18 @@ impl FunctionCompiler {
 
     fn emit_analysis_check(&mut self, analysis_id: u8) -> JitResult<()> {
         let dst = self.push_register()?;
-        if analysis_id > 6 {
+        if matches!(analysis_id, 7 | 8) {
+            let offset = if analysis_id == 7 {
+                ANALYSIS_INITIAL_STEP_OFFSET
+            } else {
+                ANALYSIS_FINAL_STEP_OFFSET
+            };
+            self.encoder
+                .movzx_r32_m8_base_disp32(Gpr::R10, self.ctx_arg_reg(), offset);
+            self.encoder.cvtsi2sd_xmm_r32(dst, Gpr::R10);
+            return Ok(());
+        }
+        if analysis_id > 8 {
             self.encoder.xorpd_xmm_xmm(dst, dst);
             return Ok(());
         }
@@ -11593,6 +11606,8 @@ mod tests {
             state_prev_len: 0,
             state_values_len: 0,
             timer_event_bound: std::ptr::null_mut(),
+            analysis_initial_step: 0,
+            analysis_final_step: 0,
         }
     }
 

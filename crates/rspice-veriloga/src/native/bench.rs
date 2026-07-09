@@ -891,6 +891,8 @@ fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         state_prev_len: context.state_values_prev.len(),
         state_values_len: context.state_values.len(),
         timer_event_bound: &mut context.timer_event_bound,
+        analysis_initial_step: u8::from(context.analysis_initial_step),
+        analysis_final_step: u8::from(context.analysis_final_step),
     }
 }
 

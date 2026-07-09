@@ -7825,6 +7825,8 @@ endmodule
             state_prev_len: context.state_values_prev.len(),
             state_values_len: context.state_values.len(),
             timer_event_bound: &mut context.timer_event_bound,
+            analysis_initial_step: u8::from(context.analysis_initial_step),
+            analysis_final_step: u8::from(context.analysis_final_step),
         }
     }
 
@@ -8136,6 +8138,8 @@ endmodule
             state_prev_len: 0,
             state_values_len: 0,
             timer_event_bound: std::ptr::null_mut(),
+            analysis_initial_step: 0,
+            analysis_final_step: 0,
         }
     }
 }

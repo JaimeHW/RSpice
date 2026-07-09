@@ -3874,6 +3874,8 @@ pub(crate) fn normalize_analysis_query(name: &str) -> Option<String> {
         "ic" => Some("ic".to_string()),
         "static" => Some("static".to_string()),
         "smallsig" | "smallsignal" | "small_signal" => Some("smallsig".to_string()),
+        "__rspice_initial_step" => Some("__rspice_initial_step".to_string()),
+        "__rspice_final_step" => Some("__rspice_final_step".to_string()),
         _ => None,
     }
 }
@@ -3887,6 +3889,8 @@ pub(crate) fn analysis_predicate_expr(query: &str) -> &'static str {
         "ic" => "ctx.analysis_ic()",
         "static" => "ctx.analysis_static()",
         "smallsig" => "ctx.analysis_smallsig()",
+        "__rspice_initial_step" => "ctx.analysis_initial_step()",
+        "__rspice_final_step" => "ctx.analysis_final_step()",
         _ => "false",
     }
 }

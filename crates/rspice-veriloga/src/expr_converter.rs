@@ -78,6 +78,8 @@ fn normalize_analysis_name(name: &str) -> Option<String> {
         "ic" => Some("ic".to_string()),
         "static" => Some("static".to_string()),
         "smallsig" | "smallsignal" | "small_signal" => Some("smallsig".to_string()),
+        "__rspice_initial_step" => Some("__rspice_initial_step".to_string()),
+        "__rspice_final_step" => Some("__rspice_final_step".to_string()),
         _ => None,
     }
 }

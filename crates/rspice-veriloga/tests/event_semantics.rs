@@ -128,3 +128,74 @@ endmodule
 "#,
     );
 }
+
+#[test]
+fn step_events_follow_phase_and_analysis_filters() {
+    let model = DeviceFixture::compile(
+        r#"
+`include "disciplines.vams"
+module step_events(p, n);
+    inout p, n;
+    electrical p, n;
+    real event_value;
+    analog begin
+        event_value = 0.0;
+        @(initial_step("tran", "vendor_extension")) event_value = event_value + 1.0;
+        @(final_step("tran")) event_value = event_value + 2.0;
+        I(p, n) <+ event_value;
+    end
+endmodule
+"#,
+    );
+    let mut device = model.device("A1", &[1, 0]);
+    device.update_voltages(&[0.0]);
+
+    device.set_analysis_type(2);
+    device.set_analysis_step(false, false);
+    assert_eq!(
+        device.try_evaluate().unwrap()[0].to_bits(),
+        0.0_f64.to_bits()
+    );
+
+    device.set_analysis_step(true, false);
+    assert_eq!(
+        device.try_evaluate().unwrap()[0].to_bits(),
+        1.0_f64.to_bits()
+    );
+
+    device.set_analysis_step(false, true);
+    assert_eq!(
+        device.try_evaluate().unwrap()[0].to_bits(),
+        2.0_f64.to_bits()
+    );
+
+    device.set_analysis_step(true, true);
+    assert_eq!(
+        device.try_evaluate().unwrap()[0].to_bits(),
+        3.0_f64.to_bits()
+    );
+
+    device.set_analysis_type(0);
+    assert_eq!(
+        device.try_evaluate().unwrap()[0].to_bits(),
+        0.0_f64.to_bits()
+    );
+}
+
+#[test]
+fn step_events_reject_non_string_analysis_filters() {
+    let compiler = rspice_veriloga::VerilogACompiler::default();
+    let error = compiler
+        .compile(
+            r#"
+`include "disciplines.vams"
+module invalid_step_event(p, n);
+    inout p, n;
+    electrical p, n;
+    analog @(initial_step("tran", 1.0)) I(p, n) <+ 1.0;
+endmodule
+"#,
+        )
+        .expect_err("non-string step-event filter must be rejected");
+    assert!(error.to_string().contains("string literals"), "{error}");
+}

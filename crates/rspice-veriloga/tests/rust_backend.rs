@@ -13478,6 +13478,10 @@ pub mod runtime {{
                 GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise
             )
         }}
+
+        pub fn analysis_initial_step(&self) -> bool {{ false }}
+
+        pub fn analysis_final_step(&self) -> bool {{ false }}
     }}
 
     pub struct GeneratedStamper<'a> {{
@@ -14236,6 +14240,10 @@ pub mod runtime {{
                 GeneratedAnalysisKind::Ac | GeneratedAnalysisKind::Noise
             )
         }}
+
+        pub fn analysis_initial_step(&self) -> bool {{ false }}
+
+        pub fn analysis_final_step(&self) -> bool {{ false }}
     }}
 
     pub struct GeneratedDerivative {{
@@ -15136,6 +15144,37 @@ fn generated_analysis_call_rust_compiles_with_runtime_stub() {
     .expect("transpile analysis call");
 
     assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn rust_backend_lowers_step_event_lifecycle_predicates() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(step_event_source())
+        .expect("canonical IR");
+
+    for transpiler in [
+        RustTranspiler::new_legacy(RustTranspileOptions {
+            runtime_path: "crate::runtime".to_string(),
+        }),
+        RustTranspiler::new_auto(RustTranspileOptions {
+            runtime_path: "crate::runtime".to_string(),
+        }),
+    ] {
+        let generated = transpiler
+            .transpile(&artifact)
+            .expect("transpile lifecycle events");
+        let stamp = generated
+            .files
+            .iter()
+            .find(|file| file.relative_path == "stamp.rs")
+            .expect("stamp file")
+            .contents
+            .as_str();
+        assert!(stamp.contains("ctx.analysis_initial_step()"), "{stamp}");
+        assert!(stamp.contains("ctx.analysis_final_step()"), "{stamp}");
+        assert!(stamp.contains("ctx.analysis_tran()"), "{stamp}");
+        assert_generated_rust_compiles(&generated);
+    }
 }
 
 #[test]
@@ -20021,6 +20060,22 @@ module analysis_call(p, n);
     analog begin
         scale = analysis("dc", "tran", "vendor_private") ? 1.0 : 2.0;
         I(p, n) <+ (scale + analysis("smallsig", "unknown_mode")) * V(p, n);
+    end
+endmodule
+"#
+}
+
+fn step_event_source() -> &'static str {
+    r#"
+module step_events(p, n);
+    inout p, n;
+    electrical p, n;
+    real event_value;
+    analog begin
+        event_value = 0.0;
+        @(initial_step("tran", "vendor_private")) event_value = event_value + 1.0;
+        @(final_step("tran")) event_value = event_value + 2.0;
+        I(p, n) <+ event_value * V(p, n);
     end
 endmodule
 "#

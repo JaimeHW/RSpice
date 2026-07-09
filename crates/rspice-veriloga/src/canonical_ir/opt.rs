@@ -7777,6 +7777,8 @@ fn normalize_analysis_query(name: &str) -> Option<&'static str> {
         "ic" => Some("ic"),
         "static" => Some("static"),
         "smallsig" | "smallsignal" | "small_signal" => Some("smallsig"),
+        "__rspice_initial_step" => Some("__rspice_initial_step"),
+        "__rspice_final_step" => Some("__rspice_final_step"),
         _ => None,
     }
 }

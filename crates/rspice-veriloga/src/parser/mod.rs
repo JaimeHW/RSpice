@@ -1177,13 +1177,19 @@ impl<'a> Parser<'a> {
             // `initial` keyword appears for bare @(initial) robustness.
             TokenKind::Initial => {
                 self.advance();
-                self.reject_step_event_analysis_args("initial_step")?;
-                Ok(EventExpr::InitialStep { span: start })
+                let analyses = self.parse_step_event_analysis_args("initial_step")?;
+                Ok(EventExpr::InitialStep {
+                    analyses,
+                    span: start.extend(self.previous_span()),
+                })
             }
             TokenKind::Final => {
                 self.advance();
-                self.reject_step_event_analysis_args("final_step")?;
-                Ok(EventExpr::FinalStep { span: start })
+                let analyses = self.parse_step_event_analysis_args("final_step")?;
+                Ok(EventExpr::FinalStep {
+                    analyses,
+                    span: start.extend(self.previous_span()),
+                })
             }
             TokenKind::Cross => {
                 self.advance();
@@ -1289,13 +1295,19 @@ impl<'a> Parser<'a> {
                 match name.as_str() {
                     "initial_step" => {
                         self.advance();
-                        self.reject_step_event_analysis_args("initial_step")?;
-                        Ok(EventExpr::InitialStep { span: start })
+                        let analyses = self.parse_step_event_analysis_args("initial_step")?;
+                        Ok(EventExpr::InitialStep {
+                            analyses,
+                            span: start.extend(self.previous_span()),
+                        })
                     }
                     "final_step" => {
                         self.advance();
-                        self.reject_step_event_analysis_args("final_step")?;
-                        Ok(EventExpr::FinalStep { span: start })
+                        let analyses = self.parse_step_event_analysis_args("final_step")?;
+                        Ok(EventExpr::FinalStep {
+                            analyses,
+                            span: start.extend(self.previous_span()),
+                        })
                     }
                     _ => {
                         let signal = self.parse_expression()?;
@@ -1324,19 +1336,25 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Analysis-list filters need a true first/last-step event state per
-    /// analysis. Until that exists, reject them rather than silently widening
-    /// the event to the current coarse initial/final-step behavior.
-    fn reject_step_event_analysis_args(&mut self, event_name: &str) -> Result<(), ParseError> {
-        if self.check(TokenKind::LParen) {
-            let args = self.parse_arg_list()?;
-            if !args.is_empty() {
-                return Err(self.error(ParseErrorKind::InvalidEventExpression(format!(
-                    "{event_name} analysis-list arguments are not supported"
-                ))));
-            }
+    /// Parse the optional constant-string analysis filters accepted by
+    /// `initial_step` and `final_step`.
+    fn parse_step_event_analysis_args(
+        &mut self,
+        event_name: &str,
+    ) -> Result<Vec<StringLit>, ParseError> {
+        if !self.check(TokenKind::LParen) {
+            return Ok(Vec::new());
         }
-        Ok(())
+
+        self.parse_arg_list()?
+            .into_iter()
+            .map(|arg| match arg {
+                Expression::StringLit(value) => Ok(value),
+                _ => Err(self.error(ParseErrorKind::InvalidEventExpression(format!(
+                    "{event_name} analysis filters must be string literals"
+                )))),
+            })
+            .collect()
     }
 
     /// Extract a constant cross direction (+1, -1, 0) from an expression
@@ -2571,6 +2589,43 @@ mod tests {
             panic!("expected event control");
         };
         assert!(matches!(e3.event, EventExpr::Or { .. }));
+    }
+
+    #[test]
+    fn step_events_preserve_analysis_filters() {
+        let m = parse_module(
+            r#"module a(p, n);
+                inout p, n;
+                electrical p, n;
+                real x;
+                analog begin
+                    @(initial_step("dc", "tran")) x = 1.0;
+                    @(final_step("ac")) x = 2.0;
+                end
+            endmodule"#,
+        );
+        let stmts = &m.analog_block.as_ref().unwrap().statements;
+        let AnalogStatement::EventControl(initial) = &stmts[0] else {
+            panic!("expected initial-step event control");
+        };
+        let EventExpr::InitialStep { analyses, .. } = &initial.event else {
+            panic!("expected initial-step event");
+        };
+        assert_eq!(
+            analyses
+                .iter()
+                .map(|analysis| analysis.value.as_str())
+                .collect::<Vec<_>>(),
+            ["dc", "tran"]
+        );
+
+        let AnalogStatement::EventControl(final_step) = &stmts[1] else {
+            panic!("expected final-step event control");
+        };
+        let EventExpr::FinalStep { analyses, .. } = &final_step.event else {
+            panic!("expected final-step event");
+        };
+        assert_eq!(analyses[0].value.as_str(), "ac");
     }
 
     #[test]

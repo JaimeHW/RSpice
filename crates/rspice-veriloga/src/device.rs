@@ -767,6 +767,37 @@ impl VerilogADevice {
         Ok(())
     }
 
+    /// Mark whether the current evaluation is the first and/or final point
+    /// of its analysis. A single-point analysis legitimately sets both.
+    pub fn set_analysis_step(&mut self, initial: bool, final_step: bool) {
+        self.try_set_analysis_step(initial, final_step)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Verilog-A device '{}' model '{}' analysis-step update failed: {}",
+                    self.name, self.model.name, err
+                )
+            });
+    }
+
+    /// Checked analysis-step update for callers that can surface native
+    /// static-guard refresh failures as diagnostics.
+    pub fn try_set_analysis_step(
+        &mut self,
+        initial: bool,
+        final_step: bool,
+    ) -> Result<(), VmError> {
+        if self.context.analysis_initial_step == initial
+            && self.context.analysis_final_step == final_step
+        {
+            return Ok(());
+        }
+
+        self.context.analysis_initial_step = initial;
+        self.context.analysis_final_step = final_step;
+        self.try_refresh_static_conditions()?;
+        Ok(())
+    }
+
     /// Commit integrator state after an accepted timestep
     pub fn advance_state(&mut self) {
         // Snapshot the $discontinuity level so the next step reports only
@@ -1490,6 +1521,8 @@ impl VerilogADevice {
             state_prev_len: context.state_values_prev.len(),
             state_values_len: context.state_values.len(),
             timer_event_bound: &mut context.timer_event_bound,
+            analysis_initial_step: u8::from(context.analysis_initial_step),
+            analysis_final_step: u8::from(context.analysis_final_step),
         }
     }
 

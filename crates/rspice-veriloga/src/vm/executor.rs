@@ -629,6 +629,8 @@ impl<'a> Vm<'a> {
                             0.0
                         }
                     }
+                    7 => f64::from(self.context.analysis_initial_step),
+                    8 => f64::from(self.context.analysis_final_step),
                     _ => 0.0, // Unknown analysis type
                 };
                 self.stack.push(result);

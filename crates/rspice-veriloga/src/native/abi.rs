@@ -88,6 +88,10 @@ pub struct EvalContext {
     pub state_values_len: usize,
     /// Earliest absolute timer event requested by native evaluation.
     pub timer_event_bound: *mut f64,
+    /// Nonzero at the first point of the current analysis.
+    pub analysis_initial_step: u8,
+    /// Nonzero at the final point of the current analysis.
+    pub analysis_final_step: u8,
 }
 
 thread_local! {
@@ -1300,7 +1304,9 @@ mod tests {
         assert_eq!(offset_of!(EvalContext, state_prev_len), 288);
         assert_eq!(offset_of!(EvalContext, state_values_len), 296);
         assert_eq!(offset_of!(EvalContext, timer_event_bound), 304);
-        assert_eq!(size_of::<EvalContext>(), 312);
+        assert_eq!(offset_of!(EvalContext, analysis_initial_step), 312);
+        assert_eq!(offset_of!(EvalContext, analysis_final_step), 313);
+        assert_eq!(size_of::<EvalContext>(), 320);
         assert_eq!(align_of::<EvalContext>(), 8);
     }
 
@@ -1483,6 +1489,8 @@ mod tests {
             state_prev_len: 0,
             state_values_len: 0,
             timer_event_bound: &mut timer_bound,
+            analysis_initial_step: 0,
+            analysis_final_step: 0,
         };
 
         assert_eq!(
@@ -2185,6 +2193,8 @@ mod tests {
             state_prev_len: 0,
             state_values_len: 0,
             timer_event_bound: std::ptr::null_mut(),
+            analysis_initial_step: 0,
+            analysis_final_step: 0,
         }
     }
 }

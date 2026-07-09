@@ -118,6 +118,10 @@ pub struct VmContext {
     pub cross_detectors: Vec<CrossDetector>,
     /// Current analysis type (0=dc, 1=ac, 2=tran, 3=noise)
     pub analysis_type: u8,
+    /// Whether the current evaluation is the first point of the analysis.
+    pub analysis_initial_step: bool,
+    /// Whether the current evaluation is the final point of the analysis.
+    pub analysis_final_step: bool,
     /// Laplace state-space filters
     pub laplace_filters: Vec<StateSpaceFilter>,
     /// Instance multiplicity ($mfactor): the number of parallel copies
@@ -153,6 +157,8 @@ impl Default for VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0, // DC by default
+            analysis_initial_step: false,
+            analysis_final_step: false,
             laplace_filters: Vec::new(),
             multiplicity: 1.0,
             zi_filters: Vec::new(),
@@ -189,6 +195,8 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            analysis_initial_step: false,
+            analysis_final_step: false,
             laplace_filters: Vec::new(),
             multiplicity: 1.0,
             zi_filters: Vec::new(),
@@ -223,6 +231,8 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            analysis_initial_step: false,
+            analysis_final_step: false,
             laplace_filters: Vec::new(),
             multiplicity: 1.0,
             zi_filters: Vec::new(),
@@ -257,6 +267,8 @@ impl VmContext {
             slew_filters: Vec::new(),
             cross_detectors: Vec::new(),
             analysis_type: 0,
+            analysis_initial_step: false,
+            analysis_final_step: false,
             laplace_filters: Vec::new(),
             multiplicity: 1.0,
             zi_filters: Vec::new(),

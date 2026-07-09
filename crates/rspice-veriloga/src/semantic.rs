@@ -69,10 +69,6 @@ pub struct SemanticAnalyzer {
 enum EventLowering {
     /// Body executes when this runtime guard is nonzero
     Guard(Expression),
-    /// Body executes unconditionally
-    Always,
-    /// Body never affects the device equations (e.g. final_step)
-    Never,
 }
 
 impl Default for SemanticAnalyzer {
@@ -1441,19 +1437,13 @@ impl SemanticAnalyzer {
                 }
             }
             AnalogStatement::EventControl(event_ctrl) => {
-                match self.event_guard(&event_ctrl.event, module, sink)? {
-                    EventLowering::Guard(guard) => {
-                        // Snapshot: the body must not perturb its own guard
-                        let guard = self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
-                        self.guard_stack.push(guard);
-                        self.analyze_statement(&event_ctrl.statement, module, sink)?;
-                        self.guard_stack.pop();
-                    }
-                    EventLowering::Always => {
-                        self.analyze_statement(&event_ctrl.statement, module, sink)?;
-                    }
-                    EventLowering::Never => {} // e.g. final_step bodies
-                }
+                let EventLowering::Guard(guard) =
+                    self.event_guard(&event_ctrl.event, module, sink)?;
+                // Snapshot: the body must not perturb its own guard.
+                let guard = self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
+                self.guard_stack.push(guard);
+                self.analyze_statement(&event_ctrl.statement, module, sink)?;
+                self.guard_stack.pop();
             }
             AnalogStatement::IndirectContribution(stmt) => {
                 self.analyze_indirect_contribution(stmt, module, sink)?;
@@ -1949,21 +1939,28 @@ impl SemanticAnalyzer {
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<EventLowering> {
         Ok(match event {
-            EventExpr::InitialStep { span } => {
-                // Approximation: initial_step is active during static
-                // (DC / IC) analyses. Assignments latched there persist
-                // into the following transient.
-                let dc = Expression::Call(CallExpr {
+            EventExpr::InitialStep { analyses, span } => {
+                let phase = Expression::Call(CallExpr {
                     name: "analysis".into(),
                     args: vec![Expression::StringLit(StringLit {
-                        value: "static".into(),
+                        value: "__rspice_initial_step".into(),
                         span: *span,
                     })],
                     span: *span,
                 });
-                EventLowering::Guard(dc)
+                EventLowering::Guard(Self::filter_step_event(phase, analyses, *span))
             }
-            EventExpr::FinalStep { .. } => EventLowering::Never,
+            EventExpr::FinalStep { analyses, span } => {
+                let phase = Expression::Call(CallExpr {
+                    name: "analysis".into(),
+                    args: vec![Expression::StringLit(StringLit {
+                        value: "__rspice_final_step".into(),
+                        span: *span,
+                    })],
+                    span: *span,
+                });
+                EventLowering::Guard(Self::filter_step_event(phase, analyses, *span))
+            }
             EventExpr::Cross {
                 signal,
                 direction,
@@ -2076,13 +2073,26 @@ impl SemanticAnalyzer {
                     (EventLowering::Guard(l), EventLowering::Guard(r)) => {
                         EventLowering::Guard(Self::binary_expr(BinaryOp::Or, l, r))
                     }
-                    (EventLowering::Always, _) | (_, EventLowering::Always) => {
-                        EventLowering::Always
-                    }
-                    (EventLowering::Never, other) | (other, EventLowering::Never) => other,
                 }
             }
         })
+    }
+
+    fn filter_step_event(phase: Expression, analyses: &[StringLit], span: Span) -> Expression {
+        if analyses.is_empty() {
+            return phase;
+        }
+
+        let analysis_filter = Expression::Call(CallExpr {
+            name: "analysis".into(),
+            args: analyses
+                .iter()
+                .cloned()
+                .map(Expression::StringLit)
+                .collect(),
+            span,
+        });
+        Self::binary_expr(BinaryOp::And, phase, analysis_filter)
     }
 
     fn analyze_contribution(

@@ -1035,6 +1035,8 @@ impl CodeGenerator {
                     "static" => 5,
                     // "smallsig" matches small-signal frequency-domain analyses.
                     "smallsig" | "smallsignal" | "small_signal" => 6,
+                    "__rspice_initial_step" => 7,
+                    "__rspice_final_step" => 8,
                     _ => {
                         return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                             format!("analysis() unknown analysis name '{name}'"),
