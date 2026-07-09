@@ -21,7 +21,7 @@ rust-version = "1.94"
 
 [workspace.dependencies]
 # Core dependencies - faer for high-performance sparse linear algebra
-faer = { version = "0.23", default-features = false, features = ["std"] }
+faer = { version = "0.24", default-features = false, features = ["std"] }
 thiserror = "2.0"
 log = "0.4"
 env_logger = "0.11"
