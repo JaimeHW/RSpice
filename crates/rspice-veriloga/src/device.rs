@@ -215,6 +215,28 @@ pub struct RhsIndex {
 }
 
 impl VerilogADevice {
+    fn finite_result(value: f64, context: impl Into<String>) -> Result<f64, VmError> {
+        if value.is_finite() {
+            Ok(value)
+        } else {
+            Err(VmError::InvalidNumericResult(format!(
+                "{} evaluated to {value}",
+                context.into()
+            )))
+        }
+    }
+
+    fn noise_power(value: f64, source_index: usize) -> Result<f64, VmError> {
+        let value = Self::finite_result(value, format!("noise source {source_index} power"))?;
+        if value < 0.0 {
+            Err(VmError::InvalidNumericResult(format!(
+                "noise source {source_index} power evaluated to negative value {value}"
+            )))
+        } else {
+            Ok(value)
+        }
+    }
+
     /// Create a new device instance
     ///
     /// # Arguments
@@ -978,7 +1000,7 @@ impl VerilogADevice {
 
             for (idx, program) in model.stamp_programs.iter().enumerate() {
                 let active = if program.static_condition.is_some() {
-                    Self::run_value_program(
+                    let condition = Self::run_value_program(
                         &mut vm,
                         program
                             .static_condition
@@ -986,7 +1008,8 @@ impl VerilogADevice {
                             .expect("static condition checked above"),
                         native,
                         NativeValueEntry::StaticCondition(idx),
-                    )? != 0.0
+                    )?;
+                    Self::finite_result(condition, format!("static condition {idx}"))? != 0.0
                 } else {
                     true
                 };
@@ -1158,7 +1181,10 @@ impl VerilogADevice {
             Self::execute_assignment_programs(&mut bytecode_vm, model)?;
             for (idx, program) in model.stamp_programs.iter().enumerate() {
                 let active = match &program.static_condition {
-                    Some(condition) => bytecode_vm.execute(condition)? != 0.0,
+                    Some(condition) => {
+                        let condition = bytecode_vm.execute(condition)?;
+                        Self::finite_result(condition, format!("static condition {idx}"))? != 0.0
+                    }
                     None => true,
                 };
                 program_active[idx] = active;
@@ -1375,10 +1401,10 @@ impl VerilogADevice {
                         entry: entry.jacobian_idx,
                     },
                 )?;
-                let deriv = match deriv {
-                    v if v.is_finite() => v * scale,
-                    _ => continue,
-                };
+                let deriv = Self::finite_result(
+                    deriv * scale,
+                    format!("reactive Jacobian {}:{}", program_idx, entry.jacobian_idx),
+                )?;
                 if let (Some(row), Some(col)) = (entry.row, entry.col) {
                     matrix_add(row, col, entry.sign * deriv);
                 }
@@ -1523,6 +1549,10 @@ impl VerilogADevice {
                 native,
                 #[cfg(feature = "native")]
                 NativeValueEntry::StampValue(program_idx),
+            )?;
+            let value = Self::finite_result(
+                value,
+                format!("contribution {program_idx} during device evaluation"),
             )?;
             currents.push(value);
             vm.context.currents.push(value);
@@ -2043,11 +2073,15 @@ impl VerilogADevice {
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
             let active = program_active.get(program_idx).copied().unwrap_or(true);
             let value = if active {
-                Self::run_value_program(
+                let value = Self::run_value_program(
                     vm,
                     &program.value_program,
                     native,
                     NativeValueEntry::StampValue(program_idx),
+                )?;
+                Self::finite_result(
+                    value,
+                    format!("contribution {program_idx} during noise evaluation"),
                 )?
             } else {
                 0.0
@@ -2066,7 +2100,11 @@ impl VerilogADevice {
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
             let active = program_active.get(program_idx).copied().unwrap_or(true);
             let value = if active {
-                vm.execute(&program.value_program)?
+                let value = vm.execute(&program.value_program)?;
+                Self::finite_result(
+                    value,
+                    format!("contribution {program_idx} during noise evaluation"),
+                )?
             } else {
                 0.0
             };
@@ -2203,13 +2241,10 @@ impl VerilogADevice {
                 #[cfg(feature = "native")]
                 NativeValueEntry::StampValue(prog_idx),
             )?;
-            let value = match value {
-                v if v.is_finite() => v,
-                _ => {
-                    vm.context.currents.push(0.0);
-                    continue;
-                }
-            };
+            let value = Self::finite_result(
+                value,
+                format!("contribution {prog_idx} during Jacobian evaluation"),
+            )?;
             vm.context.currents.push(value);
             if program.branch_ordinal.is_none()
                 && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
@@ -2229,10 +2264,7 @@ impl VerilogADevice {
                         entry: jac_idx,
                     },
                 )?;
-                let value = match value {
-                    v if v.is_finite() => v,
-                    _ => continue,
-                };
+                let value = Self::finite_result(value, format!("Jacobian {prog_idx}:{jac_idx}"))?;
                 entries.push(JacobianEntry {
                     value: jac_entry.sign * value,
                     row: jac_entry.row.clone(),
@@ -2370,8 +2402,6 @@ impl VerilogADevice {
 
             // Compute the contribution value (branch current for current
             // contributions, source voltage for potential contributions).
-            // Non-finite values would poison the whole system; skip the
-            // program and let Newton damping recover.
             let value = Self::run_value_program(
                 &mut vm,
                 &program.value_program,
@@ -2380,10 +2410,7 @@ impl VerilogADevice {
                 #[cfg(feature = "native")]
                 NativeValueEntry::StampValue(program_idx),
             )?;
-            let value = match value {
-                v if v.is_finite() => v,
-                _ => continue,
-            };
+            let value = Self::finite_result(value, format!("contribution {program_idx}"))?;
 
             // Probed currents stay per-copy; only the stamps scale
             vm.context.currents.push(value);
@@ -2412,13 +2439,11 @@ impl VerilogADevice {
             // V(p) - V(n) - E(x) = 0; the entries hold -dE/dx (sign -1)
             // and the RHS receives Eeq = E - sum dE/dx * x_old, which is
             // exactly value + sum(sign * deriv * x_old).
-            let mut eq_value = value * scale;
+            let mut eq_value =
+                Self::finite_result(value * scale, format!("scaled contribution {program_idx}"))?;
 
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
-                // A non-finite derivative (a model kink such as
-                // d(sqrt(x))/dx at x=0) is treated as zero: the residual
-                // stays exact and Newton proceeds on the remaining slope.
                 let deriv = Self::run_value_program(
                     &mut vm,
                     &model_entry.program,
@@ -2430,10 +2455,10 @@ impl VerilogADevice {
                         entry: jacobian_entry.jacobian_idx,
                     },
                 )?;
-                let deriv = match deriv {
-                    v if v.is_finite() => v * scale,
-                    _ => continue,
-                };
+                let deriv = Self::finite_result(
+                    deriv * scale,
+                    format!("Jacobian {}:{}", program_idx, jacobian_entry.jacobian_idx),
+                )?;
 
                 // Accumulate the companion RHS term once per derivative
                 // column. Current contributions (and indirect constraint
@@ -2459,6 +2484,11 @@ impl VerilogADevice {
                     matrix_add(row, col, jacobian_entry.sign * deriv);
                 }
             }
+
+            eq_value = Self::finite_result(
+                eq_value,
+                format!("equivalent source for contribution {program_idx}"),
+            )?;
 
             // RHS: current contributions stamp -/+ Ieq at the KCL rows;
             // potential contributions stamp +Eeq at the branch row
@@ -2534,15 +2564,13 @@ impl VerilogADevice {
                 native,
                 NativeValueEntry::NoisePsd(idx),
             )?;
-            if !psd.is_finite() {
-                continue;
-            }
-            let psd = psd.max(0.0);
+            let psd = Self::noise_power(psd, idx)?;
             if psd == 0.0 {
                 continue;
             }
             let m = vm.context.multiplicity;
             let psd = if source.is_current { psd * m } else { psd / m };
+            let psd = Self::finite_result(psd, format!("scaled noise source {idx} power"))?;
             let exponent = source
                 .exponent_program
                 .as_ref()
@@ -2554,6 +2582,8 @@ impl VerilogADevice {
                         NativeValueEntry::NoiseExponent(idx),
                     )
                 })
+                .transpose()?
+                .map(|value| Self::finite_result(value, format!("noise source {idx} exponent")))
                 .transpose()?;
 
             let (node_pos, node_neg) = match (source.is_current, source.branch_ordinal) {
@@ -2622,10 +2652,7 @@ impl VerilogADevice {
             }
             let psd_program = &source.psd_program;
             let psd = vm.execute(psd_program)?;
-            if !psd.is_finite() {
-                continue;
-            }
-            let psd = psd.max(0.0);
+            let psd = Self::noise_power(psd, idx)?;
             if psd == 0.0 {
                 continue;
             }
@@ -2633,10 +2660,13 @@ impl VerilogADevice {
             // (x m); series voltage-noise EMFs average (/ m)
             let m = vm.context.multiplicity;
             let psd = if source.is_current { psd * m } else { psd / m };
+            let psd = Self::finite_result(psd, format!("scaled noise source {idx} power"))?;
             let exponent = source
                 .exponent_program
                 .as_ref()
                 .map(|p| vm.execute(p))
+                .transpose()?
+                .map(|value| Self::finite_result(value, format!("noise source {idx} exponent")))
                 .transpose()?;
 
             // Potential-contribution noise is a series EMF on the branch

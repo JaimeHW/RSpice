@@ -7,6 +7,8 @@ pub enum VmError {
     NativeJit(String),
     /// Invalid model or instance parameter value.
     ParameterValue(String),
+    /// A model expression produced NaN or infinity at a solver boundary.
+    InvalidNumericResult(String),
     /// Runtime array index outside the declared bounds
     IndexOutOfBounds {
         index: i64,
@@ -22,6 +24,7 @@ impl std::fmt::Display for VmError {
             VmError::InvalidInstruction(msg) => write!(f, "Invalid instruction: {}", msg),
             VmError::NativeJit(msg) => write!(f, "native JIT error: {}", msg),
             VmError::ParameterValue(msg) => write!(f, "parameter value error: {msg}"),
+            VmError::InvalidNumericResult(msg) => write!(f, "invalid numeric result: {msg}"),
             VmError::IndexOutOfBounds {
                 index,
                 lower,
