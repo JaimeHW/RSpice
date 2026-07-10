@@ -1561,7 +1561,7 @@ fn invert_complex_matrix(
 
 fn touchstone_extension_matches(path: &std::path::Path, num_ports: usize) -> bool {
     path.extension().is_some_and(|ext| {
-        ext.eq_ignore_ascii_case("snp") || ext.eq_ignore_ascii_case(format!("s{}p", num_ports))
+        ext.eq_ignore_ascii_case("snp") || ext.eq_ignore_ascii_case(&format!("s{}p", num_ports))
     })
 }
 
