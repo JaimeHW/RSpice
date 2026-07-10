@@ -193,8 +193,8 @@ pub fn generate_generated_builtin_subset_with_progress_and_jobs(
     }
 
     reject_legacy_ad_runtime(&devices)?;
-    write_kernel_runtime(generated_root)?;
     write_device_subset(generated_root, &devices)?;
+    write_kernel_runtime(generated_root)?;
 
     Ok(BuiltinSubsetGenerationReport {
         device_count: devices.len(),
@@ -404,10 +404,21 @@ fn write_device_subset(
 }
 
 fn write_kernel_runtime(generated_root: &Path) -> BuiltinResult<()> {
-    write_text_file_if_changed(
-        generated_root.join("kernel_runtime.rs"),
-        &super::device::render_runtime_support_module(),
-    )?;
+    let mut generated_files = Vec::new();
+    collect_tree_files(generated_root, &mut generated_files)?;
+    let mut generated_sources = Vec::new();
+    for path in generated_files {
+        if path.extension().and_then(|extension| extension.to_str()) != Some("rs")
+            || path.parent() == Some(generated_root)
+        {
+            continue;
+        }
+        generated_sources.push(fs::read_to_string(path)?);
+    }
+    let runtime = super::device::render_runtime_support_module_for_generated_sources(
+        generated_sources.iter().map(String::as_str),
+    );
+    write_text_file_if_changed(generated_root.join("kernel_runtime.rs"), &runtime)?;
     let support = generated_root.join("support.rs");
     if support.is_file() {
         fs::remove_file(support)?;
@@ -1088,6 +1099,18 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("create generated root");
         fs::write(root.join("support.rs"), "legacy support").expect("write legacy support fixture");
+        let device = root.join("fixture");
+        fs::create_dir_all(&device).expect("create generated device fixture");
+        fs::write(
+            device.join("stamp.rs"),
+            "fn stamp(s: &mut Scratch) { s.store_scalar(0, 1.0); }",
+        )
+        .expect("write generated stamp fixture");
+        fs::write(
+            device.join("state.rs"),
+            "fn allocate() { KernelScratch::new_box(); }",
+        )
+        .expect("write generated state fixture");
 
         write_kernel_runtime(&root).expect("write kernel runtime");
 
@@ -1096,6 +1119,17 @@ mod tests {
             .expect("read generated kernel runtime");
         assert!(runtime.contains("pub(crate) struct Scratch<"), "{runtime}");
         assert!(runtime.contains("#[inline(never)]"), "{runtime}");
+        assert!(runtime.contains("pub(crate) fn new_box()"), "{runtime}");
+        assert!(runtime.contains("pub(crate) fn store_scalar("), "{runtime}");
+        assert!(
+            runtime.contains("pub(crate) fn clear_derivatives_if_dirty("),
+            "{runtime}"
+        );
+        assert!(
+            !runtime
+                .contains("pub(crate) fn store_div_scaled_product_sqrt_square_sum_denominator("),
+            "{runtime}"
+        );
         reject_legacy_ad_runtime_files(&root).expect("validate generated kernel runtime");
         fs::remove_dir_all(root).expect("remove generated root");
     }

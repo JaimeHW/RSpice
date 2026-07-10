@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
 };
 
 use smol_str::SmolStr;
@@ -4019,8 +4019,8 @@ mod compact_generated_stamp_surface_tests {
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
         duplicate_hoistable_derivative_rhs, generate_ad_value_struct,
         generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
-        render_runtime_support_module, reuse_duplicate_derivative_locals_in_helper_block,
-        should_cache_compact_condition,
+        render_runtime_support_module, render_runtime_support_module_for_generated_sources,
+        reuse_duplicate_derivative_locals_in_helper_block, should_cache_compact_condition,
     };
 
     #[test]
@@ -4052,6 +4052,31 @@ mod compact_generated_stamp_surface_tests {
                 "#[inline(never)]\n    pub(crate) fn store_div_scaled_product_sqrt_square_sum_denominator"
             ),
             "wide derivative helpers must be optimizer boundaries"
+        );
+    }
+
+    #[test]
+    fn runtime_support_pruning_keeps_transitive_helper_dependencies() {
+        let full = render_runtime_support_module();
+        let generated = "KernelScratch::new_box(); s.store_scalar(0, 1.0);";
+
+        let pruned = render_runtime_support_module_for_generated_sources([generated]);
+
+        assert!(pruned.contains("pub(crate) fn new_box()"), "{pruned}");
+        assert!(pruned.contains("pub(crate) fn store_scalar("), "{pruned}");
+        assert!(
+            pruned.contains("pub(crate) fn clear_derivatives_if_dirty("),
+            "store_scalar's runtime dependency must remain:\n{pruned}"
+        );
+        assert!(
+            !pruned.contains("pub(crate) fn store_div_scaled_product_sqrt_square_sum_denominator("),
+            "unreferenced runtime helpers must be removed:\n{pruned}"
+        );
+        assert!(
+            pruned.len() < full.len() / 4,
+            "{} >= {}",
+            pruned.len(),
+            full.len() / 4
         );
     }
 
@@ -30103,6 +30128,122 @@ pub fn render_runtime_support_module() -> String {
         );
 
     compact_runtime_support_surface(support)
+}
+
+pub(super) fn render_runtime_support_module_for_generated_sources<'a>(
+    sources: impl IntoIterator<Item = &'a str>,
+) -> String {
+    let support = render_runtime_support_module();
+    prune_unused_runtime_methods(support, sources)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeMethodRange {
+    name: String,
+    start_line: usize,
+    signature_line: usize,
+    end_line: usize,
+}
+
+fn prune_unused_runtime_methods<'a>(
+    source: String,
+    generated_sources: impl IntoIterator<Item = &'a str>,
+) -> String {
+    let lines = source.lines().collect::<Vec<_>>();
+    let methods = runtime_method_ranges(&lines);
+    if methods.is_empty() {
+        return source;
+    }
+
+    let method_names = methods
+        .iter()
+        .map(|method| method.name.clone())
+        .collect::<HashSet<_>>();
+    let mut live = HashSet::new();
+    let mut pending = VecDeque::new();
+    for generated_source in generated_sources {
+        extend_live_runtime_methods(generated_source, &method_names, &mut live, &mut pending);
+    }
+
+    while let Some(name) = pending.pop_front() {
+        for method in methods.iter().filter(|method| method.name == name) {
+            let method_source = lines[method.signature_line..method.end_line].join("\n");
+            extend_live_runtime_methods(&method_source, &method_names, &mut live, &mut pending);
+        }
+    }
+
+    let mut remove = vec![false; lines.len()];
+    for method in &methods {
+        if live.contains(method.name.as_str()) {
+            continue;
+        }
+        remove[method.start_line..method.end_line].fill(true);
+    }
+
+    let mut pruned = String::with_capacity(source.len());
+    for (index, line) in lines.iter().enumerate() {
+        if !remove[index] {
+            pruned.push_str(line);
+            pruned.push('\n');
+        }
+    }
+    pruned
+}
+
+fn extend_live_runtime_methods(
+    source: &str,
+    method_names: &HashSet<String>,
+    live: &mut HashSet<String>,
+    pending: &mut VecDeque<String>,
+) {
+    for token in generated_identifier_tokens(source) {
+        if method_names.contains(token.as_str()) && live.insert(token.clone()) {
+            pending.push_back(token);
+        }
+    }
+}
+
+fn runtime_method_ranges(lines: &[&str]) -> Vec<RuntimeMethodRange> {
+    let mut ranges = Vec::new();
+    for (signature_line, line) in lines.iter().enumerate() {
+        let Some(name) = runtime_method_name(line) else {
+            continue;
+        };
+        let mut start_line = signature_line;
+        while start_line != 0 && lines[start_line - 1].trim_start().starts_with("#[") {
+            start_line -= 1;
+        }
+
+        let mut end_line = signature_line;
+        let mut depth = 0i32;
+        let mut saw_opening_brace = false;
+        loop {
+            let function_line = lines.get(end_line).unwrap_or_else(|| {
+                panic!("generated runtime method '{name}' has an unterminated body")
+            });
+            saw_opening_brace |= function_line.contains('{');
+            depth += brace_delta(function_line);
+            end_line += 1;
+            if saw_opening_brace && depth == 0 {
+                break;
+            }
+        }
+        ranges.push(RuntimeMethodRange {
+            name: name.to_string(),
+            start_line,
+            signature_line,
+            end_line,
+        });
+    }
+    ranges
+}
+
+fn runtime_method_name(line: &str) -> Option<&str> {
+    let suffix = line.trim_start().strip_prefix("pub(crate) fn ")?;
+    let end = suffix
+        .find(|ch: char| !is_rust_identifier_char(ch))
+        .unwrap_or(suffix.len());
+    (end != 0).then_some(&suffix[..end])
 }
 
 fn compact_runtime_support_surface(mut source: String) -> String {
