@@ -1913,7 +1913,7 @@ fn rust_backend_auto_bounds_shipped_bsimcmg_sparse_local_source() {
         report
             .fallback_reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("production limit is 4000000 bytes")),
+            .is_some_and(|reason| reason.contains("production limit is 3700000 bytes")),
         "unexpected fallback: {:?}",
         report.fallback_reason
     );
@@ -1923,7 +1923,7 @@ fn rust_backend_auto_bounds_shipped_bsimcmg_sparse_local_source() {
         .iter()
         .map(|file| file.contents.len())
         .sum::<usize>();
-    assert!(source_bytes < 4_000_000, "generated {source_bytes} bytes");
+    assert!(source_bytes < 3_700_000, "generated {source_bytes} bytes");
 }
 
 #[test]
