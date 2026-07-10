@@ -55,13 +55,13 @@ rspice-core = { path = "crates/rspice-core", version = "0.1.0" }
 incremental = true
 
 [profile.release]
-# Release artifacts should prioritize deterministic, fully optimized builds.
-# Fat LTO + a single codegen unit let the optimizer inline faer's sparse
-# kernels straight into the Newton/transient hot loops across crate
-# boundaries; both are required for peak solver throughput.
+# Keep full per-function LLVM optimization while compiling independent solver
+# and generated-device units in parallel. Whole-program fat LTO plus one
+# codegen unit exceeded the five-minute cold-build budget and did not improve
+# the KLU or generated-device runtime benchmarks.
 incremental = false
-lto = "fat"
-codegen-units = 1
+lto = false
+codegen-units = 16
 opt-level = 3
 
 [profile.generator]
