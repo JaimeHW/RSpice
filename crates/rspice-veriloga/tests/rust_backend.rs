@@ -846,6 +846,8 @@ fn sparse_local_kernel_backend_uses_bounded_local_frames() {
         generated_source.contains("StampLocals"),
         "{generated_source}"
     );
+    assert!(generated_source.contains("l.f"), "{generated_source}");
+    assert!(!generated_source.contains("locals."), "{generated_source}");
     assert!(
         !generated_source.contains("KernelScratch"),
         "{generated_source}"

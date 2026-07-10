@@ -318,7 +318,7 @@ impl LocalHelperUsage {
 
 fn stamp_helper_local_call_args(local_usage: &LocalHelperUsage) -> Vec<String> {
     if local_usage.uses_frame {
-        vec!["&mut locals".to_string()]
+        vec!["&mut l".to_string()]
     } else {
         Vec::new()
     }
@@ -326,7 +326,7 @@ fn stamp_helper_local_call_args(local_usage: &LocalHelperUsage) -> Vec<String> {
 
 fn stamp_helper_local_params(local_usage: &LocalHelperUsage) -> String {
     if local_usage.uses_frame {
-        "        locals: &mut StampLocals,\n".to_string()
+        "        l: &mut StampLocals,\n".to_string()
     } else {
         String::new()
     }
@@ -34556,12 +34556,12 @@ fn materialize_local_variable_frame(source: &mut String) -> Vec<String> {
         }
         if let Some((local, rhs)) = parse_generated_mut_f64_local_initializer(line) {
             if !locals_declared {
-                rewritten.push_str("        let mut locals = StampLocals::default();\n");
+                rewritten.push_str("        let mut l = StampLocals::default();\n");
                 locals_declared = true;
             }
             if rhs != "0.0" {
                 let rhs = rewrite_generated_local_names(rhs, &local_names);
-                rewritten.push_str(&format!("        locals.{local} = {rhs};\n"));
+                rewritten.push_str(&format!("        l.{local} = {rhs};\n"));
             }
         } else {
             rewritten.push_str(&rewrite_generated_local_names(line, &local_names));
@@ -34667,7 +34667,7 @@ fn push_generated_local_name_rewrite(
     rewritten.push_str(&source[*cursor..start]);
     let token = &source[start..end];
     if local_names.contains(token) && !source[..start].ends_with('.') {
-        rewritten.push_str("locals.");
+        rewritten.push_str("l.");
     }
     rewritten.push_str(token);
     *cursor = end;
