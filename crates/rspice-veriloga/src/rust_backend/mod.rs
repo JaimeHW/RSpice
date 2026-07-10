@@ -5,6 +5,7 @@ mod discover;
 mod error;
 mod expr;
 mod files;
+mod kernel_ir;
 mod manifest;
 mod names;
 mod registry;
@@ -63,6 +64,38 @@ pub struct GeneratedRustDeviceReport {
     pub fallback_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RustKernelTier {
+    DirectScalar,
+    Structured,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RustDerivativeStorage {
+    Scalar,
+    Sparse,
+    Dense,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RustKernelPlan {
+    pub preferred_tier: RustKernelTier,
+    pub derivative_storage: RustDerivativeStorage,
+    pub scalar_values: usize,
+    pub scalar_derivative_entries: usize,
+    pub scalar_optimizer_nodes: usize,
+    pub structured_expressions: usize,
+    pub structured_operations: usize,
+    pub structured_control_regions: usize,
+    pub runtime_loop_operations: usize,
+    pub scheduled_opt_operations: usize,
+    pub derivative_lanes: usize,
+    pub maximum_value_derivative_lanes: usize,
+    pub scalar_expansion_ratio: usize,
+    pub statement_regions: usize,
+    pub equation_regions: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustTranspileOptions {
     pub runtime_path: String,
@@ -118,6 +151,10 @@ impl RustTranspiler {
 
     pub fn options(&self) -> &RustTranspileOptions {
         &self.options
+    }
+
+    pub fn plan(&self, artifact: &CanonicalIrArtifact) -> Result<RustKernelPlan, RustBackendError> {
+        kernel_ir::KernelPlan::analyze(artifact).map(|plan| plan.summary(artifact))
     }
 
     pub fn transpile(
