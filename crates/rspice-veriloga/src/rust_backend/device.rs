@@ -22,7 +22,8 @@ use super::{
     GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames, RustTranspileOptions,
 };
 
-const MAX_STAMP_HELPER_LINES: usize = 512;
+const MAX_STAMP_HELPER_SOURCE_LINES: usize = 512;
+const MAX_STAMP_HELPER_OPERATIONS: usize = 96;
 const MAX_STAMP_HELPERS_PER_MODULE: usize = 16;
 // Keep LLVM's per-caller optimization graph bounded. Scratch helpers above
 // this source-size limit contain derivative loops or fused expression trees;
@@ -4002,6 +4003,7 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
+        GeneratedKernelComplexity, MAX_STAMP_HELPER_OPERATIONS,
         bound_generated_scratch_helper_inlining, collapse_single_line_generated_if_blocks,
         compact_div_from_scalar_offset_denominator, compact_exp_div_scaled_inputs_expression,
         compact_generated_stamp_surface, compact_generated_statement_runs,
@@ -4044,6 +4046,31 @@ mod compact_generated_stamp_surface_tests {
             ),
             "wide derivative helpers must be optimizer boundaries"
         );
+    }
+
+    #[test]
+    fn kernel_complexity_is_independent_of_generated_line_packing() {
+        let unpacked = "scratch.store_add(0, 1, 2);\nAdValue::sqrt(scratch.ad_value(0));\n";
+        let packed = "scratch.store_add(0, 1, 2);AdValue::sqrt(scratch.ad_value(0));\n";
+
+        let unpacked = GeneratedKernelComplexity::from_source(unpacked);
+        let packed = GeneratedKernelComplexity::from_source(packed);
+
+        assert_eq!(unpacked.operations, packed.operations);
+        assert_ne!(unpacked.source_lines, packed.source_lines);
+    }
+
+    #[test]
+    fn kernel_complexity_enforces_the_operation_budget() {
+        let bounded = GeneratedKernelComplexity::from_source(
+            &"scratch.store_scalar(0, 0.0);".repeat(MAX_STAMP_HELPER_OPERATIONS),
+        );
+        let oversized = GeneratedKernelComplexity::from_source(
+            &"scratch.store_scalar(0, 0.0);".repeat(MAX_STAMP_HELPER_OPERATIONS + 1),
+        );
+
+        assert!(bounded.is_bounded());
+        assert!(!oversized.is_bounded());
     }
 
     #[test]
@@ -34530,8 +34557,11 @@ fn emit_chunked_stamp_helpers(
         return;
     }
 
-    let total_lines: usize = chunks.iter().map(|chunk| chunk.lines().count()).sum();
-    if total_lines <= MAX_STAMP_HELPER_LINES {
+    let total_complexity = chunks
+        .iter()
+        .map(|chunk| GeneratedKernelComplexity::from_source(chunk))
+        .sum::<GeneratedKernelComplexity>();
+    if total_complexity.is_bounded() {
         for chunk in chunks {
             out.push_str(&chunk);
         }
@@ -34540,10 +34570,14 @@ fn emit_chunked_stamp_helpers(
 
     let mut block_index = 0usize;
     let mut block = String::new();
-    let mut block_lines = 0usize;
+    let mut block_complexity = GeneratedKernelComplexity::default();
     for chunk in chunks {
-        let chunk_lines = chunk.lines().count();
-        if block_lines > 0 && block_lines + chunk_lines > MAX_STAMP_HELPER_LINES {
+        let chunk_complexity = GeneratedKernelComplexity::from_source(&chunk);
+        if !block.is_empty()
+            && !block_complexity
+                .combined_with(chunk_complexity)
+                .is_bounded()
+        {
             let helper_common_usage = common_usage.for_helper_block(&block);
             let helper_operator_usage = operator_usage.for_helper_block(&block);
             emit_stamp_helper_method(
@@ -34560,10 +34594,10 @@ fn emit_chunked_stamp_helpers(
                 "        Self::{helper_prefix}_block_{block_index}({helper_args});\n"
             ));
             block.clear();
-            block_lines = 0;
+            block_complexity = GeneratedKernelComplexity::default();
             block_index += 1;
         }
-        block_lines += chunk_lines;
+        block_complexity += chunk_complexity;
         block.push_str(&chunk);
     }
     if !block.is_empty() {
@@ -34601,8 +34635,11 @@ fn emit_chunked_local_variable_stamp_helpers(
         return;
     }
 
-    let total_lines: usize = chunks.iter().map(|chunk| chunk.lines().count()).sum();
-    if total_lines <= MAX_STAMP_HELPER_LINES {
+    let total_complexity = chunks
+        .iter()
+        .map(|chunk| GeneratedKernelComplexity::from_source(chunk))
+        .sum::<GeneratedKernelComplexity>();
+    if total_complexity.is_bounded() {
         for chunk in chunks {
             out.push_str(&chunk);
         }
@@ -34611,10 +34648,14 @@ fn emit_chunked_local_variable_stamp_helpers(
 
     let mut block_index = 0usize;
     let mut block = String::new();
-    let mut block_lines = 0usize;
+    let mut block_complexity = GeneratedKernelComplexity::default();
     for chunk in chunks {
-        let chunk_lines = chunk.lines().count();
-        if block_lines > 0 && block_lines + chunk_lines > MAX_STAMP_HELPER_LINES {
+        let chunk_complexity = GeneratedKernelComplexity::from_source(&chunk);
+        if !block.is_empty()
+            && !block_complexity
+                .combined_with(chunk_complexity)
+                .is_bounded()
+        {
             emit_local_variable_stamp_helper_call(
                 helper_prefix,
                 reactive,
@@ -34627,10 +34668,10 @@ fn emit_chunked_local_variable_stamp_helpers(
                 out,
             );
             block.clear();
-            block_lines = 0;
+            block_complexity = GeneratedKernelComplexity::default();
             block_index += 1;
         }
-        block_lines += chunk_lines;
+        block_complexity += chunk_complexity;
         block.push_str(&chunk);
     }
     if !block.is_empty() {
@@ -34699,7 +34740,7 @@ fn split_marked_equation_chunks(
         reactive: bool,
         block_index: usize,
         block: String,
-        block_lines: usize,
+        block_complexity: GeneratedKernelComplexity,
     }
 
     fn flush_pending_equation_helper(
@@ -34796,7 +34837,7 @@ fn split_marked_equation_chunks(
             block.push_str(block_line);
             block.push('\n');
         }
-        let block_lines = block.lines().count();
+        let block_complexity = GeneratedKernelComplexity::from_source(&block);
 
         let same_pending = pending
             .as_ref()
@@ -34805,8 +34846,11 @@ fn split_marked_equation_chunks(
         let would_overflow = pending
             .as_ref()
             .map(|pending| {
-                pending.block_lines > 0
-                    && pending.block_lines + block_lines > MAX_STAMP_HELPER_LINES
+                !pending.block.is_empty()
+                    && !pending
+                        .block_complexity
+                        .combined_with(block_complexity)
+                        .is_bounded()
             })
             .unwrap_or(false);
         if !same_pending || would_overflow {
@@ -34823,7 +34867,7 @@ fn split_marked_equation_chunks(
         match &mut pending {
             Some(pending) => {
                 pending.block.push_str(&block);
-                pending.block_lines += block_lines;
+                pending.block_complexity += block_complexity;
             }
             None => {
                 let key = (helper_prefix.to_string(), reactive);
@@ -34833,7 +34877,7 @@ fn split_marked_equation_chunks(
                     reactive,
                     block_index: *block_index,
                     block,
-                    block_lines,
+                    block_complexity,
                 });
                 *block_index += 1;
             }
@@ -34849,6 +34893,53 @@ fn split_marked_equation_chunks(
     );
 
     *out = rewritten;
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct GeneratedKernelComplexity {
+    operations: usize,
+    source_lines: usize,
+}
+
+impl GeneratedKernelComplexity {
+    fn from_source(source: &str) -> Self {
+        // A semicolon represents a materialized Rust operation. Inline AD calls
+        // and scratch row loads expand into derivative work without adding a
+        // semicolon, so count those explicitly as optimizer-visible work too.
+        let operations = source.bytes().filter(|byte| *byte == b';').count()
+            + source.match_indices("AdValue::").count()
+            + source.match_indices("A::").count()
+            + source.match_indices("scratch.ad_value(").count()
+            + source.match_indices("s.ad_value(").count();
+        Self {
+            operations,
+            source_lines: source.lines().count(),
+        }
+    }
+
+    fn combined_with(self, other: Self) -> Self {
+        Self {
+            operations: self.operations.saturating_add(other.operations),
+            source_lines: self.source_lines.saturating_add(other.source_lines),
+        }
+    }
+
+    fn is_bounded(self) -> bool {
+        self.operations <= MAX_STAMP_HELPER_OPERATIONS
+            && self.source_lines <= MAX_STAMP_HELPER_SOURCE_LINES
+    }
+}
+
+impl std::ops::AddAssign for GeneratedKernelComplexity {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = self.combined_with(rhs);
+    }
+}
+
+impl std::iter::Sum for GeneratedKernelComplexity {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), |total, next| total.combined_with(next))
+    }
 }
 
 fn reuse_duplicate_derivative_locals_in_helper_block(block: &str) -> String {
@@ -35425,8 +35516,9 @@ fn emit_stamp_helper_method_with_locals(
         stamper_type,
         scratch_type,
     );
-    let mut method =
-        format!("\n    pub(super) fn {helper_prefix}_block_{block_index}(\n{params}    ) {{\n");
+    let mut method = format!(
+        "\n    #[inline(never)]\n    pub(super) fn {helper_prefix}_block_{block_index}(\n{params}    ) {{\n"
+    );
     if local_usage.is_empty() {
         method.push_str(block);
     } else {
@@ -35464,7 +35556,7 @@ impl StampHelperModules {
             .modules
             .last_mut()
             .expect("helper module must exist after allocation");
-        if method_part.starts_with("\n    pub(super) fn ") {
+        if method_part.starts_with("\n    #[inline(never)]\n    pub(super) fn ") {
             module.method_count += 1;
             module.uses_reactive_scratch |=
                 reactive && method_part.contains("&mut ReactiveScratch");
