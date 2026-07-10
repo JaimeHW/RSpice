@@ -24,6 +24,11 @@ use super::{
 
 const MAX_STAMP_HELPER_LINES: usize = 512;
 const MAX_STAMP_HELPERS_PER_MODULE: usize = 16;
+// Keep LLVM's per-caller optimization graph bounded. Scratch helpers above
+// this source-size limit contain derivative loops or fused expression trees;
+// duplicating them at every generated call site defeats the structured
+// backend and recreates the monolithic scalar compile-time failure mode.
+const MAX_INLINE_SCRATCH_HELPER_SOURCE_BYTES: usize = 512;
 const MAX_LOCAL_VARIABLE_STORAGE_SLOTS: usize = 16_384;
 const MAX_LOCAL_ASSIGNMENT_TUPLE_LANES: usize = 16;
 const STAMP_LOCAL_FIELDS_PER_LINE: usize = 4;
@@ -3997,10 +4002,10 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
-        collapse_single_line_generated_if_blocks, compact_div_from_scalar_offset_denominator,
-        compact_exp_div_scaled_inputs_expression, compact_generated_stamp_surface,
-        compact_generated_statement_runs, compact_generated_surface_lines,
-        compact_limited_exp_div_scaled_inputs_expression,
+        bound_generated_scratch_helper_inlining, collapse_single_line_generated_if_blocks,
+        compact_div_from_scalar_offset_denominator, compact_exp_div_scaled_inputs_expression,
+        compact_generated_stamp_surface, compact_generated_statement_runs,
+        compact_generated_surface_lines, compact_limited_exp_div_scaled_inputs_expression,
         compact_ln_offset_div_scaled_inputs_expression,
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
         duplicate_hoistable_derivative_rhs, generate_ad_value_struct,
@@ -4008,6 +4013,38 @@ mod compact_generated_stamp_surface_tests {
         render_runtime_support_module, reuse_duplicate_derivative_locals_in_helper_block,
         should_cache_compact_condition,
     };
+
+    #[test]
+    fn bounds_large_scratch_helpers_at_the_runtime_boundary() {
+        let large_body = "        value += 1.0;\n".repeat(40);
+        let source = format!(
+            "    #[inline]\n    fn small(value: f64) -> f64 {{ value }}\n\n    #[inline]\n    fn large(mut value: f64) -> f64 {{\n{large_body}        value\n    }}\n"
+        );
+
+        let bounded = bound_generated_scratch_helper_inlining(source);
+
+        assert!(bounded.contains("    #[inline]\n    fn small"), "{bounded}");
+        assert!(
+            bounded.contains("    #[inline(never)]\n    fn large"),
+            "{bounded}"
+        );
+    }
+
+    #[test]
+    fn runtime_support_keeps_only_trivial_scratch_helpers_inline() {
+        let support = render_runtime_support_module();
+
+        assert!(
+            support.contains("#[inline]\n    pub(crate) fn store_scalar"),
+            "scalar stores should remain inline"
+        );
+        assert!(
+            support.contains(
+                "#[inline(never)]\n    pub(crate) fn store_div_scaled_product_sqrt_square_sum_denominator"
+            ),
+            "wide derivative helpers must be optimizer boundaries"
+        );
+    }
 
     #[test]
     fn stamp_surface_removes_generated_blank_lines() {
@@ -17208,7 +17245,67 @@ fn generate_scratch_struct() -> String {
     out.push('\n');
     out.push_str(&generate_scratch_operation_helpers());
     out.push_str("\n}\n\n");
-    mark_generated_scratch_derivative_stores(out)
+    bound_generated_scratch_helper_inlining(mark_generated_scratch_derivative_stores(out))
+}
+
+fn bound_generated_scratch_helper_inlining(source: String) -> String {
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    let mut out = String::with_capacity(source.len());
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let attribute = lines[index];
+        let Some(signature) = lines.get(index + 1).copied() else {
+            out.push_str(attribute);
+            break;
+        };
+        if attribute.trim() != "#[inline]" || !signature.trim_start().starts_with("fn ") {
+            out.push_str(attribute);
+            index += 1;
+            continue;
+        }
+
+        let mut end = index + 1;
+        let mut brace_depth = 0isize;
+        let mut saw_body = false;
+        while end < lines.len() {
+            for byte in lines[end].bytes() {
+                match byte {
+                    b'{' => {
+                        brace_depth += 1;
+                        saw_body = true;
+                    }
+                    b'}' => brace_depth -= 1,
+                    _ => {}
+                }
+            }
+            if saw_body && brace_depth == 0 {
+                break;
+            }
+            end += 1;
+        }
+
+        let function_bytes = lines[index + 1..=end]
+            .iter()
+            .map(|line| line.len())
+            .sum::<usize>();
+        if function_bytes > MAX_INLINE_SCRATCH_HELPER_SOURCE_BYTES {
+            let indent = attribute
+                .strip_suffix("#[inline]\n")
+                .or_else(|| attribute.strip_suffix("#[inline]"))
+                .unwrap_or_default();
+            out.push_str(indent);
+            out.push_str("#[inline(never)]\n");
+        } else {
+            out.push_str(attribute);
+        }
+        for line in &lines[index + 1..=end] {
+            out.push_str(line);
+        }
+        index = end + 1;
+    }
+
+    out
 }
 
 fn generate_scratch_operation_helpers() -> String {
