@@ -1911,7 +1911,7 @@ fn rust_backend_auto_bounds_shipped_bsimcmg_sparse_local_source() {
         report
             .fallback_reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("production limit is 8000000 bytes")),
+            .is_some_and(|reason| reason.contains("production limit is 5000000 bytes")),
         "unexpected fallback: {:?}",
         report.fallback_reason
     );
@@ -1921,7 +1921,7 @@ fn rust_backend_auto_bounds_shipped_bsimcmg_sparse_local_source() {
         .iter()
         .map(|file| file.contents.len())
         .sum::<usize>();
-    assert!(source_bytes < 8_000_000, "generated {source_bytes} bytes");
+    assert!(source_bytes < 5_000_000, "generated {source_bytes} bytes");
 }
 
 #[test]
@@ -3566,7 +3566,10 @@ fn rust_backend_materializes_repeated_expensive_compact_ad_subexpressions() {
         "repeated pow AD subexpressions should be materialized once and reused:\n{stamp}"
     );
     assert!(
-        stamp.contains("let assign") && stamp.contains(": A = A::powf("),
+        stamp
+            .split(';')
+            .any(|statement| statement.trim_start().starts_with("let t")
+                && statement.contains(": A = A::powf(")),
         "the repeated expensive AD expression should be emitted as a local before the store:\n{stamp}"
     );
     assert_generated_rust_compiles(&generated);
@@ -3598,7 +3601,10 @@ fn rust_backend_materializes_repeated_expensive_compact_ad_operands() {
         "repeated non-leaf AD operands feeding expensive calls should be materialized once:\n{stamp}"
     );
     assert!(
-        stamp.contains("let assign") && stamp.contains(": A = A::scale_offset("),
+        stamp
+            .split(';')
+            .any(|statement| statement.trim_start().starts_with("let t")
+                && statement.contains(": A = A::scale_offset(")),
         "the repeated expensive-call operand should be emitted as an AD local:\n{stamp}"
     );
     assert_eq!(

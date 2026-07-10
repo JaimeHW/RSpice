@@ -38,7 +38,7 @@ const MAX_COMPACT_GENERATED_STATEMENT_LINE_BYTES: usize = 4096;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES: usize = 120_000;
-const MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES: usize = 8_000_000;
+const MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES: usize = 5_000_000;
 const DERIVATIVE_ACTIVITY_MARKER: &str = "// __RSPICE_DERIVATIVE_ACTIVITY__\n";
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
@@ -615,10 +615,108 @@ fn compact_stamp_files(
         );
         helper.contents = reconcile_helper_super_imports(std::mem::take(&mut helper.contents));
         helper.contents = compact_generated_surface_lines(std::mem::take(&mut helper.contents));
+        helper.contents =
+            compact_generated_temporary_identifiers(std::mem::take(&mut helper.contents));
     }
     files.stamp = prune_unused_root_scratch_allocations(files.stamp);
     files.stamp = prune_unused_root_stamp_support_aliases(files.stamp, &files.helpers);
+    files.stamp = compact_generated_temporary_identifiers(files.stamp);
     files
+}
+
+fn compact_generated_temporary_identifiers(source: String) -> String {
+    let tokens = generated_identifier_tokens(&source);
+    let mut temporaries = tokens
+        .iter()
+        .filter(|token| is_generated_assignment_temporary(token))
+        .cloned()
+        .collect::<Vec<_>>();
+    if temporaries.is_empty() {
+        return source;
+    }
+    temporaries.sort_unstable();
+
+    let mut aliases = HashMap::with_capacity(temporaries.len());
+    let mut next_index = 0usize;
+    for temporary in temporaries {
+        let alias = loop {
+            let candidate = format!("t{next_index:x}");
+            next_index += 1;
+            if !tokens.contains(&candidate) {
+                break candidate;
+            }
+        };
+        aliases.insert(temporary, alias);
+    }
+    rewrite_generated_identifier_aliases(source, &aliases)
+}
+
+fn is_generated_assignment_temporary(identifier: &str) -> bool {
+    identifier
+        .strip_prefix("assign")
+        .and_then(|suffix| suffix.as_bytes().first())
+        .is_some_and(u8::is_ascii_digit)
+}
+
+fn rewrite_generated_identifier_aliases(
+    source: String,
+    aliases: &HashMap<String, String>,
+) -> String {
+    if aliases.is_empty() {
+        return source;
+    }
+    let mut rewritten = String::with_capacity(source.len());
+    let mut token_start = None;
+    let mut cursor = 0usize;
+    for (index, ch) in source.char_indices() {
+        if is_rust_identifier_char(ch) {
+            if token_start.is_none() {
+                token_start = Some(index);
+            }
+            continue;
+        }
+        if let Some(start) = token_start.take() {
+            push_generated_identifier_alias(
+                &source,
+                aliases,
+                &mut rewritten,
+                &mut cursor,
+                start,
+                index,
+            );
+        }
+    }
+    if let Some(start) = token_start {
+        push_generated_identifier_alias(
+            &source,
+            aliases,
+            &mut rewritten,
+            &mut cursor,
+            start,
+            source.len(),
+        );
+    }
+    rewritten.push_str(&source[cursor..]);
+    rewritten
+}
+
+fn push_generated_identifier_alias(
+    source: &str,
+    aliases: &HashMap<String, String>,
+    rewritten: &mut String,
+    cursor: &mut usize,
+    start: usize,
+    end: usize,
+) {
+    rewritten.push_str(&source[*cursor..start]);
+    let identifier = &source[start..end];
+    rewritten.push_str(
+        aliases
+            .get(identifier)
+            .map(String::as_str)
+            .unwrap_or(identifier),
+    );
+    *cursor = end;
 }
 
 fn rewrite_inactive_derivative_store_calls(
@@ -4109,23 +4207,57 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
-        GeneratedKernelComplexity, MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES,
+        GeneratedKernelComplexity, GeneratedRustFile, MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES,
         MAX_STAMP_HELPER_OPERATIONS, StructuredDerivativeActivity,
         StructuredDerivativeActivityPlane, bound_generated_scratch_helper_inlining,
         collapse_single_line_generated_if_blocks, compact_div_from_scalar_offset_denominator,
         compact_exp_div_scaled_inputs_expression, compact_generated_stamp_surface,
         compact_generated_statement_runs, compact_generated_surface_lines,
-        compact_limited_exp_div_scaled_inputs_expression,
+        compact_generated_temporary_identifiers, compact_limited_exp_div_scaled_inputs_expression,
         compact_ln_offset_div_scaled_inputs_expression,
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
-        duplicate_hoistable_derivative_rhs, emit_structured_derivative_activity_array,
-        generate_ad_value_struct, generate_scratch_operation_helpers,
-        is_hoistable_generated_derivative_rhs, render_runtime_support_module,
-        render_runtime_support_module_for_generated_sources,
+        compact_stamp_local_frame_identifiers, duplicate_hoistable_derivative_rhs,
+        emit_structured_derivative_activity_array, generate_ad_value_struct,
+        generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
+        render_runtime_support_module, render_runtime_support_module_for_generated_sources,
         reuse_duplicate_derivative_locals_in_helper_block, rewrite_inactive_derivative_store_calls,
         scratch_operation_runtime, should_cache_compact_condition,
         sparse_local_device_source_is_bounded,
     };
+
+    #[test]
+    fn compacts_stamp_local_frame_fields_consistently_across_modules() {
+        let names = vec!["var_long_name".to_string(), "var_long_name_dn0".to_string()];
+        let mut stamp = "pub(crate) struct StampLocals { pub(crate) var_long_name: f64, pub(crate) var_long_name_dn0: f64 }\nfn root(locals: &mut StampLocals) { locals.var_long_name = locals.var_long_name_dn0; }\n".to_string();
+        let mut helpers = vec![GeneratedRustFile {
+            relative_path: "stamp_blocks_0.rs".to_string(),
+            contents: "fn helper(locals: &mut StampLocals) { locals.var_long_name_dn0 = locals.var_long_name; }\n".to_string(),
+        }];
+
+        compact_stamp_local_frame_identifiers(&names, &mut stamp, &mut helpers);
+
+        assert!(stamp.contains("pub(crate) f0: f64"), "{stamp}");
+        assert!(stamp.contains("pub(crate) f1: f64"), "{stamp}");
+        assert!(stamp.contains("locals.f0 = locals.f1"), "{stamp}");
+        assert!(
+            helpers[0].contents.contains("locals.f1 = locals.f0"),
+            "{}",
+            helpers[0].contents
+        );
+        assert!(!stamp.contains("var_long_name"), "{stamp}");
+        assert!(!helpers[0].contents.contains("var_long_name"));
+    }
+
+    #[test]
+    fn compacts_generated_assignment_temporaries_without_collisions() {
+        let source = "let t0 = 1.0; let assign20_e9 = t0 + 1.0; let assignment = assign20_e9;\n";
+
+        let compacted = compact_generated_temporary_identifiers(source.to_string());
+
+        assert!(compacted.contains("let t1 = t0 + 1.0"), "{compacted}");
+        assert!(compacted.contains("let assignment = t1"), "{compacted}");
+        assert!(!compacted.contains("assign20_e9"), "{compacted}");
+    }
 
     #[test]
     fn sparse_local_device_source_budget_is_inclusive_and_bounded() {
@@ -17237,8 +17369,9 @@ fn generate_stamp_file(
         common_usage,
         transient_operator_usage,
     );
-    materialize_local_variable_frame(&mut out);
-    let helpers = helper_modules.finish();
+    let local_frame_names = materialize_local_variable_frame(&mut out);
+    let mut helpers = helper_modules.finish();
+    compact_stamp_local_frame_identifiers(&local_frame_names, &mut out, &mut helpers);
     if !helpers.is_empty() {
         let declarations = helpers
             .iter()
@@ -34409,10 +34542,10 @@ fn local_helper_block_body(
     }
 }
 
-fn materialize_local_variable_frame(source: &mut String) {
+fn materialize_local_variable_frame(source: &mut String) -> Vec<String> {
     let local_names = declared_local_variable_storage_names(source);
     if local_names.is_empty() {
-        return;
+        return local_names;
     }
 
     let mut rewritten = String::with_capacity(source.len());
@@ -34441,6 +34574,27 @@ fn materialize_local_variable_frame(source: &mut String) {
         rewritten.insert_str(index, &local_frame);
     }
     *source = rewritten;
+    local_names
+}
+
+fn compact_stamp_local_frame_identifiers(
+    local_names: &[String],
+    stamp: &mut String,
+    helpers: &mut [GeneratedRustFile],
+) {
+    if local_names.is_empty() {
+        return;
+    }
+    let aliases = local_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (name.clone(), format!("f{index:x}")))
+        .collect::<HashMap<_, _>>();
+    *stamp = rewrite_generated_identifier_aliases(std::mem::take(stamp), &aliases);
+    for helper in helpers {
+        helper.contents =
+            rewrite_generated_identifier_aliases(std::mem::take(&mut helper.contents), &aliases);
+    }
 }
 
 fn emit_stamp_local_frame(local_names: &[String]) -> String {
