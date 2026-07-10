@@ -1,0 +1,61 @@
+name: Request production web release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: request-production-web-release
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      vars.RSPICE_AUTO_RELEASE == 'true' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint repository-scoped release token
+        id: release-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.RSPICE_RELEASE_APP_ID }}
+          private-key: ${{ secrets.RSPICE_RELEASE_APP_PRIVATE_KEY }}
+          owner: JaimeHW
+          repositories: RSpice-Release
+
+      - name: Resolve companion website revision
+        id: sources
+        shell: bash
+        env:
+          RSPICE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          site_sha=$(git ls-remote https://github.com/JaimeHW/RSpice-Site.git refs/heads/main | awk '{print $1}')
+          if [[ ! "$site_sha" =~ ^[0-9a-f]{40}$ || ! "$RSPICE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "failed to resolve immutable source revisions" >&2
+            exit 1
+          fi
+          echo "site_sha=$site_sha" >> "$GITHUB_OUTPUT"
+          echo "rspice_sha=$RSPICE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch release controller
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          SITE_SHA: ${{ steps.sources.outputs.site_sha }}
+          RSPICE_SHA: ${{ steps.sources.outputs.rspice_sha }}
+        run: >-
+          gh workflow run release.yml
+          --repo JaimeHW/RSpice-Release
+          --ref main
+          --field site_sha="$SITE_SHA"
+          --field rspice_sha="$RSPICE_SHA"
+          --field channel=production
+          --field reason="RSpice main passed CI"
