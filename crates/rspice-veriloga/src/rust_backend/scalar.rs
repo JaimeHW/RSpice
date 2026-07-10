@@ -15,7 +15,10 @@ use super::{RustTranspileOptions, device};
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const MAX_SCALAR_STAMP_LIVE_VALUES: usize = 1_000_000;
 const MAX_SCALAR_STAMP_EMITTED_VALUES: usize = 1_000_000;
-const MAX_SCALAR_STAMP_SOURCE_BYTES: usize = 16 * 1024 * 1024;
+// Above this size, a single straight-line Rust module is both more expensive for
+// rustc and potentially larger than the block-partitioned fallback. Keep the
+// scalar backend on the side of predictable production build cost.
+const MAX_SCALAR_STAMP_SOURCE_BYTES: usize = 10 * 1024 * 1024;
 const MAX_SCALAR_STAMP_SOURCE_LINES: usize = 120_000;
 const SCALAR_STAMP_SOURCE_LINE_OVERHEAD_RESERVE: usize = 1024;
 const MIN_COMPACT_SCALAR_VALUE_BINDINGS_PER_LINE: usize = 8;
