@@ -45,6 +45,10 @@ pub struct Diode {
     pub forward_knee_current: Value,
     /// Reverse high-injection knee current (IKR).
     pub reverse_knee_current: Value,
+    /// Recombination saturation current (ISR).
+    pub recombination_saturation_current: Value,
+    /// Recombination-current emission coefficient (NR).
+    pub recombination_emission_coefficient: Value,
     /// Sidewall perimeter instance parameter (PJ).
     pub sidewall_perimeter: Value,
     /// Sidewall saturation current density/current parameter (JSW).
@@ -87,6 +91,8 @@ pub struct Diode {
     pub eg: Value,
     /// Model nominal temperature override in Celsius (TNOM)
     pub tnom_c: Option<Value>,
+    /// Select the PSpice-compatible Xyce/HSPICE LEVEL=2 junction-temperature law.
+    pub pspice_level2: bool,
 
     // Noise parameters
     /// Flicker noise coefficient (KF)
@@ -141,6 +147,8 @@ impl Diode {
             ibv: 1e-6,
             forward_knee_current: 0.0,
             reverse_knee_current: 0.0,
+            recombination_saturation_current: 0.0,
+            recombination_emission_coefficient: 2.0,
             sidewall_perimeter: 0.0,
             sidewall_saturation_current: 0.0,
             sidewall_current_given: false,
@@ -164,6 +172,7 @@ impl Diode {
             xti: 3.0,
             eg: 1.11,
             tnom_c: None,
+            pspice_level2: false,
 
             // Flicker noise off by default (diosetup.c: fNcoef 0, fNexp 1).
             kf: 0.0,
@@ -300,6 +309,8 @@ impl Diode {
         diode.sidewall_fc = 0.5;
         diode.breakdown_emission_coefficient = diode.n;
         diode.breakdown_emission_given = false;
+        diode.recombination_saturation_current = 0.0;
+        diode.recombination_emission_coefficient = 2.0;
         diode
     }
 
@@ -313,6 +324,9 @@ impl Diode {
 
     /// Set model parameters from a HashMap (for .MODEL statement parsing)
     pub fn with_model_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
+        self.pspice_level2 = params
+            .get("LEVEL")
+            .is_some_and(|level| level.is_finite() && (*level - 2.0).abs() <= 1.0e-9);
         if let Some(&v) = params.get("IS").or_else(|| params.get("JS")) {
             self.is = v;
         }
@@ -353,6 +367,18 @@ impl Diode {
         }
         if let Some(&v) = params.get("IKR") {
             self.reverse_knee_current = if v.is_finite() && v >= EPSMIN { v } else { 0.0 };
+        }
+        if let Some(&v) = params.get("ISR")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.recombination_saturation_current = v;
+        }
+        if let Some(&v) = params.get("NR")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.recombination_emission_coefficient = v;
         }
         if let Some(&v) = params
             .get("CJO")
@@ -498,9 +524,35 @@ impl Diode {
         if sidewall_factor.is_finite() && sidewall_factor > 0.0 {
             self.sidewall_saturation_current *= sidewall_factor;
         }
+        let nr = self.recombination_emission_coefficient.max(EPSMIN);
+        let recombination_factor = (((temp / tnom) - 1.0) * self.eg / (nr * vt)
+            + (self.xti / nr) * (temp / tnom).ln())
+        .exp();
+        if recombination_factor.is_finite() && recombination_factor > 0.0 {
+            self.recombination_saturation_current *= recombination_factor;
+        }
 
         // VJ(T) and CJ0(T), TLEVC=0 bandgap mapping.
-        if self.vj > 0.0 {
+        if self.pspice_level2 && self.vj > 0.0 {
+            // Xyce's LEVEL=2 branch is the PSpice temperature law. Keep this
+            // profile explicit: it differs materially from the SPICE3 law
+            // when TNOM is not the 27 C reference temperature.
+            let nominal_vj = self.vj;
+            let t_jct_pot = (nominal_vj - egfet1) * fact2 - 3.0 * vt * fact2.ln() + egfet;
+            let denominator =
+                1.0 + self.m * (400e-6 * (temp - tnom) + (1.0 - t_jct_pot / nominal_vj));
+            if t_jct_pot.is_finite()
+                && t_jct_pot > 0.0
+                && denominator.is_finite()
+                && denominator > 0.0
+            {
+                let cj = self.cj0 / denominator;
+                if cj.is_finite() && cj >= 0.0 {
+                    self.vj = t_jct_pot;
+                    self.cj0 = cj;
+                }
+            }
+        } else if self.vj > 0.0 {
             let pbo = (self.vj - pbfact1) / fact1;
             if pbo > 0.0 {
                 let gmaold = (self.vj - pbo) / pbo;
@@ -561,6 +613,7 @@ impl Diode {
         self.ibv *= scale;
         self.forward_knee_current *= scale;
         self.reverse_knee_current *= scale;
+        self.recombination_saturation_current *= scale;
         self.cj0 *= scale;
         if self.rs > 0.0 {
             self.rs /= scale;
@@ -735,8 +788,12 @@ impl Diode {
     /// and for the sidewall current shape.
     fn current_and_conductance(&self, vd: Value) -> (Value, Value) {
         let (forward_i, forward_g) = self.bottom_current_and_conductance(vd);
+        let (recombination_i, recombination_g) = self.recombination_current_and_conductance(vd);
         let (sidewall_i, sidewall_g) = self.separate_sidewall_current_and_conductance(vd);
-        (forward_i + sidewall_i, forward_g + sidewall_g)
+        (
+            forward_i + recombination_i + sidewall_i,
+            forward_g + recombination_g + sidewall_g,
+        )
     }
 
     fn bottom_current_and_conductance(&self, vd: Value) -> (Value, Value) {
@@ -761,6 +818,51 @@ impl Diode {
             0.0
         };
         self.is + sidewall
+    }
+
+    /// Xyce/PSpice depletion-region recombination current.
+    ///
+    /// Xyce evaluates this branch only in its forward/near-zero region,
+    /// selected by the ordinary emission voltage `N*Vt`. The exponential
+    /// itself uses `NR*Vt`, then the depletion generation factor shapes both
+    /// the current and its analytic Jacobian. Linear reverse bias and
+    /// avalanche breakdown deliberately omit ISR in Xyce 7.10.
+    fn recombination_current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        let isr = self.recombination_saturation_current;
+        let nr = self.recombination_emission_coefficient;
+        let forward_boundary = -3.0 * self.n.max(EPSMIN) * self.vt;
+        if !(isr.is_finite()
+            && isr > 0.0
+            && nr.is_finite()
+            && nr > 0.0
+            && self.vt.is_finite()
+            && self.vt > 0.0
+            && self.vj.is_finite()
+            && self.vj > 0.0
+            && vd >= forward_boundary)
+        {
+            return (0.0, 0.0);
+        }
+
+        let nr_vt = nr * self.vt;
+        let (exponential, exponential_derivative) = Self::limited_exp(vd / nr_vt, MAX_EXP_ARG);
+        let base_current = isr * (exponential - 1.0);
+        let base_conductance = (isr / nr_vt) * exponential_derivative;
+
+        let normalized_depletion = 1.0 - vd / self.vj;
+        let generation_base = normalized_depletion * normalized_depletion + 0.005;
+        let generation_exponent = 0.5 * self.m;
+        let generation_factor = generation_base.powf(generation_exponent);
+        let generation_derivative = -self.m * normalized_depletion / self.vj
+            * generation_base.powf(generation_exponent - 1.0);
+        if !(generation_factor.is_finite() && generation_derivative.is_finite()) {
+            return (0.0, 0.0);
+        }
+
+        (
+            base_current * generation_factor,
+            base_conductance * generation_factor + base_current * generation_derivative,
+        )
     }
 
     fn exponential_current_and_conductance(

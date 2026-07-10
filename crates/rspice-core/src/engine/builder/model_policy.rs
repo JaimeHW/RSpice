@@ -672,6 +672,22 @@ fn validate_xyce_level2_diode_native_subset(
             )));
         }
     }
+    if let Some(isr) = params.get("ISR")
+        && *isr < 0.0
+    {
+        return Err(SimulationError::Circuit(format!(
+            "Diode '{element_name}': model '{model}' uses Xyce/HSPICE LEVEL=2 ISR={isr}; \
+             recombination saturation current must be >= 0"
+        )));
+    }
+    if let Some(nr) = params.get("NR")
+        && *nr <= 0.0
+    {
+        return Err(SimulationError::Circuit(format!(
+            "Diode '{element_name}': model '{model}' uses Xyce/HSPICE LEVEL=2 NR={nr}; \
+             recombination emission coefficient must be > 0"
+        )));
+    }
     Ok(())
 }
 
@@ -691,6 +707,8 @@ fn xyce_level2_native_diode_param(name: &str) -> bool {
             | "IKF"
             | "IK"
             | "IKR"
+            | "ISR"
+            | "NR"
             | "CJO"
             | "CJ0"
             | "CJ"

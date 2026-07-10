@@ -13983,6 +13983,8 @@ impl XyceTestRunner {
                 | "IKF"
                 | "IK"
                 | "IKR"
+                | "ISR"
+                | "NR"
                 | "CJO"
                 | "CJ0"
                 | "CJ"
