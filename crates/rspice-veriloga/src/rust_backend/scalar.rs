@@ -493,7 +493,9 @@ fn generate_stamp_file(
             )
     });
     let mut out = String::new();
-    out.push_str("#![allow(dead_code, unused_imports, unused_parens, unused_variables)]\n\n");
+    out.push_str(
+        "#![allow(dead_code, non_snake_case, unused_imports, unused_parens, unused_variables)]\n\n",
+    );
     out.push_str("use super::state::Instance;\n");
     out.push_str(&format!(
         "use {}::{{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};\n\n",

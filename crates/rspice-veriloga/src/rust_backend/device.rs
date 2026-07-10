@@ -15110,7 +15110,7 @@ pub(super) fn generate_state_file_with_extensions(
     extensions: &StateFileExtensions,
 ) -> Result<String, RustBackendError> {
     let mut out = String::new();
-    out.push_str("#![allow(dead_code, unused_parens, unused_variables)]\n\n");
+    out.push_str("#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]\n\n");
     out.push_str(&format!(
         "use {}::GeneratedDdtCoefficients;\n",
         options.runtime_path
@@ -16768,7 +16768,9 @@ fn generate_stamp_file(
     native_local_storage: bool,
 ) -> Result<StampFiles, RustBackendError> {
     let mut out = String::new();
-    out.push_str("#![allow(dead_code, unused_assignments, unused_parens, unused_variables)]\n\n");
+    out.push_str(
+        "#![allow(dead_code, non_snake_case, unused_assignments, unused_parens, unused_variables)]\n\n",
+    );
     out.push_str("use super::state::Instance;\n");
     out.push_str(&format!(
         "use {}::{{GeneratedDerivative, GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper}};\n\n",
@@ -35422,7 +35424,7 @@ impl StampHelperModule {
         imports.push("THERMAL_VOLTAGE_PER_K");
 
         format!(
-            "#![allow(dead_code, unused_assignments, unused_imports, unused_parens, unused_variables)]\n\nuse super::{{{}}};\nuse super::super::state::{{Instance, Parameters}};\n\nimpl Instance {{\n{}}}\n",
+            "#![allow(dead_code, non_snake_case, unused_assignments, unused_imports, unused_parens, unused_variables)]\n\nuse super::{{{}}};\nuse super::super::state::{{Instance, Parameters}};\n\nimpl Instance {{\n{}}}\n",
             imports.join(", "),
             self.contents
         )

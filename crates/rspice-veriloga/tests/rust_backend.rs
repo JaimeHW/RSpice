@@ -10106,6 +10106,14 @@ fn rust_backend_splits_large_stamp_bodies_into_helper_blocks() {
         .as_str();
 
     assert!(
+        stamp.starts_with("#![allow(dead_code, non_snake_case,"),
+        "generated stamp locals intentionally preserve Verilog-A identities and must not flood production builds with style warnings:\n{stamp}"
+    );
+    assert!(
+        helper.starts_with("#![allow(dead_code, non_snake_case,"),
+        "partitioned stamp helpers must inherit the generated-identifier lint policy:\n{helper}"
+    );
+    assert!(
         stamp.contains("let s = match &mut self.scratch {"),
         "{stamp}"
     );
