@@ -15,6 +15,7 @@ static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 fn rust_backend_public_api_exists() {
     let _ = RustTranspiler::new_legacy(RustTranspileOptions::default());
     let _ = RustTranspiler::new_structured(RustTranspileOptions::default());
+    let _ = RustTranspiler::new_sparse_local(RustTranspileOptions::default());
     let _ = RustTranspiler::new_auto(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     });
@@ -813,8 +814,46 @@ fn structured_kernel_backend_uses_the_production_runtime_boundary() {
     assert_eq!(report.backend, RustBackendSelection::StructuredKernel);
     assert!(generated_source.contains("::kernel_runtime::"));
     assert!(generated_source.contains("KernelScratch"));
+    assert!(
+        generated_source.contains("TRANSIENT_NODE_DERIVATIVE_ACTIVITY"),
+        "{generated_source}"
+    );
     assert!(!generated_source.contains("::support::"));
     assert!(!generated_source.contains("GenericScratch"));
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn sparse_local_kernel_backend_uses_bounded_local_frames() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(assignment_fed_current_source())
+        .expect("canonical IR");
+
+    let report = RustTranspiler::new_sparse_local(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile_with_report(&artifact)
+    .expect("transpile sparse local kernel");
+    let generated = report.device;
+    let generated_source = generated
+        .files
+        .iter()
+        .map(|file| file.contents.as_str())
+        .collect::<String>();
+
+    assert_eq!(report.backend, RustBackendSelection::SparseLocalKernel);
+    assert!(
+        generated_source.contains("StampLocals"),
+        "{generated_source}"
+    );
+    assert!(
+        !generated_source.contains("KernelScratch"),
+        "{generated_source}"
+    );
+    assert!(
+        !generated_source.contains("DERIVATIVE_ACTIVITY"),
+        "{generated_source}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 
@@ -1799,6 +1838,43 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_structured_kernels() {
             .iter()
             .all(|file| file.contents.contains("#[inline(never)]"))
     );
+}
+
+#[test]
+fn rust_backend_auto_transpiles_shipped_psp104_with_sparse_local_kernels() {
+    let model_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("models")
+        .join("veriloga");
+    let path = model_root
+        .join("cmc")
+        .join("PSP104.1.0_vacode")
+        .join("vacode")
+        .join("psp104.va");
+    assert!(path.exists(), "missing PSP104 fixture: {}", path.display());
+
+    let mut options = CompilerOptions::default();
+    options.include_paths.push(model_root);
+    let compiled = VerilogACompiler::new(options)
+        .compile_file_canonical_ir_with_metadata(&path, Some("PSP104VA"))
+        .expect("compile shipped PSP104 canonical IR");
+    let report = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile_with_report(&compiled.artifact)
+    .expect("transpile shipped PSP104 through auto Rust backend");
+
+    assert_eq!(report.backend, RustBackendSelection::SparseLocalKernel);
+    let generated_source = report
+        .device
+        .files
+        .iter()
+        .map(|file| file.contents.as_str())
+        .collect::<String>();
+    assert!(generated_source.contains("StampLocals"));
+    assert!(!generated_source.contains("KernelScratch"));
+    assert!(!generated_source.contains("DERIVATIVE_ACTIVITY"));
 }
 
 #[test]

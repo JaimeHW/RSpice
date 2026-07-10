@@ -9,7 +9,7 @@
 //! To print the scalar error for every non-scalar selection:
 //! `RSPICE_RUST_BACKEND_FRONTIER_TRACE_NON_SCALAR=1 ...`
 //!
-//! To make the frontier a pure-scalar production gate:
+//! To reject compatibility fallback tiers in the production frontier:
 //! `RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_HYBRID=1 RSPICE_RUST_BACKEND_FRONTIER_REQUIRE_NO_LEGACY=1 ...`
 
 use rspice_veriloga::canonical_ir::{
@@ -140,8 +140,8 @@ fn run_shipped_rust_backend_frontier() {
         failures.join("\n")
     );
     eprintln!(
-        "backend frontier: scalar={}, scalar-hybrid={}, legacy-device={}",
-        counts.scalar, counts.hybrid, counts.legacy_device
+        "backend frontier: scalar={}, sparse-local-kernel={}, structured-kernel={}, scalar-hybrid={}, legacy-device={}",
+        counts.scalar, counts.sparse_local, counts.structured, counts.hybrid, counts.legacy_device
     );
 
     if env::var_os(REQUIRE_NO_LEGACY_ENV).is_some() {
@@ -479,6 +479,7 @@ fn source_matches_filter(
 #[derive(Debug, Default)]
 struct BackendSelectionCounts {
     scalar: usize,
+    sparse_local: usize,
     structured: usize,
     hybrid: usize,
     legacy_device: usize,
@@ -488,6 +489,7 @@ impl BackendSelectionCounts {
     fn record(&mut self, selection: RustBackendSelection) {
         match selection {
             RustBackendSelection::ScalarOptIr => self.scalar += 1,
+            RustBackendSelection::SparseLocalKernel => self.sparse_local += 1,
             RustBackendSelection::StructuredKernel => self.structured += 1,
             RustBackendSelection::ScalarHybrid => self.hybrid += 1,
             RustBackendSelection::LegacyDevice => self.legacy_device += 1,

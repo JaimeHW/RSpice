@@ -71,6 +71,7 @@ pub struct BuiltinBackendFallbackReason {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BuiltinBackendSelectionCounts {
     pub scalar: usize,
+    pub sparse_local: usize,
     pub structured: usize,
     pub hybrid: usize,
     pub legacy_device: usize,
@@ -80,6 +81,7 @@ impl BuiltinBackendSelectionCounts {
     fn record(&mut self, selection: RustBackendSelection) {
         match selection {
             RustBackendSelection::ScalarOptIr => self.scalar += 1,
+            RustBackendSelection::SparseLocalKernel => self.sparse_local += 1,
             RustBackendSelection::StructuredKernel => self.structured += 1,
             RustBackendSelection::ScalarHybrid => self.hybrid += 1,
             RustBackendSelection::LegacyDevice => self.legacy_device += 1,
@@ -845,7 +847,7 @@ fn reject_non_scalar_backend_selections(
     counts: &BuiltinBackendSelectionCounts,
     fallback_reasons: &[BuiltinBackendFallbackReason],
 ) -> BuiltinResult<()> {
-    if counts.structured == 0 && counts.hybrid == 0 {
+    if counts.sparse_local == 0 && counts.structured == 0 && counts.hybrid == 0 {
         return Ok(());
     }
 
@@ -854,7 +856,9 @@ fn reject_non_scalar_backend_selections(
         .filter(|reason| {
             matches!(
                 reason.backend,
-                RustBackendSelection::StructuredKernel | RustBackendSelection::ScalarHybrid
+                RustBackendSelection::SparseLocalKernel
+                    | RustBackendSelection::StructuredKernel
+                    | RustBackendSelection::ScalarHybrid
             )
         })
         .map(|reason| {
@@ -866,6 +870,17 @@ fn reject_non_scalar_backend_selections(
             )
         })
         .collect::<Vec<_>>();
+    if counts.sparse_local != 0
+        && !fallback_reasons
+            .iter()
+            .any(|reason| reason.backend == RustBackendSelection::SparseLocalKernel)
+    {
+        details.push(format!(
+            "{} generated module{} selected the sparse-local-kernel backend",
+            counts.sparse_local,
+            if counts.sparse_local == 1 { "" } else { "s" }
+        ));
+    }
     if counts.structured != 0
         && !fallback_reasons
             .iter()
@@ -1041,6 +1056,7 @@ mod tests {
     fn builtin_generation_rejects_legacy_backend_selections() {
         let counts = BuiltinBackendSelectionCounts {
             scalar: 1,
+            sparse_local: 0,
             structured: 0,
             hybrid: 0,
             legacy_device: 1,
@@ -1070,6 +1086,7 @@ mod tests {
     fn builtin_generation_can_reject_non_scalar_backend_selections() {
         let counts = BuiltinBackendSelectionCounts {
             scalar: 1,
+            sparse_local: 1,
             structured: 1,
             hybrid: 1,
             legacy_device: 0,
@@ -1086,6 +1103,7 @@ mod tests {
 
         let message = error.to_string();
         assert!(message.contains(REQUIRE_SCALAR_BUILTINS_ENV), "{message}");
+        assert!(message.contains("sparse-local-kernel backend"), "{message}");
         assert!(message.contains("structured-kernel backend"), "{message}");
         assert!(message.contains("cmc/hisim.va :: hisim"), "{message}");
     }

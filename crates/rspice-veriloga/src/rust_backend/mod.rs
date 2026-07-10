@@ -53,6 +53,7 @@ pub struct GeneratedRustDevice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RustBackendSelection {
     ScalarOptIr,
+    SparseLocalKernel,
     StructuredKernel,
     ScalarHybrid,
     LegacyDevice,
@@ -68,6 +69,7 @@ pub struct GeneratedRustDeviceReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RustKernelTier {
     DirectScalar,
+    SparseLocal,
     Structured,
 }
 
@@ -122,6 +124,7 @@ enum RustBackendKind {
     Auto,
     Legacy,
     ScalarOptIr,
+    SparseLocalKernel,
     StructuredKernel,
 }
 
@@ -158,6 +161,13 @@ impl RustTranspiler {
         }
     }
 
+    pub fn new_sparse_local(options: RustTranspileOptions) -> Self {
+        Self {
+            options,
+            backend: RustBackendKind::SparseLocalKernel,
+        }
+    }
+
     pub fn options(&self) -> &RustTranspileOptions {
         &self.options
     }
@@ -190,6 +200,11 @@ impl RustTranspiler {
                 backend: RustBackendSelection::ScalarOptIr,
                 fallback_reason: None,
             }),
+            RustBackendKind::SparseLocalKernel => Ok(GeneratedRustDeviceReport {
+                device: device::generate_sparse_local_kernel_device(artifact, &self.options)?,
+                backend: RustBackendSelection::SparseLocalKernel,
+                fallback_reason: None,
+            }),
             RustBackendKind::StructuredKernel => Ok(GeneratedRustDeviceReport {
                 device: device::generate_structured_kernel_device(artifact, &self.options)?,
                 backend: RustBackendSelection::StructuredKernel,
@@ -217,6 +232,7 @@ impl RustTranspiler {
                     Err(error) => Err(error),
                 }
             }
+            kernel_ir::PreferredKernelTier::SparseLocal => self.transpile_sparse_local(artifact),
             kernel_ir::PreferredKernelTier::Structured => {
                 match device::generate_structured_kernel_device(artifact, &self.options) {
                     Ok(device) => Ok(GeneratedRustDeviceReport {
@@ -246,6 +262,59 @@ impl RustTranspiler {
                     Err(error) => Err(error),
                 }
             }
+        }
+    }
+
+    fn transpile_sparse_local(
+        &self,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
+        match device::generate_sparse_local_kernel_device(artifact, &self.options) {
+            Ok(device) => Ok(GeneratedRustDeviceReport {
+                device,
+                backend: RustBackendSelection::SparseLocalKernel,
+                fallback_reason: None,
+            }),
+            Err(local_error) if local_error.is_unsupported() => {
+                match device::generate_structured_kernel_device(artifact, &self.options) {
+                    Ok(device) => Ok(GeneratedRustDeviceReport {
+                        device,
+                        backend: RustBackendSelection::StructuredKernel,
+                        fallback_reason: Some(format!(
+                            "sparse local kernel path: {}",
+                            unsupported_detail(&local_error)
+                        )),
+                    }),
+                    Err(structured_error) if structured_error.is_unsupported() => {
+                        match scalar::generate_device(artifact, &self.options) {
+                            Ok(device) => Ok(GeneratedRustDeviceReport {
+                                device,
+                                backend: RustBackendSelection::ScalarOptIr,
+                                fallback_reason: Some(format!(
+                                    "sparse local kernel path: {}; structured kernel path: {}",
+                                    unsupported_detail(&local_error),
+                                    unsupported_detail(&structured_error)
+                                )),
+                            }),
+                            Err(scalar_error) if scalar_error.is_unsupported() => {
+                                let combined_structured_error = combined_structured_tier_error(
+                                    artifact,
+                                    &local_error,
+                                    &structured_error,
+                                );
+                                self.transpile_hybrid_after_tier_failures(
+                                    artifact,
+                                    scalar_error,
+                                    combined_structured_error,
+                                )
+                            }
+                            Err(error) => Err(error),
+                        }
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -295,6 +364,22 @@ impl RustTranspiler {
             Err(error) => Err(error),
         }
     }
+}
+
+fn combined_structured_tier_error(
+    artifact: &CanonicalIrArtifact,
+    local_error: &RustBackendError,
+    structured_error: &RustBackendError,
+) -> RustBackendError {
+    RustBackendError::unsupported(
+        artifact.metadata.source_package.as_str(),
+        artifact.mir.module_name.as_str(),
+        format!(
+            "sparse local kernel path: {}; structured kernel path: {}",
+            unsupported_detail(local_error),
+            unsupported_detail(structured_error)
+        ),
+    )
 }
 
 fn auto_backend_unsupported(

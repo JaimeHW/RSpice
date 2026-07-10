@@ -372,6 +372,13 @@ pub(super) fn generate_structured_kernel_device(
     generate_device_with_scalar_hybrid_plan(artifact, options, None, false)
 }
 
+pub(super) fn generate_sparse_local_kernel_device(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+) -> Result<GeneratedRustDevice, RustBackendError> {
+    generate_device_with_scalar_hybrid_plan(artifact, options, None, true)
+}
+
 pub(super) fn generate_hybrid_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,

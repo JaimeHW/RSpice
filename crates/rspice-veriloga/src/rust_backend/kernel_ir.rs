@@ -16,6 +16,7 @@ const MIN_STRUCTURED_EXPANSION_RATIO: usize = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PreferredKernelTier {
     DirectScalar,
+    SparseLocal,
     Structured,
 }
 
@@ -61,10 +62,12 @@ impl KernelMetrics {
             || self.scalar_optimizer_nodes > MAX_DIRECT_SCALAR_OPTIMIZER_NODES;
         let structured_model_is_materially_smaller =
             self.scalar_expansion_ratio >= MIN_STRUCTURED_EXPANSION_RATIO;
-        if scalar_graph_is_large && structured_model_is_materially_smaller {
+        if !scalar_graph_is_large {
+            PreferredKernelTier::DirectScalar
+        } else if structured_model_is_materially_smaller {
             PreferredKernelTier::Structured
         } else {
-            PreferredKernelTier::DirectScalar
+            PreferredKernelTier::SparseLocal
         }
     }
 
@@ -186,6 +189,7 @@ impl KernelPlan {
         RustKernelPlan {
             preferred_tier: match self.preferred_tier() {
                 PreferredKernelTier::DirectScalar => RustKernelTier::DirectScalar,
+                PreferredKernelTier::SparseLocal => RustKernelTier::SparseLocal,
                 PreferredKernelTier::Structured => RustKernelTier::Structured,
             },
             derivative_storage: match self.derivative_storage() {
@@ -551,6 +555,28 @@ endmodule
         };
 
         assert_eq!(metrics.preferred_tier(), PreferredKernelTier::Structured);
+        assert_eq!(
+            metrics.derivative_storage(),
+            DerivativeStorageStrategy::Sparse
+        );
+    }
+
+    #[test]
+    fn cost_model_keeps_large_low_expansion_graphs_in_sparse_local_kernels() {
+        let metrics = KernelMetrics {
+            scalar_values: MAX_DIRECT_SCALAR_VALUES + 1,
+            scalar_derivative_entries: 512,
+            scalar_optimizer_nodes: MAX_DIRECT_SCALAR_OPTIMIZER_NODES + 1,
+            structured_expressions: 16_000,
+            structured_operations: 16_000,
+            structured_control_regions: 10,
+            runtime_loop_operations: 0,
+            derivative_lanes: 32,
+            maximum_value_derivative_lanes: 8,
+            scalar_expansion_ratio: MIN_STRUCTURED_EXPANSION_RATIO - 1,
+        };
+
+        assert_eq!(metrics.preferred_tier(), PreferredKernelTier::SparseLocal);
         assert_eq!(
             metrics.derivative_storage(),
             DerivativeStorageStrategy::Sparse
