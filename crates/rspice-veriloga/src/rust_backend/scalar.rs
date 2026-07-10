@@ -273,6 +273,7 @@ impl CompactLetEmitter {
 enum DdtEmitMode {
     Transient,
     ReactiveLinearized,
+    SharedGeneric,
 }
 
 fn local_stamp_context<'a>(
@@ -308,6 +309,13 @@ pub(super) struct SharedStampValuesPlan {
     pub(super) live: HashSet<ValueId>,
     boundary: Vec<ValueId>,
     refs: HashMap<ValueId, String>,
+    contains_ddt: bool,
+    uses_generic_ddt_mode: bool,
+}
+
+struct ShareableRuntimeLoopValues {
+    results: Vec<ValueId>,
+    dependencies: Vec<ValueId>,
 }
 
 struct ScalarDerivatives {
@@ -533,7 +541,7 @@ fn generate_stamp_file(
         .map(shared_stamp_value_refs)
         .unwrap_or_default();
     if let Some(plan) = &shared_plan {
-        emit_shared_stamp_values_binding(plan, &mut out);
+        emit_shared_stamp_values_binding(plan, false, &mut out);
     }
     if stamp_needs_params {
         out.push_str("        let p=&(*self.params);\n");
@@ -655,7 +663,7 @@ fn generate_stamp_file(
             .map(shared_stamp_value_refs)
             .unwrap_or_default();
         if let Some(plan) = &shared_plan {
-            emit_shared_stamp_values_binding(plan, &mut out);
+            emit_shared_stamp_values_binding(plan, true, &mut out);
         }
         out.push_str("        let p=&(*self.params);\n");
         if reactive_needs_param_given {
@@ -946,10 +954,21 @@ fn shared_stamp_values_plan(
         .iter()
         .map(|value| (*value, format!("common.{}", value_name(*value))))
         .collect();
+    let contains_ddt = shared_stamp_live_contains_ddt(artifact, &live)?;
+    let uses_generic_ddt_mode = contains_ddt
+        || live.iter().any(|value| {
+            artifact
+                .opt
+                .values
+                .get(usize::from(*value))
+                .is_some_and(|value| matches!(value.kind, OptValueKind::DdtScale))
+        });
     Ok(Some(SharedStampValuesPlan {
         live,
         boundary,
         refs,
+        contains_ddt,
+        uses_generic_ddt_mode,
     }))
 }
 
@@ -1040,31 +1059,116 @@ fn shareable_common_stamp_values(
         .copied()
         .filter(|value| !static_cache.contains(*value))
         .collect::<HashSet<_>>();
+    let runtime_loops =
+        shareable_common_runtime_loop_values(artifact, stamp_live, reactive_live, &common)?;
+    let ordered = ordered_live_values(artifact, &common, static_cache)?;
     let mut shared = HashSet::new();
-    for value_id in ordered_live_values(artifact, &common, static_cache)? {
-        if !common.contains(&value_id) {
-            continue;
+    loop {
+        let previous_len = shared.len();
+        for value_id in &ordered {
+            if !common.contains(value_id) || shared.contains(value_id) {
+                continue;
+            }
+            let value = artifact
+                .opt
+                .values
+                .get(usize::from(*value_id))
+                .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+            if let Some(loop_id) = runtime_loop_result_id(&value.kind) {
+                let Some(runtime_loop) = runtime_loops.get(&loop_id) else {
+                    continue;
+                };
+                if runtime_loop.dependencies.iter().all(|dependency| {
+                    static_cache.contains(*dependency) || shared.contains(dependency)
+                }) {
+                    shared.extend(runtime_loop.results.iter().copied());
+                }
+                continue;
+            }
+            if !scalar_value_kind_can_share_in_shared_stamp_helper(&value.kind) {
+                continue;
+            }
+            let dependencies = scalar_value_dependencies(artifact, *value_id)?;
+            if dependencies
+                .iter()
+                .all(|dependency| static_cache.contains(*dependency) || shared.contains(dependency))
+            {
+                shared.insert(*value_id);
+            }
         }
-        let value = artifact
-            .opt
-            .values
-            .get(usize::from(value_id))
-            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
-        if !scalar_value_kind_can_share_between_stamp_modes(&value.kind) {
-            continue;
-        }
-        let dependencies = scalar_value_dependencies(artifact, value_id)?;
-        if dependencies
-            .iter()
-            .all(|dependency| static_cache.contains(*dependency) || shared.contains(dependency))
-        {
-            shared.insert(value_id);
+        if shared.len() == previous_len {
+            break;
         }
     }
     Ok(shared)
 }
 
-fn scalar_value_kind_can_share_between_stamp_modes(kind: &OptValueKind) -> bool {
+fn shareable_common_runtime_loop_values(
+    artifact: &CanonicalIrArtifact,
+    stamp_live: &HashSet<ValueId>,
+    reactive_live: &HashSet<ValueId>,
+    common: &HashSet<ValueId>,
+) -> Result<HashMap<u32, ShareableRuntimeLoopValues>, RustBackendError> {
+    let mut loop_results = HashMap::<u32, Vec<ValueId>>::new();
+    for value in &artifact.opt.values {
+        let Some(loop_id) = runtime_loop_result_id(&value.kind) else {
+            continue;
+        };
+        if stamp_live.contains(&value.id) || reactive_live.contains(&value.id) {
+            loop_results.entry(loop_id).or_default().push(value.id);
+        }
+    }
+
+    let mut shareable = HashMap::new();
+    for (loop_id, results) in loop_results {
+        if !results.iter().all(|result| common.contains(result)) {
+            continue;
+        }
+        let mut dependencies = HashSet::new();
+        for result in &results {
+            dependencies.extend(scalar_value_dependencies(artifact, *result)?);
+        }
+        let mut dependencies = dependencies.into_iter().collect::<Vec<_>>();
+        dependencies.sort_by_key(|value| value.index());
+        shareable.insert(
+            loop_id,
+            ShareableRuntimeLoopValues {
+                results,
+                dependencies,
+            },
+        );
+    }
+    Ok(shareable)
+}
+
+fn shared_stamp_live_contains_ddt(
+    artifact: &CanonicalIrArtifact,
+    live: &HashSet<ValueId>,
+) -> Result<bool, RustBackendError> {
+    let mut checked_runtime_loops = HashSet::new();
+    for value_id in live {
+        let value = artifact
+            .opt
+            .values
+            .get(usize::from(*value_id))
+            .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value_id}")))?;
+        match value.kind {
+            OptValueKind::Ddt { .. } => return Ok(true),
+            OptValueKind::RuntimeLoopResult { loop_id, .. }
+            | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. }
+                if checked_runtime_loops.insert(loop_id) =>
+            {
+                if runtime_loop_graph_contains_ddt(artifact, loop_id, &mut HashSet::new())? {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+fn scalar_value_kind_can_share_in_shared_stamp_helper(kind: &OptValueKind) -> bool {
     matches!(
         kind,
         OptValueKind::RealConstant(_)
@@ -1076,6 +1180,9 @@ fn scalar_value_kind_can_share_between_stamp_modes(kind: &OptValueKind) -> bool 
             | OptValueKind::Multiplicity
             | OptValueKind::Time
             | OptValueKind::Analysis { .. }
+            | OptValueKind::Ddx { .. }
+            | OptValueKind::Ddt { .. }
+            | OptValueKind::DdtScale
             | OptValueKind::NodePotential { .. }
             | OptValueKind::BranchFlow { .. }
             | OptValueKind::BranchUnknownFlow { .. }
@@ -1104,9 +1211,18 @@ fn shared_stamp_value_refs(plan: &SharedStampValuesPlan) -> HashMap<ValueId, Str
     plan.refs.clone()
 }
 
-fn emit_shared_stamp_values_binding(plan: &SharedStampValuesPlan, out: &mut String) {
+fn emit_shared_stamp_values_binding(
+    plan: &SharedStampValuesPlan,
+    reactive: bool,
+    out: &mut String,
+) {
+    let call = if plan.uses_generic_ddt_mode {
+        format!("self.eval_common_stamp_values::<{reactive}>(ctx)")
+    } else {
+        "self.eval_common_stamp_values(ctx)".to_string()
+    };
     if !use_local_shared_stamp_values(plan) {
-        out.push_str("        let common=self.eval_common_stamp_values(ctx);\n");
+        out.push_str(&format!("        let common={call};\n"));
         return;
     }
 
@@ -1123,7 +1239,7 @@ fn emit_shared_stamp_values_binding(plan: &SharedStampValuesPlan, out: &mut Stri
         );
         out.push_str(",\n");
     }
-    out.push_str("        }=self.eval_common_stamp_values(ctx);\n");
+    out.push_str(&format!("        }}={call};\n"));
 }
 
 pub(super) fn emit_shared_stamp_values_struct(
@@ -1181,7 +1297,11 @@ pub(super) fn emit_shared_stamp_values_method(
         temperature_expr: "ctx.temperature()".to_string(),
         thermal_voltage_expr: "ctx.thermal_voltage()".to_string(),
         ddt_slots: Some(ddt_slots),
-        ddt_mode: DdtEmitMode::Transient,
+        ddt_mode: if plan.uses_generic_ddt_mode {
+            DdtEmitMode::SharedGeneric
+        } else {
+            DdtEmitMode::Transient
+        },
         node_array_expr: "n",
         branch_array_expr: "br",
         param_given_expr: "pg",
@@ -1193,9 +1313,15 @@ pub(super) fn emit_shared_stamp_values_method(
     };
 
     out.push_str("    #[inline(always)]\n");
-    out.push_str(
-        "    fn eval_common_stamp_values(&mut self, ctx: &GeneratedEvalContext<'_>) -> CommonStampValues {\n",
-    );
+    if plan.uses_generic_ddt_mode {
+        out.push_str(
+            "    fn eval_common_stamp_values<const REACTIVE: bool>(&mut self, ctx: &GeneratedEvalContext<'_>) -> CommonStampValues {\n",
+        );
+    } else {
+        out.push_str(
+            "    fn eval_common_stamp_values(&mut self, ctx: &GeneratedEvalContext<'_>) -> CommonStampValues {\n",
+        );
+    }
     out.push_str("        let n=self.nodes;\n");
     out.push_str("        let nodes=n;\n");
     if live_values_need_branches(artifact, &plan.live) {
@@ -1206,6 +1332,31 @@ pub(super) fn emit_shared_stamp_values_method(
         out.push_str(
             "        self.ensure_temperature_static(ctx.temperature(), ctx.thermal_voltage());\n",
         );
+    }
+    if plan.contains_ddt {
+        out.push_str("        let ddt_state_current = self.ddt_state_current.as_mut();\n");
+        out.push_str("        let ddt_state_previous = self.ddt_state_previous.as_mut();\n");
+        out.push_str("        let ddt_state_older = self.ddt_state_older.as_mut();\n");
+        out.push_str("        let ddt_state_initialized = self.ddt_state_initialized.as_mut();\n");
+        out.push_str(
+            "        let ddt_derivative_current = self.ddt_derivative_current.as_mut();\n",
+        );
+        out.push_str(
+            "        let ddt_derivative_previous = self.ddt_derivative_previous.as_mut();\n",
+        );
+        out.push_str("        let ddt_active = self.ddt_coefficients.active;\n");
+        out.push_str("        let ddt_scale = self.ddt_coefficients.derivative_scale;\n");
+        out.push_str(
+            "        let ddt_previous_value_scale = self.ddt_coefficients.previous_value_scale;\n",
+        );
+        out.push_str(
+            "        let ddt_older_value_scale = self.ddt_coefficients.older_value_scale;\n",
+        );
+        out.push_str(
+            "        let ddt_previous_derivative_scale = self.ddt_coefficients.previous_derivative_scale;\n",
+        );
+    } else if plan.uses_generic_ddt_mode {
+        out.push_str("        let ddt_scale = self.ddt_coefficients.derivative_scale;\n");
     }
     if live_values_need_params(artifact, &plan.live) {
         out.push_str("        let p=&(*self.params);\n");
@@ -3244,6 +3395,7 @@ fn emit_value_expr(
         OptValueKind::DdtScale => match context.ddt_mode {
             DdtEmitMode::Transient => "ddt_scale".to_string(),
             DdtEmitMode::ReactiveLinearized => "1.0".to_string(),
+            DdtEmitMode::SharedGeneric => "(if REACTIVE { 1.0 } else { ddt_scale })".to_string(),
         },
         OptValueKind::NodePotential { node } => {
             format!(
@@ -3903,6 +4055,21 @@ fn emit_ddt_value_expr(
             ))
         }
         DdtEmitMode::ReactiveLinearized => Ok("0.0".to_string()),
+        DdtEmitMode::SharedGeneric => {
+            let slots = context
+                .ddt_slots
+                .ok_or_else(|| unsupported(artifact, "shared ddt scalar value context"))?;
+            let slot = slots.slot_for(operator).ok_or_else(|| {
+                internal(
+                    artifact,
+                    format!("ddt expression {operator} has no generated state slot"),
+                )
+            })?;
+            let input = value_ref(artifact, parameter_fields, input, context)?;
+            Ok(format!(
+                "if REACTIVE {{ 0.0 }} else {{ eval_ddt(ddt_state_current, ddt_state_previous, ddt_state_older, ddt_state_initialized, ddt_derivative_current, ddt_derivative_previous, ddt_active, ddt_scale, ddt_previous_value_scale, ddt_older_value_scale, ddt_previous_derivative_scale, {slot}, {input}) }}"
+            ))
+        }
     }
 }
 
@@ -6359,6 +6526,105 @@ mod tests {
             MAX_SCALAR_STAMP_LIVE_VALUES
         );
         assert!(!scalar_stamp_emitted_values_exceeds_budget(680_156));
+    }
+
+    #[test]
+    fn scalar_shared_stamp_helper_accepts_const_generic_analog_operators() {
+        assert!(scalar_value_kind_can_share_in_shared_stamp_helper(
+            &OptValueKind::Ddx {
+                value: ValueId::from(0_usize),
+                pos_node: None,
+                neg_node: None,
+            }
+        ));
+        assert!(scalar_value_kind_can_share_in_shared_stamp_helper(
+            &OptValueKind::Ddt {
+                operator: ExprId::from(0_usize),
+                input: ValueId::from(0_usize),
+            }
+        ));
+        assert!(scalar_value_kind_can_share_in_shared_stamp_helper(
+            &OptValueKind::DdtScale
+        ));
+    }
+
+    #[test]
+    fn scalar_shared_stamp_helper_moves_runtime_loops_only_as_complete_units() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module shared_runtime_loop(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real c = 1e-12 from [0:inf);
+    parameter real limit = 3.0 from [0:inf);
+    real index;
+    real charge;
+    analog begin
+        index = 0.0;
+        charge = 0.0;
+        while (index < limit) begin
+            charge = charge + V(p, n);
+            index = index + 1.0;
+        end
+        I(p, n) <+ ddt(c * charge);
+    end
+endmodule
+"#,
+            )
+            .expect("canonical IR");
+        let static_cache = ScalarStaticCache::from_artifact(&artifact).expect("static cache");
+        let roots = scalar_equation_roots(&artifact).expect("equation roots");
+        let reactive_roots = reactive_equation_roots(&artifact, &roots).expect("reactive roots");
+        let stamp_live =
+            collect_stamp_live_values(&artifact, &roots, &static_cache).expect("stamp live values");
+        let reactive_live = collect_stamp_live_values(&artifact, &reactive_roots, &static_cache)
+            .expect("reactive live values");
+        let common = stamp_live
+            .intersection(&reactive_live)
+            .copied()
+            .filter(|value| !static_cache.contains(*value))
+            .collect::<HashSet<_>>();
+        let shared =
+            shareable_common_stamp_values(&artifact, &stamp_live, &reactive_live, &static_cache)
+                .expect("shared stamp values");
+        let runtime_results = artifact
+            .opt
+            .values
+            .iter()
+            .filter(|value| runtime_loop_result_id(&value.kind).is_some())
+            .map(|value| value.id)
+            .collect::<Vec<_>>();
+
+        assert!(!runtime_results.is_empty());
+        assert!(
+            runtime_results
+                .iter()
+                .filter(|value| common.contains(value))
+                .all(|value| shared.contains(value))
+        );
+        let mut partial_stamp_live = HashSet::new();
+        partial_stamp_live.extend(runtime_results.iter().copied());
+        let partial_reactive_live = runtime_results
+            .first()
+            .copied()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let partial_common = partial_stamp_live
+            .intersection(&partial_reactive_live)
+            .copied()
+            .collect::<HashSet<_>>();
+        assert!(
+            shareable_common_runtime_loop_values(
+                &artifact,
+                &partial_stamp_live,
+                &partial_reactive_live,
+                &partial_common,
+            )
+            .expect("partially shared runtime loop")
+            .is_empty(),
+            "a runtime loop must remain caller-local when either stamp mode needs a distinct result"
+        );
     }
 
     #[test]
