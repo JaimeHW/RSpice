@@ -38,6 +38,7 @@ const MAX_COMPACT_GENERATED_STATEMENT_LINE_BYTES: usize = 4096;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES: usize = 120_000;
+const MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES: usize = 8_000_000;
 const DERIVATIVE_ACTIVITY_MARKER: &str = "// __RSPICE_DERIVATIVE_ACTIVITY__\n";
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
@@ -376,7 +377,26 @@ pub(super) fn generate_sparse_local_kernel_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
 ) -> Result<GeneratedRustDevice, RustBackendError> {
-    generate_device_with_scalar_hybrid_plan(artifact, options, None, true)
+    let device = generate_device_with_scalar_hybrid_plan(artifact, options, None, true)?;
+    let source_bytes = device
+        .files
+        .iter()
+        .try_fold(0usize, |total, file| total.checked_add(file.contents.len()))
+        .unwrap_or(usize::MAX);
+    if !sparse_local_device_source_is_bounded(source_bytes) {
+        return Err(RustBackendError::unsupported(
+            artifact.metadata.source_package.as_str(),
+            artifact.mir.module_name.as_str(),
+            format!(
+                "sparse local kernel source is {source_bytes} bytes; production limit is {MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES} bytes"
+            ),
+        ));
+    }
+    Ok(device)
+}
+
+fn sparse_local_device_source_is_bounded(source_bytes: usize) -> bool {
+    source_bytes <= MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES
 }
 
 pub(super) fn generate_hybrid_device(
@@ -4089,7 +4109,8 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
-        GeneratedKernelComplexity, MAX_STAMP_HELPER_OPERATIONS, StructuredDerivativeActivity,
+        GeneratedKernelComplexity, MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES,
+        MAX_STAMP_HELPER_OPERATIONS, StructuredDerivativeActivity,
         StructuredDerivativeActivityPlane, bound_generated_scratch_helper_inlining,
         collapse_single_line_generated_if_blocks, compact_div_from_scalar_offset_denominator,
         compact_exp_div_scaled_inputs_expression, compact_generated_stamp_surface,
@@ -4103,7 +4124,18 @@ mod compact_generated_stamp_surface_tests {
         render_runtime_support_module_for_generated_sources,
         reuse_duplicate_derivative_locals_in_helper_block, rewrite_inactive_derivative_store_calls,
         scratch_operation_runtime, should_cache_compact_condition,
+        sparse_local_device_source_is_bounded,
     };
+
+    #[test]
+    fn sparse_local_device_source_budget_is_inclusive_and_bounded() {
+        assert!(sparse_local_device_source_is_bounded(
+            MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES
+        ));
+        assert!(!sparse_local_device_source_is_bounded(
+            MAX_SPARSE_LOCAL_DEVICE_SOURCE_BYTES + 1
+        ));
+    }
 
     #[test]
     fn primal_scratch_helpers_never_update_derivative_storage() {

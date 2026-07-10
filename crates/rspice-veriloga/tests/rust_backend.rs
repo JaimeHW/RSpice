@@ -1878,6 +1878,53 @@ fn rust_backend_auto_transpiles_shipped_psp104_with_sparse_local_kernels() {
 }
 
 #[test]
+fn rust_backend_auto_bounds_shipped_bsimcmg_sparse_local_source() {
+    let model_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("models")
+        .join("veriloga");
+    let path = model_root
+        .join("cmc")
+        .join("BSIM-CMG_112.1.0_04282026")
+        .join("code")
+        .join("bsimcmg.va");
+    assert!(
+        path.exists(),
+        "missing BSIM-CMG fixture: {}",
+        path.display()
+    );
+
+    let mut options = CompilerOptions::default();
+    options.include_paths.push(model_root);
+    let compiled = VerilogACompiler::new(options)
+        .compile_file_canonical_ir_with_metadata(&path, Some("bsimcmg_va"))
+        .expect("compile shipped BSIM-CMG canonical IR");
+    let report = RustTranspiler::new_auto(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile_with_report(&compiled.artifact)
+    .expect("transpile shipped BSIM-CMG through auto Rust backend");
+
+    assert_eq!(report.backend, RustBackendSelection::StructuredKernel);
+    assert!(
+        report
+            .fallback_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("production limit is 8000000 bytes")),
+        "unexpected fallback: {:?}",
+        report.fallback_reason
+    );
+    let source_bytes = report
+        .device
+        .files
+        .iter()
+        .map(|file| file.contents.len())
+        .sum::<usize>();
+    assert!(source_bytes < 8_000_000, "generated {source_bytes} bytes");
+}
+
+#[test]
 fn rust_backend_auto_bounds_hybrid_local_storage_width() {
     let source = wide_hybrid_local_storage_guard_source(35, 470);
     let artifact = VerilogACompiler::default()
