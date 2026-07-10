@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    sync::OnceLock,
 };
 
 use smol_str::SmolStr;
@@ -37,6 +38,7 @@ const MAX_COMPACT_GENERATED_STATEMENT_LINE_BYTES: usize = 4096;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_ASSIGNMENTS: usize = 8_192;
 const MAX_SCALAR_HYBRID_RUNTIME_LOOP_VARIABLES: usize = 1_024;
 const MAX_SCALAR_HYBRID_STAMP_EMITTED_VALUES: usize = 120_000;
+const DERIVATIVE_ACTIVITY_MARKER: &str = "// __RSPICE_DERIVATIVE_ACTIVITY__\n";
 const DENSE_STAMP_DERIVATIVE_THRESHOLD: usize = 4;
 const SPARSE_STAMP_DERIVATIVE_THRESHOLD: usize = 10;
 const COMPACT_EQUATION_EXPR_NODE_THRESHOLD: usize = 32;
@@ -490,18 +492,28 @@ fn generate_device_with_scalar_hybrid_plan(
     };
     let potential_branch_slots = collect_potential_branch_slots(artifact)?;
 
-    let stamp_files = compact_stamp_files(generate_stamp_file(
+    let derivative_activity = collect_structured_derivative_activity(
         artifact,
-        options,
-        &parameter_fields,
-        &variable_fields,
-        &ddt_slots,
         &transient_liveness,
         &reactive_liveness,
-        &potential_branch_slots,
-        scalar_hybrid_plan,
-        native_local_storage,
-    )?);
+        potential_branch_slots.current_slots(),
+    )?;
+    let stamp_files = compact_stamp_files(
+        generate_stamp_file(
+            artifact,
+            options,
+            &parameter_fields,
+            &variable_fields,
+            &ddt_slots,
+            &transient_liveness,
+            &reactive_liveness,
+            &potential_branch_slots,
+            scalar_hybrid_plan,
+            native_local_storage,
+            &derivative_activity,
+        )?,
+        &derivative_activity,
+    );
     let state_scratch_usage = StateScratchUsage::from_stamp_files(&stamp_files);
     let state = if let Some(plan) = scalar_hybrid_plan.filter(|plan| !plan.static_cache.is_empty())
     {
@@ -556,8 +568,12 @@ fn generate_device_with_scalar_hybrid_plan(
     })
 }
 
-fn compact_stamp_files(mut files: StampFiles) -> StampFiles {
+fn compact_stamp_files(
+    mut files: StampFiles,
+    derivative_activity: &StructuredDerivativeActivity,
+) -> StampFiles {
     files.stamp = compact_generated_stamp_surface(files.stamp);
+    files.stamp = rewrite_inactive_derivative_store_calls(files.stamp, derivative_activity);
     for helper in &mut files.helpers {
         helper.contents =
             compact_generated_stamp_surface_base(std::mem::take(&mut helper.contents));
@@ -566,12 +582,69 @@ fn compact_stamp_files(mut files: StampFiles) -> StampFiles {
         helper.contents = reuse_duplicate_derivative_locals_in_helper_methods(std::mem::take(
             &mut helper.contents,
         ));
+        helper.contents = rewrite_inactive_derivative_store_calls(
+            std::mem::take(&mut helper.contents),
+            derivative_activity,
+        );
         helper.contents = reconcile_helper_super_imports(std::mem::take(&mut helper.contents));
         helper.contents = compact_generated_surface_lines(std::mem::take(&mut helper.contents));
     }
     files.stamp = prune_unused_root_scratch_allocations(files.stamp);
     files.stamp = prune_unused_root_stamp_support_aliases(files.stamp, &files.helpers);
     files
+}
+
+fn rewrite_inactive_derivative_store_calls(
+    source: String,
+    activity: &StructuredDerivativeActivity,
+) -> String {
+    let primal_methods = &scratch_operation_runtime().primal_methods;
+    if primal_methods.is_empty() {
+        return source;
+    }
+
+    let mut rewritten = String::with_capacity(source.len());
+    let mut cursor = 0usize;
+    while let Some((call_start, method_start)) = next_scratch_store_call(&source, cursor) {
+        let method_end = source[method_start..]
+            .find(|ch: char| !is_rust_identifier_char(ch))
+            .map(|offset| method_start + offset)
+            .unwrap_or(source.len());
+        let method = &source[method_start..method_end];
+        let target = source
+            .get(method_end + 1..)
+            .and_then(|arguments| arguments.split_once(',').map(|(target, _)| target.trim()))
+            .and_then(|target| target.parse::<usize>().ok());
+        let inactive = target.is_some_and(|target| activity.target_is_primal(target));
+
+        rewritten.push_str(&source[cursor..method_start]);
+        if inactive && primal_methods.contains(method) {
+            rewritten.push_str(&primal_scratch_method_name(method));
+        } else {
+            rewritten.push_str(method);
+        }
+        cursor = method_end;
+        if call_start == method_end {
+            break;
+        }
+    }
+    rewritten.push_str(&source[cursor..]);
+    rewritten
+}
+
+fn next_scratch_store_call(source: &str, cursor: usize) -> Option<(usize, usize)> {
+    [
+        ("s.store_", "s.".len()),
+        ("scratch.store_", "scratch.".len()),
+    ]
+    .into_iter()
+    .filter_map(|(pattern, receiver_len)| {
+        source[cursor..]
+            .find(pattern)
+            .map(|relative| (cursor + relative, receiver_len))
+    })
+    .min_by_key(|(start, _)| *start)
+    .map(|(start, receiver_len)| (start, start + receiver_len))
 }
 
 fn prune_unused_root_scratch_allocations(source: String) -> String {
@@ -660,9 +733,8 @@ fn root_scratch_allocation_ranges(lines: &[&str]) -> Vec<(usize, usize)> {
             && lines[index + 2]
                 .trim_start()
                 .starts_with("slot @ None => slot.insert(")
-            && lines[index + 2]
-                .trim_end()
-                .ends_with("::new_box()).as_mut(),")
+            && lines[index + 2].trim_end().ends_with(").as_mut(),")
+            && lines[index + 2].contains("::new_box")
             && lines[index + 3].trim() == "};"
         {
             ranges.push((index, index + 4));
@@ -4010,18 +4082,79 @@ fn find_top_level_ascii_byte(source: &str, target: u8) -> Option<usize> {
 #[cfg(test)]
 mod compact_generated_stamp_surface_tests {
     use super::{
-        GeneratedKernelComplexity, MAX_STAMP_HELPER_OPERATIONS,
-        bound_generated_scratch_helper_inlining, collapse_single_line_generated_if_blocks,
-        compact_div_from_scalar_offset_denominator, compact_exp_div_scaled_inputs_expression,
-        compact_generated_stamp_surface, compact_generated_statement_runs,
-        compact_generated_surface_lines, compact_limited_exp_div_scaled_inputs_expression,
+        GeneratedKernelComplexity, MAX_STAMP_HELPER_OPERATIONS, StructuredDerivativeActivity,
+        StructuredDerivativeActivityPlane, bound_generated_scratch_helper_inlining,
+        collapse_single_line_generated_if_blocks, compact_div_from_scalar_offset_denominator,
+        compact_exp_div_scaled_inputs_expression, compact_generated_stamp_surface,
+        compact_generated_statement_runs, compact_generated_surface_lines,
+        compact_limited_exp_div_scaled_inputs_expression,
         compact_ln_offset_div_scaled_inputs_expression,
         compact_mul_sub_from_scalar_rhs_div_scaled_inputs_lhs_expression,
-        duplicate_hoistable_derivative_rhs, generate_ad_value_struct,
-        generate_scratch_operation_helpers, is_hoistable_generated_derivative_rhs,
-        render_runtime_support_module, render_runtime_support_module_for_generated_sources,
-        reuse_duplicate_derivative_locals_in_helper_block, should_cache_compact_condition,
+        duplicate_hoistable_derivative_rhs, emit_structured_derivative_activity_array,
+        generate_ad_value_struct, generate_scratch_operation_helpers,
+        is_hoistable_generated_derivative_rhs, render_runtime_support_module,
+        render_runtime_support_module_for_generated_sources,
+        reuse_duplicate_derivative_locals_in_helper_block, rewrite_inactive_derivative_store_calls,
+        scratch_operation_runtime, should_cache_compact_condition,
     };
+
+    #[test]
+    fn primal_scratch_helpers_never_update_derivative_storage() {
+        let helpers = &scratch_operation_runtime().primal_helpers;
+
+        assert!(helpers.contains("fn store_primal_add("), "{helpers}");
+        assert!(!helpers.contains("node_derivatives"), "{helpers}");
+        assert!(!helpers.contains("branch_derivatives"), "{helpers}");
+        assert!(!helpers.contains("derivatives_dirty"), "{helpers}");
+        assert!(
+            helpers
+                .lines()
+                .filter(|line| line.contains("self.store_"))
+                .all(|line| line.contains("self.store_primal_")),
+            "{helpers}"
+        );
+    }
+
+    #[test]
+    fn primal_call_rewrite_requires_all_analysis_planes_to_be_inactive() {
+        let activity = StructuredDerivativeActivity {
+            transient: StructuredDerivativeActivityPlane {
+                node_masks: vec![0, 1],
+                branch_masks: vec![0, 0],
+            },
+            reactive: StructuredDerivativeActivityPlane {
+                node_masks: vec![2, 0],
+                branch_masks: vec![0, 0],
+            },
+        };
+        let source = "s.store_add(0, 1, 2);\ns.store_add(1, 2, 3);\ns.store_add(2, 3, 4);\n";
+
+        let rewritten = rewrite_inactive_derivative_store_calls(source.to_string(), &activity);
+
+        assert!(rewritten.contains("s.store_add(0, 1, 2)"), "{rewritten}");
+        assert!(rewritten.contains("s.store_add(1, 2, 3)"), "{rewritten}");
+        assert!(
+            rewritten.contains("s.store_primal_add(2, 3, 4)"),
+            "{rewritten}"
+        );
+    }
+
+    #[test]
+    fn derivative_activity_arrays_use_compact_sparse_initializers() {
+        let mut masks = vec![0; 32];
+        masks[2] = 5;
+        let mut sparse = String::new();
+        emit_structured_derivative_activity_array("ACTIVITY", &masks, &mut sparse);
+        assert!(sparse.contains("masks[2]=0x00000000000000000000000000000005;"));
+        assert!(!sparse.contains("masks[0]="), "{sparse}");
+
+        let mut empty = String::new();
+        emit_structured_derivative_activity_array("EMPTY", &[0, 0, 0], &mut empty);
+        assert_eq!(
+            empty,
+            "const EMPTY: [u128; Instance::VARIABLE_COUNT] = [0; Instance::VARIABLE_COUNT];\n"
+        );
+    }
 
     #[test]
     fn bounds_large_scratch_helpers_at_the_runtime_boundary() {
@@ -15465,7 +15598,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            ddt_coefficients: GeneratedDdtCoefficients::inactive(),\n");
     out.push_str(&extensions.new_initializers);
     if scratch_usage.uses_transient {
-        out.push_str("            scratch: Some(KernelScratch::new_box()),\n");
+        out.push_str("            scratch: None,\n");
     }
     if scratch_usage.uses_reactive {
         out.push_str("            reactive_scratch: None,\n");
@@ -16862,6 +16995,7 @@ fn generate_stamp_file(
     potential_branch_slots: &PotentialBranchSlots,
     scalar_hybrid_plan: Option<&ScalarHybridStampPlan>,
     native_local_storage: bool,
+    derivative_activity: &StructuredDerivativeActivity,
 ) -> Result<StampFiles, RustBackendError> {
     let mut out = String::new();
     out.push_str(
@@ -16885,6 +17019,7 @@ fn generate_stamp_file(
     out.push_str(
         "type ReactiveScratch = KernelReactiveScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n\n",
     );
+    out.push_str(DERIVATIVE_ACTIVITY_MARKER);
     out.push_str("const LIMEXP_MAX: f64 = 5.54062238439351e34;\n");
     out.push_str("const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;\n\n");
     out.push_str("#[inline]\n");
@@ -17100,6 +17235,14 @@ fn generate_stamp_file(
             ),
         );
     }
+    let mut rendered_activity = String::new();
+    emit_structured_derivative_activity(
+        derivative_activity,
+        out.contains("&TRANSIENT_NODE_DERIVATIVE_ACTIVITY"),
+        out.contains("&REACTIVE_NODE_DERIVATIVE_ACTIVITY"),
+        &mut rendered_activity,
+    );
+    out = out.replacen(DERIVATIVE_ACTIVITY_MARKER, &rendered_activity, 1);
     Ok(StampFiles {
         stamp: out,
         helpers,
@@ -17112,6 +17255,7 @@ struct StampFiles {
 }
 
 fn generate_scratch_struct() -> String {
+    let operation_runtime = scratch_operation_runtime();
     let mut out = [
         "#[inline]",
         "fn integer_power_derivative_scale(base: f64, exponent: i32) -> f64 {",
@@ -17148,12 +17292,71 @@ fn generate_scratch_struct() -> String {
         "    }",
         "}",
         "",
+        "#[derive(Clone, Copy)]",
+        "struct DerivativeActivity {",
+        "    node_masks: &'static [u128],",
+        "    branch_masks: &'static [u128],",
+        "}",
+        "",
+        "impl DerivativeActivity {",
+        "    #[inline]",
+        "    fn dense() -> Self {",
+        "        Self { node_masks: &[], branch_masks: &[] }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn new(node_masks: &'static [u128], branch_masks: &'static [u128]) -> Self {",
+        "        Self { node_masks, branch_masks }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn node_axes(self, index: usize, count: usize) -> ActiveAxes {",
+        "        ActiveAxes::new(self.node_masks.get(index).copied(), count)",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn branch_axes(self, index: usize, count: usize) -> ActiveAxes {",
+        "        ActiveAxes::new(self.branch_masks.get(index).copied(), count)",
+        "    }",
+        "}",
+        "",
+        "struct ActiveAxes {",
+        "    mask: u128,",
+        "    dense_index: usize,",
+        "    count: usize,",
+        "    dense: bool,",
+        "}",
+        "",
+        "impl ActiveAxes {",
+        "    #[inline]",
+        "    fn new(mask: Option<u128>, count: usize) -> Self {",
+        "        let dense = count > u128::BITS as usize || mask.is_none();",
+        "        let valid = if count >= u128::BITS as usize { u128::MAX } else if count == 0 { 0 } else { (1u128 << count) - 1 };",
+        "        Self { mask: mask.unwrap_or(0) & valid, dense_index: 0, count, dense }",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn next(&mut self) -> Option<usize> {",
+        "        if self.dense {",
+        "            if self.dense_index == self.count { return None; }",
+        "            let axis = self.dense_index;",
+        "            self.dense_index += 1;",
+        "            return Some(axis);",
+        "        }",
+        "        if self.mask == 0 { return None; }",
+        "        let axis = self.mask.trailing_zeros() as usize;",
+        "        self.mask &= self.mask - 1;",
+        "        Some(axis)",
+        "    }",
+        "}",
+        "",
         "struct Scratch {",
         "    values: [f64; Instance::VARIABLE_COUNT],",
         "    bool_values: [bool; Instance::VARIABLE_COUNT],",
         "    node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "    branch_derivatives: [[f64; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
         "    derivatives_dirty: [bool; Instance::VARIABLE_COUNT],",
+        "    activity: DerivativeActivity,",
         "}",
         "",
         "impl Scratch {",
@@ -17162,9 +17365,14 @@ fn generate_scratch_struct() -> String {
         "    }",
         "",
         "    fn new_box() -> Box<Self> {",
+        "        Self::new_box_with_activity(&[], &[])",
+        "    }",
+        "",
+        "    fn new_box_with_activity(node_masks: &'static [u128], branch_masks: &'static [u128]) -> Box<Self> {",
         "        let mut boxed = Box::<Self>::new_uninit();",
         "        unsafe {",
         "            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);",
+        "            std::ptr::addr_of_mut!((*boxed.as_mut_ptr()).activity).write(DerivativeActivity::new(node_masks, branch_masks));",
         "            boxed.assume_init()",
         "        }",
         "    }",
@@ -17176,6 +17384,7 @@ fn generate_scratch_struct() -> String {
         "            node_derivatives: [[0.0; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "            branch_derivatives: [[0.0; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
         "            derivatives_dirty: [false; Instance::VARIABLE_COUNT],",
+        "            activity: DerivativeActivity::dense(),",
         "        }",
         "    }",
         "",
@@ -17203,6 +17412,11 @@ fn generate_scratch_struct() -> String {
         "    fn store_scalar(&mut self, index: usize, value: f64) {",
         "        self.values[index] = value;",
         "        self.clear_derivatives_if_dirty(index);",
+        "    }",
+        "",
+        "    #[inline]",
+        "    fn store_primal_scalar(&mut self, index: usize, value: f64) {",
+        "        self.values[index] = value;",
         "    }",
         "",
         "    #[inline]",
@@ -17220,7 +17434,9 @@ fn generate_scratch_struct() -> String {
     ]
     .join("\n");
     out.push('\n');
-    out.push_str(&generate_scratch_operation_helpers());
+    out.push_str(&operation_runtime.derivative_helpers);
+    out.push('\n');
+    out.push_str(&operation_runtime.primal_helpers);
     out.push_str("\n}\n\n");
     out.push_str(&[
         "",
@@ -17233,6 +17449,7 @@ fn generate_scratch_struct() -> String {
         "    reactive_values: [f64; Instance::VARIABLE_COUNT],",
         "    reactive_node_derivatives: [[f64; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "    reactive_branch_derivatives: [[f64; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "    activity: DerivativeActivity,",
         "}",
         "",
         "impl ReactiveScratch {",
@@ -17241,9 +17458,14 @@ fn generate_scratch_struct() -> String {
         "    }",
         "",
         "    fn new_box() -> Box<Self> {",
+        "        Self::new_box_with_activity(&[], &[])",
+        "    }",
+        "",
+        "    fn new_box_with_activity(node_masks: &'static [u128], branch_masks: &'static [u128]) -> Box<Self> {",
         "        let mut boxed = Box::<Self>::new_uninit();",
         "        unsafe {",
         "            std::ptr::write_bytes(boxed.as_mut_ptr(), 0, 1);",
+        "            std::ptr::addr_of_mut!((*boxed.as_mut_ptr()).activity).write(DerivativeActivity::new(node_masks, branch_masks));",
         "            boxed.assume_init()",
         "        }",
         "    }",
@@ -17258,6 +17480,7 @@ fn generate_scratch_struct() -> String {
         "            reactive_values: [0.0; Instance::VARIABLE_COUNT],",
         "            reactive_node_derivatives: [[0.0; Instance::NODE_COUNT]; Instance::VARIABLE_COUNT],",
         "            reactive_branch_derivatives: [[0.0; Instance::BRANCH_COUNT]; Instance::VARIABLE_COUNT],",
+        "            activity: DerivativeActivity::dense(),",
         "        }",
         "    }",
         "",
@@ -17288,6 +17511,11 @@ fn generate_scratch_struct() -> String {
         "    }",
         "",
         "    #[inline]",
+        "    fn store_primal_scalar(&mut self, index: usize, value: f64) {",
+        "        self.values[index] = value;",
+        "    }",
+        "",
+        "    #[inline]",
         "    fn mark_derivatives_dirty(&mut self, index: usize) {",
         "        self.derivatives_dirty[index] = true;",
         "    }",
@@ -17302,9 +17530,159 @@ fn generate_scratch_struct() -> String {
     ]
     .join("\n"));
     out.push('\n');
-    out.push_str(&generate_scratch_operation_helpers());
+    out.push_str(&operation_runtime.derivative_helpers);
+    out.push('\n');
+    out.push_str(&operation_runtime.primal_helpers);
     out.push_str("\n}\n\n");
+    out = out
+        .replace(
+            "for axis in 0..Instance::NODE_COUNT {",
+            "let mut active_axes = self.activity.node_axes(index, Instance::NODE_COUNT); while let Some(axis) = active_axes.next() {",
+        )
+        .replace(
+            "for axis in 0..Instance::BRANCH_COUNT {",
+            "let mut active_axes = self.activity.branch_axes(index, Instance::BRANCH_COUNT); while let Some(axis) = active_axes.next() {",
+        );
     bound_generated_scratch_helper_inlining(mark_generated_scratch_derivative_stores(out))
+}
+
+struct ScratchOperationRuntime {
+    derivative_helpers: String,
+    primal_helpers: String,
+    primal_methods: HashSet<String>,
+}
+
+fn scratch_operation_runtime() -> &'static ScratchOperationRuntime {
+    static RUNTIME: OnceLock<ScratchOperationRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        let derivative_helpers = generate_scratch_operation_helpers();
+        let primal_methods = collect_primal_scratch_operation_methods(&derivative_helpers);
+        let primal_helpers =
+            generate_primal_scratch_operation_helpers(&derivative_helpers, &primal_methods);
+        ScratchOperationRuntime {
+            derivative_helpers,
+            primal_helpers,
+            primal_methods,
+        }
+    })
+}
+
+fn collect_primal_scratch_operation_methods(source: &str) -> HashSet<String> {
+    let lines = source.lines().collect::<Vec<_>>();
+    let methods = scratch_operation_method_ranges(&lines);
+    methods
+        .iter()
+        .filter(|method| {
+            let body = lines[method.signature_line..method.end_line].join("\n");
+            body.contains("self.values[index]") || body.contains("self.store_")
+        })
+        .map(|method| method.name.clone())
+        .collect()
+}
+
+fn generate_primal_scratch_operation_helpers(
+    source: &str,
+    primal_methods: &HashSet<String>,
+) -> String {
+    let lines = source.lines().collect::<Vec<_>>();
+    let methods = scratch_operation_method_ranges(&lines);
+    let mut out = String::new();
+    for method in methods
+        .iter()
+        .filter(|method| primal_methods.contains(method.name.as_str()))
+    {
+        for (line_index, line) in lines[method.start_line..method.end_line].iter().enumerate() {
+            let absolute_line = method.start_line + line_index;
+            if absolute_line == method.signature_line {
+                out.push_str(&line.replacen(
+                    &format!("fn {}", method.name),
+                    &format!("fn {}", primal_scratch_method_name(&method.name)),
+                    1,
+                ));
+                out.push('\n');
+                continue;
+            }
+            if line.contains("node_derivatives")
+                || line.contains("branch_derivatives")
+                || line.contains("derivatives_dirty")
+            {
+                continue;
+            }
+            out.push_str(&rewrite_primal_scratch_delegations(line, &primal_methods));
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn primal_scratch_method_name(method: &str) -> String {
+    format!(
+        "store_primal_{}",
+        method.strip_prefix("store_").unwrap_or(method)
+    )
+}
+
+fn rewrite_primal_scratch_delegations(line: &str, primal_methods: &HashSet<String>) -> String {
+    let mut rewritten = String::with_capacity(line.len());
+    let mut cursor = 0usize;
+    while let Some(relative) = line[cursor..].find("self.store_") {
+        let start = cursor + relative;
+        let method_start = start + "self.".len();
+        let method_end = line[method_start..]
+            .find(|ch: char| !is_rust_identifier_char(ch))
+            .map(|offset| method_start + offset)
+            .unwrap_or(line.len());
+        let method = &line[method_start..method_end];
+        rewritten.push_str(&line[cursor..method_start]);
+        if method == "store_scalar" || primal_methods.contains(method) {
+            rewritten.push_str(&primal_scratch_method_name(method));
+        } else {
+            rewritten.push_str(method);
+        }
+        cursor = method_end;
+    }
+    rewritten.push_str(&line[cursor..]);
+    rewritten
+}
+
+fn scratch_operation_method_ranges(lines: &[&str]) -> Vec<RuntimeMethodRange> {
+    let mut ranges = Vec::new();
+    for (signature_line, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        let Some(suffix) = trimmed.strip_prefix("fn store_") else {
+            continue;
+        };
+        let name_end = suffix
+            .find(|ch: char| !is_rust_identifier_char(ch))
+            .unwrap_or(suffix.len());
+        let name = format!("store_{}", &suffix[..name_end]);
+        let mut start_line = signature_line;
+        while start_line != 0 && lines[start_line - 1].trim_start().starts_with("#[") {
+            start_line -= 1;
+        }
+        let mut end_line = signature_line;
+        let mut depth = 0i32;
+        let mut saw_opening_brace = false;
+        loop {
+            let function_line = lines.get(end_line).unwrap_or_else(|| {
+                panic!("generated scratch method '{name}' has an unterminated body")
+            });
+            saw_opening_brace |= function_line.contains('{');
+            depth += brace_delta(function_line);
+            end_line += 1;
+            if saw_opening_brace && depth == 0 {
+                break;
+            }
+        }
+        ranges.push(RuntimeMethodRange {
+            name,
+            start_line,
+            signature_line,
+            end_line,
+        });
+    }
+    ranges
 }
 
 fn bound_generated_scratch_helper_inlining(source: String) -> String {
@@ -30025,7 +30403,7 @@ fn generate_ad_value_struct() -> String {
 
 pub fn render_runtime_support_module() -> String {
     let mut support = String::new();
-    support.push_str("#![allow(dead_code)]\n\n");
+    support.push_str("#![allow(dead_code, unused_variables)]\n\n");
     support.push_str("use super::GeneratedEvalContext;\n\n");
     support.push_str("const LIMEXP_MAX: f64 = 5.54062238439351e34;\n\n");
     support.push_str(&generate_scratch_struct());
@@ -30715,8 +31093,9 @@ fn emit_stamp_body(
             "        let s = match &mut self.{scratch_field} {{\n"
         ));
         out.push_str("            Some(buf) => buf.as_mut(),\n");
+        let activity_prefix = if reactive { "REACTIVE" } else { "TRANSIENT" };
         out.push_str(&format!(
-            "            slot @ None => slot.insert({scratch_type}::new_box()).as_mut(),\n"
+            "            slot @ None => slot.insert({scratch_type}::new_box_with_activity(&{activity_prefix}_NODE_DERIVATIVE_ACTIVITY, &{activity_prefix}_BRANCH_DERIVATIVE_ACTIVITY)).as_mut(),\n"
         ));
         out.push_str("        };\n");
     }
@@ -33039,6 +33418,152 @@ impl LocalDerivativeAxes {
         self.nodes.extend(other.nodes);
         self.branches.extend(other.branches);
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct StructuredDerivativeActivityPlane {
+    node_masks: Vec<u128>,
+    branch_masks: Vec<u128>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct StructuredDerivativeActivity {
+    transient: StructuredDerivativeActivityPlane,
+    reactive: StructuredDerivativeActivityPlane,
+}
+
+impl StructuredDerivativeActivity {
+    fn target_is_primal(&self, target: usize) -> bool {
+        [&self.transient, &self.reactive].into_iter().all(|plane| {
+            plane.node_masks.get(target).copied().unwrap_or(0) == 0
+                && plane.branch_masks.get(target).copied().unwrap_or(0) == 0
+        })
+    }
+}
+
+fn collect_structured_derivative_activity(
+    artifact: &CanonicalIrArtifact,
+    transient_liveness: &TransientLiveness,
+    reactive_liveness: &ReactiveLiveness,
+    branch_current_unknowns: &HashMap<String, BranchCurrentSlot>,
+) -> Result<StructuredDerivativeActivity, RustBackendError> {
+    let transient =
+        collect_local_derivative_layout(artifact, transient_liveness, branch_current_unknowns)?;
+    let reactive = collect_reactive_local_derivative_layout(
+        artifact,
+        reactive_liveness,
+        branch_current_unknowns,
+    )?;
+    let mut activity = StructuredDerivativeActivity {
+        transient: StructuredDerivativeActivityPlane {
+            node_masks: vec![0; artifact.hir.variables.len()],
+            branch_masks: vec![0; artifact.hir.variables.len()],
+        },
+        reactive: StructuredDerivativeActivityPlane {
+            node_masks: vec![0; artifact.hir.variables.len()],
+            branch_masks: vec![0; artifact.hir.variables.len()],
+        },
+    };
+
+    extend_structured_derivative_activity_plane(artifact, &mut activity.transient, &[&transient]);
+    extend_structured_derivative_activity_plane(
+        artifact,
+        &mut activity.reactive,
+        &[&reactive.normal, &reactive.reactive],
+    );
+    Ok(activity)
+}
+
+fn extend_structured_derivative_activity_plane(
+    artifact: &CanonicalIrArtifact,
+    plane: &mut StructuredDerivativeActivityPlane,
+    layouts: &[&LocalDerivativeLayout],
+) {
+    for variable in &artifact.hir.variables {
+        let index = usize::from(variable.id);
+        for layout in layouts {
+            let Some(axes) = layout.get(variable.name.as_str()) else {
+                continue;
+            };
+            for &node in &axes.nodes {
+                if node < u128::BITS as usize {
+                    plane.node_masks[index] |= 1u128 << node;
+                }
+            }
+            for &branch in &axes.branches {
+                if branch < u128::BITS as usize {
+                    plane.branch_masks[index] |= 1u128 << branch;
+                }
+            }
+        }
+    }
+}
+
+fn emit_structured_derivative_activity(
+    activity: &StructuredDerivativeActivity,
+    transient: bool,
+    reactive: bool,
+    out: &mut String,
+) {
+    for (prefix, plane, used) in [
+        ("TRANSIENT", &activity.transient, transient),
+        ("REACTIVE", &activity.reactive, reactive),
+    ] {
+        if !used {
+            continue;
+        }
+        emit_structured_derivative_activity_array(
+            &format!("{prefix}_NODE_DERIVATIVE_ACTIVITY"),
+            &plane.node_masks,
+            out,
+        );
+        emit_structured_derivative_activity_array(
+            &format!("{prefix}_BRANCH_DERIVATIVE_ACTIVITY"),
+            &plane.branch_masks,
+            out,
+        );
+    }
+    out.push('\n');
+}
+
+fn emit_structured_derivative_activity_array(name: &str, masks: &[u128], out: &mut String) {
+    let mut dense = format!("const {name}: [u128; Instance::VARIABLE_COUNT] = [\n");
+    for chunk in masks.chunks(4) {
+        dense.push_str("    ");
+        for mask in chunk {
+            dense.push_str(&format!("0x{mask:032x},"));
+        }
+        dense.push('\n');
+    }
+    dense.push_str("];\n");
+
+    let nonzero = masks
+        .iter()
+        .enumerate()
+        .filter(|(_, mask)| **mask != 0)
+        .collect::<Vec<_>>();
+    let sparse = if nonzero.is_empty() {
+        format!("const {name}: [u128; Instance::VARIABLE_COUNT] = [0; Instance::VARIABLE_COUNT];\n")
+    } else {
+        let mut sparse = format!(
+            "const {name}: [u128; Instance::VARIABLE_COUNT] = {{\n    let mut masks = [0; Instance::VARIABLE_COUNT];\n"
+        );
+        for chunk in nonzero.chunks(3) {
+            sparse.push_str("    ");
+            for &(index, mask) in chunk {
+                sparse.push_str(&format!("masks[{index}]=0x{mask:032x};"));
+            }
+            sparse.push('\n');
+        }
+        sparse.push_str("    masks\n};\n");
+        sparse
+    };
+
+    out.push_str(if sparse.len() < dense.len() {
+        &sparse
+    } else {
+        &dense
+    });
 }
 
 type LocalDerivativeLayout = HashMap<String, LocalDerivativeAxes>;
