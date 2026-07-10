@@ -12,6 +12,9 @@ pub mod builtins {
     include!("registry.rs");
 }
 
+#[cfg(feature = "veriloga-builtins")]
+pub(crate) mod kernel_runtime;
+
 #[derive(Debug, Clone, Copy)]
 pub struct GeneratedDdtCoefficients {
     pub active: bool,

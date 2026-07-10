@@ -1,6 +1,7 @@
-#![allow(dead_code, unused_parens, unused_variables)]
+#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
 use crate::device::veriloga_generated::GeneratedDdtCoefficients;
+use crate::device::veriloga_generated::kernel_runtime::{ReactiveScratch as KernelReactiveScratch, Scratch as KernelScratch};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -142,6 +143,11 @@ impl Parameters {
                 0.0, 0.0, 0.0,
             ];
             std::ptr::copy_nonoverlapping(DEFAULTS_6.as_ptr(), (ptr as *mut f64).add(293), 3);
+            let params = &*ptr;
+            for index in 0..PARAMETER_DISPLAY_NAMES.len() {
+                let value = read_parameter_slot(params, index);
+                validate_parameter_metadata(params, index, value).expect("generated Verilog-A parameter defaults must satisfy declared ranges");
+            }
             boxed.assume_init()
         }
     }
@@ -162,8 +168,17 @@ struct ParameterBound {
 const PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
 const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
 
-fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
-    let name = PARAMETER_DISPLAY_NAMES[index];
+#[inline]
+fn read_parameter_slot(parameters: &Parameters, index: usize) -> f64 {
+    debug_assert!(index < PARAMETER_DISPLAY_NAMES.len(), "generated parameter index out of range");
+    // SAFETY: Parameters is repr(C), contains only f64 fields, and every caller validates or generates the index.
+    unsafe { *((parameters as *const Parameters as *const f64).add(index)) }
+}
+
+fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), String> {
+    let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
+        return Err(format!("generated parameter index {} is out of range", index));
+    };
     let flags = PARAMETER_RANGE_FLAGS[index];
     validate_finite_parameter(name, value)?;
     if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {
@@ -172,7 +187,92 @@ fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
     if PARAMETER_INTEGER_FLAGS[index] && (value < i32::MIN as f64 || value > i32::MAX as f64) {
         return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
     }
-    if let Some(min) = PARAMETER_MIN_BOUNDS[index] {
+    validate_parameter_bounds(
+        name,
+        value,
+        flags,
+        PARAMETER_MIN_BOUNDS[index],
+        PARAMETER_MAX_BOUNDS[index],
+        PARAMETER_EXCLUDED_BOUNDS[index],
+    )
+}
+
+fn validate_parameter_metadata(
+    parameters: &Parameters,
+    index: usize,
+    value: f64,
+) -> Result<(), String> {
+    validate_parameter_scalar_metadata(index, value)?;
+    let name = PARAMETER_DISPLAY_NAMES[index];
+    let flags = PARAMETER_RANGE_FLAGS[index];
+    let computed_min = parameter_computed_min_bound(parameters, index)?;
+    let lower_source_count = usize::from(PARAMETER_MIN_BOUNDS[index].is_some())
+        + usize::from(PARAMETER_MIN_REFERENCES[index].is_some())
+        + usize::from(computed_min.is_some());
+    if lower_source_count > 1 {
+        return Err(format!("parameter '{}' has conflicting lower-bound sources", name));
+    }
+    let min = match PARAMETER_MIN_REFERENCES[index] {
+        Some(reference) => Some(parameter_bound_from_reference(parameters, reference)?),
+        None => computed_min.or(PARAMETER_MIN_BOUNDS[index]),
+    };
+    let computed_max = parameter_computed_max_bound(parameters, index)?;
+    let upper_source_count = usize::from(PARAMETER_MAX_BOUNDS[index].is_some())
+        + usize::from(PARAMETER_MAX_REFERENCES[index].is_some())
+        + usize::from(computed_max.is_some());
+    if upper_source_count > 1 {
+        return Err(format!("parameter '{}' has conflicting upper-bound sources", name));
+    }
+    let max = match PARAMETER_MAX_REFERENCES[index] {
+        Some(reference) => Some(parameter_bound_from_reference(parameters, reference)?),
+        None => computed_max.or(PARAMETER_MAX_BOUNDS[index]),
+    };
+    if let (Some(min), Some(max)) = (min, max) {
+        let empty = min.value > max.value
+            || (min.value == max.value
+                && flags & (PARAMETER_MIN_EXCLUSIVE_FLAG | PARAMETER_MAX_EXCLUSIVE_FLAG) != 0);
+        if empty {
+            return Err(format!(
+                "parameter '{}' has an empty range: lower bound {}={} exceeds upper bound {}={}",
+                name, min.label, min.value, max.label, max.value
+            ));
+        }
+    }
+    validate_parameter_bounds(name, value, flags, min, max, PARAMETER_EXCLUDED_BOUNDS[index])?;
+    for &reference in PARAMETER_EXCLUDED_REFERENCES[index] {
+        let excluded = parameter_bound_from_reference(parameters, reference)?;
+        if value == excluded.value {
+            return Err(format!(
+                "parameter '{}' must not equal {}={}, got {}",
+                name, excluded.label, excluded.value, value
+            ));
+        }
+    }
+    validate_parameter_computed_exclusions(parameters, index, value)?;
+    Ok(())
+}
+
+fn parameter_bound_from_reference(
+    parameters: &Parameters,
+    index: usize,
+) -> Result<ParameterBound, String> {
+    let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
+        return Err(format!("generated parameter range reference {} is out of range", index));
+    };
+    let value = read_parameter_slot(parameters, index);
+    validate_finite_parameter(name, value)?;
+    Ok(ParameterBound { value, label: name })
+}
+
+fn validate_parameter_bounds(
+    name: &str,
+    value: f64,
+    flags: u8,
+    min: Option<ParameterBound>,
+    max: Option<ParameterBound>,
+    excluded: &[ParameterBound],
+) -> Result<(), String> {
+    if let Some(min) = min {
         if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
             if value <= min.value {
                 return Err(format!("parameter '{}' must be > {}, got {}", name, min.label, value));
@@ -181,7 +281,7 @@ fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
             return Err(format!("parameter '{}' must be >= {}, got {}", name, min.label, value));
         }
     }
-    if let Some(max) = PARAMETER_MAX_BOUNDS[index] {
+    if let Some(max) = max {
         if flags & PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {
             if value >= max.value {
                 return Err(format!("parameter '{}' must be < {}, got {}", name, max.label, value));
@@ -190,7 +290,7 @@ fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
             return Err(format!("parameter '{}' must be <= {}, got {}", name, max.label, value));
         }
     }
-    for excluded in PARAMETER_EXCLUDED_BOUNDS[index] {
+    for excluded in excluded {
         if value == excluded.value {
             return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
         }
@@ -247,6 +347,7 @@ fn validate_parameter(
     }
     Ok(())
 }
+
 const PARAMETER_NAME_LOOKUP: [(&str, usize); 296] = [
     ("l", 0), ("w", 1), ("ad", 2), ("as", 3), ("pd", 4), ("ps", 5), ("ngcon", 6), ("xgw", 7), ("xgl", 8), ("nf", 9), ("sa", 10), ("sb", 11), ("sd", 12), ("pdbcp", 13), ("psbcp", 14), ("lod", 15),
     ("temp", 16), ("dtemp", 17), ("nbt", 18), ("lbt", 19), ("wbtp", 20), ("wbtn", 21), ("abtn", 22), ("abtp", 23), ("coadov", 24), ("coisub", 25), ("cofbe", 26), ("coiigs", 27), ("cogidl", 28), ("coovlp", 29), ("coign", 30), ("coflick", 31),
@@ -269,6 +370,50 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 296] = [
     ("rbulk0", 288), ("rbulkw", 289), ("rbdb", 290), ("rbsb", 291), ("vfbbtp", 292), ("cbtbn", 293), ("cbtbp", 294), ("xwdbt", 295),
 ];
 
+const PARAMETER_MIN_REFERENCES: [Option<usize>; 296] = [
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None,
+];
+
+const PARAMETER_MAX_REFERENCES: [Option<usize>; 296] = [
+    None, None, None, None, None, None, None, None, Some(0), None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None,
+];
+
 const PARAMETER_DISPLAY_NAMES: [&str; 296] = [
     "L", "W", "AD", "AS", "PD", "PS", "NGCON", "XGW", "XGL", "NF", "SA", "SB", "SD", "PDBCP", "PSBCP", "LOD",
     "TEMP", "DTEMP", "NBT", "LBT", "WBTP", "WBTN", "ABTN", "ABTP", "COADOV", "COISUB", "COFBE", "COIIGS", "COGIDL", "COOVLP", "COIGN", "COFLICK",
@@ -289,6 +434,46 @@ const PARAMETER_DISPLAY_NAMES: [&str; 296] = [
     "NRD", "LDRIFT", "LDRIFTS", "CORS", "CORD", "CORBULK", "CORBNET", "RSH", "NOVERS", "RDRMUE", "RDRMUES", "RDRVMAX", "RDRVMAXS", "RDRMUETMP", "RDRVTMP", "RDRDJUNC",
     "RDRBB", "RDRBBS", "RDRBBTMP", "RDRVMAXW", "RDRVMAXWP", "RDRVMAXL", "RDRVMAXLP", "RDRMUEL", "RDRMUELP", "COPT", "COPSPT", "XJPT", "NJUNC", "MUPT", "VFBPT", "PSLIMPT",
     "RBULK0", "RBULKW", "RBDB", "RBSB", "VFBBTP", "CBTBN", "CBTBP", "XWDBT",
+];
+
+const PARAMETER_EXCLUDED_REFERENCES: [&[usize]; 296] = [
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
 ];
 
 const PARAMETER_INTEGER_FLAGS: [bool; 296] = [
@@ -437,6 +622,41 @@ const PARAMETER_EXCLUDED_BOUNDS: [&[ParameterBound]; 296] = [
     &[], &[], &[], &[], &[], &[], &[], &[],
 ];
 
+fn parameter_computed_min_bound(parameters: &Parameters, index: usize) -> Result<Option<ParameterBound>, String> {
+    let params = parameters;
+    let bound: Option<ParameterBound> = match index {
+        _ => None,
+    };
+    if let Some(bound) = bound {
+        validate_finite_parameter(bound.label, bound.value)?;
+    }
+    Ok(bound)
+}
+
+fn parameter_computed_max_bound(parameters: &Parameters, index: usize) -> Result<Option<ParameterBound>, String> {
+    let params = parameters;
+    let bound: Option<ParameterBound> = match index {
+        283 => Some(ParameterBound { value: (params.p237 * 1.2), label: "computed upper-bound expression" }),
+        _ => None,
+    };
+    if let Some(bound) = bound {
+        validate_finite_parameter(bound.label, bound.value)?;
+    }
+    Ok(bound)
+}
+
+fn validate_parameter_computed_exclusions(
+    parameters: &Parameters,
+    index: usize,
+    value: f64,
+) -> Result<(), String> {
+    let params = parameters;
+    match index {
+        _ => {}
+    }
+    Ok(())
+}
+
 fn parameter_index_for_name(name: &str) -> Option<usize> {
     PARAMETER_NAME_LOOKUP
         .iter()
@@ -477,6 +697,8 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
+    pub(crate) scratch: Option<Box<KernelScratch<1854, 19, 20>>>,
+    pub(crate) reactive_scratch: Option<Box<KernelReactiveScratch<1854, 19, 20>>>,
 }
 
 impl Clone for Instance {
@@ -500,6 +722,8 @@ impl Clone for Instance {
             time: self.time,
             timestep: self.timestep,
             ddt_coefficients: self.ddt_coefficients,
+            scratch: None,
+            reactive_scratch: None,
         }
     }
 }
@@ -540,11 +764,15 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
+            scratch: None,
+            reactive_scratch: None,
         }
     }
 
     #[inline]
     pub fn restore_from_snapshot(&mut self, snapshot: Self) {
+        let scratch = self.scratch.take();
+        let reactive_scratch = self.reactive_scratch.take();
         let Self {
             nodes,
             branches,
@@ -563,6 +791,8 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
+            scratch: _,
+            reactive_scratch: _,
         } = snapshot;
         *self = Self {
             nodes,
@@ -582,6 +812,8 @@ impl Instance {
             time,
             timestep,
             ddt_coefficients,
+            scratch,
+            reactive_scratch,
         };
     }
 
@@ -596,9 +828,18 @@ impl Instance {
         let Some(index) = parameter_index_for_name(lower.as_str()) else {
             return Err(format!("unknown parameter '{}' for generated Verilog-A model 'hisimsoi_va'", name));
         };
-        validate_parameter_metadata(index, value)?;
+        validate_parameter_scalar_metadata(index, value)?;
         self.write_parameter_slot(index, value);
         self.finish_set_parameter(index);
+        Ok(())
+    }
+
+    /// Validate the complete parameter vector after applying all instance overrides.
+    pub fn validate_parameters(&self) -> Result<(), String> {
+        for index in 0..Self::PARAMETER_COUNT {
+            let value = read_parameter_slot(self.params.as_ref(), index);
+            validate_parameter_metadata(self.params.as_ref(), index, value)?;
+        }
         Ok(())
     }
 

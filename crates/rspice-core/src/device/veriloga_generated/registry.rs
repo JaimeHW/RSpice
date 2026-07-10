@@ -638,6 +638,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device0(instance)))
         }
         "EPFL_HEMT_10A" => {
@@ -652,6 +653,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device1(instance)))
         }
         "JUNCAP200" => {
@@ -666,6 +668,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device2(instance)))
         }
         "PSP104TVA" => {
@@ -680,6 +683,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device3(instance)))
         }
         "PSP104VA" => {
@@ -694,6 +698,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device4(instance)))
         }
         "PSPNQS104VA" => {
@@ -708,6 +713,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device5(instance)))
         }
         "ANGELOV" => {
@@ -722,6 +728,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device6(instance)))
         }
         "ANGELOV_GAN" => {
@@ -736,6 +743,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device7(instance)))
         }
         "ASMESD" => {
@@ -750,6 +758,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device8(instance)))
         }
         "ASMESD_DIO" => {
@@ -764,6 +773,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device9(instance)))
         }
         "ASMHEMT" => {
@@ -778,6 +788,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device10(instance)))
         }
         "BJT505_VA" => {
@@ -792,6 +803,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device11(instance)))
         }
         "BJT505T_VA" => {
@@ -806,6 +818,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device12(instance)))
         }
         "BJTD505_VA" => {
@@ -820,6 +833,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device13(instance)))
         }
         "BJTD505T_VA" => {
@@ -834,6 +848,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device14(instance)))
         }
         "BSIMBULK" => {
@@ -848,6 +863,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device15(instance)))
         }
         "BSIMCMG_VA" => {
@@ -862,6 +878,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device16(instance)))
         }
         "BSIMIMG" => {
@@ -876,6 +893,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device17(instance)))
         }
         "BSIMSOI__18C250BC" => {
@@ -890,6 +908,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device18(instance)))
         }
         "BSIMSOI__E2AFF994" => {
@@ -904,6 +923,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device19(instance)))
         }
         "BSIMSOI_VA" => {
@@ -918,6 +938,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device20(instance)))
         }
         "EKV_VA" => {
@@ -932,6 +953,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device21(instance)))
         }
         "HICUML0VA" => {
@@ -946,6 +968,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device22(instance)))
         }
         "HICUML2VA" => {
@@ -960,6 +983,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device23(instance)))
         }
         "HISIMHV_N4_VA" => {
@@ -974,6 +998,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device24(instance)))
         }
         "HISIMHV_N5_VA" => {
@@ -988,6 +1013,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device25(instance)))
         }
         "HISIMHV_VA" => {
@@ -1002,6 +1028,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device26(instance)))
         }
         "HISIMSOI_VA__5BE18005" => {
@@ -1016,6 +1043,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device27(instance)))
         }
         "HISIMSOI_VA__242BC21D" => {
@@ -1030,6 +1058,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device28(instance)))
         }
         "HISIMSOI_VA__38074D06" => {
@@ -1044,6 +1073,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device29(instance)))
         }
         "HISIMSOTB_VA" => {
@@ -1058,6 +1088,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device30(instance)))
         }
         "L_UTSOI__832CE87D" => {
@@ -1072,6 +1103,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device31(instance)))
         }
         "L_UTSOI__485E0AC9" => {
@@ -1086,6 +1118,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device32(instance)))
         }
         "MOSVAR" => {
@@ -1100,6 +1133,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device33(instance)))
         }
         "MVSG_CMC" => {
@@ -1114,6 +1148,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device34(instance)))
         }
         "R2_CMC" => {
@@ -1128,6 +1163,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device35(instance)))
         }
         "R2_ET_CMC" => {
@@ -1142,6 +1178,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device36(instance)))
         }
         "R3_CMC" => {
@@ -1156,6 +1193,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device37(instance)))
         }
         "VBIC13_4T" => {
@@ -1170,6 +1208,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device38(instance)))
         }
         "VBIC_4T_ET_CF" => {
@@ -1184,6 +1223,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                     }
                 }
             }
+            instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device39(instance)))
         }
         _ => Ok(None),

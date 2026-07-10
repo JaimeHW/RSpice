@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_parens, unused_variables)]
+#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]
 
 use crate::device::veriloga_generated::GeneratedDdtCoefficients;
 
@@ -76,6 +76,11 @@ impl Parameters {
                 0.0, 0.0, 0.0, 0.0,
             ];
             std::ptr::copy_nonoverlapping(DEFAULTS_2.as_ptr(), (ptr as *mut f64).add(28), 100);
+            let params = &*ptr;
+            for index in 0..PARAMETER_DISPLAY_NAMES.len() {
+                let value = read_parameter_slot(params, index);
+                validate_parameter_metadata(params, index, value).expect("generated Verilog-A parameter defaults must satisfy declared ranges");
+            }
             boxed.assume_init()
         }
     }
@@ -96,8 +101,17 @@ struct ParameterBound {
 const PARAMETER_MIN_EXCLUSIVE_FLAG: u8 = 1;
 const PARAMETER_MAX_EXCLUSIVE_FLAG: u8 = 2;
 
-fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
-    let name = PARAMETER_DISPLAY_NAMES[index];
+#[inline]
+fn read_parameter_slot(parameters: &Parameters, index: usize) -> f64 {
+    debug_assert!(index < PARAMETER_DISPLAY_NAMES.len(), "generated parameter index out of range");
+    // SAFETY: Parameters is repr(C), contains only f64 fields, and every caller validates or generates the index.
+    unsafe { *((parameters as *const Parameters as *const f64).add(index)) }
+}
+
+fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), String> {
+    let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
+        return Err(format!("generated parameter index {} is out of range", index));
+    };
     let flags = PARAMETER_RANGE_FLAGS[index];
     validate_finite_parameter(name, value)?;
     if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {
@@ -106,7 +120,92 @@ fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
     if PARAMETER_INTEGER_FLAGS[index] && (value < i32::MIN as f64 || value > i32::MAX as f64) {
         return Err(format!("parameter '{}' must fit in a 32-bit signed integer, got {}", name, value));
     }
-    if let Some(min) = PARAMETER_MIN_BOUNDS[index] {
+    validate_parameter_bounds(
+        name,
+        value,
+        flags,
+        PARAMETER_MIN_BOUNDS[index],
+        PARAMETER_MAX_BOUNDS[index],
+        PARAMETER_EXCLUDED_BOUNDS[index],
+    )
+}
+
+fn validate_parameter_metadata(
+    parameters: &Parameters,
+    index: usize,
+    value: f64,
+) -> Result<(), String> {
+    validate_parameter_scalar_metadata(index, value)?;
+    let name = PARAMETER_DISPLAY_NAMES[index];
+    let flags = PARAMETER_RANGE_FLAGS[index];
+    let computed_min = parameter_computed_min_bound(parameters, index)?;
+    let lower_source_count = usize::from(PARAMETER_MIN_BOUNDS[index].is_some())
+        + usize::from(PARAMETER_MIN_REFERENCES[index].is_some())
+        + usize::from(computed_min.is_some());
+    if lower_source_count > 1 {
+        return Err(format!("parameter '{}' has conflicting lower-bound sources", name));
+    }
+    let min = match PARAMETER_MIN_REFERENCES[index] {
+        Some(reference) => Some(parameter_bound_from_reference(parameters, reference)?),
+        None => computed_min.or(PARAMETER_MIN_BOUNDS[index]),
+    };
+    let computed_max = parameter_computed_max_bound(parameters, index)?;
+    let upper_source_count = usize::from(PARAMETER_MAX_BOUNDS[index].is_some())
+        + usize::from(PARAMETER_MAX_REFERENCES[index].is_some())
+        + usize::from(computed_max.is_some());
+    if upper_source_count > 1 {
+        return Err(format!("parameter '{}' has conflicting upper-bound sources", name));
+    }
+    let max = match PARAMETER_MAX_REFERENCES[index] {
+        Some(reference) => Some(parameter_bound_from_reference(parameters, reference)?),
+        None => computed_max.or(PARAMETER_MAX_BOUNDS[index]),
+    };
+    if let (Some(min), Some(max)) = (min, max) {
+        let empty = min.value > max.value
+            || (min.value == max.value
+                && flags & (PARAMETER_MIN_EXCLUSIVE_FLAG | PARAMETER_MAX_EXCLUSIVE_FLAG) != 0);
+        if empty {
+            return Err(format!(
+                "parameter '{}' has an empty range: lower bound {}={} exceeds upper bound {}={}",
+                name, min.label, min.value, max.label, max.value
+            ));
+        }
+    }
+    validate_parameter_bounds(name, value, flags, min, max, PARAMETER_EXCLUDED_BOUNDS[index])?;
+    for &reference in PARAMETER_EXCLUDED_REFERENCES[index] {
+        let excluded = parameter_bound_from_reference(parameters, reference)?;
+        if value == excluded.value {
+            return Err(format!(
+                "parameter '{}' must not equal {}={}, got {}",
+                name, excluded.label, excluded.value, value
+            ));
+        }
+    }
+    validate_parameter_computed_exclusions(parameters, index, value)?;
+    Ok(())
+}
+
+fn parameter_bound_from_reference(
+    parameters: &Parameters,
+    index: usize,
+) -> Result<ParameterBound, String> {
+    let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
+        return Err(format!("generated parameter range reference {} is out of range", index));
+    };
+    let value = read_parameter_slot(parameters, index);
+    validate_finite_parameter(name, value)?;
+    Ok(ParameterBound { value, label: name })
+}
+
+fn validate_parameter_bounds(
+    name: &str,
+    value: f64,
+    flags: u8,
+    min: Option<ParameterBound>,
+    max: Option<ParameterBound>,
+    excluded: &[ParameterBound],
+) -> Result<(), String> {
+    if let Some(min) = min {
         if flags & PARAMETER_MIN_EXCLUSIVE_FLAG != 0 {
             if value <= min.value {
                 return Err(format!("parameter '{}' must be > {}, got {}", name, min.label, value));
@@ -115,7 +214,7 @@ fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
             return Err(format!("parameter '{}' must be >= {}, got {}", name, min.label, value));
         }
     }
-    if let Some(max) = PARAMETER_MAX_BOUNDS[index] {
+    if let Some(max) = max {
         if flags & PARAMETER_MAX_EXCLUSIVE_FLAG != 0 {
             if value >= max.value {
                 return Err(format!("parameter '{}' must be < {}, got {}", name, max.label, value));
@@ -124,7 +223,7 @@ fn validate_parameter_metadata(index: usize, value: f64) -> Result<(), String> {
             return Err(format!("parameter '{}' must be <= {}, got {}", name, max.label, value));
         }
     }
-    for excluded in PARAMETER_EXCLUDED_BOUNDS[index] {
+    for excluded in excluded {
         if value == excluded.value {
             return Err(format!("parameter '{}' must not equal {}, got {}", name, excluded.label, value));
         }
@@ -181,6 +280,7 @@ fn validate_parameter(
     }
     Ok(())
 }
+
 const PARAMETER_NAME_LOOKUP: [(&str, usize); 132] = [
     ("w", 0), ("l", 1), ("wd", 2), ("a1", 3), ("p1", 4), ("c1", 5), ("a2", 6), ("p2", 7), ("c2", 8), ("trise", 9), ("dtemp", 9), ("dta", 9), ("nsmm_rsh", 10), ("nsmm_w", 11), ("nsmm_l", 12), ("sw_noise", 13),
     ("sw_et", 14), ("sw_lin", 15), ("sw_mman", 16), ("version", 17), ("subversion", 18), ("revision", 19), ("level", 20), ("type", 21), ("scale", 22), ("shrink", 23), ("tmin", 24), ("tmax", 25), ("rthresh", 26), ("imax", 27), ("tnom", 28), ("lmin", 29),
@@ -193,6 +293,28 @@ const PARAMETER_NAME_LOOKUP: [(&str, usize); 132] = [
     ("smm_rsh", 124), ("smm_w", 125), ("smm_l", 126), ("sw_mmgeo", 127),
 ];
 
+const PARAMETER_MIN_REFERENCES: [Option<usize>; 128] = [
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, Some(29), None,
+    Some(31), None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+];
+
+const PARAMETER_MAX_REFERENCES: [Option<usize>; 128] = [
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, Some(60), None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+    None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+];
+
 const PARAMETER_DISPLAY_NAMES: [&str; 128] = [
     "w", "l", "wd", "a1", "p1", "c1", "a2", "p2", "c2", "trise", "nsmm_rsh", "nsmm_w", "nsmm_l", "sw_noise", "sw_et", "sw_lin",
     "sw_mman", "version", "subversion", "revision", "level", "type", "scale", "shrink", "tmin", "tmax", "rthresh", "imax", "tnom", "lmin", "lmax", "wmin",
@@ -202,6 +324,25 @@ const PARAMETER_DISPLAY_NAMES: [&str; 128] = [
     "pp", "mp", "ajp", "vbv", "ibv", "nbv", "kfn", "afn", "bfn", "sw_fngeo", "ea", "xis", "xvsat", "tc1", "tc2", "tc1l",
     "tc2l", "tc1w", "tc2w", "tc1wl", "tc2wl", "tc1rc", "tc2rc", "tc1dp", "tc2dp", "tc1vbv", "tc2vbv", "tc1nbv", "tc1kfn", "tegth", "gth0", "gthp",
     "gtha", "gthc", "cth0", "cthp", "ctha", "cthc", "nsig_rsh", "nsig_w", "nsig_l", "sig_rsh", "sig_w", "sig_l", "smm_rsh", "smm_w", "smm_l", "sw_mmgeo",
+];
+
+const PARAMETER_EXCLUDED_REFERENCES: [&[usize]; 128] = [
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
+    &[], &[], &[], &[], &[], &[], &[], &[],
 ];
 
 const PARAMETER_INTEGER_FLAGS: [bool; 128] = [
@@ -274,6 +415,40 @@ const PARAMETER_EXCLUDED_BOUNDS: [&[ParameterBound]; 128] = [
     &[], &[], &[], &[], &[], &[], &[], &[],
     &[], &[], &[], &[], &[], &[], &[], &[],
 ];
+
+fn parameter_computed_min_bound(parameters: &Parameters, index: usize) -> Result<Option<ParameterBound>, String> {
+    let params = parameters;
+    let bound: Option<ParameterBound> = match index {
+        _ => None,
+    };
+    if let Some(bound) = bound {
+        validate_finite_parameter(bound.label, bound.value)?;
+    }
+    Ok(bound)
+}
+
+fn parameter_computed_max_bound(parameters: &Parameters, index: usize) -> Result<Option<ParameterBound>, String> {
+    let params = parameters;
+    let bound: Option<ParameterBound> = match index {
+        _ => None,
+    };
+    if let Some(bound) = bound {
+        validate_finite_parameter(bound.label, bound.value)?;
+    }
+    Ok(bound)
+}
+
+fn validate_parameter_computed_exclusions(
+    parameters: &Parameters,
+    index: usize,
+    value: f64,
+) -> Result<(), String> {
+    let params = parameters;
+    match index {
+        _ => {}
+    }
+    Ok(())
+}
 
 fn parameter_index_for_name(name: &str) -> Option<usize> {
     PARAMETER_NAME_LOOKUP
@@ -461,9 +636,18 @@ impl Instance {
         let Some(index) = parameter_index_for_name(lower.as_str()) else {
             return Err(format!("unknown parameter '{}' for generated Verilog-A model 'r3_cmc'", name));
         };
-        validate_parameter_metadata(index, value)?;
+        validate_parameter_scalar_metadata(index, value)?;
         self.write_parameter_slot(index, value);
         self.finish_set_parameter(index);
+        Ok(())
+    }
+
+    /// Validate the complete parameter vector after applying all instance overrides.
+    pub fn validate_parameters(&self) -> Result<(), String> {
+        for index in 0..Self::PARAMETER_COUNT {
+            let value = read_parameter_slot(self.params.as_ref(), index);
+            validate_parameter_metadata(self.params.as_ref(), index, value)?;
+        }
         Ok(())
     }
 
@@ -626,9 +810,9 @@ impl Instance {
         self.scalar_static_f64[55]=(self.scalar_static_f64[50]/self.scalar_static_f64[54]);
         self.scalar_static_f64[56]=(self.scalar_static_f64[17]+self.scalar_static_f64[37]);
         self.scalar_static_f64[57]=p.p127;
-        self.scalar_static_f64[58]=(if (self.scalar_static_f64[57]!=0.0){self.scalar_static_f64[55]}else{0.0});
-        self.scalar_static_f64[59]=(if (self.scalar_static_f64[57]!=0.0){self.scalar_static_f64[56]}else{0.0});
-        self.scalar_static_bool[2]=(!(self.scalar_static_f64[57]!=0.0));
+        self.scalar_static_f64[58]=(if ((self.scalar_static_f64[57])!=0.0){self.scalar_static_f64[55]}else{0.0});
+        self.scalar_static_f64[59]=(if ((self.scalar_static_f64[57])!=0.0){self.scalar_static_f64[56]}else{0.0});
+        self.scalar_static_bool[2]=(!((self.scalar_static_f64[57])!=0.0));
         self.scalar_static_f64[60]=(if self.scalar_static_bool[2]{self.scalar_static_f64[15]}else{self.scalar_static_f64[58]});
         self.scalar_static_f64[61]=(if self.scalar_static_bool[2]{self.scalar_static_f64[17]}else{self.scalar_static_f64[59]});
         self.scalar_static_f64[62]=p.p16;
@@ -658,8 +842,8 @@ impl Instance {
         self.scalar_static_bool[6]=(self.scalar_static_bool[4]||self.scalar_static_bool[5]);
         self.scalar_static_bool[7]=(self.scalar_static_bool[3]&&self.scalar_static_bool[6]);
         self.scalar_static_f64[83]=(if self.scalar_static_bool[7]{1.0}else{0.0});
-        self.scalar_static_bool[8]=(!(self.scalar_static_f64[62]!=0.0));
-        self.scalar_static_bool[9]=((self.scalar_static_f64[83]!=0.0)&&self.scalar_static_bool[8]);
+        self.scalar_static_bool[8]=(!((self.scalar_static_f64[62])!=0.0));
+        self.scalar_static_bool[9]=(((self.scalar_static_f64[83])!=0.0)&&self.scalar_static_bool[8]);
         self.scalar_static_f64[84]=(self.scalar_static_f64[64]*self.scalar_static_f64[64]);
         self.scalar_static_bool[10]=(0.0!=self.scalar_static_f64[70]);
         self.scalar_static_bool[11]=(self.scalar_static_f64[75]>0.0);
@@ -667,7 +851,7 @@ impl Instance {
         self.scalar_static_bool[13]=(self.scalar_static_bool[11]||self.scalar_static_bool[12]);
         self.scalar_static_bool[14]=(self.scalar_static_bool[10]&&self.scalar_static_bool[13]);
         self.scalar_static_f64[85]=(if self.scalar_static_bool[14]{1.0}else{0.0});
-        self.scalar_static_bool[15]=(self.scalar_static_bool[8]&&(self.scalar_static_f64[85]!=0.0));
+        self.scalar_static_bool[15]=(self.scalar_static_bool[8]&&((self.scalar_static_f64[85])!=0.0));
         self.scalar_static_f64[86]=(self.scalar_static_f64[71]*self.scalar_static_f64[71]);
         self.scalar_static_bool[16]=(0.0!=self.scalar_static_f64[77]);
         self.scalar_static_bool[17]=(self.scalar_static_f64[81]>0.0);
@@ -675,14 +859,14 @@ impl Instance {
         self.scalar_static_bool[19]=(self.scalar_static_bool[17]||self.scalar_static_bool[18]);
         self.scalar_static_bool[20]=(self.scalar_static_bool[16]&&self.scalar_static_bool[19]);
         self.scalar_static_f64[87]=(if self.scalar_static_bool[20]{1.0}else{0.0});
-        self.scalar_static_bool[21]=(self.scalar_static_bool[8]&&(self.scalar_static_f64[87]!=0.0));
+        self.scalar_static_bool[21]=(self.scalar_static_bool[8]&&((self.scalar_static_f64[87])!=0.0));
         self.scalar_static_f64[88]=(0.01*self.scalar_static_f64[77]);
         self.scalar_static_f64[89]=(self.scalar_static_f64[78]*self.scalar_static_f64[78]);
-        self.scalar_static_bool[22]=(!(self.scalar_static_f64[87]!=0.0));
+        self.scalar_static_bool[22]=(!((self.scalar_static_f64[87])!=0.0));
         self.scalar_static_bool[23]=(self.scalar_static_bool[8]&&self.scalar_static_bool[22]);
         self.scalar_static_f64[90]=p.p45;
         self.scalar_static_f64[91]=p.p53;
-        self.scalar_static_bool[24]=(!(self.scalar_static_f64[91]!=0.0));
+        self.scalar_static_bool[24]=(!((self.scalar_static_f64[91])!=0.0));
         self.scalar_static_f64[92]=p.p56;
         self.scalar_static_f64[93]=p.p58;
         self.scalar_static_f64[94]=p.p54;
@@ -703,9 +887,9 @@ impl Instance {
         self.scalar_static_f64[108]=(2.0*self.scalar_static_f64[107]);
         self.scalar_static_bool[26]=(self.scalar_static_f64[105]>0.0);
         self.scalar_static_f64[109]=(if self.scalar_static_bool[26]{1.0}else{0.0});
-        self.scalar_static_bool[27]=(!(self.scalar_static_f64[106]!=0.0));
-        self.scalar_static_bool[28]=((self.scalar_static_f64[109]!=0.0)&&self.scalar_static_bool[27]);
-        self.scalar_static_bool[29]=(!(self.scalar_static_f64[109]!=0.0));
+        self.scalar_static_bool[27]=(!((self.scalar_static_f64[106])!=0.0));
+        self.scalar_static_bool[28]=(((self.scalar_static_f64[109])!=0.0)&&self.scalar_static_bool[27]);
+        self.scalar_static_bool[29]=(!((self.scalar_static_f64[109])!=0.0));
         self.scalar_static_bool[30]=(self.scalar_static_bool[27]&&self.scalar_static_bool[29]);
         self.scalar_static_f64[110]=p.p47;
         self.scalar_static_f64[111]=p.p48;
@@ -721,16 +905,16 @@ impl Instance {
         self.scalar_static_f64[118]=(self.scalar_static_f64[117]/self.scalar_static_f64[15]);
         self.scalar_static_f64[119]=(self.scalar_static_f64[115]+self.scalar_static_f64[118]);
         self.scalar_static_f64[120]=(self.scalar_static_f64[119]/self.scalar_static_f64[27]);
-        self.scalar_static_f64[121]=(if (self.scalar_static_f64[116]!=0.0){self.scalar_static_f64[120]}else{0.0});
-        self.scalar_static_bool[34]=(!(self.scalar_static_f64[116]!=0.0));
+        self.scalar_static_f64[121]=(if ((self.scalar_static_f64[116])!=0.0){self.scalar_static_f64[120]}else{0.0});
+        self.scalar_static_bool[34]=(!((self.scalar_static_f64[116])!=0.0));
         self.scalar_static_f64[122]=(if self.scalar_static_bool[34]{0.0}else{self.scalar_static_f64[121]});
         self.scalar_static_bool[35]=(self.scalar_static_bool[1]&&self.scalar_static_bool[32]);
         self.scalar_static_f64[123]=(if self.scalar_static_bool[35]{1.0}else{0.0});
         self.scalar_static_f64[124]=(self.scalar_static_f64[119]/self.scalar_static_f64[28]);
-        self.scalar_static_f64[125]=(if (self.scalar_static_f64[123]!=0.0){self.scalar_static_f64[124]}else{0.0});
-        self.scalar_static_bool[36]=(!(self.scalar_static_f64[123]!=0.0));
+        self.scalar_static_f64[125]=(if ((self.scalar_static_f64[123])!=0.0){self.scalar_static_f64[124]}else{0.0});
+        self.scalar_static_bool[36]=(!((self.scalar_static_f64[123])!=0.0));
         self.scalar_static_f64[126]=(if self.scalar_static_bool[36]{0.0}else{self.scalar_static_f64[125]});
-        self.scalar_static_bool[37]=(!(self.scalar_static_f64[100]!=0.0));
+        self.scalar_static_bool[37]=(!((self.scalar_static_f64[100])!=0.0));
         self.scalar_static_f64[127]=p.p110;
         self.scalar_static_f64[128]=p.p111;
         self.scalar_static_f64[129]=(self.scalar_static_f64[31]*self.scalar_static_f64[128]);
@@ -778,7 +962,7 @@ impl Instance {
         self.scalar_static_f64[171]=(self.scalar_static_f64[166]+self.scalar_static_f64[170]);
         self.scalar_static_f64[172]=p.p21;
         self.scalar_static_f64[173]=(-self.scalar_static_f64[172]);
-        self.scalar_static_bool[38]=(!(self.scalar_static_f64[105]!=0.0));
+        self.scalar_static_bool[38]=(!((self.scalar_static_f64[105])!=0.0));
         self.scalar_static_f64[174]=p.p101;
         self.scalar_static_f64[175]=p.p102;
         self.scalar_static_f64[176]=p.p92;
@@ -790,26 +974,26 @@ impl Instance {
         self.scalar_static_f64[181]=p.p91;
         self.scalar_static_f64[182]=p.p70;
         self.scalar_static_f64[183]=p.p27;
-        self.scalar_static_bool[40]=(!(self.scalar_static_f64[178]!=0.0));
+        self.scalar_static_bool[40]=(!((self.scalar_static_f64[178])!=0.0));
         self.scalar_static_f64[184]=p.p76;
         self.scalar_static_bool[41]=(self.scalar_static_f64[184]>0.0);
         self.scalar_static_f64[185]=(if self.scalar_static_bool[41]{1.0}else{0.0});
         self.scalar_static_f64[186]=p.p77;
-        self.scalar_static_bool[42]=(!(self.scalar_static_f64[185]!=0.0));
+        self.scalar_static_bool[42]=(!((self.scalar_static_f64[185])!=0.0));
         self.scalar_static_bool[43]=(self.scalar_static_f64[165]>0.0);
         self.scalar_static_f64[187]=(if self.scalar_static_bool[43]{1.0}else{0.0});
         self.scalar_static_f64[188]=p.p73;
         self.scalar_static_f64[189]=(0.5*self.scalar_static_f64[188]);
         self.scalar_static_f64[190]=(self.scalar_static_f64[188]* -0.5);
         self.scalar_static_f64[191]=p.p74;
-        self.scalar_static_bool[44]=(!(self.scalar_static_f64[187]!=0.0));
+        self.scalar_static_bool[44]=(!((self.scalar_static_f64[187])!=0.0));
         self.scalar_static_bool[45]=(self.scalar_static_f64[167]>0.0);
         self.scalar_static_f64[192]=(if self.scalar_static_bool[45]{1.0}else{0.0});
         self.scalar_static_f64[193]=p.p80;
         self.scalar_static_f64[194]=(0.5*self.scalar_static_f64[193]);
         self.scalar_static_f64[195]=(-0.5*self.scalar_static_f64[193]);
         self.scalar_static_f64[196]=p.p81;
-        self.scalar_static_bool[46]=(!(self.scalar_static_f64[192]!=0.0));
+        self.scalar_static_bool[46]=(!((self.scalar_static_f64[192])!=0.0));
         self.scalar_static_f64[197]=p.p83;
         self.scalar_static_bool[47]=(self.scalar_static_f64[197]>0.0);
         self.scalar_static_f64[198]=(if self.scalar_static_bool[47]{1.0}else{0.0});
@@ -819,37 +1003,37 @@ impl Instance {
         self.scalar_static_f64[202]=p.p107;
         self.scalar_static_f64[203]=p.p84;
         self.scalar_static_f64[204]=(self.scalar_static_f64[183]/self.scalar_static_f64[203]);
-        self.scalar_static_bool[48]=(!(self.scalar_static_f64[198]!=0.0));
+        self.scalar_static_bool[48]=(!((self.scalar_static_f64[198])!=0.0));
         self.scalar_static_f64[205]=p.p60;
         self.scalar_static_bool[49]=(self.scalar_static_f64[205]>0.0);
         self.scalar_static_bool[50]=(self.scalar_static_bool[37]&&self.scalar_static_bool[49]);
         self.scalar_static_f64[206]=(if self.scalar_static_bool[50]{1.0}else{0.0});
         self.scalar_static_f64[207]=p.p62;
-        self.scalar_static_bool[51]=((self.scalar_static_f64[206]!=0.0)&&(self.scalar_static_f64[207]!=0.0));
+        self.scalar_static_bool[51]=(((self.scalar_static_f64[206])!=0.0)&&((self.scalar_static_f64[207])!=0.0));
         self.scalar_static_f64[208]=p.p61;
-        self.scalar_static_bool[52]=(!(self.scalar_static_f64[207]!=0.0));
-        self.scalar_static_bool[53]=((self.scalar_static_f64[206]!=0.0)&&self.scalar_static_bool[52]);
+        self.scalar_static_bool[52]=(!((self.scalar_static_f64[207])!=0.0));
+        self.scalar_static_bool[53]=(((self.scalar_static_f64[206])!=0.0)&&self.scalar_static_bool[52]);
         self.scalar_static_f64[209]=p.p65;
         self.scalar_static_f64[210]=(4.0*self.scalar_static_f64[209]);
         self.scalar_static_f64[211]=(self.scalar_static_f64[209]*self.scalar_static_f64[210]);
         self.scalar_static_f64[212]=(2.0*self.scalar_static_f64[209]);
-        self.scalar_static_bool[54]=(!(self.scalar_static_f64[206]!=0.0));
+        self.scalar_static_bool[54]=(!((self.scalar_static_f64[206])!=0.0));
         self.scalar_static_f64[213]=(if self.scalar_static_bool[31]{1.0}else{0.0});
         self.scalar_static_f64[214]=(-self.scalar_static_f64[203]);
         self.scalar_static_f64[215]=p.p14;
         self.scalar_static_bool[55]=(0.0==self.scalar_static_f64[138]);
         self.scalar_static_f64[216]=(if self.scalar_static_bool[55]{1.0}else{0.0});
-        self.scalar_static_bool[56]=(!(self.scalar_static_f64[216]!=0.0));
+        self.scalar_static_bool[56]=(!((self.scalar_static_f64[216])!=0.0));
         self.scalar_static_f64[217]=(1.0+self.scalar_static_f64[138]);
         self.scalar_static_f64[218]=(self.scalar_static_f64[217]).abs();
         self.scalar_static_bool[57]=(self.scalar_static_f64[218]>0.1);
         self.scalar_static_f64[219]=(if self.scalar_static_bool[57]{1.0}else{0.0});
-        self.scalar_static_bool[58]=(!(self.scalar_static_f64[219]!=0.0));
+        self.scalar_static_bool[58]=(!((self.scalar_static_f64[219])!=0.0));
         self.scalar_static_f64[220]=(0.5*self.scalar_static_f64[138]);
         self.scalar_static_bool[59]=(self.scalar_static_f64[169]>0.0);
         self.scalar_static_f64[221]=(if self.scalar_static_bool[59]{1.0}else{0.0});
-        self.scalar_static_bool[60]=((self.scalar_static_f64[105]!=0.0)&&(self.scalar_static_f64[221]!=0.0));
-        self.scalar_static_bool[61]=(self.scalar_static_bool[38]&&(self.scalar_static_f64[221]!=0.0));
+        self.scalar_static_bool[60]=(((self.scalar_static_f64[105])!=0.0)&&((self.scalar_static_f64[221])!=0.0));
+        self.scalar_static_bool[61]=(self.scalar_static_bool[38]&&((self.scalar_static_f64[221])!=0.0));
         self.scalar_static_f64[222]=p.p68;
         self.scalar_static_f64[223]=p.p75;
         self.scalar_static_bool[62]=(self.scalar_static_f64[223]<=0.0);
@@ -859,7 +1043,7 @@ impl Instance {
         self.scalar_static_f64[227]=f64::powf(self.scalar_static_f64[225],self.scalar_static_f64[226]);
         self.scalar_static_f64[228]=(1.0-self.scalar_static_f64[191]);
         self.scalar_static_f64[229]=(0.5*self.scalar_static_f64[191]);
-        self.scalar_static_bool[63]=(!(self.scalar_static_f64[224]!=0.0));
+        self.scalar_static_bool[63]=(!((self.scalar_static_f64[224])!=0.0));
         self.scalar_static_f64[230]=(4.0*self.scalar_static_f64[223]);
         self.scalar_static_f64[231]=(self.scalar_static_f64[223]*self.scalar_static_f64[230]);
         self.scalar_static_f64[232]=p.p82;
@@ -869,15 +1053,15 @@ impl Instance {
         self.scalar_static_f64[235]=f64::powf(self.scalar_static_f64[225],self.scalar_static_f64[234]);
         self.scalar_static_f64[236]=(1.0-self.scalar_static_f64[196]);
         self.scalar_static_f64[237]=(0.5*self.scalar_static_f64[196]);
-        self.scalar_static_bool[65]=(!(self.scalar_static_f64[233]!=0.0));
+        self.scalar_static_bool[65]=(!((self.scalar_static_f64[233])!=0.0));
         self.scalar_static_f64[238]=(4.0*self.scalar_static_f64[232]);
         self.scalar_static_f64[239]=(self.scalar_static_f64[232]*self.scalar_static_f64[238]);
-        self.scalar_static_bool[66]=(!(self.scalar_static_f64[221]!=0.0));
+        self.scalar_static_bool[66]=(!((self.scalar_static_f64[221])!=0.0));
         self.scalar_static_bool[67]=(self.scalar_static_f64[171]>0.0);
         self.scalar_static_f64[240]=(if self.scalar_static_bool[67]{1.0}else{0.0});
-        self.scalar_static_bool[68]=((self.scalar_static_f64[105]!=0.0)&&(self.scalar_static_f64[240]!=0.0));
-        self.scalar_static_bool[69]=(self.scalar_static_bool[38]&&(self.scalar_static_f64[240]!=0.0));
-        self.scalar_static_bool[70]=(!(self.scalar_static_f64[240]!=0.0));
+        self.scalar_static_bool[68]=(((self.scalar_static_f64[105])!=0.0)&&((self.scalar_static_f64[240])!=0.0));
+        self.scalar_static_bool[69]=(self.scalar_static_bool[38]&&((self.scalar_static_f64[240])!=0.0));
+        self.scalar_static_bool[70]=(!((self.scalar_static_f64[240])!=0.0));
         self.scalar_static_f64[241]=p.p26;
         self.scalar_static_f64[242]=(self.scalar_static_f64[176]-1.0);
         self.scalar_static_f64[243]=(self.scalar_static_f64[191]-1.0);
@@ -919,11 +1103,11 @@ impl Instance {
         self.scalar_static_f64[258]=(self.scalar_static_f64[257]-1.0);
         self.scalar_static_f64[259]=(self.scalar_static_f64[258]).exp();
         self.scalar_static_f64[260]=(self.scalar_static_f64[10]+self.scalar_static_f64[259]);
-        self.scalar_static_f64[261]=(if (self.scalar_static_f64[256]!=0.0){self.scalar_static_f64[260]}else{self.scalar_static_f64[255]});
+        self.scalar_static_f64[261]=(if ((self.scalar_static_f64[256])!=0.0){self.scalar_static_f64[260]}else{self.scalar_static_f64[255]});
         self.scalar_static_bool[72]=(self.scalar_static_f64[261]>self.scalar_static_f64[13]);
         self.scalar_static_f64[262]=(if self.scalar_static_bool[72]{1.0}else{0.0});
-        self.scalar_static_bool[73]=(!(self.scalar_static_f64[256]!=0.0));
-        self.scalar_static_bool[74]=((self.scalar_static_f64[262]!=0.0)&&self.scalar_static_bool[73]);
+        self.scalar_static_bool[73]=(!((self.scalar_static_f64[256])!=0.0));
+        self.scalar_static_bool[74]=(((self.scalar_static_f64[262])!=0.0)&&self.scalar_static_bool[73]);
         self.scalar_static_f64[263]=(self.scalar_static_f64[12]-self.scalar_static_f64[261]);
         self.scalar_static_f64[264]=(self.scalar_static_f64[263]-1.0);
         self.scalar_static_f64[265]=(self.scalar_static_f64[264]).exp();
@@ -939,7 +1123,7 @@ impl Instance {
         self.scalar_static_f64[275]=(self.scalar_static_f64[272]*self.scalar_static_f64[274]);
         self.scalar_static_f64[276]=(1.0+self.scalar_static_f64[275]);
         self.scalar_static_f64[277]=(self.scalar_static_f64[270]*self.scalar_static_f64[112]);
-        self.scalar_static_f64[278]=(if (self.scalar_static_f64[106]!=0.0){self.scalar_static_f64[277]}else{0.0});
+        self.scalar_static_f64[278]=(if ((self.scalar_static_f64[106])!=0.0){self.scalar_static_f64[277]}else{0.0});
         self.scalar_static_f64[279]=(self.scalar_static_f64[270]*0.55);
         self.scalar_static_f64[280]=(self.scalar_static_f64[270]*1.1);
         self.scalar_static_f64[281]=(self.scalar_static_f64[270]*self.scalar_static_f64[113]);
@@ -949,15 +1133,15 @@ impl Instance {
         self.scalar_static_f64[285]=(self.scalar_static_f64[137]*self.scalar_static_f64[284]);
         self.scalar_static_f64[286]=(if self.scalar_static_bool[37]{self.scalar_static_f64[285]}else{0.0});
         self.scalar_static_bool[75]=(self.scalar_static_f64[286]>0.0);
-        self.scalar_static_bool[76]=(self.scalar_static_bool[75]&&(self.scalar_static_f64[215]!=0.0));
+        self.scalar_static_bool[76]=(self.scalar_static_bool[75]&&((self.scalar_static_f64[215])!=0.0));
         self.scalar_static_bool[77]=(self.scalar_static_bool[37]&&self.scalar_static_bool[76]);
         self.scalar_static_f64[287]=(if self.scalar_static_bool[77]{1.0}else{0.0});
-        self.scalar_static_bool[78]=((self.scalar_static_f64[287]!=0.0)&&(self.scalar_static_f64[216]!=0.0));
-        self.scalar_static_bool[79]=((self.scalar_static_f64[287]!=0.0)&&self.scalar_static_bool[56]);
+        self.scalar_static_bool[78]=(((self.scalar_static_f64[287])!=0.0)&&((self.scalar_static_f64[216])!=0.0));
+        self.scalar_static_bool[79]=(((self.scalar_static_f64[287])!=0.0)&&self.scalar_static_bool[56]);
         self.scalar_static_f64[288]=(if self.scalar_static_bool[79]{self.scalar_static_f64[255]}else{0.0});
         self.scalar_static_bool[80]=(self.scalar_static_f64[288]<self.scalar_static_f64[11]);
         self.scalar_static_f64[289]=(if self.scalar_static_bool[80]{1.0}else{0.0});
-        self.scalar_static_bool[81]=(self.scalar_static_bool[79]&&(self.scalar_static_f64[289]!=0.0));
+        self.scalar_static_bool[81]=(self.scalar_static_bool[79]&&((self.scalar_static_f64[289])!=0.0));
         self.scalar_static_f64[290]=(self.scalar_static_f64[288]-self.scalar_static_f64[10]);
         self.scalar_static_f64[291]=(self.scalar_static_f64[290]-1.0);
         self.scalar_static_f64[292]=(self.scalar_static_f64[291]).exp();
@@ -965,9 +1149,9 @@ impl Instance {
         self.scalar_static_f64[294]=(if self.scalar_static_bool[81]{self.scalar_static_f64[293]}else{self.scalar_static_f64[288]});
         self.scalar_static_bool[82]=(self.scalar_static_f64[294]>self.scalar_static_f64[13]);
         self.scalar_static_f64[295]=(if self.scalar_static_bool[82]{1.0}else{0.0});
-        self.scalar_static_bool[83]=(!(self.scalar_static_f64[289]!=0.0));
+        self.scalar_static_bool[83]=(!((self.scalar_static_f64[289])!=0.0));
         self.scalar_static_bool[84]=(self.scalar_static_bool[79]&&self.scalar_static_bool[83]);
-        self.scalar_static_bool[85]=((self.scalar_static_f64[295]!=0.0)&&self.scalar_static_bool[84]);
+        self.scalar_static_bool[85]=(((self.scalar_static_f64[295])!=0.0)&&self.scalar_static_bool[84]);
         self.scalar_static_f64[296]=(self.scalar_static_f64[12]-self.scalar_static_f64[294]);
         self.scalar_static_f64[297]=(self.scalar_static_f64[296]-1.0);
         self.scalar_static_f64[298]=(self.scalar_static_f64[297]).exp();
@@ -975,10 +1159,10 @@ impl Instance {
         self.scalar_static_f64[300]=(if self.scalar_static_bool[85]{self.scalar_static_f64[299]}else{self.scalar_static_f64[294]});
         self.scalar_static_f64[301]=(273.15+self.scalar_static_f64[300]);
         self.scalar_static_f64[302]=(if self.scalar_static_bool[79]{self.scalar_static_f64[301]}else{0.0});
-        self.scalar_static_bool[86]=(self.scalar_static_bool[79]&&(self.scalar_static_f64[219]!=0.0));
+        self.scalar_static_bool[86]=(self.scalar_static_bool[79]&&((self.scalar_static_f64[219])!=0.0));
         self.scalar_static_f64[303]=(self.scalar_static_f64[286]*self.scalar_static_f64[302]);
         self.scalar_static_bool[87]=(self.scalar_static_bool[79]&&self.scalar_static_bool[58]);
-        self.scalar_static_bool[88]=(!(self.scalar_static_f64[287]!=0.0));
+        self.scalar_static_bool[88]=(!((self.scalar_static_f64[287])!=0.0));
         self.scalar_static_f64[304]=(if self.scalar_static_bool[78]{self.scalar_static_f64[286]}else{0.0});
         self.scalar_static_f64[305]=(1.0/self.scalar_static_f64[302]);
         self.scalar_static_f64[306]=(self.scalar_static_f64[220]/self.scalar_static_f64[302]);
