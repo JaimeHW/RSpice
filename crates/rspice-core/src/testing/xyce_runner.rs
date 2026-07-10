@@ -34,6 +34,7 @@ const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
 const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 250_000.0;
 const MAX_NATIVE_TRAN_ELEMENT_STEPS: f64 = 250_000_000.0;
+const MAX_NATIVE_TRAN_COMPACT_DEVICE_STEPS: f64 = 2_500_000.0;
 const MAX_NATIVE_TRAN_NODE_SOLVE_STEPS: f64 = 2_500_000_000.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
@@ -640,6 +641,7 @@ struct XyceTranAnalysis {
 #[derive(Debug, Clone, Copy)]
 struct XyceTransientProblemSize {
     element_count: usize,
+    compact_device_count: usize,
     node_count: usize,
 }
 
@@ -1598,6 +1600,14 @@ impl XyceTestRunner {
 
         let output_override = requires_wrapper
             && Self::is_native_output_override_wrapper_candidate_path(&deck.relative_path);
+        let has_static_tran_oracle = self.has_static_tran_reference_oracle(&deck.path);
+        if requires_wrapper
+            && !output_override
+            && !has_static_tran_oracle
+            && !Self::source_may_have_pwl_repeat_option(&source)
+        {
+            return Err(Self::upstream_wrapper_required_reason().to_string());
+        }
         let print_output = if output_override {
             Self::output_override_print_output_request(&source, "TRAN")?.ok_or_else(|| {
                 "output override deck has no .PRINT TRAN statement with static columns".to_string()
@@ -1707,6 +1717,19 @@ impl XyceTestRunner {
             steps,
             wrapper_tolerance: Self::native_default_prn_tran_wrapper_tolerance(&deck.relative_path),
             contract,
+        })
+    }
+
+    fn has_static_tran_reference_oracle(&self, deck_path: &Path) -> bool {
+        [
+            XyceStaticTranContract::WrapperStatic.reference_extension(),
+            XyceStaticTranContract::WrapperCsv.reference_extension(),
+            XyceStaticTranContract::WrapperCsd.reference_extension(),
+        ]
+        .into_iter()
+        .any(|extension| {
+            self.static_output_reference_path(deck_path, extension)
+                .is_some_and(|path| path.is_file())
         })
     }
 
@@ -2841,7 +2864,9 @@ impl XyceTestRunner {
                     "wrapper-origin RAW contract does not cover FILE= side output with FORMAT={format}"
                 ));
             }
-            if !format.eq_ignore_ascii_case("RAW") && !format.eq_ignore_ascii_case("STD") {
+            let supported_format =
+                format.eq_ignore_ascii_case("RAW") || format.eq_ignore_ascii_case("STD");
+            if !supported_format {
                 return Err(format!(
                     "wrapper-origin RAW contract does not cover primary .PRINT DC FORMAT={format}"
                 ));
@@ -3116,10 +3141,11 @@ impl XyceTestRunner {
                             "file" => has_file_output = true,
                             "format" => {
                                 print_format = value.to_string();
-                                if !Self::ac_print_format_is_prn_compatible(value)
-                                    && !value.eq_ignore_ascii_case("CSV")
-                                    && !value.eq_ignore_ascii_case("PROBE")
-                                {
+                                let supported_format =
+                                    Self::ac_print_format_is_prn_compatible(value)
+                                        || value.eq_ignore_ascii_case("CSV")
+                                        || value.eq_ignore_ascii_case("PROBE");
+                                if !supported_format {
                                     return Err(format!(
                                         "wrapper-origin frequency-domain static output contract does not cover .PRINT AC FORMAT={value}"
                                     ));
@@ -3168,14 +3194,15 @@ impl XyceTestRunner {
                         .to_string(),
                 );
             }
-            if let Some(format) = side_ac_print_formats.first()
-                && !Self::ac_print_format_is_prn_compatible(format)
-                && !format.eq_ignore_ascii_case("CSV")
-                && !format.eq_ignore_ascii_case("PROBE")
-            {
-                return Err(format!(
-                    "wrapper-origin frequency-domain static output contract does not cover primary FILE= .PRINT AC FORMAT={format}"
-                ));
+            if let Some(format) = side_ac_print_formats.first() {
+                let supported_format = Self::ac_print_format_is_prn_compatible(format)
+                    || format.eq_ignore_ascii_case("CSV")
+                    || format.eq_ignore_ascii_case("PROBE");
+                if !supported_format {
+                    return Err(format!(
+                        "wrapper-origin frequency-domain static output contract does not cover primary FILE= .PRINT AC FORMAT={format}"
+                    ));
+                }
             }
             if primary_ac_ic_print_count == 0
                 && side_ac_ic_print_count == 0
@@ -8526,6 +8553,16 @@ impl XyceTestRunner {
                 estimated_steps
             ));
         }
+        let estimated_compact_device_steps = estimated_steps * size.compact_device_count as Value;
+        if estimated_compact_device_steps > MAX_NATIVE_TRAN_COMPACT_DEVICE_STEPS {
+            return Err(format!(
+                "transient harness execution envelope supports at most {:.0} native compact-device step unit(s), but this deck requires about {:.0} ({} flattened compact device(s) across about {:.0} step(s))",
+                MAX_NATIVE_TRAN_COMPACT_DEVICE_STEPS,
+                estimated_compact_device_steps,
+                size.compact_device_count,
+                estimated_steps
+            ));
+        }
         let estimated_node_solve_steps =
             estimated_steps * (size.node_count as Value) * (size.node_count as Value);
         if estimated_node_solve_steps > MAX_NATIVE_TRAN_NODE_SOLVE_STEPS {
@@ -8586,6 +8623,7 @@ impl XyceTestRunner {
 
         Ok(XyceTransientProblemSize {
             element_count: elements.len(),
+            compact_device_count: Self::transient_compact_device_count(&elements),
             node_count: nodes.len(),
         })
     }
@@ -8600,6 +8638,7 @@ impl XyceTestRunner {
 
         let mut top_nodes = BTreeSet::new();
         let mut element_count = 0usize;
+        let mut compact_device_count = 0usize;
         let mut internal_node_count = 0usize;
         let mut stack = BTreeSet::new();
 
@@ -8622,14 +8661,17 @@ impl XyceTestRunner {
                 let size =
                     Self::subcircuit_problem_size_estimate(subcircuit, &subcircuits, &mut stack)?;
                 element_count += size.element_count;
+                compact_device_count += size.compact_device_count;
                 internal_node_count += size.node_count;
             } else {
                 element_count += 1;
+                compact_device_count += Self::transient_element_compact_device_count(element);
             }
         }
 
         Ok(XyceTransientProblemSize {
             element_count,
+            compact_device_count,
             node_count: top_nodes.len() + internal_node_count,
         })
     }
@@ -8664,6 +8706,7 @@ impl XyceTestRunner {
             .collect::<BTreeSet<_>>();
         let mut local_nodes = BTreeSet::new();
         let mut element_count = 0usize;
+        let mut compact_device_count = 0usize;
         let mut internal_node_count = 0usize;
 
         for element in &subcircuit.elements {
@@ -8682,17 +8725,38 @@ impl XyceTestRunner {
                 })?;
                 let size = Self::subcircuit_problem_size_estimate(child, defs, stack)?;
                 element_count += size.element_count;
+                compact_device_count += size.compact_device_count;
                 internal_node_count += size.node_count;
             } else {
                 element_count += 1;
+                compact_device_count += Self::transient_element_compact_device_count(element);
             }
         }
 
         stack.remove(&key);
         Ok(XyceTransientProblemSize {
             element_count,
+            compact_device_count,
             node_count: local_nodes.len() + internal_node_count,
         })
+    }
+
+    fn transient_compact_device_count(elements: &[crate::netlist::Element]) -> usize {
+        elements
+            .iter()
+            .map(Self::transient_element_compact_device_count)
+            .sum()
+    }
+
+    fn transient_element_compact_device_count(element: &crate::netlist::Element) -> usize {
+        matches!(
+            element.kind,
+            ElementKind::Diode { .. }
+                | ElementKind::Bjt { .. }
+                | ElementKind::Mosfet { .. }
+                | ElementKind::Jfet { .. }
+                | ElementKind::Mesfet { .. }
+        ) as usize
     }
 
     fn node_name_is_ground(node: &str) -> bool {
@@ -18151,6 +18215,57 @@ C1 out 0 40u IC=1
         );
         assert!(
             err.contains("native element-step"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn transient_max_step_rejects_oversized_compact_device_work_envelope() {
+        let mut deck = String::from(
+            "\
+oversized compact-device transient
+VDD dd 0 1.8
+VIN gate 0 PULSE(0 1.8 0 1n 1n 5n 10n)
+.model nmod NMOS LEVEL=10 SOIMOD=0
+.subckt moscell d g s b
+M1 d g s b nmod W=1u L=0.18u
+.ends
+",
+        );
+        for index in 0..140 {
+            deck.push_str(&format!("X{index} d{index} gate 0 0 moscell\n"));
+        }
+        deck.push_str(".tran 1n 10n\n.print tran v(d139)\n.end\n");
+
+        let netlist = Netlist::parse(&deck).expect("test netlist parses");
+        let tran = XyceTranAnalysis {
+            step: 1.0e-9,
+            stop: 10.0e-9,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(d139)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 0.0],
+                vec![1.0, 0.5e-12, 0.0],
+                vec![2.0, 10.0e-9, 0.0],
+            ],
+        };
+
+        let err = XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+            .expect_err("oversized native compact-device work envelope should be unsupported");
+
+        assert!(
+            err.contains("transient harness execution envelope"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains("native compact-device"),
             "unexpected error: {err}"
         );
     }
