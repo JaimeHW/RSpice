@@ -58,8 +58,9 @@ fn run() -> CommandResult<()> {
                 options.generated_root.display()
             );
             println!(
-                "backend selection: scalar={}, scalar-hybrid={}, legacy-device={}",
+                "backend selection: scalar={}, structured-kernel={}, scalar-hybrid={}, legacy-device={}",
                 report.backend_counts.scalar,
+                report.backend_counts.structured,
                 report.backend_counts.hybrid,
                 report.backend_counts.legacy_device
             );
@@ -87,8 +88,9 @@ fn run() -> CommandResult<()> {
             );
             println!("[partial output: registry.rs and manifest.txt were not rewritten]");
             println!(
-                "backend selection: scalar={}, scalar-hybrid={}, legacy-device={}",
+                "backend selection: scalar={}, structured-kernel={}, scalar-hybrid={}, legacy-device={}",
                 report.backend_counts.scalar,
+                report.backend_counts.structured,
                 report.backend_counts.hybrid,
                 report.backend_counts.legacy_device
             );

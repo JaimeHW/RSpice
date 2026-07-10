@@ -53,6 +53,7 @@ pub struct GeneratedRustDevice {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RustBackendSelection {
     ScalarOptIr,
+    StructuredKernel,
     ScalarHybrid,
     LegacyDevice,
 }
@@ -121,6 +122,7 @@ enum RustBackendKind {
     Auto,
     Legacy,
     ScalarOptIr,
+    StructuredKernel,
 }
 
 impl RustTranspiler {
@@ -149,6 +151,13 @@ impl RustTranspiler {
         }
     }
 
+    pub fn new_structured(options: RustTranspileOptions) -> Self {
+        Self {
+            options,
+            backend: RustBackendKind::StructuredKernel,
+        }
+    }
+
     pub fn options(&self) -> &RustTranspileOptions {
         &self.options
     }
@@ -170,27 +179,7 @@ impl RustTranspiler {
         artifact: &CanonicalIrArtifact,
     ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
         match self.backend {
-            RustBackendKind::Auto => match scalar::generate_device(artifact, &self.options) {
-                Ok(device) => Ok(GeneratedRustDeviceReport {
-                    device,
-                    backend: RustBackendSelection::ScalarOptIr,
-                    fallback_reason: None,
-                }),
-                Err(scalar_error) if scalar_error.is_unsupported() => {
-                    match device::generate_hybrid_device(artifact, &self.options) {
-                        Ok(device) => Ok(GeneratedRustDeviceReport {
-                            device,
-                            backend: RustBackendSelection::ScalarHybrid,
-                            fallback_reason: Some(unsupported_detail(&scalar_error).to_string()),
-                        }),
-                        Err(hybrid_error) if hybrid_error.is_unsupported() => Err(
-                            auto_backend_unsupported(artifact, &scalar_error, &hybrid_error),
-                        ),
-                        Err(error) => Err(error),
-                    }
-                }
-                Err(error) => Err(error),
-            },
+            RustBackendKind::Auto => self.transpile_auto(artifact),
             RustBackendKind::Legacy => Ok(GeneratedRustDeviceReport {
                 device: device::generate_device(artifact, &self.options)?,
                 backend: RustBackendSelection::LegacyDevice,
@@ -201,6 +190,109 @@ impl RustTranspiler {
                 backend: RustBackendSelection::ScalarOptIr,
                 fallback_reason: None,
             }),
+            RustBackendKind::StructuredKernel => Ok(GeneratedRustDeviceReport {
+                device: device::generate_structured_kernel_device(artifact, &self.options)?,
+                backend: RustBackendSelection::StructuredKernel,
+                fallback_reason: None,
+            }),
+        }
+    }
+
+    fn transpile_auto(
+        &self,
+        artifact: &CanonicalIrArtifact,
+    ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
+        let plan = kernel_ir::KernelPlan::analyze(artifact)?;
+        match plan.preferred_tier() {
+            kernel_ir::PreferredKernelTier::DirectScalar => {
+                match scalar::generate_device(artifact, &self.options) {
+                    Ok(device) => Ok(GeneratedRustDeviceReport {
+                        device,
+                        backend: RustBackendSelection::ScalarOptIr,
+                        fallback_reason: None,
+                    }),
+                    Err(scalar_error) if scalar_error.is_unsupported() => {
+                        self.transpile_structured_after_scalar_failure(artifact, scalar_error)
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            kernel_ir::PreferredKernelTier::Structured => {
+                match device::generate_structured_kernel_device(artifact, &self.options) {
+                    Ok(device) => Ok(GeneratedRustDeviceReport {
+                        device,
+                        backend: RustBackendSelection::StructuredKernel,
+                        fallback_reason: None,
+                    }),
+                    Err(structured_error) if structured_error.is_unsupported() => {
+                        match scalar::generate_device(artifact, &self.options) {
+                            Ok(device) => Ok(GeneratedRustDeviceReport {
+                                device,
+                                backend: RustBackendSelection::ScalarOptIr,
+                                fallback_reason: Some(format!(
+                                    "structured kernel path: {}",
+                                    unsupported_detail(&structured_error)
+                                )),
+                            }),
+                            Err(scalar_error) if scalar_error.is_unsupported() => self
+                                .transpile_hybrid_after_tier_failures(
+                                    artifact,
+                                    scalar_error,
+                                    structured_error,
+                                ),
+                            Err(error) => Err(error),
+                        }
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+        }
+    }
+
+    fn transpile_structured_after_scalar_failure(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        scalar_error: RustBackendError,
+    ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
+        match device::generate_structured_kernel_device(artifact, &self.options) {
+            Ok(device) => Ok(GeneratedRustDeviceReport {
+                device,
+                backend: RustBackendSelection::StructuredKernel,
+                fallback_reason: Some(format!(
+                    "direct scalar path: {}",
+                    unsupported_detail(&scalar_error)
+                )),
+            }),
+            Err(structured_error) if structured_error.is_unsupported() => {
+                self.transpile_hybrid_after_tier_failures(artifact, scalar_error, structured_error)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn transpile_hybrid_after_tier_failures(
+        &self,
+        artifact: &CanonicalIrArtifact,
+        scalar_error: RustBackendError,
+        structured_error: RustBackendError,
+    ) -> Result<GeneratedRustDeviceReport, RustBackendError> {
+        match device::generate_hybrid_device(artifact, &self.options) {
+            Ok(device) => Ok(GeneratedRustDeviceReport {
+                device,
+                backend: RustBackendSelection::ScalarHybrid,
+                fallback_reason: Some(format!(
+                    "direct scalar path: {}; structured kernel path: {}",
+                    unsupported_detail(&scalar_error),
+                    unsupported_detail(&structured_error)
+                )),
+            }),
+            Err(hybrid_error) if hybrid_error.is_unsupported() => Err(auto_backend_unsupported(
+                artifact,
+                &scalar_error,
+                &structured_error,
+                &hybrid_error,
+            )),
+            Err(error) => Err(error),
         }
     }
 }
@@ -208,14 +300,16 @@ impl RustTranspiler {
 fn auto_backend_unsupported(
     artifact: &CanonicalIrArtifact,
     scalar_error: &RustBackendError,
+    structured_error: &RustBackendError,
     hybrid_error: &RustBackendError,
 ) -> RustBackendError {
     RustBackendError::unsupported(
         artifact.metadata.source_package.as_str(),
         artifact.mir.module_name.as_str(),
         format!(
-            "model cannot be lowered by optimized generated Rust backends; scalar path: {}; hybrid scalar path: {}",
+            "model cannot be lowered by optimized generated Rust backends; direct scalar path: {}; structured kernel path: {}; hybrid scalar path: {}",
             unsupported_detail(scalar_error),
+            unsupported_detail(structured_error),
             unsupported_detail(hybrid_error),
         ),
     )

@@ -479,6 +479,7 @@ fn source_matches_filter(
 #[derive(Debug, Default)]
 struct BackendSelectionCounts {
     scalar: usize,
+    structured: usize,
     hybrid: usize,
     legacy_device: usize,
 }
@@ -487,6 +488,7 @@ impl BackendSelectionCounts {
     fn record(&mut self, selection: RustBackendSelection) {
         match selection {
             RustBackendSelection::ScalarOptIr => self.scalar += 1,
+            RustBackendSelection::StructuredKernel => self.structured += 1,
             RustBackendSelection::ScalarHybrid => self.hybrid += 1,
             RustBackendSelection::LegacyDevice => self.legacy_device += 1,
         }

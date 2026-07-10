@@ -14,6 +14,7 @@ static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[test]
 fn rust_backend_public_api_exists() {
     let _ = RustTranspiler::new_legacy(RustTranspileOptions::default());
+    let _ = RustTranspiler::new_structured(RustTranspileOptions::default());
     let _ = RustTranspiler::new_auto(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     });
@@ -789,6 +790,32 @@ fn scalar_rust_backend_emits_plain_f64_for_algebraic_current() {
     assert!(!stamp.contains("Scratch"), "{stamp}");
     assert!(!stamp.contains("s."), "{stamp}");
     assert!(!stamp.contains("GeneratedDerivative"), "{stamp}");
+}
+
+#[test]
+fn structured_kernel_backend_uses_the_production_runtime_boundary() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(assignment_fed_current_source())
+        .expect("canonical IR");
+
+    let report = RustTranspiler::new_structured(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile_with_report(&artifact)
+    .expect("transpile structured kernel");
+    let generated = report.device;
+    let generated_source = generated
+        .files
+        .iter()
+        .map(|file| file.contents.as_str())
+        .collect::<String>();
+
+    assert_eq!(report.backend, RustBackendSelection::StructuredKernel);
+    assert!(generated_source.contains("::kernel_runtime::"));
+    assert!(generated_source.contains("KernelScratch"));
+    assert!(!generated_source.contains("::support::"));
+    assert!(!generated_source.contains("GenericScratch"));
+    assert_generated_rust_compiles(&generated);
 }
 
 #[test]
@@ -1709,7 +1736,7 @@ fn rust_backend_auto_scalarizes_wide_mixed_residuals() {
 }
 
 #[test]
-fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
+fn rust_backend_auto_transpiles_shipped_asmhemt_with_structured_kernels() {
     let model_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
@@ -1731,11 +1758,13 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
     let compiled = VerilogACompiler::new(options)
         .compile_file_canonical_ir_with_metadata(&path, Some("asmhemt"))
         .expect("compile shipped ASM-HEMT canonical IR");
-    let generated = RustTranspiler::new_auto(RustTranspileOptions {
+    let report = RustTranspiler::new_auto(RustTranspileOptions {
         runtime_path: "crate::runtime".to_string(),
     })
-    .transpile(&compiled.artifact)
+    .transpile_with_report(&compiled.artifact)
     .expect("transpile shipped ASM-HEMT through auto Rust backend");
+    assert_eq!(report.backend, RustBackendSelection::StructuredKernel);
+    let generated = report.device;
     let stamp = generated
         .files
         .iter()
@@ -1751,34 +1780,24 @@ fn rust_backend_auto_transpiles_shipped_asmhemt_with_mixed_local_storage() {
         .contents
         .as_str();
 
+    assert!(stamp.contains("::kernel_runtime::"), "{stamp}");
+    assert!(stamp.contains("type Scratch = KernelScratch"), "{stamp}");
+    assert!(state.contains("Option<Box<KernelScratch<"), "{state}");
+    assert!(!stamp.contains("::support::"), "{stamp}");
+    assert!(!state.contains("GenericScratch"), "{state}");
+    let helpers = generated
+        .files
+        .iter()
+        .filter(|file| file.relative_path.starts_with("stamp_blocks_"))
+        .collect::<Vec<_>>();
     assert!(
-        !stamp.contains("let s = match &mut self.scratch")
-            && !stamp.contains("scratch.values")
-            && !stamp.contains("scratch.node_derivatives")
-            && !stamp.contains("s.ad_value("),
-        "ASM-HEMT should avoid legacy scratch AD in transient stamp"
+        helpers.len() > 16,
+        "ASM-HEMT must be split into bounded kernel modules"
     );
     assert!(
-        !stamp.contains("let s = match &mut self.reactive_scratch")
-            && !stamp.contains("ReactiveScratch"),
-        "ASM-HEMT should avoid legacy reactive scratch AD"
-    );
-    assert!(
-        !state.contains("GenericScratch")
-            && !state.contains("GenericReactiveScratch")
-            && !state.contains("scratch:")
-            && !state.contains("reactive_scratch:"),
-        "ASM-HEMT should not reserve legacy scratch storage in generated state"
-    );
-    assert!(
-        stamp.contains("struct CommonStampValues") && stamp.contains("fn eval_common_stamp_values"),
-        "ASM-HEMT should share native scalar common values without legacy scratch AD:\n{stamp}"
-    );
-    assert!(
-        !stamp.contains("GenericAdValue")
-            && !stamp.contains("type A =")
-            && !stamp.contains("from_derivatives("),
-        "ASM-HEMT should not rebuild native locals as compact AdValue operands:\n{stamp}"
+        helpers
+            .iter()
+            .all(|file| file.contents.contains("#[inline(never)]"))
     );
 }
 
@@ -3055,7 +3074,7 @@ fn rust_backend_compacts_generated_scratch_storage_field_names() {
     );
     assert!(stamp.contains("s.v["), "{stamp}");
     assert!(!stamp.contains("scratch."), "{stamp}");
-    assert!(stamp.contains("type Scratch = GenericScratch"), "{stamp}");
+    assert!(stamp.contains("type Scratch = KernelScratch"), "{stamp}");
     assert!(!stamp.contains("GenericAdValue"), "{stamp}");
     assert!(stamp.contains("s.store_voltage("), "{stamp}");
     assert!(!stamp.contains("AdValue::"), "{stamp}");
@@ -6375,10 +6394,12 @@ fn rust_backend_directly_stores_mixed_index_product_helpers() {
     let stamp = generated
         .files
         .iter()
-        .find(|file| file.relative_path == "stamp.rs")
-        .expect("stamp file")
-        .contents
-        .as_str();
+        .filter(|file| {
+            file.relative_path == "stamp.rs" || file.relative_path.starts_with("stamp_blocks_")
+        })
+        .map(|file| file.contents.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     let support = render_runtime_support_module();
 
     for helper in [
@@ -13040,7 +13061,7 @@ fn rust_backend_uses_compact_parameter_state_initialization_and_validation() {
         "parameter defaults should zero the heap allocation without emitting an all-field initializer:\n{state}"
     );
     assert!(
-        state.starts_with("#![allow(dead_code, unused_parens, unused_variables)]"),
+        state.starts_with("#![allow(dead_code, non_snake_case, unused_parens, unused_variables)]"),
         "generated state files should suppress warning storms from mechanical expressions:\n{state}"
     );
     assert!(
@@ -13341,11 +13362,11 @@ fn rust_backend_generates_restore_that_preserves_live_scratch_buffers() {
         "{state}"
     );
     assert!(
-        state.contains("pub(crate) scratch: Option<Box<GenericScratch<"),
-        "fallback scratch users should reserve transient scratch storage:\n{state}"
+        state.contains("pub(crate) scratch: Option<Box<KernelScratch<"),
+        "structured-kernel users should reserve transient scratch storage:\n{state}"
     );
     assert!(
-        !state.contains("GenericReactiveScratch") && !state.contains("reactive_scratch:"),
+        !state.contains("KernelReactiveScratch") && !state.contains("reactive_scratch:"),
         "fixture should not reserve unused reactive scratch storage:\n{state}"
     );
     assert!(
@@ -13435,7 +13456,7 @@ fn assert_generated_rust_compiles(generated: &GeneratedRustDevice) {
         format!(
             r#"
 pub mod runtime {{
-    pub mod support {{
+    pub mod kernel_runtime {{
 {}
     }}
 

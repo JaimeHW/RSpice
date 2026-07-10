@@ -363,6 +363,13 @@ pub fn generate_device(
     generate_device_with_scalar_hybrid_plan(artifact, options, None, false)
 }
 
+pub(super) fn generate_structured_kernel_device(
+    artifact: &CanonicalIrArtifact,
+    options: &RustTranspileOptions,
+) -> Result<GeneratedRustDevice, RustBackendError> {
+    generate_device_with_scalar_hybrid_plan(artifact, options, None, false)
+}
+
 pub(super) fn generate_hybrid_device(
     artifact: &CanonicalIrArtifact,
     options: &RustTranspileOptions,
@@ -696,13 +703,13 @@ fn prune_unused_root_stamp_support_aliases(
         if is_root_stamp_support_import(line) {
             let mut imports = Vec::new();
             if uses_ad_value {
-                imports.push("AdValue as GenericAdValue");
+                imports.push("AdValue as KernelAdValue");
             }
             if uses_reactive_scratch {
-                imports.push("ReactiveScratch as GenericReactiveScratch");
+                imports.push("ReactiveScratch as KernelReactiveScratch");
             }
             if uses_scratch {
-                imports.push("Scratch as GenericScratch");
+                imports.push("Scratch as KernelScratch");
             }
             if !imports.is_empty() {
                 let prefix = line
@@ -830,19 +837,19 @@ fn is_root_stamp_support_import_or_alias(line: &str) -> bool {
 }
 
 fn is_root_stamp_support_import(line: &str) -> bool {
-    line.starts_with("use ") && line.contains("::support::{")
+    line.starts_with("use ") && line.contains("::kernel_runtime::{")
 }
 
 fn is_ad_value_alias(line: &str) -> bool {
-    line.starts_with("type A = GenericAdValue") || line.starts_with("type AdValue = GenericAdValue")
+    line.starts_with("type A = KernelAdValue") || line.starts_with("type AdValue = KernelAdValue")
 }
 
 fn is_scratch_alias(line: &str) -> bool {
-    line.starts_with("type Scratch = GenericScratch")
+    line.starts_with("type Scratch = KernelScratch")
 }
 
 fn is_reactive_scratch_alias(line: &str) -> bool {
-    line.starts_with("type ReactiveScratch = GenericReactiveScratch")
+    line.starts_with("type ReactiveScratch = KernelReactiveScratch")
 }
 
 fn compact_generated_stamp_helper_surface(mut source: String) -> String {
@@ -906,7 +913,7 @@ fn compact_generated_stamp_surface_base(mut source: String) -> String {
         ("scratch: &mut ReactiveScratch", "s: &mut ReactiveScratch"),
         ("scratch: &mut Scratch", "s: &mut Scratch"),
         ("scratch.", "s."),
-        ("type AdValue = GenericAdValue", "type A = GenericAdValue"),
+        ("type AdValue = KernelAdValue", "type A = KernelAdValue"),
         ("AdValue::", "A::"),
         (": AdValue", ": A"),
         ("params.", "p."),
@@ -15184,13 +15191,13 @@ pub(super) fn generate_state_file_with_extensions(
     } else {
         let mut support_imports = Vec::new();
         if scratch_usage.uses_reactive {
-            support_imports.push("ReactiveScratch as GenericReactiveScratch");
+            support_imports.push("ReactiveScratch as KernelReactiveScratch");
         }
         if scratch_usage.uses_transient {
-            support_imports.push("Scratch as GenericScratch");
+            support_imports.push("Scratch as KernelScratch");
         }
         out.push_str(&format!(
-            "use {}::support::{{{}}};\n\n",
+            "use {}::kernel_runtime::{{{}}};\n\n",
             options.runtime_path,
             support_imports.join(", ")
         ));
@@ -15312,12 +15319,12 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&extensions.instance_fields);
     if scratch_usage.uses_transient {
         out.push_str(&format!(
-            "    pub(crate) scratch: Option<Box<GenericScratch<{variable_count}, {node_count}, {branch_count}>>>,\n"
+            "    pub(crate) scratch: Option<Box<KernelScratch<{variable_count}, {node_count}, {branch_count}>>>,\n"
         ));
     }
     if scratch_usage.uses_reactive {
         out.push_str(&format!(
-            "    pub(crate) reactive_scratch: Option<Box<GenericReactiveScratch<{variable_count}, {node_count}, {branch_count}>>>,\n"
+            "    pub(crate) reactive_scratch: Option<Box<KernelReactiveScratch<{variable_count}, {node_count}, {branch_count}>>>,\n"
         ));
     }
     out.push_str("}\n\n");
@@ -15433,7 +15440,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            ddt_coefficients: GeneratedDdtCoefficients::inactive(),\n");
     out.push_str(&extensions.new_initializers);
     if scratch_usage.uses_transient {
-        out.push_str("            scratch: Some(GenericScratch::new_box()),\n");
+        out.push_str("            scratch: Some(KernelScratch::new_box()),\n");
     }
     if scratch_usage.uses_reactive {
         out.push_str("            reactive_scratch: None,\n");
@@ -16841,17 +16848,17 @@ fn generate_stamp_file(
         options.runtime_path
     ));
     out.push_str(&format!(
-        "use {}::support::{{AdValue as GenericAdValue, ReactiveScratch as GenericReactiveScratch, Scratch as GenericScratch}};\n\n",
+        "use {}::kernel_runtime::{{AdValue as KernelAdValue, ReactiveScratch as KernelReactiveScratch, Scratch as KernelScratch}};\n\n",
         options.runtime_path
     ));
     out.push_str(
-        "type AdValue = GenericAdValue<{ Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n",
+        "type AdValue = KernelAdValue<{ Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n",
     );
     out.push_str(
-        "type Scratch = GenericScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n",
+        "type Scratch = KernelScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n",
     );
     out.push_str(
-        "type ReactiveScratch = GenericReactiveScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n\n",
+        "type ReactiveScratch = KernelReactiveScratch<{ Instance::VARIABLE_COUNT }, { Instance::NODE_COUNT }, { Instance::BRANCH_COUNT }>;\n\n",
     );
     out.push_str("const LIMEXP_MAX: f64 = 5.54062238439351e34;\n");
     out.push_str("const THERMAL_VOLTAGE_PER_K: f64 = 1.380649e-23 / 1.602176634e-19;\n\n");
