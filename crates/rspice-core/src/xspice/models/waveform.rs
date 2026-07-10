@@ -649,7 +649,7 @@ impl CodeModel for SquareOscillator {
                 request_absolute_breakpoint(ctx, time4);
 
                 low + ((ctx.time - time1) / (time2 - time1)) * amplitude
-            } else if time_window_contains(time2, ctx.time, time3) {
+            } else if time_window_contains(time2, ctx.time, time3) && ctx.time < time3 {
                 time3 = ctx.time_prev + (1.0 - dphase) / frequency;
                 time4 = time3 + fall_time;
 
@@ -763,7 +763,7 @@ impl CodeModel for TriangleOscillator {
             let mut t_start = ctx.state_prev(TRIANGLE_START_STATE);
             let mut dphase = c_truncated_fraction(phase_prev);
 
-            let value = if time_window_contains(time1, ctx.time, time2) {
+            let value = if time_window_contains(time1, ctx.time, time2) && ctx.time < time2 {
                 time2 = ctx.time_prev + (1.0 - dphase) / frequency;
 
                 if ctx.time < time2 {

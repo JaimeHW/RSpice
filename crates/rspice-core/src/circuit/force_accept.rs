@@ -573,7 +573,35 @@ mod tests {
     use super::*;
     use crate::device::{BehavioralVoltageSource, Vdmos};
     use crate::xspice::{PortConnection, XspiceInstance, models::Gain};
+    use crate::{Engine, Netlist};
     use std::sync::Arc;
+
+    #[test]
+    fn dc_projection_does_not_replace_explicit_dc_value_with_waveform_t0() {
+        let netlist = Netlist::parse(
+            "mixed DC and transient source\n\
+             v1 in 0 dc 0.55 pulse(0.3 0.8 20p 5p 5p 80p 200p)\n\
+             r1 in 0 1k\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("mixed DC/transient source deck parses");
+        let circuit = Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+        let input = circuit.get_node_by_name("in").expect("input node");
+        let mut solution = vec![0.0; circuit.matrix_size()];
+
+        assert_eq!(circuit.voltage_sources.dc_values, vec![0.55]);
+        assert_eq!(circuit.voltage_sources.node_pos, vec![input]);
+        assert_eq!(circuit.voltage_sources.node_neg, vec![0]);
+
+        circuit.enforce_scaled_dc_ideal_voltage_constraints(&mut solution, 1.0);
+        assert!((solution[input - 1] - 0.55).abs() <= 1.0e-15);
+
+        circuit.enforce_ideal_voltage_constraints(&mut solution, 0.0);
+        assert!((solution[input - 1] - 0.3).abs() <= 1.0e-15);
+    }
 
     #[test]
     fn vdmos_drain_drift_participates_in_force_accept_topology() {

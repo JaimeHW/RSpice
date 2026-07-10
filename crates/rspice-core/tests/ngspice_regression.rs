@@ -24,7 +24,6 @@ use std::{
 };
 
 const FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS: u128 = 30_000;
-const DEFAULT_HARD_CASE_TIMEOUT_MS: u128 = 30_000;
 const CASE_RUNNER_RESULT_GRACE_MS: u128 = 1_000;
 const CASE_RUNNER_RESULT_GRACE_DIVISOR: u128 = 10;
 const FULL_SUITE_TIMEOUT_OVERHEAD_MS: u128 = 60_000;
@@ -120,49 +119,8 @@ fn run_case_with_watchdog(
     run_case_with_watchdog_with_timeout(test_dir, config, cir_path, hard_case_timeout_ms(config))
 }
 
-/// Marker prefix for the one skip class a suite run may carry. Suite
-/// assertions admit exactly this prefix; any other skip still fails the
-/// "all discovered decks must execute" guard.
-const DEBUG_WATCHDOG_SKIP_MARKER: &str = "SKIPPED: debug-build watchdog";
-
-/// Reclassify watchdog timeouts as named skips in debug builds.
-///
-/// Unoptimized builds run the heavy conformance decks (fourbitadder, the
-/// SOI ring oscillators, mesa-12) many times slower than the per-deck
-/// watchdog budget, so a watchdog abort there measures the build profile,
-/// not the deck — and a permanently red debug suite trains readers to
-/// ignore failures (a stale "10 numerical failures" investigation already
-/// shipped off the back of exactly that). The deck still gates in the
-/// release-mode nightly conformance run, where this function compiles to
-/// the identity and every timeout stays a genuine failure.
-fn reclassify_debug_watchdog_timeout(result: TestResult, hard_timeout_ms: u128) -> TestResult {
-    if !cfg!(debug_assertions) || result.passed {
-        return result;
-    }
-    let Some(error) = result.error.clone() else {
-        return result;
-    };
-    // The three shapes a watchdog abort takes: the in-process budget check,
-    // the hard process kill, and the soft-deadline abort signal (which in
-    // this harness is armed only by the case runner's deadline).
-    let timeout_class = error.contains("Test exceeded timeout")
-        || error.contains("Test exceeded hard process timeout")
-        || error.contains("Simulation aborted by user");
-    if !timeout_class {
-        return result;
-    }
-    TestResult {
-        passed: true,
-        error: Some(format!(
-            "{DEBUG_WATCHDOG_SKIP_MARKER} ({hard_timeout_ms}ms cap; the release nightly \
-             gates this deck; set RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS to run it in a \
-             debug build): {error}"
-        )),
-        mismatches: Vec::new(),
-        ..result
-    }
-}
-
+/// Execute one deck in a child process with a finite soft and hard deadline.
+/// Timeouts remain test failures in every build profile.
 fn run_case_with_watchdog_with_timeout(
     test_dir: &Path,
     config: &TestRunnerConfig,
@@ -219,7 +177,7 @@ fn run_case_with_watchdog_with_timeout(
                 };
                 let _ = fs::remove_file(&result_path);
                 return match decoded {
-                    Ok(result) => reclassify_debug_watchdog_timeout(result, hard_timeout_ms),
+                    Ok(result) => result,
                     Err(err) => watchdog_error_result(cir_path, start.elapsed().as_millis(), err),
                 };
             }
@@ -227,13 +185,10 @@ fn run_case_with_watchdog_with_timeout(
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = fs::remove_file(&result_path);
-                return reclassify_debug_watchdog_timeout(
-                    watchdog_error_result(
-                        cir_path,
-                        start.elapsed().as_millis(),
-                        format!("Test exceeded hard process timeout ({}ms)", hard_timeout_ms),
-                    ),
-                    hard_timeout_ms,
+                return watchdog_error_result(
+                    cir_path,
+                    start.elapsed().as_millis(),
+                    format!("Test exceeded hard process timeout ({}ms)", hard_timeout_ms),
                 );
             }
             Ok(None) => {
@@ -258,9 +213,18 @@ fn hard_case_timeout_ms(config: &TestRunnerConfig) -> u128 {
     let hard_cap_ms = std::env::var("RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u128>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_HARD_CASE_TIMEOUT_MS);
-    resolve_hard_case_timeout_ms(config.max_time_per_test_ms, hard_cap_ms)
+        .filter(|value| *value > 0);
+    resolve_optional_hard_case_timeout_ms(config.max_time_per_test_ms, hard_cap_ms)
+}
+
+fn resolve_optional_hard_case_timeout_ms(
+    config_timeout_ms: u128,
+    hard_cap_ms: Option<u128>,
+) -> u128 {
+    hard_cap_ms.filter(|value| *value > 0).map_or_else(
+        || config_timeout_ms.max(1),
+        |hard_cap_ms| resolve_hard_case_timeout_ms(config_timeout_ms, hard_cap_ms),
+    )
 }
 
 fn resolve_hard_case_timeout_ms(config_timeout_ms: u128, hard_cap_ms: u128) -> u128 {
@@ -471,54 +435,17 @@ fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
         stats.skipped,
         stats.pass_rate()
     );
-    let foreign_skips = count_foreign_skips(&results);
     assert_eq!(
-        foreign_skips, 0,
-        "Suite '{}' skipped {} circuit(s) outside the debug-watchdog class; all discovered decks must execute.",
-        subdir, foreign_skips
+        stats.skipped, 0,
+        "Suite '{}' skipped {} circuit(s); all discovered decks must execute.",
+        subdir, stats.skipped
     );
 
     stats
 }
 
-fn broad_ngspice_suite_debug_block_message(subdir: &str) -> Option<String> {
-    if !cfg!(debug_assertions) {
-        return None;
-    }
-
-    Some(format!(
-        "Refusing broad ngspice suite '{subdir}' in debug mode; run `cargo test --release -p rspice-core --test ngspice_regression test_full_ngspice_suite_summary -- --nocapture` for the full suite, or add `--release` to this exact suite command."
-    ))
-}
-
-fn ngspice_regression_debug_block_message(scope: &str) -> Option<String> {
-    if !cfg!(debug_assertions) {
-        return None;
-    }
-
-    Some(format!(
-        "Refusing ngspice regression {scope} in debug mode; run `cargo test --release -p rspice-core --test ngspice_regression test_full_ngspice_suite_summary -- --nocapture` for the full suite, or add `--release` to the focused command."
-    ))
-}
-
-fn assert_ngspice_regression_deck_run_allowed(scope: &str) {
-    if let Some(message) = ngspice_regression_debug_block_message(scope) {
-        panic!("{message}");
-    }
+fn assert_ngspice_regression_deck_run_allowed(_scope: &str) {
     assert_ngspice_exe_is_console_binary();
-}
-
-/// Skips other than the debug-build watchdog class, which is the only skip
-/// a suite run may carry (and which cannot occur in release builds).
-fn count_foreign_skips(results: &[TestResult]) -> usize {
-    results
-        .iter()
-        .filter(|r| {
-            r.error.as_ref().is_some_and(|e| {
-                e.starts_with("SKIPPED") && !e.starts_with(DEBUG_WATCHDOG_SKIP_MARKER)
-            })
-        })
-        .count()
 }
 
 fn suite_config(subdir: &str) -> TestRunnerConfig {
@@ -808,62 +735,27 @@ fn test_hard_case_timeout_is_always_finite_and_capped() {
     assert_eq!(resolve_hard_case_timeout_ms(90_000, 120_000), 90_000);
     assert_eq!(resolve_hard_case_timeout_ms(0, 30_000), 1);
     assert_eq!(resolve_hard_case_timeout_ms(90_000, 0), 1);
+    assert_eq!(resolve_optional_hard_case_timeout_ms(90_000, None), 90_000);
+    assert_eq!(
+        resolve_optional_hard_case_timeout_ms(90_000, Some(30_000)),
+        30_000
+    );
+    assert_eq!(resolve_optional_hard_case_timeout_ms(0, None), 1);
 }
 
 #[test]
-fn test_debug_watchdog_reclassification_is_profile_gated() {
-    let timed_out = || {
-        TestResult {
-        name: "fourbitadder".to_string(),
-        passed: false,
-        error: Some(
-            "Simulation error: Simulation aborted by user; Test exceeded timeout (29011ms > 29000ms)"
-                .to_string(),
-        ),
-        mismatches: Vec::new(),
-        duration_ms: 29_011,
-        analysis_type: Some("Transient".to_string()),
-    }
-    };
+fn test_watchdog_timeout_result_is_a_failure() {
+    let timed_out = watchdog_error_result(
+        Path::new("general/fourbitadder.cir"),
+        29_011,
+        "Test exceeded hard process timeout (29000ms)".to_string(),
+    );
 
-    let out = reclassify_debug_watchdog_timeout(timed_out(), 30_000);
-    if cfg!(debug_assertions) {
-        assert!(out.passed, "debug build reclassifies the timeout as a skip");
-        let error = out.error.as_deref().expect("skip carries its reason");
-        assert!(
-            error.starts_with(DEBUG_WATCHDOG_SKIP_MARKER),
-            "skip is prefixed with the admitted marker: {error}"
-        );
-        assert!(
-            error.contains("Test exceeded timeout"),
-            "original diagnostic stays quoted in the skip reason: {error}"
-        );
-    } else {
-        let original = timed_out();
-        assert_eq!(
-            out.passed, original.passed,
-            "release keeps timeouts failing"
-        );
-        assert_eq!(
-            out.error, original.error,
-            "release leaves the diagnostic untouched"
-        );
-    }
-
-    // A genuine failure class is never reclassified in any profile.
-    let mismatch = TestResult {
-        name: "ltra1_1_line".to_string(),
-        passed: false,
-        error: Some("Value mismatch on v(3) at t=3.2e-8".to_string()),
-        mismatches: Vec::new(),
-        duration_ms: 1_000,
-        analysis_type: Some("Transient".to_string()),
-    };
-    let kept = reclassify_debug_watchdog_timeout(mismatch, 30_000);
-    assert!(!kept.passed, "non-timeout failures are never converted");
+    assert!(!timed_out.passed);
+    assert_eq!(timed_out.name, "fourbitadder");
     assert_eq!(
-        kept.error.as_deref(),
-        Some("Value mismatch on v(3) at t=3.2e-8")
+        timed_out.error.as_deref(),
+        Some("Test exceeded hard process timeout (29000ms)")
     );
 }
 
@@ -897,57 +789,11 @@ fn test_focused_general_config_uses_diagnostic_timeout() {
 }
 
 #[test]
-fn test_broad_ngspice_suite_runner_is_profile_gated() {
-    let skip_message = broad_ngspice_suite_debug_block_message("general");
-
-    if cfg!(debug_assertions) {
-        let skip_message = skip_message.expect("debug broad suites must be blocked");
-        assert!(skip_message.contains("general"));
-        assert!(skip_message.contains("Refusing broad ngspice suite"));
-        assert!(skip_message.contains("cargo test --release"));
-    } else {
-        assert!(
-            skip_message.is_none(),
-            "release broad suites must execute normally"
-        );
-    }
-}
-
-#[test]
-fn test_ngspice_deck_runs_are_profile_gated() {
-    let skip_message = ngspice_regression_debug_block_message("deck 'general/rc.cir'");
-
-    if cfg!(debug_assertions) {
-        let skip_message = skip_message.expect("debug deck runs must be blocked");
-        assert!(skip_message.contains("general/rc.cir"));
-        assert!(skip_message.contains("Refusing ngspice regression"));
-        assert!(skip_message.contains("cargo test --release"));
-    } else {
-        assert!(
-            skip_message.is_none(),
-            "release deck runs must execute normally"
-        );
-    }
-}
-
-#[test]
-fn test_ngspice_deck_preflight_blocks_debug_profile_before_spawn() {
+fn test_ngspice_deck_preflight_allows_current_profile() {
     let result = std::panic::catch_unwind(|| {
         assert_ngspice_regression_deck_run_allowed("deck 'general/rc.cir'");
     });
-
-    if cfg!(debug_assertions) {
-        let panic_payload = result.expect_err("debug deck preflight must panic before spawn");
-        let message = panic_payload
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| panic_payload.downcast_ref::<&str>().copied())
-            .unwrap_or("<non-string panic>");
-        assert!(message.contains("general/rc.cir"));
-        assert!(message.contains("cargo test --release"));
-    } else {
-        result.expect("release deck preflight must allow execution");
-    }
+    result.expect("ngspice deck preflight must allow debug and release profiles");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1897,7 +1743,6 @@ fn test_full_ngspice_suite_summary() {
         expected_unsupported: 0,
         total_time_ms: 0,
     };
-    let mut total_foreign_skips = 0usize;
 
     for suite in &suites {
         if Instant::now() >= full_suite_deadline {
@@ -1921,7 +1766,6 @@ fn test_full_ngspice_suite_summary() {
         total_stats.skipped += stats.skipped;
         total_stats.expected_unsupported += stats.expected_unsupported;
         total_stats.total_time_ms += stats.total_time_ms;
-        total_foreign_skips += count_foreign_skips(&results);
 
         if stats.total > 0 {
             println!(
@@ -1968,9 +1812,9 @@ fn test_full_ngspice_suite_summary() {
         total_stats.pass_rate()
     );
     assert_eq!(
-        total_foreign_skips, 0,
-        "Full ngspice suite skipped {} circuit(s) outside the debug-watchdog class; all discovered decks must execute.",
-        total_foreign_skips
+        total_stats.skipped, 0,
+        "Full ngspice suite skipped {} circuit(s); all discovered decks must execute.",
+        total_stats.skipped
     );
 }
 

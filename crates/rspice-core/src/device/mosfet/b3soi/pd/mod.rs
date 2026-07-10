@@ -150,6 +150,13 @@ pub struct B3SoiPd {
     /// The previous full evaluation engaged the body limiter (ngspice
     /// `Check != 0`), which disqualifies the next iterate from bypassing.
     last_limited: std::cell::Cell<bool>,
+    /// Raw bias consumed by the previous DC update. Repeated evaluation of the
+    /// same Newton candidate must reuse the current linearization rather than
+    /// advancing the stateful limiters a second time.
+    last_dc_update_bias: std::cell::Cell<Option<B3SoiPdBias>>,
+    /// One-shot permission for the next identical DC update to reuse the
+    /// candidate linearization before stamping.
+    dc_stamp_reuse_pending: std::cell::Cell<bool>,
     /// `DEBUG=-1` instance flag (ngspice `debugMod`): the charge state is
     /// still evaluated for probes, but `ChargeComputationNeeded` is forced to
     /// zero before the companion assembly, so the device contributes no
@@ -241,6 +248,8 @@ impl B3SoiPd {
             bypass_active: std::cell::Cell::new(false),
             force_full_eval: std::cell::Cell::new(true),
             last_limited: std::cell::Cell::new(false),
+            last_dc_update_bias: std::cell::Cell::new(None),
+            dc_stamp_reuse_pending: std::cell::Cell::new(false),
             charges_suppressed: false,
             instance_ic: super::common::B3SoiInstanceIc::new(),
         })
@@ -258,6 +267,8 @@ impl B3SoiPd {
         self.limit_anchor_valid.set(false);
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
+        self.last_dc_update_bias.set(None);
+        self.dc_stamp_reuse_pending.set(false);
     }
 
     /// Clear the cached operating-point linearization before a fresh DC path.
@@ -408,6 +419,8 @@ impl B3SoiPd {
     pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
         let bias = self.raw_branch_voltages(voltages);
+        self.last_dc_update_bias.set(Some(bias));
+        self.dc_stamp_reuse_pending.set(false);
         self.bias = bias;
         self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
@@ -850,17 +863,16 @@ impl B3SoiPd {
         check
     }
 
-    /// MODEINITJCT startup bias used by Xyce/ngspice for an uninitialized
-    /// B3SOIPD operating-point solve with no explicit input operating point.
-    ///
-    /// Xyce's normal `initJctFlag` path preserves the source-solved terminal
-    /// drops and only imposes the gate startup value; it does not zero Vbs,
-    /// Vds, Ves, or Vps. That is important for `.NODESET` and DC-sweep
-    /// warm-starts of floating-body devices.
-    fn junction_init_bias(&self, raw: B3SoiPdBias) -> B3SoiPdBias {
+    /// MODEINITJCT startup bias used by ngspice for an uninitialized B3SOIPD
+    /// operating-point solve with no explicit input operating point.
+    fn junction_init_bias(&self) -> B3SoiPdBias {
         B3SoiPdBias {
+            vbs: 0.0,
             vgs: self.mtype * 0.1 + self.sized.vth0,
-            ..raw
+            vds: 0.0,
+            ves: 0.0,
+            vps: 0.0,
+            del_temp: 0.0,
         }
     }
 
@@ -897,12 +909,15 @@ impl B3SoiPd {
 
 impl NonlinearDevice for B3SoiPd {
     fn update(&mut self, voltages: &[Value]) {
-        self.converged_ref = self.bias;
         if self.startup_seed_pending.get() && self.dc_mode.get() {
+            self.converged_ref = self.bias;
             return;
         }
         if !self.has_history && self.dc_mode.get() {
-            let bias = self.junction_init_bias(self.raw_branch_voltages(voltages));
+            self.converged_ref = self.bias;
+            self.last_dc_update_bias
+                .set(Some(self.raw_branch_voltages(voltages)));
+            let bias = self.junction_init_bias();
             self.bias = bias;
             self.op = self.eval_op_for_bias(bias);
             self.has_history = true;
@@ -916,6 +931,22 @@ impl NonlinearDevice for B3SoiPd {
             self.last_limited.set(false);
             return;
         }
+        let raw_bias = self.raw_branch_voltages(voltages);
+        if self.dc_mode.get()
+            && self
+                .last_dc_update_bias
+                .get()
+                .is_some_and(|last| pd_biases_match(last, raw_bias))
+            && self.dc_stamp_reuse_pending.replace(false)
+        {
+            self.converged_ref = self.bias;
+            return;
+        }
+        self.converged_ref = self.bias;
+        if self.dc_mode.get() {
+            self.last_dc_update_bias.set(Some(raw_bias));
+            self.dc_stamp_reuse_pending.set(true);
+        }
         // ngspice transient bypass (b3soipdld.c:509-560): when the previous
         // iterate evaluated without limiting and the new branch voltages plus
         // predicted currents are stationary within tolerances, freeze the
@@ -926,16 +957,19 @@ impl NonlinearDevice for B3SoiPd {
             && !self.last_limited.get()
             && self.has_history
         {
-            let raw = self.raw_branch_voltages(voltages);
-            if self.bypass_check(raw, reltol, abstol, vntol) {
+            if self.bypass_check(raw_bias, reltol, abstol, vntol) {
                 self.bypass_active.set(true);
                 return;
             }
         }
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
-        let mut bias = self.raw_branch_voltages(voltages);
-        let limited = self.apply_branch_limiting(&mut bias) || self.apply_body_limiting(&mut bias);
+        let mut bias = raw_bias;
+        // Both calls mutate `bias`; evaluating them separately is required even
+        // when branch limiting already reported a change.
+        let branch_limited = self.apply_branch_limiting(&mut bias);
+        let body_limited = self.apply_body_limiting(&mut bias);
+        let limited = branch_limited || body_limited;
         self.last_limited.set(limited);
         self.startup_seed_pending.set(false);
         self.bias = bias;
@@ -987,6 +1021,16 @@ impl NonlinearDevice for B3SoiPd {
             && cmp(self.bias.vps, self.converged_ref.vps)
             && (!self.self_heating_active() || cmp(self.bias.del_temp, self.converged_ref.del_temp))
     }
+}
+
+#[inline]
+fn pd_biases_match(a: B3SoiPdBias, b: B3SoiPdBias) -> bool {
+    a.vbs == b.vbs
+        && a.vgs == b.vgs
+        && a.vds == b.vds
+        && a.ves == b.ves
+        && a.vps == b.vps
+        && a.del_temp == b.del_temp
 }
 
 impl B3SoiPd {

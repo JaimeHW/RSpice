@@ -108,7 +108,7 @@ impl Engine {
         }
         circuit.prepare_behavioral_small_signal(&dc_solution);
 
-        let dense_g = Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0)
+        let dense_g = Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0)?
             .to_dense_real();
         let elements = Self::collect_sensitivity_elements(&circuit);
         if elements.is_empty() {

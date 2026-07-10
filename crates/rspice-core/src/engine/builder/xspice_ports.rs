@@ -269,6 +269,11 @@ pub(in crate::engine::builder) fn coerce_xspice_connections(
                 &port_specs[spec_idx + 1..],
                 &parsed_ports[cursor..],
             )
+            && !xspice_current_assignment_feasible(
+                port_spec,
+                &port_specs[spec_idx + 1..],
+                &parsed_ports[cursor..],
+            )
         {
             connections.push(crate::xspice::PortConnection::Null);
             continue;
@@ -366,7 +371,40 @@ fn choose_unpacked_vector_take(
     }
 
     (min_take..=max_take)
+        .rev()
         .find(|take| xspice_connection_shapes_feasible(remaining_specs, &parsed_ports[*take..]))
+}
+
+fn xspice_current_assignment_feasible(
+    port_spec: &crate::xspice::PortSpec,
+    remaining_specs: &[crate::xspice::PortSpec],
+    parsed_ports: &[crate::netlist::XspicePort],
+) -> bool {
+    let Some(current) = parsed_ports.first() else {
+        return false;
+    };
+    if matches!(current, crate::netlist::XspicePort::Null) {
+        return port_spec.null_allowed
+            && xspice_connection_shapes_feasible(remaining_specs, &parsed_ports[1..]);
+    }
+
+    if port_spec.is_vector {
+        if current.is_vector_connection() {
+            let len = parsed_vector_connection_len(current).unwrap_or(1);
+            return vector_connection_len_allowed(port_spec, len)
+                && xspice_connection_shapes_feasible(remaining_specs, &parsed_ports[1..]);
+        }
+        return choose_unpacked_vector_take(port_spec, remaining_specs, parsed_ports).is_some();
+    }
+
+    if try_pack_default_differential_port(port_spec, parsed_ports).is_some()
+        && xspice_connection_shapes_feasible(remaining_specs, &parsed_ports[2..])
+    {
+        return true;
+    }
+
+    !current.is_vector_connection()
+        && xspice_connection_shapes_feasible(remaining_specs, &parsed_ports[1..])
 }
 
 fn xspice_connection_shapes_feasible(
@@ -998,17 +1036,14 @@ mod tests {
             "A3",
             "d_cosim",
         )
-        .expect("single-bit input and output vectors should split across ports");
+        .expect("ambiguous scalar vector tokens should use the largest feasible prefix");
 
         assert_eq!(single_bit_connections.len(), 3);
         match &single_bit_connections[0] {
-            PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 1),
-            other => panic!("expected one digital input bit, got {other:?}"),
+            PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 2),
+            other => panic!("expected two digital input bits, got {other:?}"),
         }
-        match &single_bit_connections[1] {
-            PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 1),
-            other => panic!("expected one digital output bit, got {other:?}"),
-        }
+        assert!(matches!(single_bit_connections[1], PortConnection::Null));
         assert!(matches!(single_bit_connections[2], PortConnection::Null));
     }
 
@@ -1070,7 +1105,7 @@ mod tests {
     }
 
     #[test]
-    fn required_vector_port_keeps_minimum_before_nullable_tail() {
+    fn required_vector_port_takes_largest_prefix_before_nullable_tail() {
         let mut circuit = CircuitData::new();
         let ports = vec![
             PortSpec::vector_input("in", PortType::Digital).with_vector_min_len(2),
@@ -1085,14 +1120,14 @@ mod tests {
 
         let connections =
             coerce_xspice_connections(&mut circuit, &ports, &parsed_ports, "A1", "d_and")
-                .expect("vector input should consume its required width before optional outputs");
+                .expect("vector input should consume the largest prefix before optional outputs");
 
         assert_eq!(connections.len(), 3);
         match &connections[0] {
-            PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 2),
-            other => panic!("expected two digital input bits, got {other:?}"),
+            PortConnection::DigitalVector(nodes) => assert_eq!(nodes.len(), 3),
+            other => panic!("expected three digital input bits, got {other:?}"),
         }
-        assert!(matches!(connections[1], PortConnection::Digital(_)));
+        assert!(matches!(connections[1], PortConnection::Null));
         assert!(matches!(connections[2], PortConnection::Null));
     }
 

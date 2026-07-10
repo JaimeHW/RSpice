@@ -175,6 +175,14 @@ pub struct B3SoiDd {
     /// The previous full evaluation engaged the body limiter (ngspice
     /// `Check != 0`), which disqualifies the next iterate from bypassing.
     last_limited: std::cell::Cell<bool>,
+    /// Raw terminal vector consumed by the previous DC update. The engine
+    /// revisits an accepted candidate before stamping the next Newton system;
+    /// that repeat must not advance the stateful voltage limiters again.
+    last_dc_update_terminals: std::cell::Cell<Option<B3SoiDdTerminals>>,
+    /// One-shot permission for the next identical DC update to reuse the
+    /// candidate linearization. Once consumed, a later identical Newton
+    /// iterate is a real new load and must run the limiters again.
+    dc_stamp_reuse_pending: std::cell::Cell<bool>,
     /// The previous update evaluated at a bias adjusted by the body/temperature
     /// limiter. The stamp must use that same bias/op pair.
     bias_was_limited: std::cell::Cell<bool>,
@@ -297,6 +305,8 @@ impl B3SoiDd {
             bypass_active: std::cell::Cell::new(false),
             force_full_eval: std::cell::Cell::new(true),
             last_limited: std::cell::Cell::new(false),
+            last_dc_update_terminals: std::cell::Cell::new(None),
+            dc_stamp_reuse_pending: std::cell::Cell::new(false),
             bias_was_limited: std::cell::Cell::new(false),
             self_heating_startup_disabled: std::cell::Cell::new(false),
             charges_suppressed: false,
@@ -327,6 +337,8 @@ impl B3SoiDd {
         }
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
+        self.last_dc_update_terminals.set(None);
+        self.dc_stamp_reuse_pending.set(false);
         self.bias_was_limited.set(false);
         self.startup_seed_pending.set(false);
     }
@@ -355,6 +367,8 @@ impl B3SoiDd {
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
         self.last_limited.set(false);
+        self.last_dc_update_terminals.set(None);
+        self.dc_stamp_reuse_pending.set(false);
         self.bias_was_limited.set(false);
     }
 
@@ -523,13 +537,18 @@ impl B3SoiDd {
 
     /// Re-linearize directly at the supplied static candidate solution.
     ///
-    /// Regular Newton updates intentionally use the BSIMSOI body limiter.
-    /// Residual and fallback validation probes must evaluate the true
-    /// operating-point equations at the candidate voltage itself.
+    /// Residual and fallback validation probes bypass the per-iteration change
+    /// limiters, but retain the DC `B3SOIDDSmartVbs` floor because ngspice uses
+    /// that effective body voltage in the converged operating-point load.
     pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
-        let bias = self.raw_branch_voltages(voltages);
-        self.terminal_limit_anchor = self.raw_terminal_voltages(voltages);
+        let raw_bias = self.raw_branch_voltages(voltages);
+        let mut bias = raw_bias;
+        self.apply_dc_smart_vbs(&mut bias);
+        let terminals = self.raw_terminal_voltages(voltages);
+        self.terminal_limit_anchor = terminals;
+        self.last_dc_update_terminals.set(Some(terminals));
+        self.dc_stamp_reuse_pending.set(false);
         self.bias = bias;
         self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
@@ -541,8 +560,7 @@ impl B3SoiDd {
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
         self.last_limited.set(false);
-        self.bias_was_limited.set(false);
-        self.startup_seed_pending.set(false);
+        self.bias_was_limited.set(!biases_match(raw_bias, bias));
     }
 
     /// ngspice bypass predicate (b3soiddld.c:589-643): every branch-voltage
@@ -1033,37 +1051,18 @@ impl B3SoiDd {
         if !self.limit_anchor_valid.get() {
             // First iterate of a phase: accept the raw bias, but still apply the
             // DC SmartVbs floor so a floating body never starts negative.
-            if self.dc_mode.get() && self.body_mode == BodyMode::Floating {
-                if bias.vds >= 0.0 {
-                    if bias.vbs < 0.0 {
-                        bias.vbs = 0.0;
-                    }
-                } else {
-                    let mut vbd = bias.vbs - bias.vds;
-                    if vbd < 0.0 {
-                        vbd = 0.0;
-                        bias.vbs = vbd + bias.vds;
-                    }
-                }
-            }
+            self.apply_dc_smart_vbs(bias);
             return false;
         }
         let mut check = false;
-        let smart = self.dc_mode.get() && self.body_mode == BodyMode::Floating;
         if bias.vds >= 0.0 {
-            let mut vbs = common::soi_limit(bias.vbs, self.vbs_limit_anchor, 0.2, &mut check);
-            if smart && vbs < 0.0 {
-                vbs = 0.0;
-            }
-            bias.vbs = vbs;
+            bias.vbs = common::soi_limit(bias.vbs, self.vbs_limit_anchor, 0.2, &mut check);
         } else {
             let vbd0 = bias.vbs - bias.vds;
-            let mut vbd = common::soi_limit(vbd0, self.vbd_limit_anchor, 0.2, &mut check);
-            if smart && vbd < 0.0 {
-                vbd = 0.0;
-            }
+            let vbd = common::soi_limit(vbd0, self.vbd_limit_anchor, 0.2, &mut check);
             bias.vbs = vbd + bias.vds;
         }
+        self.apply_dc_smart_vbs(bias);
         if self.self_heating_active() {
             bias.del_temp =
                 common::soi_limit(bias.del_temp, self.del_temp_limit_anchor, 5.0, &mut check);
@@ -1071,29 +1070,52 @@ impl B3SoiDd {
         check
     }
 
-    /// MODEINITJCT startup bias used by Xyce/ngspice for an uninitialized
-    /// B3SOIDD operating-point solve with no explicit input operating point.
+    fn apply_dc_smart_vbs(&self, bias: &mut B3SoiDdBias) {
+        if !self.dc_mode.get() || self.body_mode != BodyMode::Floating {
+            return;
+        }
+        if bias.vds >= 0.0 {
+            bias.vbs = bias.vbs.max(0.0);
+        } else {
+            let vbd = (bias.vbs - bias.vds).max(0.0);
+            bias.vbs = vbd + bias.vds;
+        }
+    }
+
+    /// MODEINITJCT startup bias for an uninitialized B3SOIDD operating-point
+    /// solve with no explicit input operating point.
     ///
-    /// Xyce's ordinary DCOP startup preserves the source-solved terminal drops
-    /// and imposes only the gate startup value. That lets source stepping and
-    /// nodesets retain their linear context while avoiding an off-device first
-    /// linearization for floating-body SOI devices.
+    /// ngspice initializes every branch voltage to zero before applying the
+    /// gate seed. Xyce preserves the source-solved terminal drops and only
+    /// imposes the gate value, so retain that behavior for LEVEL=10 cards.
     fn junction_init_bias(&self, raw: B3SoiDdBias) -> B3SoiDdBias {
-        B3SoiDdBias {
-            vgs: self.mtype * 0.1 + self.sized.vth0,
-            ..raw
+        match self.model.dialect {
+            common::B3SoiDialect::Ngspice => B3SoiDdBias {
+                vbs: 0.0,
+                vgs: self.mtype * 0.1 + self.sized.vth0,
+                vds: 0.0,
+                ves: 0.0,
+                vps: 0.0,
+                del_temp: 0.0,
+            },
+            common::B3SoiDialect::Xyce => B3SoiDdBias {
+                vgs: self.mtype * 0.1 + self.sized.vth0,
+                ..raw
+            },
         }
     }
 }
 
 impl NonlinearDevice for B3SoiDd {
     fn update(&mut self, voltages: &[Value]) {
-        self.converged_ref = self.bias;
         if self.startup_seed_pending.get() && self.dc_mode.get() {
+            self.converged_ref = self.bias;
             return;
         }
         if !self.has_history && self.dc_mode.get() {
             let terminals = self.raw_terminal_voltages(voltages);
+            self.converged_ref = self.bias;
+            self.last_dc_update_terminals.set(Some(terminals));
             let bias = self.junction_init_bias(self.bias_from_terminals(terminals));
             self.bias = bias;
             self.op = self.eval_op_for_bias(bias);
@@ -1112,6 +1134,21 @@ impl NonlinearDevice for B3SoiDd {
         }
 
         let node_terminals = self.raw_terminal_voltages(voltages);
+        if self.dc_mode.get()
+            && self
+                .last_dc_update_terminals
+                .get()
+                .is_some_and(|last| terminals_match(last, node_terminals))
+            && self.dc_stamp_reuse_pending.replace(false)
+        {
+            self.converged_ref = self.bias;
+            return;
+        }
+        self.converged_ref = self.bias;
+        if self.dc_mode.get() {
+            self.last_dc_update_terminals.set(Some(node_terminals));
+            self.dc_stamp_reuse_pending.set(true);
+        }
         let node_bias = self.bias_from_terminals(node_terminals);
         let predicted_bias = self.predictor_bias.take();
         let raw_bias = predicted_bias.unwrap_or(node_bias);
@@ -1146,9 +1183,11 @@ impl NonlinearDevice for B3SoiDd {
                 terminal_limited,
             )
         };
-        let limited = terminal_limited
-            || self.apply_branch_limiting(&mut bias)
-            || self.apply_body_limiting(&mut bias);
+        // Every limiter mutates `bias`; do not combine these calls with
+        // short-circuit boolean operators.
+        let branch_limited = self.apply_branch_limiting(&mut bias);
+        let body_limited = self.apply_body_limiting(&mut bias);
+        let limited = terminal_limited || branch_limited || body_limited;
         self.last_limited.set(limited);
         self.bias_was_limited
             .set(using_prediction || !biases_match(raw_bias, bias));
@@ -1200,7 +1239,7 @@ impl NonlinearDevice for B3SoiDd {
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        if !self.has_history {
+        if !self.has_history || self.last_limited.get() {
             return false;
         }
         let reltol = criteria.relative_tolerance();
@@ -1568,6 +1607,18 @@ fn biases_match(a: B3SoiDdBias, b: B3SoiDdBias) -> bool {
         && a.ves == b.ves
         && a.vps == b.vps
         && a.del_temp == b.del_temp
+}
+
+#[inline]
+fn terminals_match(a: B3SoiDdTerminals, b: B3SoiDdTerminals) -> bool {
+    a.vd == b.vd
+        && a.vg_ext == b.vg_ext
+        && a.vg == b.vg
+        && a.vs == b.vs
+        && a.ve == b.ve
+        && a.vp == b.vp
+        && a.vb == b.vb
+        && a.vt == b.vt
 }
 
 #[cfg(test)]
@@ -2068,8 +2119,10 @@ mod tests {
         assert_eq!(dev.bias.vds, 0.0);
         assert_eq!(dev.bias.ves, 0.0);
         assert_eq!(dev.bias.vps, 0.0);
+        dev.dc_mode.set(true);
 
-        dev.update(&[10.0, 8.0, 0.0, 7.0, 0.0, 0.0, 9.0]);
+        let limited_input = [10.0, 8.0, 0.0, 7.0, 1.0, 0.0, 9.0];
+        dev.update(&limited_input);
 
         assert!(
             (dev.bias.vds - 3.0).abs() <= 1.0e-12,
@@ -2092,12 +2145,30 @@ mod tests {
             dev.bias.vps
         );
         assert!(
+            (dev.bias.vbs - 0.2).abs() <= 1.0e-12,
+            "body limiting must run after terminal and branch limiting; vbs={}",
+            dev.bias.vbs
+        );
+        assert!(
             dev.last_limited.get(),
             "branch limiting should mark the iterate non-bypassable"
         );
         assert!(
             dev.bias_was_limited.get(),
             "charge and RHS stamping must reuse the limited branch bias"
+        );
+
+        let limited_bias = dev.bias;
+        dev.update(&limited_input);
+        assert!(
+            biases_match(dev.bias, limited_bias),
+            "revisiting one DC candidate must not advance the limiter twice"
+        );
+
+        dev.update(&limited_input);
+        assert!(
+            dev.bias.vbs > limited_bias.vbs,
+            "a later identical Newton iterate must advance the limiter"
         );
     }
 
@@ -2313,6 +2384,18 @@ mod tests {
             sized.abulk_cv_factor,
             1.0 + (sized.clc / sized.leff).powf(sized.cle)
         );
+    }
+
+    #[test]
+    fn impact_ionization_beta0_default_tracks_source_dialect() {
+        let ngspice = B3SoiDdModel::from_params(&HashMap::new(), false, 300.15);
+        assert_eq!(ngspice.dialect, B3SoiDialect::Ngspice);
+        assert_eq!(ngspice.beta0.v, 30.0);
+
+        let xyce =
+            B3SoiDdModel::from_params(&HashMap::from([("LEVEL".to_string(), 10.0)]), false, 300.15);
+        assert_eq!(xyce.dialect, B3SoiDialect::Xyce);
+        assert_eq!(xyce.beta0.v, 0.0);
     }
 
     #[test]

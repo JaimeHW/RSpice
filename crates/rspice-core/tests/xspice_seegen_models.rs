@@ -154,7 +154,7 @@ rmon mon 0 1meg
 .end
 ";
 
-    let result = run_tran(deck, 4.0e-9, 0.1e-9);
+    let result = run_tran(deck, 4.0e-9, 0.01e-9);
     let out = transient_node_series(&result, "out");
     let mon = transient_node_series(&result, "mon");
 
@@ -317,13 +317,18 @@ r1 out1 0 1k
 
     let result = run_tran(deck, 2.35e-9, 0.01e-9);
     let out1 = transient_node_series(&result, "out1");
-    let first_post_advance_sample = 2.301e-9;
-    let just_after_advance = value_at_time(&result.time, out1, first_post_advance_sample);
+    let advance_time = 0.5e-9 + 0.9 * 2.0e-9;
+    let first_post_advance_index = result
+        .time
+        .iter()
+        .position(|time| *time > advance_time)
+        .expect("transient has a sample after the channel-advance boundary");
+    let first_post_advance_sample = result.time[first_post_advance_index];
+    let just_after_advance = out1[first_post_advance_index];
     let elapsed = first_post_advance_sample - 0.5e-9;
     let previous_tail_current =
         1.0e-3 * (f64::exp(-(elapsed / 1.0e-9)) - f64::exp(-(elapsed / 0.2e-9)));
     let expected = -previous_tail_current * 1.0e3;
-
     assert!(
         (just_after_advance - expected).abs() < 5.0e-3,
         "ngspice computes the previous pulse tail before advancing output channel; expected {expected}, got {just_after_advance}"

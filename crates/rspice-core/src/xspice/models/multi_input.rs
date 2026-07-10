@@ -166,31 +166,24 @@ fn table_uncached(ctx: &CmContext) -> CmResult<TableData> {
     let y = ctx
         .real_vector_param("y")
         .ok_or_else(|| CmError::MissingParameter("y".to_string()))?;
-    if x.len() != y.len() {
+    // ngspice reports the mismatch but continues using the common prefix.
+    // Preserve that compatibility without mutating the model parameters.
+    let point_count = x.len().min(y.len());
+    if point_count < 2 {
         return Err(invalid_param(
             "x/y",
-            format!(
-                "x and y vectors must have the same length, got x={} y={}",
-                x.len(),
-                y.len()
-            ),
-        ));
-    }
-    if x.len() < 2 {
-        return Err(invalid_param(
-            "x/y",
-            format!("x and y require at least 2 common points, got {}", x.len()),
+            format!("x and y require at least 2 common points, got {point_count}"),
         ));
     }
 
     let mut points = Vec::new();
-    points.try_reserve_exact(x.len()).map_err(|err| {
+    points.try_reserve_exact(point_count).map_err(|err| {
         invalid_param(
             "x/y",
-            format!("unable to reserve {} table point(s): {err}", x.len()),
+            format!("unable to reserve {point_count} table point(s): {err}"),
         )
     })?;
-    for (idx, (&x_value, &y_value)) in x.iter().zip(y).enumerate() {
+    for (idx, (&x_value, &y_value)) in x.iter().zip(y).take(point_count).enumerate() {
         if !x_value.is_finite() {
             return Err(invalid_param(
                 "x",
@@ -780,17 +773,15 @@ mod tests {
     }
 
     #[test]
-    fn multi_input_rejects_mismatched_table_lengths() {
+    fn multi_input_uses_common_table_prefix_like_ngspice() {
         let mut ctx = CmContext::new();
         ctx.set_real_vector_param("x", vec![0.0, 1.0, 2.0]);
         ctx.set_real_vector_param("y", vec![0.0, 10.0]);
 
-        let err = table_uncached(&ctx).expect_err("mismatched tables must be rejected");
-        let message = err.to_string();
-        assert!(
-            message.contains("same length"),
-            "mismatched table error should explain the length problem, got {message}"
-        );
+        let table = table_uncached(&ctx).expect("common table prefix should remain usable");
+        assert_eq!(table.points.len(), 2);
+        assert_eq!((table.points[0].x, table.points[0].y), (0.0, 0.0));
+        assert_eq!((table.points[1].x, table.points[1].y), (1.0, 10.0));
     }
 
     #[test]

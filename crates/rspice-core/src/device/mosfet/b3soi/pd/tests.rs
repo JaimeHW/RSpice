@@ -175,6 +175,53 @@ fn model_consts(m: &B3SoiPdModel) -> ModelConsts {
 }
 
 #[test]
+fn update_applies_body_limit_after_branch_limit() {
+    let model = Arc::new(B3SoiPdModel::from_params(&n1_params(), false, 300.15));
+    let mut dev = B3SoiPd::new(
+        "m1".to_string(),
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        0,
+        BodyMode::TiedIdeal,
+        model,
+        geom(),
+        300.15,
+    )
+    .expect("PD device builds");
+
+    dev.dc_mode.set(false);
+    dev.update(&[0.0; 6]);
+    dev.dc_mode.set(true);
+    let limited_input = [10.0, 8.0, 0.0, 7.0, 1.0, 9.0];
+    dev.update(&limited_input);
+
+    assert!((dev.bias.vds - 3.0).abs() <= 1.0e-12);
+    assert!(
+        (dev.bias.vbs - 0.2).abs() <= 1.0e-12,
+        "body limiting must run after branch limiting; vbs={}",
+        dev.bias.vbs
+    );
+    assert!(dev.last_limited.get());
+
+    let limited_bias = dev.bias;
+    dev.update(&limited_input);
+    assert!(
+        pd_biases_match(dev.bias, limited_bias),
+        "revisiting one DC candidate must not advance the limiter twice"
+    );
+
+    dev.update(&limited_input);
+    assert!(
+        dev.bias.vbs > limited_bias.vbs,
+        "a later identical Newton iterate must advance the limiter"
+    );
+}
+
+#[test]
 fn temp_setup_is_finite_and_physical() {
     let model = B3SoiPdModel::from_params(&n1_params(), false, 300.15);
     let sized = B3SoiPdSized::new(&model, &geom(), 300.15).expect("sized");

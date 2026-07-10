@@ -1041,7 +1041,9 @@ fn parse_unsigned_param_value(
     defer_simple_param_refs: bool,
 ) -> Result<XspiceParamValue, ParseError> {
     match &stream.peek().kind {
-        kind if !xspice_param_prefers_bare_string(param_name)
+        kind if (!xspice_param_prefers_bare_string(param_name)
+            || (param_name.eq_ignore_ascii_case("model")
+                && !matches!(kind, TokenKind::Ident(_))))
             && scalar_expression_token_can_start(kind) =>
         {
             if let Some(value) =
@@ -1158,7 +1160,30 @@ fn parse_scalar_param_token_value(
         ),
         TokenKind::Ident(raw) => {
             let raw = raw.clone();
-            if xspice_param_prefers_bare_string(param_name) {
+            if param_name.eq_ignore_ascii_case("model") {
+                stream.advance();
+                if let Some(value) = netlist_params.get(&raw) {
+                    if defer_simple_param_refs {
+                        Ok(XspiceParamValue::Deferred(raw))
+                    } else {
+                        Ok(XspiceParamValue::Resolved(value))
+                    }
+                } else if let Some(value) = netlist_params.get_string(&raw) {
+                    if defer_simple_param_refs {
+                        Ok(XspiceParamValue::StringDeferred(raw))
+                    } else {
+                        let parsed = parse_string_backed_param_value(param_name, value, line_num)?
+                            .unwrap_or_else(|| XspiceParamValue::String(value.to_string()));
+                        Ok(parsed)
+                    }
+                } else if let Some(value) = parse_boolean_literal(&raw) {
+                    Ok(XspiceParamValue::Resolved(value))
+                } else if let Ok(value) = parse_spice_value(&raw) {
+                    Ok(XspiceParamValue::Resolved(value))
+                } else {
+                    Ok(XspiceParamValue::String(raw))
+                }
+            } else if xspice_param_prefers_bare_string(param_name) {
                 if let Some(value) = netlist_params.get_string(&raw) {
                     stream.advance();
                     if defer_simple_param_refs {
@@ -1850,11 +1875,34 @@ fn parse_xspice_complex_component(
 }
 
 fn format_xspice_complex_component(value: Value) -> String {
-    let formatted = value.to_string();
+    let formatted = trim_xspice_decimal(value.to_string());
+    if value.is_finite() {
+        let fixed = trim_xspice_decimal(format!("{value:.15}"));
+        if let Ok(rounded) = fixed.parse::<Value>() {
+            let tolerance = value.abs().max(1.0) * 1.0e-12;
+            if (rounded - value).abs() <= tolerance && fixed.len() <= formatted.len() {
+                return fixed;
+            }
+        }
+    }
     formatted
-        .strip_suffix(".0")
-        .unwrap_or(formatted.as_str())
-        .to_string()
+}
+
+fn trim_xspice_decimal(formatted: String) -> String {
+    let trimmed = if formatted.contains('.') {
+        formatted
+            .strip_suffix(".0")
+            .unwrap_or(formatted.as_str())
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+    } else {
+        formatted.as_str()
+    };
+    if trimmed == "-0" {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn xspice_complex_component_expr(component: XspiceComplexComponent) -> String {

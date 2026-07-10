@@ -601,10 +601,8 @@ impl CircuitData {
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-    ) {
-        if let Err(err) = self.try_stamp_nonlinear(matrix, rhs, voltages) {
-            panic!("{err}");
-        }
+    ) -> Result<(), String> {
+        self.try_stamp_nonlinear(matrix, rhs, voltages)
     }
 
     /// Checked nonlinear stamping path for simulator analyses that can report
@@ -653,7 +651,15 @@ impl CircuitData {
             }
         }
         self.bjts.stamp_all_direct(matrix, rhs, voltages);
-        self.mosfets.stamp_all_direct(matrix, rhs, voltages);
+        match diode_stamp_mode {
+            DiodeStampMode::LimitedNewton => {
+                self.mosfets.stamp_all_direct(matrix, rhs, voltages);
+            }
+            DiodeStampMode::StaticProbe => {
+                self.mosfets
+                    .stamp_all_static_probe_direct(matrix, rhs, voltages);
+            }
+        }
         for jfet in &self.jfets {
             jfet.stamp_direct(matrix, rhs, voltages);
         }

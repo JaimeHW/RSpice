@@ -121,6 +121,7 @@ impl Engine {
 
         Self::apply_bjt_initial_guess_correction(&mut initial_guess, circuit);
         Self::apply_b3soi_pd_initial_guess_correction(&mut initial_guess, circuit);
+        Self::apply_bsim4_internal_gate_initial_guess_correction(&mut initial_guess, circuit);
         Self::apply_vbic_internal_initial_guess_correction(&mut initial_guess, circuit);
         for &(node_id, voltage) in node_hints {
             if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
@@ -489,7 +490,7 @@ impl Engine {
                     );
                 }
                 if let Some(refined) =
-                    self.refine_fallback_candidate(circuit, matrix, &solution, abort)
+                    self.refine_fallback_candidate(circuit, matrix, &solution, abort)?
                 {
                     return Ok(refined);
                 }
@@ -534,7 +535,8 @@ impl Engine {
 
         if residual_stalled
             && !circuit.has_b3soi_devices()
-            && let Some(refined) = self.refine_fallback_candidate(circuit, matrix, &solution, abort)
+            && let Some(refined) =
+                self.refine_fallback_candidate(circuit, matrix, &solution, abort)?
         {
             log::info!(
                 "Residual-stalled DC Newton candidate accepted after static-device polishing."
@@ -559,7 +561,7 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             if let Some(restarted) =
-                self.warm_restart_after_fallback(circuit, matrix, &legacy_seed, abort)
+                self.warm_restart_after_fallback(circuit, matrix, &legacy_seed, abort)?
             {
                 log::info!(
                     "Legacy HFET inverse-branch restart accepted after direct Newton failed."
@@ -596,7 +598,7 @@ impl Engine {
                         gmin_solution.clone(),
                         "GMIN stepping",
                         abort,
-                    ) {
+                    )? {
                         return Ok(candidate);
                     }
                     fallback_seed = self.prefer_lower_merit_scaled_seed(
@@ -607,7 +609,7 @@ impl Engine {
                         1.0,
                     );
                     if let Some(restarted) =
-                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)?
                     {
                         log::info!(
                             "GMIN stepping warmed the nonlinear state; direct Newton restart accepted."
@@ -645,7 +647,7 @@ impl Engine {
             if electrical_result.is_err() && !abort.is_aborted() {
                 circuit.reset_b3soi_operating_point_history();
                 if let Some(direct_electrical_solution) =
-                    self.warm_restart_after_fallback(circuit, matrix, &electrical_seed, abort)
+                    self.warm_restart_after_fallback(circuit, matrix, &electrical_seed, abort)?
                 {
                     electrical_result = Ok(direct_electrical_solution);
                 }
@@ -657,7 +659,7 @@ impl Engine {
                     circuit.seed_b3soi_self_heating_temperature_guess(&mut coupled_seed);
                     circuit.prime_b3soi_operating_point_from_solution(&coupled_seed);
                     if let Some(restarted) =
-                        self.warm_restart_after_fallback(circuit, matrix, &coupled_seed, abort)
+                        self.warm_restart_after_fallback(circuit, matrix, &coupled_seed, abort)?
                     {
                         log::info!(
                             "B3SOI electrothermal startup warmed the nonlinear state; direct Newton restart accepted."
@@ -669,7 +671,7 @@ impl Engine {
                         matrix,
                         &coupled_seed,
                         abort,
-                    ) {
+                    )? {
                         log::info!(
                             "B3SOI electrothermal startup required static-probe polishing and is now accepted."
                         );
@@ -718,7 +720,7 @@ impl Engine {
                         source_stepped.clone(),
                         "Source stepping",
                         abort,
-                    ) {
+                    )? {
                         return Ok(candidate);
                     }
                     fallback_seed = self.prefer_lower_merit_scaled_seed(
@@ -729,7 +731,7 @@ impl Engine {
                         1.0,
                     );
                     if let Some(restarted) =
-                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)?
                     {
                         log::info!(
                             "Source stepping warmed the nonlinear state; direct Newton restart accepted."
@@ -772,7 +774,7 @@ impl Engine {
                         pseudo_solution.clone(),
                         "Pseudo-transient continuation",
                         abort,
-                    ) {
+                    )? {
                         return Ok(candidate);
                     }
                     fallback_seed = self.prefer_lower_merit_scaled_seed(
@@ -783,7 +785,7 @@ impl Engine {
                         1.0,
                     );
                     if let Some(restarted) =
-                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)?
                     {
                         log::info!(
                             "Pseudo-transient continuation warmed the nonlinear state; direct Newton restart accepted."
@@ -816,7 +818,7 @@ impl Engine {
                         gmin_solution.clone(),
                         "GMIN stepping",
                         abort,
-                    ) {
+                    )? {
                         return Ok(candidate);
                     }
                     fallback_seed = self.prefer_lower_merit_scaled_seed(
@@ -827,7 +829,7 @@ impl Engine {
                         1.0,
                     );
                     if let Some(restarted) =
-                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)?
                     {
                         log::info!(
                             "GMIN stepping warmed the nonlinear state; direct Newton restart accepted."
@@ -868,7 +870,7 @@ impl Engine {
                         gate_solution.clone(),
                         "Gate generation continuation",
                         abort,
-                    ) {
+                    )? {
                         return Ok(candidate);
                     }
                     fallback_seed = self.prefer_lower_merit_scaled_seed(
@@ -879,7 +881,7 @@ impl Engine {
                         1.0,
                     );
                     if let Some(restarted) =
-                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)?
                     {
                         log::info!(
                             "Gate generation continuation warmed the nonlinear state; direct Newton restart accepted."
@@ -915,11 +917,11 @@ impl Engine {
                 arc_solution.clone(),
                 "Arc-length continuation",
                 abort,
-            ) {
+            )? {
                 return Ok(candidate);
             }
             if let Some(restarted) =
-                self.warm_restart_after_fallback(circuit, matrix, &arc_solution, abort)
+                self.warm_restart_after_fallback(circuit, matrix, &arc_solution, abort)?
             {
                 log::info!(
                     "Arc-length continuation warmed the nonlinear state; direct Newton restart accepted."

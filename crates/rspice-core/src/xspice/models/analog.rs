@@ -380,6 +380,11 @@ fn analog_vector_param_values<'a>(
     width: usize,
     model_name: &str,
 ) -> CmResult<Option<&'a [Value]>> {
+    // The one-element IFS defaults are broadcast placeholders. Only an
+    // explicitly supplied vector is required to match the input width.
+    if !ctx.param_was_provided(name) {
+        return Ok(None);
+    }
     let supplied = ctx.real_vector_param(name).unwrap_or(&[]);
     if supplied.is_empty() {
         return Ok(None);
@@ -420,6 +425,9 @@ fn validate_analog_vector_param_width(
 fn validate_analog_vector_params(ctx: &CmContext, model_name: &str) -> CmResult<()> {
     let width = ctx.port_width("in");
     for name in ["in_offset", "in_gain"] {
+        if !ctx.param_was_provided(name) {
+            continue;
+        }
         let supplied = ctx.real_vector_param(name).unwrap_or(&[]);
         if !supplied.is_empty() {
             validate_analog_vector_param_width(name, supplied.len(), width, model_name)?;
@@ -2214,6 +2222,15 @@ impl CodeModel for AnalogStateReturn {
                 _ => input,
             };
         } else if ctx.time > xval1 {
+            // Select from the pre-shift accepted history. ngspice reaches
+            // the same value on its repeated call at this timepoint; RSpice
+            // evaluates rollbackable trials without mutating model state.
+            outval = match state_number {
+                1 => state1,
+                2 => state2,
+                3 => state3,
+                _ => input,
+            };
             state3 = state2;
             state2 = state1;
             state1 = input;
@@ -2665,6 +2682,25 @@ fn oneshot_output_below_or_at_official(value: Value, target: Value) -> bool {
     value - target < 1.0e-20
 }
 
+fn oneshot_trigger_crossing_time(
+    ctx: &CmContext,
+    old_clock: Value,
+    clock: Value,
+    trigger: Value,
+) -> Value {
+    let delta = clock - old_clock;
+    if !delta.is_finite() || delta.abs() <= Value::EPSILON {
+        return ctx.time;
+    }
+    let fraction = ((trigger - old_clock) / delta).clamp(0.0, 1.0);
+    let crossing = ctx.time_prev + fraction * (ctx.time - ctx.time_prev);
+    if crossing.is_finite() {
+        crossing.clamp(ctx.time_prev.min(ctx.time), ctx.time_prev.max(ctx.time))
+    } else {
+        ctx.time
+    }
+}
+
 impl CodeModel for AnalogOneShot {
     fn name(&self) -> &str {
         "oneshot"
@@ -2742,6 +2778,7 @@ impl CodeModel for AnalogOneShot {
         };
         let clock = ctx.input("clk");
         let commit_state = ctx.evaluation_phase() != EvaluationPhase::RollbackableProbe;
+        let mut trigger_time = None;
 
         let mut output = output_low;
         if ctx.port_width("clear") > 0 && ctx.input("clear") > trigger {
@@ -2763,6 +2800,9 @@ impl CodeModel for AnalogOneShot {
                     if clock > old_clock && clock > trigger {
                         state = true;
                         set = true;
+                        trigger_time = Some(oneshot_trigger_crossing_time(
+                            ctx, old_clock, clock, trigger,
+                        ));
                     }
                 } else if clock < old_clock && clock < trigger {
                     set = false;
@@ -2771,6 +2811,9 @@ impl CodeModel for AnalogOneShot {
                 if clock < old_clock && clock < trigger {
                     state = true;
                     set = true;
+                    trigger_time = Some(oneshot_trigger_crossing_time(
+                        ctx, old_clock, clock, trigger,
+                    ));
                 }
             } else if clock > old_clock && clock > trigger {
                 set = false;
@@ -2778,7 +2821,8 @@ impl CodeModel for AnalogOneShot {
 
             if state && oneshot_output_below_or_at_official(previous_output, output_low) && !locked
             {
-                time1 = ctx.time + rise_delay;
+                let edge_time = trigger_time.unwrap_or(ctx.time);
+                time1 = edge_time + rise_delay;
                 time2 = time1 + rise_time;
                 time3 = time2 + pulse_width + fall_delay;
                 time4 = time3 + fall_time;
@@ -2793,7 +2837,8 @@ impl CodeModel for AnalogOneShot {
                 && oneshot_output_below_or_at_official(previous_output, output_high)
                 && !locked
             {
-                time3 = ctx.time + pulse_width + rise_delay + fall_delay + rise_time;
+                let edge_time = trigger_time.unwrap_or(ctx.time);
+                time3 = edge_time + pulse_width + rise_delay + fall_delay + rise_time;
                 time4 = time3 + fall_time;
                 if commit_state {
                     request_oneshot_breakpoints(ctx, &[time3, time4]);
@@ -3825,10 +3870,13 @@ mod tests {
             .evaluate(&mut ctx)
             .expect("accepted oneshot trigger");
 
-        assert!((ctx.state(ONESHOT_T1) - 1.2e-9).abs() < 1.0e-18);
-        assert!((ctx.state(ONESHOT_T2) - 1.4e-9).abs() < 1.0e-18);
+        assert!((ctx.state(ONESHOT_T1) - 0.7e-9).abs() < 1.0e-18);
+        assert!((ctx.state(ONESHOT_T2) - 0.9e-9).abs() < 1.0e-18);
         assert_eq!(ctx.state(ONESHOT_CLOCK), 1.0);
-        assert_eq!(ctx.take_requested_breakpoints().len(), 4);
+        let breakpoints = ctx.take_requested_breakpoints();
+        assert_eq!(breakpoints.len(), 2);
+        assert!((breakpoints[0] - 2.0e-9).abs() < 1.0e-18);
+        assert!((breakpoints[1] - 2.2e-9).abs() < 1.0e-18);
     }
 
     #[test]
@@ -3908,6 +3956,8 @@ mod tests {
         .expect("set mult inputs");
         ctx.set_real_vector_param("in_gain", vec![2.0, 3.0, 4.0]);
         ctx.set_real_vector_param("in_offset", vec![0.5, -1.0, 0.0]);
+        ctx.mark_param_provided("in_gain");
+        ctx.mark_param_provided("in_offset");
         ctx.set_param("out_gain", 2.0);
         ctx.set_param("out_offset", 1.0);
 

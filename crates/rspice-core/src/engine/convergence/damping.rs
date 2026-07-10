@@ -180,16 +180,19 @@ impl Engine {
     /// Newton step for this circuit. These compact models run SPICE/Xyce-style
     /// voltage limiting inside their `update` path: the full node step is the
     /// algorithm and the per-iterate branch replacement is the globalization.
+    /// Berkeley MOS1/2/3/6 (and the legacy BSIM front carried by `Mosfet`)
+    /// use the same DEVfetlim/DEVlimvds/DEVpnjlim discipline as ngspice.
     /// B3SOI also has a local branch/body limiter, but it still benefits from
     /// the engine's voltage damping in ordinary operating-point solves. Those
     /// callers use a progress-forcing line-search policy instead of this raw
     /// full-step bypass.
     pub(in crate::engine) fn junction_limiting_owns_newton_steps(circuit: &CircuitData) -> bool {
-        circuit
-            .bjts
-            .devices
-            .iter()
-            .any(|bjt| bjt.uses_legacy_gummel_poon() || bjt.uses_vbic_dynamic_charges())
+        !circuit.mosfets.is_empty()
+            || circuit
+                .bjts
+                .devices
+                .iter()
+                .any(|bjt| bjt.uses_legacy_gummel_poon() || bjt.uses_vbic_dynamic_charges())
             || circuit
                 .vdmoses
                 .devices
@@ -442,6 +445,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::device::Mosfet;
 
     #[test]
     fn physical_clamp_only_limits_node_voltage_unknowns() {
@@ -462,5 +466,23 @@ mod tests {
         Engine::clamp_solution_to_physical_bounds(&mut solution, 1);
 
         assert_eq!(solution, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn classic_mos_local_limiting_owns_newton_steps() {
+        let mut circuit = CircuitData::new();
+        let drain = circuit.get_or_create_node("d");
+        let gate = circuit.get_or_create_node("g");
+        let source = circuit.get_or_create_node("s");
+        let bulk = circuit.get_or_create_node("b");
+        circuit.mosfets.add(Mosfet::new_pmos(
+            "mp".to_string(),
+            drain,
+            gate,
+            source,
+            bulk,
+        ));
+
+        assert!(Engine::junction_limiting_owns_newton_steps(&circuit));
     }
 }

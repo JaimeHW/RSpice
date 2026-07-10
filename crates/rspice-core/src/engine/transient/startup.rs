@@ -90,13 +90,17 @@ impl Engine {
         circuit: &mut crate::circuit::Circuit,
         matrix: &mut crate::solver::StaticMatrix,
         seed: &[Value],
-    ) -> Vec<Value> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut solution = seed.to_vec();
         let mut rhs = vec![0.0; size];
         let gmin_floor = self.startup_warmup_conditioning_gmin(circuit);
 
-        for _ in 0..self.startup_warmup_iteration_budget() {
+        for iteration in 0..self.startup_warmup_iteration_budget() {
+            if (iteration & 0x0f) == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             matrix.clear_values();
             rhs.fill(0.0);
 
@@ -111,7 +115,9 @@ impl Engine {
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
                 circuit.update_nonlinear(&solution);
-                circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+                circuit
+                    .stamp_nonlinear(matrix, &mut rhs, &solution)
+                    .map_err(SimulationError::Circuit)?;
                 circuit.stamp_behavioral(
                     matrix,
                     &mut rhs,
@@ -147,7 +153,10 @@ impl Engine {
             solution = proposal;
         }
 
-        solution
+        // A warmup iterate is only a seed. Never expose it as an operating
+        // point until the normal solver has validated voltage, device, and
+        // equation-residual convergence at the physical candidate.
+        self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&solution), abort)
     }
 
     pub(super) fn nonlinear_transient_startup_warmup_seed(
@@ -156,13 +165,17 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         seed: &[Value],
         time: Value,
-    ) -> Vec<Value> {
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut solution = seed.to_vec();
         let mut rhs = vec![0.0; size];
         let gmin_floor = self.startup_warmup_conditioning_gmin(circuit);
 
-        for _ in 0..self.startup_warmup_iteration_budget() {
+        for iteration in 0..self.startup_warmup_iteration_budget() {
+            if (iteration & 0x0f) == 0 && abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             matrix.clear_values();
             rhs.fill(0.0);
 
@@ -180,7 +193,9 @@ impl Engine {
             if circuit.has_nonlinear_devices() {
                 circuit.set_b3soi_operating_point_mode(true);
                 circuit.update_nonlinear(&solution);
-                circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+                circuit
+                    .stamp_nonlinear(matrix, &mut rhs, &solution)
+                    .map_err(SimulationError::Circuit)?;
                 circuit.stamp_behavioral(
                     matrix,
                     &mut rhs,
@@ -219,7 +234,14 @@ impl Engine {
             solution = proposal;
         }
 
-        solution
+        self.solve_nonlinear_transient_op_startup_with_guess_and_hints_abort(
+            circuit,
+            matrix,
+            time,
+            &solution,
+            &[],
+            abort,
+        )
     }
 
     fn t0_transient_seed_after_dc_fallback(
@@ -228,7 +250,7 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         dc_solution: &[Value],
         abort: &dyn AbortSignal,
-    ) -> Option<Vec<Value>> {
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
         let source_delta = circuit
             .voltage_sources
             .max_dc_to_transient_delta(0.0)
@@ -243,7 +265,7 @@ impl Engine {
             log::debug!(
                 "Skipping t=0 transient seed: source_delta={source_delta:e}, xspice_ramptime_active={xspice_ramptime_active}, xyce_inductor_ic_active={xyce_inductor_ic_active}"
             );
-            return None;
+            return Ok(None);
         }
 
         let mut nonlinear_seed_solved = false;
@@ -254,12 +276,12 @@ impl Engine {
             Err(err) => {
                 if !xyce_inductor_ic_active || !circuit.has_nonlinear_devices() {
                     log::debug!("t=0 transient seed solve failed: {err}");
-                    return None;
+                    return Ok(None);
                 }
                 let mut ic_seed = dc_solution.to_vec();
                 if !Self::apply_inductor_element_initial_conditions(circuit, &mut ic_seed) {
                     log::debug!("t=0 transient seed solve failed: {err}");
-                    return None;
+                    return Ok(None);
                 }
                 let capacitor_hints =
                     Self::grounded_capacitor_startup_voltage_hints(circuit, dc_solution);
@@ -275,12 +297,12 @@ impl Engine {
                         nonlinear_seed_solved = true;
                         seed
                     }
-                    Err(SimulationError::Aborted) => return None,
+                    Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
                     Err(nonlinear_err) => {
                         log::debug!(
                             "t=0 transient seed solve failed: {err}; nonlinear inductor-IC startup seed also failed: {nonlinear_err}"
                         );
-                        return None;
+                        return Ok(None);
                     }
                 }
             }
@@ -296,7 +318,7 @@ impl Engine {
             log::debug!(
                 "t=0 transient seed solve matched DC fallback despite source_delta={source_delta:e}, xspice_ramptime_active={xspice_ramptime_active}"
             );
-            return None;
+            return Ok(None);
         }
 
         for value in &mut transient_seed {
@@ -315,18 +337,26 @@ impl Engine {
             log::debug!(
                 "Skipping t=0 transient seed after sanitization: seed_delta={seed_delta:e}"
             );
-            return None;
+            return Ok(None);
         }
 
         if nonlinear_seed_solved {
-            Some(transient_seed)
+            Ok(Some(transient_seed))
         } else {
-            Some(self.nonlinear_transient_startup_warmup_seed(
+            match self.nonlinear_transient_startup_warmup_seed(
                 circuit,
                 matrix,
                 &transient_seed,
                 0.0,
-            ))
+                abort,
+            ) {
+                Ok(seed) => Ok(Some(seed)),
+                Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
+                Err(err) => {
+                    log::debug!("t=0 transient warmup seed did not converge: {err}");
+                    Ok(None)
+                }
+            }
         }
     }
 
@@ -335,11 +365,11 @@ impl Engine {
         circuit: &mut crate::circuit::Circuit,
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
-    ) -> Option<Vec<Value>> {
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
         let Ok(mut transient_seed) =
             self.solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
         else {
-            return None;
+            return Ok(None);
         };
 
         for value in &mut transient_seed {
@@ -348,7 +378,20 @@ impl Engine {
             }
         }
 
-        Some(self.nonlinear_transient_startup_warmup_seed(circuit, matrix, &transient_seed, 0.0))
+        match self.nonlinear_transient_startup_warmup_seed(
+            circuit,
+            matrix,
+            &transient_seed,
+            0.0,
+            abort,
+        ) {
+            Ok(seed) => Ok(Some(seed)),
+            Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
+            Err(err) => {
+                log::debug!("linearized t=0 warmup seed did not converge: {err}");
+                Ok(None)
+            }
+        }
     }
 
     fn solve_direct_dc_startup_with_abort(
@@ -387,14 +430,14 @@ impl Engine {
         solution: Vec<Value>,
         abort: &dyn AbortSignal,
         mode: InitialSolutionMode,
-    ) -> (Vec<Value>, InitialSolutionMode) {
+    ) -> Result<(Vec<Value>, InitialSolutionMode), SimulationError> {
         if let Some(seed) =
-            self.t0_transient_seed_after_dc_fallback(circuit, matrix, &solution, abort)
+            self.t0_transient_seed_after_dc_fallback(circuit, matrix, &solution, abort)?
         {
             log::warn!("Transient startup using source-consistent t=0 seed after DC startup.");
-            (seed, InitialSolutionMode::LinearizedSeed)
+            Ok((seed, InitialSolutionMode::LinearizedSeed))
         } else {
-            (solution, mode)
+            Ok((solution, mode))
         }
     }
 
@@ -436,13 +479,13 @@ impl Engine {
         }
         match self.solve_direct_dc_startup_with_abort(netlist, circuit, matrix, abort) {
             Ok(solution) => {
-                return Ok(self.transient_startup_from_dc_solution(
+                return self.transient_startup_from_dc_solution(
                     circuit,
                     matrix,
                     solution,
                     abort,
                     InitialSolutionMode::DcOperatingPoint,
-                ));
+                );
             }
             Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
             Err(direct_dc_err) => {
@@ -460,13 +503,13 @@ impl Engine {
             match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
                 Ok(solution) => {
                     log::warn!("Transient startup recovered using configured DC startup aids.");
-                    return Ok(self.transient_startup_from_dc_solution(
+                    return self.transient_startup_from_dc_solution(
                         circuit,
                         matrix,
                         solution,
                         abort,
                         InitialSolutionMode::DcOperatingPoint,
-                    ));
+                    );
                 }
                 Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
                 Err(configured_dc_err) => {
@@ -478,7 +521,7 @@ impl Engine {
             }
         }
 
-        if let Some(seed) = self.t0_linearized_transient_startup_seed(circuit, matrix, abort) {
+        if let Some(seed) = self.t0_linearized_transient_startup_seed(circuit, matrix, abort)? {
             log::warn!("Transient startup using source-consistent linearized t=0 seed.");
             return Ok((seed, InitialSolutionMode::LinearizedSeed));
         }
@@ -490,7 +533,7 @@ impl Engine {
         match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
             Ok(solution) => {
                 if let Some(seed) =
-                    self.t0_transient_seed_after_dc_fallback(circuit, matrix, &solution, abort)
+                    self.t0_transient_seed_after_dc_fallback(circuit, matrix, &solution, abort)?
                 {
                     log::warn!(
                         "Transient startup using source-consistent t=0 seed after DC OP fallback."
@@ -554,7 +597,8 @@ impl Engine {
                                         circuit,
                                         matrix,
                                         &continuation_seed,
-                                    );
+                                        abort,
+                                    )?;
                                     log::warn!(
                                         "Transient startup using Level-6 continuation seed after DC OP failure."
                                     );
@@ -584,7 +628,8 @@ impl Engine {
                                 *v = 0.0;
                             }
                         }
-                        solution = self.nonlinear_startup_warmup_seed(circuit, matrix, &solution);
+                        solution =
+                            self.nonlinear_startup_warmup_seed(circuit, matrix, &solution, abort)?;
                         log::warn!(
                             "Transient startup using linearized initial seed after DC OP failure."
                         );

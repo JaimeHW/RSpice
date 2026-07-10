@@ -255,7 +255,6 @@ struct BidiAnalogDrive {
     current: Value,
     partial: Value,
     svoc: Value,
-    completion_time: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -620,6 +619,22 @@ fn bidi_digital_delay(state: DigitalState, params: BidiParams) -> Value {
     }
 }
 
+fn bidi_analog_transition_breakpoint(
+    event_time: Value,
+    drive: DigitalValue,
+    params: BidiParams,
+) -> Option<Value> {
+    let transition = if drive.state.is_low() {
+        params.t_fall
+    } else if drive.state.is_high() {
+        params.t_rise
+    } else {
+        params.t_rise.min(params.t_fall)
+    };
+    let breakpoint = event_time + transition * 1.0001;
+    breakpoint.is_finite().then_some(breakpoint)
+}
+
 fn bidi_unknown_target_svoc(drive: DigitalValue, params: BidiParams) -> Value {
     match drive.strength {
         DigitalStrength::Strong => {
@@ -924,7 +939,6 @@ fn bidi_drive_current(
             current,
             partial,
             svoc,
-            completion_time: None,
         };
     }
 
@@ -934,27 +948,19 @@ fn bidi_drive_current(
         current = 0.0;
     }
     let mut partial = 0.0;
-    let mut last_target = current;
-    let mut last_range = 0.0;
     let segments = bidi_analog_segments(ctx, index, drive, layout);
     for segment in segments.iter() {
         svoc = bidi_advance_svoc(svoc, segment.drive, segment.interval, params);
         let (target, segment_partial, range) =
             bidi_current_target(voltage, segment.drive, svoc, params);
         partial = segment_partial;
-        last_target = target;
-        last_range = range;
         current = bidi_advance_current(current, target, segment.interval, range, params);
     }
-
-    let completion_time = bidi_current_transition_time(current, last_target, last_range, params)
-        .map(|dt| ctx.time + dt);
 
     BidiAnalogDrive {
         current,
         partial,
         svoc,
-        completion_time,
     }
 }
 
@@ -968,6 +974,10 @@ fn dac_bridge_ramp_value(
     t_rise: Value,
     t_fall: Value,
 ) -> Value {
+    // ngspice's signed-slope branches collapse reversed output ranges to the target.
+    if out_low > out_high {
+        return target;
+    }
     let elapsed = (time - start_time).max(0.0);
     let span = (out_high - out_low).abs();
     if (target - start_value).abs() < 1e-12 || span <= 1e-12 {
@@ -1404,8 +1414,11 @@ impl CodeModel for BidiBridge {
                 BidiDirection::Dac | BidiDirection::Bidirectional => digital_input,
             };
             let analog_drive = bidi_drive_current(ctx, index, voltage, drive, params, layout);
-            if let Some(completion_time) = analog_drive.completion_time
-                && commit_outputs
+            if commit_outputs
+                && direction != BidiDirection::Adc
+                && let Some(event_time) = ctx.input_digital_vector_event_time("d", index)
+                && let Some(completion_time) =
+                    bidi_analog_transition_breakpoint(event_time, drive, params)
                 && completion_time > ctx.time + 1.0e-18
             {
                 ctx.request_breakpoint(completion_time);
@@ -1890,7 +1903,7 @@ mod tests {
     }
 
     #[test]
-    fn dac_bridge_ramps_inverted_output_levels() {
+    fn dac_bridge_steps_inverted_output_levels_like_ngspice() {
         let mut ctx = CmContext::new();
         ctx.set_port_width("in", 1);
         ctx.set_port_width("out", 1);
@@ -1923,8 +1936,8 @@ mod tests {
             .expect("ramps toward inverted one level");
 
         assert!(
-            (ctx.output_vector("out")[0] - 3.75).abs() <= 1.0e-15,
-            "inverted dac_bridge levels should ramp instead of snapping"
+            ctx.output_vector("out")[0].abs() <= 1.0e-15,
+            "ngspice's signed DAC slope snaps inverted output ranges to the target"
         );
         assert_eq!(ctx.take_requested_breakpoints(), vec![1.0e-9]);
     }
@@ -2038,7 +2051,7 @@ mod tests {
         );
         assert!(
             ctx.take_requested_breakpoints().is_empty(),
-            "rollbackable bidi_bridge probe must not schedule analog completion breakpoints"
+            "rollbackable bidi_bridge probe must not schedule analog transition breakpoints"
         );
 
         ctx.set_evaluation_phase(EvaluationPhase::AcceptedStep);
@@ -2047,7 +2060,9 @@ mod tests {
             .expect("commits DAC analog drive");
         assert!((ctx.state(BIDI_STATE_SVOC_BASE) - 0.75).abs() <= 1.0e-15);
         assert!((ctx.state(current_base) + 0.05).abs() <= 1.0e-15);
-        assert_eq!(ctx.take_requested_breakpoints(), vec![0.75e-9]);
+        let breakpoints = ctx.take_requested_breakpoints();
+        assert_eq!(breakpoints.len(), 1);
+        assert!((breakpoints[0] - 1.2501e-9).abs() <= 1.0e-21);
         assert_eq!(
             ctx.state(drive_state_base),
             digital_state_code(DigitalState::One) as Value

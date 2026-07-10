@@ -775,6 +775,9 @@ impl Jfet {
         frequency_hz: Value,
         matrix: &mut impl MatrixStamper,
     ) {
+        // AC is linearized at the accepted operating-point solution. Newton
+        // limiter/bypass state may legitimately lag that solution by one
+        // iteration and must not perturb the small-signal Jacobian.
         let vd = Self::node_voltage(voltages, self.drain);
         let vg = Self::node_voltage(voltages, self.gate);
         let vs = Self::node_voltage(voltages, self.source);

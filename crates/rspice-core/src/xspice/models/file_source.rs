@@ -15,16 +15,9 @@ pub struct FileSource;
 pub struct FileSourceAlias;
 
 #[derive(Debug, Clone, Copy)]
-enum RawFileSourceFieldRole {
-    Time,
-    Value(usize),
-}
-
-#[derive(Debug, Clone, Copy)]
 struct RawFileSourceField {
     line: usize,
     value: Value,
-    role: RawFileSourceFieldRole,
 }
 
 #[derive(Debug, Clone)]
@@ -323,22 +316,13 @@ fn parse_filesource_contents(
         fields.push(RawFileSourceField {
             line: line_number,
             value: time,
-            role: RawFileSourceFieldRole::Time,
         });
 
         let mut offset = time_len;
         for value_index in 0..width {
             offset = skip_filesource_data_delimiters(trimmed_start, offset);
             if offset >= trimmed_start.len() {
-                return Err(filesource_line_error(
-                    file,
-                    line_number,
-                    format!(
-                        "expected {} columns, found {}",
-                        expected_columns,
-                        value_index + 1
-                    ),
-                ));
+                break;
             }
             let Some((value, len)) = parse_filesource_value_token(
                 file,
@@ -347,16 +331,11 @@ fn parse_filesource_contents(
                 value_index,
             )?
             else {
-                return Err(filesource_line_error(
-                    file,
-                    line_number,
-                    format!("value[{value_index}] must start with a numeric value"),
-                ));
+                break;
             };
             fields.push(RawFileSourceField {
                 line: line_number,
                 value,
-                role: RawFileSourceFieldRole::Value(value_index),
             });
             offset += len;
         }
@@ -584,29 +563,27 @@ fn transform_rows(
     let mut row_column = 0;
     let mut previous_time = timeoffset;
     for raw in raw_fields {
-        let value = match raw.role {
-            RawFileSourceFieldRole::Time => {
-                let time_delta = raw.value * timescale;
-                let time = if timerelative {
-                    previous_time += time_delta;
-                    previous_time
-                } else {
-                    timeoffset + time_delta
-                };
-                if !time.is_finite() {
-                    return Err(filesource_line_error(
-                        file,
-                        raw.line,
-                        format!("transformed time must be finite, got {time}"),
-                    ));
-                }
-                time
+        let value = if row_column == 0 {
+            let time_delta = raw.value * timescale;
+            let time = if timerelative {
+                previous_time += time_delta;
+                previous_time
+            } else {
+                timeoffset + time_delta
+            };
+            if !time.is_finite() {
+                return Err(filesource_line_error(
+                    file,
+                    raw.line,
+                    format!("transformed time must be finite, got {time}"),
+                ));
             }
-            RawFileSourceFieldRole::Value(index) => {
-                let scale = amplscale.get(index).copied().unwrap_or(1.0);
-                let offset = amploffset.get(index).copied().unwrap_or(0.0);
-                raw.value * scale + offset
-            }
+            time
+        } else {
+            let index = row_column - 1;
+            let scale = amplscale.get(index).copied().unwrap_or(1.0);
+            let offset = amploffset.get(index).copied().unwrap_or(0.0);
+            raw.value * scale + offset
         };
 
         if row_column == 0 {
@@ -1174,8 +1151,8 @@ mod tests {
     }
 
     #[test]
-    fn filesource_rejects_incomplete_data_rows() {
-        let err = parse_filesource_contents(
+    fn filesource_preserves_ngspice_flat_stream_alignment_for_short_rows() {
+        let fields = parse_filesource_contents(
             "stim.txt",
             2,
             "\
@@ -1183,12 +1160,10 @@ mod tests {
 1 20 30
 ",
         )
-        .expect_err("short filesource row must not corrupt following rows");
-        let message = err.to_string();
-
-        assert!(
-            message.contains("line 1: expected 3 columns, found 2"),
-            "incomplete filesource row should report the failing line, got {message}"
+        .expect("ngspice retains fields parsed before a short row");
+        assert_eq!(
+            fields.iter().map(|field| field.value).collect::<Vec<_>>(),
+            vec![0.0, 10.0, 1.0, 20.0, 30.0]
         );
     }
 

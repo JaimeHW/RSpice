@@ -1487,6 +1487,8 @@ pub(super) fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<S
     })
 }
 
+/// Consume one node inside a bracket-delimited field without treating the
+/// closing bracket as part of an adjacent punctuation-rich node name.
 pub(super) fn expect_node_before_rbracket(
     stream: &mut TokenStream,
     line_num: usize,

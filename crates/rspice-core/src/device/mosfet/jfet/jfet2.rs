@@ -1097,6 +1097,62 @@ fn finite_or_zero(value: Value) -> Value {
 mod tests {
     use super::*;
 
+    fn ngspice46_common_source_jfet2() -> Jfet {
+        let mut jfet = Jfet::njf("j1", 1, 2, 0).enable_jfet2_model();
+        jfet.params.beta = 1.0e-3;
+        jfet.params.vto = -2.0;
+        jfet.params.lambda = 0.02;
+        jfet.params.pb = 1.0;
+        jfet.params.is = 1.0e-14;
+        jfet.params.n = 1.0;
+        jfet.params.jfet2_p = 2.0;
+        jfet.params.jfet2_q = 2.0;
+        jfet.params.jfet2_xi = 1000.0;
+        jfet.params.jfet2_z = 1.0;
+        jfet.params.jfet2_vst = 0.1;
+        jfet.params.jfet2_mvst = 0.05;
+        jfet.params.jfet2_mxi = 0.0;
+        jfet.params.jfet2_lfgam = 0.01;
+        jfet.params.jfet2_lfg1 = 0.002;
+        jfet.params.jfet2_lfg2 = 0.001;
+        jfet.params.jfet2_ibd = 1.0e-12;
+        jfet.params.jfet2_vbd = 10.0;
+        jfet.params.jfet2_acgam = 0.05;
+        jfet.params.jfet2_hfgam = 0.02;
+        jfet.params.jfet2_hfg1 = 0.001;
+        jfet.params.jfet2_hfg2 = 0.0005;
+        jfet.params.jfet2_hfeta = 0.01;
+        jfet.params.jfet2_hfe1 = 0.001;
+        jfet.params.jfet2_hfe2 = 0.0007;
+        jfet.params.jfet2_taug = 1.0e-9;
+        jfet.params.jfet2_taud = 2.0e-9;
+        jfet.params.jfet2_delta = 0.01;
+        jfet
+    }
+
+    #[test]
+    fn parker_skellern_operating_terms_match_ngspice46_common_source_oracle() {
+        let jfet = ngspice46_common_source_jfet2();
+        let vds = 0.788_235_214_303_974_9;
+        let terms = jfet.jfet2_operating_terms(-0.25, vds, -0.25 - vds, 300.15);
+
+        assert!(
+            (terms.ids - 2.105_882_339_113_719e-3).abs() < 2.0e-12,
+            "ids={:.16e}",
+            terms.ids
+        );
+        assert!(
+            (terms.gm - 1.597_147_998_591_449e-3).abs() < 1.0e-12,
+            "gm={:.16e}",
+            terms.gm
+        );
+        assert!(
+            (terms.gds - 1.794_436_366_968_775e-3).abs() < 1.0e-12,
+            "gds={:.16e}",
+            terms.gds
+        );
+    }
+
     #[test]
     fn xyce_jfet2_charge_state_matches_closed_form_depletion_charge() {
         let mut jfet = Jfet::njf("jtest", 1, 2, 3).enable_xyce_jfet2_model();

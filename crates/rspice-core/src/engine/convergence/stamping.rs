@@ -14,19 +14,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::convergence) fn stamp_nonlinear_devices_for_dc(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        solution: &[Value],
-    ) {
-        if let Err(err) = self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, rhs, solution) {
-            panic!("{err}");
-        }
-    }
-
-    #[inline]
     pub(in crate::engine::convergence) fn try_stamp_nonlinear_devices_for_dc(
         &self,
         circuit: &mut CircuitData,
@@ -43,26 +30,6 @@ impl Engine {
             solution,
             junction_gmin,
         )
-    }
-
-    #[inline]
-    pub(in crate::engine::convergence) fn stamp_nonlinear_devices_for_dc_with_junction_gmin(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        solution: &[Value],
-        junction_gmin: Value,
-    ) {
-        if let Err(err) = self.try_stamp_nonlinear_devices_for_dc_with_junction_gmin(
-            circuit,
-            matrix,
-            rhs,
-            solution,
-            junction_gmin,
-        ) {
-            panic!("{err}");
-        }
     }
 
     #[inline]
@@ -83,21 +50,6 @@ impl Engine {
             crate::xspice::AnalysisType::DcOp,
             junction_gmin,
         )
-    }
-
-    #[inline]
-    pub(in crate::engine::convergence) fn stamp_static_probe_nonlinear_devices_for_dc(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        rhs: &mut [Value],
-        solution: &[Value],
-    ) {
-        if let Err(err) =
-            self.try_stamp_static_probe_nonlinear_devices_for_dc(circuit, matrix, rhs, solution)
-        {
-            panic!("{err}");
-        }
     }
 
     #[inline]

@@ -250,18 +250,19 @@ impl Engine {
         )
     }
 
-    pub(in crate::engine::convergence) fn nonlinear_residual_converged_scaled(
+    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged_scaled(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
         source_scale: Value,
-    ) -> bool {
+    ) -> Result<bool, SimulationError> {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
-        self.nonlinear_residual_converged_with_linear_stamp(
+        self.try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             |circuit, matrix, rhs| {
                 let node_count = circuit.num_nodes().min(rhs.len());
                 for i in 0..node_count {
@@ -272,15 +273,15 @@ impl Engine {
         )
     }
 
-    pub(in crate::engine::convergence) fn nonlinear_residual_converged_with_gmin(
+    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged_with_gmin(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
         gmin: Value,
-    ) -> bool {
+    ) -> Result<bool, SimulationError> {
         let junction_gmin = self.effective_device_junction_gmin(gmin);
-        self.nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
+        self.try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
@@ -295,18 +296,19 @@ impl Engine {
         )
     }
 
-    pub(in crate::engine::convergence) fn nonlinear_residual_converged_with_pseudo_transient(
+    pub(in crate::engine::convergence) fn try_nonlinear_residual_converged_with_pseudo_transient(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
         anchor_solution: &[Value],
         pseudo_conductance: Value,
-    ) -> bool {
-        self.nonlinear_residual_converged_with_linear_stamp(
+    ) -> Result<bool, SimulationError> {
+        self.try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             |circuit, matrix, rhs| {
                 for i in 0..rhs.len() {
                     matrix.add(i, i, 1e-12 + pseudo_conductance);

@@ -173,19 +173,8 @@ impl VerilogADevices {
         }
     }
 
-    /// Stamp all devices into matrix and RHS
-    pub fn stamp_all<M, R>(&mut self, circuit_voltages: &[Value], mut matrix_add: M, mut rhs_add: R)
-    where
-        M: FnMut(usize, usize, Value),
-        R: FnMut(usize, Value),
-    {
-        if let Err(err) = self.try_stamp_all(circuit_voltages, &mut matrix_add, &mut rhs_add) {
-            panic!("{err}");
-        }
-    }
-
-    /// Checked variant of [`Self::stamp_all`] for simulator paths that can
-    /// return model diagnostics instead of unwinding.
+    /// Stamp all devices into matrix and RHS, returning the first model
+    /// diagnostic instead of unwinding across the simulator boundary.
     pub fn try_stamp_all<M, R>(
         &mut self,
         circuit_voltages: &[Value],

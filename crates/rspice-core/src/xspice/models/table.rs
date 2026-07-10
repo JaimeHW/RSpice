@@ -154,7 +154,7 @@ impl<'a> TokenCursor<'a> {
             let index = self.next;
             let line = self.lines.get(index)?;
             self.next += 1;
-            if line.header_ignored || line.data_comment {
+            if line.data_comment {
                 continue;
             }
             return Some(line);
@@ -419,19 +419,11 @@ fn table_cache_key(file: &str, stamp: data_file::DataFileStamp) -> TableCacheKey
     }
 }
 
-fn table_line_data(line: &str) -> (&str, bool) {
-    let trimmed = line.trim_start();
-    if trimmed.is_empty() {
-        return ("", false);
-    }
-    if matches!(trimmed.as_bytes()[0], b'*' | b'#' | b';' | b'$') {
-        return ("", true);
-    }
-    let end = trimmed
-        .char_indices()
-        .find_map(|(index, ch)| matches!(ch, '#' | ';' | '$').then_some(index))
-        .unwrap_or(trimmed.len());
-    (trimmed[..end].trim_end(), false)
+fn table_line_data(line: &str) -> (&str, bool, bool) {
+    let data_comment = line.starts_with('*');
+    let header_ignored = line.is_empty() || data_comment;
+    let data = if data_comment { "" } else { line.trim() };
+    (data, header_ignored, data_comment)
 }
 
 fn tokenize_table_contents<'a>(
@@ -443,8 +435,7 @@ fn tokenize_table_contents<'a>(
 
     for (line_idx, line) in contents.lines().enumerate() {
         let line_no = line_idx + 1;
-        let (data, data_comment) = table_line_data(line);
-        let header_ignored = data.is_empty() || data_comment;
+        let (data, header_ignored, data_comment) = table_line_data(line);
         let mut tokens = Vec::new();
         if !header_ignored {
             for token in
@@ -724,7 +715,6 @@ fn parse_table3d_cursor(
     let y = parse_axis(cursor, file, model, "y", y_len)?;
     let z = parse_axis(cursor, file, model, "z", z_len)?;
     let values = parse_table3d_values(cursor, file, model, x_len, y_len, z_len)?;
-    cursor.reject_extra_tokens(file, model)?;
     Ok(Table3DData { x, y, z, values })
 }
 
@@ -1972,19 +1962,18 @@ mod tests {
     }
 
     #[test]
-    fn table2d_parser_accepts_indented_and_inline_comments() {
+    fn table2d_parser_accepts_column_zero_comments() {
         let table = parse_table2d_contents(
             "inline-table2d",
             "\
-  * header comment
-2 # x size
-2 ; y size
-0 1 ; x axis
-0 1 # y axis
+* header comment
+2
+2
+0 1
+0 1
 3 4
-
-  * gap comment
-5 6 $ final row
+* gap comment
+5 6
 ",
         )
         .expect("table2d should parse commented table data");
@@ -2018,8 +2007,8 @@ mod tests {
     }
 
     #[test]
-    fn table3d_rejects_trailing_tokens_after_declared_grid() {
-        let err = parse_table3d_contents(
+    fn table3d_ignores_trailing_tokens_after_declared_grid() {
+        let table = parse_table3d_contents(
             "inline-table3d",
             "\
 2
@@ -2035,12 +2024,10 @@ mod tests {
 999
 ",
         )
-        .expect_err("table3d must reject trailing tokens after declared data grid");
-        let message = err.to_string();
-
-        assert!(
-            message.contains("unexpected extra token '999'"),
-            "extra table3d data should be reported, got {message}"
+        .expect("table3d ignores trailing tokens after its declared data grid");
+        assert_eq!(
+            table.values,
+            vec![10.0, 11.0, 12.0, 13.0, 20.0, 21.0, 22.0, 23.0]
         );
     }
 

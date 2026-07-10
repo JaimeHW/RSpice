@@ -338,8 +338,10 @@ impl Engine {
 
         // Reuse the AC linearization path so pole-zero analysis sees the same
         // nonlinear small-signal conductances and capacitances as AC analysis.
-        let g_descriptor = Self::build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 0.0);
-        let c_descriptor = Self::build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 1.0);
+        let g_descriptor =
+            Self::try_build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 0.0)?;
+        let c_descriptor =
+            Self::try_build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 1.0)?;
         let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
         let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
         Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);

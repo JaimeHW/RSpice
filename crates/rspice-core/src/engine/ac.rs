@@ -2073,36 +2073,6 @@ impl Engine {
         Ok(())
     }
 
-    fn fill_small_signal_ac_matrix_with_vbic_delay_mode(
-        circuit: &CircuitData,
-        ac_matrix: &mut ComplexMatrix,
-        op_voltages: &[Value],
-        omega: Value,
-        include_vbic_dynamic_stamp: bool,
-        include_vbic_delay_branches: bool,
-    ) {
-        if let Err(err) = Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
-            circuit,
-            ac_matrix,
-            op_voltages,
-            omega,
-            include_vbic_dynamic_stamp,
-            include_vbic_delay_branches,
-        ) {
-            panic!("{err}");
-        }
-    }
-
-    pub(super) fn build_small_signal_ac_matrix(
-        circuit: &CircuitData,
-        matrix: &StaticMatrix,
-        op_voltages: &[Value],
-        omega: Value,
-    ) -> ComplexMatrix {
-        Self::try_build_small_signal_ac_matrix(circuit, matrix, op_voltages, omega)
-            .unwrap_or_else(|err| panic!("{err}"))
-    }
-
     pub(super) fn try_build_small_signal_ac_matrix(
         circuit: &CircuitData,
         matrix: &StaticMatrix,
@@ -2127,25 +2097,25 @@ impl Engine {
         Ok(ac_matrix)
     }
 
-    pub(super) fn build_small_signal_pz_matrix(
+    pub(super) fn try_build_small_signal_pz_matrix(
         circuit: &CircuitData,
         matrix: &StaticMatrix,
         op_voltages: &[Value],
         omega: Value,
-    ) -> ComplexMatrix {
+    ) -> Result<ComplexMatrix, SimulationError> {
         // PZ descriptor construction handles VBIC hidden dynamic states
         // explicitly in `engine/advanced/mod.rs`, so keep the base AC
         // linearization free of frequency-dependent VBIC companion reduction.
         let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
-        Self::fill_small_signal_ac_matrix_with_vbic_delay_mode(
+        Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
             circuit,
             &mut ac_matrix,
             op_voltages,
             omega,
             false,
             true,
-        );
-        ac_matrix
+        )?;
+        Ok(ac_matrix)
     }
 
     fn build_ac_excitation_rhs(circuit: &CircuitData) -> Vec<Complex64> {

@@ -1644,7 +1644,7 @@ impl Engine {
                     VbicCachedSnapshotReuse::NewtonBypass,
                     !nonlinear_state_matches_new_solution,
                     0.0,
-                );
+                )?;
 
                 // Merit-gated Newton globalization: the freshly stamped
                 // system gives the true nonlinear residual at the current
@@ -1947,7 +1947,7 @@ impl Engine {
                                 VbicCachedSnapshotReuse::NewtonBypass,
                                 false,
                                 0.0,
-                            );
+                            )?;
                             residual_converged_for_acceptance = self.residual_convergence_met(
                                 &circuit,
                                 &mut matrix,
@@ -2047,7 +2047,7 @@ impl Engine {
                             coupled_tline_refs: &coupled_tline_refs,
                         },
                         &mut vbic_snapshot_cache,
-                    )
+                    )?
                 {
                     static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
                         std::sync::atomic::AtomicUsize::new(0);

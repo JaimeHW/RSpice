@@ -270,13 +270,13 @@ fn apply_builtin_metadata(
             changed |= set_soft_min(params, "freq_array", 0.0);
             changed |= set_soft_range(params, "duty_cycle", 1.0e-6, 0.999999);
             changed |= set_soft_range(params, "init_phase", -180.0, 360.0);
-            changed |= set_min_many(params, &["rise_delay", "fall_delay"], 0.0);
+            changed |= set_soft_min_many(params, &["rise_delay", "fall_delay"], 0.0);
         }
         "d_pwm" => {
             changed |= set_soft_range(params, "dc_array", 0.0, 1.0);
             changed |= set_soft_min(params, "frequency", 1.0e-6);
             changed |= set_soft_range(params, "init_phase", -180.0, 360.0);
-            changed |= set_min_many(params, &["rise_delay", "fall_delay"], 0.0);
+            changed |= set_soft_min_many(params, &["rise_delay", "fall_delay"], 0.0);
         }
         "d_cosim" => {
             changed |= set_min(params, "delay", 1.0e-12);
@@ -292,25 +292,25 @@ fn apply_builtin_metadata(
             changed |= set_min(params, "transition_time", 1.0e-15);
         }
         "astate" => {
-            changed |= set_range(params, "astate_no", 0.0, 3.0);
+            changed |= set_soft_range(params, "astate_no", 0.0, 3.0);
         }
         "delay" => {
-            changed |= set_min(params, "buffer_size", 1.0);
-            changed |= set_min_many(params, &["delmin", "delmax"], 0.0);
+            changed |= set_soft_min(params, "buffer_size", 1.0);
+            changed |= set_soft_min_many(params, &["delmin", "delmax"], 0.0);
         }
         "divide" => {
-            changed |= set_min(params, "den_lower_limit", 1.0e-10);
+            changed |= set_soft_min(params, "den_lower_limit", 1.0e-10);
         }
         "d_dt" | "int" | "limit" => {
-            changed |= set_required_many(params, &["out_lower_limit", "out_upper_limit"], false);
+            changed |= set_required_many(params, &["out_lower_limit", "out_upper_limit"], true);
         }
         "hyst" => {
-            changed |= set_min(params, "hyst", 0.0);
+            changed |= set_soft_min(params, "hyst", 0.0);
         }
         "ilimit" => {
-            changed |= set_range_many(params, &["r_out_source", "r_out_sink"], 1.0e-9, 1.0e9);
-            changed |= set_min_many(params, &["i_limit_source", "i_limit_sink"], 1.0e-12);
-            changed |= set_min_many(
+            changed |= set_soft_range_many(params, &["r_out_source", "r_out_sink"], 1.0e-9, 1.0e9);
+            changed |= set_soft_min_many(params, &["i_limit_source", "i_limit_sink"], 1.0e-12);
+            changed |= set_soft_min_many(
                 params,
                 &[
                     "v_pwr_range",
@@ -322,59 +322,59 @@ fn apply_builtin_metadata(
             );
         }
         "oneshot" => {
-            changed |= set_min(params, "pw_array", 0.0);
+            changed |= set_soft_min(params, "pw_array", 0.0);
         }
         "pwl" | "pwlts" => {
-            changed |= set_range(params, "input_domain", 1.0e-12, 0.5);
+            changed |= set_soft_range(params, "input_domain", 1.0e-12, 0.5);
         }
         "s_xfer" => {
-            changed |= set_required_many(params, &["num_coeff", "den_coeff"], false);
+            changed |= set_required_many(params, &["num_coeff", "den_coeff"], true);
             changed |= set_real_vector_default(params, "int_ic", &[0.0]);
         }
         "xfer" => {
-            changed |= set_real_vector_default(params, "table", &[0.0]);
-            changed |= set_min(params, "span", 3.0);
-            changed |= set_min(params, "offset", 1.0);
+            changed |= set_real_vector_default(params, "table", &[0.0, 0.0, 0.0]);
+            changed |= set_soft_min(params, "span", 3.0);
+            changed |= set_soft_min(params, "offset", 1.0);
         }
         "mult" | "summer" => {
             changed |= set_real_vector_default(params, "in_offset", &[0.0]);
             changed |= set_real_vector_default(params, "in_gain", &[1.0]);
         }
         "sine" => {
-            changed |= set_min(params, "freq_array", 0.0);
+            changed |= set_soft_min(params, "freq_array", 0.0);
         }
         "square" | "triangle" => {
-            changed |= set_min(params, "freq_array", 0.0);
-            changed |= set_range(params, "duty_cycle", 1.0e-6, 0.999999);
+            changed |= set_soft_min(params, "freq_array", 0.0);
+            changed |= set_soft_range(params, "duty_cycle", 1.0e-6, 0.999999);
         }
         "table2d" | "table3d" => {
-            changed |= set_min(params, "order", 2.0);
-            changed |= set_range(params, "verbose", 0.0, 2.0);
+            changed |= set_soft_min(params, "order", 2.0);
+            changed |= set_soft_range(params, "verbose", 0.0, 2.0);
         }
         "core" => {
-            changed |= set_range(params, "input_domain", 1.0e-12, 0.5);
-            changed |= set_range(params, "mode", 1.0, 2.0);
-            changed |= set_min(params, "hyst", 0.0);
+            changed |= set_soft_range(params, "input_domain", 1.0e-12, 0.5);
+            changed |= set_soft_range(params, "mode", 1.0, 2.0);
+            changed |= set_soft_min(params, "hyst", 0.0);
         }
         "potentiometer" => {
-            changed |= set_range(params, "position", 0.0, 1.0);
+            changed |= set_soft_range(params, "position", 0.0, 1.0);
         }
         "seegen" => {
-            changed |= set_range(params, "angle", 0.0, 1.57079);
+            changed |= set_soft_range(params, "angle", 0.0, 1.57079);
         }
         "sidiode" => {
-            changed |= set_min(params, "ron", 1.0e-6);
-            changed |= set_min(params, "roff", 1.0e-12);
-            changed |= set_min_many(params, &["vfwd", "vrev", "epsilon", "revepsilon"], 0.0);
-            changed |= set_min_many(params, &["ilimit", "revilimit"], 1.0e-15);
+            changed |= set_soft_min(params, "ron", 1.0e-6);
+            changed |= set_soft_min(params, "roff", 1.0e-12);
+            changed |= set_soft_min_many(params, &["vfwd", "vrev", "epsilon", "revepsilon"], 0.0);
+            changed |= set_soft_min_many(params, &["ilimit", "revilimit"], 1.0e-15);
         }
         "zener" => {
-            changed |= set_range(params, "v_breakdown", 1.0e-6, 1.0e6);
-            changed |= set_min(params, "i_breakdown", 1.0e-9);
-            changed |= set_min(params, "r_breakdown", 1.0e-12);
-            changed |= set_min(params, "i_rev", 1.0e-9);
-            changed |= set_min(params, "i_sat", 1.0e-15);
-            changed |= set_range(params, "n_forward", 0.1, 10.0);
+            changed |= set_soft_range(params, "v_breakdown", 1.0e-6, 1.0e6);
+            changed |= set_soft_min(params, "i_breakdown", 1.0e-9);
+            changed |= set_soft_min(params, "r_breakdown", 1.0e-12);
+            changed |= set_soft_min(params, "i_rev", 1.0e-9);
+            changed |= set_soft_min(params, "i_sat", 1.0e-15);
+            changed |= set_soft_range(params, "n_forward", 0.1, 10.0);
         }
         _ => {}
     }
@@ -398,22 +398,6 @@ fn set_min(params: &mut [ParamSpec], name: &str, min: Value) -> bool {
     param.min = Some(min);
     param.min_is_soft = false;
     true
-}
-
-fn set_max(params: &mut [ParamSpec], name: &str, max: Value) -> bool {
-    let Some(param) = param_mut(params, name) else {
-        return false;
-    };
-    if param.max == Some(max) && !param.max_is_soft {
-        return false;
-    }
-    param.max = Some(max);
-    param.max_is_soft = false;
-    true
-}
-
-fn set_range(params: &mut [ParamSpec], name: &str, min: Value, max: Value) -> bool {
-    set_min(params, name, min) | set_max(params, name, max)
 }
 
 fn set_soft_min(params: &mut [ParamSpec], name: &str, min: Value) -> bool {
@@ -448,12 +432,6 @@ fn set_min_many(params: &mut [ParamSpec], names: &[&str], min: Value) -> bool {
     names
         .iter()
         .fold(false, |changed, name| set_min(params, name, min) | changed)
-}
-
-fn set_range_many(params: &mut [ParamSpec], names: &[&str], min: Value, max: Value) -> bool {
-    names.iter().fold(false, |changed, name| {
-        set_range(params, name, min, max) | changed
-    })
 }
 
 fn set_soft_min_many(params: &mut [ParamSpec], names: &[&str], min: Value) -> bool {

@@ -213,7 +213,7 @@ impl Engine {
                 &mut damping_state,
                 source_iterations,
                 abort,
-            );
+            )?;
         total_iterations += bootstrap_iterations;
         if abort.is_aborted() {
             circuit.restore_nonlinear_state(entry_state);
@@ -257,7 +257,7 @@ impl Engine {
                 &mut trial_damping_state,
                 source_iterations,
                 abort,
-            );
+            )?;
             total_iterations = total_iterations.saturating_add(used_iterations);
 
             if abort.is_aborted() {
@@ -291,7 +291,7 @@ impl Engine {
                 &mut damping_state,
                 source_iterations,
                 abort,
-            );
+            )?;
         total_iterations = total_iterations.saturating_add(polish_iterations);
         if abort.is_aborted() {
             circuit.restore_nonlinear_state(entry_state);
@@ -352,7 +352,7 @@ impl Engine {
                 }
 
                 circuit.stamp_dc_direct(matrix, &mut rhs);
-                self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
+                self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
 
                 let raw_solution = match matrix.solve(&rhs) {
                     Ok(sol) => sol,
@@ -390,13 +390,13 @@ impl Engine {
                     circuit.nonlinear_converged(self.device_convergence_criteria());
                 let nonlinear_residual_converged = converged
                     && device_converged
-                    && self.nonlinear_residual_converged_with_pseudo_transient(
+                    && self.try_nonlinear_residual_converged_with_pseudo_transient(
                         circuit,
                         matrix,
                         &solution,
                         &anchor_solution,
                         pseudo_conductance,
-                    );
+                    )?;
 
                 if converged && device_converged && nonlinear_residual_converged {
                     stage_converged = true;
@@ -457,7 +457,7 @@ impl Engine {
             &mut damping_state,
             arc_newton_iters,
             abort,
-        );
+        )?;
         current_solution = bootstrap_solution;
         arc.initialize(&current_solution);
 
@@ -476,7 +476,7 @@ impl Engine {
                     &mut damping_state,
                     arc_cfg.max_newton_iters,
                     abort,
-                );
+                )?;
 
             if converged {
                 arc.accept_step(&corrected_solution, target_lambda, newton_iters);
@@ -544,7 +544,7 @@ impl Engine {
                 corrector_iterations,
                 abort,
                 super::fallback::CorrectorSeedMode::Limited,
-            );
+            )?;
         total_iterations = total_iterations.saturating_add(relaxed_iterations);
         if abort.is_aborted() {
             circuit.set_jfet_gate_generation_scale(1.0);
@@ -589,7 +589,7 @@ impl Engine {
                     corrector_iterations,
                     abort,
                     super::fallback::CorrectorSeedMode::Limited,
-                );
+                )?;
             total_iterations = total_iterations.saturating_add(used_iterations);
 
             if abort.is_aborted() {
@@ -625,7 +625,7 @@ impl Engine {
                 corrector_iterations,
                 abort,
                 super::fallback::CorrectorSeedMode::Limited,
-            );
+            )?;
         total_iterations = total_iterations.saturating_add(polish_iterations);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -703,7 +703,7 @@ impl Engine {
                 &mut damping_state,
                 gmin_iterations,
                 abort,
-            );
+            )?;
         total_iterations = total_iterations.saturating_add(initial_iterations);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
@@ -748,7 +748,7 @@ impl Engine {
                 &mut trial_damping_state,
                 gmin_iterations,
                 abort,
-            );
+            )?;
             total_iterations = total_iterations.saturating_add(used_iterations);
 
             if abort.is_aborted() {
@@ -839,7 +839,7 @@ impl Engine {
         damping_state: &mut NewtonDampingState,
         max_iterations: usize,
         abort: &dyn AbortSignal,
-    ) -> (Vec<Value>, bool, usize) {
+    ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
         let mut solution = initial_solution.to_vec();
         let junction_gmin = self.effective_device_junction_gmin(gmin);
         self.update_device_states_for_dc_with_junction_gmin(circuit, &solution, junction_gmin);
@@ -847,7 +847,7 @@ impl Engine {
 
         for iteration in 0..max_iterations {
             if Self::should_abort_iteration(abort, iteration) {
-                return (solution, false, used_iterations);
+                return Err(SimulationError::Aborted);
             }
             used_iterations = iteration + 1;
             let mut rhs = vec![0.0; solution.len()];
@@ -859,17 +859,17 @@ impl Engine {
             }
 
             circuit.stamp_dc_direct(matrix, &mut rhs);
-            self.stamp_nonlinear_devices_for_dc_with_junction_gmin(
+            self.try_stamp_nonlinear_devices_for_dc_with_junction_gmin(
                 circuit,
                 matrix,
                 &mut rhs,
                 &solution,
                 junction_gmin,
-            );
+            )?;
 
             let raw_solution = match matrix.solve(&rhs) {
                 Ok(solution) => solution,
-                Err(_) => return (solution, false, used_iterations),
+                Err(_) => return Ok((solution, false, used_iterations)),
             };
 
             let mut new_solution = self.apply_damping_strategy_for_circuit(
@@ -894,19 +894,19 @@ impl Engine {
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && self.nonlinear_residual_converged_with_gmin(
+                && self.try_nonlinear_residual_converged_with_gmin(
                     circuit,
                     matrix,
                     &new_solution,
                     gmin,
-                );
+                )?;
             solution = new_solution;
 
             if voltage_converged && device_converged && nonlinear_residual_converged {
-                return (solution, true, used_iterations);
+                return Ok((solution, true, used_iterations));
             }
         }
 
-        (solution, false, used_iterations)
+        Ok((solution, false, used_iterations))
     }
 }

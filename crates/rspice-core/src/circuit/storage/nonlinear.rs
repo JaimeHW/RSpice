@@ -656,4 +656,16 @@ impl Mosfets {
             d.stamp_direct(matrix, rhs, voltages);
         }
     }
+
+    /// Stamp exact candidate equations for residual and line-search probes.
+    pub fn stamp_all_static_probe_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        for d in &self.devices {
+            d.stamp_static_probe_direct(matrix, rhs, voltages);
+        }
+    }
 }

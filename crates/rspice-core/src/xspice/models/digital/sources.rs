@@ -361,7 +361,10 @@ fn parse_d_source_file(input_file: &str, width: usize) -> CmResult<DSourceRows> 
 fn load_d_source_rows(
     input_file: &str,
     width: usize,
-) -> (Option<data_file::DataFileStamp>, CmResult<Arc<DSourceRows>>) {
+) -> (
+    Option<data_file::DataFileStamp>,
+    CmResult<Option<Arc<DSourceRows>>>,
+) {
     let (contents, stamp) = match data_file::read_to_string_with_stamp(input_file) {
         Ok(file) => file,
         Err(err) => return (None, Err(d_source_file_error(input_file, err))),
@@ -373,63 +376,48 @@ fn load_d_source_rows(
         let mut guard = lock_d_source_cache();
         guard.sync_virtual_epoch();
         if let Some(rows) = guard.entries.get(&key) {
-            return (virtual_stamp, Ok(Arc::clone(rows)));
+            return (virtual_stamp, Ok(Some(Arc::clone(rows))));
         }
     }
 
     let rows = match parse_d_source_contents(input_file, width, &contents) {
         Ok(rows) => Arc::new(rows),
-        Err(err) => return (virtual_stamp, Err(err)),
+        Err(err) => {
+            log::warn!("{err}; disabling d_source instance");
+            return (virtual_stamp, Ok(None));
+        }
     };
     let mut guard = lock_d_source_cache();
     guard.sync_virtual_epoch();
     guard.entries.insert(key, Arc::clone(&rows));
-    (virtual_stamp, Ok(rows))
+    (virtual_stamp, Ok(Some(rows)))
 }
 
 fn load_d_source_rows_for_context(
     ctx: &mut CmContext,
     input_file: &str,
     width: usize,
-) -> CmResult<Arc<DSourceRows>> {
+) -> CmResult<Option<Arc<DSourceRows>>> {
     if let Some(resource) = ctx.resource::<DSourceRowsResource>(D_SOURCE_ROWS_RESOURCE)
         && resource.input_file == input_file
         && resource.width == width
         && resource.virtual_stamp == data_file::virtual_data_file_stamp(input_file)
     {
-        if let Some(rows) = &resource.rows {
-            return Ok(Arc::clone(rows));
-        }
-        return Err(d_source_file_error(input_file, "previous load failed"));
+        return Ok(resource.rows.clone());
     }
 
     let (virtual_stamp, load_result) = load_d_source_rows(input_file, width);
-    match load_result {
-        Ok(rows) => {
-            ctx.set_resource(
-                D_SOURCE_ROWS_RESOURCE,
-                Arc::new(DSourceRowsResource {
-                    input_file: input_file.to_string(),
-                    width,
-                    virtual_stamp,
-                    rows: Some(Arc::clone(&rows)),
-                }),
-            );
-            Ok(rows)
-        }
-        Err(err) => {
-            ctx.set_resource(
-                D_SOURCE_ROWS_RESOURCE,
-                Arc::new(DSourceRowsResource {
-                    input_file: input_file.to_string(),
-                    width,
-                    virtual_stamp,
-                    rows: None,
-                }),
-            );
-            Err(err)
-        }
-    }
+    let rows = load_result?;
+    ctx.set_resource(
+        D_SOURCE_ROWS_RESOURCE,
+        Arc::new(DSourceRowsResource {
+            input_file: input_file.to_string(),
+            width,
+            virtual_stamp,
+            rows: rows.clone(),
+        }),
+    );
+    Ok(rows)
 }
 
 const D_SOURCE_TIME_EPSILON: Value = 1e-18;
@@ -537,7 +525,9 @@ impl CodeModel for DigitalSource {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let input_file = d_source_input_file(ctx).to_string();
         let width = ctx.port_width("out");
-        let rows = load_d_source_rows_for_context(ctx, &input_file, width)?;
+        let Some(rows) = load_d_source_rows_for_context(ctx, &input_file, width)? else {
+            return Ok(());
+        };
         if rows.first().is_some_and(|row| row.time < 0.0) {
             if ctx.int_state(D_SOURCE_EMITTED_ROW) != D_SOURCE_BEFORE_FIRST_ROW {
                 d_source_set_unknown_output(ctx, width)?;
@@ -928,7 +918,7 @@ fn parse_d_state_output_code(state_file: &str, line: usize, token: &str) -> CmRe
         Err(d_state_error(
             state_file,
             line,
-            format!("invalid digital token '{token}'"),
+            format!("invalid d_state output token '{token}'"),
         ))
     }
 }
@@ -1486,7 +1476,7 @@ mod tests {
         GUARD
             .get_or_init(|| Mutex::new(()))
             .lock()
-            .expect("data-file test guard")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn unregister_test_data_file(path: &str) {
@@ -1712,13 +1702,15 @@ mod tests {
 
         let mut ctx = CmContext::new();
         let first = load_d_source_rows_for_context(&mut ctx, input_file, 1)
-            .expect("load first d_source rows");
+            .expect("load first d_source rows")
+            .expect("first d_source data parses");
         assert_eq!(first.row_values(1), &[DigitalValue::one()][..]);
 
         data_file::register_data_file(input_file, "0 0s\n1n 0s\n")
             .expect("replace virtual d_source data");
         let second = load_d_source_rows_for_context(&mut ctx, input_file, 1)
-            .expect("reload replaced d_source rows");
+            .expect("reload replaced d_source rows")
+            .expect("replaced d_source data parses");
         assert_eq!(second.row_values(1), &[DigitalValue::zero()][..]);
 
         unregister_test_data_file(input_file);
@@ -1761,13 +1753,17 @@ mod tests {
         data_file::register_data_file(input_file, "0 0s\n1n 1s\n")
             .expect("register first virtual d_source data");
         let (_, first_source) = load_d_source_rows(input_file, 1);
-        let first_source = first_source.expect("load first virtual d_source data");
+        let first_source = first_source
+            .expect("load first virtual d_source data")
+            .expect("first virtual d_source data parses");
         assert_eq!(first_source.row_values(1), &[DigitalValue::one()][..]);
 
         data_file::register_data_file(input_file, "0 0s\n1n 0s\n")
             .expect("replace virtual d_source data");
         let (_, second_source) = load_d_source_rows(input_file, 1);
-        let second_source = second_source.expect("load replaced virtual d_source data");
+        let second_source = second_source
+            .expect("load replaced virtual d_source data")
+            .expect("replaced virtual d_source data parses");
         assert_eq!(second_source.row_values(1), &[DigitalValue::zero()][..]);
 
         data_file::register_data_file(state_file, "0 0s 0 -> 0\n")
@@ -1857,14 +1853,12 @@ mod tests {
         ctx.set_string_param("input_file", input_file);
         model.init(&mut ctx).expect("d_source init");
 
-        let err = model
+        model
             .evaluate(&mut ctx)
-            .expect_err("malformed d_source files must fail evaluation");
-        let message = err.to_string();
-
+            .expect("ngspice-compatible malformed d_source disables the instance");
         assert!(
-            message.contains("time values must increase monotonically"),
-            "malformed d_source error should explain the parser failure, got {message}"
+            ctx.take_pending_events().is_empty(),
+            "disabled malformed d_source must not emit partial or stale output"
         );
 
         unregister_test_data_file(input_file);
@@ -2279,7 +2273,7 @@ mod tests {
     }
 
     #[test]
-    fn d_state_malformed_file_fails_closed() {
+    fn d_state_ignores_separator_token_like_ngspice() {
         let _guard = data_file_test_guard();
         let state_file = "virtual://d_state/malformed";
         unregister_test_data_file(state_file);
@@ -2293,14 +2287,12 @@ mod tests {
         ctx.set_string_param("state_file", state_file);
         model.init(&mut ctx).expect("d_state init");
 
-        let err = model
+        model
             .evaluate(&mut ctx)
-            .expect_err("malformed d_state files must fail evaluation");
-        let message = err.to_string();
-
+            .expect("ngspice ignores the token between input bits and next state");
         assert!(
-            message.contains("invalid d_state output token 'bogus'"),
-            "malformed d_state error should explain the parser failure, got {message}"
+            !ctx.take_pending_events().is_empty(),
+            "accepted d_state row should emit its initial output"
         );
 
         unregister_test_data_file(state_file);

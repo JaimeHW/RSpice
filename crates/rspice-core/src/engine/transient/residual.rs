@@ -58,7 +58,7 @@ impl Engine {
         vbic_reuse: VbicCachedSnapshotReuse,
         refresh_nonlinear: bool,
         extra_diag_gmin: Value,
-    ) {
+    ) -> Result<(), SimulationError> {
         let num_nodes = circuit.num_nodes();
         matrix.clear_values();
         rhs.fill(0.0);
@@ -215,7 +215,9 @@ impl Engine {
             if circuit.has_generated_veriloga_devices() {
                 circuit.prepare_generated_veriloga_timepoint(time, dt, ctx.coeff);
             }
-            circuit.stamp_nonlinear(matrix, rhs, solution);
+            circuit
+                .stamp_nonlinear(matrix, rhs, solution)
+                .map_err(SimulationError::Circuit)?;
             circuit.stamp_behavioral(
                 matrix,
                 rhs,
@@ -230,6 +232,7 @@ impl Engine {
         if circuit.has_xspice_devices() {
             circuit.stamp_xspice_transient_trial(matrix, rhs, time, dt, solution);
         }
+        Ok(())
     }
 
     /// Restamp the full system at `solution` and test the true nonlinear
@@ -245,9 +248,9 @@ impl Engine {
         dt: Value,
         ctx: &TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
-    ) -> bool {
+    ) -> Result<bool, SimulationError> {
         if solution.iter().any(|value| !value.is_finite()) {
-            return false;
+            return Ok(false);
         }
 
         self.stamp_transient_system(
@@ -262,8 +265,8 @@ impl Engine {
             VbicCachedSnapshotReuse::SeedOnly,
             true,
             0.0,
-        );
-        self.residual_convergence_met(circuit, matrix, solution, rhs)
+        )?;
+        Ok(self.residual_convergence_met(circuit, matrix, solution, rhs))
     }
 
     #[inline]
@@ -463,19 +466,21 @@ Q1 C B E 0 QN
 
         // Stamp at the base point and capture the asserted Jacobian columns
         // A(base)·e_j before any probe overwrites the matrix values.
-        engine.stamp_transient_system(
-            &mut circuit,
-            &mut matrix,
-            &mut rhs,
-            &base,
-            time,
-            dt,
-            &ctx,
-            &mut vbic_snapshot_cache,
-            VbicCachedSnapshotReuse::SeedOnly,
-            true,
-            0.0,
-        );
+        engine
+            .stamp_transient_system(
+                &mut circuit,
+                &mut matrix,
+                &mut rhs,
+                &base,
+                time,
+                dt,
+                &ctx,
+                &mut vbic_snapshot_cache,
+                VbicCachedSnapshotReuse::SeedOnly,
+                true,
+                0.0,
+            )
+            .expect("base transient system stamps");
         let zeros = vec![0.0; size];
         let mut stamped_columns = Vec::with_capacity(size);
         for j in 0..size {
@@ -493,37 +498,41 @@ Q1 C B E 0 QN
             let h = 1e-7 * base[j].abs().max(1.0);
             let mut probe = base.clone();
             probe[j] += h;
-            engine.stamp_transient_system(
-                &mut circuit,
-                &mut matrix,
-                &mut rhs,
-                &probe,
-                time,
-                dt,
-                &ctx,
-                &mut vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
-                true,
-                0.0,
-            );
+            engine
+                .stamp_transient_system(
+                    &mut circuit,
+                    &mut matrix,
+                    &mut rhs,
+                    &probe,
+                    time,
+                    dt,
+                    &ctx,
+                    &mut vbic_snapshot_cache,
+                    VbicCachedSnapshotReuse::SeedOnly,
+                    true,
+                    0.0,
+                )
+                .expect("positive transient probe stamps");
             let f_plus = matrix
                 .residual_vector(&probe, &rhs)
                 .expect("residual at +h probe");
 
             probe[j] = base[j] - h;
-            engine.stamp_transient_system(
-                &mut circuit,
-                &mut matrix,
-                &mut rhs,
-                &probe,
-                time,
-                dt,
-                &ctx,
-                &mut vbic_snapshot_cache,
-                VbicCachedSnapshotReuse::SeedOnly,
-                true,
-                0.0,
-            );
+            engine
+                .stamp_transient_system(
+                    &mut circuit,
+                    &mut matrix,
+                    &mut rhs,
+                    &probe,
+                    time,
+                    dt,
+                    &ctx,
+                    &mut vbic_snapshot_cache,
+                    VbicCachedSnapshotReuse::SeedOnly,
+                    true,
+                    0.0,
+                )
+                .expect("negative transient probe stamps");
             let f_minus = matrix
                 .residual_vector(&probe, &rhs)
                 .expect("residual at -h probe");
@@ -636,19 +645,21 @@ Q1 C B E 0 QN
 
         // Dense static matrix from the huge-dt assembly (companion
         // conductances scale as 1/dt and vanish).
-        engine.stamp_transient_system(
-            circuit,
-            matrix,
-            &mut rhs,
-            base,
-            dt,
-            1e9,
-            ctx,
-            vbic_snapshot_cache,
-            VbicCachedSnapshotReuse::SeedOnly,
-            true,
-            0.0,
-        );
+        engine
+            .stamp_transient_system(
+                circuit,
+                matrix,
+                &mut rhs,
+                base,
+                dt,
+                1e9,
+                ctx,
+                vbic_snapshot_cache,
+                VbicCachedSnapshotReuse::SeedOnly,
+                true,
+                0.0,
+            )
+            .expect("static companion system stamps");
         let mut static_columns = Vec::with_capacity(size);
         for j in 0..size {
             let mut unit = vec![0.0; size];
@@ -661,19 +672,21 @@ Q1 C B E 0 QN
         }
 
         // BE assembly at the probe dt; the matrix now holds A(dt).
-        engine.stamp_transient_system(
-            circuit,
-            matrix,
-            &mut rhs,
-            base,
-            dt,
-            dt,
-            ctx,
-            vbic_snapshot_cache,
-            VbicCachedSnapshotReuse::SeedOnly,
-            true,
-            0.0,
-        );
+        engine
+            .stamp_transient_system(
+                circuit,
+                matrix,
+                &mut rhs,
+                base,
+                dt,
+                dt,
+                ctx,
+                vbic_snapshot_cache,
+                VbicCachedSnapshotReuse::SeedOnly,
+                true,
+                0.0,
+            )
+            .expect("dynamic companion system stamps");
 
         // Power iteration on M·z = z − A⁻¹·(G·z). A deterministic
         // pseudo-random start avoids accidental orthogonality to the
@@ -738,35 +751,39 @@ Q1 C B E 0 QN
         let size = circuit.matrix_size();
         let mut rhs = vec![0.0; size];
         let zeros = vec![0.0; size];
-        engine.stamp_transient_system(
-            circuit,
-            matrix,
-            &mut rhs,
-            base,
-            dt,
-            1e9,
-            ctx,
-            vbic_snapshot_cache,
-            VbicCachedSnapshotReuse::SeedOnly,
-            true,
-            0.0,
-        );
+        engine
+            .stamp_transient_system(
+                circuit,
+                matrix,
+                &mut rhs,
+                base,
+                dt,
+                1e9,
+                ctx,
+                vbic_snapshot_cache,
+                VbicCachedSnapshotReuse::SeedOnly,
+                true,
+                0.0,
+            )
+            .expect("static matrix-vector system stamps");
         let gv = matrix
             .residual_vector(vector, &zeros)
             .expect("static matvec");
-        engine.stamp_transient_system(
-            circuit,
-            matrix,
-            &mut rhs,
-            base,
-            dt,
-            dt,
-            ctx,
-            vbic_snapshot_cache,
-            VbicCachedSnapshotReuse::SeedOnly,
-            true,
-            0.0,
-        );
+        engine
+            .stamp_transient_system(
+                circuit,
+                matrix,
+                &mut rhs,
+                base,
+                dt,
+                dt,
+                ctx,
+                vbic_snapshot_cache,
+                VbicCachedSnapshotReuse::SeedOnly,
+                true,
+                0.0,
+            )
+            .expect("dynamic matrix-vector system stamps");
         let correction = matrix.solve(&gv).expect("A solve");
         let mapped_norm = vector
             .iter()

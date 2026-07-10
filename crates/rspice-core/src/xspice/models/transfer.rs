@@ -282,13 +282,10 @@ fn xfer_table_from_model(ctx: &CmContext) -> CmResult<Vec<XferPoint>> {
 
     let (span, offset) = xfer_effective_span_offset(ctx)?;
     if offset < 1 || span < offset + 2 {
-        return Err(xfer_error("impossible span/offset combination"));
+        return Ok(Vec::new());
     }
     if table.len() % span != 0 {
-        return Err(xfer_error(format!(
-            "table length {} is not a multiple of span {span}",
-            table.len()
-        )));
+        return Ok(Vec::new());
     }
 
     let ri = xfer_bool_param(ctx, "r_i")?;
@@ -303,16 +300,12 @@ fn xfer_table_from_model(ctx: &CmContext) -> CmResult<Vec<XferPoint>> {
             return Err(xfer_error("table frequencies must be finite"));
         }
         if row_count > 1 && frequency < 0.0 {
-            return Err(xfer_error(
-                "multi-row table frequencies must be non-negative",
-            ));
+            return Ok(Vec::new());
         }
         if let Some(previous) = last_frequency
             && frequency < previous
         {
-            return Err(xfer_error(
-                "table frequencies must be monotonically increasing",
-            ));
+            return Ok(Vec::new());
         }
         let gain = xfer_complex_value(row[offset], row[offset + 1], ri, db, rad)?;
         points.push(XferPoint { frequency, gain });
@@ -425,7 +418,7 @@ fn xfer_table_from_touchstone(
         Err(err) => return (None, Err(err)),
     };
     if offset < 1 || span < offset + 2 {
-        return (None, Err(xfer_error("impossible span/offset combination")));
+        return (None, Ok(Vec::new()));
     }
 
     let (contents, stamp) = match data_file::read_to_string_with_stamp(file) {
@@ -440,13 +433,9 @@ fn xfer_table_from_touchstone(
         }
     };
     let file_virtual_stamp = data_file::loaded_virtual_data_file_stamp(stamp);
-    let option_line = contents
-        .lines()
-        .find(|line| line.starts_with('#'))
-        .ok_or_else(|| xfer_error(format!("Touchstone file '{file}' has no option line")));
-    let option_line = match option_line {
-        Ok(line) => line,
-        Err(err) => return (file_virtual_stamp, Err(err)),
+    let option_line = match contents.lines().find(|line| line.starts_with('#')) {
+        Some(line) => line,
+        None => return (file_virtual_stamp, Ok(Vec::new())),
     };
     let (mut ri, mut db) = parse_touchstone_options(option_line.trim_start());
     let mut rad = false;
@@ -859,6 +848,12 @@ fn s_xfer_coefficient_signature_matches(
         && ctx.real_vector_param_revision("den_coeff") == signature.den_coeff_revision
 }
 
+fn s_xfer_has_improper_order(ctx: &CmContext) -> bool {
+    let numerator_len = ctx.real_vector_param("num_coeff").map_or(0, <[Value]>::len);
+    let denominator_len = ctx.real_vector_param("den_coeff").map_or(0, <[Value]>::len);
+    numerator_len > denominator_len
+}
+
 fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCoefficients>>> {
     let signature = s_xfer_coefficient_signature(ctx);
     if let Some(resource) = ctx.resource::<SXferCoefficientResource>(SXFER_COEFFICIENT_RESOURCE)
@@ -867,7 +862,13 @@ fn cache_s_xfer_coefficients(ctx: &mut CmContext) -> CmResult<Option<Arc<SXferCo
         return Ok(resource.coefficients.clone());
     }
 
-    let coefficients = Some(Arc::new(s_xfer_coefficients(ctx)?));
+    let coefficients = if s_xfer_has_improper_order(ctx) {
+        // ngspice diagnoses an improper transfer function and leaves the
+        // code-model instance unstamped rather than aborting the analysis.
+        None
+    } else {
+        Some(Arc::new(s_xfer_coefficients(ctx)?))
+    };
     ctx.set_resource(
         SXFER_COEFFICIENT_RESOURCE,
         Arc::new(SXferCoefficientResource {
@@ -884,7 +885,11 @@ fn s_xfer_coefficients_for_context(ctx: &CmContext) -> CmResult<Option<Arc<SXfer
             return Ok(resource.coefficients.clone());
         }
     }
-    s_xfer_coefficients(ctx).map(Arc::new).map(Some)
+    if s_xfer_has_improper_order(ctx) {
+        Ok(None)
+    } else {
+        s_xfer_coefficients(ctx).map(Arc::new).map(Some)
+    }
 }
 
 fn evaluate_ascending_polynomial(coefficients: &[Value], s: Complex64) -> Complex64 {
@@ -1525,22 +1530,19 @@ mod tests {
     }
 
     #[test]
-    fn s_xfer_rejects_improper_transfer_order() {
+    fn s_xfer_disables_improper_transfer_order_like_ngspice() {
         let mut ctx = CmContext::new();
         ctx.analysis = AnalysisType::Transient;
         ctx.set_real_vector_param("num_coeff", vec![1.0, 0.0]);
         ctx.set_real_vector_param("den_coeff", vec![1.0]);
 
-        let err = SXfer
+        SXfer
             .init(&mut ctx)
-            .expect_err("s_xfer must reject numerator order above denominator order");
-        let message = err.to_string();
-
+            .expect("ngspice-compatible improper s_xfer disables the instance");
         assert!(
-            message.contains(
-                "Numerator coefficient array size greater than denominator coefficient array size"
-            ),
-            "s_xfer error should explain improper transfer order, got {message}"
+            s_xfer_coefficients_for_context(&ctx)
+                .expect("disabled coefficient lookup remains valid")
+                .is_none()
         );
     }
 

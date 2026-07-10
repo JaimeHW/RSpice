@@ -8585,8 +8585,8 @@ mod tests {
     fn passive_tails_reject_unconsumed_trailing_tokens() {
         for line in [
             "R1 out 0 1k garbage extra",
-            "C1 out 0 1p garbage",
-            "L1 out 0 1n garbage",
+            "C1 out 0 1p garbage extra",
+            "L1 out 0 1n garbage extra",
         ] {
             let err = Netlist::parse(&format!(
                 "bad passive tail\n\

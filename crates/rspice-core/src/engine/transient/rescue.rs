@@ -46,7 +46,7 @@ impl Engine {
         dt: Value,
         ctx: &residual::TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
-    ) -> Option<Vec<Value>> {
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
         let snapshot = circuit.nonlinear_state_snapshot();
         let rescued = self.walk_gmin_continuation_levels(
             circuit,
@@ -63,7 +63,7 @@ impl Engine {
         circuit.set_semiconductor_junction_gmin(
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
         );
-        if rescued.is_none() {
+        if !matches!(rescued, Ok(Some(_))) {
             circuit.restore_nonlinear_state(snapshot);
         }
         rescued
@@ -80,7 +80,7 @@ impl Engine {
         dt: Value,
         ctx: &residual::TransientSystemContext<'_>,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
-    ) -> Option<Vec<Value>> {
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
         let num_nodes = circuit.num_nodes();
         let budget =
             Self::transient_newton_iteration_budget(self.config.transient_max_iterations, false);
@@ -121,7 +121,7 @@ impl Engine {
                     },
                     true,
                     extra_gmin,
-                );
+                )?;
                 let base_merit = self
                     .residual_inf_norm(circuit, matrix, &iterate, rhs)
                     .unwrap_or(Value::INFINITY);
@@ -134,7 +134,7 @@ impl Engine {
                             level_iter
                         );
                     }
-                    return None;
+                    return Ok(None);
                 };
 
                 // Continuation discipline mirrors DC gmin stepping: hard
@@ -202,7 +202,7 @@ impl Engine {
                         VbicCachedSnapshotReuse::NewtonBypass,
                         true,
                         extra_gmin,
-                    );
+                    )?;
                     let trial_merit = self
                         .residual_inf_norm(circuit, matrix, &trial, rhs)
                         .unwrap_or(Value::INFINITY);
@@ -265,7 +265,7 @@ impl Engine {
                         last_failure.2
                     );
                 }
-                return None;
+                return Ok(None);
             }
         }
 
@@ -283,13 +283,13 @@ impl Engine {
             dt,
             ctx,
             vbic_snapshot_cache,
-        ) {
+        )? {
             if debug {
                 log::warn!("GMIN-RESCUE final restamp proof failed at t={:.6e}", time);
             }
-            return None;
+            return Ok(None);
         }
 
-        Some(iterate)
+        Ok(Some(iterate))
     }
 }

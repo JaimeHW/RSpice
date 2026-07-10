@@ -264,7 +264,7 @@ impl Engine {
                 base.times[k] + dt_freeze,
                 dt_freeze,
                 &solution,
-            );
+            )?;
 
             let mut integrand = 0.0;
             for source in &sources {

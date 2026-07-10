@@ -516,7 +516,7 @@ fn scheduled_output_time(current_time: Value, delay: Value) -> Option<Value> {
     if !event_time.is_finite() || event_time < 0.0 {
         return None;
     }
-    Some(event_time.max(current_time))
+    Some(event_time)
 }
 
 /// Event queue statistics
@@ -569,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn event_queue_clamps_rebased_delayed_outputs_to_current_time() {
+    fn event_queue_preserves_valid_rebased_delayed_output_times() {
         let mut queue = EventQueue::new();
 
         queue.schedule_delayed(
@@ -584,15 +584,13 @@ mod tests {
 
         assert_eq!(
             queue.next_event_time(),
-            Some(10.0e-9),
-            "rebased output events must not be inserted before the current event dispatch"
+            Some(8.0e-9),
+            "valid rebased output events should keep their absolute target time"
         );
         let events = queue.pop_events_at(10.0e-9);
         assert_eq!(events.len(), 2);
-        assert!(
-            events.iter().all(|event| event.time == 10.0e-9),
-            "all late rebased events should apply at the current dispatch time: {events:?}"
-        );
+        assert_eq!(events[0].time, 8.0e-9);
+        assert_eq!(events[1].time, 9.0e-9);
     }
 
     #[test]

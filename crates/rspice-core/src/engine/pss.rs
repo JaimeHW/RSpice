@@ -859,7 +859,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
 
         for _iter in 0..self.config.max_iterations {
-            self.pss_stamp_system(circuit, matrix, &mut rhs, coeff, t_next, dt, &new_solution);
+            self.pss_stamp_system(circuit, matrix, &mut rhs, coeff, t_next, dt, &new_solution)?;
 
             match matrix.solve(&rhs) {
                 Ok(sol) => {
@@ -905,7 +905,7 @@ impl Engine {
         t_next: Value,
         dt: Value,
         linearize_at: &[Value],
-    ) {
+    ) -> Result<(), SimulationError> {
         let size = circuit.matrix_size();
         matrix.clear_values();
         rhs.fill(0.0);
@@ -996,7 +996,9 @@ impl Engine {
 
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(linearize_at);
-            circuit.stamp_nonlinear(matrix, rhs, linearize_at);
+            circuit
+                .stamp_nonlinear(matrix, rhs, linearize_at)
+                .map_err(SimulationError::Circuit)?;
             circuit.stamp_behavioral(
                 matrix,
                 rhs,
@@ -1005,6 +1007,7 @@ impl Engine {
                 crate::xspice::AnalysisType::Transient,
             );
         }
+        Ok(())
     }
 
     /// Internal transient simulation

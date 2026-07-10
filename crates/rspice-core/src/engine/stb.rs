@@ -149,7 +149,7 @@ impl Engine {
         for &freq in &frequencies {
             let omega = 2.0 * PI * freq;
             let mut ac_matrix =
-                Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega);
+                Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
 
             // Experiment 1: unit series voltage at the probe, all other
             // sources dead.

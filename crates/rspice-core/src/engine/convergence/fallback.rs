@@ -72,6 +72,38 @@ impl Engine {
         }
     }
 
+    pub(in crate::engine::convergence) fn apply_bsim4_internal_gate_initial_guess_correction(
+        guess: &mut [Value],
+        circuit: &CircuitData,
+    ) {
+        #[inline]
+        fn voltage(guess: &[Value], node: usize) -> Value {
+            if node > 0 {
+                guess.get(node - 1).copied().unwrap_or(0.0)
+            } else {
+                0.0
+            }
+        }
+
+        #[inline]
+        fn set_voltage(guess: &mut [Value], node: usize, value: Value) {
+            if node > 0
+                && let Some(slot) = guess.get_mut(node - 1)
+            {
+                *slot = value;
+            }
+        }
+
+        for dev in &circuit.bsim4v8.devices {
+            if !matches!(dev.core.model.rgate_mod, 2 | 3) {
+                continue;
+            }
+
+            let driven_gate = voltage(guess, dev.node_gate_mid);
+            set_voltage(guess, dev.node_gate, driven_gate);
+        }
+    }
+
     pub(in crate::engine::convergence) fn prefer_lower_merit_scaled_seed(
         &self,
         circuit: &mut CircuitData,
@@ -117,7 +149,7 @@ impl Engine {
         damping_state: &mut NewtonDampingState,
         max_iterations: usize,
         abort: &dyn AbortSignal,
-    ) -> (Vec<Value>, bool, usize) {
+    ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
         self.solve_scaled_nonlinear_corrector_with_seed_mode(
             circuit,
             matrix,
@@ -140,7 +172,7 @@ impl Engine {
         max_iterations: usize,
         abort: &dyn AbortSignal,
         seed_mode: CorrectorSeedMode,
-    ) -> (Vec<Value>, bool, usize) {
+    ) -> Result<(Vec<Value>, bool, usize), SimulationError> {
         let mut solution = initial_solution.to_vec();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
         if matches!(
@@ -164,7 +196,7 @@ impl Engine {
 
         for iter in 0..max_iterations {
             if Self::should_abort_iteration(abort, iter) {
-                return (solution, false, used_iterations);
+                return Err(SimulationError::Aborted);
             }
             used_iterations = iter + 1;
             let mut rhs = vec![0.0; solution.len()];
@@ -181,16 +213,16 @@ impl Engine {
                 CorrectorSeedMode::StaticJfetEveryIteration
                     | CorrectorSeedMode::StaticProbeEveryIteration
             ) {
-                self.stamp_static_probe_nonlinear_devices_for_dc(
+                self.try_stamp_static_probe_nonlinear_devices_for_dc(
                     circuit, matrix, &mut rhs, &solution,
-                );
+                )?;
             } else {
-                self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
+                self.try_stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution)?;
             }
 
             let raw_solution = match matrix.solve(&rhs) {
                 Ok(sol) => sol,
-                Err(_) => return (solution, false, used_iterations),
+                Err(_) => return Ok((solution, false, used_iterations)),
             };
 
             let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
@@ -231,16 +263,16 @@ impl Engine {
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && self.nonlinear_residual_converged_scaled(
+                && self.try_nonlinear_residual_converged_scaled(
                     circuit,
                     matrix,
                     &new_solution,
                     source_scale,
-                );
+                )?;
             solution = new_solution;
 
             if voltage_converged && device_converged && nonlinear_residual_converged {
-                return (solution, true, used_iterations);
+                return Ok((solution, true, used_iterations));
             }
 
             if voltage_converged && device_converged && !nonlinear_residual_converged {
@@ -253,7 +285,7 @@ impl Engine {
             }
         }
 
-        (solution, false, used_iterations)
+        Ok((solution, false, used_iterations))
     }
 
     pub(in crate::engine::convergence) fn evaluate_fallback_candidate(
@@ -263,24 +295,24 @@ impl Engine {
         candidate: Vec<Value>,
         method_name: &str,
         abort: &dyn AbortSignal,
-    ) -> Option<Vec<Value>> {
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
         let node_count = circuit.num_nodes().min(candidate.len());
         let suspicious = Self::is_suspicious_solution(&candidate, node_count);
         let validated =
             !suspicious && self.validate_nonlinear_solution(circuit, matrix, &candidate);
         if validated {
-            return Some(candidate);
+            return Ok(Some(candidate));
         }
 
         if !suspicious
             && let Some(refined) =
-                self.refine_fallback_candidate(circuit, matrix, &candidate, abort)
+                self.refine_fallback_candidate(circuit, matrix, &candidate, abort)?
         {
             log::info!(
                 "{} candidate required Newton polishing and is now accepted.",
                 method_name
             );
-            return Some(refined);
+            return Ok(Some(refined));
         }
 
         if suspicious {
@@ -302,7 +334,7 @@ impl Engine {
             );
         }
 
-        None
+        Ok(None)
     }
 
     pub(in crate::engine::convergence) fn refine_fallback_candidate(
@@ -311,7 +343,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         candidate: &[Value],
         abort: &dyn AbortSignal,
-    ) -> Option<Vec<Value>> {
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
         let mut damping_state = NewtonDampingState::default();
         let refinement_iterations = self.continuation_iteration_budget(4, 12);
         let (refined, converged, _) = self.solve_scaled_nonlinear_corrector_with_seed_mode(
@@ -323,11 +355,11 @@ impl Engine {
             refinement_iterations,
             abort,
             CorrectorSeedMode::StaticJfetEveryIteration,
-        );
+        )?;
         if converged || self.validate_nonlinear_solution(circuit, matrix, &refined) {
-            Some(refined)
+            Ok(Some(refined))
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -337,7 +369,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         restart_seed: &[Value],
         abort: &dyn AbortSignal,
-    ) -> Option<Vec<Value>> {
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
         let mut damping_state = NewtonDampingState::default();
         let restart_iterations = self.nonlinear_iteration_budget(10);
         let (restarted, converged, _) = self.solve_scaled_nonlinear_corrector_with_seed_mode(
@@ -349,12 +381,12 @@ impl Engine {
             restart_iterations,
             abort,
             CorrectorSeedMode::StaticJfet,
-        );
+        )?;
         let validated = self.validate_nonlinear_solution(circuit, matrix, &restarted);
         if converged || validated {
-            Some(restarted)
+            Ok(Some(restarted))
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -364,7 +396,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         restart_seed: &[Value],
         abort: &dyn AbortSignal,
-    ) -> Option<Vec<Value>> {
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
         let mut damping_state = NewtonDampingState::default();
         let restart_iterations = self.continuation_iteration_budget(4, 64);
         let (restarted, converged, _) = self.solve_scaled_nonlinear_corrector_with_seed_mode(
@@ -376,12 +408,12 @@ impl Engine {
             restart_iterations,
             abort,
             CorrectorSeedMode::StaticProbeEveryIteration,
-        );
+        )?;
         let validated = self.validate_nonlinear_solution(circuit, matrix, &restarted);
         if converged || validated {
-            Some(restarted)
+            Ok(Some(restarted))
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -548,24 +580,23 @@ impl Engine {
             let vb = guess[base_node - 1];
             let ve = node_voltage(emitter_node);
 
-            // Strategy: Start with emitter voltage from linear presolve (respects resistor network)
-            // Adjust base to be VBE_FORWARD above emitter
-            // Adjust collector to be above base for forward-active
-
             let is_npn = matches!(bjt.bjt_type, crate::device::BjtType::Npn);
 
             if is_npn {
-                // NPN: Vc > Vb > Ve, VBE ≈ 0.7V, VCE > 0.2V
-                // Keep emitter at linear presolve value (grounded through resistor)
-                // Set base = emitter + 0.7V
-                // Set collector to be above base (midpoint to VCC or similar)
+                // Preserve a plausible base-emitter voltage from the linear
+                // presolve. Rewriting it solely because the collector is on
+                // the other side of the base can select a different DC root
+                // in compact models with non-monotone literal parameters.
+                let correct_base = (vb - ve).abs() > 1.0;
+                let vb_new = if correct_base { ve + VBE_FORWARD } else { vb };
+                let correct_collector = vc < vb_new;
+                let vc_new = if correct_collector {
+                    vb_new + VCE_SAT
+                } else {
+                    vc
+                };
 
-                let ve_new = ve; // Keep emitter from linear presolve
-                let vb_new = ve_new + VBE_FORWARD;
-                let vc_new = (vb_new + vc.max(vb_new + VCE_SAT)) / 2.0; // Between base and original Vc
-                let vc_new = vc_new.max(vb_new + VCE_SAT); // Ensure forward active
-
-                if (vb - ve).abs() > 1.0 || vc < vb {
+                if correct_base || correct_collector {
                     log::debug!(
                         "BJT {} (NPN): Correcting to forward active: Vc={:.2}->{:.2}, Vb={:.2}->{:.2}, Ve={:.2}->{:.2}",
                         bjt.name,
@@ -574,20 +605,27 @@ impl Engine {
                         vb,
                         vb_new,
                         ve,
-                        ve_new
+                        ve
                     );
-                    guess[base_node - 1] = vb_new;
-                    if collector_node > 0 {
+                    if correct_base {
+                        guess[base_node - 1] = vb_new;
+                    }
+                    if correct_collector && collector_node > 0 {
                         guess[collector_node - 1] = vc_new;
                     }
                 }
             } else {
-                // PNP: Ve > Vb > Vc, VEB ≈ 0.7V, VEC > 0.2V
-                let ve_new = ve;
-                let vb_new = ve_new - VBE_FORWARD;
-                let vc_new = vb_new - VCE_SAT;
+                // PNP mirror of the NPN policy above.
+                let correct_base = (ve - vb).abs() > 1.0;
+                let vb_new = if correct_base { ve - VBE_FORWARD } else { vb };
+                let correct_collector = vc > vb_new;
+                let vc_new = if correct_collector {
+                    vb_new - VCE_SAT
+                } else {
+                    vc
+                };
 
-                if (ve - vb).abs() > 1.0 || vc > vb {
+                if correct_base || correct_collector {
                     log::debug!(
                         "BJT {} (PNP): Correcting to forward active: Vc={:.2}->{:.2}, Vb={:.2}->{:.2}, Ve={:.2}->{:.2}",
                         bjt.name,
@@ -596,10 +634,12 @@ impl Engine {
                         vb,
                         vb_new,
                         ve,
-                        ve_new
+                        ve
                     );
-                    guess[base_node - 1] = vb_new;
-                    if collector_node > 0 {
+                    if correct_base {
+                        guess[base_node - 1] = vb_new;
+                    }
+                    if correct_collector && collector_node > 0 {
                         guess[collector_node - 1] = vc_new;
                     }
                 }
