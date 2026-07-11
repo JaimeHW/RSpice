@@ -10244,9 +10244,17 @@ impl XyceTestRunner {
                         *coefficient,
                     )?;
                 }
+                ElementKind::BehavioralVoltage { expression, .. }
+                | ElementKind::BehavioralCurrent { expression, .. } => {
+                    Self::validate_static_step_tran_behavioral_expression(
+                        &element.name,
+                        expression,
+                        &netlist.params,
+                    )?;
+                }
                 _ => {
                     return Err(format!(
-                        "native .STEP .PRINT TRAN comparison currently supports static R/L/C passives, coupled inductors, and independent DC/PULSE/SIN/PWL/PAT sources; element '{}' requires a broader stepped transient oracle contract",
+                        "native .STEP .PRINT TRAN comparison currently supports static R/L/C passives, coupled inductors, independent DC/PULSE/SIN/PWL/PAT sources, and solution-independent behavioral sources; element '{}' requires a broader stepped transient oracle contract",
                         element.name
                     ));
                 }
@@ -10767,6 +10775,29 @@ impl XyceTestRunner {
         expression: &str,
         params: &crate::netlist::ParamContext,
     ) -> Result<(), String> {
+        Self::parse_transient_behavioral_expression(element_name, expression, params).map(drop)
+    }
+
+    fn validate_static_step_tran_behavioral_expression(
+        element_name: &str,
+        expression: &str,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<(), String> {
+        let ast = Self::parse_transient_behavioral_expression(element_name, expression, params)?;
+        if Self::expression_depends_on_solution_quantity(&ast) {
+            return Err(format!(
+                "native .STEP .PRINT TRAN comparison does not yet support behavioral expression '{}' on element '{}' because it references circuit nodes or branch currents",
+                expression, element_name
+            ));
+        }
+        Ok(())
+    }
+
+    fn parse_transient_behavioral_expression(
+        element_name: &str,
+        expression: &str,
+        params: &crate::netlist::ParamContext,
+    ) -> Result<Expr, String> {
         let prepared = prepare_behavioral_expression(expression, params).map_err(|err| {
             format!(
                 "native static .PRINT TRAN comparison could not prepare behavioral expression '{}' on element '{}': {err}",
@@ -10779,8 +10810,7 @@ impl XyceTestRunner {
                 expression, element_name
             )
         })?;
-        let _validated_ast = ast;
-        Ok(())
+        Ok(ast)
     }
 
     fn validate_ac_behavioral_expression(
