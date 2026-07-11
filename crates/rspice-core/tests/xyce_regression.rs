@@ -831,6 +831,47 @@ fn test_xyce_sin_expression_family_runs_exact_transient_parity() {
 }
 
 #[test]
+fn test_xyce_bug_1806_parameter_expression_family_runs_canonical_transient_parity() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/Certification_Tests/BUG_1806/bug_1806.cir",
+            "param_expression_family_wrapper",
+            true,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1806/bug_1806_2.cir",
+            "param_expression_family_baseline",
+            false,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1806/bug_1806_2a.cir",
+            "param_expression_family_wrapper",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass strict parameter/literal expression qualification and the canonical xyce_verify transient oracle, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should satisfy the Release 7.10 interpolated RMS comparison"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+}
+
+#[test]
 fn test_xyce_mid_certification_transient_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

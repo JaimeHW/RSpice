@@ -40,7 +40,12 @@ const MAX_NATIVE_TRAN_NODE_SOLVE_STEPS: f64 = 2_500_000_000.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
 const XYCE_DEFAULT_PRN_FRACTION_DIGITS: f64 = 8.0;
+const XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION: usize = 8;
 const PRN_TIME_NEIGHBOR_HALF_ULPS: f64 = 4.0;
+const XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE: f64 = 1.0e-2;
+const XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE: f64 = 1.0e-12;
+const XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE: f64 = 1.0e-12;
+const XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE: f64 = 1.0e-12;
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
@@ -390,15 +395,33 @@ struct XyceSinExpressionFamilySnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum XyceExactTransientFamilySnapshot {
+struct XyceParamExpressionFamilySnapshot {
+    title: String,
+    parameter_name: String,
+    parameter_bits: u64,
+    subcircuit_name: String,
+    subcircuit_ports: Vec<String>,
+    flattened_elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    representation: XyceParamExpressionRepresentation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum XyceStrictTransientFamilySnapshot {
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
+    ParamExpression(XyceParamExpressionFamilySnapshot),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceSinExpressionRepresentation {
     IndependentSin,
     BehavioralSpiceSin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceParamExpressionRepresentation {
+    ParameterCoefficient,
+    LiteralCoefficient,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -427,6 +450,7 @@ enum XyceBjtExternalNodeRepresentation {
 enum XyceBaselineFamilyKind {
     BjtExternalNode,
     SinExpression,
+    ParamExpression,
     Subckt,
     Supernode,
     ScopedModel,
@@ -441,7 +465,34 @@ enum XyceBaselineFamilyAnalysis {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyComparison {
     Toleranced,
+    TolerancedStrict,
     Exact,
+}
+
+impl XyceBaselineFamilyComparison {
+    fn strict_qualification(self) -> bool {
+        !matches!(self, Self::Toleranced)
+    }
+
+    fn requires_semantic_snapshot(self) -> bool {
+        !matches!(self, Self::Toleranced)
+    }
+
+    fn requires_exact_plan_equivalence(self) -> bool {
+        !matches!(self, Self::Toleranced)
+    }
+
+    fn compares_waveforms_exactly(self) -> bool {
+        matches!(self, Self::Exact)
+    }
+
+    fn uses_xyce_verify_transient_oracle(self) -> bool {
+        matches!(self, Self::TolerancedStrict)
+    }
+
+    fn permits_locked_time_retry(self) -> bool {
+        matches!(self, Self::Toleranced)
+    }
 }
 
 impl XyceBaselineFamilyKind {
@@ -449,6 +500,7 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::BjtExternalNode => "BJT_EXTNODE",
             Self::SinExpression => "SIN_EXPRESSION",
+            Self::ParamExpression => "PARAM_EXPRESSION",
             Self::Subckt => "SUBCKT",
             Self::Supernode => "SUPERNODE",
             Self::ScopedModel => "SCOPED_MODEL",
@@ -459,6 +511,7 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::BjtExternalNode => "bjt_external_node_family_wrapper",
             Self::SinExpression => "sin_expression_family_wrapper",
+            Self::ParamExpression => "param_expression_family_wrapper",
             Self::Subckt => "subckt_family_wrapper",
             Self::Supernode => "supernode_family_wrapper",
             Self::ScopedModel => "scoped_model_family_wrapper",
@@ -469,6 +522,7 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::BjtExternalNode => "bjt_external_node_family_baseline",
             Self::SinExpression => "sin_expression_family_baseline",
+            Self::ParamExpression => "param_expression_family_baseline",
             Self::Subckt => "subckt_family_baseline",
             Self::Supernode => "supernode_family_baseline",
             Self::ScopedModel => "scoped_model_family_baseline",
@@ -482,9 +536,11 @@ impl XyceBaselineFamilyKind {
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
-            Self::BjtExternalNode | Self::SinExpression | Self::Subckt | Self::Supernode => {
-                XyceStaticTranPlanPurpose::RelationalFamily
-            }
+            Self::BjtExternalNode
+            | Self::SinExpression
+            | Self::ParamExpression
+            | Self::Subckt
+            | Self::Supernode => XyceStaticTranPlanPurpose::RelationalFamily,
         }
     }
 }
@@ -6911,6 +6967,7 @@ impl XyceTestRunner {
             ),
             XyceBaselineFamilyKind::BjtExternalNode => false,
             XyceBaselineFamilyKind::SinExpression
+            | XyceBaselineFamilyKind::ParamExpression
             | XyceBaselineFamilyKind::Subckt
             | XyceBaselineFamilyKind::Supernode => baseline == target,
         }
@@ -6932,7 +6989,7 @@ impl XyceTestRunner {
         comparison: XyceBaselineFamilyComparison,
         reason: String,
     ) -> XyceTestResult {
-        if comparison == XyceBaselineFamilyComparison::Exact {
+        if comparison.strict_qualification() {
             self.failure_result(deck, start, result_contract, reason, Vec::new())
         } else {
             self.expected_unsupported_result(deck, start, result_contract, &reason)
@@ -6991,6 +7048,20 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::ParamExpression
+            && analysis != XyceBaselineFamilyAnalysis::Tran
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' requires a transient analysis",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if analysis == XyceBaselineFamilyAnalysis::Tran {
             let baseline_plan = match self.static_tran_family_plan_for_path(
                 &contract.baseline_path,
@@ -7034,7 +7105,7 @@ impl XyceTestRunner {
                 );
             }
         };
-        if contract.comparison == XyceBaselineFamilyComparison::Exact {
+        if contract.comparison.compares_waveforms_exactly() {
             return self.run_exact_dc_baseline_family_contract(
                 deck,
                 contract,
@@ -7654,6 +7725,20 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::ParamExpression
+            && let Err(err) = Self::validate_param_expression_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
 
         let (baseline_netlist, baseline_result) = match self.run_transient_family_plan(
             &baseline_plan,
@@ -7698,8 +7783,8 @@ impl XyceTestRunner {
                 );
             }
         };
-        let baseline_snapshot = if contract.comparison == XyceBaselineFamilyComparison::Exact {
-            match Self::exact_transient_family_snapshot(
+        let baseline_snapshot = if contract.comparison.requires_semantic_snapshot() {
+            match Self::strict_transient_family_snapshot(
                 &contract,
                 &baseline_netlist,
                 &baseline_plan.print,
@@ -7818,6 +7903,21 @@ impl XyceTestRunner {
                     Vec::new(),
                 );
             }
+            if contract.kind == XyceBaselineFamilyKind::ParamExpression
+                && let Err(err) = Self::validate_param_expression_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
             if !Self::baseline_family_tran_contracts_compatible(
                 contract.kind,
                 baseline_plan.contract,
@@ -7837,7 +7937,7 @@ impl XyceTestRunner {
                     ),
                 );
             }
-            if contract.comparison == XyceBaselineFamilyComparison::Exact {
+            if contract.comparison.requires_exact_plan_equivalence() {
                 if target_plan.print.probes != baseline_plan.print.probes {
                     return self.failure_result(
                         deck,
@@ -7894,7 +7994,7 @@ impl XyceTestRunner {
                     );
                 }
             };
-            let time_scale_differs = if contract.comparison == XyceBaselineFamilyComparison::Exact {
+            let time_scale_differs = if contract.comparison.requires_exact_plan_equivalence() {
                 target_time_scale.to_bits() != baseline_time_scale.to_bits()
             } else {
                 let scale = baseline_time_scale
@@ -7968,7 +8068,7 @@ impl XyceTestRunner {
                 }
             };
             if let Some(baseline_snapshot) = baseline_snapshot.as_ref() {
-                let target_snapshot = match Self::exact_transient_family_snapshot(
+                let target_snapshot = match Self::strict_transient_family_snapshot(
                     &contract,
                     &target_netlist,
                     &target_plan.print,
@@ -7988,7 +8088,7 @@ impl XyceTestRunner {
                         );
                     }
                 };
-                if let Err(err) = Self::compare_exact_transient_family_snapshots(
+                if let Err(err) = Self::compare_strict_transient_family_snapshots(
                     baseline_snapshot,
                     &target_snapshot,
                 ) {
@@ -8006,7 +8106,7 @@ impl XyceTestRunner {
                 }
             }
 
-            let mut mismatches = if contract.comparison == XyceBaselineFamilyComparison::Exact {
+            let mut mismatches = if contract.comparison.compares_waveforms_exactly() {
                 let target_table = match Self::transient_family_result_to_prn_table(
                     &target_plan,
                     &target_netlist,
@@ -8048,6 +8148,43 @@ impl XyceTestRunner {
                         );
                     }
                 }
+            } else if contract.comparison.uses_xyce_verify_transient_oracle() {
+                let target_table = match Self::transient_family_result_to_prn_table(
+                    &target_plan,
+                    &target_netlist,
+                    &target_result,
+                ) {
+                    Ok(table) => table,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} xyce_verify output conversion failed: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+                match self.compare_xyce_verify_transient_tables(&baseline_table, &target_table) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} xyce_verify comparison error: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                }
             } else {
                 match self.compare_tran_prn_reference(
                     &baseline_table,
@@ -8073,9 +8210,7 @@ impl XyceTestRunner {
                     }
                 }
             };
-            if contract.comparison == XyceBaselineFamilyComparison::Toleranced
-                && !mismatches.is_empty()
-            {
+            if contract.comparison.permits_locked_time_retry() && !mismatches.is_empty() {
                 let locked_run = self.run_transient_family_plan(
                     &target_plan,
                     start,
@@ -8321,50 +8456,58 @@ impl XyceTestRunner {
         })
     }
 
-    fn exact_transient_family_snapshot(
+    fn strict_transient_family_snapshot(
         contract: &XyceBaselineFamilyContract,
         netlist: &Netlist,
         print: &XycePrintRequest,
-    ) -> Result<XyceExactTransientFamilySnapshot, String> {
+    ) -> Result<XyceStrictTransientFamilySnapshot, String> {
         match contract.kind {
             XyceBaselineFamilyKind::ScopedModel => {
                 Self::scoped_model_family_snapshot(contract, netlist)?
-                    .map(XyceExactTransientFamilySnapshot::ScopedModel)
+                    .map(XyceStrictTransientFamilySnapshot::ScopedModel)
                     .ok_or_else(|| {
-                        "scoped-model exact family produced no semantic snapshot".to_string()
+                        "scoped-model strict family produced no semantic snapshot".to_string()
                     })
             }
             XyceBaselineFamilyKind::SinExpression => {
                 Self::sin_expression_family_snapshot(netlist, print)
-                    .map(XyceExactTransientFamilySnapshot::SinExpression)
+                    .map(XyceStrictTransientFamilySnapshot::SinExpression)
+            }
+            XyceBaselineFamilyKind::ParamExpression => {
+                Self::param_expression_family_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::ParamExpression)
             }
             other => Err(format!(
-                "exact transient family kind {} has no semantic snapshot contract",
+                "strict transient family kind {} has no semantic snapshot contract",
                 other.name()
             )),
         }
     }
 
-    fn compare_exact_transient_family_snapshots(
-        baseline: &XyceExactTransientFamilySnapshot,
-        target: &XyceExactTransientFamilySnapshot,
+    fn compare_strict_transient_family_snapshots(
+        baseline: &XyceStrictTransientFamilySnapshot,
+        target: &XyceStrictTransientFamilySnapshot,
     ) -> Result<(), String> {
         match (baseline, target) {
             (
-                XyceExactTransientFamilySnapshot::ScopedModel(baseline),
-                XyceExactTransientFamilySnapshot::ScopedModel(target),
+                XyceStrictTransientFamilySnapshot::ScopedModel(baseline),
+                XyceStrictTransientFamilySnapshot::ScopedModel(target),
             ) if baseline == target => Ok(()),
             (
-                XyceExactTransientFamilySnapshot::ScopedModel(_),
-                XyceExactTransientFamilySnapshot::ScopedModel(_),
+                XyceStrictTransientFamilySnapshot::ScopedModel(_),
+                XyceStrictTransientFamilySnapshot::ScopedModel(_),
             ) => {
                 Err("flattened elements or effective nonlinear model parameters differ".to_string())
             }
             (
-                XyceExactTransientFamilySnapshot::SinExpression(baseline),
-                XyceExactTransientFamilySnapshot::SinExpression(target),
+                XyceStrictTransientFamilySnapshot::SinExpression(baseline),
+                XyceStrictTransientFamilySnapshot::SinExpression(target),
             ) => Self::compare_sin_expression_family_snapshots(baseline, target),
-            _ => Err("baseline and target use different exact family snapshot kinds".to_string()),
+            (
+                XyceStrictTransientFamilySnapshot::ParamExpression(baseline),
+                XyceStrictTransientFamilySnapshot::ParamExpression(target),
+            ) => Self::compare_param_expression_family_snapshots(baseline, target),
+            _ => Err("baseline and target use different strict family snapshot kinds".to_string()),
         }
     }
 
@@ -8471,6 +8614,517 @@ impl XyceTestRunner {
             return Err(format!(
                 "exact SIN/SPICE_SIN parity requires exactly one .TRAN, .PRINT, and .END; found ({tran_count}, {print_count}, {end_count})"
             ));
+        }
+        Ok(())
+    }
+
+    fn validate_param_expression_direct_source_forms(source: &str) -> Result<(), String> {
+        const LABEL: &str = "parameter-expression parity";
+        let lines = Self::logical_netlist_lines(source);
+        let Some(title) = source.lines().find(|line| !line.trim().is_empty()) else {
+            return Err(format!("{LABEL} requires a circuit title"));
+        };
+        let title = title
+            .split_once(';')
+            .map(|(head, _)| head)
+            .unwrap_or(title)
+            .trim();
+        if title.is_empty() || title.starts_with('.') {
+            return Err(format!("{LABEL} requires an ordinary circuit title"));
+        }
+        let logical_title_count = usize::from(
+            !Self::strip_netlist_comment(title).trim().is_empty()
+                && lines.first().is_some_and(|line| line.trim() == title),
+        );
+
+        let mut behavioral_count = 0usize;
+        let mut resistor_count = 0usize;
+        let mut voltage_count = 0usize;
+        let mut instance_count = 0usize;
+        for line in lines.iter().skip(logical_title_count) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                if command.eq_ignore_ascii_case(".TRAN") {
+                    let fields = Self::split_grouped_whitespace_fields(
+                        stripped,
+                        "parameter-expression .TRAN statement",
+                    )?;
+                    if fields.len() != 3
+                        || !Self::is_single_spice_numeric_literal(&fields[1])
+                        || !Self::is_single_spice_numeric_literal(&fields[2])
+                    {
+                        return Err(format!(
+                            "{LABEL} requires direct numeric '.TRAN step stop' tokens"
+                        ));
+                    }
+                }
+                continue;
+            }
+
+            let fields = Self::split_grouped_whitespace_fields(
+                stripped,
+                "parameter-expression element statement",
+            )?;
+            let Some(designator) = fields[0].chars().next().map(|ch| ch.to_ascii_uppercase())
+            else {
+                return Err(format!("{LABEL} contains an empty element name"));
+            };
+            match designator {
+                'B' => {
+                    behavioral_count += 1;
+                    if fields.len() != 4 || !Self::is_single_braced_voltage_assignment(&fields[3]) {
+                        return Err(format!(
+                            "{LABEL} behavioral source must use exactly 'Bname n+ n- V={{expression}}'"
+                        ));
+                    }
+                }
+                'R' => {
+                    resistor_count += 1;
+                    if fields.len() != 4 || !Self::is_single_spice_numeric_literal(&fields[3]) {
+                        return Err(format!(
+                            "{LABEL} resistors must use direct numeric 'Rname n+ n- value' form"
+                        ));
+                    }
+                }
+                'V' => {
+                    voltage_count += 1;
+                    if fields.len() != 4 || !Self::is_single_spice_numeric_literal(&fields[3]) {
+                        return Err(format!(
+                            "{LABEL} voltage source must use direct numeric 'Vname n+ n- value' form"
+                        ));
+                    }
+                }
+                'X' => {
+                    instance_count += 1;
+                    if fields.len() != 8 {
+                        return Err(format!(
+                            "{LABEL} subcircuit instance must bind exactly six nodes without parameter fields"
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "{LABEL} does not admit element statement '{command}'"
+                    ));
+                }
+            }
+        }
+        if (
+            behavioral_count,
+            resistor_count,
+            voltage_count,
+            instance_count,
+        ) != (1, 2, 1, 1)
+        {
+            return Err(format!(
+                "{LABEL} requires exactly one behavioral source, two resistors, one direct DC source, and one subcircuit instance; found ({behavioral_count}, {resistor_count}, {voltage_count}, {instance_count})"
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_param_expression_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
+        const LABEL: &str = "parameter-expression parity";
+        if plan.contract != XyceStaticTranContract::PlainStatic {
+            return Err(format!(
+                "{LABEL} requires ordinary primary .prn output, got {:?}",
+                plan.contract
+            ));
+        }
+        if !plan.steps.is_empty() {
+            return Err(format!("{LABEL} does not admit .STEP"));
+        }
+        if plan.output_override {
+            return Err(format!("{LABEL} does not admit an output override"));
+        }
+        if plan.timeint_conststep {
+            return Err(format!(
+                "{LABEL} requires ordinary adaptive transient output"
+            ));
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step <= 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.step > plan.tran.stop
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "{LABEL} requires finite '.TRAN step stop' values with 0 < step <= stop and no START, MAXSTEP, or UIC; got step={}, stop={}, start={:?}, max_step={:?}, uic={}",
+                plan.tran.step, plan.tran.stop, plan.tran.start, plan.tran.max_step, plan.tran.uic
+            ));
+        }
+        let [probe] = plan.print.probes.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one voltage probe, found {}",
+                plan.print.probes.len()
+            ));
+        };
+        let voltage_probe = Self::parse_voltage_probe(probe)
+            .ok_or_else(|| format!("{LABEL} probe '{probe}' is not an atomic voltage probe"))?;
+        if voltage_probe.accessor != XyceVoltageAccessor::Value || voltage_probe.node_neg.is_some()
+        {
+            return Err(format!(
+                "{LABEL} probe '{probe}' must be one ordinary single-ended voltage"
+            ));
+        }
+        Self::validate_param_expression_direct_source_forms(&plan.source)?;
+
+        if plan.source.lines().any(|line| {
+            line.split_whitespace()
+                .next()
+                .is_some_and(|field| field.eq_ignore_ascii_case("*COMP"))
+        }) {
+            return Err(format!(
+                "{LABEL} uses the unmodified xyce_verify default tolerances and does not admit *COMP directives"
+            ));
+        }
+
+        let mut param_count = 0usize;
+        let mut subckt_count = 0usize;
+        let mut ends_count = 0usize;
+        let mut print_count = 0usize;
+        let mut tran_count = 0usize;
+        let mut end_count = 0usize;
+        for line in Self::logical_netlist_lines(&plan.source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if !command.starts_with('.') {
+                continue;
+            }
+            match command.to_ascii_lowercase().as_str() {
+                ".param" => {
+                    param_count += 1;
+                    let fields = Self::split_grouped_whitespace_fields(
+                        stripped,
+                        "parameter-expression .PARAM statement",
+                    )?;
+                    let [_, assignment] = fields.as_slice() else {
+                        return Err(format!(
+                            "{LABEL} requires one canonical '.PARAM name=value' assignment"
+                        ));
+                    };
+                    let Some((name, value)) = assignment.split_once('=') else {
+                        return Err(format!(
+                            "{LABEL} requires one canonical '.PARAM name=value' assignment"
+                        ));
+                    };
+                    if name.trim().is_empty()
+                        || value.trim().is_empty()
+                        || value.contains('=')
+                        || !Self::is_single_spice_numeric_literal(value)
+                    {
+                        return Err(format!(
+                            "{LABEL} requires one direct finite numeric .PARAM value"
+                        ));
+                    }
+                }
+                ".subckt" => {
+                    subckt_count += 1;
+                    let fields = Self::split_grouped_whitespace_fields(
+                        stripped,
+                        "parameter-expression .SUBCKT statement",
+                    )?;
+                    if fields.len() != 8 {
+                        return Err(format!(
+                            "{LABEL} requires '.SUBCKT name' followed by exactly six ports and no defaults"
+                        ));
+                    }
+                }
+                ".ends" => {
+                    ends_count += 1;
+                    if !stripped.eq_ignore_ascii_case(".ends") {
+                        return Err(format!("{LABEL} requires a bare '.ENDS' statement"));
+                    }
+                }
+                ".print" => {
+                    print_count += 1;
+                    let fields = Self::split_print_fields(stripped)?;
+                    if fields.len() != 3
+                        || !fields[1].eq_ignore_ascii_case("TRAN")
+                        || Self::normalize_probe(&fields[2]) != Self::normalize_probe(probe)
+                    {
+                        return Err(format!(
+                            "{LABEL} requires one canonical '.PRINT TRAN <voltage>' statement without destination or formatting assignments"
+                        ));
+                    }
+                }
+                ".tran" => {
+                    tran_count += 1;
+                    if stripped.split_whitespace().count() != 3 {
+                        return Err(format!(
+                            "{LABEL} requires the canonical '.TRAN step stop' form"
+                        ));
+                    }
+                }
+                ".end" => {
+                    end_count += 1;
+                    if !stripped.eq_ignore_ascii_case(".end") {
+                        return Err(format!("{LABEL} requires an ordinary '.END' statement"));
+                    }
+                }
+                other => {
+                    return Err(format!("{LABEL} does not admit directive '{other}'"));
+                }
+            }
+        }
+        if (
+            param_count,
+            subckt_count,
+            ends_count,
+            print_count,
+            tran_count,
+            end_count,
+        ) != (1, 1, 1, 1, 1, 1)
+        {
+            return Err(format!(
+                "{LABEL} requires exactly one .PARAM, .SUBCKT, .ENDS, .PRINT, .TRAN, and .END; found ({param_count}, {subckt_count}, {ends_count}, {print_count}, {tran_count}, {end_count})"
+            ));
+        }
+        Ok(())
+    }
+
+    fn param_expression_name_is_literal_ground(node: &str) -> bool {
+        node.trim() == "0"
+    }
+
+    fn canonical_param_expression_node_name(node: &str) -> String {
+        if Self::param_expression_name_is_literal_ground(node) {
+            "0".to_string()
+        } else {
+            node.trim().to_ascii_lowercase()
+        }
+    }
+
+    fn raw_param_expression_voltage_node(expression: &crate::netlist::expr::Expr) -> Option<&str> {
+        let crate::netlist::expr::Expr::FnCall { name, args } = expression else {
+            return None;
+        };
+        let [crate::netlist::expr::Expr::Param(node)] = args.as_slice() else {
+            return None;
+        };
+        name.eq_ignore_ascii_case("V").then_some(node.as_str())
+    }
+
+    fn raw_param_expression_squared_voltage_difference_matches(
+        expression: &crate::netlist::expr::Expr,
+        positive_node: &str,
+        negative_node: &str,
+    ) -> bool {
+        use crate::netlist::expr::{BinOpKind, Expr as NetExpr};
+        let NetExpr::BinOp {
+            op: BinOpKind::Pow,
+            left,
+            right,
+        } = expression
+        else {
+            return false;
+        };
+        let NetExpr::Number(exponent) = right.as_ref() else {
+            return false;
+        };
+        let NetExpr::BinOp {
+            op: BinOpKind::Sub,
+            left,
+            right,
+        } = left.as_ref()
+        else {
+            return false;
+        };
+        exponent.to_bits() == 2.0f64.to_bits()
+            && Self::raw_param_expression_voltage_node(left)
+                .is_some_and(|node| node.eq_ignore_ascii_case(positive_node))
+            && Self::raw_param_expression_voltage_node(right)
+                .is_some_and(|node| node.eq_ignore_ascii_case(negative_node))
+    }
+
+    fn qualify_raw_param_expression(
+        expression: &str,
+        parameter_name: &str,
+        parameter_value: Value,
+        ports: &[String],
+    ) -> Result<XyceParamExpressionRepresentation, String> {
+        use crate::netlist::expr::{BinOpKind, Expr as NetExpr};
+        let ast = crate::netlist::expr::parse_expression(expression)
+            .map_err(|err| format!("could not parse the behavioral expression: {err}"))?;
+        let NetExpr::BinOp {
+            op: BinOpKind::Mul,
+            left: coefficient,
+            right: magnitude,
+        } = ast
+        else {
+            return Err(
+                "behavioral expression must directly multiply its coefficient by sqrt(...)"
+                    .to_string(),
+            );
+        };
+        let representation = match coefficient.as_ref() {
+            NetExpr::Param(name) if name.eq_ignore_ascii_case(parameter_name) => {
+                XyceParamExpressionRepresentation::ParameterCoefficient
+            }
+            NetExpr::Number(value) if value.to_bits() == parameter_value.to_bits() => {
+                XyceParamExpressionRepresentation::LiteralCoefficient
+            }
+            NetExpr::Param(_) => {
+                return Err(
+                    "behavioral coefficient must reference the unique global parameter directly"
+                        .to_string(),
+                );
+            }
+            NetExpr::Number(value) => {
+                return Err(format!(
+                    "literal behavioral coefficient {value} does not exactly equal the global parameter value {parameter_value}"
+                ));
+            }
+            _ => {
+                return Err(
+                    "behavioral coefficient must be one direct parameter reference or numeric literal"
+                        .to_string(),
+                );
+            }
+        };
+        let NetExpr::FnCall { name, args } = magnitude.as_ref() else {
+            return Err("behavioral magnitude must be one direct sqrt(...) call".to_string());
+        };
+        if !name.eq_ignore_ascii_case("sqrt") {
+            return Err("behavioral magnitude function must be sqrt".to_string());
+        }
+        let [
+            NetExpr::BinOp {
+                op: BinOpKind::Add,
+                left: first,
+                right: second,
+            },
+        ] = args.as_slice()
+        else {
+            return Err(
+                "sqrt must contain one direct sum of two squared voltage differences".to_string(),
+            );
+        };
+        if ports.len() != 6
+            || !Self::raw_param_expression_squared_voltage_difference_matches(
+                first, &ports[2], &ports[3],
+            )
+            || !Self::raw_param_expression_squared_voltage_difference_matches(
+                second, &ports[4], &ports[5],
+            )
+        {
+            return Err(
+                "behavioral expression must preserve the ordered squared voltage differences for subcircuit ports 2/3 and 4/5"
+                    .to_string(),
+            );
+        }
+        Ok(representation)
+    }
+
+    fn strict_param_expression_voltage_node_matches(expression: &Expr, expected: &str) -> bool {
+        matches!(
+            expression,
+            Expr::NodeVoltage(node)
+                if Self::canonical_param_expression_node_name(node) == expected
+        )
+    }
+
+    fn strict_param_expression_squared_voltage_difference_matches(
+        expression: &Expr,
+        positive_node: &str,
+        negative_node: &str,
+    ) -> bool {
+        let Expr::Binary {
+            op: crate::expr::BinaryOp::Pow,
+            left,
+            right,
+        } = expression
+        else {
+            return false;
+        };
+        let Expr::Const(exponent) = right.as_ref() else {
+            return false;
+        };
+        let Expr::Binary {
+            op: crate::expr::BinaryOp::Sub,
+            left,
+            right,
+        } = left.as_ref()
+        else {
+            return false;
+        };
+        exponent.to_bits() == 2.0f64.to_bits()
+            && Self::strict_param_expression_voltage_node_matches(left, positive_node)
+            && Self::strict_param_expression_voltage_node_matches(right, negative_node)
+    }
+
+    fn qualify_prepared_param_expression(
+        expression: &str,
+        params: &crate::netlist::expr::ParamContext,
+        coefficient: Value,
+        first_positive: &str,
+        first_negative: &str,
+        second_positive: &str,
+        second_negative: &str,
+    ) -> Result<(), String> {
+        let prepared = prepare_behavioral_expression(expression, params)
+            .map_err(|err| format!("could not prepare the flattened expression: {err}"))?;
+        let ast = parse_expression_strict(&prepared)
+            .map_err(|err| format!("could not parse the prepared flattened expression: {err}"))?;
+        let Expr::Binary {
+            op: crate::expr::BinaryOp::Mul,
+            left,
+            right,
+        } = ast
+        else {
+            return Err(
+                "prepared expression must directly multiply a constant by sqrt(...)".to_string(),
+            );
+        };
+        let Expr::Const(prepared_coefficient) = left.as_ref() else {
+            return Err("prepared behavioral coefficient must be constant".to_string());
+        };
+        if prepared_coefficient.to_bits() != coefficient.to_bits() {
+            return Err(format!(
+                "prepared behavioral coefficient {prepared_coefficient} does not exactly equal {coefficient}"
+            ));
+        }
+        let Expr::Function {
+            func: crate::expr::Function::Sqrt,
+            args,
+        } = right.as_ref()
+        else {
+            return Err("prepared behavioral magnitude must be sqrt".to_string());
+        };
+        let [
+            Expr::Binary {
+                op: crate::expr::BinaryOp::Add,
+                left: first,
+                right: second,
+            },
+        ] = args.as_slice()
+        else {
+            return Err(
+                "prepared sqrt must contain one direct sum of squared voltage differences"
+                    .to_string(),
+            );
+        };
+        if !Self::strict_param_expression_squared_voltage_difference_matches(
+            first,
+            first_positive,
+            first_negative,
+        ) || !Self::strict_param_expression_squared_voltage_difference_matches(
+            second,
+            second_positive,
+            second_negative,
+        ) {
+            return Err(
+                "prepared expression changed the ordered squared voltage-difference topology"
+                    .to_string(),
+            );
         }
         Ok(())
     }
@@ -8886,6 +9540,496 @@ impl XyceTestRunner {
         }
         if baseline.waveform_bits != target.waveform_bits {
             return Err("canonical sinusoidal waveform values differ".to_string());
+        }
+        Ok(())
+    }
+
+    fn param_expression_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceParamExpressionFamilySnapshot, String> {
+        const LABEL: &str = "parameter-expression parity";
+        let source = netlist.source_text.as_deref().ok_or_else(|| {
+            format!("{LABEL} requires original source text for representation qualification")
+        })?;
+        Self::validate_param_expression_direct_source_forms(source)?;
+        if !netlist.models.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} contains models, top-level auxiliary analysis state, or external-model state"
+            ));
+        }
+        if !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!(
+                "{LABEL} does not admit string parameters or user functions"
+            ));
+        }
+        let parameters = netlist.params.all_params();
+        let [(parameter_name, parameter_value)] = parameters.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one explicit numeric global parameter, found {}",
+                parameters.len()
+            ));
+        };
+        let complex_parameter = netlist
+            .params
+            .get_complex(parameter_name)
+            .ok_or_else(|| format!("{LABEL} could not resolve its unique global parameter"))?;
+        if !complex_parameter.is_real()
+            || complex_parameter.re.to_bits() != parameter_value.to_bits()
+            || !parameter_value.is_finite()
+            || *parameter_value <= 0.0
+        {
+            return Err(format!(
+                "{LABEL} requires one finite positive real global parameter, got {complex_parameter:?}"
+            ));
+        }
+        if !netlist.diagnostics.is_empty() {
+            return Err(format!(
+                "{LABEL} requires a diagnostic-free parse, found {} diagnostic(s)",
+                netlist.diagnostics.len()
+            ));
+        }
+        if !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }]) {
+            return Err(format!(
+                "{LABEL} requires exactly one transient analysis, found {} analysis command(s)",
+                netlist.analyses.len()
+            ));
+        }
+        let [subcircuit] = netlist.subcircuits.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one subcircuit definition, found {}",
+                netlist.subcircuits.len()
+            ));
+        };
+        if !subcircuit.params.is_empty()
+            || !subcircuit.expr_params.is_empty()
+            || !subcircuit.string_params.is_empty()
+            || !subcircuit.body_params.is_empty()
+            || !subcircuit.body_expr_params.is_empty()
+            || !subcircuit.body_string_params.is_empty()
+            || !subcircuit.body_functions.is_empty()
+            || !subcircuit.local_options.is_empty()
+            || subcircuit.library_ref.is_some()
+            || !subcircuit.nested_subcircuits.is_empty()
+            || !subcircuit.initial_conditions.is_empty()
+            || !subcircuit.node_sets.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} subcircuit must not contain defaults, body parameters/functions, local options, nested hierarchy, startup state, or a library reference"
+            ));
+        }
+        if subcircuit.ports.len() != 6 {
+            return Err(format!(
+                "{LABEL} subcircuit requires exactly six ports, found {}",
+                subcircuit.ports.len()
+            ));
+        }
+        let subcircuit_ports = subcircuit
+            .ports
+            .iter()
+            .map(|port| Self::canonical_param_expression_node_name(port))
+            .collect::<Vec<_>>();
+        let distinct_ports = subcircuit_ports.iter().cloned().collect::<BTreeSet<_>>();
+        if distinct_ports.len() != 6
+            || subcircuit.ports.iter().any(|port| {
+                crate::compat::ground::is_spice_ground_name(port) || port.trim().is_empty()
+            })
+        {
+            return Err(format!(
+                "{LABEL} subcircuit ports must be six distinct non-ground names"
+            ));
+        }
+        let [behavioral] = subcircuit.elements.as_slice() else {
+            return Err(format!(
+                "{LABEL} subcircuit requires exactly one behavioral voltage source, found {} elements",
+                subcircuit.elements.len()
+            ));
+        };
+        let behavioral_nodes = behavioral
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_param_expression_node_name(node))
+            .collect::<Vec<_>>();
+        if behavioral_nodes != subcircuit_ports[..2] {
+            return Err(format!(
+                "{LABEL} behavioral source must connect across subcircuit ports 0 and 1"
+            ));
+        }
+        let representation = match &behavioral.kind {
+            ElementKind::BehavioralVoltage {
+                expression,
+                tc1,
+                tc2,
+            } if tc1.to_bits() == 0.0f64.to_bits() && tc2.to_bits() == 0.0f64.to_bits() => {
+                Self::qualify_raw_param_expression(
+                    expression,
+                    parameter_name,
+                    *parameter_value,
+                    &subcircuit.ports,
+                )?
+            }
+            ElementKind::BehavioralVoltage { .. } => {
+                return Err(format!(
+                    "{LABEL} behavioral source requires exact +0 TC1 and TC2"
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "{LABEL} subcircuit element must be a behavioral voltage source"
+                ));
+            }
+        };
+
+        if netlist.elements.len() != 4 {
+            return Err(format!(
+                "{LABEL} requires one subcircuit instance, two resistors, and one DC voltage source, found {} top-level elements",
+                netlist.elements.len()
+            ));
+        }
+        let mut instance = None;
+        let mut resistors = Vec::new();
+        let mut voltage_source = None;
+        for element in &netlist.elements {
+            if let Some(alias) = element.nodes.iter().find(|node| {
+                crate::compat::ground::is_spice_ground_name(node)
+                    && !Self::param_expression_name_is_literal_ground(node)
+            }) {
+                return Err(format!(
+                    "element '{}' uses ground alias '{}'; {LABEL} requires literal node 0",
+                    element.name, alias
+                ));
+            }
+            match &element.kind {
+                ElementKind::Subcircuit {
+                    subckt_name,
+                    params,
+                } => {
+                    if instance.is_some() {
+                        return Err(format!("{LABEL} requires exactly one subcircuit instance"));
+                    }
+                    if !subckt_name.eq_ignore_ascii_case(&subcircuit.name)
+                        || !params.is_empty()
+                        || element.nodes.len() != 6
+                    {
+                        return Err(format!(
+                            "subcircuit instance '{}' must bind all six ports without parameter overrides",
+                            element.name
+                        ));
+                    }
+                    instance = Some(element);
+                }
+                ElementKind::Resistor { .. } => resistors.push(element),
+                ElementKind::VoltageSource(_) => {
+                    if voltage_source.replace(element).is_some() {
+                        return Err(format!("{LABEL} requires exactly one voltage source"));
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "top-level element '{}' is outside the subcircuit/resistor/DC-source envelope",
+                        element.name
+                    ));
+                }
+            }
+        }
+        let instance =
+            instance.ok_or_else(|| format!("{LABEL} contains no subcircuit instance"))?;
+        if resistors.len() != 2 {
+            return Err(format!(
+                "{LABEL} requires exactly two resistors, found {}",
+                resistors.len()
+            ));
+        }
+        let voltage_source =
+            voltage_source.ok_or_else(|| format!("{LABEL} contains no voltage source"))?;
+        if !instance
+            .nodes
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .all(|node| Self::param_expression_name_is_literal_ground(node))
+        {
+            return Err(format!(
+                "subcircuit instance '{}' must bind ports 1, 3, and 5 to literal node 0",
+                instance.name
+            ));
+        }
+        let signal_nodes = [
+            Self::canonical_param_expression_node_name(&instance.nodes[0]),
+            Self::canonical_param_expression_node_name(&instance.nodes[2]),
+            Self::canonical_param_expression_node_name(&instance.nodes[4]),
+        ];
+        if signal_nodes
+            .iter()
+            .any(|node| node == "0" || crate::compat::ground::is_spice_ground_name(node))
+            || signal_nodes.iter().cloned().collect::<BTreeSet<_>>().len() != 3
+        {
+            return Err(format!(
+                "subcircuit instance signal bindings must be three distinct non-ground nodes"
+            ));
+        }
+
+        let mut resistor_signal_nodes = BTreeSet::new();
+        for resistor in resistors {
+            let nodes = resistor
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let ElementKind::Resistor {
+                value,
+                value_expr,
+                model,
+                instance_params,
+                deferred_params,
+            } = &resistor.kind
+            else {
+                unreachable!("resistor collection is type-checked above")
+            };
+            if nodes.len() != 2
+                || nodes[1] != "0"
+                || !value.is_finite()
+                || *value <= 0.0
+                || value_expr.is_some()
+                || model.is_some()
+                || !instance_params.is_empty()
+                || !deferred_params.is_empty()
+                || !matches!(nodes[0].as_str(), node if node == signal_nodes[0] || node == signal_nodes[1])
+                || !resistor_signal_nodes.insert(nodes[0].clone())
+            {
+                return Err(format!(
+                    "resistor '{}' must be one unique finite positive numeric connection from instance signal 0 or 2 to literal ground",
+                    resistor.name
+                ));
+            }
+        }
+        if resistor_signal_nodes
+            != [signal_nodes[0].clone(), signal_nodes[1].clone()]
+                .into_iter()
+                .collect()
+        {
+            return Err(format!(
+                "{LABEL} resistors must terminate instance signal nodes 0 and 2"
+            ));
+        }
+
+        let voltage_nodes = voltage_source
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_param_expression_node_name(node))
+            .collect::<Vec<_>>();
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(source_value)) =
+            &voltage_source.kind
+        else {
+            return Err(format!(
+                "voltage source '{}' must be a direct DC source",
+                voltage_source.name
+            ));
+        };
+        if voltage_nodes != [signal_nodes[2].clone(), "0".to_string()]
+            || !source_value.is_finite()
+            || *source_value == 0.0
+        {
+            return Err(format!(
+                "voltage source '{}' must drive instance signal node 4 from literal ground with a finite nonzero DC value",
+                voltage_source.name
+            ));
+        }
+
+        let [probe] = print.probes.as_slice() else {
+            return Err(format!("{LABEL} requires exactly one output probe"));
+        };
+        let probe = Self::parse_voltage_probe(probe)
+            .ok_or_else(|| format!("{LABEL} requires an atomic voltage probe"))?;
+        if probe.accessor != XyceVoltageAccessor::Value
+            || probe.node_neg.is_some()
+            || Self::canonical_param_expression_node_name(&probe.node_pos) != signal_nodes[0]
+        {
+            return Err(format!(
+                "{LABEL} output probe must observe instance signal node 0"
+            ));
+        }
+
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist)
+            .map_err(|err| format!("could not flatten {LABEL} member: {err}"))?;
+        if !flattened.scoped_models.is_empty()
+            || !flattened.scoped_initial_conditions.is_empty()
+            || !flattened.scoped_node_sets.is_empty()
+            || !flattened.xspice_auto_bridge_node_hints.is_empty()
+            || flattened.elements.len() != 4
+        {
+            return Err(format!(
+                "flattened {LABEL} member contains scoped state, bridge hints, or an unexpected element count"
+            ));
+        }
+        let mut flattened_elements = BTreeMap::new();
+        let mut flattened_resistor_nodes = BTreeSet::new();
+        let mut flattened_voltage_count = 0usize;
+        let mut flattened_behavioral_count = 0usize;
+        for element in &flattened.elements {
+            if let Some(alias) = element.nodes.iter().find(|node| {
+                crate::compat::ground::is_spice_ground_name(node)
+                    && !Self::param_expression_name_is_literal_ground(node)
+            }) {
+                return Err(format!(
+                    "flattened element '{}' uses unqualified ground alias '{}'",
+                    element.name, alias
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_param_expression_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if nodes.len() == 2
+                    && nodes[1] == "0"
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+                    && matches!(nodes[0].as_str(), node if node == signal_nodes[0] || node == signal_nodes[1])
+                    && flattened_resistor_nodes.insert(nodes[0].clone()) =>
+                {
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if nodes == [signal_nodes[2].clone(), "0".to_string()]
+                        && value.is_finite()
+                        && *value != 0.0
+                        && flattened_voltage_count == 0 =>
+                {
+                    flattened_voltage_count += 1;
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::BehavioralVoltage {
+                    expression,
+                    tc1,
+                    tc2,
+                } if nodes == [signal_nodes[0].clone(), "0".to_string()]
+                    && tc1.to_bits() == 0.0f64.to_bits()
+                    && tc2.to_bits() == 0.0f64.to_bits()
+                    && flattened_behavioral_count == 0 =>
+                {
+                    Self::qualify_prepared_param_expression(
+                        expression,
+                        &netlist.params,
+                        *parameter_value,
+                        &signal_nodes[1],
+                        "0",
+                        &signal_nodes[2],
+                        "0",
+                    )?;
+                    flattened_behavioral_count += 1;
+                    XyceRelationalElementFingerprint {
+                        kind: "BV".to_string(),
+                        nodes,
+                        numeric_bits: vec![tc1.to_bits(), tc2.to_bits(), parameter_value.to_bits()],
+                        text: vec![
+                            signal_nodes[1].clone(),
+                            "0".to_string(),
+                            signal_nodes[2].clone(),
+                            "0".to_string(),
+                        ],
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "flattened element '{}' is outside the qualified parameter-expression topology",
+                        element.name
+                    ));
+                }
+            };
+            let key = Self::normalize_device_instance_name(&element.name);
+            if flattened_elements
+                .insert(key.clone(), fingerprint)
+                .is_some()
+            {
+                return Err(format!(
+                    "flattened {LABEL} member contains duplicate element name '{key}'"
+                ));
+            }
+        }
+        if flattened_resistor_nodes
+            != [signal_nodes[0].clone(), signal_nodes[1].clone()]
+                .into_iter()
+                .collect()
+            || flattened_voltage_count != 1
+            || flattened_behavioral_count != 1
+        {
+            return Err(format!(
+                "flattened {LABEL} member does not contain the exact two-resistor/one-DC-source/one-behavioral-source topology"
+            ));
+        }
+
+        Ok(XyceParamExpressionFamilySnapshot {
+            title: netlist.title.trim().to_string(),
+            parameter_name: parameter_name.to_ascii_lowercase(),
+            parameter_bits: parameter_value.to_bits(),
+            subcircuit_name: subcircuit.name.trim().to_ascii_lowercase(),
+            subcircuit_ports,
+            flattened_elements,
+            representation,
+        })
+    }
+
+    fn compare_param_expression_family_snapshots(
+        baseline: &XyceParamExpressionFamilySnapshot,
+        target: &XyceParamExpressionFamilySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceParamExpressionRepresentation::ParameterCoefficient
+            || target.representation != XyceParamExpressionRepresentation::LiteralCoefficient
+        {
+            return Err(
+                "family must compare a direct parameter-coefficient baseline with a direct literal-coefficient target"
+                    .to_string(),
+            );
+        }
+        if baseline.title != target.title {
+            return Err("circuit titles differ".to_string());
+        }
+        if baseline.parameter_name != target.parameter_name
+            || baseline.parameter_bits != target.parameter_bits
+        {
+            return Err("global parameter identity or value differs".to_string());
+        }
+        if baseline.subcircuit_name != target.subcircuit_name
+            || baseline.subcircuit_ports != target.subcircuit_ports
+        {
+            return Err("subcircuit identity or ordered ports differ".to_string());
+        }
+        if baseline.flattened_elements != target.flattened_elements {
+            return Err(
+                "flattened element identity, topology, or numeric state differs".to_string(),
+            );
         }
         Ok(())
     }
@@ -9438,6 +10582,278 @@ impl XyceTestRunner {
             return Err("explicit BJT model fields differ".to_string());
         }
         Ok(())
+    }
+
+    fn normalized_xyce_verify_transient_rows(
+        table: &XycePrnTable,
+        role: &str,
+    ) -> Result<Vec<(Value, Vec<Value>)>, String> {
+        if table.columns.len() < 3
+            || !table.columns[0].eq_ignore_ascii_case("Index")
+            || !table.columns[1].eq_ignore_ascii_case("TIME")
+        {
+            return Err(format!(
+                "{role} table must contain Index, TIME, and at least one output column"
+            ));
+        }
+        if table.rows.is_empty() {
+            return Err(format!("{role} table contains no transient rows"));
+        }
+
+        let mut normalized = Vec::with_capacity(table.rows.len());
+        for (row_index, row) in table.rows.iter().enumerate() {
+            if row.len() != table.columns.len() {
+                return Err(format!(
+                    "{role} row {row_index} has {} values, expected {}",
+                    row.len(),
+                    table.columns.len()
+                ));
+            }
+            if row.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "{role} row {row_index} contains a non-finite value"
+                ));
+            }
+
+            let zero_small = |value: Value| {
+                if value.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+                    0.0
+                } else {
+                    value
+                }
+            };
+            let time = zero_small(Self::xyce_default_prn_roundtrip(row[1]).map_err(|err| {
+                format!("could not serialize {role} TIME at row {row_index}: {err}")
+            })?);
+            let mut values = Vec::with_capacity(row.len() - 2);
+            for (column_index, &value) in row[2..].iter().enumerate() {
+                values.push(zero_small(
+                    Self::xyce_default_prn_roundtrip(value).map_err(|err| {
+                        format!(
+                            "could not serialize {role} {} at row {row_index}: {err}",
+                            table.columns[column_index + 2]
+                        )
+                    })?,
+                ));
+            }
+            if normalized
+                .last()
+                .is_some_and(|(previous_time, _)| *previous_time == time)
+            {
+                // Release 7.10's ReadDataFile keeps the first printed row at
+                // a time and discards immediately following duplicates before
+                // interpolation.
+                continue;
+            }
+            if normalized
+                .last()
+                .is_some_and(|(previous_time, _)| *previous_time > time)
+            {
+                return Err(format!(
+                    "{role} transient times are not monotonically increasing at row {row_index}"
+                ));
+            }
+            normalized.push((time, values));
+        }
+        if normalized.is_empty() {
+            return Err(format!(
+                "{role} table has no rows after duplicate-time normalization"
+            ));
+        }
+        Ok(normalized)
+    }
+
+    fn xyce_default_prn_roundtrip(value: Value) -> Result<Value, String> {
+        if !value.is_finite() {
+            return Err(format!("default .prn output cannot serialize {value}"));
+        }
+        let printed = format!(
+            "{value:.precision$e}",
+            precision = XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION
+        );
+        printed
+            .parse::<Value>()
+            .map_err(|err| format!("could not parse default .prn value '{printed}': {err}"))
+    }
+
+    fn xyce_verify_linear_interpolate(
+        low_time: Value,
+        high_time: Value,
+        test_time: Value,
+        low_value: Value,
+        high_value: Value,
+    ) -> Value {
+        (high_value - low_value) / (high_time - low_time) * (test_time - low_time) + low_value
+    }
+
+    fn xyce_verify_normalized_error(expected: Value, actual: Value) -> Value {
+        let difference = expected - actual;
+        if difference.abs() < XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE {
+            0.0
+        } else {
+            difference
+                / (XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE * expected.abs()
+                    + XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE)
+        }
+    }
+
+    fn compare_xyce_verify_transient_tables(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if good.columns.len() != test.columns.len()
+            || !good
+                .columns
+                .iter()
+                .zip(&test.columns)
+                .all(|(left, right)| left.eq_ignore_ascii_case(right))
+        {
+            return Err(format!(
+                "xyce_verify transient columns differ: good={:?}, test={:?}",
+                good.columns, test.columns
+            ));
+        }
+
+        let good_rows = Self::normalized_xyce_verify_transient_rows(good, "good")?;
+        let test_rows = Self::normalized_xyce_verify_transient_rows(test, "test")?;
+        if good_rows.len() < 2 || test_rows.len() < 2 {
+            return Err(format!(
+                "xyce_verify transient RMS requires at least two distinct printed times in both series, found good={} and test={}",
+                good_rows.len(),
+                test_rows.len()
+            ));
+        }
+        let good_first = good_rows[0].0;
+        let good_last = good_rows[good_rows.len() - 1].0;
+        let test_first = test_rows[0].0;
+        let test_last = test_rows[test_rows.len() - 1].0;
+        if good_first > test_first {
+            return Err(format!(
+                "good transient series starts at {good_first}, after test series start {test_first}"
+            ));
+        }
+        if good_last < test_last {
+            return Err(format!(
+                "good transient series ends at {good_last}, before test series end {test_last}"
+            ));
+        }
+
+        let probe_count = good.columns.len() - 2;
+        let mut interpolated = Vec::with_capacity(test_rows.len());
+        let mut good_high = 0usize;
+        for (test_time, _) in &test_rows {
+            while good_high + 1 < good_rows.len() && good_rows[good_high].0 < *test_time {
+                good_high += 1;
+            }
+            if good_rows[good_high].0 < *test_time {
+                return Err(format!(
+                    "could not bracket test time {test_time} in the good transient series"
+                ));
+            }
+            if good_rows[good_high].0 == *test_time {
+                interpolated.push(good_rows[good_high].1.clone());
+                continue;
+            }
+            let Some(good_low) = good_high.checked_sub(1) else {
+                return Err(format!(
+                    "could not find a good transient sample below test time {test_time}"
+                ));
+            };
+            let low_time = good_rows[good_low].0;
+            let high_time = good_rows[good_high].0;
+            let width = high_time - low_time;
+            if !width.is_finite() || width <= 0.0 {
+                return Err(format!(
+                    "good transient interpolation interval [{low_time}, {high_time}] is invalid"
+                ));
+            }
+            let values = (0..probe_count)
+                .map(|probe_index| {
+                    Self::xyce_verify_linear_interpolate(
+                        low_time,
+                        high_time,
+                        *test_time,
+                        good_rows[good_low].1[probe_index],
+                        good_rows[good_high].1[probe_index],
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.iter().any(|value| !value.is_finite()) {
+                return Err(format!(
+                    "good transient interpolation produced a non-finite value at time {test_time}"
+                ));
+            }
+            interpolated.push(values);
+        }
+
+        let mut squared_errors = vec![vec![0.0; probe_count]; test_rows.len()];
+        let mut worst_rows = vec![0usize; probe_count];
+        let mut worst_errors = vec![0.0; probe_count];
+        for (row_index, ((_, test_values), good_values)) in
+            test_rows.iter().zip(&interpolated).enumerate()
+        {
+            for probe_index in 0..probe_count {
+                let expected = good_values[probe_index];
+                let actual = test_values[probe_index];
+                let normalized_error = Self::xyce_verify_normalized_error(expected, actual);
+                if !normalized_error.is_finite() {
+                    return Err(format!(
+                        "normalized xyce_verify error is non-finite at test row {row_index}, probe {}",
+                        good.columns[probe_index + 2]
+                    ));
+                }
+                if normalized_error.abs() > worst_errors[probe_index] {
+                    worst_errors[probe_index] = normalized_error.abs();
+                    worst_rows[probe_index] = row_index;
+                }
+                squared_errors[row_index][probe_index] = normalized_error * normalized_error;
+            }
+        }
+
+        let mut rms_errors = vec![0.0; probe_count];
+        let duration = (test_last - test_first).abs();
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(format!(
+                "test transient integration interval [{test_first}, {test_last}] is invalid"
+            ));
+        }
+        for row_index in 1..test_rows.len() {
+            let width = (test_rows[row_index].0 - test_rows[row_index - 1].0).abs();
+            for probe_index in 0..probe_count {
+                rms_errors[probe_index] += 0.5
+                    * (squared_errors[row_index][probe_index]
+                        + squared_errors[row_index - 1][probe_index])
+                    * width;
+            }
+        }
+        for error in &mut rms_errors {
+            *error = (*error / duration).sqrt();
+        }
+
+        let mut mismatches = Vec::new();
+        for (probe_index, rms_error) in rms_errors.into_iter().enumerate() {
+            if !rms_error.is_finite() {
+                return Err(format!(
+                    "xyce_verify RMS error is non-finite for probe {}",
+                    good.columns[probe_index + 2]
+                ));
+            }
+            if rms_error > 1.0 {
+                let row = worst_rows[probe_index];
+                mismatches.push(XyceValueMismatch {
+                    row,
+                    probe: good.columns[probe_index + 2].clone(),
+                    expected: interpolated[row][probe_index],
+                    actual: test_rows[row].1[probe_index],
+                    relative_error: rms_error,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    break;
+                }
+            }
+        }
+        Ok(mismatches)
     }
 
     fn compare_exact_prn_tables(
@@ -20280,9 +21696,134 @@ impl XyceTestRunner {
     fn baseline_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
         self.bjt_external_node_family_contract(deck)
             .or_else(|| self.sin_expression_family_contract(deck))
+            .or_else(|| self.param_expression_family_contract(deck))
             .or_else(|| self.scoped_model_family_contract(deck))
             .or_else(|| self.subckt_family_contract(deck))
             .or_else(|| self.supernode_family_contract(deck))
+    }
+
+    fn param_expression_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+
+        let file_name = deck.path.file_name()?.to_str()?;
+        let parent = deck.path.parent()?;
+        if self.requires_upstream_wrapper(&deck.relative_path)
+            && fs::metadata(&deck.path)
+                .ok()
+                .is_some_and(|metadata| metadata.len() == 0)
+        {
+            let family = file_name.strip_suffix(".cir")?;
+            if family.is_empty()
+                || !family
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            {
+                return None;
+            }
+            return self.param_expression_family_contract_for(parent, family, None);
+        }
+
+        let file_name_lower = file_name.to_ascii_lowercase();
+        let suffix = if file_name_lower.ends_with("_2a.cir") {
+            "_2a.cir"
+        } else if file_name_lower.ends_with("_2.cir") {
+            "_2.cir"
+        } else {
+            return None;
+        };
+        let family = file_name.get(..file_name.len().checked_sub(suffix.len())?)?;
+        if family.is_empty()
+            || !family
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return None;
+        }
+        self.param_expression_family_contract_for(parent, family, Some(deck.path.clone()))
+    }
+
+    fn param_expression_family_contract_for(
+        &self,
+        parent: &Path,
+        family: &str,
+        target_path: Option<PathBuf>,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let owner_path = parent.join(format!("{family}.cir"));
+        let baseline_path = parent.join(format!("{family}_2.cir"));
+        let literal_path = parent.join(format!("{family}_2a.cir"));
+        let cir_stems = fs::read_dir(parent)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if !path.is_file()
+                    || !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                {
+                    return None;
+                }
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(str::to_ascii_lowercase)
+            })
+            .collect::<BTreeSet<_>>();
+        let family_lower = family.to_ascii_lowercase();
+        let required_stems = [
+            family_lower.clone(),
+            format!("{family_lower}_2"),
+            format!("{family_lower}_2a"),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        if cir_stems != required_stems
+            || !owner_path.is_file()
+            || !baseline_path.is_file()
+            || !literal_path.is_file()
+            || fs::metadata(&owner_path)
+                .ok()
+                .is_none_or(|metadata| metadata.len() != 0)
+            || fs::metadata(&baseline_path)
+                .ok()
+                .is_none_or(|metadata| metadata.len() == 0)
+            || fs::metadata(&literal_path)
+                .ok()
+                .is_none_or(|metadata| metadata.len() == 0)
+        {
+            return None;
+        }
+
+        let owner_relative = self.relative_key(&owner_path);
+        let baseline_relative = self.relative_key(&baseline_path);
+        let literal_relative = self.relative_key(&literal_path);
+        if !self.requires_upstream_wrapper(&owner_relative)
+            || self.requires_upstream_wrapper(&baseline_relative)
+            || self.requires_upstream_wrapper(&literal_relative)
+        {
+            return None;
+        }
+        if let Some(target_path) = target_path.as_ref()
+            && !Self::same_path(target_path, &baseline_path)
+            && !Self::same_path(target_path, &literal_path)
+        {
+            return None;
+        }
+
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::ParamExpression,
+            comparison: XyceBaselineFamilyComparison::TolerancedStrict,
+            family: family.to_string(),
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path, literal_path],
+            target_path,
+        })
     }
 
     fn sin_expression_family_contract(
@@ -23744,6 +25285,329 @@ VMON 2 1 0\n\
     }
 
     #[test]
+    fn xyce_verify_transient_comparison_interpolates_and_integrates_like_release_7_10() {
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+        assert_eq!(
+            XyceTestRunner::xyce_default_prn_roundtrip(1.000000004)
+                .expect("default PRN round trip succeeds")
+                .to_bits(),
+            1.0f64.to_bits(),
+            "FORMAT=STD rounds through eight scientific fraction digits before verification"
+        );
+        assert_eq!(
+            XyceTestRunner::xyce_verify_linear_interpolate(
+                0.0,
+                f64::from_bits(0x3f46_187d_a9c9_ecff),
+                f64::from_bits(0x3f32_a543_d216_30c9),
+                f64::from_bits(0xbfb9_5d15_b39b_3f60),
+                f64::from_bits(0x409a_bda7_d153_6d40),
+            )
+            .to_bits(),
+            0x4086_904a_6c9e_e052,
+            "interpolation must preserve Perl's divide-then-multiply association"
+        );
+        let below_absdiff =
+            f64::from_bits(XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE.to_bits() - 1);
+        assert_eq!(
+            XyceTestRunner::xyce_verify_normalized_error(0.0, below_absdiff),
+            0.0,
+            "ABSDIFFTOL uses a strict below-boundary comparison"
+        );
+        assert_eq!(
+            XyceTestRunner::xyce_verify_normalized_error(
+                0.0,
+                XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+            ),
+            -1.0,
+            "a difference exactly at ABSDIFFTOL is normalized rather than discarded"
+        );
+        let good = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(out)".to_string(),
+            ],
+            rows: vec![
+                vec![0.0, 0.0, 0.0],
+                vec![1.0, 1.0, 10.0],
+                vec![2.0, 2.0, 20.0],
+            ],
+        };
+        let test = XycePrnTable {
+            columns: good.columns.clone(),
+            rows: vec![
+                vec![0.0, 0.0, 0.0],
+                vec![1.0, 0.5, 5.0],
+                vec![2.0, 1.0, 10.0],
+                vec![3.0, 1.5, 15.0],
+                vec![4.0, 2.0, 20.0],
+            ],
+        };
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&good, &test)
+                .expect("independent grids interpolate")
+                .is_empty(),
+            "a linear good trace must match exact samples on a denser test grid"
+        );
+
+        let duplicate_test = XycePrnTable {
+            columns: good.columns.clone(),
+            rows: vec![
+                vec![0.0, 0.0, 0.0],
+                vec![1.0, 0.0, 999.0],
+                vec![2.0, 1.0, 10.0],
+                vec![3.0, 2.0, 20.0],
+            ],
+        };
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&good, &duplicate_test)
+                .expect("duplicate test time is normalized")
+                .is_empty(),
+            "Release 7.10 keeps the first row and discards an immediately repeated time"
+        );
+
+        let rounded_duplicate_good = XycePrnTable {
+            columns: good.columns.clone(),
+            rows: vec![
+                vec![40.0, 0.0, 0.0],
+                vec![41.0, 1.000000003, 10.0],
+                vec![42.0, 1.000000004, 999.0],
+                vec![43.0, 2.0, 20.0],
+            ],
+        };
+        let rounded_duplicate_test = XycePrnTable {
+            columns: good.columns.clone(),
+            rows: vec![
+                vec![90.0, 0.0, 0.0],
+                vec![91.0, 1.0, 10.0],
+                vec![92.0, 2.0, 20.0],
+            ],
+        };
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(
+                    &rounded_duplicate_good,
+                    &rounded_duplicate_test,
+                )
+                .expect("printed duplicate good time is normalized")
+                .is_empty(),
+            "PRN rounding occurs before duplicate removal, retains the first row, and discards Index"
+        );
+
+        let mut near_zero = test.clone();
+        near_zero.rows[0][2] = 1.000000004e-12;
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&good, &near_zero)
+                .expect("ZEROTOL normalization compares")
+                .is_empty(),
+            "PRN rounding occurs before values at the default ZEROTOL boundary become exact zero"
+        );
+
+        let collapsed_test = XycePrnTable {
+            columns: good.columns.clone(),
+            rows: vec![vec![0.0, 1.000000003, 10.0], vec![1.0, 1.000000004, 10.0]],
+        };
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&good, &collapsed_test)
+                .is_err(),
+            "a printed grid collapsed to one distinct time has no qualified multi-row RMS oracle"
+        );
+
+        let nonuniform_good = XycePrnTable {
+            columns: good.columns.clone(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0e-9],
+                vec![1.0, 0.25, 1.0e-9],
+                vec![2.0, 1.0, 1.0e-9],
+            ],
+        };
+        let nonuniform_test = XycePrnTable {
+            columns: good.columns.clone(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0e-9],
+                vec![1.0, 0.25, 9.78e-10],
+                vec![2.0, 1.0, 1.0e-9],
+            ],
+        };
+        let nonuniform_mismatches = runner
+            .compare_xyce_verify_transient_tables(&nonuniform_good, &nonuniform_test)
+            .expect("nonuniform RMS comparison succeeds structurally");
+        assert_eq!(nonuniform_mismatches.len(), 1);
+        assert!(
+            (nonuniform_mismatches[0].relative_error - 2.0f64.sqrt()).abs() < 1.0e-12,
+            "nonuniform trapezoids integrate to sqrt(2), got {}",
+            nonuniform_mismatches[0].relative_error
+        );
+
+        let mut failed = test.clone();
+        failed.rows[2][2] = 20.0;
+        let mismatches = runner
+            .compare_xyce_verify_transient_tables(&good, &failed)
+            .expect("large waveform error remains structurally comparable");
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].probe, "V(out)");
+        assert!(mismatches[0].relative_error > 1.0);
+
+        let mut uncovered = test.clone();
+        uncovered.rows[0][1] = -0.5;
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&good, &uncovered)
+                .is_err(),
+            "the good series must cover the complete test time domain"
+        );
+
+        let mut nonfinite = test.clone();
+        nonfinite.rows[1][2] = Value::NAN;
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&good, &nonfinite)
+                .is_err(),
+            "non-finite transient values fail closed"
+        );
+
+        let mut changed_columns = test;
+        changed_columns.columns[2] = "V(other)".to_string();
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables(&good, &changed_columns)
+                .is_err(),
+            "ordered output columns are part of the verifier contract"
+        );
+    }
+
+    #[test]
+    fn param_expression_plan_admits_only_the_canonical_default_verifier_contract() {
+        let source = "validated parameter-expression pair\n\
+.param gain=1.5\n\
+.subckt vector a b m n o p\n\
+Bvector a b V={gain*sqrt((V(m)-V(n))**2+(V(o)-V(p))**2)}\n\
+.ends\n\
+Xpair out 0 x 0 y 0 vector\n\
+Rin x 0 10\n\
+Vdrive y 0 4.7\n\
+Rload out 0 1\n\
+.print tran V(out)\n\
+.tran 1u 10u\n\
+.end\n";
+        let plan = XyceStaticTranPlan {
+            deck_path: PathBuf::from("parameter.cir"),
+            reference_path: PathBuf::from("parameter.prn"),
+            source: source.to_string(),
+            print: XycePrintRequest {
+                probes: vec!["V(out)".to_string()],
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 1.0e-6,
+                stop: 1.0e-5,
+                start: None,
+                max_step: None,
+                uic: false,
+            },
+            steps: Vec::new(),
+            contract: XyceStaticTranContract::PlainStatic,
+            wrapper_tolerance: None,
+        };
+        XyceTestRunner::validate_param_expression_transient_plan(&plan)
+            .expect("canonical parameter-expression transient plan qualifies");
+        let mut comment_title = plan.clone();
+        comment_title.source = source.replacen(
+            "validated parameter-expression pair",
+            "* validated parameter-expression pair",
+            1,
+        );
+        XyceTestRunner::validate_param_expression_transient_plan(&comment_title)
+            .expect("SPICE comment-style title remains an ordinary title");
+
+        let mut with_option = plan.clone();
+        with_option.source = source.replace(".tran", ".options reltol=1e-6\n.tran");
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&with_option).is_err(),
+            "simulator options are outside the bounded representation contract"
+        );
+
+        let mut with_comp = plan.clone();
+        with_comp.source = source.replace(
+            ".param gain=1.5",
+            "*COMP v(out) RELTOL=0.5\n.param gain=1.5",
+        );
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&with_comp).is_err(),
+            "custom comparison tolerances require a separately represented oracle"
+        );
+
+        let mut extra_param = plan.clone();
+        extra_param.source = source.replace("gain=1.5", "gain=1.5 other=2");
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&extra_param).is_err(),
+            "the qualified source form has exactly one direct numeric assignment"
+        );
+
+        let mut parameter_resistor = plan.clone();
+        parameter_resistor.source = source.replace("Rin x 0 10", "Rin x 0 gain");
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&parameter_resistor).is_err(),
+            "resolved resistor parameters cannot add a second representation difference"
+        );
+
+        let mut parameter_source = plan.clone();
+        parameter_source.source = source.replace("Vdrive y 0 4.7", "Vdrive y 0 gain");
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&parameter_source).is_err(),
+            "resolved source parameters cannot add a second representation difference"
+        );
+
+        let mut parameter_tran = plan.clone();
+        parameter_tran.source = source.replace(".tran 1u 10u", ".tran gain 10u");
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&parameter_tran).is_err(),
+            "resolved transient tuple parameters cannot add a second representation difference"
+        );
+
+        let mut formatted_print = plan.clone();
+        formatted_print.source =
+            source.replace(".print tran V(out)", ".print tran format=std V(out)");
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&formatted_print).is_err(),
+            "format assignments change the primary output contract"
+        );
+
+        let mut multiple_probes = plan.clone();
+        multiple_probes.print.probes.push("V(x)".to_string());
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&multiple_probes).is_err(),
+            "the wrapper oracle has exactly one output probe"
+        );
+
+        let mut with_start = plan.clone();
+        with_start.tran.start = Some(1.0e-6);
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&with_start).is_err(),
+            "START changes the admitted transient tuple"
+        );
+
+        let mut constant_step = plan.clone();
+        constant_step.timeint_conststep = true;
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&constant_step).is_err(),
+            "constant-step output is a different contract"
+        );
+
+        let mut csv = plan;
+        csv.contract = XyceStaticTranContract::PlainCsv;
+        assert!(
+            XyceTestRunner::validate_param_expression_transient_plan(&csv).is_err(),
+            "only ordinary primary PRN output is admitted"
+        );
+    }
+
+    #[test]
     fn sin_expression_plan_admits_only_canonical_transient_output() {
         let source = "canonical SIN expression family member\n\
 VDRIVE out 0 SIN(1 2 1k)\n\
@@ -23815,6 +25679,207 @@ RLOAD out 0 5\n\
         assert!(
             XyceTestRunner::validate_sin_expression_transient_plan(&csv).is_err(),
             "only ordinary primary PRN output is admitted"
+        );
+    }
+
+    #[test]
+    fn param_expression_snapshot_proves_only_the_direct_parameter_literal_pair() {
+        let source_for = |coefficient: &str| {
+            format!(
+                "validated parameter-expression pair\n\
+.param gain=1.5\n\
+.subckt vector a b m n o p\n\
+Bvector a b V={{{coefficient}*sqrt((V(m)-V(n))**2+(V(o)-V(p))**2)}}\n\
+.ends\n\
+Xpair out 0 x 0 y 0 vector\n\
+Rin x 0 10\n\
+Vdrive y 0 4.7\n\
+Rload out 0 1\n\
+.print tran V(out)\n\
+.tran 1u 10u\n\
+.end\n"
+            )
+        };
+        let baseline = Netlist::parse(&source_for("gain"))
+            .expect("direct-parameter coefficient fixture parses");
+        let target =
+            Netlist::parse(&source_for("1.5")).expect("direct-literal coefficient fixture parses");
+        let print = XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        };
+        let baseline_snapshot = XyceTestRunner::param_expression_family_snapshot(&baseline, &print)
+            .expect("direct-parameter snapshot qualifies");
+        let target_snapshot = XyceTestRunner::param_expression_family_snapshot(&target, &print)
+            .expect("direct-literal snapshot qualifies");
+        XyceTestRunner::compare_param_expression_family_snapshots(
+            &baseline_snapshot,
+            &target_snapshot,
+        )
+        .expect("direct parameter and exactly equal literal coefficients are equivalent");
+        assert!(
+            XyceTestRunner::compare_param_expression_family_snapshots(
+                &baseline_snapshot,
+                &baseline_snapshot,
+            )
+            .is_err(),
+            "two parameter references do not exercise the representation contract"
+        );
+
+        let parameter_resistor =
+            Netlist::parse(&source_for("gain").replace("Rload out 0 1", "Rload out 0 gain"))
+                .expect("parameter-resolved resistor fixture parses");
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&parameter_resistor, &print).is_err(),
+            "a resolved resistor parameter cannot hide an additional representation difference"
+        );
+
+        let parameter_source =
+            Netlist::parse(&source_for("gain").replace("Vdrive y 0 4.7", "Vdrive y 0 gain"))
+                .expect("parameter-resolved source fixture parses");
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&parameter_source, &print).is_err(),
+            "a resolved source parameter cannot hide an additional representation difference"
+        );
+
+        let mut changed_parameter = target.clone();
+        let next_parameter = f64::from_bits(1.5f64.to_bits() + 1);
+        changed_parameter.params.set("gain", next_parameter);
+        let ElementKind::BehavioralVoltage { expression, .. } =
+            &mut changed_parameter.subcircuits[0].elements[0].kind
+        else {
+            panic!("subcircuit source remains behavioral")
+        };
+        *expression = format!("{next_parameter:.17}*sqrt((V(m)-V(n))**2+(V(o)-V(p))**2)");
+        let changed_parameter_snapshot =
+            XyceTestRunner::param_expression_family_snapshot(&changed_parameter, &print)
+                .expect("one-ULP parameter and matching literal remain individually qualified");
+        assert!(
+            XyceTestRunner::compare_param_expression_family_snapshots(
+                &baseline_snapshot,
+                &changed_parameter_snapshot,
+            )
+            .is_err(),
+            "the global parameter value participates bit-for-bit in semantic parity"
+        );
+
+        let mut changed_resistor = target.clone();
+        let resistor = changed_resistor
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("Rin"))
+            .expect("input resistor exists");
+        let ElementKind::Resistor { value, .. } = &mut resistor.kind else {
+            panic!("input resistor remains a resistor")
+        };
+        *value = f64::from_bits(value.to_bits() + 1);
+        let changed_resistor_snapshot =
+            XyceTestRunner::param_expression_family_snapshot(&changed_resistor, &print)
+                .expect("one-ULP resistor remains individually qualified");
+        assert!(
+            XyceTestRunner::compare_param_expression_family_snapshots(
+                &baseline_snapshot,
+                &changed_resistor_snapshot,
+            )
+            .is_err(),
+            "passive values participate bit-for-bit in semantic parity"
+        );
+
+        for rejected_expression in [
+            "1.5*abs((V(m)-V(n))**2+(V(o)-V(p))**2)",
+            "1.5*sqrt((V(o)-V(p))**2+(V(m)-V(n))**2)",
+            "1.5*sqrt((V(m)-V(n))**3+(V(o)-V(p))**2)",
+            "(1.5+0)*sqrt((V(m)-V(n))**2+(V(o)-V(p))**2)",
+        ] {
+            let mut rejected = target.clone();
+            let ElementKind::BehavioralVoltage { expression, .. } =
+                &mut rejected.subcircuits[0].elements[0].kind
+            else {
+                panic!("subcircuit source remains behavioral")
+            };
+            *expression = rejected_expression.to_string();
+            assert!(
+                XyceTestRunner::param_expression_family_snapshot(&rejected, &print).is_err(),
+                "changed raw AST shape must not qualify: {rejected_expression}"
+            );
+        }
+
+        let mut nonzero_tc = target.clone();
+        let ElementKind::BehavioralVoltage { tc1, .. } =
+            &mut nonzero_tc.subcircuits[0].elements[0].kind
+        else {
+            panic!("subcircuit source remains behavioral")
+        };
+        *tc1 = 1.0e-3;
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&nonzero_tc, &print).is_err(),
+            "temperature coefficients change source semantics"
+        );
+
+        let mut extra_parameter = target.clone();
+        extra_parameter.params.set("other", 2.0);
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&extra_parameter, &print).is_err(),
+            "additional parameter state is outside the bounded pair"
+        );
+
+        let mut ground_alias = target.clone();
+        ground_alias.elements[0].nodes[1] = "GND".to_string();
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&ground_alias, &print).is_err(),
+            "ground aliases are not literal node zero"
+        );
+
+        let mut instance_parameter = target.clone();
+        let ElementKind::Subcircuit { params, .. } = &mut instance_parameter.elements[0].kind
+        else {
+            panic!("first top-level element remains the instance")
+        };
+        params.push((
+            "gain".to_string(),
+            crate::netlist::ParametricValue::Resolved(1.5),
+        ));
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&instance_parameter, &print).is_err(),
+            "instance overrides are outside the global-parameter representation pair"
+        );
+
+        let mut subcircuit_default = target.clone();
+        subcircuit_default.subcircuits[0]
+            .params
+            .push(("gain".to_string(), 1.5));
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&subcircuit_default, &print).is_err(),
+            "subcircuit defaults add a separate parameter scope"
+        );
+
+        let mut non_dc_source = target.clone();
+        let source = non_dc_source
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("Vdrive"))
+            .expect("drive source exists");
+        source.kind = ElementKind::VoltageSource(crate::netlist::SourceSpec::Ac {
+            magnitude: 4.7,
+            phase: 0.0,
+        });
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&non_dc_source, &print).is_err(),
+            "only a direct DC independent source is admitted"
+        );
+
+        let wrong_print = XycePrintRequest {
+            probes: vec!["V(x)".to_string()],
+        };
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&target, &wrong_print).is_err(),
+            "the printed output node is part of the qualified topology"
+        );
+
+        let mut extra_element = target;
+        extra_element.elements.push(baseline.elements[1].clone());
+        assert!(
+            XyceTestRunner::param_expression_family_snapshot(&extra_element, &print).is_err(),
+            "additional circuit elements are outside the bounded topology"
         );
     }
 
@@ -24151,6 +26216,113 @@ RLOAD out 0 5\n\
         );
 
         fs::remove_dir_all(&root).expect("remove generic SIN-expression fixture");
+    }
+
+    #[test]
+    fn param_expression_family_detection_is_manifest_and_sibling_driven() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-param-expression-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_PARAM");
+        fs::create_dir_all(&family_dir).expect("create generic parameter-expression fixture");
+        let owner_path = family_dir.join("representation.cir");
+        let baseline_path = family_dir.join("representation_2.cir");
+        let literal_path = family_dir.join("representation_2a.cir");
+        fs::write(&owner_path, "").expect("write empty wrapper fixture");
+        fs::write(&baseline_path, "parameter member\n.end\n").expect("write parameter fixture");
+        fs::write(&literal_path, "literal member\n.end\n").expect("write literal fixture");
+        let owner_relative = "Netlists/Certification_Tests/GENERIC_PARAM/representation.cir";
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper manifest fixture");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (path, relative, target_expected) in [
+            (&owner_path, owner_relative, false),
+            (
+                &baseline_path,
+                "Netlists/Certification_Tests/GENERIC_PARAM/representation_2.cir",
+                true,
+            ),
+            (
+                &literal_path,
+                "Netlists/Certification_Tests/GENERIC_PARAM/representation_2a.cir",
+                true,
+            ),
+        ] {
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: relative.to_string(),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .param_expression_family_contract(&deck)
+                .expect("manifest owner and exact _2/_2a siblings form a family");
+            assert_eq!(contract.kind, XyceBaselineFamilyKind::ParamExpression);
+            assert_eq!(
+                contract.comparison,
+                XyceBaselineFamilyComparison::TolerancedStrict
+            );
+            assert_eq!(contract.target_path.is_some(), target_expected);
+            assert!(XyceTestRunner::same_path(
+                &contract.baseline_path,
+                &baseline_path
+            ));
+            assert_eq!(contract.member_paths.len(), 2);
+            assert!(XyceTestRunner::same_path(
+                &contract.member_paths[0],
+                &baseline_path
+            ));
+            assert!(XyceTestRunner::same_path(
+                &contract.member_paths[1],
+                &literal_path
+            ));
+        }
+
+        let owner_deck = XyceDeck {
+            path: owner_path.clone(),
+            relative_path: owner_relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let third_path = family_dir.join("representation_3.cir");
+        fs::write(&third_path, "unqualified third variant\n.end\n")
+            .expect("write third-variant fixture");
+        assert!(
+            runner
+                .param_expression_family_contract(&owner_deck)
+                .is_none(),
+            "an additional circuit sibling is a different upstream family shape"
+        );
+        fs::remove_file(&third_path).expect("remove third-variant fixture");
+
+        fs::write(&owner_path, "nonempty owner\n.end\n").expect("make owner nonempty");
+        assert!(
+            runner
+                .param_expression_family_contract(&owner_deck)
+                .is_none(),
+            "the generic wrapper shape requires an empty manifest owner"
+        );
+        fs::write(&owner_path, "").expect("restore empty owner");
+
+        fs::write(&literal_path, "").expect("make literal member empty");
+        assert!(
+            runner
+                .param_expression_family_contract(&owner_deck)
+                .is_none(),
+            "both executable siblings must be nonempty"
+        );
+
+        fs::remove_dir_all(&root).expect("remove generic parameter-expression fixture");
     }
 
     #[test]
