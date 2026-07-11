@@ -3301,7 +3301,23 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
+    // The inventory metric is per vendored .cir record. The zero-byte anchor
+    // represents the upstream logical wrapper, while each member record must
+    // independently exercise its baseline-relative route without a vacuous
+    // success or a redundant checked-in gold dependency.
     for (relative, expected_contract) in [
+        ("Netlists/SUBCKT/subckt_a.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a0.cir", "subckt_family_baseline"),
+        ("Netlists/SUBCKT/subckt_a1.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a1_dup.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a2.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a2_dup.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a3.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a3_hs.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a4.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a4_hs.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a5.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_a5_hs.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_b.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_b0.cir", "subckt_family_baseline"),
         ("Netlists/SUBCKT/subckt_b1.cir", "subckt_family_wrapper"),
@@ -3309,6 +3325,11 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
         ("Netlists/SUBCKT/subckt_b2_hs.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_b3.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_b3_hs.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_e.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_e0.cir", "subckt_family_baseline"),
+        ("Netlists/SUBCKT/subckt_e1.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_e2.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_e3.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_f.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_f0.cir", "subckt_family_baseline"),
         ("Netlists/SUBCKT/subckt_f1.cir", "subckt_family_wrapper"),

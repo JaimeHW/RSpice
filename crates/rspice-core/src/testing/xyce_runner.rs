@@ -211,6 +211,29 @@ struct XyceStaticTranPlan {
     wrapper_tolerance: Option<XyceComparisonTolerance>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStaticTranPlanPurpose {
+    /// Compare a simulation directly with a checked-in Xyce waveform. This
+    /// path admits only device families whose absolute transient behavior is
+    /// covered by the native oracle contract.
+    AbsoluteOracle,
+    /// Compare two independently simulated representations of the same
+    /// circuit. The freshly simulated baseline is the oracle, so a redundant
+    /// per-member gold file and absolute device-model eligibility are neither
+    /// required nor consulted.
+    RelationalFamily,
+}
+
+impl XyceStaticTranPlanPurpose {
+    fn requires_reference_file(self) -> bool {
+        matches!(self, Self::AbsoluteOracle)
+    }
+
+    fn validates_absolute_device_contract(self) -> bool {
+        matches!(self, Self::AbsoluteOracle)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct XyceStaticAcPlan {
     deck_path: PathBuf,
@@ -1591,6 +1614,14 @@ impl XyceTestRunner {
     }
 
     fn static_tran_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticTranPlan, String> {
+        self.static_tran_plan_for_deck_with_purpose(deck, XyceStaticTranPlanPurpose::AbsoluteOracle)
+    }
+
+    fn static_tran_plan_for_deck_with_purpose(
+        &self,
+        deck: &XyceDeck,
+        purpose: XyceStaticTranPlanPurpose,
+    ) -> Result<XyceStaticTranPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
         let source =
             fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
@@ -1674,13 +1705,7 @@ impl XyceTestRunner {
         } else {
             primary_reference_path
         };
-        if !reference_path.is_file() {
-            return Err(format!(
-                "no checked-in static .{} oracle at {}",
-                contract.reference_extension(),
-                self.display_path(&reference_path)
-            ));
-        }
+        Self::validate_static_tran_reference_requirement(purpose, contract, &reference_path)?;
         if !steps.is_empty() {
             Self::validate_static_step_tran_contract(&netlist)?;
         }
@@ -1708,7 +1733,12 @@ impl XyceTestRunner {
                 _ => Self::validate_native_static_prn_tran_wrapper_contract(&source)?,
             }
         }
-        Self::validate_static_tran_contract(&netlist, &tran, &print)?;
+        Self::validate_static_tran_analysis_contract(&netlist, &tran, &print)?;
+        if purpose.validates_absolute_device_contract() {
+            Self::validate_native_transient_contract(&netlist)?;
+        } else {
+            Self::validate_native_relational_transient_contract(&netlist)?;
+        }
 
         let timeint_conststep = Self::source_enables_constant_time_step_output(&source);
 
@@ -1726,14 +1756,28 @@ impl XyceTestRunner {
         })
     }
 
-    fn static_tran_plan_for_path(&self, deck_path: &Path) -> Result<XyceStaticTranPlan, String> {
+    fn static_tran_family_plan_for_path(
+        &self,
+        deck_path: &Path,
+    ) -> Result<XyceStaticTranPlan, String> {
+        self.static_tran_plan_for_path_with_purpose(
+            deck_path,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+    }
+
+    fn static_tran_plan_for_path_with_purpose(
+        &self,
+        deck_path: &Path,
+        purpose: XyceStaticTranPlanPurpose,
+    ) -> Result<XyceStaticTranPlan, String> {
         let relative_path = self.relative_key(deck_path);
         let deck = XyceDeck {
             path: deck_path.to_path_buf(),
             section: Self::section_for_relative_path(&relative_path),
             relative_path,
         };
-        self.static_tran_plan_for_deck(&deck)
+        self.static_tran_plan_for_deck_with_purpose(&deck, purpose)
     }
 
     fn has_static_tran_reference_oracle(&self, deck_path: &Path) -> bool {
@@ -1747,6 +1791,21 @@ impl XyceTestRunner {
             self.static_output_reference_path(deck_path, extension)
                 .is_some_and(|path| path.is_file())
         })
+    }
+
+    fn validate_static_tran_reference_requirement(
+        purpose: XyceStaticTranPlanPurpose,
+        contract: XyceStaticTranContract,
+        reference_path: &Path,
+    ) -> Result<(), String> {
+        if purpose.requires_reference_file() && !reference_path.is_file() {
+            return Err(format!(
+                "no checked-in static .{} oracle at {}",
+                contract.reference_extension(),
+                reference_path.display()
+            ));
+        }
+        Ok(())
     }
 
     fn static_ac_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticAcPlan, String> {
@@ -6732,6 +6791,26 @@ impl XyceTestRunner {
         }
     }
 
+    fn baseline_family_targets(contract: &XyceBaselineFamilyContract) -> (Vec<PathBuf>, bool) {
+        let baseline_record = contract
+            .target_path
+            .as_ref()
+            .is_some_and(|target| Self::same_path(target, &contract.baseline_path));
+        let targets = if let Some(target_path) = contract.target_path.as_ref()
+            && !baseline_record
+        {
+            vec![target_path.clone()]
+        } else {
+            contract
+                .member_paths
+                .iter()
+                .filter(|path| !Self::same_path(path, &contract.baseline_path))
+                .cloned()
+                .collect()
+        };
+        (targets, baseline_record)
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -6756,7 +6835,8 @@ impl XyceTestRunner {
             }
         };
         if analysis == XyceBaselineFamilyAnalysis::Tran {
-            let baseline_plan = match self.static_tran_plan_for_path(&contract.baseline_path) {
+            let baseline_plan = match self.static_tran_family_plan_for_path(&contract.baseline_path)
+            {
                 Ok(plan) => plan,
                 Err(reason) => {
                     return self.expected_unsupported_result(
@@ -6907,19 +6987,18 @@ impl XyceTestRunner {
             }
         };
 
-        let targets = if let Some(target_path) = contract.target_path {
-            if Self::same_path(&target_path, &contract.baseline_path) {
-                return self.passed_result(deck, start, baseline_contract);
-            }
-            vec![target_path]
-        } else {
-            contract
-                .member_paths
-                .iter()
-                .filter(|path| !Self::same_path(path, &contract.baseline_path))
-                .cloned()
-                .collect::<Vec<_>>()
-        };
+        let (targets, baseline_record) = Self::baseline_family_targets(&contract);
+        if targets.is_empty() {
+            return self.expected_unsupported_result(
+                deck,
+                start,
+                wrapper_contract,
+                &format!(
+                    "{kind_name} family '{}' has no non-baseline member to compare",
+                    contract.family
+                ),
+            );
+        }
 
         let mut all_mismatches = Vec::new();
         for target_path in targets {
@@ -7019,7 +7098,12 @@ impl XyceTestRunner {
         }
 
         if all_mismatches.is_empty() {
-            self.passed_result(deck, start, wrapper_contract)
+            let result_contract = if baseline_record {
+                baseline_contract
+            } else {
+                wrapper_contract
+            };
+            self.passed_result(deck, start, result_contract)
         } else {
             self.failure_result(
                 deck,
@@ -7145,22 +7229,21 @@ impl XyceTestRunner {
             }
         };
 
-        let targets = if let Some(target_path) = contract.target_path {
-            if Self::same_path(&target_path, &contract.baseline_path) {
-                return self.passed_result(deck, start, baseline_contract);
-            }
-            vec![target_path]
-        } else {
-            contract
-                .member_paths
-                .iter()
-                .filter(|path| !Self::same_path(path, &contract.baseline_path))
-                .cloned()
-                .collect::<Vec<_>>()
-        };
+        let (targets, baseline_record) = Self::baseline_family_targets(&contract);
+        if targets.is_empty() {
+            return self.expected_unsupported_result(
+                deck,
+                start,
+                wrapper_contract,
+                &format!(
+                    "{kind_name} family '{}' has no non-baseline member to compare",
+                    contract.family
+                ),
+            );
+        }
 
         for target_path in targets {
-            let target_plan = match self.static_tran_plan_for_path(&target_path) {
+            let target_plan = match self.static_tran_family_plan_for_path(&target_path) {
                 Ok(plan) => plan,
                 Err(reason) => {
                     return self.expected_unsupported_result(
@@ -7344,7 +7427,12 @@ impl XyceTestRunner {
             }
         }
 
-        self.passed_result(deck, start, wrapper_contract)
+        let result_contract = if baseline_record {
+            baseline_contract
+        } else {
+            wrapper_contract
+        };
+        self.passed_result(deck, start, result_contract)
     }
 
     fn run_transient_family_plan(
@@ -10513,7 +10601,7 @@ impl XyceTestRunner {
         out
     }
 
-    fn validate_static_tran_contract(
+    fn validate_static_tran_analysis_contract(
         netlist: &Netlist,
         tran: &XyceTranAnalysis,
         print: &XycePrintRequest,
@@ -10552,7 +10640,6 @@ impl XyceTestRunner {
         for probe in &print.probes {
             Self::validate_tran_probe(probe, netlist)?;
         }
-        Self::validate_native_transient_contract(netlist)?;
 
         Ok(())
     }
@@ -10986,6 +11073,23 @@ impl XyceTestRunner {
     }
 
     fn validate_native_transient_contract(netlist: &Netlist) -> Result<(), String> {
+        Self::validate_native_transient_contract_for_purpose(
+            netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+        )
+    }
+
+    fn validate_native_relational_transient_contract(netlist: &Netlist) -> Result<(), String> {
+        Self::validate_native_transient_contract_for_purpose(
+            netlist,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        )
+    }
+
+    fn validate_native_transient_contract_for_purpose(
+        netlist: &Netlist,
+        purpose: XyceStaticTranPlanPurpose,
+    ) -> Result<(), String> {
         if netlist
             .elements
             .iter()
@@ -11002,7 +11106,7 @@ impl XyceTestRunner {
             flat_netlist.elements = flattened.elements;
             flat_netlist.models.extend(flattened.scoped_models);
             flat_netlist.subcircuits.clear();
-            return Self::validate_native_transient_contract(&flat_netlist);
+            return Self::validate_native_transient_contract_for_purpose(&flat_netlist, purpose);
         }
 
         let elements = &netlist.elements;
@@ -11140,13 +11244,31 @@ impl XyceTestRunner {
                 }
                 ElementKind::Mosfet { .. }
                     if Self::netlist_device_is_native_b3soi_mosfet(netlist, &element.name) => {}
+                ElementKind::Mosfet { .. }
+                    if purpose == XyceStaticTranPlanPurpose::RelationalFamily
+                        && Self::netlist_device_is_native_relational_mos3(
+                            netlist,
+                            &element.name,
+                        ) => {}
                 ElementKind::Jfet { .. }
                     if Self::netlist_device_is_native_classic_jfet(netlist, &element.name) => {}
+                ElementKind::Diode { .. }
+                    if purpose == XyceStaticTranPlanPurpose::RelationalFamily
+                        && Self::netlist_device_is_native_relational_legacy_diode(
+                            netlist,
+                            &element.name,
+                        ) => {}
                 _ => {
-                    return Err(format!(
-                        "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
-                        element.name
-                    ));
+                    return Err(match purpose {
+                        XyceStaticTranPlanPurpose::AbsoluteOracle => format!(
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            element.name
+                        ),
+                        XyceStaticTranPlanPurpose::RelationalFamily => format!(
+                            "native relational .PRINT TRAN comparison currently supports the absolute transient device envelope plus validated native MOS3 and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
+                            element.name
+                        ),
+                    });
                 }
             }
         }
@@ -14389,6 +14511,185 @@ impl XyceTestRunner {
                 instance_name,
             )
         })
+    }
+
+    fn netlist_device_is_native_relational_legacy_diode(
+        netlist: &Netlist,
+        instance_name: &str,
+    ) -> bool {
+        netlist.elements.iter().any(|element| {
+            if !Self::device_instance_names_match(&element.name, instance_name) {
+                return false;
+            }
+            let ElementKind::Diode {
+                model,
+                instance_params,
+                deferred_params,
+            } = &element.kind
+            else {
+                return false;
+            };
+            deferred_params.is_empty()
+                && instance_params
+                    .iter()
+                    .all(|(name, value)| Self::native_relational_diode_instance_param(name, *value))
+                && Self::find_model(&netlist.models, model)
+                    .is_some_and(Self::model_is_native_relational_legacy_diode)
+        })
+    }
+
+    fn native_relational_diode_instance_param(name: &str, value: Value) -> bool {
+        value.is_finite()
+            && match name.to_ascii_uppercase().as_str() {
+                "AREA" | "M" => value > 0.0,
+                "TEMP" => value > -273.15,
+                _ => false,
+            }
+    }
+
+    fn model_is_native_relational_legacy_diode(model: &crate::netlist::ModelDef) -> bool {
+        Self::model_is_native_legacy_diode(model)
+            && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model
+                .params
+                .iter()
+                .all(|(name, value)| Self::native_relational_diode_model_param(name, *value))
+    }
+
+    fn native_relational_diode_model_param(name: &str, value: Value) -> bool {
+        if !value.is_finite() || !Self::xyce_level2_native_diode_param(name) {
+            return false;
+        }
+        match name.to_ascii_uppercase().as_str() {
+            "LEVEL" => {
+                (value - 0.0).abs() <= 1.0e-9
+                    || (value - 1.0).abs() <= 1.0e-9
+                    || (value - 2.0).abs() <= 1.0e-9
+            }
+            "IS" | "JS" | "RS" | "KF" | "IKF" | "IK" | "IKR" | "CJO" | "CJ0" | "CJ" | "TT"
+            | "JSW" | "CJSW" | "CJP" | "ISR" => value >= 0.0,
+            "N" | "AF" | "IBV" | "NR" | "NS" | "VJ" | "PHP" | "VJSW" | "EG" | "BV" | "VB"
+            | "NBV" => value > 0.0,
+            "M" | "MJSW" => (0.0..=1.0).contains(&value),
+            "FC" | "FCS" => (0.0..1.0).contains(&value),
+            "XTI" => true,
+            "TNOM" => value > -273.15,
+            _ => false,
+        }
+    }
+
+    fn netlist_device_is_native_relational_mos3(netlist: &Netlist, instance_name: &str) -> bool {
+        netlist.elements.iter().any(|element| {
+            if !Self::device_instance_names_match(&element.name, instance_name) {
+                return false;
+            }
+            let ElementKind::Mosfet {
+                model,
+                compact_syntax,
+                instance_params,
+                deferred_params,
+                ..
+            } = &element.kind
+            else {
+                return false;
+            };
+            if *compact_syntax
+                || !deferred_params.is_empty()
+                || !instance_params
+                    .iter()
+                    .all(|(name, value)| Self::native_relational_mos3_instance_param(name, *value))
+            {
+                return false;
+            }
+            let Some(model) = Self::find_model(&netlist.models, model) else {
+                return false;
+            };
+            Self::model_is_native_relational_mos3(model)
+                && Self::native_relational_mos3_effective_geometry_is_valid(model, instance_params)
+        })
+    }
+
+    fn native_relational_mos3_instance_param(name: &str, value: Value) -> bool {
+        value.is_finite()
+            && value > 0.0
+            && matches!(name.to_ascii_uppercase().as_str(), "L" | "W" | "M" | "NF")
+    }
+
+    fn native_relational_mos3_effective_geometry_is_valid(
+        model: &crate::netlist::ModelDef,
+        instance_params: &[(String, Value)],
+    ) -> bool {
+        let Some(length) = Self::numeric_param_value(instance_params, "L")
+            .or_else(|| Self::numeric_param_value(&model.params, "L"))
+        else {
+            return false;
+        };
+        let Some(width) = Self::numeric_param_value(instance_params, "W")
+            .or_else(|| Self::numeric_param_value(&model.params, "W"))
+        else {
+            return false;
+        };
+        let lateral_diffusion = Self::numeric_param_value(&model.params, "LD").unwrap_or(0.0);
+        let length_adjust = Self::numeric_param_value(&model.params, "XL").unwrap_or(0.0);
+        let width_narrow = Self::numeric_param_value(&model.params, "WD").unwrap_or(0.0);
+        let width_adjust = Self::numeric_param_value(&model.params, "XW").unwrap_or(0.0);
+        let effective_length = length - 2.0 * lateral_diffusion + length_adjust;
+        let effective_width = width - 2.0 * width_narrow + width_adjust;
+        effective_length.is_finite()
+            && effective_length > 0.0
+            && effective_width.is_finite()
+            && effective_width > 0.0
+    }
+
+    fn model_is_native_relational_mos3(model: &crate::netlist::ModelDef) -> bool {
+        if !matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) || Self::numeric_param_value(&model.params, "LEVEL")
+            .is_none_or(|level| !level.is_finite() || (level - 3.0).abs() > 1.0e-9)
+        {
+            return false;
+        }
+        model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model
+                .params
+                .iter()
+                .all(|(name, value)| Self::native_relational_mos3_model_param(name, *value))
+    }
+
+    fn native_relational_mos3_model_param(name: &str, value: Value) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        match name.to_ascii_uppercase().as_str() {
+            "LEVEL" => (value - 3.0).abs() <= 1.0e-9,
+            "VTO" | "VT0" | "ETA" | "XL" | "XW" => true,
+            "TPG" => matches!(value, -1.0 | 0.0 | 1.0),
+            "KP" | "PHI" | "U0" | "UO" | "TOX" | "NSUB" | "L" | "W" | "PB" | "KAPPA" | "AF" => {
+                value > 0.0
+            }
+            "GAMMA" | "LAMBDA" | "NSS" | "IS" | "JS" | "LD" | "RD" | "RS" | "CBD" | "CBS"
+            | "CJ" | "CJ0" | "CJSW" | "CGSO" | "CGDO" | "CGBO" | "DELTA" | "THETA" | "NFS"
+            | "VMAX" | "XJ" | "WD" | "KF" => value >= 0.0,
+            // The classic MOS builder currently has two RSH lowering paths;
+            // zero is semantically inert and therefore the only qualified
+            // relational value until nonzero topology is single-stamped.
+            "RSH" => value == 0.0,
+            "MJ" | "MJSW" => (0.0..=1.0).contains(&value),
+            "FC" => (0.0..1.0).contains(&value),
+            "TNOM" => value > -273.15,
+            _ => false,
+        }
     }
 
     fn netlist_device_is_native_legacy_bjt(netlist: &Netlist, instance_name: &str) -> bool {
@@ -20185,6 +20486,175 @@ C1 mid out 1u
 
         XyceTestRunner::validate_native_transient_contract(&netlist)
             .expect("flattened multi-element passive subcircuit should be supported");
+    }
+
+    #[test]
+    fn transient_plan_purpose_keeps_absolute_and_relational_requirements_distinct() {
+        assert!(XyceStaticTranPlanPurpose::AbsoluteOracle.requires_reference_file());
+        assert!(XyceStaticTranPlanPurpose::AbsoluteOracle.validates_absolute_device_contract());
+        assert!(!XyceStaticTranPlanPurpose::RelationalFamily.requires_reference_file());
+        assert!(!XyceStaticTranPlanPurpose::RelationalFamily.validates_absolute_device_contract());
+
+        let missing = Path::new("definitely-missing-transient-oracle.prn");
+        assert!(
+            XyceTestRunner::validate_static_tran_reference_requirement(
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                XyceStaticTranContract::PlainStatic,
+                missing,
+            )
+            .is_err(),
+            "absolute plans must reject a missing checked-in reference"
+        );
+        XyceTestRunner::validate_static_tran_reference_requirement(
+            XyceStaticTranPlanPurpose::RelationalFamily,
+            XyceStaticTranContract::PlainStatic,
+            missing,
+        )
+        .expect("relational plans use the freshly simulated baseline instead of a gold file");
+    }
+
+    #[test]
+    fn baseline_family_record_still_selects_a_real_comparison_target() {
+        let baseline = PathBuf::from("family0.cir");
+        let member = PathBuf::from("family1.cir");
+        let contract = XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::Subckt,
+            family: "family".to_string(),
+            baseline_path: baseline.clone(),
+            member_paths: vec![baseline.clone(), member.clone()],
+            target_path: Some(baseline),
+        };
+
+        let (targets, baseline_record) = XyceTestRunner::baseline_family_targets(&contract);
+
+        assert!(baseline_record);
+        assert_eq!(targets, vec![member]);
+    }
+
+    #[test]
+    fn relational_transient_contract_accepts_only_validated_mos3_and_diode_subsets() {
+        let netlist = Netlist::parse(
+            "\
+validated relational nonlinear subsets
+VDD d 0 5
+VG g 0 PULSE(0 5 0 1n 1n 1u)
+M1 d g 0 0 NM L=5u W=175u
+D1 d 0 DM
+.MODEL NM NMOS (LEVEL=3 VTO=1 KP=2e-5 TOX=6e-8 NSUB=8e15)
+.MODEL DM D (IS=2e-14 N=1.1 CJO=3e-10 TT=1e-7)
+.TRAN 10n 1u
+.PRINT TRAN V(d)
+.END
+",
+        )
+        .expect("validated relational deck parses");
+
+        XyceTestRunner::validate_native_relational_transient_contract(&netlist)
+            .expect("validated native MOS3 and diode subsets are eligible relational runtimes");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+            "the same devices must remain outside the absolute Xyce transient oracle envelope"
+        );
+    }
+
+    #[test]
+    fn relational_transient_contract_rejects_unqualified_nonlinear_models() {
+        let unknown_mos_parameter = Netlist::parse(
+            "\
+unqualified relational mos model
+VDD d 0 5
+VG g 0 1
+M1 d g 0 0 NM L=5u W=175u
+.MODEL NM NMOS (LEVEL=3 VTO=1 BOGUS=2)
+.TRAN 10n 1u
+.PRINT TRAN V(d)
+.END
+",
+        )
+        .expect("unknown MOS model parameter remains represented in the parsed model");
+        assert!(
+            XyceTestRunner::validate_native_relational_transient_contract(&unknown_mos_parameter)
+                .is_err(),
+            "unknown model parameters must not enter a relational runtime by producing identical ignored behavior"
+        );
+
+        let unqualified_bjt = Netlist::parse(
+            "\
+unqualified relational bjt
+VC c 0 5
+VB b 0 0.7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.TRAN 10n 1u
+.PRINT TRAN V(c)
+.END
+",
+        )
+        .expect("BJT deck parses");
+        assert!(
+            XyceTestRunner::validate_native_relational_transient_contract(&unqualified_bjt)
+                .is_err(),
+            "a relational family name must not bypass the qualified nonlinear-device policy"
+        );
+    }
+
+    #[test]
+    fn relational_transient_contract_rejects_silently_defaulted_parameter_domains() {
+        assert!(!XyceTestRunner::native_relational_diode_instance_param(
+            "OFF", 1.0
+        ));
+        assert!(!XyceTestRunner::native_relational_diode_instance_param(
+            "M", 0.0
+        ));
+        assert!(!XyceTestRunner::native_relational_diode_instance_param(
+            "DTEMP", -400.0
+        ));
+        assert!(!XyceTestRunner::native_relational_diode_model_param(
+            "BV", -1.0
+        ));
+        assert!(!XyceTestRunner::native_relational_diode_model_param(
+            "IBV", 0.0
+        ));
+        assert!(!XyceTestRunner::native_relational_mos3_instance_param(
+            "L", 0.0
+        ));
+        assert!(!XyceTestRunner::native_relational_mos3_instance_param(
+            "M", 0.0
+        ));
+        assert!(!XyceTestRunner::native_relational_mos3_model_param(
+            "KP", -1.0
+        ));
+        assert!(!XyceTestRunner::native_relational_mos3_model_param(
+            "PHI", 0.0
+        ));
+        assert!(!XyceTestRunner::native_relational_mos3_model_param(
+            "RSH", 1.0
+        ));
+        assert!(!XyceTestRunner::native_relational_mos3_model_param(
+            "TPG", 2.0
+        ));
+        assert!(XyceTestRunner::native_relational_mos3_model_param(
+            "RSH", 0.0
+        ));
+
+        let invalid_geometry = Netlist::parse(
+            "\
+invalid relational MOS3 effective geometry
+VDD d 0 5
+VG g 0 1
+M1 d g 0 0 NM L=1u W=10u
+.MODEL NM NMOS (LEVEL=3 L=1u W=10u LD=1u KP=2e-5 PHI=.6)
+.TRAN 10n 1u
+.PRINT TRAN V(d)
+.END
+",
+        )
+        .expect("invalid effective-geometry deck still parses structurally");
+        assert!(
+            XyceTestRunner::validate_native_relational_transient_contract(&invalid_geometry)
+                .is_err(),
+            "a clamped one-picometer effective channel must remain outside the relational contract"
+        );
     }
 
     #[test]
