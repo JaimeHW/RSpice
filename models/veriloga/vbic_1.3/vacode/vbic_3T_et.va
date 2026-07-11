@@ -1,0 +1,6 @@
+// Canonical three-electrical-terminal VBIC 1.3 variant with an externally
+// connected electrothermal node. The model equations remain in the upstream
+// vbic_1p3.va source.
+`define threeTerminal
+`define externalThermal
+`include "vbic_1p3.va"

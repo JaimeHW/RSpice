@@ -192,14 +192,21 @@
 //
 
 `ifdef threeTerminal
-    `ifdef __XYCE__
-        module vbic13_va(c,b,e);
+    `ifdef externalThermal
+        module vbic13_3t_et(c,b,e,dt);
+        inout       c,b,e,dt;                        // external nodes
+        electrical  c,b,e;
+        thermal     dt;                              // external self-heating temperature rise node
     `else
-        module vbic13(c,b,e);
+        `ifdef __XYCE__
+            module vbic13_va(c,b,e);
+        `else
+            module vbic13(c,b,e);
+        `endif
+        inout       c,b,e;                           // external nodes
+        electrical  c,b,e;
+        thermal     dt;                              // internal self-heating local temperature rise node
     `endif
-    inout       c,b,e;                           // external nodes
-    electrical  c,b,e;
-    thermal     dt;                              // self-heating local temperature rise node
     electrical  cx,ci,bx,bi,ei,bp,xf1,xf2;       // internal nodes
     `undef fourTerminal
 `else

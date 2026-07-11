@@ -343,7 +343,9 @@ fn generated_bjt_target(
         Some(504) => Some(GeneratedTarget::new("bjtd505_va")),
         Some(505) if instance_terminal_count >= 4 => Some(GeneratedTarget::new("bjt505t_va")),
         Some(505) => Some(GeneratedTarget::new("bjtd505t_va")),
-        Some(4 | 9 | 11 | 12 | 13) => Some(GeneratedTarget::new("vbic13_4t")),
+        Some(11) if instance_terminal_count >= 4 => Some(GeneratedTarget::new("vbic13_3t_et")),
+        Some(11) => Some(GeneratedTarget::new("vbic13")),
+        Some(4 | 9 | 12 | 13) => Some(GeneratedTarget::new("vbic13_4t")),
         _ => None,
     })
 }
@@ -604,7 +606,10 @@ fn append_generated_bjt_polarity_param(
 }
 
 fn needs_inferred_generated_bjt_type(model_name: &str) -> bool {
-    match_normalized(model_name, &["VBIC13_4T", "VBIC_4T_ET_CF"])
+    match_normalized(
+        model_name,
+        &["VBIC13", "VBIC13_3T_ET", "VBIC13_4T", "VBIC_4T_ET_CF"],
+    )
 }
 
 fn append_generated_instance_params(

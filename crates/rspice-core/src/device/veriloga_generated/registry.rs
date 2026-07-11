@@ -115,8 +115,14 @@ pub mod r2_et_cmc__r2_et_cmc__a8425039;
 #[path = "r3_cmc__r3_cmc__2e3554ae/mod.rs"]
 pub mod r3_cmc__r3_cmc__2e3554ae;
 #[allow(non_snake_case)]
-#[path = "vbic_1p3__vbic13_4t__5c387f2d/mod.rs"]
-pub mod vbic_1p3__vbic13_4t__5c387f2d;
+#[path = "vbic_3t__vbic13__aa00e2e7/mod.rs"]
+pub mod vbic_3t__vbic13__aa00e2e7;
+#[allow(non_snake_case)]
+#[path = "vbic_3t_et__vbic13_3t_et__bd2f63d4/mod.rs"]
+pub mod vbic_3t_et__vbic13_3t_et__bd2f63d4;
+#[allow(non_snake_case)]
+#[path = "vbic_1p3__vbic13_4t__132cb4e0/mod.rs"]
+pub mod vbic_1p3__vbic13_4t__132cb4e0;
 #[allow(non_snake_case)]
 #[path = "vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1/mod.rs"]
 pub mod vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1;
@@ -161,8 +167,10 @@ pub enum GeneratedBuiltinKind {
     Device35(Box<r2_cmc__r2_cmc__bc71a915::Instance>),
     Device36(Box<r2_et_cmc__r2_et_cmc__a8425039::Instance>),
     Device37(Box<r3_cmc__r3_cmc__2e3554ae::Instance>),
-    Device38(Box<vbic_1p3__vbic13_4t__5c387f2d::Instance>),
-    Device39(Box<vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance>),
+    Device38(Box<vbic_3t__vbic13__aa00e2e7::Instance>),
+    Device39(Box<vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance>),
+    Device40(Box<vbic_1p3__vbic13_4t__132cb4e0::Instance>),
+    Device41(Box<vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance>),
 }
 
 impl GeneratedBuiltinKind {
@@ -208,6 +216,8 @@ impl GeneratedBuiltinKind {
             (Self::Device37(active), Self::Device37(snapshot)) => active.restore_from_snapshot(*snapshot),
             (Self::Device38(active), Self::Device38(snapshot)) => active.restore_from_snapshot(*snapshot),
             (Self::Device39(active), Self::Device39(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device40(active), Self::Device40(snapshot)) => active.restore_from_snapshot(*snapshot),
+            (Self::Device41(active), Self::Device41(snapshot)) => active.restore_from_snapshot(*snapshot),
             (active, snapshot) => *active = snapshot,
         }
     }
@@ -254,6 +264,8 @@ impl GeneratedBuiltinKind {
             Self::Device37(device) => device.stamp(ctx, stamper),
             Self::Device38(device) => device.stamp(ctx, stamper),
             Self::Device39(device) => device.stamp(ctx, stamper),
+            Self::Device40(device) => device.stamp(ctx, stamper),
+            Self::Device41(device) => device.stamp(ctx, stamper),
         }
     }
 
@@ -299,6 +311,8 @@ impl GeneratedBuiltinKind {
             Self::Device37(device) => device.set_timepoint(time, timestep, ddt_coefficients),
             Self::Device38(device) => device.set_timepoint(time, timestep, ddt_coefficients),
             Self::Device39(device) => device.set_timepoint(time, timestep, ddt_coefficients),
+            Self::Device40(device) => device.set_timepoint(time, timestep, ddt_coefficients),
+            Self::Device41(device) => device.set_timepoint(time, timestep, ddt_coefficients),
         }
     }
 
@@ -344,6 +358,8 @@ impl GeneratedBuiltinKind {
             Self::Device37(device) => device.accept_timestep(),
             Self::Device38(device) => device.accept_timestep(),
             Self::Device39(device) => device.accept_timestep(),
+            Self::Device40(device) => device.accept_timestep(),
+            Self::Device41(device) => device.accept_timestep(),
         }
     }
 
@@ -389,6 +405,8 @@ impl GeneratedBuiltinKind {
             Self::Device37(device) => device.stamp_reactive(ctx, stamper),
             Self::Device38(device) => device.stamp_reactive(ctx, stamper),
             Self::Device39(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device40(device) => device.stamp_reactive(ctx, stamper),
+            Self::Device41(device) => device.stamp_reactive(ctx, stamper),
         }
     }
 }
@@ -432,6 +450,8 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "r2_cmc",
     "r2_et_cmc",
     "r3_cmc",
+    "vbic13",
+    "vbic13_3t_et",
     "vbic13_4t",
     "vbic_4T_et_cf",
 ];
@@ -480,7 +500,9 @@ pub fn node_count(model_name: &str) -> Option<usize> {
         "R2_CMC" => Some(r2_cmc__r2_cmc__bc71a915::Instance::TERMINAL_COUNT),
         "R2_ET_CMC" => Some(r2_et_cmc__r2_et_cmc__a8425039::Instance::TERMINAL_COUNT),
         "R3_CMC" => Some(r3_cmc__r3_cmc__2e3554ae::Instance::TERMINAL_COUNT),
-        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__5c387f2d::Instance::TERMINAL_COUNT),
+        "VBIC13" => Some(vbic_3t__vbic13__aa00e2e7::Instance::TERMINAL_COUNT),
+        "VBIC13_3T_ET" => Some(vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::TERMINAL_COUNT),
+        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__132cb4e0::Instance::TERMINAL_COUNT),
         "VBIC_4T_ET_CF" => Some(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::TERMINAL_COUNT),
         _ => None,
     }
@@ -526,7 +548,9 @@ pub fn total_node_count(model_name: &str) -> Option<usize> {
         "R2_CMC" => Some(r2_cmc__r2_cmc__bc71a915::Instance::NODE_COUNT),
         "R2_ET_CMC" => Some(r2_et_cmc__r2_et_cmc__a8425039::Instance::NODE_COUNT),
         "R3_CMC" => Some(r3_cmc__r3_cmc__2e3554ae::Instance::NODE_COUNT),
-        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__5c387f2d::Instance::NODE_COUNT),
+        "VBIC13" => Some(vbic_3t__vbic13__aa00e2e7::Instance::NODE_COUNT),
+        "VBIC13_3T_ET" => Some(vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::NODE_COUNT),
+        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__132cb4e0::Instance::NODE_COUNT),
         "VBIC_4T_ET_CF" => Some(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::NODE_COUNT),
         _ => None,
     }
@@ -572,7 +596,9 @@ pub fn internal_node_names(model_name: &str) -> Option<&'static [&'static str]> 
         "R2_CMC" => Some(&r2_cmc__r2_cmc__bc71a915::Instance::INTERNAL_NODE_NAMES),
         "R2_ET_CMC" => Some(&r2_et_cmc__r2_et_cmc__a8425039::Instance::INTERNAL_NODE_NAMES),
         "R3_CMC" => Some(&r3_cmc__r3_cmc__2e3554ae::Instance::INTERNAL_NODE_NAMES),
-        "VBIC13_4T" => Some(&vbic_1p3__vbic13_4t__5c387f2d::Instance::INTERNAL_NODE_NAMES),
+        "VBIC13" => Some(&vbic_3t__vbic13__aa00e2e7::Instance::INTERNAL_NODE_NAMES),
+        "VBIC13_3T_ET" => Some(&vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::INTERNAL_NODE_NAMES),
+        "VBIC13_4T" => Some(&vbic_1p3__vbic13_4t__132cb4e0::Instance::INTERNAL_NODE_NAMES),
         "VBIC_4T_ET_CF" => Some(&vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::INTERNAL_NODE_NAMES),
         _ => None,
     }
@@ -618,7 +644,9 @@ pub fn branch_count(model_name: &str) -> Option<usize> {
         "R2_CMC" => Some(r2_cmc__r2_cmc__bc71a915::Instance::BRANCH_COUNT),
         "R2_ET_CMC" => Some(r2_et_cmc__r2_et_cmc__a8425039::Instance::BRANCH_COUNT),
         "R3_CMC" => Some(r3_cmc__r3_cmc__2e3554ae::Instance::BRANCH_COUNT),
-        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__5c387f2d::Instance::BRANCH_COUNT),
+        "VBIC13" => Some(vbic_3t__vbic13__aa00e2e7::Instance::BRANCH_COUNT),
+        "VBIC13_3T_ET" => Some(vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::BRANCH_COUNT),
+        "VBIC13_4T" => Some(vbic_1p3__vbic13_4t__132cb4e0::Instance::BRANCH_COUNT),
         "VBIC_4T_ET_CF" => Some(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::BRANCH_COUNT),
         _ => None,
     }
@@ -1196,8 +1224,8 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device37(instance)))
         }
-        "VBIC13_4T" => {
-            let mut instance = Box::new(vbic_1p3__vbic13_4t__5c387f2d::Instance::new(nodes));
+        "VBIC13" => {
+            let mut instance = Box::new(vbic_3t__vbic13__aa00e2e7::Instance::new(nodes));
             instance.set_branch_indices(branches);
             for (name, value) in params {
                 if let Err(error) = instance.set_parameter(name, *value) {
@@ -1210,6 +1238,36 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
             }
             instance.validate_parameters()?;
             Ok(Some(GeneratedBuiltinKind::Device38(instance)))
+        }
+        "VBIC13_3T_ET" => {
+            let mut instance = Box::new(vbic_3t_et__vbic13_3t_et__bd2f63d4::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            instance.validate_parameters()?;
+            Ok(Some(GeneratedBuiltinKind::Device39(instance)))
+        }
+        "VBIC13_4T" => {
+            let mut instance = Box::new(vbic_1p3__vbic13_4t__132cb4e0::Instance::new(nodes));
+            instance.set_branch_indices(branches);
+            for (name, value) in params {
+                if let Err(error) = instance.set_parameter(name, *value) {
+                    if name.eq_ignore_ascii_case("m") {
+                        instance.set_multiplicity(*value);
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+            instance.validate_parameters()?;
+            Ok(Some(GeneratedBuiltinKind::Device40(instance)))
         }
         "VBIC_4T_ET_CF" => {
             let mut instance = Box::new(vbic_4t_et_cf__vbic_4t_et_cf__3990c5a1::Instance::new(nodes));
@@ -1224,7 +1282,7 @@ pub fn instantiate(model_name: &str, nodes: &[usize], branches: &[usize], params
                 }
             }
             instance.validate_parameters()?;
-            Ok(Some(GeneratedBuiltinKind::Device39(instance)))
+            Ok(Some(GeneratedBuiltinKind::Device41(instance)))
         }
         _ => Ok(None),
     }

@@ -262,6 +262,48 @@ r1 a 0 rmod
 }
 
 #[test]
+fn bjt_vbic_level_11_routes_three_terminal_and_external_thermal_variants() {
+    assert_eq!(builtins::node_count("vbic13"), Some(3));
+    assert_eq!(builtins::node_count("vbic13_3t_et"), Some(4));
+
+    let internal_thermal = build(
+        r#"
+v1 c 0 dc 0
+q1 c b e qv
+.model qv npn level=11
+.op
+.end
+"#,
+    );
+    assert!(internal_thermal.has_generated_veriloga_devices());
+    assert!(
+        internal_thermal
+            .get_node_by_name("q1.__dt.internal")
+            .is_some(),
+        "three-terminal LEVEL=11 must use the generated internal thermal state"
+    );
+
+    let external_thermal = build(
+        r#"
+v1 c 0 dc 0
+rth thermal 0 1k
+q1 c b e thermal qv
+.model qv npn level=11
+.op
+.end
+"#,
+    );
+    assert!(external_thermal.has_generated_veriloga_devices());
+    assert!(external_thermal.get_node_by_name("thermal").is_some());
+    assert!(
+        external_thermal
+            .get_node_by_name("q1.__dt.internal")
+            .is_none(),
+        "fourth LEVEL=11 node must bind generated external dt, not create a substrate or hidden thermal node"
+    );
+}
+
+#[test]
 fn bjt_explicit_vbic13_4t_model_type_routes_to_generated_vbic13() {
     assert!(
         has_builtin("vbic13_4t"),
