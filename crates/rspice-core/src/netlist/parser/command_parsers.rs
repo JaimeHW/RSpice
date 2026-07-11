@@ -64,14 +64,18 @@ pub(super) fn parse_step_command(
     let mut param_name: Option<String> = None;
     if target == StepTarget::Device
         && let Some((device_name, device_param)) = name
-            .split_once(':')
+            .rsplit_once(':')
             .map(|(device_name, device_param)| (device_name.to_string(), device_param.to_string()))
     {
-        if device_name.is_empty() || device_param.is_empty() || device_param.contains(':') {
+        if device_name.is_empty()
+            || device_param.is_empty()
+            || device_name.split(':').any(str::is_empty)
+        {
             return Err(ParseError::Syntax {
                 line: line_num,
-                message: "Malformed .STEP device parameter target; expected device:param"
-                    .to_string(),
+                message:
+                    "Malformed .STEP device parameter target; expected device[:child...]:param"
+                        .to_string(),
             });
         }
         name = device_name.to_string();

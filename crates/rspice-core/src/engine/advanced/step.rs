@@ -175,6 +175,15 @@ impl Engine {
         match step_cmd.target {
             StepTarget::Param => Self::create_perturbed_netlist(netlist, &step_cmd.name, value),
             StepTarget::Device => {
+                if step_cmd.name.contains(':') {
+                    let stepped = Self::hierarchical_device_step_netlist(
+                        netlist,
+                        &step_cmd.name,
+                        step_cmd.param_name.as_deref(),
+                        value,
+                    )?;
+                    return Ok((stepped, 1));
+                }
                 let mut stepped = netlist.clone();
                 match Self::resolve_device_or_model_step_target(
                     &stepped,
@@ -272,6 +281,32 @@ impl Engine {
         values: &[Value],
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         validate_step_values(values)?;
+
+        if device_name.contains(':') {
+            let mut results = Vec::with_capacity(values.len());
+            for &value in values {
+                let stepped = Self::hierarchical_device_step_netlist(
+                    netlist,
+                    device_name,
+                    param_name,
+                    value,
+                )?;
+                match self.run_dc_op(&stepped) {
+                    Ok(result) => results.push((value, result)),
+                    Err(error) => {
+                        let target = format!(
+                            "{}{}",
+                            device_name,
+                            param_name
+                                .map(|name| format!(":{name}"))
+                                .unwrap_or_default()
+                        );
+                        return Err(step_point_error("DEVICE", &target, value, error));
+                    }
+                }
+            }
+            return Ok(results);
+        }
 
         let resolved = Self::resolve_device_or_model_step_target(netlist, device_name, param_name)?;
 
@@ -377,6 +412,151 @@ impl Engine {
             ".STEP DEVICE target '{}' not found in netlist",
             target_name
         )))
+    }
+
+    fn hierarchical_device_step_netlist(
+        netlist: &Netlist,
+        target_name: &str,
+        param_name: Option<&str>,
+        value: Value,
+    ) -> Result<Netlist, SimulationError> {
+        let segments = target_name.split(':').collect::<Vec<_>>();
+        if segments.len() < 2 || segments.iter().any(|segment| segment.is_empty()) {
+            return Err(SimulationError::Circuit(format!(
+                ".STEP hierarchical DEVICE target '{target_name}' is malformed"
+            )));
+        }
+
+        let mut stepped = netlist.clone();
+        let root_index = stepped
+            .elements
+            .iter()
+            .position(|element| element.name.eq_ignore_ascii_case(segments[0]))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    ".STEP hierarchical DEVICE root instance '{}' not found in netlist",
+                    segments[0]
+                ))
+            })?;
+        let root_subcircuit = match &stepped.elements[root_index].kind {
+            ElementKind::Subcircuit { subckt_name, .. } => subckt_name.clone(),
+            _ => {
+                return Err(SimulationError::Circuit(format!(
+                    ".STEP hierarchical DEVICE root '{}' is not a subcircuit instance",
+                    segments[0]
+                )));
+            }
+        };
+
+        let (specialized_root, specialized_definitions) = Self::specialize_step_subcircuit(
+            &stepped.subcircuits,
+            &root_subcircuit,
+            &segments[1..],
+            target_name,
+            param_name,
+            value,
+            0,
+        )?;
+        if let ElementKind::Subcircuit { subckt_name, .. } = &mut stepped.elements[root_index].kind
+        {
+            *subckt_name = specialized_root;
+        }
+        stepped.subcircuits.extend(specialized_definitions);
+        Self::mark_ast_stepped_netlist(&mut stepped);
+        Ok(stepped)
+    }
+
+    fn specialize_step_subcircuit(
+        definitions: &[crate::netlist::SubcircuitDef],
+        subcircuit_name: &str,
+        path: &[&str],
+        full_target: &str,
+        param_name: Option<&str>,
+        value: Value,
+        depth: usize,
+    ) -> Result<(String, Vec<crate::netlist::SubcircuitDef>), SimulationError> {
+        let original = definitions
+            .iter()
+            .find(|definition| definition.name.eq_ignore_ascii_case(subcircuit_name))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    ".STEP hierarchical DEVICE target '{full_target}' references undefined subcircuit '{subcircuit_name}'"
+                ))
+            })?;
+        let target = path.first().copied().ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                ".STEP hierarchical DEVICE target '{full_target}' has no leaf device"
+            ))
+        })?;
+        let mut specialized = original.clone();
+        let element_index = specialized
+            .elements
+            .iter()
+            .position(|element| element.name.eq_ignore_ascii_case(target))
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    ".STEP hierarchical DEVICE target '{full_target}' cannot find '{target}' inside subcircuit '{}'",
+                    original.name
+                ))
+            })?;
+
+        let mut generated_definitions = Vec::new();
+        if path.len() == 1 {
+            Self::apply_device_step_value(
+                &mut specialized.elements[element_index].kind,
+                param_name,
+                value,
+            )?;
+        } else {
+            let child_subcircuit = match &specialized.elements[element_index].kind {
+                ElementKind::Subcircuit { subckt_name, .. } => subckt_name.clone(),
+                _ => {
+                    return Err(SimulationError::Circuit(format!(
+                        ".STEP hierarchical DEVICE path component '{target}' in '{full_target}' is not a subcircuit instance"
+                    )));
+                }
+            };
+            let (specialized_child, mut child_definitions) = Self::specialize_step_subcircuit(
+                definitions,
+                &child_subcircuit,
+                &path[1..],
+                full_target,
+                param_name,
+                value,
+                depth + 1,
+            )?;
+            if let ElementKind::Subcircuit { subckt_name, .. } =
+                &mut specialized.elements[element_index].kind
+            {
+                *subckt_name = specialized_child;
+            }
+            generated_definitions.append(&mut child_definitions);
+        }
+
+        let sanitized_target = full_target
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character.to_ascii_uppercase()
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        let specialized_name =
+            format!("__RSPICE_STEP_{sanitized_target}_{depth}_{}", original.name);
+        if definitions
+            .iter()
+            .chain(generated_definitions.iter())
+            .any(|definition| definition.name.eq_ignore_ascii_case(&specialized_name))
+        {
+            return Err(SimulationError::Circuit(format!(
+                ".STEP hierarchical DEVICE specialization name '{specialized_name}' collides with an existing subcircuit"
+            )));
+        }
+        specialized.name = specialized_name.clone();
+        generated_definitions.push(specialized);
+        Ok((specialized_name, generated_definitions))
     }
 
     fn find_step_model_mut<'a>(
@@ -1006,5 +1186,69 @@ I1 out 0 DC 0 SIN(0 1 1k 0 0 0)
             }
             other => panic!("unexpected stepped source kind: {other:?}"),
         }
+    }
+
+    #[test]
+    fn hierarchical_device_step_specializes_only_the_qualified_instance_path() {
+        let netlist = Netlist::parse(
+            "\
+hierarchical device step
+V1 a 0 0
+V2 b 0 0
+XTOPA a WRAP
+XTOPB b WRAP
+.SUBCKT LEAF p
+RLOCAL p 0 1k
+.ENDS LEAF
+.SUBCKT WRAP p
+XINNER p LEAF
+.ENDS WRAP
+.STEP XTOPA:XINNER:RLOCAL:R 2k 2k 1
+.END
+",
+        )
+        .expect("hierarchical step deck parses");
+        let step = first_step_command(&netlist);
+        assert_eq!(step.target, StepTarget::Device);
+        assert_eq!(step.name, "XTOPA:XINNER:RLOCAL");
+        assert_eq!(step.param_name.as_deref(), Some("R"));
+
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        });
+        let stepped = engine
+            .step_netlists_for_command(&netlist, step, &[2.0e3])
+            .expect("hierarchical step materializes");
+        let flattened = crate::netlist::flatten_netlist_with_models(&stepped[0].1)
+            .expect("specialized hierarchy flattens");
+        let resistance = |name: &str| {
+            flattened
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .and_then(|element| match &element.kind {
+                    ElementKind::Resistor { value, .. } => Some(*value),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("flattened resistor '{name}' exists"))
+        };
+        assert_eq!(resistance("XTOPA.XINNER.RLOCAL"), 2.0e3);
+        assert_eq!(resistance("XTOPB.XINNER.RLOCAL"), 1.0e3);
+        assert!(stepped[0].1.source_text.is_none());
+    }
+
+    #[test]
+    fn hierarchical_device_step_rejects_empty_path_components() {
+        let error = Netlist::parse(
+            "\
+malformed hierarchical device step
+R1 1 0 1k
+.STEP X1::R1:R 1k 2k 1k
+.END
+",
+        )
+        .expect_err("empty hierarchy path component must fail parsing");
+        assert!(error.to_string().contains("device[:child...]:param"));
     }
 }
