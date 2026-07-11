@@ -53,6 +53,19 @@ const XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE: f64 = 1.0e-12;
 const XYCE_ANALYTIC_RC_ORACLE_INITIAL_VALUE: f64 = 1.0;
 const XYCE_ANALYTIC_RC_ORACLE_FINAL_VALUE: f64 = 0.0;
 const XYCE_ANALYTIC_RC_ORACLE_TIME_CONSTANT: f64 = 1.0e-3;
+// The removed rc_osc sidecar is deliberately a fixed analytic generator. Keep
+// its decimal constants distinct from the simulator's source evaluation: in
+// particular, the Perl oracle uses 3.1415927 rather than a platform PI value.
+const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_RESISTANCE: f64 = 1.0e3;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_CAPACITANCE: f64 = 2.0e-6;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_SOURCE_OFFSET: f64 = 0.0;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_SOURCE_AMPLITUDE: f64 = 1.0;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_FREQUENCY: f64 = 1.0e5;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PI: f64 = 3.1415927;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET: f64 = 2.0e-3;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_STOP: f64 = 2.0e-4;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_TIMEINT_TOLERANCE: f64 = 1.0e-4;
+const XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE: f64 = 1.0e-6;
 const XYCE_PWL_REPEAT_VALUE_ERROR: &str =
     "PWL source repeat value (R) must be >= 0 and < last value in time-voltage list";
 
@@ -258,6 +271,50 @@ struct XyceAnalyticRcSpecification {
 struct XyceAnalyticRcContract {
     plan: XyceStaticTranPlan,
     specification: XyceAnalyticRcSpecification,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceAnalyticSinusoidalRcSourceContract {
+    capacitor_name: String,
+    capacitor_nodes: [String; 2],
+    capacitance_bits: u64,
+    resistor_name: String,
+    resistor_nodes: [String; 2],
+    resistance_bits: u64,
+    source_name: String,
+    source_nodes: [String; 2],
+    source_offset_bits: u64,
+    source_amplitude_bits: u64,
+    source_frequency_bits: u64,
+    source_delay_bits: u64,
+    source_damping_bits: u64,
+    probe_node: String,
+    print_expression: String,
+    print_offset_bits: u64,
+    tran_step_bits: u64,
+    tran_stop_bits: u64,
+    timeint_reltol_bits: u64,
+    timeint_abstol_bits: u64,
+    method_selector: String,
+    verify_reltol_bits: u64,
+    verify_abstol_bits: u64,
+}
+
+#[derive(Debug, Clone)]
+struct XyceAnalyticSinusoidalRcSpecification {
+    output_node: String,
+    print_expression: String,
+    resistance: Value,
+    capacitance: Value,
+    source_frequency: Value,
+    print_offset: Value,
+}
+
+#[derive(Debug, Clone)]
+struct XyceAnalyticSinusoidalRcContract {
+    plan: XyceStaticTranPlan,
+    specification: XyceAnalyticSinusoidalRcSpecification,
+    tolerance: XyceVerifyTransientTolerance,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -886,6 +943,48 @@ impl XyceComparisonTolerance {
             self.zero = Some(self.zero.unwrap_or(0.0).max(value));
         }
         self
+    }
+}
+
+/// Release 7.10 transient `xyce_verify` uses an integrated normalized RMS
+/// contract. These fields intentionally remain separate from the runner's
+/// pointwise [`XyceComparisonTolerance`], whose absolute and zero semantics
+/// are different. Qualified native generated-oracle contracts require
+/// positive RELTOL/ABSTOL rather than reproducing the Perl verifier's
+/// degenerate zero-RELTOL final comparison.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct XyceVerifyTransientTolerance {
+    relative: Value,
+    absolute: Value,
+    zero: Value,
+    absolute_difference: Value,
+}
+
+impl XyceVerifyTransientTolerance {
+    const fn release_7_10_default() -> Self {
+        Self {
+            relative: XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE,
+            absolute: XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE,
+            zero: XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
+            absolute_difference: XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+        }
+    }
+
+    fn validate(self) -> Result<Self, String> {
+        if !self.relative.is_finite()
+            || self.relative <= 0.0
+            || !self.absolute.is_finite()
+            || self.absolute <= 0.0
+            || !self.zero.is_finite()
+            || self.zero < 0.0
+            || !self.absolute_difference.is_finite()
+            || self.absolute_difference < 0.0
+        {
+            return Err(format!(
+                "xyce_verify transient tolerances must have positive finite RELTOL/ABSTOL and nonnegative finite ZEROTOL/ABSDIFFTOL, got {self:?}"
+            ));
+        }
+        Ok(self)
     }
 }
 
@@ -1668,6 +1767,30 @@ impl XyceTestRunner {
                     start,
                     "analytic_first_order_rc_tran_wrapper",
                     format!("analytic first-order RC qualification failed: {reason}"),
+                    Vec::new(),
+                ),
+            };
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.analytic_sinusoidal_rc_wrapper_contract(deck) {
+            let result = match contract {
+                Ok(contract) => {
+                    self.run_analytic_sinusoidal_rc_wrapper_contract(deck, contract, start)
+                }
+                Err(reason) => self.failure_result(
+                    deck,
+                    start,
+                    "analytic_sinusoidal_first_order_rc_tran_wrapper",
+                    format!("analytic sinusoidal first-order RC qualification failed: {reason}"),
                     Vec::new(),
                 ),
             };
@@ -7610,6 +7733,260 @@ impl XyceTestRunner {
         }
     }
 
+    fn analytic_sinusoidal_rc_reference_table(
+        actual: &XycePrnTable,
+        specification: &XyceAnalyticSinusoidalRcSpecification,
+    ) -> Result<XycePrnTable, String> {
+        const LABEL: &str = "analytic sinusoidal first-order RC";
+        let (expression_node, expression_offset) =
+            Self::analytic_sinusoidal_rc_print_expression(&specification.print_expression)?;
+        if !specification.resistance.is_finite()
+            || specification.resistance <= 0.0
+            || !specification.capacitance.is_finite()
+            || specification.capacitance <= 0.0
+            || !specification.source_frequency.is_finite()
+            || specification.source_frequency <= 0.0
+            || !specification.print_offset.is_finite()
+            || specification.resistance.to_bits()
+                != XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_RESISTANCE.to_bits()
+            || specification.capacitance.to_bits()
+                != XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_CAPACITANCE.to_bits()
+            || specification.source_frequency.to_bits()
+                != XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_FREQUENCY.to_bits()
+            || specification.print_offset.to_bits()
+                != XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET.to_bits()
+            || expression_node != specification.output_node
+            || expression_offset.to_bits() != specification.print_offset.to_bits()
+        {
+            return Err(format!(
+                "{LABEL} specification is nonfinite or differs from the fixed Release 7.10 generator"
+            ));
+        }
+        if actual.columns.len() != 3
+            || actual.columns[0] != "Index"
+            || actual.columns[1] != "TIME"
+            || Self::normalize_probe(&actual.columns[2])
+                != Self::normalize_probe(&specification.print_expression)
+        {
+            return Err(format!(
+                "{LABEL} generator requires Index, TIME, and the qualified expression, got {:?}",
+                actual.columns
+            ));
+        }
+        if actual.rows.is_empty() {
+            return Err(format!("{LABEL} simulator output contains no rows"));
+        }
+
+        let a = -1.0 / (specification.resistance * specification.capacitance);
+        let s = 2.0 * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PI * specification.source_frequency;
+        let denominator = a * a + s * s;
+        let initial_coefficient = -a * s / denominator;
+        if !a.is_finite()
+            || !s.is_finite()
+            || !denominator.is_finite()
+            || denominator <= 0.0
+            || !initial_coefficient.is_finite()
+        {
+            return Err(format!("{LABEL} generator coefficients are invalid"));
+        }
+
+        let mut rows = Vec::with_capacity(actual.rows.len());
+        for (row_index, row) in actual.rows.iter().enumerate() {
+            if row.len() != actual.columns.len()
+                || row[0].to_bits() != (row_index as Value).to_bits()
+                || row.iter().any(|value| !value.is_finite())
+            {
+                return Err(format!(
+                    "{LABEL} simulator row {row_index} is malformed, nonfinite, or has a noncanonical index"
+                ));
+            }
+            // The Perl sidecar consumes the TIME token from the simulator's
+            // already-written default PRN before evaluating its fixed formula.
+            let printed_time = Self::xyce_default_prn_roundtrip(row[1])?;
+            if printed_time < 0.0 {
+                return Err(format!(
+                    "{LABEL} simulator row {row_index} has negative printed time {printed_time}"
+                ));
+            }
+            let analytic_value = specification.print_offset
+                + initial_coefficient * (a * printed_time).exp()
+                + a * (a * (s * printed_time).sin() + s * (s * printed_time).cos()) / denominator;
+            if !analytic_value.is_finite() {
+                return Err(format!(
+                    "{LABEL} produced nonfinite value at printed time {printed_time}"
+                ));
+            }
+            rows.push(vec![row[0], printed_time, analytic_value]);
+        }
+        Ok(XycePrnTable {
+            columns: actual.columns.clone(),
+            rows,
+        })
+    }
+
+    fn validate_analytic_sinusoidal_rc_output_domain(
+        actual: &XycePrnTable,
+        specification: &XyceAnalyticSinusoidalRcSpecification,
+        stop_time: Value,
+        tolerance: XyceVerifyTransientTolerance,
+    ) -> Result<(), String> {
+        const LABEL: &str = "analytic sinusoidal first-order RC";
+        let tolerance = tolerance.validate()?;
+        if !stop_time.is_finite() || stop_time <= 0.0 {
+            return Err(format!("{LABEL} has invalid planned stop time {stop_time}"));
+        }
+        if actual.columns.len() != 3
+            || Self::normalize_probe(&actual.columns[2])
+                != Self::normalize_probe(&specification.print_expression)
+            || actual.rows.len() < 2
+        {
+            return Err(format!(
+                "{LABEL} output domain requires Index/TIME/expression and at least two rows"
+            ));
+        }
+        let first = actual.rows.first().expect("row count was checked");
+        let last = actual.rows.last().expect("row count was checked");
+        if first.len() != actual.columns.len() || last.len() != actual.columns.len() {
+            return Err(format!(
+                "{LABEL} output boundary rows do not match the output columns"
+            ));
+        }
+        let printed_first_time = Self::xyce_default_prn_roundtrip(first[1])?;
+        let printed_last_time = Self::xyce_default_prn_roundtrip(last[1])?;
+        let printed_stop = Self::xyce_default_prn_roundtrip(stop_time)?;
+        let printed_first_value = Self::xyce_default_prn_roundtrip(first[2])?;
+        let printed_initial = Self::xyce_default_prn_roundtrip(specification.print_offset)?;
+        let initial_error = Self::xyce_verify_normalized_error_with_tolerance(
+            printed_initial,
+            printed_first_value,
+            tolerance,
+        )
+        .abs();
+        if first[0].to_bits() != 0.0f64.to_bits()
+            || printed_first_time != 0.0
+            || printed_last_time.to_bits() != printed_stop.to_bits()
+            || !initial_error.is_finite()
+            || initial_error > 1.0
+        {
+            return Err(format!(
+                "{LABEL} output must start at Index=0/TIME=0/value within the qualified xyce_verify bound around {printed_initial} and end at .TRAN stop {printed_stop}; got Index={}, TIME/value={printed_first_time}/{printed_first_value}, normalized initial error={initial_error}, final TIME={printed_last_time}",
+                first[0]
+            ));
+        }
+        Ok(())
+    }
+
+    fn run_analytic_sinusoidal_rc_wrapper_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceAnalyticSinusoidalRcContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const RESULT_CONTRACT: &str = "analytic_sinusoidal_first_order_rc_tran_wrapper";
+        let (netlist, result) = match self.run_transient_family_plan(&contract.plan, start, None) {
+            Ok(result) => result,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    RESULT_CONTRACT,
+                    format!(
+                        "analytic sinusoidal first-order RC execution exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    RESULT_CONTRACT,
+                    format!("analytic sinusoidal first-order RC execution failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let actual =
+            match Self::transient_family_result_to_prn_table(&contract.plan, &netlist, &result) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!(
+                            "analytic sinusoidal first-order RC output conversion failed: {err}"
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+        if let Err(err) = Self::validate_analytic_sinusoidal_rc_output_domain(
+            &actual,
+            &contract.specification,
+            contract.plan.tran.stop,
+            contract.tolerance,
+        ) {
+            return self.failure_result(
+                deck,
+                start,
+                RESULT_CONTRACT,
+                format!(
+                    "analytic sinusoidal first-order RC output-domain validation failed: {err}"
+                ),
+                Vec::new(),
+            );
+        }
+        let reference =
+            match Self::analytic_sinusoidal_rc_reference_table(&actual, &contract.specification) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        RESULT_CONTRACT,
+                        format!(
+                            "analytic sinusoidal first-order RC reference generation failed: {err}"
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+        let mismatches = match self.compare_xyce_verify_transient_tables_with_tolerance(
+            &reference,
+            &actual,
+            contract.tolerance,
+        ) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    RESULT_CONTRACT,
+                    format!(
+                        "analytic sinusoidal first-order RC xyce_verify comparison failed: {err}"
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, RESULT_CONTRACT)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                RESULT_CONTRACT,
+                format!(
+                    "{} analytic sinusoidal first-order RC xyce_verify mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -9584,9 +9961,12 @@ impl XyceTestRunner {
         })
     }
 
-    fn analytic_rc_options_match(
+    fn analytic_timeint_only_options_match(
         options: &crate::netlist::SimulationOptions,
-        source: &XyceAnalyticRcSourceContract,
+        reltol_bits: u64,
+        abstol_bits: u64,
+        method_selector: Option<&str>,
+        lte_reference: Option<TransientLteReference>,
     ) -> bool {
         let crate::netlist::SimulationOptions {
             reltol,
@@ -9625,15 +10005,15 @@ impl XyceTestRunner {
         } = options;
         reltol.is_none()
             && abstol.is_none()
-            && timeint_reltol.is_some_and(|value| value.to_bits() == source.reltol_bits)
-            && timeint_abstol.is_some_and(|value| value.to_bits() == source.abstol_bits)
-            && *transient_lte_reference == source.transient_lte_reference
+            && timeint_reltol.is_some_and(|value| value.to_bits() == reltol_bits)
+            && timeint_abstol.is_some_and(|value| value.to_bits() == abstol_bits)
+            && *transient_lte_reference == lte_reference
             && transient_new_bp_stepping.is_none()
             && vntol.is_none()
             && iabstol.is_none()
             && residual_reltol.is_none()
             && gmin.is_none()
-            && method.is_none()
+            && method.as_deref() == method_selector
             && trtol.is_none()
             && ramptime.is_none()
             && digital_delay_type.is_none()
@@ -9656,6 +10036,19 @@ impl XyceTestRunner {
             && topology_supernode.is_none()
             && device_zero_resistance_tol.is_none()
             && b3soi_gmin_scaling.is_none()
+    }
+
+    fn analytic_rc_options_match(
+        options: &crate::netlist::SimulationOptions,
+        source: &XyceAnalyticRcSourceContract,
+    ) -> bool {
+        Self::analytic_timeint_only_options_match(
+            options,
+            source.reltol_bits,
+            source.abstol_bits,
+            None,
+            source.transient_lte_reference,
+        )
     }
 
     fn validate_analytic_rc_plan(
@@ -9953,6 +10346,867 @@ impl XyceTestRunner {
             resistance: effective_resistance,
             capacitance: effective_capacitance,
             time_constant,
+        })
+    }
+
+    fn analytic_sinusoidal_rc_print_expression(probe: &str) -> Result<(String, Value), String> {
+        let expression = Self::print_expression_inner(probe).ok_or_else(|| {
+            "analytic sinusoidal RC print probe must be one braced expression".to_string()
+        })?;
+        if expression.chars().any(char::is_whitespace) {
+            return Err(
+                "analytic sinusoidal RC expression must remain one whitespace-free wrapper token"
+                    .to_string(),
+            );
+        }
+        let ast = parse_expression_strict(expression)
+            .map_err(|err| format!("could not parse analytic sinusoidal RC expression: {err}"))?;
+        let Expr::Binary {
+            op: crate::expr::BinaryOp::Add,
+            left,
+            right,
+        } = ast
+        else {
+            return Err(
+                "analytic sinusoidal RC expression must directly add V(output) and an offset"
+                    .to_string(),
+            );
+        };
+        let Expr::NodeVoltage(node) = left.as_ref() else {
+            return Err(
+                "analytic sinusoidal RC expression left operand must be one direct V(output) probe"
+                    .to_string(),
+            );
+        };
+        if !Self::is_single_spice_node_token(node) {
+            return Err(
+                "analytic sinusoidal RC expression voltage node must be one direct node token"
+                    .to_string(),
+            );
+        }
+        let Expr::Const(offset) = right.as_ref() else {
+            return Err(
+                "analytic sinusoidal RC expression offset must be one direct numeric literal"
+                    .to_string(),
+            );
+        };
+        if !offset.is_finite() {
+            return Err("analytic sinusoidal RC expression offset must be finite".to_string());
+        }
+        Ok((Self::canonical_passive_primary_node_name(node), *offset))
+    }
+
+    fn is_analytic_sinusoidal_rc_wrapper_candidate(source: &str) -> bool {
+        let lines = Self::logical_netlist_lines(source);
+        let Some(title) = lines.first() else {
+            return false;
+        };
+        let title = Self::strip_netlist_comment(title).trim();
+        if title.is_empty() || title.starts_with('.') {
+            return false;
+        }
+
+        let mut capacitor_count = 0usize;
+        let mut resistor_count = 0usize;
+        let mut sinusoidal_voltage_count = 0usize;
+        let mut print_count = 0usize;
+        let mut tran_count = 0usize;
+        let mut options_count = 0usize;
+        let mut end_count = 0usize;
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let Ok(fields) = Self::split_grouped_whitespace_fields(
+                stripped,
+                "analytic sinusoidal RC candidate statement",
+            ) else {
+                return false;
+            };
+            let Some(command) = fields.first() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                match command.to_ascii_lowercase().as_str() {
+                    ".print"
+                        if fields.len() == 3
+                            && fields[1].eq_ignore_ascii_case("TRAN")
+                            && Self::print_expression_inner(&fields[2]).is_some() =>
+                    {
+                        print_count += 1;
+                    }
+                    ".tran" if fields.len() == 3 => tran_count += 1,
+                    ".options" if fields.len() == 5 => {
+                        let keys = fields[1..]
+                            .iter()
+                            .map(|field| {
+                                field
+                                    .split_once('=')
+                                    .map_or(field.as_str(), |(name, _)| name)
+                                    .to_ascii_lowercase()
+                            })
+                            .collect::<BTreeSet<_>>();
+                        let expected = ["timeint", "reltol", "abstol", "method"]
+                            .into_iter()
+                            .map(str::to_string)
+                            .collect::<BTreeSet<_>>();
+                        if keys != expected {
+                            return false;
+                        }
+                        options_count += 1;
+                    }
+                    ".end" if fields.len() == 1 => end_count += 1,
+                    _ => return false,
+                }
+                continue;
+            }
+
+            match command.chars().next().map(|ch| ch.to_ascii_uppercase()) {
+                Some('C') => capacitor_count += 1,
+                Some('R') => resistor_count += 1,
+                Some('V')
+                    if fields
+                        .get(3)
+                        .is_some_and(|field| field.eq_ignore_ascii_case("SIN")) =>
+                {
+                    sinusoidal_voltage_count += 1;
+                }
+                _ => return false,
+            }
+        }
+
+        capacitor_count == 1
+            && resistor_count == 1
+            && sinusoidal_voltage_count == 1
+            && print_count == 1
+            && tran_count == 1
+            && options_count == 1
+            && end_count == 1
+    }
+
+    fn analytic_sinusoidal_rc_source_contract(
+        source: &str,
+    ) -> Result<XyceAnalyticSinusoidalRcSourceContract, String> {
+        const LABEL: &str = "analytic sinusoidal first-order RC";
+
+        let comp_lines = source
+            .lines()
+            .filter(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|token| token.eq_ignore_ascii_case("*COMP"))
+            })
+            .collect::<Vec<_>>();
+        let [comp_line] = comp_lines.as_slice() else {
+            return Err(format!(
+                "{LABEL} requires exactly one *COMP directive, found {}",
+                comp_lines.len()
+            ));
+        };
+        let comp_fields = Self::split_grouped_whitespace_fields(
+            comp_line.trim(),
+            "analytic sinusoidal RC *COMP directive",
+        )?;
+        let [
+            comp_command,
+            comp_probe,
+            first_comp_option,
+            second_comp_option,
+        ] = comp_fields.as_slice()
+        else {
+            return Err(format!(
+                "{LABEL} requires exactly '*COMP {{expression}} RELTOL=<numeric> ABSTOL=<numeric>'"
+            ));
+        };
+        if !comp_command.eq_ignore_ascii_case("*COMP") {
+            return Err(format!("{LABEL} comparison directive opcode changed"));
+        }
+        let mut verify_reltol = None;
+        let mut verify_abstol = None;
+        for option in [first_comp_option, second_comp_option] {
+            let Some((name, value)) = option.split_once('=') else {
+                return Err(format!(
+                    "{LABEL} *COMP option '{option}' is not an assignment"
+                ));
+            };
+            if value.contains('=') {
+                return Err(format!("{LABEL} *COMP option '{option}' is malformed"));
+            }
+            let value = Self::single_spice_numeric_literal_value(value)?;
+            if value <= 0.0 {
+                return Err(format!("{LABEL} *COMP {name} must be finite and positive"));
+            }
+            if name.eq_ignore_ascii_case("RELTOL") {
+                if verify_reltol.replace(value.to_bits()).is_some() {
+                    return Err(format!("{LABEL} contains duplicate *COMP RELTOL"));
+                }
+            } else if name.eq_ignore_ascii_case("ABSTOL") {
+                if verify_abstol.replace(value.to_bits()).is_some() {
+                    return Err(format!("{LABEL} contains duplicate *COMP ABSTOL"));
+                }
+            } else {
+                return Err(format!("{LABEL} does not admit *COMP option '{name}'"));
+            }
+        }
+        let verify_reltol_bits =
+            verify_reltol.ok_or_else(|| format!("{LABEL} *COMP has no RELTOL"))?;
+        let verify_abstol_bits =
+            verify_abstol.ok_or_else(|| format!("{LABEL} *COMP has no ABSTOL"))?;
+
+        let lines = Self::logical_netlist_lines(source);
+        let Some(title) = lines.first() else {
+            return Err(format!("{LABEL} requires a circuit title"));
+        };
+        let title = Self::strip_netlist_comment(title).trim();
+        if title.is_empty() || title.starts_with('.') {
+            return Err(format!("{LABEL} requires an ordinary circuit title"));
+        }
+
+        let mut capacitor = None;
+        let mut resistor = None;
+        let mut voltage_source = None;
+        let mut print_probe = None;
+        let mut tran_values = None;
+        let mut option_values = None;
+        let mut end_count = 0usize;
+        let mut element_names = BTreeSet::new();
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let fields = Self::split_grouped_whitespace_fields(
+                stripped,
+                "analytic sinusoidal RC source statement",
+            )?;
+            let Some(command) = fields.first() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                match command.to_ascii_lowercase().as_str() {
+                    ".print" => {
+                        if print_probe.is_some()
+                            || fields.len() != 3
+                            || !fields[1].eq_ignore_ascii_case("TRAN")
+                        {
+                            return Err(format!(
+                                "{LABEL} requires one canonical '.PRINT TRAN {{V(node)+offset}}'"
+                            ));
+                        }
+                        let (node, offset) =
+                            Self::analytic_sinusoidal_rc_print_expression(&fields[2])?;
+                        print_probe = Some((node, fields[2].clone(), offset.to_bits()));
+                    }
+                    ".tran" => {
+                        if tran_values.is_some() || fields.len() != 3 {
+                            return Err(format!(
+                                "{LABEL} requires one canonical '.TRAN step stop'"
+                            ));
+                        }
+                        let step = Self::single_spice_numeric_literal_value(&fields[1])?;
+                        let stop = Self::single_spice_numeric_literal_value(&fields[2])?;
+                        if step < 0.0 || stop <= 0.0 {
+                            return Err(format!(
+                                "{LABEL} requires a nonnegative print step and positive stop time"
+                            ));
+                        }
+                        tran_values = Some((step.to_bits(), stop.to_bits()));
+                    }
+                    ".options" => {
+                        if option_values.is_some() || fields.len() != 5 {
+                            return Err(format!(
+                                "{LABEL} requires exactly '.OPTIONS TIMEINT RELTOL=<numeric> ABSTOL=<numeric> METHOD=7'"
+                            ));
+                        }
+                        let mut timeint = false;
+                        let mut reltol = None;
+                        let mut abstol = None;
+                        let mut method = None;
+                        for option in &fields[1..] {
+                            if option.eq_ignore_ascii_case("TIMEINT") {
+                                if timeint {
+                                    return Err(format!("{LABEL} contains duplicate TIMEINT"));
+                                }
+                                timeint = true;
+                                continue;
+                            }
+                            let Some((name, value)) = option.split_once('=') else {
+                                return Err(format!(
+                                    "{LABEL} option '{option}' is not a direct assignment"
+                                ));
+                            };
+                            if value.contains('=') {
+                                return Err(format!("{LABEL} option '{option}' is malformed"));
+                            }
+                            let value = Self::single_spice_numeric_literal_value(value)?;
+                            if name.eq_ignore_ascii_case("RELTOL") {
+                                if value <= 0.0 || reltol.replace(value.to_bits()).is_some() {
+                                    return Err(format!(
+                                        "{LABEL} requires one positive TIMEINT RELTOL"
+                                    ));
+                                }
+                            } else if name.eq_ignore_ascii_case("ABSTOL") {
+                                if value <= 0.0 || abstol.replace(value.to_bits()).is_some() {
+                                    return Err(format!(
+                                        "{LABEL} requires one positive TIMEINT ABSTOL"
+                                    ));
+                                }
+                            } else if name.eq_ignore_ascii_case("METHOD") {
+                                if value != 7.0 || method.replace("7".to_string()).is_some() {
+                                    return Err(format!(
+                                        "{LABEL} requires the direct Xyce ONESTEP selector METHOD=7"
+                                    ));
+                                }
+                            } else {
+                                return Err(format!("{LABEL} does not admit option '{name}'"));
+                            }
+                        }
+                        if !timeint || reltol.is_none() || abstol.is_none() || method.is_none() {
+                            return Err(format!(
+                                "{LABEL} requires TIMEINT, RELTOL, ABSTOL, and METHOD=7 exactly once"
+                            ));
+                        }
+                        option_values = Some((
+                            reltol.expect("checked above"),
+                            abstol.expect("checked above"),
+                            method.expect("checked above"),
+                        ));
+                    }
+                    ".end" if fields.len() == 1 => end_count += 1,
+                    other => return Err(format!("{LABEL} does not admit directive '{other}'")),
+                }
+                continue;
+            }
+
+            if fields.len() < 4
+                || !Self::is_single_spice_identifier(&fields[0])
+                || !Self::is_single_spice_node_token(&fields[1])
+                || !Self::is_single_spice_node_token(&fields[2])
+            {
+                return Err(format!(
+                    "{LABEL} element '{command}' does not use direct name/node fields"
+                ));
+            }
+            let element_name = Self::normalize_device_instance_name(&fields[0]);
+            if !element_names.insert(element_name.clone()) {
+                return Err(format!(
+                    "{LABEL} contains duplicate element '{element_name}'"
+                ));
+            }
+            let nodes = [
+                Self::canonical_passive_primary_node_name(&fields[1]),
+                Self::canonical_passive_primary_node_name(&fields[2]),
+            ];
+            match fields[0].chars().next().map(|ch| ch.to_ascii_uppercase()) {
+                Some('C') => {
+                    if capacitor.is_some() || fields.len() != 4 {
+                        return Err(format!(
+                            "{LABEL} requires one direct capacitor without model or IC fields"
+                        ));
+                    }
+                    let value = Self::single_spice_numeric_literal_value(&fields[3])?;
+                    if value <= 0.0 {
+                        return Err(format!("{LABEL} capacitance must be positive"));
+                    }
+                    capacitor = Some((element_name, nodes, value.to_bits()));
+                }
+                Some('R') => {
+                    if resistor.is_some() || fields.len() != 4 {
+                        return Err(format!("{LABEL} requires one direct resistor"));
+                    }
+                    let value = Self::single_spice_numeric_literal_value(&fields[3])?;
+                    if value <= 0.0 {
+                        return Err(format!("{LABEL} resistance must be positive"));
+                    }
+                    resistor = Some((element_name, nodes, value.to_bits()));
+                }
+                Some('V') => {
+                    if voltage_source.is_some()
+                        || fields.len() != 9
+                        || !fields[3].eq_ignore_ascii_case("SIN")
+                    {
+                        return Err(format!(
+                            "{LABEL} requires one direct 'Vname n+ n- SIN vo va freq td theta' source"
+                        ));
+                    }
+                    let values = fields[4..]
+                        .iter()
+                        .map(|field| Self::single_spice_numeric_literal_value(field))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let [offset, amplitude, frequency, delay, damping] = values.as_slice() else {
+                        unreachable!("source arity was checked");
+                    };
+                    if *amplitude == 0.0 || *frequency <= 0.0 || *delay < 0.0 {
+                        return Err(format!(
+                            "{LABEL} source requires nonzero amplitude, positive frequency, and nonnegative delay"
+                        ));
+                    }
+                    voltage_source = Some((
+                        element_name,
+                        nodes,
+                        offset.to_bits(),
+                        amplitude.to_bits(),
+                        frequency.to_bits(),
+                        delay.to_bits(),
+                        damping.to_bits(),
+                    ));
+                }
+                _ => return Err(format!("{LABEL} does not admit element '{command}'")),
+            }
+        }
+
+        if end_count != 1 {
+            return Err(format!(
+                "{LABEL} requires exactly one .END statement, found {end_count}"
+            ));
+        }
+        let (capacitor_name, capacitor_nodes, capacitance_bits) =
+            capacitor.ok_or_else(|| format!("{LABEL} contains no qualified capacitor"))?;
+        let (resistor_name, resistor_nodes, resistance_bits) =
+            resistor.ok_or_else(|| format!("{LABEL} contains no qualified resistor"))?;
+        let (
+            source_name,
+            source_nodes,
+            source_offset_bits,
+            source_amplitude_bits,
+            source_frequency_bits,
+            source_delay_bits,
+            source_damping_bits,
+        ) = voltage_source.ok_or_else(|| format!("{LABEL} contains no qualified SIN source"))?;
+        let (probe_node, print_expression, print_offset_bits) =
+            print_probe.ok_or_else(|| format!("{LABEL} contains no qualified print expression"))?;
+        let (tran_step_bits, tran_stop_bits) =
+            tran_values.ok_or_else(|| format!("{LABEL} contains no qualified .TRAN"))?;
+        let (timeint_reltol_bits, timeint_abstol_bits, method_selector) =
+            option_values.ok_or_else(|| format!("{LABEL} contains no qualified .OPTIONS"))?;
+
+        if Self::normalize_probe(comp_probe) != Self::normalize_probe(&print_expression) {
+            return Err(format!(
+                "{LABEL} *COMP probe must exactly match the printed expression"
+            ));
+        }
+        let fixed_values = [
+            (
+                "resistance",
+                resistance_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_RESISTANCE.to_bits(),
+            ),
+            (
+                "capacitance",
+                capacitance_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_CAPACITANCE.to_bits(),
+            ),
+            (
+                "source offset",
+                source_offset_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_SOURCE_OFFSET.to_bits(),
+            ),
+            (
+                "source amplitude",
+                source_amplitude_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_SOURCE_AMPLITUDE.to_bits(),
+            ),
+            (
+                "source frequency",
+                source_frequency_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_FREQUENCY.to_bits(),
+            ),
+            ("source delay", source_delay_bits, 0.0f64.to_bits()),
+            ("source damping", source_damping_bits, 0.0f64.to_bits()),
+            (
+                "print offset",
+                print_offset_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET.to_bits(),
+            ),
+            (".TRAN print step", tran_step_bits, 0.0f64.to_bits()),
+            (
+                ".TRAN stop",
+                tran_stop_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_STOP.to_bits(),
+            ),
+            (
+                "TIMEINT RELTOL",
+                timeint_reltol_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_TIMEINT_TOLERANCE.to_bits(),
+            ),
+            (
+                "TIMEINT ABSTOL",
+                timeint_abstol_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_TIMEINT_TOLERANCE.to_bits(),
+            ),
+            (
+                "*COMP RELTOL",
+                verify_reltol_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE.to_bits(),
+            ),
+            (
+                "*COMP ABSTOL",
+                verify_abstol_bits,
+                XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE.to_bits(),
+            ),
+        ];
+        if let Some((name, actual, expected)) = fixed_values
+            .into_iter()
+            .find(|(_, actual, expected)| actual != expected)
+        {
+            return Err(format!(
+                "{LABEL} {name} differs from the fixed Release 7.10 generator: actual={}, expected={}",
+                Value::from_bits(actual),
+                Value::from_bits(expected)
+            ));
+        }
+
+        Ok(XyceAnalyticSinusoidalRcSourceContract {
+            capacitor_name,
+            capacitor_nodes,
+            capacitance_bits,
+            resistor_name,
+            resistor_nodes,
+            resistance_bits,
+            source_name,
+            source_nodes,
+            source_offset_bits,
+            source_amplitude_bits,
+            source_frequency_bits,
+            source_delay_bits,
+            source_damping_bits,
+            probe_node,
+            print_expression,
+            print_offset_bits,
+            tran_step_bits,
+            tran_stop_bits,
+            timeint_reltol_bits,
+            timeint_abstol_bits,
+            method_selector,
+            verify_reltol_bits,
+            verify_abstol_bits,
+        })
+    }
+
+    fn analytic_sinusoidal_rc_options_match(
+        options: &crate::netlist::SimulationOptions,
+        source: &XyceAnalyticSinusoidalRcSourceContract,
+    ) -> bool {
+        Self::analytic_timeint_only_options_match(
+            options,
+            source.timeint_reltol_bits,
+            source.timeint_abstol_bits,
+            Some(source.method_selector.as_str()),
+            None,
+        )
+    }
+
+    fn validate_analytic_sinusoidal_rc_plan(
+        plan: &XyceStaticTranPlan,
+        source: &XyceAnalyticSinusoidalRcSourceContract,
+    ) -> Result<(), String> {
+        const LABEL: &str = "analytic sinusoidal first-order RC";
+        if plan.contract != XyceStaticTranContract::WrapperStatic
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+            || plan.wrapper_tolerance.is_some()
+            || plan.reference_path.is_file()
+        {
+            return Err(format!(
+                "{LABEL} requires one unstepped default-PRN wrapper output with a generated oracle"
+            ));
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step < 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+            || plan.tran.step.to_bits() != source.tran_step_bits
+            || plan.tran.stop.to_bits() != source.tran_stop_bits
+        {
+            return Err(format!(
+                "{LABEL} requires the direct '.TRAN 0 2e-4' tuple and no START, MAXSTEP, or UIC"
+            ));
+        }
+        let [probe] = plan.print.probes.as_slice() else {
+            return Err(format!("{LABEL} requires exactly one print expression"));
+        };
+        if Self::normalize_probe(probe) != Self::normalize_probe(&source.print_expression) {
+            return Err(format!(
+                "{LABEL} planned probe differs from direct source provenance"
+            ));
+        }
+        let (probe_node, offset) = Self::analytic_sinusoidal_rc_print_expression(probe)?;
+        if probe_node != source.probe_node || offset.to_bits() != source.print_offset_bits {
+            return Err(format!(
+                "{LABEL} planned print expression changed its node or offset"
+            ));
+        }
+        if Self::tran_print_time_scale_factor(&plan.source)?.to_bits() != 1.0f64.to_bits() {
+            return Err(format!(
+                "{LABEL} generator consumes physical TIME and does not admit output time scaling"
+            ));
+        }
+        if Self::analytic_sinusoidal_rc_source_contract(&plan.source)? != *source {
+            return Err(format!(
+                "{LABEL} plan source changed after source-form qualification"
+            ));
+        }
+        Ok(())
+    }
+
+    fn analytic_sinusoidal_rc_specification(
+        netlist: &Netlist,
+        plan: &XyceStaticTranPlan,
+        source: &XyceAnalyticSinusoidalRcSourceContract,
+    ) -> Result<XyceAnalyticSinusoidalRcSpecification, String> {
+        const LABEL: &str = "analytic sinusoidal first-order RC";
+        if netlist.title.trim().is_empty()
+            || !netlist.models.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+        {
+            return Err(format!(
+                "{LABEL} contains model, hierarchy, auxiliary-analysis, external-model, or diagnostic state"
+            ));
+        }
+        if !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(format!("{LABEL} does not admit parameters or functions"));
+        }
+        if !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }]) {
+            return Err(format!("{LABEL} requires exactly one transient analysis"));
+        }
+        if !Self::analytic_sinusoidal_rc_options_match(&netlist.options, source) {
+            return Err(format!(
+                "{LABEL} parsed options differ from the qualified TIMEINT source contract"
+            ));
+        }
+        if netlist.elements.len() != 3 {
+            return Err(format!(
+                "{LABEL} requires exactly three elements, found {}",
+                netlist.elements.len()
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            if let Some(alias) = element.nodes.iter().find(|node| {
+                crate::compat::ground::is_spice_ground_name(node)
+                    && !Self::passive_primary_name_is_literal_ground(node)
+            }) {
+                return Err(format!(
+                    "element '{}' uses ground alias '{}'; {LABEL} requires literal node 0",
+                    element.name, alias
+                ));
+            }
+            let name = Self::normalize_device_instance_name(&element.name);
+            if elements.insert(name.clone(), element).is_some() {
+                return Err(format!("{LABEL} contains duplicate element '{name}'"));
+            }
+        }
+        let expected_names = [
+            source.capacitor_name.clone(),
+            source.resistor_name.clone(),
+            source.source_name.clone(),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        if elements.keys().cloned().collect::<BTreeSet<_>>() != expected_names {
+            return Err(format!(
+                "{LABEL} parsed element inventory differs from source provenance"
+            ));
+        }
+
+        let capacitor = elements
+            .get(&source.capacitor_name)
+            .expect("element inventory was checked");
+        let capacitor_nodes = capacitor
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_passive_primary_node_name(node))
+            .collect::<Vec<_>>();
+        let ElementKind::Capacitor {
+            value: capacitance,
+            value_expr,
+            initial_voltage,
+            model,
+            instance_params,
+            deferred_params,
+        } = &capacitor.kind
+        else {
+            return Err(format!(
+                "source-qualified capacitor '{}' parsed as another element kind",
+                capacitor.name
+            ));
+        };
+        if capacitor_nodes.as_slice() != source.capacitor_nodes
+            || !capacitance.is_finite()
+            || capacitance.to_bits() != source.capacitance_bits
+            || value_expr.is_some()
+            || initial_voltage.is_some()
+            || model.is_some()
+            || !instance_params.is_empty()
+            || !deferred_params.is_empty()
+        {
+            return Err(format!(
+                "capacitor '{}' differs from the direct value/no-IC source contract",
+                capacitor.name
+            ));
+        }
+        let effective_capacitance = Self::effective_capacitor_value(netlist, &capacitor.name)
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .ok_or_else(|| format!("{LABEL} capacitance did not resolve"))?;
+        if effective_capacitance.to_bits() != source.capacitance_bits {
+            return Err(format!(
+                "{LABEL} explicit and effective capacitance values differ"
+            ));
+        }
+
+        let resistor = elements
+            .get(&source.resistor_name)
+            .expect("element inventory was checked");
+        let resistor_nodes = resistor
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_passive_primary_node_name(node))
+            .collect::<Vec<_>>();
+        let ElementKind::Resistor {
+            value: resistance,
+            value_expr,
+            model,
+            instance_params,
+            deferred_params,
+        } = &resistor.kind
+        else {
+            return Err(format!(
+                "source-qualified resistor '{}' parsed as another element kind",
+                resistor.name
+            ));
+        };
+        if resistor_nodes.as_slice() != source.resistor_nodes
+            || !resistance.is_finite()
+            || resistance.to_bits() != source.resistance_bits
+            || value_expr.is_some()
+            || model.is_some()
+            || !instance_params.is_empty()
+            || !deferred_params.is_empty()
+        {
+            return Err(format!(
+                "resistor '{}' differs from the direct source contract",
+                resistor.name
+            ));
+        }
+        let effective_resistance = Self::effective_resistor_value(netlist, &resistor.name)
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .ok_or_else(|| format!("{LABEL} resistance did not resolve"))?;
+        if effective_resistance.to_bits() != source.resistance_bits {
+            return Err(format!(
+                "{LABEL} explicit and effective resistance values differ"
+            ));
+        }
+
+        let voltage_source = elements
+            .get(&source.source_name)
+            .expect("element inventory was checked");
+        let source_nodes = voltage_source
+            .nodes
+            .iter()
+            .map(|node| Self::canonical_passive_primary_node_name(node))
+            .collect::<Vec<_>>();
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Sin {
+            offset,
+            amplitude,
+            frequency,
+            delay,
+            damping,
+            phase,
+        }) = &voltage_source.kind
+        else {
+            return Err(format!(
+                "source-qualified voltage source '{}' is not direct SIN",
+                voltage_source.name
+            ));
+        };
+        if source_nodes.as_slice() != source.source_nodes
+            || offset.to_bits() != source.source_offset_bits
+            || amplitude.to_bits() != source.source_amplitude_bits
+            || frequency.to_bits() != source.source_frequency_bits
+            || delay.to_bits() != source.source_delay_bits
+            || damping.to_bits() != source.source_damping_bits
+            || phase.to_bits() != 0.0f64.to_bits()
+        {
+            return Err(format!(
+                "voltage source '{}' differs from direct SIN source provenance",
+                voltage_source.name
+            ));
+        }
+
+        let [capacitor_node, capacitor_ground] = &source.capacitor_nodes;
+        let [source_node, source_ground] = &source.source_nodes;
+        let [resistor_a, resistor_b] = &source.resistor_nodes;
+        if capacitor_ground != "0"
+            || source_ground != "0"
+            || capacitor_node == "0"
+            || source_node == "0"
+            || capacitor_node == source_node
+            || source.probe_node != *capacitor_node
+            || !((resistor_a == capacitor_node && resistor_b == source_node)
+                || (resistor_b == capacitor_node && resistor_a == source_node))
+        {
+            return Err(format!(
+                "{LABEL} topology must be C(output,0), R(output,source), and SIN V(source,0)"
+            ));
+        }
+
+        let expression = Self::print_expression_inner(&source.print_expression)
+            .ok_or_else(|| format!("{LABEL} print expression lost its braces"))?;
+        let prepared = prepare_behavioral_expression(expression, &netlist.params)
+            .map_err(|err| format!("could not prepare {LABEL} print expression: {err}"))?;
+        let ast = parse_expression_strict(&prepared)
+            .map_err(|err| format!("could not parse prepared {LABEL} print expression: {err}"))?;
+        let Expr::Binary {
+            op: crate::expr::BinaryOp::Add,
+            left,
+            right,
+        } = ast
+        else {
+            return Err(format!(
+                "{LABEL} prepared expression must directly add voltage and offset"
+            ));
+        };
+        let Expr::NodeVoltage(node) = left.as_ref() else {
+            return Err(format!(
+                "{LABEL} prepared expression left operand is not node voltage"
+            ));
+        };
+        let Expr::Const(print_offset) = right.as_ref() else {
+            return Err(format!(
+                "{LABEL} prepared expression right operand is not a constant"
+            ));
+        };
+        if Self::canonical_passive_primary_node_name(node) != source.probe_node
+            || print_offset.to_bits() != source.print_offset_bits
+        {
+            return Err(format!(
+                "{LABEL} prepared expression changed its voltage node or offset"
+            ));
+        }
+        if plan.tran.step.to_bits() != source.tran_step_bits
+            || plan.tran.stop.to_bits() != source.tran_stop_bits
+        {
+            return Err(format!("{LABEL} parsed and planned .TRAN tuples differ"));
+        }
+
+        Ok(XyceAnalyticSinusoidalRcSpecification {
+            output_node: capacitor_node.clone(),
+            print_expression: source.print_expression.clone(),
+            resistance: effective_resistance,
+            capacitance: effective_capacitance,
+            source_frequency: *frequency,
+            print_offset: *print_offset,
         })
     }
 
@@ -13049,6 +14303,7 @@ impl XyceTestRunner {
     fn normalized_xyce_verify_transient_rows(
         table: &XycePrnTable,
         role: &str,
+        tolerance: XyceVerifyTransientTolerance,
     ) -> Result<Vec<(Value, Vec<Value>)>, String> {
         if table.columns.len() < 3
             || !table.columns[0].eq_ignore_ascii_case("Index")
@@ -13077,16 +14332,21 @@ impl XyceTestRunner {
                 ));
             }
 
-            let zero_small = |value: Value| {
-                if value.abs() <= XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE {
+            let zero_small = |value: Value, zero_tolerance: Value| {
+                if value.abs() <= zero_tolerance {
                     0.0
                 } else {
                     value
                 }
             };
-            let time = zero_small(Self::xyce_default_prn_roundtrip(row[1]).map_err(|err| {
-                format!("could not serialize {role} TIME at row {row_index}: {err}")
-            })?);
+            // rc_osc overrides only its expression's *COMP tolerance. TIME
+            // retains Release 7.10's independent default zero threshold.
+            let time = zero_small(
+                Self::xyce_default_prn_roundtrip(row[1]).map_err(|err| {
+                    format!("could not serialize {role} TIME at row {row_index}: {err}")
+                })?,
+                XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
+            );
             let mut values = Vec::with_capacity(row.len() - 2);
             for (column_index, &value) in row[2..].iter().enumerate() {
                 values.push(zero_small(
@@ -13096,6 +14356,7 @@ impl XyceTestRunner {
                             table.columns[column_index + 2]
                         )
                     })?,
+                    tolerance.zero,
                 ));
             }
             if normalized
@@ -13153,13 +14414,23 @@ impl XyceTestRunner {
     }
 
     fn xyce_verify_normalized_error(expected: Value, actual: Value) -> Value {
+        Self::xyce_verify_normalized_error_with_tolerance(
+            expected,
+            actual,
+            XyceVerifyTransientTolerance::release_7_10_default(),
+        )
+    }
+
+    fn xyce_verify_normalized_error_with_tolerance(
+        expected: Value,
+        actual: Value,
+        tolerance: XyceVerifyTransientTolerance,
+    ) -> Value {
         let difference = expected - actual;
-        if difference.abs() < XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE {
+        if difference.abs() < tolerance.absolute_difference {
             0.0
         } else {
-            difference
-                / (XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE * expected.abs()
-                    + XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE)
+            difference / (tolerance.relative * expected.abs() + tolerance.absolute)
         }
     }
 
@@ -13168,6 +14439,35 @@ impl XyceTestRunner {
         good: &XycePrnTable,
         test: &XycePrnTable,
     ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+            good,
+            test,
+            XyceVerifyTransientTolerance::release_7_10_default(),
+        )
+    }
+
+    fn compare_xyce_verify_transient_tables_with_tolerance(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        tolerance: XyceVerifyTransientTolerance,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if good.columns.len() != 3 || test.columns.len() != 3 {
+            return Err(format!(
+                "custom xyce_verify transient tolerance requires exactly one output column, got good={:?}, test={:?}",
+                good.columns, test.columns
+            ));
+        }
+        self.compare_xyce_verify_transient_tables_with_uniform_tolerance(good, test, tolerance)
+    }
+
+    fn compare_xyce_verify_transient_tables_with_uniform_tolerance(
+        &self,
+        good: &XycePrnTable,
+        test: &XycePrnTable,
+        tolerance: XyceVerifyTransientTolerance,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        let tolerance = tolerance.validate()?;
         if good.columns.len() != test.columns.len()
             || !good
                 .columns
@@ -13181,8 +14481,8 @@ impl XyceTestRunner {
             ));
         }
 
-        let good_rows = Self::normalized_xyce_verify_transient_rows(good, "good")?;
-        let test_rows = Self::normalized_xyce_verify_transient_rows(test, "test")?;
+        let good_rows = Self::normalized_xyce_verify_transient_rows(good, "good", tolerance)?;
+        let test_rows = Self::normalized_xyce_verify_transient_rows(test, "test", tolerance)?;
         if good_rows.len() < 2 || test_rows.len() < 2 {
             return Err(format!(
                 "xyce_verify transient RMS requires at least two distinct printed times in both series, found good={} and test={}",
@@ -13262,7 +14562,8 @@ impl XyceTestRunner {
             for probe_index in 0..probe_count {
                 let expected = good_values[probe_index];
                 let actual = test_values[probe_index];
-                let normalized_error = Self::xyce_verify_normalized_error(expected, actual);
+                let normalized_error =
+                    Self::xyce_verify_normalized_error_with_tolerance(expected, actual, tolerance);
                 if !normalized_error.is_finite() {
                     return Err(format!(
                         "normalized xyce_verify error is non-finite at test row {row_index}, probe {}",
@@ -24258,10 +25559,7 @@ impl XyceTestRunner {
             .or_else(|| self.supernode_family_contract(deck))
     }
 
-    fn analytic_rc_wrapper_contract(
-        &self,
-        deck: &XyceDeck,
-    ) -> Option<Result<XyceAnalyticRcContract, String>> {
+    fn analytic_generated_wrapper_source(&self, deck: &XyceDeck) -> Option<String> {
         let relative_path = Self::normalize_manifest_key(&deck.relative_path);
         if !relative_path.starts_with("netlists/")
             || !self.requires_upstream_wrapper(&deck.relative_path)
@@ -24272,7 +25570,14 @@ impl XyceTestRunner {
         {
             return None;
         }
-        let source = fs::read_to_string(&deck.path).ok()?;
+        fs::read_to_string(&deck.path).ok()
+    }
+
+    fn analytic_rc_wrapper_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceAnalyticRcContract, String>> {
+        let source = self.analytic_generated_wrapper_source(deck)?;
         if !Self::is_analytic_rc_wrapper_candidate(&source) {
             return None;
         }
@@ -24289,6 +25594,42 @@ impl XyceTestRunner {
             Ok(XyceAnalyticRcContract {
                 plan,
                 specification,
+            })
+        })())
+    }
+
+    fn analytic_sinusoidal_rc_wrapper_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<Result<XyceAnalyticSinusoidalRcContract, String>> {
+        let source = self.analytic_generated_wrapper_source(deck)?;
+        if !Self::is_analytic_sinusoidal_rc_wrapper_candidate(&source) {
+            return None;
+        }
+        Some((|| {
+            let source_contract = Self::analytic_sinusoidal_rc_source_contract(&source)?;
+            let plan = self.static_tran_plan_for_path_with_purpose(
+                &deck.path,
+                XyceStaticTranPlanPurpose::AnalyticOracle,
+            )?;
+            Self::validate_analytic_sinusoidal_rc_plan(&plan, &source_contract)?;
+            let netlist =
+                Self::parse_xyce_netlist(&plan.source, &plan.deck_path).map_err(|err| {
+                    format!("netlist parser rejected analytic sinusoidal RC deck: {err}")
+                })?;
+            let specification =
+                Self::analytic_sinusoidal_rc_specification(&netlist, &plan, &source_contract)?;
+            let tolerance = XyceVerifyTransientTolerance {
+                relative: Value::from_bits(source_contract.verify_reltol_bits),
+                absolute: Value::from_bits(source_contract.verify_abstol_bits),
+                zero: XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
+                absolute_difference: XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+            }
+            .validate()?;
+            Ok(XyceAnalyticSinusoidalRcContract {
+                plan,
+                specification,
+                tolerance,
             })
         })())
     }
@@ -28019,6 +29360,497 @@ Vbias source 0 0\n\
         );
 
         fs::remove_dir_all(&root).expect("remove renamed analytic fixture");
+    }
+
+    fn analytic_sinusoidal_rc_test_source() -> &'static str {
+        "renamed sinusoidal RC fixture\n\
+.TRAN 0 2.0e-4\n\
+.PRINT TRAN {v(out)+0.002}\n\
+.OPTIONS TIMEINT RELTOL=1.0e-4 ABSTOL=1.0e-4 METHOD=7\n\
+*COMP {v(out)+0.002} RELTOL=1.0e-6 ABSTOL=1.0e-6\n\
+Vdrive source 0 SIN 0 1V 1e5 0 0\n\
+Rload source out 1k\n\
+Cload out 0 2u\n\
+.END\n"
+    }
+
+    fn analytic_sinusoidal_rc_test_plan(source: &str) -> XyceStaticTranPlan {
+        XyceStaticTranPlan {
+            deck_path: PathBuf::from("renamed-analytic-sinusoidal-rc.cir"),
+            reference_path: PathBuf::from(
+                "definitely-missing-analytic-sinusoidal-rc-reference.prn",
+            ),
+            source: source.to_string(),
+            print: XycePrintRequest {
+                probes: vec!["{v(out)+0.002}".to_string()],
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 0.0,
+                stop: 2.0e-4,
+                start: None,
+                max_step: None,
+                uic: false,
+            },
+            steps: Vec::new(),
+            contract: XyceStaticTranContract::WrapperStatic,
+            wrapper_tolerance: None,
+        }
+    }
+
+    fn analytic_sinusoidal_rc_test_specification(
+        source: &str,
+    ) -> Result<XyceAnalyticSinusoidalRcSpecification, String> {
+        let source_contract = XyceTestRunner::analytic_sinusoidal_rc_source_contract(source)?;
+        let plan = analytic_sinusoidal_rc_test_plan(source);
+        XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&plan, &source_contract)?;
+        let netlist = XyceTestRunner::parse_xyce_netlist(source, &plan.deck_path)
+            .map_err(|err| err.to_string())?;
+        XyceTestRunner::analytic_sinusoidal_rc_specification(&netlist, &plan, &source_contract)
+    }
+
+    #[test]
+    fn analytic_sinusoidal_rc_source_and_semantic_contracts_are_fail_closed() {
+        let source = analytic_sinusoidal_rc_test_source();
+        assert!(XyceTestRunner::is_analytic_sinusoidal_rc_wrapper_candidate(
+            source
+        ));
+        let contract = XyceTestRunner::analytic_sinusoidal_rc_source_contract(source)
+            .expect("renamed direct sinusoidal RC source qualifies");
+        assert_eq!(contract.capacitor_name, "cload");
+        assert_eq!(contract.resistor_name, "rload");
+        assert_eq!(contract.source_name, "vdrive");
+        assert_eq!(contract.probe_node, "out");
+        assert_eq!(
+            contract.verify_reltol_bits,
+            XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE.to_bits()
+        );
+
+        let specification = analytic_sinusoidal_rc_test_specification(source)
+            .expect("fixed generator values and low-pass topology qualify");
+        assert_eq!(specification.output_node, "out");
+        assert_eq!(
+            specification.resistance.to_bits(),
+            XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_RESISTANCE.to_bits()
+        );
+        assert_eq!(
+            specification.capacitance.to_bits(),
+            XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_CAPACITANCE.to_bits()
+        );
+
+        for malformed in [
+            source.replace("Rload source out 1k", "Rload source out 2k"),
+            source.replace("Cload out 0 2u", "Cload out 0 1u"),
+            source.replace("SIN 0 1V 1e5", "SIN 0 2V 1e5"),
+            source.replace("SIN 0 1V 1e5 0 0", "SIN 0 1V 2e5 0 0"),
+            source.replace("SIN 0 1V 1e5 0 0", "SIN 0 1V 1e5 1n 0"),
+            source.replace("SIN 0 1V 1e5 0 0", "SIN 0 1V 1e5 0 1"),
+            source.replace("SIN 0 1V 1e5 0 0", "SIN 0 1V 1e5 0 0 1"),
+            source.replace("{v(out)+0.002}", "{v(out)+0.003}"),
+            source.replace("{v(out)+0.002}", "{v(out) + 0.002}"),
+            source.replace("METHOD=7", "METHOD=8"),
+            source.replace("RELTOL=1.0e-4", "RELTOL=2.0e-4"),
+            source.replace("ABSTOL=1.0e-6", "ABSTOL=2.0e-6"),
+            source.replace(".TRAN 0 2.0e-4", ".TRAN 0 1.0e-4"),
+            source.replace("Cload out 0 2u", "Cload out 0 2u IC=0"),
+        ] {
+            assert!(
+                XyceTestRunner::is_analytic_sinusoidal_rc_wrapper_candidate(&malformed),
+                "a near-shape candidate must reach strict qualification: {malformed}"
+            );
+            assert!(
+                XyceTestRunner::analytic_sinusoidal_rc_source_contract(&malformed).is_err(),
+                "fixed generator provenance must reject: {malformed}"
+            );
+        }
+
+        let missing_comp = source.replace("*COMP {v(out)+0.002} RELTOL=1.0e-6 ABSTOL=1.0e-6\n", "");
+        let duplicate_comp =
+            format!("{source}*COMP {{v(out)+0.002}} RELTOL=1.0e-6 ABSTOL=1.0e-6\n");
+        for malformed in [missing_comp, duplicate_comp] {
+            assert!(
+                XyceTestRunner::is_analytic_sinusoidal_rc_wrapper_candidate(&malformed),
+                "fixed circuit shape must route missing/duplicate comparison provenance to strict qualification"
+            );
+            assert!(
+                XyceTestRunner::analytic_sinusoidal_rc_source_contract(&malformed).is_err(),
+                "missing/duplicate *COMP must fail qualification"
+            );
+        }
+
+        let wrong_comp_probe =
+            source.replacen("*COMP {v(out)+0.002}", "*COMP {v(source)+0.002}", 1);
+        assert!(
+            XyceTestRunner::analytic_sinusoidal_rc_source_contract(&wrong_comp_probe).is_err(),
+            "*COMP must name the exact printed expression"
+        );
+        let aliased_ground = source.replace("Cload out 0 2u", "Cload out GND 2u");
+        let err = analytic_sinusoidal_rc_test_specification(&aliased_ground)
+            .expect_err("literal ground provenance is required");
+        assert!(
+            err.contains("ground alias"),
+            "unexpected ground error: {err}"
+        );
+        let wrong_topology = source.replace("Rload source out 1k", "Rload source 0 1k");
+        let err = analytic_sinusoidal_rc_test_specification(&wrong_topology)
+            .expect_err("resistor must connect source and output");
+        assert!(err.contains("topology"), "unexpected topology error: {err}");
+        let extra_directive = source.replace(".END", ".NODESET V(out)=0\n.END");
+        assert!(
+            !XyceTestRunner::is_analytic_sinusoidal_rc_wrapper_candidate(&extra_directive),
+            "additional directives belong to a distinct wrapper contract"
+        );
+    }
+
+    #[test]
+    fn analytic_sinusoidal_rc_plan_rejects_unqualified_execution_state() {
+        let source = analytic_sinusoidal_rc_test_source();
+        let source_contract = XyceTestRunner::analytic_sinusoidal_rc_source_contract(source)
+            .expect("canonical sinusoidal source contract qualifies");
+        let plan = analytic_sinusoidal_rc_test_plan(source);
+        XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&plan, &source_contract)
+            .expect("canonical sinusoidal analytic plan qualifies");
+
+        let mut uic = plan.clone();
+        uic.tran.uic = true;
+        assert!(
+            XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&uic, &source_contract).is_err()
+        );
+        let mut stepped = plan.clone();
+        stepped.steps.push(StepCommand {
+            target: StepTarget::Param,
+            name: "gain".to_string(),
+            param_name: None,
+            sweep: StepSweep::List(vec![1.0]),
+        });
+        assert!(
+            XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&stepped, &source_contract)
+                .is_err()
+        );
+        let mut conststep = plan.clone();
+        conststep.timeint_conststep = true;
+        assert!(
+            XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&conststep, &source_contract)
+                .is_err()
+        );
+        let mut extra_probe = plan.clone();
+        extra_probe.print.probes.push("V(source)".to_string());
+        assert!(
+            XyceTestRunner::validate_analytic_sinusoidal_rc_plan(&extra_probe, &source_contract)
+                .is_err()
+        );
+        let mut changed_source = plan;
+        changed_source.source = source.replace("ABSTOL=1.0e-4", "ABSTOL=2.0e-4");
+        assert!(
+            XyceTestRunner::validate_analytic_sinusoidal_rc_plan(
+                &changed_source,
+                &source_contract,
+            )
+            .is_err(),
+            "source provenance changes must not reuse a stale plan contract"
+        );
+    }
+
+    #[test]
+    fn analytic_sinusoidal_rc_reference_uses_serialized_time_and_fixed_pi() {
+        let specification =
+            analytic_sinusoidal_rc_test_specification(analytic_sinusoidal_rc_test_source())
+                .expect("canonical sinusoidal RC specification qualifies");
+        let tolerance = XyceVerifyTransientTolerance {
+            relative: XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE,
+            absolute: XYCE_ANALYTIC_SINUSOIDAL_RC_VERIFY_TOLERANCE,
+            zero: XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
+            absolute_difference: XYCE_VERIFY_DEFAULT_ABSOLUTE_DIFFERENCE_TOLERANCE,
+        };
+        let raw_time = 1.000000004e-5;
+        let printed_time = XyceTestRunner::xyce_default_prn_roundtrip(raw_time)
+            .expect("default PRN time round trip succeeds");
+        assert_ne!(raw_time.to_bits(), printed_time.to_bits());
+        let actual = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "TIME".to_string(),
+                "{v(out)+0.002}".to_string(),
+            ],
+            rows: vec![
+                vec![0.0, 0.0, 0.002],
+                vec![1.0, raw_time, 0.002],
+                vec![2.0, 2.0e-4, 0.002],
+            ],
+        };
+        XyceTestRunner::validate_analytic_sinusoidal_rc_output_domain(
+            &actual,
+            &specification,
+            2.0e-4,
+            tolerance,
+        )
+        .expect("self-grid oracle spans the exact serialized domain");
+        let reference =
+            XyceTestRunner::analytic_sinusoidal_rc_reference_table(&actual, &specification)
+                .expect("fixed sinusoidal RC reference builds");
+        assert_eq!(reference.rows[1][1].to_bits(), printed_time.to_bits());
+
+        let a = -1.0
+            / (XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_RESISTANCE
+                * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_CAPACITANCE);
+        let s = 2.0
+            * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PI
+            * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_FREQUENCY;
+        let denominator = a * a + s * s;
+        let initial_coefficient = -a * s / denominator;
+        let expected = XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET
+            + initial_coefficient * (a * printed_time).exp()
+            + a * (a * (s * printed_time).sin() + s * (s * printed_time).cos()) / denominator;
+        assert_eq!(reference.rows[1][2].to_bits(), expected.to_bits());
+        assert_eq!(
+            reference.rows[1][2].to_bits(),
+            0.001996031059679484f64.to_bits(),
+            "fixed Release 7.10 sidecar value must not drift with the platform PI constant"
+        );
+        let true_pi_s = 2.0 * std::f64::consts::PI * XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_FREQUENCY;
+        let true_pi_denominator = a * a + true_pi_s * true_pi_s;
+        let true_pi_initial = -a * true_pi_s / true_pi_denominator;
+        let true_pi_value = XYCE_ANALYTIC_SINUSOIDAL_RC_ORACLE_PRINT_OFFSET
+            + true_pi_initial * (a * printed_time).exp()
+            + a * (a * (true_pi_s * printed_time).sin()
+                + true_pi_s * (true_pi_s * printed_time).cos())
+                / true_pi_denominator;
+        assert_ne!(
+            reference.rows[1][2].to_bits(),
+            true_pi_value.to_bits(),
+            "the upstream generator deliberately does not use full-precision PI"
+        );
+
+        let mut wrong_initial = actual.clone();
+        wrong_initial.rows[0][2] = 0.0;
+        assert!(
+            XyceTestRunner::validate_analytic_sinusoidal_rc_output_domain(
+                &wrong_initial,
+                &specification,
+                2.0e-4,
+                tolerance,
+            )
+            .is_err(),
+            "the exact initial expression value cannot be diluted by integrated RMS"
+        );
+        let mut close_initial = actual.clone();
+        close_initial.rows[0][2] = 0.0020005;
+        XyceTestRunner::validate_analytic_sinusoidal_rc_output_domain(
+            &close_initial,
+            &specification,
+            2.0e-4,
+            tolerance,
+        )
+        .expect("a non-bit-identical initial value within the authoritative verifier bound passes");
+        let mut truncated = actual;
+        truncated.rows.pop();
+        assert!(
+            XyceTestRunner::validate_analytic_sinusoidal_rc_output_domain(
+                &truncated,
+                &specification,
+                2.0e-4,
+                tolerance,
+            )
+            .is_err(),
+            "the self-grid oracle cannot accept a truncated trace"
+        );
+    }
+
+    #[test]
+    fn xyce_verify_custom_transient_tolerance_preserves_release_boundaries() {
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+        let columns = vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+        ];
+        let tolerance = XyceVerifyTransientTolerance {
+            relative: 1.0,
+            absolute: 1.0,
+            zero: 0.0,
+            absolute_difference: 1.0,
+        };
+        assert_eq!(
+            XyceTestRunner::xyce_verify_normalized_error_with_tolerance(0.0, 1.0, tolerance,)
+                .to_bits(),
+            (-1.0f64).to_bits(),
+            "difference exactly equal to ABSDIFFTOL is not suppressed"
+        );
+        let good = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![vec![0.0, 0.0, 0.0], vec![1.0, 1.0, 0.0]],
+        };
+        let rms_equal_to_one = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![vec![0.0, 0.0, 1.000000004], vec![1.0, 1.0, 1.000000004]],
+        };
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables_with_tolerance(
+                    &good,
+                    &rms_equal_to_one,
+                    tolerance,
+                )
+                .expect("RMS boundary tables compare")
+                .is_empty(),
+            "serialized difference exactly equal to ABSDIFFTOL yields RMS=1 and passes"
+        );
+        let rms_above_one = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![vec![0.0, 0.0, 1.000000006], vec![1.0, 1.0, 1.000000006]],
+        };
+        let mismatches = runner
+            .compare_xyce_verify_transient_tables_with_tolerance(&good, &rms_above_one, tolerance)
+            .expect("above-boundary tables compare structurally");
+        assert_eq!(mismatches.len(), 1);
+        assert!(mismatches[0].relative_error > 1.0);
+
+        let zero_tolerance = XyceVerifyTransientTolerance {
+            relative: 1.0e-6,
+            absolute: 1.0e-4,
+            zero: 1.0e-3,
+            absolute_difference: 1.0e-12,
+        };
+        let zero_good = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![
+                vec![0.0, 0.0, 1.0e-3],
+                vec![1.0, 5.0e-13, 99.0],
+                vec![2.0, 1.0, 0.0],
+            ],
+        };
+        let zero_test = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![
+                vec![0.0, 0.0, -1.0e-3],
+                vec![1.0, 5.0e-13, -99.0],
+                vec![2.0, 1.0, 0.0],
+            ],
+        };
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables_with_tolerance(
+                    &zero_good,
+                    &zero_test,
+                    zero_tolerance,
+                )
+                .expect("zero/duplicate tables compare")
+                .is_empty(),
+            "ZEROTOL equality zeroes the first values and duplicate rounded TIME keeps the first row"
+        );
+
+        let interpolation_tolerance = XyceVerifyTransientTolerance {
+            relative: 1.0,
+            absolute: 1.0,
+            zero: 0.0,
+            absolute_difference: 0.0,
+        };
+        let interpolation_good = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![vec![0.0, 0.0, 0.0], vec![1.0, 2.0, 2.0]],
+        };
+        let interpolation_test = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![
+                vec![0.0, 0.5, 0.5],
+                vec![1.0, 1.0, 4.0],
+                vec![2.0, 2.000000004, 2.0],
+            ],
+        };
+        let interpolation_mismatches = runner
+            .compare_xyce_verify_transient_tables_with_tolerance(
+                &interpolation_good,
+                &interpolation_test,
+                interpolation_tolerance,
+            )
+            .expect("interpolated test-domain RMS compares");
+        assert_eq!(interpolation_mismatches.len(), 1);
+        assert!(
+            (interpolation_mismatches[0].relative_error - 1.125f64.sqrt()).abs()
+                <= 4.0 * f64::EPSILON,
+            "RMS must use trapezoidal weighting over the surviving test duration"
+        );
+        let mut uncovered = interpolation_test;
+        uncovered.rows[2][1] = 2.000000006;
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables_with_tolerance(
+                    &interpolation_good,
+                    &uncovered,
+                    interpolation_tolerance,
+                )
+                .is_err(),
+            "serialized test endpoint beyond the good domain must fail coverage"
+        );
+
+        let multi_probe = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(out)".to_string(),
+                "V(source)".to_string(),
+            ],
+            rows: vec![vec![0.0, 0.0, 0.0, 0.0], vec![1.0, 1.0, 0.0, 0.0]],
+        };
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables_with_tolerance(
+                    &multi_probe,
+                    &multi_probe,
+                    interpolation_tolerance,
+                )
+                .is_err(),
+            "one custom trace tolerance must not be silently applied to multiple probes"
+        );
+    }
+
+    #[test]
+    fn analytic_sinusoidal_rc_detector_is_path_independent_and_fail_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-analytic-sinusoidal-rc-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after epoch")
+                .as_nanos()
+        ));
+        let family_dir = root.join("Netlists").join("RENAMED_SINUSOIDAL_ANALYTIC");
+        fs::create_dir_all(&family_dir).expect("create renamed sinusoidal analytic fixture");
+        let relative = "Netlists/RENAMED_SINUSOIDAL_ANALYTIC/curve.cir";
+        let deck_path = root.join(relative);
+        fs::write(&deck_path, analytic_sinusoidal_rc_test_source())
+            .expect("write renamed sinusoidal analytic deck");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper provenance manifest");
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let deck = XyceDeck {
+            path: deck_path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+
+        runner
+            .analytic_sinusoidal_rc_wrapper_contract(&deck)
+            .expect("renamed sinusoidal source shape is detected")
+            .expect("renamed sinusoidal source qualifies without a path allowlist");
+        fs::write(
+            &deck_path,
+            analytic_sinusoidal_rc_test_source()
+                .replace("Rload source out 1k", "Rload source out 2k"),
+        )
+        .expect("mutate sinusoidal analytic deck");
+        assert!(
+            matches!(
+                runner.analytic_sinusoidal_rc_wrapper_contract(&deck),
+                Some(Err(_))
+            ),
+            "a malformed candidate remains an executed qualification failure"
+        );
+        fs::remove_dir_all(&root).expect("remove renamed sinusoidal analytic fixture");
     }
 
     #[test]

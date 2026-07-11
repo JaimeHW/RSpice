@@ -963,6 +963,36 @@ fn test_xyce_capacitor_analytic_newlte_sibling_runs() {
 }
 
 #[test]
+fn test_xyce_analytic_sinusoidal_rc_wrappers_run() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/CAPACITOR/rc_osc.cir",
+        "Netlists/TIA/TRAP/CAPACITOR/rc_osc.cir",
+    ] {
+        assert!(
+            runner.requires_upstream_wrapper(relative),
+            "{relative} should retain removed analytic-wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass the generated Release 7.10 sinusoidal RC oracle, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should satisfy its custom xyce_verify integrated transient comparison"
+        );
+        assert_eq!(
+            result.contract,
+            "analytic_sinusoidal_first_order_rc_tran_wrapper"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_mid_certification_transient_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
