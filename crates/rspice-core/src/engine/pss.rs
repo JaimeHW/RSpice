@@ -25,13 +25,52 @@ use crate::analysis::transient::{
     BreakpointManager, CompanionCoefficients, LteEstimator, TimestepController, TrapGearController,
 };
 use crate::analysis::{
-    PeriodDetector, PeriodicWaveform, PssConfig, PssResult, ShootingNewtonSolver, ShootingState,
+    IntegrationMethod, PeriodDetector, PeriodicWaveform, PssConfig, PssResult,
+    ShootingNewtonSolver, ShootingState,
 };
 use crate::circuit::Circuit;
 use crate::solver::StaticMatrix;
 use crate::{Netlist, Value};
 
 type AutonomousNewtonStep = (Vec<Value>, Value, Vec<Vec<Value>>);
+
+/// Accepted-step timing state for the adaptive PSS trajectory.
+///
+/// Coefficient construction is deliberately read-only: a rejected Newton
+/// trial may change the proposed `dt`, but it must not replace the interval
+/// between the two most recent accepted solution points. Only `accept` rotates
+/// that history.
+#[derive(Debug, Clone, Copy, Default)]
+struct PssAcceptedStepHistory {
+    previous_accepted_dt: Option<Value>,
+}
+
+impl PssAcceptedStepHistory {
+    #[inline]
+    fn coefficients_for_trial(
+        &self,
+        method: IntegrationMethod,
+        dt: Value,
+    ) -> CompanionCoefficients {
+        match self.previous_accepted_dt {
+            Some(previous_dt) => {
+                CompanionCoefficients::for_method_with_previous_step(method, dt, previous_dt)
+            }
+            // Gear2 cannot form a valid second-order stencil until one real
+            // interval has been accepted. PSS normally selects BE explicitly
+            // for its first step; this fallback keeps the invariant local if
+            // the method-selection policy changes later.
+            None if method == IntegrationMethod::Gear2 => CompanionCoefficients::backward_euler(),
+            None => CompanionCoefficients::for_method(method),
+        }
+    }
+
+    #[inline]
+    fn accept(&mut self, dt: Value) {
+        debug_assert!(dt.is_finite() && dt > 0.0);
+        self.previous_accepted_dt = (dt.is_finite() && dt > 0.0).then_some(dt);
+    }
+}
 
 /// Recover the monodromy matrix from a converged shooting Jacobian:
 /// the shooting residual is F(x0) = x(T) - x0, so J = dF/dx0 = M - I and
@@ -1071,6 +1110,7 @@ impl Engine {
         const MAX_ITERATIONS: usize = 100_000;
         let mut total_iterations = 0;
         let mut first_step = true;
+        let mut accepted_step_history = PssAcceptedStepHistory::default();
 
         if let Some(tr) = trace.as_deref_mut() {
             tr.times.push(0.0);
@@ -1097,13 +1137,13 @@ impl Engine {
             // inductor-voltage history, so the trajectory depends only on the
             // shooting state that pss_set_reactive_state installed.
             let current_method = if first_step {
-                crate::analysis::IntegrationMethod::BackwardEuler
+                IntegrationMethod::BackwardEuler
             } else if fixed_grid {
-                crate::analysis::IntegrationMethod::Trapezoidal
+                IntegrationMethod::Trapezoidal
             } else {
                 trapgear.current_method()
             };
-            let coeff = CompanionCoefficients::for_method(current_method);
+            let coeff = accepted_step_history.coefficients_for_trial(current_method, dt);
 
             let Some(new_solution) =
                 self.pss_newton_solve(circuit, matrix, &coeff, t + dt, dt, &solution)?
@@ -1168,6 +1208,7 @@ impl Engine {
             }
 
             solution = new_solution;
+            accepted_step_history.accept(dt);
 
             if let Some(tr) = trace.as_deref_mut() {
                 tr.times.push(t);
@@ -1215,5 +1256,59 @@ impl Engine {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(actual: Value, expected: Value) {
+        let tolerance = 32.0 * Value::EPSILON * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "expected {expected:.17e}, got {actual:.17e}"
+        );
+    }
+
+    #[test]
+    fn adaptive_pss_gear2_uses_only_the_previous_accepted_timestep() {
+        let mut history = PssAcceptedStepHistory::default();
+
+        history.accept(1.0);
+        let rejected_trial = history.coefficients_for_trial(IntegrationMethod::Gear2, 2.0);
+        assert_close(rejected_trial.coeff_g, 5.0 / 3.0);
+        assert_close(rejected_trial.coeff_v_n, 3.0);
+        assert_close(rejected_trial.coeff_v_n_minus_1, -4.0 / 3.0);
+
+        // Merely constructing coefficients for the rejected 2x trial cannot
+        // rotate the accepted history. Its 0.5x retry still compares against
+        // the original accepted 1.0 interval.
+        assert_eq!(history.previous_accepted_dt, Some(1.0));
+        let retry = history.coefficients_for_trial(IntegrationMethod::Gear2, 0.5);
+        assert_close(retry.coeff_g, 4.0 / 3.0);
+        assert_close(retry.coeff_v_n, 1.5);
+        assert_close(retry.coeff_v_n_minus_1, -1.0 / 6.0);
+
+        history.accept(0.5);
+        let next_trial = history.coefficients_for_trial(IntegrationMethod::Gear2, 1.0);
+        assert_close(next_trial.coeff_g, 5.0 / 3.0);
+        assert_close(next_trial.coeff_v_n, 3.0);
+        assert_close(next_trial.coeff_v_n_minus_1, -4.0 / 3.0);
+    }
+
+    #[test]
+    fn adaptive_pss_gear2_without_accepted_timestep_history_restarts_at_order_one() {
+        let history = PssAcceptedStepHistory::default();
+        let coefficients = history.coefficients_for_trial(IntegrationMethod::Gear2, 2.0);
+        let backward_euler = CompanionCoefficients::backward_euler();
+
+        assert_eq!(coefficients.coeff_g, backward_euler.coeff_g);
+        assert_eq!(coefficients.coeff_v_n, backward_euler.coeff_v_n);
+        assert_eq!(
+            coefficients.coeff_v_n_minus_1,
+            backward_euler.coeff_v_n_minus_1
+        );
+        assert!(!coefficients.needs_two_history);
     }
 }

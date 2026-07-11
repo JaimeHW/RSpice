@@ -403,11 +403,18 @@ impl Capacitors {
         }
     }
 
-    /// Update capacitor state after a successful timestep
+    /// Update capacitor state after a successful timestep using the exact
+    /// coefficients that stamped that timestep.
     ///
-    /// Stores current voltage and calculates internal current based on integration method.
-    pub fn update_state(&mut self, solution: &[Value], dt: Value, method: IntegrationMethod) {
-        let coeff = CompanionCoefficients::for_method(method);
+    /// Adaptive integrators should prefer this entry point so the committed
+    /// current history cannot be reconstructed with a different timestep
+    /// ratio or integration order than the accepted linear system.
+    pub fn update_state_with_coefficients(
+        &mut self,
+        solution: &[Value],
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) {
         for (i, stamp) in self.stamps.iter().enumerate() {
             let v_curr = if stamp.pp.row != 0 {
                 solution[stamp.pp.row - 1]
@@ -440,6 +447,56 @@ impl Capacitors {
         }
     }
 
+    /// Update capacitor state with explicit accepted-timestep history.
+    ///
+    /// `previous_accepted_dt` is the interval from the two solution points
+    /// preceding this accepted step. Variable-step Gear2 uses it to construct
+    /// its nonuniform BDF2 stencil. `None` deliberately restarts Gear2 at
+    /// backward Euler order instead of inventing an equal previous step.
+    pub fn update_state_with_previous_step(
+        &mut self,
+        solution: &[Value],
+        dt: Value,
+        method: IntegrationMethod,
+        previous_accepted_dt: Option<Value>,
+    ) {
+        let coeff = match previous_accepted_dt {
+            Some(previous_dt) => {
+                CompanionCoefficients::for_method_with_previous_step(method, dt, previous_dt)
+            }
+            None if method == IntegrationMethod::Gear2 => CompanionCoefficients::backward_euler(),
+            None => CompanionCoefficients::for_method(method),
+        };
+        self.update_state_with_coefficients(solution, dt, &coeff);
+    }
+
+    /// Update capacitor state assuming the current and previous timesteps are
+    /// equal.
+    ///
+    /// This convenience is appropriate for fixed-grid integration. Adaptive
+    /// Gear2 callers must use [`Self::update_state_with_previous_step`] or,
+    /// preferably, [`Self::update_state_with_coefficients`].
+    pub fn update_state_equal_step(
+        &mut self,
+        solution: &[Value],
+        dt: Value,
+        method: IntegrationMethod,
+    ) {
+        let coeff = CompanionCoefficients::for_method(method);
+        self.update_state_with_coefficients(solution, dt, &coeff);
+    }
+
+    /// Legacy equal-step state update.
+    ///
+    /// This retains source compatibility, but its Gear2 behavior is explicitly
+    /// fixed-grid only. Adaptive callers must provide accepted-step history.
+    #[deprecated(
+        note = "Gear2 here assumes equal timesteps; use update_state_with_previous_step or update_state_with_coefficients"
+    )]
+    pub fn update_state(&mut self, solution: &[Value], dt: Value, method: IntegrationMethod) {
+        self.update_state_equal_step(solution, dt, method);
+    }
+
     /// Stamp all capacitors (legacy TripletMatrix support)
     #[inline]
     pub fn stamp_all(&self, matrix: &mut TripletMatrix, rhs: &mut [Value], dt: Value) {
@@ -456,5 +513,92 @@ impl Capacitors {
                 rhs[stamp.nn.row - 1] -= i_eq;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod capacitor_state_tests {
+    use super::*;
+
+    fn assert_close(actual: Value, expected: Value) {
+        let tolerance = 32.0 * Value::EPSILON * expected.abs().max(1.0);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "expected {expected:.17e}, got {actual:.17e}"
+        );
+    }
+
+    fn capacitor_with_history(
+        capacitance: Value,
+        previous_voltage: Value,
+        older_voltage: Value,
+    ) -> Capacitors {
+        let mut capacitors = Capacitors::new();
+        capacitors.add("C1".to_string(), 1, 0, capacitance);
+        capacitors.v_prev[0] = previous_voltage;
+        capacitors.v_prev_prev[0] = older_voltage;
+        capacitors
+    }
+
+    #[test]
+    fn variable_step_gear2_state_update_is_exact_for_an_affine_voltage() {
+        let dt = 2.0;
+        let previous_dt = 1.0;
+        let slope = 3.0;
+        let previous_voltage = 7.0;
+        let older_voltage = previous_voltage - slope * previous_dt;
+        let current_voltage = previous_voltage + slope * dt;
+        let capacitance = 0.25;
+        let mut capacitors = capacitor_with_history(capacitance, previous_voltage, older_voltage);
+
+        capacitors.update_state_with_previous_step(
+            &[current_voltage],
+            dt,
+            IntegrationMethod::Gear2,
+            Some(previous_dt),
+        );
+
+        assert_close(capacitors.i_prev[0], capacitance * slope);
+        assert_eq!(capacitors.v_prev[0], current_voltage);
+        assert_eq!(capacitors.v_prev_prev[0], previous_voltage);
+        assert_eq!(capacitors.v_prev_prev_prev[0], older_voltage);
+    }
+
+    #[test]
+    fn gear2_without_previous_timestep_history_commits_with_backward_euler() {
+        let dt = 2.0;
+        let previous_voltage = 4.0;
+        let current_voltage = 10.0;
+        let capacitance = 0.5;
+        // An intentionally unrelated older value proves that startup does not
+        // manufacture an equal-step BDF2 stencil from invalid history.
+        let mut capacitors = capacitor_with_history(capacitance, previous_voltage, -100.0);
+
+        capacitors.update_state_with_previous_step(
+            &[current_voltage],
+            dt,
+            IntegrationMethod::Gear2,
+            None,
+        );
+
+        assert_close(
+            capacitors.i_prev[0],
+            capacitance * (current_voltage - previous_voltage) / dt,
+        );
+    }
+
+    #[test]
+    fn equal_step_gear2_convenience_has_explicit_fixed_grid_semantics() {
+        let dt = 2.0;
+        let slope = 3.0;
+        let previous_voltage = 7.0;
+        let older_voltage = previous_voltage - slope * dt;
+        let current_voltage = previous_voltage + slope * dt;
+        let capacitance = 0.25;
+        let mut capacitors = capacitor_with_history(capacitance, previous_voltage, older_voltage);
+
+        capacitors.update_state_equal_step(&[current_voltage], dt, IntegrationMethod::Gear2);
+
+        assert_close(capacitors.i_prev[0], capacitance * slope);
     }
 }
