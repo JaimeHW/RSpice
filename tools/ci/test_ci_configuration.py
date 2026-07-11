@@ -260,6 +260,12 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo cyclonedx --format json --target all", security)
         self.assertIn("if-no-files-found: error", security)
         self.assertIn("cargo llvm-cov --locked --workspace", coverage)
+        self.assertIn("mkdir -p target/coverage", coverage)
+        self.assertLess(
+            coverage.index("mkdir -p target/coverage"),
+            coverage.index("--lcov --output-path target/coverage/lcov.info"),
+            "coverage output directory must exist before cargo-llvm-cov writes the report",
+        )
         self.assertIn("if-no-files-found: error", coverage)
         self.assertIn("actions/attest@", nightly)
         self.assertIn("attestations: write", nightly)
