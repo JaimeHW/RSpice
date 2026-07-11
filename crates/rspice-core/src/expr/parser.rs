@@ -57,6 +57,7 @@ pub enum Token {
     // Delimiters
     LParen,
     RParen,
+    SingleQuote,
     Comma,
     Question,
     Colon,
@@ -232,7 +233,11 @@ impl<'a> Lexer<'a> {
             Some(&c) => match c {
                 '0'..='9' | '.' => self.read_number(),
                 'a'..='z' | 'A'..='Z' | '_' | '$' => Token::Ident(self.read_ident()),
-                '"' | '\'' => self.read_string(c),
+                '"' => self.read_string(c),
+                '\'' => {
+                    self.chars.next();
+                    Token::SingleQuote
+                }
                 '+' => {
                     self.chars.next();
                     Token::Plus
@@ -601,6 +606,16 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let expr = self.parse_conditional();
                 self.expect(Token::RParen);
+                expr
+            }
+            Token::SingleQuote => {
+                self.advance();
+                let expr = self.parse_conditional();
+                if self.current == Token::SingleQuote {
+                    self.advance();
+                } else {
+                    self.errors.push("Missing closing single quote".to_string());
+                }
                 expr
             }
             Token::Invalid(c) => {

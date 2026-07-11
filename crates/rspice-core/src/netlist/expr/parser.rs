@@ -409,6 +409,18 @@ impl<'a> ExprParser<'a> {
             return Ok(expr);
         }
 
+        // SPICE and Xyce use single quotes as expression delimiters, with
+        // the same grouping semantics as braces or parentheses. Double
+        // quotes remain reserved for string values such as table filenames.
+        if self.consume('\'') {
+            let expr = self.parse_ternary()?;
+            self.skip_ws();
+            if !self.consume('\'') {
+                return Err(ExprError::MissingCloseQuote);
+            }
+            return Ok(expr);
+        }
+
         // Number
         if let Some(c) = self.peek()
             && (c.is_ascii_digit() || c == '.')
