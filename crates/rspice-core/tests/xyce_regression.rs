@@ -790,6 +790,47 @@ fn test_xyce_bjt_external_node_family_runs_exact_dc_parity() {
 }
 
 #[test]
+fn test_xyce_sin_expression_family_runs_exact_transient_parity() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/Certification_Tests/BUG_791_SON/bug791.cir",
+            "sin_expression_family_wrapper",
+            true,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_791_SON/bug791_vsrc.cir",
+            "sin_expression_family_baseline",
+            false,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_791_SON/bug791_expr.cir",
+            "sin_expression_family_wrapper",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass exact independent-SIN/behavioral-SPICE_SIN parity, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should have bit-exact time/probe/value parity with its sibling representation"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+}
+
+#[test]
 fn test_xyce_mid_certification_transient_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

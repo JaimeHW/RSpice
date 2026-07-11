@@ -381,6 +381,27 @@ struct XyceScopedModelFamilySnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceSinExpressionFamilySnapshot {
+    resistor: XyceRelationalElementFingerprint,
+    resistor_name: String,
+    source_nodes: Vec<String>,
+    waveform_bits: [u64; 6],
+    representation: XyceSinExpressionRepresentation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum XyceExactTransientFamilySnapshot {
+    ScopedModel(XyceScopedModelFamilySnapshot),
+    SinExpression(XyceSinExpressionFamilySnapshot),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceSinExpressionRepresentation {
+    IndependentSin,
+    BehavioralSpiceSin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceRelationalElementFingerprint {
     kind: String,
     nodes: Vec<String>,
@@ -405,6 +426,7 @@ enum XyceBjtExternalNodeRepresentation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
     BjtExternalNode,
+    SinExpression,
     Subckt,
     Supernode,
     ScopedModel,
@@ -426,6 +448,7 @@ impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
             Self::BjtExternalNode => "BJT_EXTNODE",
+            Self::SinExpression => "SIN_EXPRESSION",
             Self::Subckt => "SUBCKT",
             Self::Supernode => "SUPERNODE",
             Self::ScopedModel => "SCOPED_MODEL",
@@ -435,6 +458,7 @@ impl XyceBaselineFamilyKind {
     fn wrapper_contract(self) -> &'static str {
         match self {
             Self::BjtExternalNode => "bjt_external_node_family_wrapper",
+            Self::SinExpression => "sin_expression_family_wrapper",
             Self::Subckt => "subckt_family_wrapper",
             Self::Supernode => "supernode_family_wrapper",
             Self::ScopedModel => "scoped_model_family_wrapper",
@@ -444,6 +468,7 @@ impl XyceBaselineFamilyKind {
     fn baseline_contract(self) -> &'static str {
         match self {
             Self::BjtExternalNode => "bjt_external_node_family_baseline",
+            Self::SinExpression => "sin_expression_family_baseline",
             Self::Subckt => "subckt_family_baseline",
             Self::Supernode => "supernode_family_baseline",
             Self::ScopedModel => "scoped_model_family_baseline",
@@ -457,7 +482,7 @@ impl XyceBaselineFamilyKind {
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
-            Self::BjtExternalNode | Self::Subckt | Self::Supernode => {
+            Self::BjtExternalNode | Self::SinExpression | Self::Subckt | Self::Supernode => {
                 XyceStaticTranPlanPurpose::RelationalFamily
             }
         }
@@ -6885,9 +6910,9 @@ impl XyceTestRunner {
                 )
             ),
             XyceBaselineFamilyKind::BjtExternalNode => false,
-            XyceBaselineFamilyKind::Subckt | XyceBaselineFamilyKind::Supernode => {
-                baseline == target
-            }
+            XyceBaselineFamilyKind::SinExpression
+            | XyceBaselineFamilyKind::Subckt
+            | XyceBaselineFamilyKind::Supernode => baseline == target,
         }
     }
 
@@ -6947,6 +6972,20 @@ impl XyceTestRunner {
                 wrapper_contract,
                 format!(
                     "{kind_name} family '{}' requires a DC analysis",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        if contract.kind == XyceBaselineFamilyKind::SinExpression
+            && analysis != XyceBaselineFamilyAnalysis::Tran
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' requires a transient analysis",
                     contract.family
                 ),
                 Vec::new(),
@@ -7601,6 +7640,20 @@ impl XyceTestRunner {
                 ),
             );
         }
+        if contract.kind == XyceBaselineFamilyKind::SinExpression
+            && let Err(err) = Self::validate_sin_expression_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
 
         let (baseline_netlist, baseline_result) = match self.run_transient_family_plan(
             &baseline_plan,
@@ -7645,22 +7698,29 @@ impl XyceTestRunner {
                 );
             }
         };
-        let baseline_snapshot =
-            match Self::scoped_model_family_snapshot(&contract, &baseline_netlist) {
-                Ok(snapshot) => snapshot,
+        let baseline_snapshot = if contract.comparison == XyceBaselineFamilyComparison::Exact {
+            match Self::exact_transient_family_snapshot(
+                &contract,
+                &baseline_netlist,
+                &baseline_plan.print,
+            ) {
+                Ok(snapshot) => Some(snapshot),
                 Err(err) => {
                     return self.failure_result(
-                    deck,
-                    start,
-                    wrapper_contract,
-                    format!(
-                        "{kind_name} family '{}' baseline scoped-model qualification failed: {err}",
-                        contract.family
-                    ),
-                    Vec::new(),
-                );
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' baseline semantic qualification failed: {err}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
                 }
-            };
+            }
+        } else {
+            None
+        };
         let baseline_table = match Self::transient_family_result_to_prn_table(
             &baseline_plan,
             &baseline_netlist,
@@ -7741,6 +7801,21 @@ impl XyceTestRunner {
                         contract.family,
                         self.display_path(&target_path)
                     ),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::SinExpression
+                && let Err(err) = Self::validate_sin_expression_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
                 );
             }
             if !Self::baseline_family_tran_contracts_compatible(
@@ -7892,37 +7967,43 @@ impl XyceTestRunner {
                     );
                 }
             };
-            let target_snapshot = match Self::scoped_model_family_snapshot(
-                &contract,
-                &target_netlist,
-            ) {
-                Ok(snapshot) => snapshot,
-                Err(err) => {
+            if let Some(baseline_snapshot) = baseline_snapshot.as_ref() {
+                let target_snapshot = match Self::exact_transient_family_snapshot(
+                    &contract,
+                    &target_netlist,
+                    &target_plan.print,
+                ) {
+                    Ok(snapshot) => snapshot,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} semantic qualification failed: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+                if let Err(err) = Self::compare_exact_transient_family_snapshots(
+                    baseline_snapshot,
+                    &target_snapshot,
+                ) {
                     return self.failure_result(
                         deck,
                         start,
                         wrapper_contract,
                         format!(
-                            "{kind_name} family '{}' member {} scoped-model qualification failed: {err}",
+                            "{kind_name} family '{}' member {} changes qualified semantic state: {err}",
                             contract.family,
                             self.display_path(&target_path)
                         ),
                         Vec::new(),
                     );
                 }
-            };
-            if target_snapshot != baseline_snapshot {
-                return self.failure_result(
-                    deck,
-                    start,
-                    wrapper_contract,
-                    format!(
-                        "{kind_name} family '{}' member {} changes qualified flattened element semantics or effective nonlinear model parameters",
-                        contract.family,
-                        self.display_path(&target_path)
-                    ),
-                    Vec::new(),
-                );
             }
 
             let mut mismatches = if contract.comparison == XyceBaselineFamilyComparison::Exact {
@@ -8238,6 +8319,575 @@ impl XyceTestRunner {
             numeric_bits,
             text,
         })
+    }
+
+    fn exact_transient_family_snapshot(
+        contract: &XyceBaselineFamilyContract,
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceExactTransientFamilySnapshot, String> {
+        match contract.kind {
+            XyceBaselineFamilyKind::ScopedModel => {
+                Self::scoped_model_family_snapshot(contract, netlist)?
+                    .map(XyceExactTransientFamilySnapshot::ScopedModel)
+                    .ok_or_else(|| {
+                        "scoped-model exact family produced no semantic snapshot".to_string()
+                    })
+            }
+            XyceBaselineFamilyKind::SinExpression => {
+                Self::sin_expression_family_snapshot(netlist, print)
+                    .map(XyceExactTransientFamilySnapshot::SinExpression)
+            }
+            other => Err(format!(
+                "exact transient family kind {} has no semantic snapshot contract",
+                other.name()
+            )),
+        }
+    }
+
+    fn compare_exact_transient_family_snapshots(
+        baseline: &XyceExactTransientFamilySnapshot,
+        target: &XyceExactTransientFamilySnapshot,
+    ) -> Result<(), String> {
+        match (baseline, target) {
+            (
+                XyceExactTransientFamilySnapshot::ScopedModel(baseline),
+                XyceExactTransientFamilySnapshot::ScopedModel(target),
+            ) if baseline == target => Ok(()),
+            (
+                XyceExactTransientFamilySnapshot::ScopedModel(_),
+                XyceExactTransientFamilySnapshot::ScopedModel(_),
+            ) => {
+                Err("flattened elements or effective nonlinear model parameters differ".to_string())
+            }
+            (
+                XyceExactTransientFamilySnapshot::SinExpression(baseline),
+                XyceExactTransientFamilySnapshot::SinExpression(target),
+            ) => Self::compare_sin_expression_family_snapshots(baseline, target),
+            _ => Err("baseline and target use different exact family snapshot kinds".to_string()),
+        }
+    }
+
+    fn validate_sin_expression_transient_plan(plan: &XyceStaticTranPlan) -> Result<(), String> {
+        if plan.contract != XyceStaticTranContract::PlainStatic {
+            return Err(format!(
+                "exact SIN/SPICE_SIN parity requires ordinary primary .prn output, got {:?}",
+                plan.contract
+            ));
+        }
+        if !plan.steps.is_empty() {
+            return Err("exact SIN/SPICE_SIN parity does not admit .STEP".to_string());
+        }
+        if plan.output_override {
+            return Err("exact SIN/SPICE_SIN parity does not admit an output override".to_string());
+        }
+        if plan.timeint_conststep {
+            return Err(
+                "exact SIN/SPICE_SIN parity requires ordinary adaptive transient output"
+                    .to_string(),
+            );
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step <= 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.step > plan.tran.stop
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err(format!(
+                "exact SIN/SPICE_SIN parity requires finite '.TRAN step stop' values with 0 < step <= stop and no START, MAXSTEP, or UIC; got step={}, stop={}, start={:?}, max_step={:?}, uic={}",
+                plan.tran.step, plan.tran.stop, plan.tran.start, plan.tran.max_step, plan.tran.uic
+            ));
+        }
+        let [probe] = plan.print.probes.as_slice() else {
+            return Err(format!(
+                "exact SIN/SPICE_SIN parity requires exactly one voltage probe, found {}",
+                plan.print.probes.len()
+            ));
+        };
+        let voltage_probe = Self::parse_voltage_probe(probe).ok_or_else(|| {
+            format!("exact SIN/SPICE_SIN probe '{probe}' is not an atomic voltage probe")
+        })?;
+        if voltage_probe.accessor != XyceVoltageAccessor::Value || voltage_probe.node_neg.is_some()
+        {
+            return Err(format!(
+                "exact SIN/SPICE_SIN probe '{probe}' must be one ordinary single-ended voltage"
+            ));
+        }
+
+        let mut tran_count = 0usize;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        for line in Self::logical_netlist_lines(&plan.source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if !command.starts_with('.') {
+                continue;
+            }
+            match command.to_ascii_lowercase().as_str() {
+                ".tran" => {
+                    tran_count += 1;
+                    if stripped.split_whitespace().count() != 3 {
+                        return Err(
+                            "exact SIN/SPICE_SIN parity requires the canonical '.TRAN step stop' form"
+                                .to_string(),
+                        );
+                    }
+                }
+                ".print" => {
+                    print_count += 1;
+                    let fields = Self::split_print_fields(stripped)?;
+                    if fields.len() != 3
+                        || !fields[1].eq_ignore_ascii_case("TRAN")
+                        || Self::normalize_probe(&fields[2]) != Self::normalize_probe(probe)
+                    {
+                        return Err(
+                            "exact SIN/SPICE_SIN parity requires one canonical '.PRINT TRAN <voltage>' statement without destination or formatting assignments"
+                                .to_string(),
+                        );
+                    }
+                }
+                ".end" => {
+                    end_count += 1;
+                    if !stripped.eq_ignore_ascii_case(".end") {
+                        return Err(
+                            "exact SIN/SPICE_SIN parity requires an ordinary '.END' statement"
+                                .to_string(),
+                        );
+                    }
+                }
+                other => {
+                    return Err(format!(
+                        "exact SIN/SPICE_SIN parity does not admit directive '{other}'"
+                    ));
+                }
+            }
+        }
+        if (tran_count, print_count, end_count) != (1, 1, 1) {
+            return Err(format!(
+                "exact SIN/SPICE_SIN parity requires exactly one .TRAN, .PRINT, and .END; found ({tran_count}, {print_count}, {end_count})"
+            ));
+        }
+        Ok(())
+    }
+
+    fn sin_expression_name_is_literal_ground(node: &str) -> bool {
+        node.trim() == "0"
+    }
+
+    fn canonical_sin_expression_node_name(node: &str) -> String {
+        if Self::sin_expression_name_is_literal_ground(node) {
+            "0".to_string()
+        } else {
+            node.trim().to_ascii_lowercase()
+        }
+    }
+
+    fn qualified_sin_expression_waveform_bits(
+        offset: Value,
+        amplitude: Value,
+        frequency: Value,
+    ) -> Result<[u64; 6], String> {
+        if !offset.is_finite()
+            || !amplitude.is_finite()
+            || amplitude == 0.0
+            || !frequency.is_finite()
+            || frequency <= 0.0
+        {
+            return Err(format!(
+                "qualified SIN/SPICE_SIN values require finite offset, finite nonzero amplitude, and finite positive frequency; got offset={offset}, amplitude={amplitude}, frequency={frequency}"
+            ));
+        }
+        Ok([
+            offset.to_bits(),
+            amplitude.to_bits(),
+            frequency.to_bits(),
+            0.0f64.to_bits(),
+            0.0f64.to_bits(),
+            0.0f64.to_bits(),
+        ])
+    }
+
+    fn validate_sin_expression_source_form(
+        netlist: &Netlist,
+        source_name: &str,
+        representation: XyceSinExpressionRepresentation,
+    ) -> Result<(), String> {
+        let source = netlist.source_text.as_deref().ok_or_else(|| {
+            "exact SIN/SPICE_SIN parity requires original source text for arity qualification"
+                .to_string()
+        })?;
+        let mut matching_lines = Vec::new();
+        for line in Self::logical_netlist_lines(source) {
+            let stripped = Self::strip_netlist_comment(&line).trim();
+            if stripped
+                .split_whitespace()
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case(source_name))
+            {
+                matching_lines.push(stripped.to_string());
+            }
+        }
+        let [source_line] = matching_lines.as_slice() else {
+            return Err(format!(
+                "exact SIN/SPICE_SIN parity requires exactly one source line for '{source_name}', found {}",
+                matching_lines.len()
+            ));
+        };
+        let fields = Self::split_grouped_whitespace_fields(
+            source_line,
+            "exact SIN/SPICE_SIN source statement",
+        )?;
+        match representation {
+            XyceSinExpressionRepresentation::IndependentSin => {
+                if fields.len() != 7
+                    || !fields[3].eq_ignore_ascii_case("SIN")
+                    || !fields[4..]
+                        .iter()
+                        .all(|field| Self::is_single_spice_numeric_literal(field))
+                {
+                    return Err(format!(
+                        "independent source '{source_name}' must use exactly three standalone numeric tokens in 'SIN offset amplitude frequency' form"
+                    ));
+                }
+            }
+            XyceSinExpressionRepresentation::BehavioralSpiceSin => {
+                if fields.len() != 4 || !Self::is_single_braced_voltage_assignment(&fields[3]) {
+                    return Err(format!(
+                        "behavioral source '{source_name}' must use one complete braced V={{SPICE_SIN(...)}} assignment without adjacent or trailing fields"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn is_single_spice_numeric_literal(field: &str) -> bool {
+        let Ok(tokens) = crate::netlist::lexer::tokenize(field) else {
+            return false;
+        };
+        if !crate::netlist::lexer::parse_spice_value(field.trim()).is_ok_and(Value::is_finite) {
+            return false;
+        }
+        let kinds = tokens.iter().map(|token| &token.kind).collect::<Vec<_>>();
+        matches!(
+            kinds.as_slice(),
+            [
+                crate::netlist::lexer::TokenKind::Number(_)
+                    | crate::netlist::lexer::TokenKind::Ident(_),
+                crate::netlist::lexer::TokenKind::Eof
+            ] | [
+                crate::netlist::lexer::TokenKind::Plus | crate::netlist::lexer::TokenKind::Minus,
+                crate::netlist::lexer::TokenKind::Number(_)
+                    | crate::netlist::lexer::TokenKind::Ident(_),
+                crate::netlist::lexer::TokenKind::Eof
+            ]
+        )
+    }
+
+    fn is_single_braced_voltage_assignment(field: &str) -> bool {
+        let Some((key, expression)) = field.split_once('=') else {
+            return false;
+        };
+        if !key.trim().eq_ignore_ascii_case("V") {
+            return false;
+        }
+        let expression = expression.trim();
+        let chars = expression.chars().collect::<Vec<_>>();
+        if chars.first() != Some(&'{') || chars.last() != Some(&'}') {
+            return false;
+        }
+
+        let mut depth = 0usize;
+        for (index, ch) in chars.iter().enumerate() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    let Some(next_depth) = depth.checked_sub(1) else {
+                        return false;
+                    };
+                    depth = next_depth;
+                    if depth == 0 && index + 1 != chars.len() {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+        depth == 0
+    }
+
+    fn sin_expression_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceSinExpressionFamilySnapshot, String> {
+        if !netlist.models.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(
+                "exact SIN/SPICE_SIN parity contains models, hierarchy, auxiliary analysis state, or external-model state"
+                    .to_string(),
+            );
+        }
+        if !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(
+                "exact SIN/SPICE_SIN parity does not admit parameters or user functions"
+                    .to_string(),
+            );
+        }
+        if !netlist.diagnostics.is_empty() {
+            return Err(format!(
+                "exact SIN/SPICE_SIN parity requires a diagnostic-free parse, found {} diagnostic(s)",
+                netlist.diagnostics.len()
+            ));
+        }
+        if !matches!(netlist.analyses.as_slice(), [AnalysisCommand::Tran { .. }]) {
+            return Err(format!(
+                "exact SIN/SPICE_SIN parity requires exactly one transient analysis, found {} analysis command(s)",
+                netlist.analyses.len()
+            ));
+        }
+        if netlist.elements.len() != 2 {
+            return Err(format!(
+                "exact SIN/SPICE_SIN parity requires exactly one excitation and one resistor, found {} elements",
+                netlist.elements.len()
+            ));
+        }
+
+        let mut resistor = None;
+        let mut source = None;
+        for element in &netlist.elements {
+            if let Some(alias) = element.nodes.iter().find(|node| {
+                crate::compat::ground::is_spice_ground_name(node)
+                    && !Self::sin_expression_name_is_literal_ground(node)
+            }) {
+                return Err(format!(
+                    "element '{}' uses ground alias '{}'; exact Xyce parity requires literal node 0 without .PREPROCESS REPLACEGND",
+                    element.name, alias
+                ));
+            }
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_sin_expression_node_name(node))
+                .collect::<Vec<_>>();
+            match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    if resistor.is_some() {
+                        return Err(
+                            "exact SIN/SPICE_SIN parity requires exactly one resistor".to_string()
+                        );
+                    }
+                    if nodes.len() != 2
+                        || !value.is_finite()
+                        || *value <= 0.0
+                        || value_expr.is_some()
+                        || model.is_some()
+                        || !instance_params.is_empty()
+                        || !deferred_params.is_empty()
+                    {
+                        return Err(format!(
+                            "resistor '{}' is outside the finite positive numeric two-terminal envelope",
+                            element.name
+                        ));
+                    }
+                    resistor = Some((
+                        Self::normalize_device_instance_name(&element.name),
+                        XyceRelationalElementFingerprint {
+                            kind: "R".to_string(),
+                            nodes,
+                            numeric_bits: vec![value.to_bits()],
+                            text: Vec::new(),
+                        },
+                    ));
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Sin {
+                    offset,
+                    amplitude,
+                    frequency,
+                    delay,
+                    damping,
+                    phase,
+                }) => {
+                    if source.is_some() {
+                        return Err("exact SIN/SPICE_SIN parity requires exactly one excitation"
+                            .to_string());
+                    }
+                    if nodes.len() != 2
+                        || delay.to_bits() != 0.0f64.to_bits()
+                        || damping.to_bits() != 0.0f64.to_bits()
+                        || phase.to_bits() != 0.0f64.to_bits()
+                    {
+                        return Err(format!(
+                            "independent source '{}' must be a two-terminal three-argument SIN with exact +0 delay, damping, and phase",
+                            element.name
+                        ));
+                    }
+                    let waveform_bits = Self::qualified_sin_expression_waveform_bits(
+                        *offset, *amplitude, *frequency,
+                    )?;
+                    source = Some((
+                        element.name.clone(),
+                        nodes,
+                        waveform_bits,
+                        XyceSinExpressionRepresentation::IndependentSin,
+                    ));
+                }
+                ElementKind::BehavioralVoltage {
+                    expression,
+                    tc1,
+                    tc2,
+                } => {
+                    if source.is_some() {
+                        return Err("exact SIN/SPICE_SIN parity requires exactly one excitation"
+                            .to_string());
+                    }
+                    if nodes.len() != 2
+                        || tc1.to_bits() != 0.0f64.to_bits()
+                        || tc2.to_bits() != 0.0f64.to_bits()
+                    {
+                        return Err(format!(
+                            "behavioral source '{}' must be two-terminal with exact +0 TC1 and TC2",
+                            element.name
+                        ));
+                    }
+                    let prepared = prepare_behavioral_expression(expression, &netlist.params)
+                        .map_err(|err| {
+                            format!(
+                                "could not canonicalize behavioral expression for '{}': {err}",
+                                element.name
+                            )
+                        })?;
+                    let ast = parse_expression_strict(&prepared).map_err(|err| {
+                        format!(
+                            "could not parse behavioral expression for '{}': {err}",
+                            element.name
+                        )
+                    })?;
+                    let Expr::Function {
+                        func: crate::expr::Function::SpiceSin,
+                        args,
+                    } = ast
+                    else {
+                        return Err(format!(
+                            "behavioral source '{}' is not a direct SPICE_SIN expression",
+                            element.name
+                        ));
+                    };
+                    let [
+                        Expr::Const(offset),
+                        Expr::Const(amplitude),
+                        Expr::Const(frequency),
+                    ] = args.as_slice()
+                    else {
+                        return Err(format!(
+                            "behavioral source '{}' must use exactly three constant SPICE_SIN arguments",
+                            element.name
+                        ));
+                    };
+                    let waveform_bits = Self::qualified_sin_expression_waveform_bits(
+                        *offset, *amplitude, *frequency,
+                    )?;
+                    source = Some((
+                        element.name.clone(),
+                        nodes,
+                        waveform_bits,
+                        XyceSinExpressionRepresentation::BehavioralSpiceSin,
+                    ));
+                }
+                _ => {
+                    return Err(format!(
+                        "element '{}' is outside the resistor/SIN/SPICE_SIN envelope",
+                        element.name
+                    ));
+                }
+            }
+        }
+
+        let (resistor_name, resistor) = resistor
+            .ok_or_else(|| "exact SIN/SPICE_SIN parity contains no resistor".to_string())?;
+        let (source_name, source_nodes, waveform_bits, representation) = source
+            .ok_or_else(|| "exact SIN/SPICE_SIN parity contains no excitation".to_string())?;
+        Self::validate_sin_expression_source_form(netlist, &source_name, representation)?;
+        if source_nodes[0] == "0" || source_nodes[1] != "0" {
+            return Err(
+                "exact SIN/SPICE_SIN excitation requires one non-ground output node and literal node 0"
+                    .to_string(),
+            );
+        }
+        if resistor.nodes != source_nodes {
+            return Err(
+                "exact SIN/SPICE_SIN resistor must connect across the same ordered node pair as the excitation"
+                    .to_string(),
+            );
+        }
+        let [probe] = print.probes.as_slice() else {
+            return Err("exact SIN/SPICE_SIN parity requires exactly one probe".to_string());
+        };
+        let probe = Self::parse_voltage_probe(probe).ok_or_else(|| {
+            "exact SIN/SPICE_SIN parity requires an atomic voltage probe".to_string()
+        })?;
+        if probe.accessor != XyceVoltageAccessor::Value
+            || probe.node_neg.is_some()
+            || Self::canonical_sin_expression_node_name(&probe.node_pos) != source_nodes[0]
+        {
+            return Err(
+                "exact SIN/SPICE_SIN voltage probe must observe the excitation output node"
+                    .to_string(),
+            );
+        }
+
+        Ok(XyceSinExpressionFamilySnapshot {
+            resistor,
+            resistor_name,
+            source_nodes,
+            waveform_bits,
+            representation,
+        })
+    }
+
+    fn compare_sin_expression_family_snapshots(
+        baseline: &XyceSinExpressionFamilySnapshot,
+        target: &XyceSinExpressionFamilySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XyceSinExpressionRepresentation::IndependentSin
+            || target.representation != XyceSinExpressionRepresentation::BehavioralSpiceSin
+        {
+            return Err(
+                "family must compare an independent SIN baseline with a behavioral SPICE_SIN target"
+                    .to_string(),
+            );
+        }
+        if baseline.resistor_name != target.resistor_name || baseline.resistor != target.resistor {
+            return Err("resistor identity, topology, or value differs".to_string());
+        }
+        if baseline.source_nodes != target.source_nodes {
+            return Err("excitation topology differs".to_string());
+        }
+        if baseline.waveform_bits != target.waveform_bits {
+            return Err("canonical sinusoidal waveform values differ".to_string());
+        }
+        Ok(())
     }
 
     fn scoped_model_family_snapshot(
@@ -19629,9 +20279,120 @@ impl XyceTestRunner {
 
     fn baseline_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
         self.bjt_external_node_family_contract(deck)
+            .or_else(|| self.sin_expression_family_contract(deck))
             .or_else(|| self.scoped_model_family_contract(deck))
             .or_else(|| self.subckt_family_contract(deck))
             .or_else(|| self.supernode_family_contract(deck))
+    }
+
+    fn sin_expression_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+
+        let file_name = deck.path.file_name()?.to_str()?;
+        let parent = deck.path.parent()?;
+        if self.requires_upstream_wrapper(&deck.relative_path)
+            && fs::metadata(&deck.path)
+                .ok()
+                .is_some_and(|metadata| metadata.len() == 0)
+        {
+            let family = file_name.strip_suffix(".cir")?;
+            if family.is_empty() {
+                return None;
+            }
+            return self.sin_expression_family_contract_for(parent, family, None);
+        }
+
+        let file_name_lower = file_name.to_ascii_lowercase();
+        let suffix = if file_name_lower.ends_with("_vsrc.cir") {
+            "_vsrc.cir"
+        } else if file_name_lower.ends_with("_expr.cir") {
+            "_expr.cir"
+        } else {
+            return None;
+        };
+        let family = file_name.get(..file_name.len().checked_sub(suffix.len())?)?;
+        if family.is_empty() {
+            return None;
+        }
+        self.sin_expression_family_contract_for(parent, family, Some(deck.path.clone()))
+    }
+
+    fn sin_expression_family_contract_for(
+        &self,
+        parent: &Path,
+        family: &str,
+        target_path: Option<PathBuf>,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let owner_path = parent.join(format!("{family}.cir"));
+        let baseline_path = parent.join(format!("{family}_vsrc.cir"));
+        let expression_path = parent.join(format!("{family}_expr.cir"));
+        let variant_prefix = format!("{}_", family.to_ascii_lowercase());
+        let variant_suffixes = fs::read_dir(parent)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if !path.is_file()
+                    || !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                {
+                    return None;
+                }
+                let stem = path.file_stem()?.to_str()?.to_ascii_lowercase();
+                stem.strip_prefix(&variant_prefix).map(ToString::to_string)
+            })
+            .collect::<BTreeSet<_>>();
+        let required_suffixes = ["vsrc".to_string(), "expr".to_string()]
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        if !owner_path.is_file()
+            || !baseline_path.is_file()
+            || !expression_path.is_file()
+            || variant_suffixes != required_suffixes
+            || fs::metadata(&owner_path)
+                .ok()
+                .is_none_or(|metadata| metadata.len() != 0)
+        {
+            return None;
+        }
+
+        let owner_relative = self.relative_key(&owner_path);
+        let baseline_relative = self.relative_key(&baseline_path);
+        let expression_relative = self.relative_key(&expression_path);
+        if !self.requires_upstream_wrapper(&owner_relative)
+            || self.requires_upstream_wrapper(&baseline_relative)
+            || self.requires_upstream_wrapper(&expression_relative)
+        {
+            return None;
+        }
+        if let Some(target_path) = target_path.as_ref()
+            && !Self::same_path(target_path, &baseline_path)
+            && !Self::same_path(target_path, &expression_path)
+        {
+            return None;
+        }
+
+        // The upstream sidecar invokes the generic toleranced verifier, while
+        // the behavioral member explicitly states that it must match the
+        // independent-source baseline exactly. RSpice enforces that stronger
+        // invariant only after the source forms, topology, analysis tuple, and
+        // output contract have all qualified through the bounded checks above.
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::SinExpression,
+            comparison: XyceBaselineFamilyComparison::Exact,
+            family: family.to_string(),
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path, expression_path],
+            target_path,
+        })
     }
 
     fn bjt_external_node_family_contract(
@@ -22980,6 +23741,416 @@ VMON 2 1 0\n\
         );
 
         fs::remove_dir_all(&root).expect("remove generic BJT family fixture");
+    }
+
+    #[test]
+    fn sin_expression_plan_admits_only_canonical_transient_output() {
+        let source = "canonical SIN expression family member\n\
+VDRIVE out 0 SIN(1 2 1k)\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n";
+        let plan = XyceStaticTranPlan {
+            deck_path: PathBuf::from("canonical.cir"),
+            reference_path: PathBuf::from("canonical.prn"),
+            source: source.to_string(),
+            print: XycePrintRequest {
+                probes: vec!["V(out)".to_string()],
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 1.0e-6,
+                stop: 5.0e-3,
+                start: None,
+                max_step: None,
+                uic: false,
+            },
+            steps: Vec::new(),
+            contract: XyceStaticTranContract::PlainStatic,
+            wrapper_tolerance: None,
+        };
+        XyceTestRunner::validate_sin_expression_transient_plan(&plan)
+            .expect("canonical two-field TRAN and ordinary voltage print qualify");
+
+        let mut with_option = plan.clone();
+        with_option.source = source.replace(".TRAN", ".OPTIONS RELTOL=1e-6\n.TRAN");
+        assert!(
+            XyceTestRunner::validate_sin_expression_transient_plan(&with_option).is_err(),
+            "additional simulator options are outside the exact representation contract"
+        );
+
+        let mut formatted_print = plan.clone();
+        formatted_print.source =
+            source.replace(".PRINT TRAN V(out)", ".PRINT TRAN FORMAT=STD V(out)");
+        assert!(
+            XyceTestRunner::validate_sin_expression_transient_plan(&formatted_print).is_err(),
+            "format assignments change the exact primary-output contract"
+        );
+
+        let mut multiple_probes = plan.clone();
+        multiple_probes.print.probes.push("V(0)".to_string());
+        assert!(
+            XyceTestRunner::validate_sin_expression_transient_plan(&multiple_probes).is_err(),
+            "the bounded wrapper oracle has exactly one probe"
+        );
+
+        let mut start_time = plan.clone();
+        start_time.tran.start = Some(1.0e-6);
+        assert!(
+            XyceTestRunner::validate_sin_expression_transient_plan(&start_time).is_err(),
+            "START changes the admitted transient tuple"
+        );
+
+        let mut constant_step = plan.clone();
+        constant_step.timeint_conststep = true;
+        assert!(
+            XyceTestRunner::validate_sin_expression_transient_plan(&constant_step).is_err(),
+            "constant-step output is a distinct transient contract"
+        );
+
+        let mut csv = plan;
+        csv.contract = XyceStaticTranContract::PlainCsv;
+        assert!(
+            XyceTestRunner::validate_sin_expression_transient_plan(&csv).is_err(),
+            "only ordinary primary PRN output is admitted"
+        );
+    }
+
+    #[test]
+    fn sin_expression_snapshot_proves_only_three_argument_representation_parity() {
+        let baseline = Netlist::parse(
+            "independent SIN baseline\n\
+VDRIVE out 0 SIN 1 2 1k\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+        )
+        .expect("independent SIN fixture parses");
+        let target = Netlist::parse(
+            "behavioral SPICE_SIN target\n\
+BDRIVE out 0 V={SPICE_SIN(1,2,1k)}\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+        )
+        .expect("behavioral SPICE_SIN fixture parses");
+        let print = XycePrintRequest {
+            probes: vec!["V(out)".to_string()],
+        };
+        let baseline_snapshot = XyceTestRunner::sin_expression_family_snapshot(&baseline, &print)
+            .expect("independent SIN snapshot qualifies");
+        let target_snapshot = XyceTestRunner::sin_expression_family_snapshot(&target, &print)
+            .expect("behavioral SPICE_SIN snapshot qualifies");
+        XyceTestRunner::compare_sin_expression_family_snapshots(
+            &baseline_snapshot,
+            &target_snapshot,
+        )
+        .expect("three-argument SIN and SPICE_SIN forms are semantically identical");
+        assert!(
+            XyceTestRunner::compare_sin_expression_family_snapshots(
+                &baseline_snapshot,
+                &baseline_snapshot,
+            )
+            .is_err(),
+            "two independent-source members do not exercise the representation contract"
+        );
+
+        let mut one_ulp_waveform = target.clone();
+        let ElementKind::BehavioralVoltage { expression, .. } =
+            &mut one_ulp_waveform.elements[0].kind
+        else {
+            panic!("target excitation remains behavioral");
+        };
+        *expression = "SPICE_SIN(1,2.0000000000000004,1k)".to_string();
+        let one_ulp_snapshot =
+            XyceTestRunner::sin_expression_family_snapshot(&one_ulp_waveform, &print)
+                .expect("one-ULP waveform remains individually qualified");
+        assert!(
+            XyceTestRunner::compare_sin_expression_family_snapshots(
+                &baseline_snapshot,
+                &one_ulp_snapshot,
+            )
+            .is_err(),
+            "waveform constants participate bit-for-bit in the semantic snapshot"
+        );
+
+        let mut changed_resistor = target.clone();
+        let ElementKind::Resistor { value, .. } = &mut changed_resistor.elements[1].kind else {
+            panic!("target load remains a resistor");
+        };
+        *value = 5.000000000000001;
+        let changed_resistor_snapshot =
+            XyceTestRunner::sin_expression_family_snapshot(&changed_resistor, &print)
+                .expect("changed resistor remains individually qualified");
+        assert!(
+            XyceTestRunner::compare_sin_expression_family_snapshots(
+                &baseline_snapshot,
+                &changed_resistor_snapshot,
+            )
+            .is_err(),
+            "load values participate in the semantic snapshot"
+        );
+
+        let mut optional_argument = target.clone();
+        let ElementKind::BehavioralVoltage { expression, .. } =
+            &mut optional_argument.elements[0].kind
+        else {
+            panic!("target excitation remains behavioral");
+        };
+        *expression = "SPICE_SIN(1,2,1k,0)".to_string();
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&optional_argument, &print).is_err(),
+            "optional waveform arguments require a separately proven equivalence contract"
+        );
+
+        let mut dynamic_argument = target.clone();
+        let ElementKind::BehavioralVoltage { expression, .. } =
+            &mut dynamic_argument.elements[0].kind
+        else {
+            panic!("target excitation remains behavioral");
+        };
+        *expression = "SPICE_SIN(1,2,time)".to_string();
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&dynamic_argument, &print).is_err(),
+            "time-dependent arguments are not constant waveform definitions"
+        );
+
+        let mut nonzero_tc = target.clone();
+        let ElementKind::BehavioralVoltage { tc1, .. } = &mut nonzero_tc.elements[0].kind else {
+            panic!("target excitation remains behavioral");
+        };
+        *tc1 = 1.0e-3;
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&nonzero_tc, &print).is_err(),
+            "temperature coefficients change behavioral-source semantics"
+        );
+
+        let mut delayed_independent = baseline.clone();
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Sin { delay, .. }) =
+            &mut delayed_independent.elements[0].kind
+        else {
+            panic!("baseline excitation remains an independent SIN source");
+        };
+        *delay = 1.0e-6;
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&delayed_independent, &print).is_err(),
+            "optional independent-source delay is outside the three-argument contract"
+        );
+
+        let explicit_optional_zeros = Netlist::parse(
+            "six-argument independent SIN\n\
+VDRIVE out 0 SIN 1 2 1k 0 0 0\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+        )
+        .expect("six-argument independent SIN fixture parses");
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&explicit_optional_zeros, &print)
+                .is_err(),
+            "explicit optional zeros are a distinct source representation despite equal AST values"
+        );
+
+        let comma_packed_optional_zeros = Netlist::parse(
+            "comma-packed six-argument independent SIN\n\
+VDRIVE out 0 SIN 1 2 1k,0,0,0\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+        )
+        .expect("comma-packed six-argument independent SIN fixture parses");
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&comma_packed_optional_zeros, &print,)
+                .is_err(),
+            "comma-packed optional zeros cannot bypass raw source-arity qualification"
+        );
+
+        let adjacent_optional_zeros = Netlist::parse(
+            "adjacent-token six-argument independent SIN\n\
+VDRIVE out 0 SIN 1 2 1k{0}{0}{0}\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+        )
+        .expect("adjacent-token six-argument independent SIN fixture parses");
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&adjacent_optional_zeros, &print)
+                .is_err(),
+            "adjacent expression tokens cannot bypass source-arity qualification"
+        );
+
+        let double_sign_argument = Netlist::parse(
+            "double-sign independent SIN argument\n\
+VDRIVE out 0 SIN --1 2 1k\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+        )
+        .expect("double-sign independent SIN fixture parses");
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&double_sign_argument, &print).is_err(),
+            "multiple adjacent signs are not one numeric source argument"
+        );
+
+        let adjacent_behavioral_tc = Netlist::parse(
+            "adjacent behavioral TC field\n\
+BDRIVE out 0 V={SPICE_SIN(1,2,1k)}TC1=0\n\
+RLOAD out 0 5\n\
+.PRINT TRAN V(out)\n\
+.TRAN 1u 5m\n\
+.END\n",
+        )
+        .expect("adjacent behavioral TC fixture parses");
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&adjacent_behavioral_tc, &print)
+                .is_err(),
+            "an adjacent zero-valued TC field is still an additional source representation"
+        );
+
+        let mut nonfinite_independent = baseline.clone();
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Sin { amplitude, .. }) =
+            &mut nonfinite_independent.elements[0].kind
+        else {
+            panic!("baseline excitation remains an independent SIN source");
+        };
+        *amplitude = Value::INFINITY;
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&nonfinite_independent, &print).is_err(),
+            "non-finite waveform values never qualify for exact comparison"
+        );
+
+        let mut ground_alias = target.clone();
+        ground_alias.elements[0].nodes[1] = "GND".to_string();
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&ground_alias, &print).is_err(),
+            "Xyce ground aliases require explicit preprocessing and are not literal node zero"
+        );
+
+        let mut changed_topology = target.clone();
+        for element in &mut changed_topology.elements {
+            element.nodes[0] = "other".to_string();
+        }
+        let other_print = XycePrintRequest {
+            probes: vec!["V(other)".to_string()],
+        };
+        let changed_topology_snapshot =
+            XyceTestRunner::sin_expression_family_snapshot(&changed_topology, &other_print)
+                .expect("changed topology remains individually qualified");
+        assert!(
+            XyceTestRunner::compare_sin_expression_family_snapshots(
+                &baseline_snapshot,
+                &changed_topology_snapshot,
+            )
+            .is_err(),
+            "excitation topology participates in the semantic snapshot"
+        );
+
+        let mut parameterized = target.clone();
+        parameterized.params.set("gain", 2.0);
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&parameterized, &print).is_err(),
+            "parameter state is outside the literal three-constant representation pair"
+        );
+
+        let mut extra_element = target;
+        extra_element.elements.push(baseline.elements[1].clone());
+        assert!(
+            XyceTestRunner::sin_expression_family_snapshot(&extra_element, &print).is_err(),
+            "additional elements are outside the bounded topology"
+        );
+    }
+
+    #[test]
+    fn sin_expression_family_detection_is_manifest_and_sibling_driven() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-sin-expression-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_SIN");
+        fs::create_dir_all(&family_dir).expect("create generic SIN-expression fixture");
+        let owner_path = family_dir.join("representation.cir");
+        let baseline_path = family_dir.join("representation_vsrc.cir");
+        let expression_path = family_dir.join("representation_expr.cir");
+        fs::write(&owner_path, "").expect("write empty wrapper fixture");
+        fs::write(&baseline_path, "independent source member\n.end\n")
+            .expect("write baseline fixture");
+        fs::write(&expression_path, "behavioral source member\n.end\n")
+            .expect("write expression fixture");
+        let owner_relative = "Netlists/Certification_Tests/GENERIC_SIN/representation.cir";
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper manifest fixture");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (path, relative, target_expected) in [
+            (&owner_path, owner_relative, false),
+            (
+                &baseline_path,
+                "Netlists/Certification_Tests/GENERIC_SIN/representation_vsrc.cir",
+                true,
+            ),
+            (
+                &expression_path,
+                "Netlists/Certification_Tests/GENERIC_SIN/representation_expr.cir",
+                true,
+            ),
+        ] {
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: relative.to_string(),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .sin_expression_family_contract(&deck)
+                .expect("manifest owner and exact _vsrc/_expr siblings form a family");
+            assert_eq!(contract.kind, XyceBaselineFamilyKind::SinExpression);
+            assert_eq!(contract.comparison, XyceBaselineFamilyComparison::Exact);
+            assert_eq!(contract.target_path.is_some(), target_expected);
+            assert!(XyceTestRunner::same_path(
+                &contract.baseline_path,
+                &baseline_path
+            ));
+            assert_eq!(contract.member_paths.len(), 2);
+        }
+
+        let owner_deck = XyceDeck {
+            path: owner_path.clone(),
+            relative_path: owner_relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let third_path = family_dir.join("representation_other.cir");
+        fs::write(&third_path, "unqualified third variant\n.end\n")
+            .expect("write third-variant fixture");
+        assert!(
+            runner.sin_expression_family_contract(&owner_deck).is_none(),
+            "an additional direct variant is a different upstream family shape"
+        );
+        fs::remove_file(&third_path).expect("remove third-variant fixture");
+
+        fs::write(&owner_path, "nonempty owner\n.end\n").expect("make owner nonempty");
+        assert!(
+            runner.sin_expression_family_contract(&owner_deck).is_none(),
+            "the generic wrapper shape requires an empty manifest owner"
+        );
+
+        fs::remove_dir_all(&root).expect("remove generic SIN-expression fixture");
     }
 
     #[test]
