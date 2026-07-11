@@ -34,8 +34,16 @@ jobs:
         run: >-
           cargo test --locked --workspace --exclude rspice-python --exclude rspice-wasm
           --release -- --skip test_ngspice_ --skip test_full_ngspice
+          --skip test_xyce_ --skip test_full_xyce
       - name: Core library unit tests (release)
         run: cargo test --locked -p rspice-core --lib --release
+      - name: Xyce conformance suite
+        # Every Xyce regression test takes the shared runner mutex. Running
+        # the target serially avoids misleading long-running queued tests and
+        # executes the complete corpus once per nightly run.
+        run: >-
+          cargo test --locked -p rspice-core --release --test xyce_regression
+          -- --nocapture --test-threads=1
       - name: ngspice conformance report
         # Serial test threads: each deck spawns a case-runner subprocess with
         # a hard per-case timeout; parallel threads oversubscribe the runner

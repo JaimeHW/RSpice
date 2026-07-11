@@ -57,13 +57,21 @@ jobs:
       - name: Clear check artifacts before tests
         run: cargo clean
       - name: Test core integration tests (fast tier)
-        # Skip only the vendored conformance suites (their test names start
-        # with test_ngspice_ / test_full_ngspice). A bare "ngspice" filter
-        # used to swallow seven oracle-pinned tests in unrelated files whose
-        # names merely mention ngspice.
+        # Keep the vendored ngspice and Xyce corpus sweeps out of the PR
+        # gate. Their exact name prefixes avoid skipping oracle-pinned tests
+        # in unrelated files that merely mention either simulator.
         run: >-
           cargo test --locked -p rspice-core --tests
           -- --skip test_ngspice_ --skip test_full_ngspice
+          --skip test_xyce_ --skip test_full_xyce
+      - name: Xyce compatibility smoke
+        # The full 4,055-deck Xyce corpus runs serially in nightly CI. These
+        # small oracle-backed checks retain DC, transient, and wrapper coverage
+        # in the per-commit gate.
+        run: |
+          cargo test --locked -p rspice-core --test xyce_regression test_xyce_abm_math_function_cases_run -- --exact --test-threads=1
+          cargo test --locked -p rspice-core --test xyce_regression test_xyce_static_capacitor_transient_case_runs -- --exact --test-threads=1
+          cargo test --locked -p rspice-core --test xyce_regression test_xyce_absolute_include_library_wrapper_cases_run_natively -- --exact --test-threads=1
       - name: Core library unit tests
         run: cargo test --locked -p rspice-core --lib
       - name: Clear core test artifacts

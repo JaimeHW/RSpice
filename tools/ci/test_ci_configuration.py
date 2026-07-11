@@ -134,6 +134,20 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("Test core integration tests (fast tier)", workflow)
         self.assertIn("cargo test --locked -p rspice-core --tests", workflow)
+        self.assertIn("--skip test_xyce_ --skip test_full_xyce", workflow)
+        self.assertIn("Xyce compatibility smoke", workflow)
+        self.assertIn(
+            "cargo test --locked -p rspice-core --test xyce_regression test_xyce_abm_math_function_cases_run -- --exact --test-threads=1",
+            workflow,
+        )
+        self.assertIn(
+            "cargo test --locked -p rspice-core --test xyce_regression test_xyce_static_capacitor_transient_case_runs -- --exact --test-threads=1",
+            workflow,
+        )
+        self.assertIn(
+            "cargo test --locked -p rspice-core --test xyce_regression test_xyce_absolute_include_library_wrapper_cases_run_natively -- --exact --test-threads=1",
+            workflow,
+        )
         self.assertIn("Test non-UI crates (fast tier)", workflow)
         self.assertIn("cargo test --locked -p rspice-cli -p rspice-veriloga -p rspice-bench", workflow)
         self.assertIn("Test Verilog-A native JIT units (Linux x64)", workflow)
@@ -179,6 +193,13 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn("cargo test --locked -p rspice-core --lib", ci_workflow)
         self.assertIn("cargo test --locked -p rspice-core --lib --release", nightly_workflow)
+        self.assertIn("--skip test_xyce_ --skip test_full_xyce", nightly_workflow)
+        self.assertIn("Xyce conformance suite", nightly_workflow)
+        self.assertIn(
+            "cargo test --locked -p rspice-core --release --test xyce_regression\n"
+            "          -- --nocapture --test-threads=1",
+            nightly_workflow,
+        )
 
     def test_linux_ci_runs_clippy_warning_clean(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
