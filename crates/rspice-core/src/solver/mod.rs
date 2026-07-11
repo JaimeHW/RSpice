@@ -42,6 +42,9 @@ pub enum SolverError {
 
     #[error("Stored pivot sequence is numerically inadequate for the new values")]
     PivotGrowth,
+
+    #[error("Sparse solve failed its backward-error check ({0:.3e})")]
+    InaccurateSolution(Value),
 }
 
 /// Simulation result containing node voltages and branch currents

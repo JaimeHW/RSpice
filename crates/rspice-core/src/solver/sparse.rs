@@ -36,8 +36,10 @@ struct LuWorkspace {
     /// controlled sources across many orders of magnitude; factoring the raw
     /// values can lose the pivot quality required by Newton iteration.
     scaled_values: Vec<Value>,
+    scaled_rhs: Vec<Value>,
     row_scale: Vec<Value>,
     col_scale: Vec<Value>,
+    max_row_nnz: usize,
 }
 
 //=============================================================================
@@ -214,6 +216,87 @@ fn equilibrate_sparse_system(
     }
 
     Ok(())
+}
+
+#[inline]
+fn faer_backward_error_tolerance(max_row_nnz: usize) -> Value {
+    64.0 * Value::EPSILON * (max_row_nnz.saturating_add(1) as Value)
+}
+
+/// Compute componentwise backward error in the supplied coordinates.
+///
+/// The denominator `|b| + |A| |x|` makes the check unit- and scale-invariant.
+/// Consequently, checking `D_r*A*D_c`, `y`, and `D_r*b` is mathematically
+/// identical to checking the original system with `x = D_c*y`, while avoiding
+/// overflow when valid original-coordinate terms approach `f64::MAX`.
+/// The safe terms follow LAPACK's treatment of rows whose denominator is near
+/// underflow. `residual` is retained as `b - A*x` for iterative refinement.
+fn componentwise_backward_error(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Value],
+    solution: &[Value],
+    rhs: &[Value],
+    residual: &mut Vec<Value>,
+    denominator: &mut Vec<Value>,
+    max_row_nnz: usize,
+) -> Result<Value, SolverError> {
+    let nrows = csc.nrows();
+    let ncols = csc.ncols();
+    if values.len() != csc.row_idx().len() || solution.len() != ncols || rhs.len() != nrows {
+        return Err(SolverError::InvalidCircuit(
+            "Sparse backward-error dimension mismatch".to_string(),
+        ));
+    }
+
+    residual.resize(nrows, 0.0);
+    denominator.resize(nrows, 0.0);
+    for row in 0..nrows {
+        if !rhs[row].is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        residual[row] = rhs[row];
+        denominator[row] = rhs[row].abs();
+    }
+
+    let col_ptr = csc.col_ptr();
+    let row_idx = csc.row_idx();
+    for col in 0..ncols {
+        let x = solution[col];
+        if !x.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            let value = values[idx];
+            let term = value * x;
+            let magnitude = value.abs() * x.abs();
+            if !term.is_finite() || !magnitude.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            let row = row_idx[idx];
+            residual[row] -= term;
+            denominator[row] = (denominator[row] + magnitude).min(Value::MAX);
+        }
+    }
+
+    let safe1 = (max_row_nnz.saturating_add(1) as Value) * Value::MIN_POSITIVE;
+    let safe2 = safe1 / Value::EPSILON;
+    let mut error: Value = 0.0;
+    for row in 0..nrows {
+        let residual_abs = residual[row].abs();
+        let scale = denominator[row];
+        if !residual_abs.is_finite() || !scale.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        let row_error = if residual_abs == 0.0 {
+            0.0
+        } else if scale > safe2 {
+            residual_abs / scale
+        } else {
+            (residual_abs + safe1) / (scale + safe1)
+        };
+        error = error.max(row_error);
+    }
+    Ok(error)
 }
 
 impl StaticMatrix {
@@ -662,6 +745,11 @@ impl StaticMatrix {
         .map_err(|_| SolverError::SingularMatrix)?;
         let solve_mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<Value>(1, par))
             .map_err(|_| SolverError::SingularMatrix)?;
+        let mut row_nnz = vec![0_usize; self.nrows];
+        for &row in self.csc.row_idx() {
+            row_nnz[row] = row_nnz[row].saturating_add(1);
+        }
+        let max_row_nnz = row_nnz.into_iter().max().unwrap_or(0);
         self.lu = Some(LuWorkspace {
             symbolic: Arc::new(symbolic),
             numeric: sparse_lu::NumericLu::new(),
@@ -669,8 +757,10 @@ impl StaticMatrix {
             solve_mem,
             rhs: Mat::zeros(self.nrows, 1),
             scaled_values: Vec::new(),
+            scaled_rhs: Vec::new(),
             row_scale: Vec::new(),
             col_scale: Vec::new(),
+            max_row_nnz,
         });
         Ok(())
     }
@@ -711,7 +801,12 @@ impl StaticMatrix {
 
         let par = get_global_parallelism();
         let Self {
-            csc, values, lu, ..
+            csc,
+            values,
+            lu,
+            residual_scratch,
+            residual_gross_scratch,
+            ..
         } = self;
         let ws = lu.as_mut().expect("LU workspace initialized above");
 
@@ -737,15 +832,13 @@ impl StaticMatrix {
             )
             .map_err(|_| SolverError::SingularMatrix)?;
 
-        for ((scaled_rhs, &rhs_value), &row_scale) in ws
-            .rhs
-            .col_as_slice_mut(0)
-            .iter_mut()
-            .zip(rhs)
-            .zip(&ws.row_scale)
+        ws.scaled_rhs.resize(rhs.len(), 0.0);
+        for ((scaled_rhs, &rhs_value), &row_scale) in
+            ws.scaled_rhs.iter_mut().zip(rhs).zip(&ws.row_scale)
         {
             *scaled_rhs = rhs_value * row_scale;
         }
+        ws.rhs.col_as_slice_mut(0).copy_from_slice(&ws.scaled_rhs);
         lu_ref.solve_in_place_with_conj(
             Conj::No,
             ws.rhs.as_mut(),
@@ -753,14 +846,85 @@ impl StaticMatrix {
             MemStack::new(&mut ws.solve_mem),
         );
 
-        let solution = ws
-            .rhs
-            .col_as_slice(0)
-            .iter()
-            .zip(&ws.col_scale)
-            .map(|(&value, &col_scale)| value * col_scale)
-            .collect();
-        finite_solution_or_singular(solution)
+        let mut scaled_solution = ws.rhs.col_as_slice(0).to_vec();
+        if scaled_solution.iter().any(|value| !value.is_finite()) {
+            return Err(SolverError::SingularMatrix);
+        }
+
+        let target_error = faer_backward_error_tolerance(ws.max_row_nnz);
+        let mut backward_error = componentwise_backward_error(
+            csc,
+            &ws.scaled_values,
+            &scaled_solution,
+            &ws.scaled_rhs,
+            residual_scratch,
+            residual_gross_scratch,
+            ws.max_row_nnz,
+        )?;
+        if backward_error <= target_error {
+            for (value, &col_scale) in scaled_solution.iter_mut().zip(&ws.col_scale) {
+                *value *= col_scale;
+                if !value.is_finite() {
+                    return Err(SolverError::Overflow);
+                }
+            }
+            return Ok(scaled_solution);
+        }
+
+        const MAX_REFINEMENTS: usize = 5;
+        const MIN_IMPROVEMENT_FACTOR: Value = 0.5;
+        for _ in 0..MAX_REFINEMENTS {
+            for (scaled_residual, &residual) in ws
+                .rhs
+                .col_as_slice_mut(0)
+                .iter_mut()
+                .zip(residual_scratch.iter())
+            {
+                *scaled_residual = residual;
+            }
+            lu_ref.solve_in_place_with_conj(
+                Conj::No,
+                ws.rhs.as_mut(),
+                par,
+                MemStack::new(&mut ws.solve_mem),
+            );
+
+            for (value, &scaled_correction) in
+                scaled_solution.iter_mut().zip(ws.rhs.col_as_slice(0))
+            {
+                let refined = *value + scaled_correction;
+                if !scaled_correction.is_finite() || !refined.is_finite() {
+                    return Err(SolverError::Overflow);
+                }
+                *value = refined;
+            }
+
+            let refined_error = componentwise_backward_error(
+                csc,
+                &ws.scaled_values,
+                &scaled_solution,
+                &ws.scaled_rhs,
+                residual_scratch,
+                residual_gross_scratch,
+                ws.max_row_nnz,
+            )?;
+            if refined_error <= target_error {
+                for (value, &col_scale) in scaled_solution.iter_mut().zip(&ws.col_scale) {
+                    *value *= col_scale;
+                    if !value.is_finite() {
+                        return Err(SolverError::Overflow);
+                    }
+                }
+                return Ok(scaled_solution);
+            }
+            if refined_error >= backward_error * MIN_IMPROVEMENT_FACTOR {
+                backward_error = refined_error;
+                break;
+            }
+            backward_error = refined_error;
+        }
+
+        Err(SolverError::InaccurateSolution(backward_error))
     }
 
     /// Default KLU-class real solve: values-only
@@ -1417,6 +1581,57 @@ mod tests {
     }
 
     #[test]
+    fn componentwise_backward_error_detects_perturbed_original_solution() {
+        let matrix = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 4.0), (0, 1, 1.0), (1, 0, 2.0), (1, 1, 3.0)],
+        )
+        .unwrap();
+        let rhs = [6.0, 8.0];
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+
+        let exact_error = componentwise_backward_error(
+            &matrix.csc,
+            &matrix.values,
+            &[1.0, 2.0],
+            &rhs,
+            &mut residual,
+            &mut denominator,
+            2,
+        )
+        .unwrap();
+        assert_eq!(exact_error.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(residual, vec![0.0, 0.0]);
+
+        let perturbed_error = componentwise_backward_error(
+            &matrix.csc,
+            &matrix.values,
+            &[1.0 + 1.0e-6, 2.0],
+            &rhs,
+            &mut residual,
+            &mut denominator,
+            2,
+        )
+        .unwrap();
+        assert!(perturbed_error > faer_backward_error_tolerance(2));
+
+        let zero_row = StaticMatrix::from_triplets(1, 1, &[(0, 0, 0.0)]).unwrap();
+        let zero_error = componentwise_backward_error(
+            &zero_row.csc,
+            &zero_row.values,
+            &[0.0],
+            &[0.0],
+            &mut residual,
+            &mut denominator,
+            1,
+        )
+        .unwrap();
+        assert_eq!(zero_error.to_bits(), 0.0_f64.to_bits());
+    }
+
+    #[test]
     fn faer_equilibration_solves_ill_scaled_system_and_recomputes_scales() {
         let row_factors = [1.0e-20, 1.0e-10, 1.0, 1.0e10, 1.0e20];
         let col_factors = [1.0e20, 1.0e10, 1.0, 1.0e-10, 1.0e-20];
@@ -1426,6 +1641,19 @@ mod tests {
         let first = matrix.solve_faer(&rhs).unwrap();
         let repeated = matrix.solve_faer(&rhs).unwrap();
         assert_relative_solution(&first, &expected);
+        let mut residual = Vec::new();
+        let mut denominator = Vec::new();
+        let backward_error = componentwise_backward_error(
+            &matrix.csc,
+            &matrix.values,
+            &first,
+            &rhs,
+            &mut residual,
+            &mut denominator,
+            3,
+        )
+        .unwrap();
+        assert!(backward_error <= faer_backward_error_tolerance(3));
         assert_eq!(
             first
                 .iter()
