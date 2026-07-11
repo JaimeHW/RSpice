@@ -9,8 +9,7 @@ impl Engine {
         accepted_solution: &[Value],
         accepted_time: Value,
         dt: Value,
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         bjt_history: &mut BjtTransientHistory,
         jfet_history: &mut JfetTransientHistory,
         diode_history: &mut DiodeTransientHistory,
@@ -39,11 +38,8 @@ impl Engine {
             let v_new = Self::differential_voltage(accepted_solution, np, nn);
 
             // Compute new capacitor current from OLD history before rotating it.
-            let coeff_update = CompanionCoefficients::for_method(Self::effective_companion_method(
-                method, trap_order,
-            ));
-            let geq = coeff_update.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
-            let ieq = coeff_update.capacitor_ieq(
+            let geq = coeff.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
+            let ieq = coeff.capacitor_ieq(
                 circuit.capacitors.capacitances[cap_idx],
                 dt,
                 circuit.capacitors.v_prev[cap_idx],
@@ -240,7 +236,6 @@ impl Engine {
             }
         }
 
-        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(accepted_solution, bjt.node_collector);
             let vb = Self::node_voltage(accepted_solution, bjt.node_base);
@@ -261,8 +256,7 @@ impl Engine {
                     let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
                     let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
                     let cq_curr = Self::jfet_companion_ccap(
-                        effective_method,
-                        trap_order,
+                        coeff,
                         dt,
                         branch.charge,
                         q_prev,
@@ -297,8 +291,7 @@ impl Engine {
             let Some(snapshot) = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
                 bjt,
                 external,
-                method,
-                trap_order,
+                coeff,
                 dt,
                 &bjt_history.charge_q_prev[idx],
                 &bjt_history.charge_q_prev_prev[idx],
@@ -331,15 +324,8 @@ impl Engine {
                 let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
                 let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
                 let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
-                let cq_curr = Self::jfet_companion_ccap(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    charge,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let cq_curr =
+                    Self::jfet_companion_ccap(coeff, dt, charge, q_prev, q_prev_prev, cq_prev);
                 bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
                 bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
                 bjt_history.charge_q_prev[idx][branch_idx] = charge;
@@ -412,8 +398,7 @@ impl Engine {
             if !suppress_gate_charge_history {
                 let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = if let Some(charge) = jfet2_charge {
                     Self::nonlinear_charge_companion_terms(
-                        method,
-                        trap_order,
+                        coeff,
                         dt,
                         cgs,
                         vgs_charge,
@@ -424,8 +409,7 @@ impl Engine {
                     )
                 } else {
                     Self::jfet_companion_terms(
-                        method,
-                        trap_order,
+                        coeff,
                         dt,
                         cgs,
                         vgs_charge,
@@ -442,8 +426,7 @@ impl Engine {
 
                 let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = if let Some(charge) = jfet2_charge {
                     Self::nonlinear_charge_companion_terms(
-                        method,
-                        trap_order,
+                        coeff,
                         dt,
                         cgd,
                         vgd_charge,
@@ -454,8 +437,7 @@ impl Engine {
                     )
                 } else {
                     Self::jfet_companion_terms(
-                        method,
-                        trap_order,
+                        coeff,
                         dt,
                         cgd,
                         vgd_charge,
@@ -472,8 +454,7 @@ impl Engine {
             }
             if cds.is_finite() && cds > 0.0 {
                 let (_geq_ds, _ieq_ds, qds_curr, cqds_curr) = Self::jfet_companion_terms(
-                    method,
-                    trap_order,
+                    coeff,
                     dt,
                     cds,
                     vds_charge,
@@ -499,8 +480,7 @@ impl Engine {
             let (qd, capd) = diode.junction_charge_and_capacitance(vd);
             if capd.is_finite() && capd > 0.0 {
                 let (_geq, _ieq, qd_curr, cqd_curr) = Self::nonlinear_charge_companion_terms(
-                    effective_method,
-                    trap_order,
+                    coeff,
                     dt,
                     capd,
                     vd,
@@ -543,8 +523,7 @@ impl Engine {
             mosfet_history.capgb_prev_half[idx] = cgb_half;
             if !suppress_gate_charge_history {
                 let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
-                    method,
-                    trap_order,
+                    coeff,
                     dt,
                     cgs,
                     vgs,
@@ -559,8 +538,7 @@ impl Engine {
                 mosfet_history.cqgs_prev[idx] = cqgs_curr;
 
                 let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
-                    method,
-                    trap_order,
+                    coeff,
                     dt,
                     cgd,
                     vgd,
@@ -575,8 +553,7 @@ impl Engine {
                 mosfet_history.cqgd_prev[idx] = cqgd_curr;
 
                 let (_geq_gb, _ieq_gb, qgb_curr, cqgb_curr) = Self::jfet_companion_terms(
-                    method,
-                    trap_order,
+                    coeff,
                     dt,
                     cgb,
                     vgb,
@@ -595,8 +572,7 @@ impl Engine {
             let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
             let (qbs_exact, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs);
             let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = Self::nonlinear_charge_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cbs,
                 vbs_j,
@@ -613,8 +589,7 @@ impl Engine {
 
             let (qbd_exact, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
             let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = Self::nonlinear_charge_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cbd,
                 vbd_j,
@@ -645,8 +620,7 @@ impl Engine {
             vdmos_history.vgs_prev_prev[idx] = vdmos_history.vgs_prev[idx];
             vdmos_history.vgs_prev[idx] = vgs;
             let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cgs,
                 vgs,
@@ -663,8 +637,7 @@ impl Engine {
             vdmos_history.vgd_prev_prev[idx] = vdmos_history.vgd_prev[idx];
             vdmos_history.vgd_prev[idx] = vgd;
             let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cgd,
                 vgd,
@@ -681,8 +654,7 @@ impl Engine {
             vdmos_history.vgb_prev_prev[idx] = vdmos_history.vgb_prev[idx];
             vdmos_history.vgb_prev[idx] = vgb;
             let (_geq_gb, _ieq_gb, qgb_curr, cqgb_curr) = Self::jfet_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cgb,
                 vgb,
@@ -699,8 +671,7 @@ impl Engine {
             vdmos_history.vds_prev_prev[idx] = vdmos_history.vds_prev[idx];
             vdmos_history.vds_prev[idx] = vds;
             let (_geq_ds, _ieq_ds, qds_curr, cqds_curr) = Self::jfet_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cds,
                 vds,
@@ -717,8 +688,7 @@ impl Engine {
             vdmos_history.vbs_prev_prev[idx] = vdmos_history.vbs_prev[idx];
             vdmos_history.vbs_prev[idx] = vbs;
             let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = Self::nonlinear_charge_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cbs,
                 vbs,
@@ -735,8 +705,7 @@ impl Engine {
             vdmos_history.vbd_prev_prev[idx] = vdmos_history.vbd_prev[idx];
             vdmos_history.vbd_prev[idx] = vbd;
             let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = Self::nonlinear_charge_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cbd,
                 vbd,
@@ -753,8 +722,7 @@ impl Engine {
             vdmos_history.vd1_prev_prev[idx] = vdmos_history.vd1_prev[idx];
             vdmos_history.vd1_prev[idx] = vd1;
             let (_geq_d1, _ieq_d1, qd1_curr, cqd1_curr) = Self::nonlinear_charge_companion_terms(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 cd1,
                 vd1,
@@ -771,37 +739,9 @@ impl Engine {
         vdmos_history.accepted_dt_prev_prev = vdmos_history.accepted_dt_prev;
         vdmos_history.accepted_dt_prev = dt;
 
-        Self::update_b3soi_history(
-            circuit,
-            accepted_solution,
-            method,
-            trap_order,
-            dt,
-            b3soi_history,
-        );
-        Self::update_bsim3_history(
-            circuit,
-            accepted_solution,
-            method,
-            trap_order,
-            dt,
-            bsim3_history,
-        );
-        Self::update_bsim4_history(
-            circuit,
-            accepted_solution,
-            method,
-            trap_order,
-            dt,
-            bsim4_history,
-        );
-        Self::update_ekv26_history(
-            circuit,
-            accepted_solution,
-            method,
-            trap_order,
-            dt,
-            ekv26_history,
-        );
+        Self::update_b3soi_history(circuit, accepted_solution, coeff, dt, b3soi_history);
+        Self::update_bsim3_history(circuit, accepted_solution, coeff, dt, bsim3_history);
+        Self::update_bsim4_history(circuit, accepted_solution, coeff, dt, bsim4_history);
+        Self::update_ekv26_history(circuit, accepted_solution, coeff, dt, ekv26_history);
     }
 }

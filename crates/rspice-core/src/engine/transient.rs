@@ -475,12 +475,14 @@ impl Engine {
     /// Continue a transient from a checkpoint to a later stop time.
     ///
     /// The checkpoint must come from the same netlist (fingerprint
-    /// enforced). Continuation restores the exact linear-reactive state
-    /// (capacitor/inductor integrator histories) and restarts integration
-    /// at the checkpoint time with absolute-time source evaluation — the
-    /// same numerical regime as a breakpoint restart. Nonlinear-device
-    /// iteration memories and transmission-line delay histories re-derive
-    /// from the restored solution on the first step.
+    /// enforced). Continuation restores the captured linear-reactive state
+    /// (capacitor/inductor integrator histories) and restarts integration at
+    /// order one with absolute-time source evaluation. Higher-order integration
+    /// resumes only after one real post-checkpoint interval has been accepted,
+    /// because nonlinear charge histories and accepted-step timing provenance
+    /// are intentionally not serialized. Nonlinear-device iteration memories
+    /// and transmission-line delay histories also re-derive from the restored
+    /// solution on the first step.
     ///
     /// TRNOISE decks regenerate their sample train for each segment's
     /// horizon; run noise decks unsegmented when a single continuous
@@ -585,7 +587,7 @@ impl Engine {
                 real_traces: Vec::new(),
                 device_op_traces: Vec::new(),
             };
-            let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit);
+            let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit, None);
             return Ok((result, checkpoint));
         }
         Self::ensure_supported_transient_dynamic_charges(&circuit)?;
@@ -835,8 +837,23 @@ impl Engine {
         );
         let mut dynamic_tline_breakpoints_added = 0_usize;
         let mut warned_dynamic_tline_breakpoint_cap = false;
-        let mut lte_estimator =
-            LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
+        let transient_lte_reltol = self.transient_lte_reltol();
+        let transient_lte_abstol = self.transient_lte_abstol();
+        let mut lte_estimator = LteEstimator::with_tolerances_and_reference(
+            transient_lte_reltol,
+            transient_lte_abstol,
+            self.config
+                .transient_lte_reference
+                .unwrap_or_else(|| self.config.spice_dialect.default_transient_lte_reference()),
+        );
+        if lte_estimator.uses_accepted_solution_reference() {
+            lte_estimator.seed_initial_solution(&solution[..size.min(solution.len())]);
+        }
+        if let Some(checkpoint) = resume {
+            checkpoint
+                .restore_lte_references(&mut lte_estimator)
+                .map_err(SimulationError::Circuit)?;
+        }
 
         // Floor-dt livelock detection: dozens of consecutive accepted points
         // at the hard-minimum timestep mean the step controller is trapped —
@@ -854,6 +871,7 @@ impl Engine {
         let mut livelock_streak = 0_usize;
         let mut livelock_last_restart_t: Option<Value> = None;
         let mut lte_warmup_skips = 0_u8;
+        let mut xyce_lte_restart_first_step = false;
 
         // Integration method selection:
         // - TrapGear => adaptive trap/gear switching
@@ -866,39 +884,29 @@ impl Engine {
         if let Some(method) = fixed_method {
             trapgear.force_method(method);
         }
-        let xyce_locked_gear12_order1_window = if self.config.locked_time_grid.is_some()
-            && self.config.spice_dialect == SpiceDialect::Xyce
-            && matches!(fixed_method, Some(IntegrationMethod::Gear2))
-        {
-            // Xyce's default Gear 1-2 integrator restarts at order 1 after
-            // source breakpoints before promoting back to BDF2. Locked-grid
-            // oracle replay bypasses the normal breakpoint restart path, so
-            // keep the same short first-order window explicitly.
-            4_usize
-        } else {
-            0_usize
-        };
-        let mut xyce_locked_gear12_order1_remaining = xyce_locked_gear12_order1_window;
-        let mut xyce_locked_gear12_last_restart: Option<Value> = None;
-
         // Track integration method order for LTE scaling
         let effective_method_order = |method: IntegrationMethod, trap_order: u8| -> u32 {
             match method {
                 IntegrationMethod::BackwardEuler => 1,
-                IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear if trap_order <= 1 => {
+                IntegrationMethod::Trapezoidal
+                | IntegrationMethod::TrapGear
+                | IntegrationMethod::Gear2
+                    if trap_order <= 1 =>
+                {
                     1
                 }
                 _ => 2, // Trapezoidal and Gear2 are both order 2
             }
         };
-        let current_integration_method = |tg: &TrapGearController,
-                                          gear12_order1_remaining: usize|
-         -> IntegrationMethod {
-            if matches!(fixed_method, Some(IntegrationMethod::Gear2)) && gear12_order1_remaining > 0
-            {
-                IntegrationMethod::BackwardEuler
+        let current_integration_method = |tg: &TrapGearController| -> IntegrationMethod {
+            fixed_method.unwrap_or_else(|| tg.current_method())
+        };
+        let native_predictor_local = !lte_estimator.uses_accepted_solution_reference();
+        let native_order_after_restart = |method: IntegrationMethod| -> u8 {
+            if native_predictor_local && method == IntegrationMethod::Gear2 {
+                2
             } else {
-                fixed_method.unwrap_or_else(|| tg.current_method())
+                1
             }
         };
 
@@ -1043,17 +1051,38 @@ impl Engine {
         );
         voltage_lte_excluded_nodes.sort_unstable();
         voltage_lte_excluded_nodes.dedup();
+        let mut xyce_lte_excluded_indices = Vec::new();
+        for binding in &circuit.coupled_inductor_pairs {
+            for branch in [binding.branch1_ordinal, binding.branch2_ordinal] {
+                if branch > 0 {
+                    xyce_lte_excluded_indices.push(num_nodes + branch - 1);
+                }
+            }
+        }
+        for binding in &circuit.multi_winding_transformers {
+            xyce_lte_excluded_indices.extend(
+                binding
+                    .branch_ordinals
+                    .iter()
+                    .filter(|branch| **branch > 0)
+                    .map(|branch| num_nodes + *branch - 1),
+            );
+        }
+        xyce_lte_excluded_indices.sort_unstable();
+        xyce_lte_excluded_indices.dedup();
 
         // Grid-locked stepping: the accepted times are exactly the
         // configured grid (filtered to points after the start), the dt
         // sequence is the successive deltas, and the run ends at the last
-        // grid point. Breakpoints, source-activity biasing, LTE control,
-        // and every timestep-controller proposal are bypassed while locked;
-        // Newton (with its dt-preserving rescue) is the sole acceptance
-        // authority, and a step that cannot converge on its imposed dt
-        // fails the run instead of sub-stepping, because history-coupled
-        // devices sample accepted points and internal sub-steps would
-        // perturb the trajectory under validation.
+        // grid point. Source-activity biasing, LTE rejection, and every
+        // timestep-controller proposal are bypassed while locked; Newton
+        // (with its dt-preserving rescue) is the sole acceptance authority.
+        // Accepted-reference modes still restart integration history at
+        // source breakpoints and compute LTE for Xyce's order-selection trial;
+        // the estimate cannot reject a prescribed step or alter the grid. A
+        // step that cannot converge on its imposed dt fails instead of
+        // sub-stepping, because history-coupled devices sample accepted points
+        // and internal sub-steps would perturb the trajectory under validation.
         let locked_grid: Option<Vec<Value>> = self
             .config
             .locked_time_grid
@@ -1124,19 +1153,28 @@ impl Engine {
         let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
         let coupled_tline_refs =
             Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
+        // A checkpoint intentionally does not serialize nonlinear charge histories
+        // or their accepted timestep chain. Mark that chain unknown on resume so
+        // every variable-step companion fails safe until one real interval has
+        // been accepted. Fresh startup retains ngspice's maxstep seed.
+        let accepted_dt_seed = if resume.is_some() {
+            0.0
+        } else {
+            hinted_max_step
+        };
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution);
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
-        // ngspice seeds CKTdeltaOld[] with maxstep before the first transient point.
-        // Mirror that here so early device-local truncation/order checks have the
-        // same timestep history instead of falling back to a synthetic zero-history path.
-        bjt_history.accepted_dt_prev = hinted_max_step;
-        bjt_history.accepted_dt_prev_prev = hinted_max_step;
+        // On a fresh run, ngspice seeds CKTdeltaOld[] with maxstep before the
+        // first transient point. Mirror that only at startup so early
+        // device-local truncation/order checks see the same history.
+        bjt_history.accepted_dt_prev = accepted_dt_seed;
+        bjt_history.accepted_dt_prev_prev = accepted_dt_seed;
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
-        jfet_history.accepted_dt_prev = hinted_max_step;
-        jfet_history.accepted_dt_prev_prev = hinted_max_step;
+        jfet_history.accepted_dt_prev = accepted_dt_seed;
+        jfet_history.accepted_dt_prev_prev = accepted_dt_seed;
         let mut diode_history = Self::initialize_diode_history(&circuit, &solution);
-        diode_history.accepted_dt_prev = hinted_max_step;
-        diode_history.accepted_dt_prev_prev = hinted_max_step;
+        diode_history.accepted_dt_prev = accepted_dt_seed;
+        diode_history.accepted_dt_prev_prev = accepted_dt_seed;
         // Companion stamp slots resolved once against the frozen pattern:
         // the per-iteration charge companions then stamp through direct CSC
         // indices instead of a hash lookup per matrix entry.
@@ -1144,24 +1182,24 @@ impl Engine {
         let mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
         let vdmos_companion_slots = Self::link_vdmos_companion_slots(&circuit, &matrix);
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
-        mosfet_history.accepted_dt_prev = hinted_max_step;
-        mosfet_history.accepted_dt_prev_prev = hinted_max_step;
+        mosfet_history.accepted_dt_prev = accepted_dt_seed;
+        mosfet_history.accepted_dt_prev_prev = accepted_dt_seed;
         let mut vdmos_history = Self::initialize_vdmos_history(&circuit, &solution);
-        vdmos_history.accepted_dt_prev = hinted_max_step;
-        vdmos_history.accepted_dt_prev_prev = hinted_max_step;
+        vdmos_history.accepted_dt_prev = accepted_dt_seed;
+        vdmos_history.accepted_dt_prev_prev = accepted_dt_seed;
         let mut b3soi_history = Self::initialize_b3soi_history(&circuit, &solution);
-        b3soi_history.accepted_dt_prev = hinted_max_step;
-        b3soi_history.accepted_dt_prev_prev = hinted_max_step;
+        b3soi_history.accepted_dt_prev = accepted_dt_seed;
+        b3soi_history.accepted_dt_prev_prev = accepted_dt_seed;
         let b3soi_first_transient_handoff = resume.is_none() && circuit.has_b3soi_devices();
         let mut bsim3_history = Self::initialize_bsim3_history(&circuit, &solution);
-        bsim3_history.accepted_dt_prev = hinted_max_step;
-        bsim3_history.accepted_dt_prev_prev = hinted_max_step;
+        bsim3_history.accepted_dt_prev = accepted_dt_seed;
+        bsim3_history.accepted_dt_prev_prev = accepted_dt_seed;
         let mut bsim4_history = Self::initialize_bsim4_history(&circuit, &solution);
-        bsim4_history.accepted_dt_prev = hinted_max_step;
-        bsim4_history.accepted_dt_prev_prev = hinted_max_step;
+        bsim4_history.accepted_dt_prev = accepted_dt_seed;
+        bsim4_history.accepted_dt_prev_prev = accepted_dt_seed;
         let mut ekv26_history = Self::initialize_ekv26_history(&circuit, &solution);
-        ekv26_history.accepted_dt_prev = hinted_max_step;
-        ekv26_history.accepted_dt_prev_prev = hinted_max_step;
+        ekv26_history.accepted_dt_prev = accepted_dt_seed;
+        ekv26_history.accepted_dt_prev_prev = accepted_dt_seed;
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
 
         // ngspice keeps `CKTgmin` live in every analysis mode: the compact
@@ -1177,7 +1215,8 @@ impl Engine {
         let mut total_iterations = 0;
         let mut stale_accept_count = 0;
         let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
-        let mut trap_order = 1_u8; // ngspice-style trap order: start at 1, promote to 2 after accepted smooth step
+        let mut trap_order = native_order_after_restart(current_integration_method(&trapgear));
+        // Xyce OneStep/Gear12 start at order 1; every native Gear2 path remains order 2.
         const MAX_RETRIES: usize = 200; // Maximum retries per timepoint before force-accept
         const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
         const LINEARIZED_STARTUP_RECOVERY_POINTS: usize = 96;
@@ -1252,13 +1291,6 @@ impl Engine {
             };
         }
 
-        macro_rules! consume_xyce_locked_gear12_order1_step {
-            () => {
-                xyce_locked_gear12_order1_remaining =
-                    xyce_locked_gear12_order1_remaining.saturating_sub(1);
-            };
-        }
-
         // Perform one breakpoint-style integration restart at `t`, unless
         // the previous restart happened within the spacing window (same
         // wall — restarting again cannot help). Returns whether it ran.
@@ -1284,15 +1316,19 @@ impl Engine {
                         &mut bsim4_history,
                         &mut ekv26_history,
                     );
-                    lte_estimator =
-                        LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
+                    if lte_estimator.uses_accepted_solution_reference() {
+                        lte_estimator.restart_history_from(&solution);
+                        xyce_lte_restart_first_step = true;
+                    } else {
+                        lte_estimator.restart_history();
+                        lte_warmup_skips = 2;
+                    }
                     let restart_dt = Self::ngspice_t0_breakpoint_limited_initial_timestep(
                         Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
                         breakpoints.next_after(t),
                     );
                     timestep.force_step(restart_dt.max(timestep.preferred_min_dt()).min(max_step));
-                    trap_order = 1;
-                    lte_warmup_skips = 2;
+                    trap_order = native_order_after_restart(current_integration_method(&trapgear));
                     log::warn!(
                         "Transient stall at t={:.6e}s: integration restarted \
                          (histories re-seeded, dt -> {:.3e})",
@@ -1434,28 +1470,33 @@ impl Engine {
                 hinted_max_step,
                 MAX_FORCE_ACCEPT_DELTA_V,
             );
-            if xyce_locked_gear12_order1_window > 0
-                && source_breakpoint_times
-                    .iter()
-                    .any(|breakpoint| (t - *breakpoint).abs() <= breakpoint_tolerance)
-                && xyce_locked_gear12_last_restart
-                    .is_none_or(|restart| (t - restart).abs() > breakpoint_tolerance)
-            {
-                xyce_locked_gear12_order1_remaining = xyce_locked_gear12_order1_window;
-                xyce_locked_gear12_last_restart = Some(t);
-            }
-            let current_method =
-                current_integration_method(&trapgear, xyce_locked_gear12_order1_remaining);
+            let current_method = current_integration_method(&trapgear);
             let locked_edge_order_reset = locked_edge_order && breakpoints.at_breakpoint(t);
-            let step_trap_order = Self::step_trapezoidal_order(
-                current_method,
-                trap_order,
-                at_breakpoint || locked_edge_order_reset,
+            // Resume is a breakpoint-style integration restart. The checkpoint
+            // supplies the accepted solution but deliberately omits nonlinear
+            // charge histories and their timestep provenance, so the first real
+            // post-resume interval must be order one. Rejected attempts do not
+            // append a result point and therefore remain order one; after any
+            // accepted path commits the interval, native fixed Gear2 naturally
+            // returns to its preserved order-two `trap_order` on the next step.
+            let is_first_resumed_interval = resume.is_some() && result.time.len() == 1;
+            let step_trap_order = if is_first_resumed_interval {
+                1
+            } else {
+                Self::step_trapezoidal_order(
+                    current_method,
+                    trap_order,
+                    at_breakpoint || locked_edge_order_reset,
+                )
+            };
+            if xyce_lte_restart_first_step {
+                lte_estimator.seed_restart_timestep(dt);
+            }
+            let coeff = CompanionCoefficients::for_method_with_previous_step(
+                Self::effective_companion_method(current_method, step_trap_order),
+                dt,
+                bjt_history.accepted_dt_prev,
             );
-            let coeff = CompanionCoefficients::for_method(Self::effective_companion_method(
-                current_method,
-                step_trap_order,
-            ));
             let suppress_gate_charge = false;
             let mut rejected_attempt_nonlinear_state = circuit
                 .has_nonlinear_devices()
@@ -1509,10 +1550,10 @@ impl Engine {
             // unknown, including branch-current equations, not just node
             // voltages. Matching that behavior materially improves the initial
             // Newton guess for source-heavy compact-model decks.
-            if let Some(predicted_solution) =
-                lte_estimator.predict_solution(dt, current_method, step_trap_order)
-            {
-                new_solution = predicted_solution;
+            let lte_predicted_solution =
+                lte_estimator.predict_solution(dt, current_method, step_trap_order);
+            if let Some(predicted_solution) = lte_predicted_solution.as_ref() {
+                new_solution.clone_from(predicted_solution);
             } else {
                 new_solution.clone_from(&solution);
             }
@@ -1636,8 +1677,6 @@ impl Engine {
                     dt,
                     &residual::TransientSystemContext {
                         coeff: &coeff,
-                        method: current_method,
-                        trap_order: step_trap_order,
                         bjt_history: &bjt_history,
                         jfet_history: &jfet_history,
                         diode_history: &diode_history,
@@ -1940,8 +1979,6 @@ impl Engine {
                                 dt,
                                 &residual::TransientSystemContext {
                                     coeff: &coeff,
-                                    method: current_method,
-                                    trap_order: step_trap_order,
                                     bjt_history: &bjt_history,
                                     jfet_history: &jfet_history,
                                     diode_history: &diode_history,
@@ -2004,7 +2041,7 @@ impl Engine {
             let postloop_phase_start = crate::time_compat::Instant::now();
             if !converged {
                 retry_count += 1;
-                trap_order = 1;
+                trap_order = native_order_after_restart(current_method);
 
                 // Diagnostic logging for debugging convergence issues
                 static CONV_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -2048,8 +2085,6 @@ impl Engine {
                         dt,
                         &residual::TransientSystemContext {
                             coeff: &coeff,
-                            method: current_method,
-                            trap_order: step_trap_order,
                             bjt_history: &bjt_history,
                             jfet_history: &jfet_history,
                             diode_history: &diode_history,
@@ -2165,6 +2200,16 @@ impl Engine {
                 let mut force_accepted_rejected_newton_step = false;
 
                 if exhausted_retries || exhausted_at_min {
+                    if lte_estimator.uses_accepted_solution_reference() {
+                        log::error!(
+                            "Xyce transient Newton recovery exhausted at t={:.12e}s (dt={:.3e}, retries={})",
+                            t + dt,
+                            dt,
+                            retry_count
+                        );
+                        restore_rejected_transient_nonlinear_state!();
+                        return Err(SimulationError::ConvergenceFailed(total_iterations));
+                    }
                     let bounded_force_candidate = Self::bounded_force_accept_candidate(
                         &circuit,
                         &solution,
@@ -2315,10 +2360,13 @@ impl Engine {
                         circuit.update_nonlinear(&new_solution);
                     }
 
-                    let method_after_step =
-                        current_integration_method(&trapgear, xyce_locked_gear12_order1_remaining);
+                    let method_after_step = current_integration_method(&trapgear);
                     let accepted_step_trap_order =
-                        Self::effective_trapezoidal_order(current_method, 1);
+                        if native_predictor_local && current_method == IntegrationMethod::Gear2 {
+                            2
+                        } else {
+                            1
+                        };
                     let force_accept_bjt_truncation_limit = if has_bjts {
                         Self::bjt_ngspice_truncation_limit(
                             &circuit,
@@ -2329,7 +2377,7 @@ impl Engine {
                             &bjt_history,
                             &vbic_snapshot_cache,
                             self.voltage_abstol(),
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -2347,7 +2395,7 @@ impl Engine {
                             dt,
                             &jfet_history,
                             suppress_gate_charge,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -2366,7 +2414,7 @@ impl Engine {
                             dt,
                             mosfet_history.accepted_dt_prev,
                             mosfet_history.accepted_dt_prev_prev,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -2383,7 +2431,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &diode_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -2401,7 +2449,7 @@ impl Engine {
                                 accepted_step_trap_order,
                                 dt,
                                 &mosfet_history,
-                                self.voltage_reltol(),
+                                transient_lte_reltol,
                                 self.current_abstol(),
                                 self.charge_abstol(),
                                 self.transient_trtol(),
@@ -2419,7 +2467,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &vdmos_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -2436,7 +2484,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &b3soi_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -2453,7 +2501,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &bsim3_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -2470,7 +2518,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &bsim4_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -2505,6 +2553,10 @@ impl Engine {
                         ),
                     );
                     lte_estimator.record(&new_solution, dt);
+                    if hit_breakpoint && lte_estimator.uses_accepted_solution_reference() {
+                        lte_estimator.restart_history_from(&new_solution);
+                        xyce_lte_restart_first_step = true;
+                    }
                     lte_estimator.set_method_order(effective_method_order(
                         method_after_step,
                         accepted_step_trap_order,
@@ -2517,8 +2569,7 @@ impl Engine {
                         &new_solution,
                         t,
                         dt,
-                        current_method,
-                        accepted_step_trap_order,
+                        &coeff,
                         &mut bjt_history,
                         &mut jfet_history,
                         &mut diode_history,
@@ -2577,7 +2628,6 @@ impl Engine {
                         &derived_branch_currents,
                         record_device_op_traces,
                     );
-                    consume_xyce_locked_gear12_order1_step!();
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                         result.record_digital_snapshot(
@@ -2656,7 +2706,7 @@ impl Engine {
                     &bjt_history,
                     &vbic_snapshot_cache,
                     self.voltage_abstol(),
-                    self.voltage_reltol(),
+                    transient_lte_reltol,
                     self.current_abstol(),
                     self.charge_abstol(),
                     self.transient_trtol(),
@@ -2675,7 +2725,7 @@ impl Engine {
                         dt,
                         mosfet_history.accepted_dt_prev,
                         mosfet_history.accepted_dt_prev_prev,
-                        self.voltage_reltol(),
+                        transient_lte_reltol,
                         self.current_abstol(),
                         self.charge_abstol(),
                         self.transient_trtol(),
@@ -2694,7 +2744,7 @@ impl Engine {
                         dt,
                         &jfet_history,
                         suppress_gate_charge,
-                        self.voltage_reltol(),
+                        transient_lte_reltol,
                         self.current_abstol(),
                         self.charge_abstol(),
                         self.transient_trtol(),
@@ -2712,7 +2762,7 @@ impl Engine {
                         step_trap_order,
                         dt,
                         &diode_history,
-                        self.voltage_reltol(),
+                        transient_lte_reltol,
                         self.current_abstol(),
                         self.charge_abstol(),
                         self.transient_trtol(),
@@ -2732,7 +2782,7 @@ impl Engine {
                     step_trap_order,
                     dt,
                     &mosfet_history,
-                    self.voltage_reltol(),
+                    transient_lte_reltol,
                     self.current_abstol(),
                     self.charge_abstol(),
                     self.transient_trtol(),
@@ -2753,7 +2803,7 @@ impl Engine {
                         step_trap_order,
                         dt,
                         &vdmos_history,
-                        self.voltage_reltol(),
+                        transient_lte_reltol,
                         self.current_abstol(),
                         self.charge_abstol(),
                         self.transient_trtol(),
@@ -2771,7 +2821,7 @@ impl Engine {
                         step_trap_order,
                         dt,
                         &b3soi_history,
-                        self.voltage_reltol(),
+                        transient_lte_reltol,
                         self.current_abstol(),
                         self.charge_abstol(),
                         self.transient_trtol(),
@@ -2789,7 +2839,7 @@ impl Engine {
                         step_trap_order,
                         dt,
                         &bsim3_history,
-                        self.voltage_reltol(),
+                        transient_lte_reltol,
                         self.current_abstol(),
                         self.charge_abstol(),
                         self.transient_trtol(),
@@ -2807,7 +2857,7 @@ impl Engine {
                         step_trap_order,
                         dt,
                         &bsim4_history,
-                        self.voltage_reltol(),
+                        transient_lte_reltol,
                         self.current_abstol(),
                         self.charge_abstol(),
                         self.transient_trtol(),
@@ -2843,7 +2893,9 @@ impl Engine {
             } else {
                 None
             };
-            let activity_limit = if !first_accepted_transient_step {
+            let activity_limit = if !first_accepted_transient_step
+                && !lte_estimator.uses_accepted_solution_reference()
+            {
                 Self::nonlinear_terminal_activity_limit(
                     &circuit,
                     &solution,
@@ -2856,7 +2908,14 @@ impl Engine {
                 None
             };
             let candidate_truncation_limit = Self::min_truncation_limit(
-                Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit),
+                Self::min_truncation_limit(
+                    if lte_estimator.uses_accepted_solution_reference() {
+                        None
+                    } else {
+                        device_truncation_limit
+                    },
+                    ltra_truncation_limit,
+                ),
                 activity_limit,
             );
             total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();
@@ -2944,40 +3003,107 @@ impl Engine {
                     mosfet_truncation_limit,
                     vdmos_truncation_limit,
                 );
+            let legacy_xyce_breakpoint_restart_controls_lte = lte_estimator
+                .uses_accepted_solution_reference()
+                && xyce_lte_restart_first_step
+                && !self.config.transient_new_bp_stepping;
             let device_or_startup_controls_lte = first_accepted_transient_step
-                || linearized_startup_recovery_points
-                || defer_voltage_lte_to_bjt_truncation
-                || defer_voltage_lte_to_jfet_truncation
-                || defer_voltage_lte_to_mosfet_truncation
-                || defer_voltage_lte_to_ngspice_device_truncation;
-            let (lte, accept) = if locked_grid.is_some() || device_or_startup_controls_lte {
-                // For locked grids, first/startup recovery points, and decks
-                // covered by ngspice device-local truncation (CAPtrunc,
-                // MOStrunc, BJTtrunc, generated compact-model truncation,
-                // etc.), a converged Newton
-                // solution at the imposed dt is the acceptance criterion.
+                || legacy_xyce_breakpoint_restart_controls_lte
+                || (!lte_estimator.uses_accepted_solution_reference()
+                    && (linearized_startup_recovery_points
+                        || defer_voltage_lte_to_bjt_truncation
+                        || defer_voltage_lte_to_jfet_truncation
+                        || defer_voltage_lte_to_mosfet_truncation
+                        || defer_voltage_lte_to_ngspice_device_truncation));
+            let (lte, lte_accept) = if device_or_startup_controls_lte {
+                // For first/startup recovery points and decks covered by
+                // ngspice device-local truncation (CAPtrunc, MOStrunc,
+                // BJTtrunc, generated compact-model truncation, etc.), a
+                // converged Newton solution at the imposed dt is the
+                // acceptance criterion.
                 (0.0, true)
             } else {
                 Self::estimate_transient_lte(
                     &circuit,
                     &new_solution,
+                    lte_predicted_solution.as_deref(),
                     dt,
+                    current_method,
+                    step_trap_order,
                     is_strictly_linear_transient,
                     &lte_estimator,
                     &voltage_lte_excluded_nodes,
+                    &xyce_lte_excluded_indices,
                 )
             };
-            let lte_scale = if first_accepted_transient_step || is_strictly_linear_transient {
+            // Xyce CONSTSTEP still evaluates LTE for integration-order
+            // selection, but the estimate cannot reject or resize a
+            // prescribed grid step.
+            let accept = locked_grid.is_some() || lte_accept;
+            let xyce_order_two_trial_eligible = lte_estimator.uses_accepted_solution_reference()
+                && accept
+                && !first_accepted_transient_step
+                && !xyce_lte_restart_first_step
+                && !at_breakpoint
+                && step_trap_order == 1
+                && matches!(
+                    current_method,
+                    IntegrationMethod::Trapezoidal
+                        | IntegrationMethod::TrapGear
+                        | IntegrationMethod::Gear2
+                );
+            let xyce_promotes_order_two =
+                xyce_order_two_trial_eligible && lte_estimator.xyce_should_promote_order_two(lte);
+            let xyce_accepted_ratio_order = if xyce_order_two_trial_eligible {
+                2
+            } else {
+                step_trap_order
+            };
+            let xyce_rejected_order = match current_method {
+                IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => 1,
+                IntegrationMethod::Gear2 if retry_count > 0 => 1,
+                _ => step_trap_order,
+            };
+            let lte_scale = if first_accepted_transient_step
+                || (is_strictly_linear_transient
+                    && !lte_estimator.uses_accepted_solution_reference())
+            {
                 1.0
+            } else if lte_estimator.uses_accepted_solution_reference() {
+                if accept {
+                    lte_estimator.xyce_accepted_step_scale(
+                        lte,
+                        current_method,
+                        xyce_accepted_ratio_order,
+                    )
+                } else {
+                    lte_estimator.xyce_rejected_step_scale(
+                        lte,
+                        current_method,
+                        xyce_rejected_order,
+                        retry_count == 0,
+                    )
+                }
             } else {
                 lte_estimator.recommend_scale(lte)
             };
             if !accept {
                 retry_count += 1;
-                // LTE/truncation rejects in ngspice retry the same order at a
-                // smaller timestep instead of forcing trapezoidal back to order 1.
-                trap_order = Self::trapezoidal_order_after_timestep_control_reject(step_trap_order);
-                timestep.adjust(lte / lte_scale);
+                trap_order = if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_rejected_order
+                } else {
+                    // Native/ngspice LTE retries preserve the current order.
+                    Self::trapezoidal_order_after_timestep_control_reject(step_trap_order)
+                };
+                if lte_estimator.uses_accepted_solution_reference() {
+                    // Xyce-mode LTE is normalized against its own TIMEINT
+                    // tolerance, whereas the legacy timestep controller has a
+                    // fixed 1e-3 target. Apply the estimator's order-aware
+                    // scale directly so a rejected Xyce step always shrinks.
+                    timestep.force_step((dt * lte_scale).clamp(timestep.hard_min_dt(), max_step));
+                } else {
+                    timestep.adjust(lte / lte_scale);
+                }
                 let clamped_retry_dt = Self::apply_retry_timestep_floor(
                     timestep.dt(),
                     legacy_bjt_retry_floor_dt,
@@ -2999,6 +3125,16 @@ impl Engine {
                 let mut force_accepted_rejected_lte_step = false;
 
                 if exhausted_retries || exhausted_at_min {
+                    if lte_estimator.uses_accepted_solution_reference() {
+                        log::error!(
+                            "Xyce transient LTE recovery exhausted at t={:.12e}s (dt={:.3e}, retries={})",
+                            t + dt,
+                            dt,
+                            retry_count
+                        );
+                        restore_rejected_transient_nonlinear_state!();
+                        return Err(SimulationError::ConvergenceFailed(total_iterations));
+                    }
                     let bounded_force_candidate = Self::bounded_force_accept_candidate(
                         &circuit,
                         &solution,
@@ -3122,10 +3258,13 @@ impl Engine {
                         circuit.update_nonlinear(&new_solution);
                     }
 
-                    let method_after_step =
-                        current_integration_method(&trapgear, xyce_locked_gear12_order1_remaining);
+                    let method_after_step = current_integration_method(&trapgear);
                     let accepted_step_trap_order =
-                        Self::effective_trapezoidal_order(current_method, 1);
+                        if native_predictor_local && current_method == IntegrationMethod::Gear2 {
+                            2
+                        } else {
+                            1
+                        };
                     let force_accept_bjt_truncation_limit = if has_bjts {
                         Self::bjt_ngspice_truncation_limit(
                             &circuit,
@@ -3136,7 +3275,7 @@ impl Engine {
                             &bjt_history,
                             &vbic_snapshot_cache,
                             self.voltage_abstol(),
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -3154,7 +3293,7 @@ impl Engine {
                             dt,
                             &jfet_history,
                             suppress_gate_charge,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -3173,7 +3312,7 @@ impl Engine {
                             dt,
                             mosfet_history.accepted_dt_prev,
                             mosfet_history.accepted_dt_prev_prev,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -3190,7 +3329,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &diode_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -3208,7 +3347,7 @@ impl Engine {
                                 accepted_step_trap_order,
                                 dt,
                                 &mosfet_history,
-                                self.voltage_reltol(),
+                                transient_lte_reltol,
                                 self.current_abstol(),
                                 self.charge_abstol(),
                                 self.transient_trtol(),
@@ -3226,7 +3365,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &vdmos_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -3243,7 +3382,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &b3soi_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -3260,7 +3399,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &bsim3_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -3277,7 +3416,7 @@ impl Engine {
                             accepted_step_trap_order,
                             dt,
                             &bsim4_history,
-                            self.voltage_reltol(),
+                            transient_lte_reltol,
                             self.current_abstol(),
                             self.charge_abstol(),
                             self.transient_trtol(),
@@ -3312,6 +3451,10 @@ impl Engine {
                         ),
                     );
                     lte_estimator.record(&new_solution, dt);
+                    if hit_breakpoint && lte_estimator.uses_accepted_solution_reference() {
+                        lte_estimator.restart_history_from(&new_solution);
+                        xyce_lte_restart_first_step = true;
+                    }
                     lte_estimator.set_method_order(effective_method_order(
                         method_after_step,
                         accepted_step_trap_order,
@@ -3324,8 +3467,7 @@ impl Engine {
                         &new_solution,
                         t,
                         dt,
-                        current_method,
-                        accepted_step_trap_order,
+                        &coeff,
                         &mut bjt_history,
                         &mut jfet_history,
                         &mut diode_history,
@@ -3384,7 +3526,6 @@ impl Engine {
                         &derived_branch_currents,
                         record_device_op_traces,
                     );
-                    consume_xyce_locked_gear12_order1_step!();
                     if record_xspice_event_traces {
                         circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                         result.record_digital_snapshot(
@@ -3465,7 +3606,7 @@ impl Engine {
                     );
                     return Err(SimulationError::ConvergenceFailed(total_iterations));
                 }
-                trap_order = 1;
+                trap_order = native_order_after_restart(current_method);
                 restore_rejected_transient_nonlinear_state!();
                 total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                 continue;
@@ -3482,18 +3623,24 @@ impl Engine {
                     t = grid[locked_cursor];
                     locked_cursor += 1;
                 }
-                false
+                lte_estimator.uses_accepted_solution_reference() && breakpoints.at_breakpoint(t)
             } else {
                 at_breakpoint || breakpoints.at_breakpoint(t)
             };
-            if hit_breakpoint {
+            // A locked grid is an external acceptance contract: retain its exact
+            // target even when a source breakpoint is within the breakpoint
+            // tolerance. `mark_breakpoint_solved` below uses that same tolerance,
+            // so the nearby breakpoint is still consumed without perturbing the
+            // prescribed sample time (in particular, the final grid endpoint).
+            if hit_breakpoint && !locked_step_lands_on_grid {
                 t = breakpoints.snap_to_breakpoint(t);
             }
-            let method_after_step =
-                current_integration_method(&trapgear, xyce_locked_gear12_order1_remaining);
-            lte_estimator.record(&new_solution, dt);
-            lte_estimator
-                .set_method_order(effective_method_order(method_after_step, step_trap_order));
+            let method_after_step = current_integration_method(&trapgear);
+            if !lte_estimator.uses_accepted_solution_reference() {
+                lte_estimator.record(&new_solution, dt);
+                lte_estimator
+                    .set_method_order(effective_method_order(method_after_step, step_trap_order));
+            }
             if fixed_method.is_none() {
                 trapgear.update(&new_solution, dt);
             }
@@ -3506,13 +3653,17 @@ impl Engine {
             let trap_trial_phase_start = crate::time_compat::Instant::now();
             let trapezoidal_order_trial = if !first_accepted_transient_step
                 && !linearized_startup_recovery_points
+                && !lte_estimator.uses_accepted_solution_reference()
                 && matches!(
                     current_method,
                     IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
                 )
                 && !hit_breakpoint
             {
-                if step_trap_order == 2 && device_truncation_limit.is_some() {
+                if step_trap_order == 2
+                    && !lte_estimator.uses_accepted_solution_reference()
+                    && device_truncation_limit.is_some()
+                {
                     // The order-2 trial truncation walk is the order-2 device
                     // truncation walk: when this step already ran at order 2,
                     // the candidate limits were just computed above on the
@@ -3537,9 +3688,10 @@ impl Engine {
                         &ekv26_history,
                         &lte_estimator,
                         &voltage_lte_excluded_nodes,
+                        &xyce_lte_excluded_indices,
                         &vbic_snapshot_cache,
                         self.voltage_abstol(),
-                        self.voltage_reltol(),
+                        transient_lte_reltol,
                         self.current_abstol(),
                         self.charge_abstol(),
                         self.transient_trtol(),
@@ -3556,8 +3708,7 @@ impl Engine {
                 &new_solution,
                 t,
                 dt,
-                current_method,
-                step_trap_order,
+                &coeff,
                 &mut bjt_history,
                 &mut jfet_history,
                 &mut diode_history,
@@ -3599,15 +3750,22 @@ impl Engine {
                 circuit.accept_generated_veriloga_timestep();
             }
 
+            if lte_estimator.uses_accepted_solution_reference() {
+                lte_estimator.record(&new_solution, dt);
+                if hit_breakpoint {
+                    lte_estimator.restart_history_from(&new_solution);
+                    xyce_lte_restart_first_step = true;
+                }
+                lte_estimator
+                    .set_method_order(effective_method_order(method_after_step, step_trap_order));
+            }
+
             solution.clone_from(&new_solution);
 
             if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
-                log::warn!(
-                    "GRID accept t={:.12e} dt={:.6e} order={} bp={}",
-                    t,
-                    dt,
-                    step_trap_order,
-                    hit_breakpoint
+                eprintln!(
+                    "GRID accept t={:.12e} dt={:.6e} order={} bp={} lte={:.6e} promote={}",
+                    t, dt, step_trap_order, hit_breakpoint, lte, xyce_promotes_order_two
                 );
             }
 
@@ -3626,7 +3784,6 @@ impl Engine {
                 &derived_branch_currents,
                 record_device_op_traces,
             );
-            consume_xyce_locked_gear12_order1_step!();
             if record_xspice_event_traces {
                 circuit.fill_xspice_digital_snapshot(&mut digital_snapshot);
                 result.record_digital_snapshot(t, &digital_snapshot, &mut digital_trace_indices);
@@ -3635,12 +3792,24 @@ impl Engine {
             }
             if first_accepted_transient_step {
                 timestep.set_max_dt(hinted_max_step);
-                timestep.force_step(dt);
+                let next_dt = if lte_estimator.uses_accepted_solution_reference() {
+                    // Xyce does not test LTE on the first successful transient
+                    // step (`TESTFIRSTSTEP=false`), then applies its normal
+                    // maximum 2x growth before later breakpoint/device caps.
+                    (dt * 2.0).min(max_step)
+                } else {
+                    // Preserve ngspice's initial repeated-delta behavior for
+                    // native predictor-local control.
+                    dt
+                };
+                timestep.force_step(next_dt);
             } else {
                 Self::recover_timestep_after_accepted_step(
                     &mut timestep,
                     &lte_estimator,
                     &new_solution,
+                    current_method,
+                    step_trap_order,
                     dt,
                     max_step,
                     is_strictly_linear_transient,
@@ -3652,7 +3821,8 @@ impl Engine {
             if hit_breakpoint {
                 let restart_dt = breakpoints.mark_breakpoint_solved(t);
                 timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
-                if !circuit.vdmoses.is_empty() {
+                if !lte_estimator.uses_accepted_solution_reference() && !circuit.vdmoses.is_empty()
+                {
                     lte_warmup_skips = lte_warmup_skips.max(2);
                 }
             }
@@ -3702,7 +3872,11 @@ impl Engine {
                 current_method,
                 IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
             ) {
-                let should_promote = trapezoidal_order_trial.is_some_and(|trial| trial.promote);
+                let should_promote = if lte_estimator.uses_accepted_solution_reference() {
+                    xyce_promotes_order_two
+                } else {
+                    trapezoidal_order_trial.is_some_and(|trial| trial.promote)
+                };
                 trap_order = Self::next_trapezoidal_order_after_accepted_step(
                     step_trap_order,
                     hit_breakpoint,
@@ -3715,6 +3889,20 @@ impl Engine {
                 {
                     timestep.force_step(trial.limit);
                 }
+            } else if current_method == IntegrationMethod::Gear2
+                && lte_estimator.uses_accepted_solution_reference()
+            {
+                trap_order = Self::next_trapezoidal_order_after_accepted_step(
+                    step_trap_order,
+                    hit_breakpoint,
+                    xyce_promotes_order_two,
+                );
+            }
+
+            lte_estimator.set_method_order(effective_method_order(current_method, trap_order));
+
+            if xyce_lte_restart_first_step && !hit_breakpoint {
+                xyce_lte_restart_first_step = false;
             }
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
@@ -3795,7 +3983,8 @@ impl Engine {
             );
         }
 
-        let final_checkpoint = TransientCheckpoint::capture(fingerprint, t, &solution, &circuit);
+        let final_checkpoint =
+            TransientCheckpoint::capture(fingerprint, t, &solution, &circuit, Some(&lte_estimator));
         Ok((result, final_checkpoint))
     }
 
@@ -3948,7 +4137,7 @@ mod tests {
     }
 
     #[test]
-    fn xyce_locked_gear12_restarts_order1_at_source_breakpoint() {
+    fn xyce_locked_gear12_promotes_only_after_order_two_ratio_passes() {
         let deck = "Xyce Gear12 locked-grid RC ramp\n\
                     VIN 1 0 PULSE(0 1 10U 1U 1U 80U)\n\
                     R1 1 2 1K\n\
@@ -3985,8 +4174,102 @@ mod tests {
             result.voltages[node2][index]
         };
 
-        assert!((voltage_at(10.4e-6) - 4.950_434_026_064e-3).abs() < 1.0e-14);
-        assert!((voltage_at(10.5e-6) - 7.251_345_484_406e-3).abs() < 1.0e-14);
+        let alpha = 0.1e-6 / (1.0e3 * 20.0e-9);
+        let backward_euler =
+            |previous: Value, input: Value| (previous + alpha * input) / (1.0 + alpha);
+        let bdf2 = |previous: Value, previous_previous: Value, input: Value| {
+            (2.0 * previous - 0.5 * previous_previous + alpha * input) / (1.5 + alpha)
+        };
+        let v_10_1 = backward_euler(0.0, 0.1);
+        let v_10_2 = backward_euler(v_10_1, 0.2);
+        let v_10_3 = backward_euler(v_10_2, 0.3);
+        let v_10_4 = backward_euler(v_10_3, 0.4);
+        let v_10_5 = backward_euler(v_10_4, 0.5);
+        let v_10_6 = bdf2(v_10_5, v_10_4, 0.6);
+
+        assert!((voltage_at(10.1e-6) - v_10_1).abs() < 1.0e-14);
+        assert!((voltage_at(10.2e-6) - v_10_2).abs() < 1.0e-14);
+        assert!((voltage_at(10.3e-6) - v_10_3).abs() < 1.0e-14);
+        assert!((voltage_at(10.4e-6) - v_10_4).abs() < 1.0e-14);
+        assert!((voltage_at(10.5e-6) - v_10_5).abs() < 1.0e-14);
+        assert!((voltage_at(10.6e-6) - v_10_6).abs() < 1.0e-14);
+    }
+
+    #[test]
+    fn gear2_order_one_charge_companions_are_backward_euler() {
+        let dt = 0.5;
+        let capacitance = 2.0;
+        let q_curr = 3.0;
+        let q_prev = 2.0;
+        let q_prev_prev = 0.5;
+        let cq_prev = 0.25;
+
+        let backward_euler = CompanionCoefficients::backward_euler();
+        let gear_order_one = CompanionCoefficients::for_method(Engine::effective_companion_method(
+            IntegrationMethod::Gear2,
+            1,
+        ));
+        let gear_order_two = CompanionCoefficients::gear2();
+        let backward_euler_geq = Engine::jfet_companion_geq(&backward_euler, capacitance, dt);
+        let gear_order_one_geq = Engine::jfet_companion_geq(&gear_order_one, capacitance, dt);
+        let gear_order_two_geq = Engine::jfet_companion_geq(&gear_order_two, capacitance, dt);
+        assert_eq!(gear_order_one_geq, backward_euler_geq);
+        assert_ne!(gear_order_two_geq, backward_euler_geq);
+
+        let backward_euler_ccap =
+            Engine::jfet_companion_ccap(&backward_euler, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        let gear_order_one_ccap =
+            Engine::jfet_companion_ccap(&gear_order_one, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        let gear_order_two_ccap =
+            Engine::jfet_companion_ccap(&gear_order_two, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        assert_eq!(gear_order_one_ccap, backward_euler_ccap);
+        assert_ne!(gear_order_two_ccap, backward_euler_ccap);
+
+        let backward_euler_ieq =
+            Engine::linear_charge_history_ieq(&backward_euler, dt, q_prev, q_prev_prev, cq_prev);
+        let gear_order_one_ieq =
+            Engine::linear_charge_history_ieq(&gear_order_one, dt, q_prev, q_prev_prev, cq_prev);
+        let gear_order_two_ieq =
+            Engine::linear_charge_history_ieq(&gear_order_two, dt, q_prev, q_prev_prev, cq_prev);
+        assert_eq!(gear_order_one_ieq, backward_euler_ieq);
+        assert_ne!(gear_order_two_ieq, backward_euler_ieq);
+    }
+
+    #[test]
+    fn unequal_step_gear2_nonlinear_charge_companion_uses_trial_coefficients() {
+        let dt = 2.0;
+        let previous_dt = 1.0;
+        let coeff = CompanionCoefficients::gear2_variable_step(dt, previous_dt);
+        let v_curr = 3.0;
+        let q_curr = v_curr * v_curr;
+        let q_prev = 4.0;
+        let q_prev_prev = 1.0;
+        let dq_dv = 2.0 * v_curr;
+
+        let (geq, ieq, returned_q, cq) = Engine::nonlinear_charge_companion_terms(
+            &coeff,
+            dt,
+            dq_dv,
+            v_curr,
+            q_curr,
+            q_prev,
+            q_prev_prev,
+            0.0,
+        );
+        let expected_cq = (5.0 / 3.0 * q_curr - 3.0 * q_prev + 4.0 / 3.0 * q_prev_prev) / dt;
+        let expected_geq = 5.0 / 3.0 * dq_dv / dt;
+
+        assert!((cq - expected_cq).abs() <= 16.0 * Value::EPSILON);
+        assert!((geq - expected_geq).abs() <= 16.0 * Value::EPSILON);
+        assert!((ieq - (geq * v_curr - expected_cq)).abs() <= 16.0 * Value::EPSILON);
+        assert_eq!(returned_q, q_curr);
+
+        let fixed_step_cq = (1.5 * q_curr - 2.0 * q_prev + 0.5 * q_prev_prev) / dt;
+        let comparison_scale = cq.abs().max(fixed_step_cq.abs()).max(1.0);
+        assert!(
+            (cq - fixed_step_cq).abs() > 128.0 * Value::EPSILON * comparison_scale,
+            "unequal-step Gear2 must not silently reconstruct fixed-step BDF2"
+        );
     }
 
     #[test]

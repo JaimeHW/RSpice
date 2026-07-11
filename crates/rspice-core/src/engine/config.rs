@@ -1,6 +1,7 @@
 //! Engine configuration types.
 
 use crate::Value;
+use crate::netlist::TransientLteReference;
 
 /// Broad SPICE compatibility policy for internal device-model selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -20,6 +21,14 @@ impl SpiceDialect {
         match self {
             Self::BestAvailable | Self::Ngspice => JfetLevel2Model::ParkerSkellern,
             Self::Xyce => JfetLevel2Model::XyceModifiedShockley,
+        }
+    }
+
+    /// Default transient LTE reference policy for this compatibility dialect.
+    pub fn default_transient_lte_reference(self) -> TransientLteReference {
+        match self {
+            Self::Xyce => TransientLteReference::PointGlobal,
+            Self::BestAvailable | Self::Ngspice => TransientLteReference::PredictorLocal,
         }
     }
 }
@@ -81,6 +90,21 @@ pub struct SimulationConfig {
     pub b3soi_gmin_scaling: bool,
     /// Transient truncation tolerance factor for charge-state timestep control.
     pub transient_trtol: Value,
+    /// Explicit transient LTE relative tolerance. `None` uses Xyce's independent
+    /// TIMEINT default in Xyce mode and voltage RELTOL in native/ngspice modes.
+    pub transient_lte_reltol: Option<Value>,
+    /// Explicit transient LTE absolute tolerance. `None` uses Xyce's independent
+    /// TIMEINT default in Xyce mode and voltage ABSTOL in native/ngspice modes.
+    pub transient_lte_abstol: Option<Value>,
+    /// Reference magnitude policy for normalized transient LTE control.
+    /// `None` selects the active [`SpiceDialect`]'s default policy.
+    pub transient_lte_reference: Option<TransientLteReference>,
+    /// Xyce `NEWBPSTEPPING` policy.
+    ///
+    /// When false, the first integration step after a breakpoint remains an
+    /// order-one restart step but bypasses LTE rejection. The Xyce 7.10
+    /// default is true, which tests LTE at noninitial breakpoint restarts.
+    pub transient_new_bp_stepping: bool,
     /// Largest nonlinear-device terminal-voltage change allowed per accepted
     /// transient step (volts). Signal-activity step control complementing the
     /// polynomial charge LTE; see `constants::DEVICE_ACTIVITY_STEP_BOUND`.
@@ -89,16 +113,20 @@ pub struct SimulationConfig {
     pub bypass_config: BypassConfig,
     /// Convergence configuration for DC operating point
     pub convergence_config: ConvergenceConfig,
-    /// Grid-locked transient stepping: when set, accepted timepoints are
-    /// exactly these strictly-increasing times — the dt sequence is the
-    /// successive grid deltas, with no intermediate adaptive points, no
-    /// breakpoint-restart re-seeding, and LTE control disabled (the grid is
-    /// given). Newton-only acceptance per step; a step that cannot converge
-    /// on its imposed dt fails the run rather than sub-stepping, because
-    /// history-coupled devices (TXL/CPL/LTRA convolutions) sample accepted
-    /// points and internal sub-steps would change the trajectory being
-    /// validated. Built for oracle comparison: replaying a reference's
-    /// recorded grid isolates physics parity from step-control parity.
+    /// Grid-locked transient stepping: every strictly increasing configured
+    /// time is visited exactly, and adaptive LTE rejection cannot insert
+    /// points. Source breakpoints and pending XSPICE events may still split an
+    /// interval when the supplied grid omitted a required event time; those
+    /// accepted event points are recorded as well. Accepted-reference modes
+    /// restart integration history at source breakpoints and continue LTE
+    /// evaluation for integration-order selection, but the estimate cannot
+    /// reject or resize a prescribed step. Newton convergence is the
+    /// acceptance authority; a step
+    /// that cannot converge on its imposed interval fails rather than
+    /// convergence-substepping, because history-coupled devices
+    /// (TXL/CPL/LTRA convolutions) sample accepted points. Built for oracle
+    /// comparison: replaying a reference grid isolates physics parity from
+    /// adaptive step-selection parity.
     pub locked_time_grid: Option<std::sync::Arc<Vec<Value>>>,
 }
 
@@ -113,6 +141,7 @@ impl SimulationConfig {
     /// Reset dialect-controlled device selections to follow the current dialect.
     pub fn apply_spice_dialect(&mut self) {
         self.jfet_level2_model = JfetLevel2Model::DialectDefault;
+        self.transient_lte_reference = None;
     }
 
     /// Resolve the concrete evaluator for `NJF`/`PJF LEVEL=2`.
@@ -326,6 +355,10 @@ impl Default for SimulationConfig {
             jfet_level2_model: JfetLevel2Model::DialectDefault,
             b3soi_gmin_scaling: true,
             transient_trtol: crate::constants::TRTOL,
+            transient_lte_reltol: None,
+            transient_lte_abstol: None,
+            transient_lte_reference: None,
+            transient_new_bp_stepping: true,
             transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
             bypass_config: BypassConfig::default(),
             convergence_config: ConvergenceConfig::default(),

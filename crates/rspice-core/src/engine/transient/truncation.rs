@@ -111,7 +111,8 @@ impl Engine {
         }
 
         let effective_method = Self::effective_companion_method(method, trap_order);
-        let coeff = CompanionCoefficients::for_method(effective_method);
+        let coeff =
+            CompanionCoefficients::for_method_with_previous_step(effective_method, dt, prev_dt);
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -177,6 +178,11 @@ impl Engine {
         trtol: Value,
     ) -> Option<Value> {
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -196,15 +202,8 @@ impl Engine {
                 let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
                 let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
                 let cq_prev = history.charge_cq_prev[idx][branch_idx];
-                let cq_curr = Self::jfet_companion_ccap(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    q_curr,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let cq_curr =
+                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
 
                 let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
                     q_curr,
@@ -257,6 +256,11 @@ impl Engine {
         trtol: Value,
     ) -> Option<Value> {
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -275,8 +279,7 @@ impl Engine {
             let snapshot = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
                 bjt,
                 candidate_external,
-                method,
-                trap_order,
+                &coeff,
                 dt,
                 &history.charge_q_prev[idx],
                 &history.charge_q_prev_prev[idx],
@@ -314,15 +317,8 @@ impl Engine {
                 let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
                 let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
                 let cq_prev = history.charge_cq_prev[idx][branch_idx];
-                let cq_curr = Self::jfet_companion_ccap(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    q_curr,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let cq_curr =
+                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
 
                 let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
                     q_curr,
@@ -433,6 +429,11 @@ impl Engine {
         }
 
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -513,8 +514,7 @@ impl Engine {
 
                 let (_geq, _ieq, q_curr, cq_curr) = if let Some(q_exact) = q_curr_exact {
                     Self::nonlinear_charge_companion_terms(
-                        effective_method,
-                        trap_order,
+                        &coeff,
                         dt,
                         capacitance,
                         voltage,
@@ -525,8 +525,7 @@ impl Engine {
                     )
                 } else {
                     Self::jfet_companion_terms(
-                        effective_method,
-                        trap_order,
+                        &coeff,
                         dt,
                         capacitance,
                         voltage,
@@ -584,6 +583,11 @@ impl Engine {
         }
 
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -599,8 +603,7 @@ impl Engine {
             }
 
             let (_geq, _ieq, q_curr, cq_curr) = Self::nonlinear_charge_companion_terms(
-                effective_method,
-                trap_order,
+                &coeff,
                 dt,
                 capd,
                 vd,
@@ -663,6 +666,11 @@ impl Engine {
         }
 
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -722,8 +730,7 @@ impl Engine {
                 }
 
                 let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
+                    &coeff,
                     dt,
                     capacitance,
                     voltage,
@@ -785,6 +792,11 @@ impl Engine {
         }
 
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -850,8 +862,7 @@ impl Engine {
                 }
 
                 let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
+                    &coeff,
                     dt,
                     capacitance,
                     voltage,
@@ -925,8 +936,7 @@ impl Engine {
                 }
 
                 let (_geq, _ieq, q_curr, cq_curr) = Self::nonlinear_charge_companion_terms(
-                    effective_method,
-                    trap_order,
+                    &coeff,
                     dt,
                     capacitance,
                     voltage,
@@ -986,6 +996,11 @@ impl Engine {
             return None;
         }
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -1049,15 +1064,8 @@ impl Engine {
                 ),
             ] {
                 // Integrated charge current at the candidate point.
-                let cq_curr = Self::jfet_companion_ccap(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    q_curr,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let cq_curr =
+                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
                 let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
                     q_curr,
                     q_prev,
@@ -1109,6 +1117,11 @@ impl Engine {
             return None;
         }
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -1138,15 +1151,8 @@ impl Engine {
                 ),
             ] {
                 // Integrated charge current at the candidate point.
-                let cq_curr = Self::jfet_companion_ccap(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    q_curr,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let cq_curr =
+                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
                 let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
                     q_curr,
                     q_prev,
@@ -1198,6 +1204,11 @@ impl Engine {
             return None;
         }
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -1222,15 +1233,8 @@ impl Engine {
                                        q_prev_prev_prev: Value,
                                        cq_prev: Value| {
                 // Integrated charge current at the candidate point.
-                let cq_curr = Self::jfet_companion_ccap(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    q_curr,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let cq_curr =
+                    Self::jfet_companion_ccap(&coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
                 let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
                     q_curr,
                     q_prev,
@@ -1343,6 +1347,11 @@ impl Engine {
             return None;
         }
         let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method_with_previous_step(
+            effective_method,
+            dt,
+            history.accepted_dt_prev,
+        );
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
@@ -1354,8 +1363,7 @@ impl Engine {
                 let q_prev_prev_prev = history.q_prev_prev_prev[idx][row];
                 let cq_prev = history.cq_prev[idx][row];
                 let cq_curr = Self::jfet_companion_ccap(
-                    effective_method,
-                    trap_order,
+                    &coeff,
                     dt,
                     q_curr[row],
                     q_prev,
@@ -1795,21 +1803,51 @@ impl Engine {
     pub(super) fn estimate_transient_lte(
         circuit: &crate::circuit::Circuit,
         candidate_solution: &[Value],
+        predicted_solution: Option<&[Value]>,
         dt: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
         is_strictly_linear_transient: bool,
         voltage_lte_estimator: &LteEstimator,
         voltage_lte_excluded_nodes: &[usize],
+        xyce_lte_excluded_indices: &[usize],
     ) -> (Value, bool) {
-        if is_strictly_linear_transient {
+        if is_strictly_linear_transient && !voltage_lte_estimator.uses_accepted_solution_reference()
+        {
             return (0.0, true);
         }
 
-        voltage_lte_estimator.estimate_prefix_excluding(
-            candidate_solution,
-            circuit.num_nodes(),
-            dt,
-            voltage_lte_excluded_nodes,
-        )
+        let uses_xyce_solution_domain = voltage_lte_estimator.uses_accepted_solution_reference();
+        if !uses_xyce_solution_domain {
+            return voltage_lte_estimator.estimate_prefix_excluding(
+                candidate_solution,
+                circuit.num_nodes(),
+                dt,
+                voltage_lte_excluded_nodes,
+            );
+        }
+        let error_domain_len = candidate_solution.len();
+        let excluded = xyce_lte_excluded_indices;
+        match predicted_solution {
+            Some(predicted) => voltage_lte_estimator
+                .estimate_correction_prefix_excluding_for_integration(
+                    candidate_solution,
+                    predicted,
+                    error_domain_len,
+                    dt,
+                    excluded,
+                    method,
+                    trap_order,
+                ),
+            None => voltage_lte_estimator.estimate_prefix_excluding_for_integration(
+                candidate_solution,
+                error_domain_len,
+                dt,
+                excluded,
+                method,
+                trap_order,
+            ),
+        }
     }
 
     #[inline]
@@ -1827,6 +1865,7 @@ impl Engine {
         ekv26_history: &Ekv26TransientHistory,
         voltage_lte_estimator: &LteEstimator,
         voltage_lte_excluded_nodes: &[usize],
+        xyce_lte_excluded_indices: &[usize],
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         voltage_abstol: Value,
         reltol: Value,
@@ -1850,26 +1889,28 @@ impl Engine {
             return None;
         }
 
-        if let Some(limit) = Self::ngspice_device_truncation_limit(
-            circuit,
-            accepted_solution,
-            method,
-            2,
-            dt,
-            history,
-            vbic_snapshot_cache,
-            jfet_history,
-            diode_history,
-            mosfet_history,
-            vdmos_history,
-            ekv26_history,
-            false,
-            voltage_abstol,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
-        ) {
+        if !voltage_lte_estimator.uses_accepted_solution_reference()
+            && let Some(limit) = Self::ngspice_device_truncation_limit(
+                circuit,
+                accepted_solution,
+                method,
+                2,
+                dt,
+                history,
+                vbic_snapshot_cache,
+                jfet_history,
+                diode_history,
+                mosfet_history,
+                vdmos_history,
+                ekv26_history,
+                false,
+                voltage_abstol,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            )
+        {
             return Some(TrapezoidalOrderTrial {
                 limit,
                 promote: Self::should_promote_ngspice_charge_truncation(limit, dt),
@@ -1879,17 +1920,25 @@ impl Engine {
         let (candidate_lte, accept) = Self::estimate_transient_lte(
             circuit,
             accepted_solution,
+            None,
             dt,
+            method,
+            2,
             is_strictly_linear_transient,
             voltage_lte_estimator,
             voltage_lte_excluded_nodes,
+            xyce_lte_excluded_indices,
         );
         if !accept {
             return None;
         }
 
-        let candidate_scale = if is_strictly_linear_transient {
+        let candidate_scale = if is_strictly_linear_transient
+            && !voltage_lte_estimator.uses_accepted_solution_reference()
+        {
             1.0
+        } else if voltage_lte_estimator.uses_accepted_solution_reference() {
+            voltage_lte_estimator.recommend_scale_for_integration(candidate_lte, method, 2)
         } else {
             voltage_lte_estimator.recommend_scale(candidate_lte)
         };

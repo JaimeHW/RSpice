@@ -497,7 +497,7 @@ impl Engine {
     pub(super) fn effective_trapezoidal_order(method: IntegrationMethod, trap_order: u8) -> u8 {
         match method {
             IntegrationMethod::BackwardEuler => 1,
-            IntegrationMethod::Gear2 => 2,
+            IntegrationMethod::Gear2 => trap_order.clamp(1, 2),
             IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => trap_order.clamp(1, 2),
         }
     }
@@ -526,7 +526,11 @@ impl Engine {
         trap_order: u8,
     ) -> IntegrationMethod {
         match method {
-            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear if trap_order <= 1 => {
+            IntegrationMethod::Trapezoidal
+            | IntegrationMethod::TrapGear
+            | IntegrationMethod::Gear2
+                if trap_order <= 1 =>
+            {
                 IntegrationMethod::BackwardEuler
             }
             _ => method,
@@ -535,31 +539,19 @@ impl Engine {
 
     #[inline]
     pub(super) fn jfet_companion_geq(
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         capacitance: Value,
         dt: Value,
     ) -> Value {
         if !capacitance.is_finite() || capacitance <= 0.0 || !dt.is_finite() || dt <= 0.0 {
             return 0.0;
         }
-        match method {
-            IntegrationMethod::BackwardEuler => capacitance / dt,
-            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => {
-                if trap_order <= 1 {
-                    capacitance / dt
-                } else {
-                    2.0 * capacitance / dt
-                }
-            }
-            IntegrationMethod::Gear2 => 1.5 * capacitance / dt,
-        }
+        coeff.capacitor_geq(capacitance, dt)
     }
 
     #[inline]
     pub(super) fn jfet_companion_ccap(
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         q_curr: Value,
         q_prev: Value,
@@ -569,23 +561,13 @@ impl Engine {
         if !dt.is_finite() || dt <= 0.0 {
             return 0.0;
         }
-        match method {
-            IntegrationMethod::BackwardEuler => (q_curr - q_prev) / dt,
-            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => {
-                if trap_order <= 1 {
-                    (q_curr - q_prev) / dt
-                } else {
-                    -cq_prev + 2.0 * (q_curr - q_prev) / dt
-                }
-            }
-            IntegrationMethod::Gear2 => (1.5 * q_curr - 2.0 * q_prev + 0.5 * q_prev_prev) / dt,
-        }
+        coeff.capacitor_geq(1.0, dt) * q_curr
+            - coeff.capacitor_ieq(1.0, dt, q_prev, q_prev_prev, cq_prev)
     }
 
     #[inline]
     pub(super) fn jfet_companion_terms(
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         capacitance: Value,
         v_curr: Value,
@@ -594,15 +576,14 @@ impl Engine {
         q_prev_prev: Value,
         cq_prev: Value,
     ) -> (Value, Value, Value, Value) {
-        let geq = Self::jfet_companion_geq(method, trap_order, capacitance, dt);
+        let geq = Self::jfet_companion_geq(coeff, capacitance, dt);
         if geq == 0.0 {
             return (0.0, 0.0, q_prev, 0.0);
         }
         // Match ngspice nonlinear charge-branch transient update:
         // q(n+1) = q(n) + C(n+1) * (v(n+1) - v(n))
         let q_curr = q_prev + capacitance * (v_curr - v_prev);
-        let cq_curr =
-            Self::jfet_companion_ccap(method, trap_order, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        let cq_curr = Self::jfet_companion_ccap(coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
         // Match ngspice load linearization contract for capacitive branches:
         //   i(v) ≈ ccap + geq * (v - v_hist) = geq * v - (geq * v_hist - ccap).
         // With our companion stamp convention (i = geq * v - i_eq), this gives:
@@ -615,8 +596,7 @@ impl Engine {
 
     #[inline]
     pub(super) fn nonlinear_charge_companion_terms(
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         capacitance: Value,
         v_curr: Value,
@@ -625,20 +605,18 @@ impl Engine {
         q_prev_prev: Value,
         cq_prev: Value,
     ) -> (Value, Value, Value, Value) {
-        let geq = Self::jfet_companion_geq(method, trap_order, capacitance, dt);
+        let geq = Self::jfet_companion_geq(coeff, capacitance, dt);
         if geq == 0.0 {
             return (0.0, 0.0, q_curr, 0.0);
         }
-        let cq_curr =
-            Self::jfet_companion_ccap(method, trap_order, dt, q_curr, q_prev, q_prev_prev, cq_prev);
+        let cq_curr = Self::jfet_companion_ccap(coeff, dt, q_curr, q_prev, q_prev_prev, cq_prev);
         let ieq = geq * v_curr - cq_curr;
         (geq, ieq, q_curr, cq_curr)
     }
 
     #[inline]
     pub(super) fn linear_charge_history_ieq(
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         q_prev: Value,
         q_prev_prev: Value,
@@ -647,17 +625,7 @@ impl Engine {
         if !dt.is_finite() || dt <= 0.0 {
             return 0.0;
         }
-        match method {
-            IntegrationMethod::BackwardEuler => q_prev / dt,
-            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => {
-                if trap_order <= 1 {
-                    q_prev / dt
-                } else {
-                    cq_prev + 2.0 * q_prev / dt
-                }
-            }
-            IntegrationMethod::Gear2 => (2.0 * q_prev - 0.5 * q_prev_prev) / dt,
-        }
+        coeff.capacitor_ieq(1.0, dt, q_prev, q_prev_prev, cq_prev)
     }
 
     #[inline]

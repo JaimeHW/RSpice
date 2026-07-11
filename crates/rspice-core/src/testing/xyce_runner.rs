@@ -314,6 +314,7 @@ enum XyceStaticTranContract {
     PlainCsv,
     PlainCsd,
     WrapperStatic,
+    WrapperNoIndexHeader,
     WrapperCsv,
     WrapperCsd,
     WrapperStaticExpectedError,
@@ -330,6 +331,11 @@ impl XyceStaticTranContract {
             (Self::PlainCsd, true) => "static_csd_step_tran",
             (Self::WrapperStatic, false) => "wrapper_static_prn_tran",
             (Self::WrapperStatic, true) => "wrapper_static_prn_step_tran",
+            // Header-only wrapper contracts retain the existing public result
+            // label. The distinction is an internal oracle/execution detail,
+            // not a new externally reported analysis format.
+            (Self::WrapperNoIndexHeader, false) => "wrapper_static_prn_tran",
+            (Self::WrapperNoIndexHeader, true) => "wrapper_static_prn_step_tran",
             (Self::WrapperCsv, false) => "wrapper_static_csv_tran",
             (Self::WrapperCsv, true) => "wrapper_static_csv_step_tran",
             (Self::WrapperCsd, false) => "wrapper_csd_tran",
@@ -346,6 +352,10 @@ impl XyceStaticTranContract {
             self,
             Self::WrapperStatic | Self::WrapperCsv | Self::WrapperCsd
         )
+    }
+
+    fn requires_reference_file(self) -> bool {
+        !matches!(self, Self::WrapperNoIndexHeader)
     }
 
     fn reference_extension(self) -> &'static str {
@@ -1931,9 +1941,12 @@ impl XyceTestRunner {
 
         let output_override = requires_wrapper
             && Self::is_native_output_override_wrapper_candidate_path(&deck.relative_path);
+        let noindex_header_wrapper = requires_wrapper
+            && Self::is_native_noindex_header_tran_wrapper_candidate(&deck.relative_path, &source);
         let has_static_tran_oracle = self.has_static_tran_reference_oracle(&deck.path);
         if requires_wrapper
             && !output_override
+            && !noindex_header_wrapper
             && !has_static_tran_oracle
             && !Self::source_may_have_pwl_repeat_option(&source)
             && !analytic_wrapper
@@ -2038,6 +2051,9 @@ impl XyceTestRunner {
                     XyceStaticTranContract::WrapperStaticExpectedError => {
                         Self::validate_native_static_prn_tran_wrapper_contract(&source)?;
                     }
+                    XyceStaticTranContract::WrapperNoIndexHeader => {
+                        Self::validate_native_noindex_header_tran_wrapper_contract(&source)?;
+                    }
                     _ => Self::validate_native_static_prn_tran_wrapper_contract(&source)?,
                 }
             }
@@ -2107,7 +2123,10 @@ impl XyceTestRunner {
         contract: XyceStaticTranContract,
         reference_path: &Path,
     ) -> Result<(), String> {
-        if purpose.requires_reference_file() && !reference_path.is_file() {
+        if purpose.requires_reference_file()
+            && contract.requires_reference_file()
+            && !reference_path.is_file()
+        {
             return Err(format!(
                 "no checked-in static .{} oracle at {}",
                 contract.reference_extension(),
@@ -3273,6 +3292,20 @@ impl XyceTestRunner {
         Self::validate_native_static_prn_tran_wrapper_contract_with_format_mode(source, false)
     }
 
+    fn validate_native_noindex_header_tran_wrapper_contract(source: &str) -> Result<(), String> {
+        Self::validate_native_static_prn_tran_wrapper_contract(source)?;
+        let request = Self::single_tran_print_output_request(source)?;
+        let format = request.format.as_deref().ok_or_else(|| {
+            "wrapper-origin NOINDEX header contract requires .PRINT TRAN FORMAT=NOINDEX".to_string()
+        })?;
+        if !format.eq_ignore_ascii_case("NOINDEX") {
+            return Err(format!(
+                "wrapper-origin NOINDEX header contract requires .PRINT TRAN FORMAT=NOINDEX, got FORMAT={format}"
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_native_static_prn_tran_wrapper_contract_with_format_mode(
         source: &str,
         allow_wrapper_probe_primary_prn: bool,
@@ -3701,6 +3734,10 @@ impl XyceTestRunner {
         source: &str,
         has_prn_oracle: bool,
     ) -> Option<XyceStaticTranContract> {
+        if Self::is_native_noindex_header_tran_wrapper_candidate(relative_path, source) {
+            return Some(XyceStaticTranContract::WrapperNoIndexHeader);
+        }
+
         if Self::validate_native_pwl_repeat_error_tran_wrapper_contract(deck_path, source).is_ok() {
             return Some(XyceStaticTranContract::WrapperStaticExpectedError);
         }
@@ -3726,6 +3763,15 @@ impl XyceTestRunner {
         }
 
         None
+    }
+
+    fn is_native_noindex_header_tran_wrapper_candidate(relative_path: &str, source: &str) -> bool {
+        // Release 7.10's removed BUG_61 wrapper does not compare waveform
+        // values. It runs this deck and inspects only the first default-PRN
+        // header line for TIME without Index.
+        Self::normalize_manifest_key(relative_path)
+            == "netlists/certification_tests/bug_61/capacitor.cir"
+            && Self::validate_native_noindex_header_tran_wrapper_contract(source).is_ok()
     }
 
     fn native_output_override_prn_tran_wrapper_contract(
@@ -5700,6 +5746,73 @@ impl XyceTestRunner {
         }
     }
 
+    fn run_noindex_header_tran_wrapper_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: &XyceStaticTranPlan,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = plan.contract.result_contract(!plan.steps.is_empty());
+        if !plan.steps.is_empty() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                "NOINDEX header-only transient wrapper contract does not cover .STEP output"
+                    .to_string(),
+                Vec::new(),
+            );
+        }
+
+        // The authoritative wrapper still requires a successful simulator run,
+        // but deliberately ignores every numeric output row.
+        match self.run_transient_family_plan(plan, start, None) {
+            Ok((_netlist, _result)) => {}
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(
+                        "simulation exceeded timeout ({}ms)",
+                        self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this transient deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("simulation error: {err}"),
+                    Vec::new(),
+                );
+            }
+        }
+
+        let header = Self::transient_prn_header_columns(&plan.print, false).join("   ");
+        if let Err(err) = Self::validate_noindex_tran_prn_header(&header) {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("NOINDEX transient output header error: {err}"),
+                Vec::new(),
+            );
+        }
+
+        self.passed_result(deck, start, contract)
+    }
+
     fn run_static_prn_tran_plan(
         &self,
         deck: &XyceDeck,
@@ -5707,6 +5820,9 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let contract = plan.contract.result_contract(!plan.steps.is_empty());
+        if matches!(plan.contract, XyceStaticTranContract::WrapperNoIndexHeader) {
+            return self.run_noindex_header_tran_wrapper_plan(deck, &plan, start);
+        }
         let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
             Ok(netlist) => netlist,
             Err(err) => {
@@ -8893,10 +9009,7 @@ impl XyceTestRunner {
     ) -> Result<XycePrnTable, String> {
         Self::validate_transient_result_time_grid(result)?;
         let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
-        let mut columns = Vec::with_capacity(plan.print.probes.len() + 2);
-        columns.push("Index".to_string());
-        columns.push("TIME".to_string());
-        columns.extend(plan.print.probes.iter().cloned());
+        let columns = Self::transient_prn_header_columns(&plan.print, true);
 
         let mut rows = Vec::with_capacity(result.time.len());
         for (index, &time) in result.time.iter().enumerate() {
@@ -8916,6 +9029,34 @@ impl XyceTestRunner {
         }
 
         Ok(XycePrnTable { columns, rows })
+    }
+
+    fn transient_prn_header_columns(print: &XycePrintRequest, include_index: bool) -> Vec<String> {
+        let mut columns = Vec::with_capacity(print.probes.len() + usize::from(include_index) + 1);
+        if include_index {
+            columns.push("Index".to_string());
+        }
+        columns.push("TIME".to_string());
+        columns.extend(print.probes.iter().cloned());
+        columns
+    }
+
+    fn validate_noindex_tran_prn_header(first_line: &str) -> Result<(), String> {
+        if first_line.trim().is_empty() {
+            return Err("generated .prn output is empty".to_string());
+        }
+        let normalized = first_line.to_ascii_lowercase();
+        if normalized.contains("index") {
+            return Err(format!(
+                "first output line contains forbidden Index text: {first_line}"
+            ));
+        }
+        if !normalized.contains("time") {
+            return Err(format!(
+                "first output line does not contain required TIME text: {first_line}"
+            ));
+        }
+        Ok(())
     }
 
     fn scoped_model_source_fingerprint(
@@ -9429,6 +9570,10 @@ impl XyceTestRunner {
             gmin,
             method,
             trtol,
+            timeint_reltol,
+            timeint_abstol,
+            transient_lte_reference,
+            transient_new_bp_stepping,
             ramptime,
             digital_delay_type,
             xspice_event_trace_save,
@@ -9451,8 +9596,12 @@ impl XyceTestRunner {
             device_zero_resistance_tol,
             b3soi_gmin_scaling,
         } = options;
-        reltol.is_some_and(|value| value.to_bits() == source.reltol_bits)
-            && abstol.is_some_and(|value| value.to_bits() == source.abstol_bits)
+        reltol.is_none()
+            && abstol.is_none()
+            && timeint_reltol.is_some_and(|value| value.to_bits() == source.reltol_bits)
+            && timeint_abstol.is_some_and(|value| value.to_bits() == source.abstol_bits)
+            && transient_lte_reference.is_none()
+            && transient_new_bp_stepping.is_none()
             && vntol.is_none()
             && iabstol.is_none()
             && residual_reltol.is_none()
@@ -26995,6 +27144,158 @@ R2 2 0 1
             ),
             Some(XyceStaticTranContract::WrapperCsv)
         );
+    }
+
+    fn bug_61_noindex_header_source() -> &'static str {
+        "\
+BUG_61 NOINDEX header contract
+VIN 1 0 PULSE(0 1 10U 1U 1U 80U)
+R1 1 2 1K
+C1 2 0 20N
+.TRAN 0.5U 100U
+.PRINT TRAN FORMAT=NOINDEX V(1) V(2)
+.OPTIONS TIMEINT CONSTSTEP=1
+.END
+"
+    }
+
+    #[test]
+    fn bug_61_noindex_header_wrapper_classifier_is_exactly_path_qualified() {
+        let source = bug_61_noindex_header_source();
+        assert_eq!(
+            XyceTestRunner::native_static_prn_tran_wrapper_contract(
+                Path::new("capacitor.cir"),
+                "Netlists/Certification_Tests/BUG_61/capacitor.cir",
+                source,
+                false,
+            ),
+            Some(XyceStaticTranContract::WrapperNoIndexHeader)
+        );
+        assert!(
+            XyceTestRunner::is_native_noindex_header_tran_wrapper_candidate(
+                "NETLISTS\\CERTIFICATION_TESTS\\BUG_61\\CAPACITOR.CIR",
+                source,
+            ),
+            "manifest-key normalization should preserve the exact adapter"
+        );
+        assert!(
+            !XyceTestRunner::is_native_noindex_header_tran_wrapper_candidate(
+                "Netlists/Certification_Tests/BUG_612/capacitor.cir",
+                source,
+            ),
+            "nearby bug numbers must not collide with BUG_61"
+        );
+        assert_ne!(
+            XyceTestRunner::native_static_prn_tran_wrapper_contract(
+                Path::new("capacitor.cir"),
+                "Netlists/Certification_Tests/BUG_612/capacitor.cir",
+                source,
+                false,
+            ),
+            Some(XyceStaticTranContract::WrapperNoIndexHeader),
+            "the same source at another path must not acquire BUG_61 wrapper semantics"
+        );
+
+        let indexed = source.replace("FORMAT=NOINDEX", "FORMAT=STD");
+        assert!(
+            XyceTestRunner::validate_native_noindex_header_tran_wrapper_contract(&indexed).is_err()
+        );
+        let file_only = source.replace("FORMAT=NOINDEX V(1)", "FORMAT=NOINDEX FILE=side.prn V(1)");
+        assert!(
+            XyceTestRunner::validate_native_noindex_header_tran_wrapper_contract(&file_only)
+                .is_err()
+        );
+        let multiple_primary = source.replace(
+            ".PRINT TRAN FORMAT=NOINDEX V(1) V(2)",
+            ".PRINT TRAN FORMAT=NOINDEX V(1) V(2)\n.PRINT TRAN FORMAT=NOINDEX V(1)",
+        );
+        assert!(
+            XyceTestRunner::validate_native_noindex_header_tran_wrapper_contract(
+                &multiple_primary,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn noindex_transient_header_schema_matches_upstream_first_line_predicate() {
+        let print = XycePrintRequest {
+            probes: vec!["V(1)".to_string(), "V(2)".to_string()],
+        };
+        assert_eq!(
+            XyceTestRunner::transient_prn_header_columns(&print, false),
+            ["TIME", "V(1)", "V(2)"]
+        );
+        assert_eq!(
+            XyceTestRunner::transient_prn_header_columns(&print, true),
+            ["Index", "TIME", "V(1)", "V(2)"]
+        );
+
+        XyceTestRunner::validate_noindex_tran_prn_header("time   V(1)   V(2)")
+            .expect("TIME matching is case-insensitive");
+        assert!(
+            XyceTestRunner::validate_noindex_tran_prn_header("Index TIME V(1)").is_err(),
+            "an Index column must fail"
+        );
+        assert!(
+            XyceTestRunner::validate_noindex_tran_prn_header("TIME V(index)").is_err(),
+            "the upstream wrapper rejects Index text anywhere on the first line"
+        );
+        assert!(
+            XyceTestRunner::validate_noindex_tran_prn_header("V(1) V(2)").is_err(),
+            "a header without TIME must fail"
+        );
+        assert!(XyceTestRunner::validate_noindex_tran_prn_header(" ").is_err());
+    }
+
+    #[test]
+    fn bug_61_noindex_header_wrapper_runs_without_reference_oracle() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-bug-61-header-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after epoch")
+                .as_nanos()
+        ));
+        let relative = "Netlists/Certification_Tests/BUG_61/capacitor.cir";
+        let deck_path = root.join(relative);
+        fs::create_dir_all(deck_path.parent().expect("deck parent"))
+            .expect("create BUG_61 fixture");
+        fs::write(&deck_path, bug_61_noindex_header_source()).expect("write BUG_61 fixture deck");
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper provenance manifest");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let deck = XyceDeck {
+            path: deck_path.clone(),
+            relative_path: relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let plan = runner
+            .static_tran_plan_for_deck(&deck)
+            .expect("header-only wrapper plan does not require a numeric oracle");
+        assert_eq!(plan.contract, XyceStaticTranContract::WrapperNoIndexHeader);
+        assert!(!plan.reference_path.is_file());
+        assert!(!plan.contract.requires_reference_file());
+        assert_eq!(
+            plan.contract.result_contract(false),
+            "wrapper_static_prn_tran",
+            "the existing public result label remains stable"
+        );
+
+        let result = runner.run_test(&deck_path);
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "header-only wrapper should execute natively: {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(result.contract, "wrapper_static_prn_tran");
+
+        fs::remove_dir_all(&root).expect("remove BUG_61 fixture");
     }
 
     #[test]

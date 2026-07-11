@@ -8,6 +8,8 @@ impl Engine {
         timestep: &mut TimestepController,
         lte_estimator: &LteEstimator,
         accepted_solution: &[Value],
+        active_method: IntegrationMethod,
+        active_order: u8,
         dt: Value,
         max_step: Value,
         is_strictly_linear_transient: bool,
@@ -15,9 +17,15 @@ impl Engine {
         source_activity_growth_cap_enabled: bool,
         accepted_scale: Option<Value>,
     ) {
-        // Strictly linear steps are solved directly, so they can recover from
-        // breakpoint restart steps faster than Newton-limited nonlinear decks.
-        let scale = if is_strictly_linear_transient {
+        // Native strictly linear steps are solved directly, so they can recover
+        // from breakpoint restart steps faster than Newton-limited nonlinear
+        // decks. Xyce accepted-solution LTE remains authoritative even on a
+        // linear circuit.
+        let use_linear_fast_recovery =
+            is_strictly_linear_transient && !lte_estimator.uses_accepted_solution_reference();
+        let uses_xyce_step_policy = lte_estimator.uses_accepted_solution_reference();
+        let uses_order_two_gear2 = active_method == IntegrationMethod::Gear2 && active_order >= 2;
+        let scale = if use_linear_fast_recovery {
             4.0
         } else if let Some(scale) = accepted_scale {
             scale
@@ -26,8 +34,18 @@ impl Engine {
             lte_estimator.recommend_scale(lte)
         };
 
-        let growth_limit = if is_strictly_linear_transient {
+        // The unequal-step BDF2 parasitic root exceeds unity once consecutive
+        // step growth exceeds 1 + sqrt(2). Xyce already limits growth to 2x;
+        // apply the same stable bound to native order-2 Gear2, including a
+        // TrapGear controller currently resolved to Gear2. Order-1 Gear2
+        // restart steps use a BE formula and retain the ordinary linear fast
+        // recovery policy.
+        let growth_limit = if uses_order_two_gear2 {
+            2.0
+        } else if use_linear_fast_recovery {
             4.0
+        } else if uses_xyce_step_policy {
+            2.0
         } else if source_activity_growth_cap_enabled {
             1.5
         } else {
@@ -35,10 +53,13 @@ impl Engine {
         };
         let mut next_dt = if scale > 1.0 {
             (dt * scale.min(growth_limit)).min(max_step)
+        } else if lte_estimator.uses_accepted_solution_reference() {
+            (dt * scale.max(0.25)).min(max_step)
         } else {
             (dt * 1.25).min(max_step)
         };
-        if source_activity_growth_cap_enabled
+        if !uses_xyce_step_policy
+            && source_activity_growth_cap_enabled
             && expected_source_delta.is_finite()
             && expected_source_delta > 0.0
         {
@@ -291,5 +312,136 @@ impl Engine {
         let half_diff = 0.5 * (cand_vp - cand_vn);
         candidate_solution[vp_idx] = clipped_midpoint + half_diff;
         candidate_solution[vn_idx] = clipped_midpoint - half_diff;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::netlist::TransientLteReference;
+
+    #[test]
+    fn accepted_solution_lte_controls_strict_linear_recovery() {
+        let mut timestep = TimestepController::new(1.0, 1.0e-6, 10.0);
+        let estimator = LteEstimator::with_tolerances_and_reference(
+            1.0e-3,
+            1.0e-6,
+            TransientLteReference::SignalGlobal,
+        );
+
+        Engine::recover_timestep_after_accepted_step(
+            &mut timestep,
+            &estimator,
+            &[1.0],
+            IntegrationMethod::Trapezoidal,
+            2,
+            1.0,
+            10.0,
+            true,
+            0.0,
+            false,
+            Some(1.1),
+        );
+
+        assert!((timestep.dt() - 1.1).abs() <= 1.0e-15);
+    }
+
+    #[test]
+    fn native_strict_linear_recovery_retains_fast_growth() {
+        let estimator = LteEstimator::with_tolerances(1.0e-3, 1.0e-6);
+
+        for method in [
+            IntegrationMethod::BackwardEuler,
+            IntegrationMethod::Trapezoidal,
+        ] {
+            let mut timestep = TimestepController::new(1.0, 1.0e-6, 10.0);
+            Engine::recover_timestep_after_accepted_step(
+                &mut timestep,
+                &estimator,
+                &[1.0],
+                method,
+                if method == IntegrationMethod::BackwardEuler {
+                    1
+                } else {
+                    2
+                },
+                1.0,
+                10.0,
+                true,
+                0.0,
+                false,
+                Some(1.1),
+            );
+
+            assert_eq!(timestep.dt(), 4.0, "method {method:?}");
+        }
+    }
+
+    #[test]
+    fn native_order_two_gear2_caps_strict_linear_growth_at_two() {
+        let mut timestep = TimestepController::new(1.0, 1.0e-6, 10.0);
+        let estimator = LteEstimator::with_tolerances(1.0e-3, 1.0e-6);
+
+        Engine::recover_timestep_after_accepted_step(
+            &mut timestep,
+            &estimator,
+            &[1.0],
+            IntegrationMethod::Gear2,
+            2,
+            1.0,
+            10.0,
+            true,
+            0.0,
+            false,
+            Some(4.0),
+        );
+
+        assert_eq!(timestep.dt(), 2.0);
+    }
+
+    #[test]
+    fn native_order_one_gear2_restart_retains_fast_linear_growth() {
+        let mut timestep = TimestepController::new(1.0, 1.0e-6, 10.0);
+        let estimator = LteEstimator::with_tolerances(1.0e-3, 1.0e-6);
+
+        Engine::recover_timestep_after_accepted_step(
+            &mut timestep,
+            &estimator,
+            &[1.0],
+            IntegrationMethod::Gear2,
+            1,
+            1.0,
+            10.0,
+            true,
+            0.0,
+            false,
+            Some(4.0),
+        );
+
+        assert_eq!(timestep.dt(), 4.0);
+    }
+
+    #[test]
+    fn trapgear_resolved_to_gear2_uses_the_order_two_growth_cap() {
+        let mut timestep = TimestepController::new(1.0, 1.0e-6, 10.0);
+        let estimator = LteEstimator::with_tolerances(1.0e-3, 1.0e-6);
+        let mut trapgear = TrapGearController::new();
+        trapgear.force_method(IntegrationMethod::Gear2);
+
+        Engine::recover_timestep_after_accepted_step(
+            &mut timestep,
+            &estimator,
+            &[1.0],
+            trapgear.current_method(),
+            2,
+            1.0,
+            10.0,
+            true,
+            0.0,
+            false,
+            Some(4.0),
+        );
+
+        assert_eq!(timestep.dt(), 2.0);
     }
 }

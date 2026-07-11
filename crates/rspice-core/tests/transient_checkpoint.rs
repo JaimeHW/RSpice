@@ -2,7 +2,10 @@
 //! trajectory the unsegmented run follows, file round-trips must be exact,
 //! and mismatched state must be refused loudly.
 
-use rspice_core::engine::{Engine, SimulationConfig, TransientCheckpoint};
+use std::sync::Arc;
+
+use rspice_core::analysis::IntegrationMethod;
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect, TransientCheckpoint};
 use rspice_core::netlist::Netlist;
 use rspice_core::xspice::{register_data_file, unregister_data_file};
 
@@ -167,6 +170,73 @@ fn segmented_run_continues_the_unsegmented_trajectory() {
 }
 
 #[test]
+fn fixed_gear2_resume_uses_be_before_real_history_bdf2() {
+    const TAU: f64 = 1.0e-3;
+    const PRE_RESUME_STEP: f64 = 100.0e-6;
+    const SPLIT: f64 = 500.0e-6;
+    const RESUME_STEP: f64 = 1.0e-3;
+
+    let netlist = Netlist::parse(
+        "\
+* checkpoint fixed-Gear2 order restart
+r1 out 0 1k
+c1 out 0 1u ic=1
+.tran 100u 3m uic
+.end
+",
+    )
+    .expect("fixed-Gear2 checkpoint deck parses");
+    let first_engine = Engine::new(SimulationConfig {
+        integration_method: IntegrationMethod::Gear2,
+        transient_initial_timestep: Some(PRE_RESUME_STEP),
+        ..Default::default()
+    });
+    let (_, checkpoint) = first_engine
+        .run_tran_checkpointed(&netlist, SPLIT, PRE_RESUME_STEP)
+        .expect("fixed-Gear2 first segment completes");
+
+    let resume_grid = Arc::new(vec![SPLIT, SPLIT + RESUME_STEP, SPLIT + 2.0 * RESUME_STEP]);
+    let resume_engine = Engine::new(SimulationConfig {
+        integration_method: IntegrationMethod::Gear2,
+        transient_initial_timestep: Some(RESUME_STEP),
+        locked_time_grid: Some(resume_grid),
+        ..Default::default()
+    });
+    let (resumed, _) = resume_engine
+        .run_tran_resume(
+            &netlist,
+            &checkpoint,
+            SPLIT + 2.0 * RESUME_STEP,
+            RESUME_STEP,
+        )
+        .expect("fixed-Gear2 resumed segment completes");
+    let trace = &resumed.voltages[out_index(&resumed)];
+
+    assert_eq!(resumed.time.len(), 3, "resume grid has two real intervals");
+    assert_eq!(resumed.time[0].to_bits(), checkpoint.time.to_bits());
+
+    let first_dt = resumed.time[1] - resumed.time[0];
+    let expected_be = trace[0] / (1.0 + first_dt / TAU);
+    assert!(
+        (trace[1] - expected_be).abs() <= 1.0e-12,
+        "first resumed Gear2 interval must be backward Euler: expected {expected_be:e}, got {:e}",
+        trace[1]
+    );
+
+    let second_dt = resumed.time[2] - resumed.time[1];
+    let ratio = second_dt / first_dt;
+    let a0 = (1.0 + 2.0 * ratio) / (1.0 + ratio);
+    let a1 = 1.0 + ratio;
+    let a2 = -(ratio * ratio) / (1.0 + ratio);
+    let expected_bdf2 = (a1 * trace[1] + a2 * trace[0]) / (a0 + second_dt / TAU);
+    assert!(
+        (trace[2] - expected_bdf2).abs() <= 1.0e-12,
+        "second resumed Gear2 interval must use the real first interval as BDF2 history: expected {expected_bdf2:e}, got {:e}",
+        trace[2]
+    );
+}
+
+#[test]
 fn checkpoint_file_round_trip_resumes_identically() {
     let netlist = Netlist::parse(DECK).expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
@@ -197,6 +267,94 @@ fn checkpoint_file_round_trip_resumes_identically() {
             .all(|(a, b)| a.to_bits() == b.to_bits()),
         "file-loaded checkpoint resumes bit-identically"
     );
+}
+
+#[test]
+fn xyce_signal_history_modes_survive_segmented_disk_checkpoints() {
+    for selector in [2, 3] {
+        let deck = format!(
+            "\
+* Xyce NEWLTE signal-history checkpoint bench
+vzero in 0 0
+r1 in out 1k
+c1 out 0 100n ic=1
+.options timeint reltol=1e-5 abstol=1e-7 newlte={selector}
+.tran 10u 1m uic
+.end
+"
+        );
+        let netlist = Netlist::parse(&deck).expect("NEWLTE checkpoint deck parses");
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        });
+
+        let full = engine
+            .run_tran(&netlist, 1.0e-3, 20.0e-6)
+            .expect("unsegmented NEWLTE run completes");
+        let full_out = out_index(&full);
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&netlist, 0.4e-3, 20.0e-6)
+            .expect("NEWLTE first segment completes");
+
+        let checkpoint_text = checkpoint.to_text();
+        assert!(
+            checkpoint_text.contains(&format!("lte_reference_mode {selector}\n")),
+            "checkpoint records the resolved NEWLTE={selector} provenance"
+        );
+        let local_count = checkpoint_text
+            .lines()
+            .find_map(|line| line.strip_prefix("lte_signal_local "))
+            .expect("checkpoint contains the signal-local vector header")
+            .parse::<usize>()
+            .expect("signal-local count is numeric");
+        if selector == 2 {
+            assert_eq!(local_count, 0, "NEWLTE=2 stores one global reference");
+        } else {
+            assert!(local_count > 0, "NEWLTE=3 stores per-variable references");
+        }
+
+        let path = std::env::temp_dir().join(format!(
+            "rspice_newlte{selector}_checkpoint_{}.ckpt",
+            std::process::id()
+        ));
+        checkpoint.save(&path).expect("NEWLTE checkpoint saves");
+        let loaded = TransientCheckpoint::load(&path).expect("NEWLTE checkpoint loads");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(checkpoint, loaded, "NEWLTE checkpoint round-trip is exact");
+
+        let (memory_resume, _) = engine
+            .run_tran_resume(&netlist, &checkpoint, 1.0e-3, 20.0e-6)
+            .expect("NEWLTE checkpoint resumes from memory");
+        let (disk_resume, _) = engine
+            .run_tran_resume(&netlist, &loaded, 1.0e-3, 20.0e-6)
+            .expect("NEWLTE checkpoint resumes from disk");
+        assert_eq!(memory_resume.time, disk_resume.time);
+        assert!(
+            memory_resume.voltages[out_index(&memory_resume)]
+                .iter()
+                .zip(&disk_resume.voltages[out_index(&disk_resume)])
+                .all(|(memory, disk)| memory.to_bits() == disk.to_bits()),
+            "NEWLTE={selector} disk resume is bit-identical to memory resume"
+        );
+
+        let mut worst = 0.0_f64;
+        let resumed_out = out_index(&memory_resume);
+        for sample in 1..=20 {
+            let time = 0.4e-3 + sample as f64 * 30.0e-6;
+            let expected = interpolate(&full.time, &full.voltages[full_out], time);
+            let actual = interpolate(
+                &memory_resume.time,
+                &memory_resume.voltages[resumed_out],
+                time,
+            );
+            worst = worst.max((expected - actual).abs());
+        }
+        assert!(
+            worst < 5.0e-3,
+            "NEWLTE={selector} segmented trajectory tracks the full run (worst |delta|={worst})"
+        );
+    }
 }
 
 #[test]

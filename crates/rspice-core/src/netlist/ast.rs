@@ -1789,6 +1789,51 @@ pub struct XspiceAutoBridgeParamName {
     pub param_name: String,
 }
 
+/// Reference magnitude used to normalize transient local-truncation error.
+///
+/// Four policies correspond exactly to Xyce's `.OPTIONS TIMEINT NEWLTE`
+/// selectors; `PredictorLocal` preserves RSpice's non-Xyce adaptive default.
+/// Historical modes retain only accepted solution magnitudes, so a rejected
+/// candidate cannot relax future error weights.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransientLteReference {
+    /// RSpice legacy policy: scale by the larger candidate/predictor magnitude.
+    #[default]
+    PredictorLocal,
+    /// Scale each state by its magnitude at the prior accepted point (`NEWLTE=0`).
+    PointLocal,
+    /// Scale every state by the prior accepted point's infinity norm (`NEWLTE=1`).
+    PointGlobal,
+    /// Scale every state by the largest magnitude seen over the transient (`NEWLTE=2`).
+    SignalGlobal,
+    /// Scale each state by its own largest magnitude seen over the transient (`NEWLTE=3`).
+    SignalLocal,
+}
+
+impl TransientLteReference {
+    /// Convert a Xyce `NEWLTE` selector to its reference policy.
+    pub fn from_xyce_selector(selector: u8) -> Option<Self> {
+        match selector {
+            0 => Some(Self::PointLocal),
+            1 => Some(Self::PointGlobal),
+            2 => Some(Self::SignalGlobal),
+            3 => Some(Self::SignalLocal),
+            _ => None,
+        }
+    }
+
+    /// Return the corresponding Xyce `NEWLTE` selector.
+    pub fn xyce_selector(self) -> Option<u8> {
+        match self {
+            Self::PredictorLocal => None,
+            Self::PointLocal => Some(0),
+            Self::PointGlobal => Some(1),
+            Self::SignalGlobal => Some(2),
+            Self::SignalLocal => Some(3),
+        }
+    }
+}
+
 /// Simulation options from .OPTIONS command
 ///
 /// Controls numerical parameters for simulation accuracy and convergence.
@@ -1811,6 +1856,18 @@ pub struct SimulationOptions {
     pub method: Option<String>,
     /// Transient error tolerance factor (default: 7.0)
     pub trtol: Option<Value>,
+    /// Xyce `.OPTIONS TIMEINT RELTOL` for transient LTE weighting.
+    pub timeint_reltol: Option<Value>,
+    /// Xyce `.OPTIONS TIMEINT ABSTOL` for transient LTE weighting.
+    pub timeint_abstol: Option<Value>,
+    /// Xyce transient LTE error-weight reference policy (`NEWLTE=0..3`).
+    pub transient_lte_reference: Option<TransientLteReference>,
+    /// Xyce breakpoint-step LTE policy (`NEWBPSTEPPING=0|1`).
+    ///
+    /// When disabled, the first integration step after a breakpoint is
+    /// accepted based on Newton convergence without testing its local
+    /// truncation error. Xyce enables the newer policy by default.
+    pub transient_new_bp_stepping: Option<bool>,
     /// Transient source/code-model ramping time in seconds (default: disabled)
     pub ramptime: Option<Value>,
     /// Ngspice XSPICE digital delay policy:
@@ -1904,6 +1961,18 @@ impl SimulationOptions {
         }
         if other.trtol.is_some() {
             self.trtol = other.trtol;
+        }
+        if other.timeint_reltol.is_some() {
+            self.timeint_reltol = other.timeint_reltol;
+        }
+        if other.timeint_abstol.is_some() {
+            self.timeint_abstol = other.timeint_abstol;
+        }
+        if other.transient_lte_reference.is_some() {
+            self.transient_lte_reference = other.transient_lte_reference;
+        }
+        if other.transient_new_bp_stepping.is_some() {
+            self.transient_new_bp_stepping = other.transient_new_bp_stepping;
         }
         if other.ramptime.is_some() {
             self.ramptime = other.ramptime;

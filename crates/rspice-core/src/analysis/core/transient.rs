@@ -2,6 +2,7 @@
 
 #![allow(clippy::type_complexity)]
 use crate::Value;
+use crate::netlist::TransientLteReference;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::ops::Bound::{Excluded, Unbounded};
@@ -667,6 +668,14 @@ pub struct LteEstimator {
     reltol: Value,
     /// Absolute LTE tolerance floor for state variables.
     abstol: Value,
+    /// Reference magnitude policy used by the normalized LTE weights.
+    reference: TransientLteReference,
+    /// Most recent accepted solution used by Xyce point-reference modes.
+    accepted_reference_solution: Vec<Value>,
+    /// Largest accepted state magnitude seen by signal-global weighting.
+    signal_global_reference: Value,
+    /// Largest accepted magnitude per state seen by signal-local weighting.
+    signal_local_reference: Vec<Value>,
     /// Number of valid history entries
     history_count: usize,
     /// Current integration method (for order-aware scaling)
@@ -683,6 +692,15 @@ impl LteEstimator {
 
     /// Create a new LTE estimator with explicit relative and absolute tolerances.
     pub fn with_tolerances(reltol: Value, abstol: Value) -> Self {
+        Self::with_tolerances_and_reference(reltol, abstol, TransientLteReference::PredictorLocal)
+    }
+
+    /// Create an LTE estimator with explicit tolerances and reference policy.
+    pub fn with_tolerances_and_reference(
+        reltol: Value,
+        abstol: Value,
+        reference: TransientLteReference,
+    ) -> Self {
         let reltol = if reltol.is_finite() && reltol > 0.0 {
             reltol
         } else {
@@ -702,6 +720,10 @@ impl LteEstimator {
             prev_prev_dt: 0.0,
             reltol,
             abstol,
+            reference,
+            accepted_reference_solution: Vec::new(),
+            signal_global_reference: 0.0,
+            signal_local_reference: Vec::new(),
             history_count: 0,
             method_order: 2, // Default to trapezoidal order
         }
@@ -718,14 +740,151 @@ impl LteEstimator {
     }
 
     #[inline]
+    fn accepted_point_global_reference(&self) -> Option<Value> {
+        self.accepted_reference_solution
+            .iter()
+            .try_fold(0.0_f64, |reference, value| {
+                value.is_finite().then(|| reference.max(value.abs()))
+            })
+    }
+
+    #[inline]
+    fn accepted_reference_magnitude(&self, index: usize, accepted_point_global: Value) -> Value {
+        match self.reference {
+            TransientLteReference::PredictorLocal => 0.0,
+            TransientLteReference::PointLocal => self.accepted_reference_solution[index].abs(),
+            TransientLteReference::PointGlobal => accepted_point_global,
+            TransientLteReference::SignalGlobal => {
+                self.signal_global_reference.max(accepted_point_global)
+            }
+            TransientLteReference::SignalLocal => self
+                .signal_local_reference
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| self.accepted_reference_solution[index].abs()),
+        }
+    }
+
+    fn update_signal_reference_prefix(&mut self, solution: &[Value], prefix_len: usize) {
+        let reference_len = prefix_len.min(solution.len());
+        match self.reference {
+            TransientLteReference::SignalGlobal => {
+                let accepted_max = solution[..reference_len]
+                    .iter()
+                    .filter(|value| value.is_finite())
+                    .map(|value| value.abs())
+                    .fold(0.0, Value::max);
+                self.signal_global_reference = self.signal_global_reference.max(accepted_max);
+            }
+            TransientLteReference::SignalLocal => {
+                if self.signal_local_reference.len() < reference_len {
+                    self.signal_local_reference.resize(reference_len, 0.0);
+                }
+                for (reference, value) in self
+                    .signal_local_reference
+                    .iter_mut()
+                    .zip(&solution[..reference_len])
+                {
+                    if value.is_finite() {
+                        *reference = (*reference).max(value.abs());
+                    }
+                }
+            }
+            TransientLteReference::PointLocal | TransientLteReference::PointGlobal => {}
+            TransientLteReference::PredictorLocal => {}
+        }
+        if self.reference != TransientLteReference::PredictorLocal {
+            self.accepted_reference_solution.clear();
+            self.accepted_reference_solution
+                .extend_from_slice(&solution[..reference_len]);
+        }
+    }
+
+    /// Seed historical signal references without adding predictor history.
+    #[cfg(test)]
+    pub(crate) fn seed_reference_prefix(&mut self, solution: &[Value], prefix_len: usize) {
+        self.update_signal_reference_prefix(solution, prefix_len);
+    }
+
+    /// Seed both Xyce reference state and the accepted t0 predictor history.
+    pub(crate) fn seed_initial_solution(&mut self, solution: &[Value]) {
+        self.update_signal_reference_prefix(solution, solution.len());
+        self.restart_history_from(solution);
+    }
+
+    /// Snapshot historical signal references for transient checkpointing.
+    pub(crate) fn signal_reference_snapshot(&self) -> (Value, &[Value]) {
+        (self.signal_global_reference, &self.signal_local_reference)
+    }
+
+    /// Restore historical signal references from a validated checkpoint.
+    pub(crate) fn restore_signal_reference_snapshot(
+        &mut self,
+        global: Value,
+        local: &[Value],
+    ) -> Result<(), String> {
+        if !global.is_finite()
+            || global < 0.0
+            || local.iter().any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err("checkpoint contains invalid transient LTE references".to_string());
+        }
+        match self.reference {
+            TransientLteReference::SignalGlobal => {
+                let accepted = self.accepted_point_global_reference().ok_or_else(|| {
+                    "checkpoint accepted solution contains a non-finite LTE reference".to_string()
+                })?;
+                if !local.is_empty() || global < accepted {
+                    return Err(
+                        "checkpoint signal-global LTE state is inconsistent with the accepted solution"
+                            .to_string(),
+                    );
+                }
+            }
+            TransientLteReference::SignalLocal => {
+                if self
+                    .accepted_reference_solution
+                    .iter()
+                    .any(|value| !value.is_finite())
+                    || global != 0.0
+                    || local.len() != self.accepted_reference_solution.len()
+                    || local
+                        .iter()
+                        .zip(&self.accepted_reference_solution)
+                        .any(|(reference, accepted)| *reference < accepted.abs())
+                {
+                    return Err(
+                        "checkpoint signal-local LTE references do not cover the accepted solution"
+                            .to_string(),
+                    );
+                }
+            }
+            TransientLteReference::PredictorLocal
+            | TransientLteReference::PointLocal
+            | TransientLteReference::PointGlobal => {
+                if global != 0.0 || !local.is_empty() {
+                    return Err(
+                        "checkpoint point-reference LTE state contains signal history".to_string(),
+                    );
+                }
+            }
+        }
+        self.signal_global_reference = global;
+        self.signal_local_reference.clear();
+        self.signal_local_reference.extend_from_slice(local);
+        Ok(())
+    }
+
+    #[inline]
     fn predict_next_value(
         &self,
         prev: Value,
         prev_prev: Value,
         prev_prev_prev: Value,
         dt: Value,
+        method_order: u32,
     ) -> Value {
-        if self.method_order >= 2 && self.history_count >= 3 && self.prev_prev_dt > 0.0 {
+        if method_order >= 2 && self.history_count >= 3 && self.prev_prev_dt > 0.0 {
             // Evaluate the quadratic interpolant through the previous three
             // accepted points at the proposed next time. This keeps the LTE
             // estimate order-consistent with trapezoidal/Gear2 instead of
@@ -798,6 +957,7 @@ impl LteEstimator {
 
         let mut predicted = self.prev_solution.clone();
         let predicted_len = predicted_len.min(predicted.len());
+        let method_order = Self::integration_method_order(method, trap_order);
         for (idx, value) in predicted.iter_mut().enumerate().take(predicted_len) {
             let prev = self.prev_solution[idx];
             let prev_prev = self.prev_prev_solution.get(idx).copied().unwrap_or(prev);
@@ -818,7 +978,7 @@ impl LteEstimator {
                     }
                 }
                 IntegrationMethod::Gear2 => {
-                    self.predict_next_value(prev, prev_prev, prev_prev_prev, dt)
+                    self.predict_next_value(prev, prev_prev, prev_prev_prev, dt, method_order)
                 }
             };
         }
@@ -844,8 +1004,53 @@ impl LteEstimator {
         self.method_order = order.max(1);
     }
 
-    /// Record a solution point for history
+    #[inline]
+    fn integration_method_order(method: IntegrationMethod, trap_order: u8) -> u32 {
+        match method {
+            IntegrationMethod::BackwardEuler => 1,
+            IntegrationMethod::Trapezoidal
+            | IntegrationMethod::TrapGear
+            | IntegrationMethod::Gear2
+                if trap_order <= 1 =>
+            {
+                1
+            }
+            IntegrationMethod::Trapezoidal
+            | IntegrationMethod::Gear2
+            | IntegrationMethod::TrapGear => 2,
+        }
+    }
+
+    /// Whether this estimator uses Xyce accepted-solution weighting and WRMS.
+    pub fn uses_accepted_solution_reference(&self) -> bool {
+        self.reference != TransientLteReference::PredictorLocal
+    }
+
+    pub(crate) fn requires_signal_reference_history(&self) -> bool {
+        matches!(
+            self.reference,
+            TransientLteReference::SignalGlobal | TransientLteReference::SignalLocal
+        )
+    }
+
+    pub(crate) fn reference_mode(&self) -> TransientLteReference {
+        self.reference
+    }
+
+    /// Record a solution point for history and reference weighting.
     pub fn record(&mut self, solution: &[Value], dt: Value) {
+        self.record_prefix(solution, solution.len(), dt);
+    }
+
+    /// Record a solution while limiting LTE reference state to a vector prefix.
+    ///
+    /// Transient solution vectors append algebraic branch-current unknowns after
+    /// node voltages. Callers that apply generic voltage LTE to only the nodal
+    /// prefix should use the same prefix here so mixed-unit branch magnitudes do
+    /// not relax voltage error weights.
+    pub fn record_prefix(&mut self, solution: &[Value], prefix_len: usize, dt: Value) {
+        self.update_signal_reference_prefix(solution, prefix_len);
+
         // Shift history: prev_prev_prev <- prev_prev <- prev <- new
         self.prev_prev_prev_solution = std::mem::take(&mut self.prev_prev_solution);
         self.prev_prev_solution = std::mem::take(&mut self.prev_solution);
@@ -888,22 +1093,145 @@ impl LteEstimator {
         dt: Value,
         excluded_indices: &[usize],
     ) -> (Value, bool) {
+        self.estimate_prefix_excluding_with_coefficient(
+            current,
+            None,
+            prefix_len,
+            dt,
+            excluded_indices,
+            1.0,
+            self.method_order,
+        )
+    }
+
+    /// Estimate LTE using Xyce's integration-method correction coefficient.
+    ///
+    /// Xyce multiplies the weighted RMS predictor correction by `ck`: for
+    /// one-step order 1 it is `h/(h+h_prev)`, for trapezoidal order 2 it is
+    /// one third of that value, and for Gear order 2 it is
+    /// `h/(h+h_prev+h_prev_prev)`. Native predictor-local control preserves its
+    /// established uncorrected metric.
+    pub(crate) fn estimate_prefix_excluding_for_integration(
+        &self,
+        current: &[Value],
+        prefix_len: usize,
+        dt: Value,
+        excluded_indices: &[usize],
+        method: IntegrationMethod,
+        trap_order: u8,
+    ) -> (Value, bool) {
+        let coefficient = self.integration_error_coefficient(method, trap_order, dt);
+        let method_order = Self::integration_method_order(method, trap_order);
+        self.estimate_prefix_excluding_with_coefficient(
+            current,
+            None,
+            prefix_len,
+            dt,
+            excluded_indices,
+            coefficient,
+            method_order,
+        )
+    }
+
+    /// Estimate LTE from the exact predictor vector used to seed Newton.
+    pub(crate) fn estimate_correction_prefix_excluding_for_integration(
+        &self,
+        current: &[Value],
+        predicted: &[Value],
+        prefix_len: usize,
+        dt: Value,
+        excluded_indices: &[usize],
+        method: IntegrationMethod,
+        trap_order: u8,
+    ) -> (Value, bool) {
+        let coefficient = self.integration_error_coefficient(method, trap_order, dt);
+        let method_order = Self::integration_method_order(method, trap_order);
+        self.estimate_prefix_excluding_with_coefficient(
+            current,
+            Some(predicted),
+            prefix_len,
+            dt,
+            excluded_indices,
+            coefficient,
+            method_order,
+        )
+    }
+
+    fn integration_error_coefficient(
+        &self,
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+    ) -> Value {
+        if !self.uses_accepted_solution_reference()
+            || !dt.is_finite()
+            || dt <= 0.0
+            || !self.prev_dt.is_finite()
+            || self.prev_dt <= 0.0
+        {
+            return 1.0;
+        }
+
+        let one_step = dt / (dt + self.prev_dt);
+        match method {
+            IntegrationMethod::BackwardEuler => one_step,
+            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => {
+                if trap_order >= 2 {
+                    one_step / 3.0
+                } else {
+                    one_step
+                }
+            }
+            IntegrationMethod::Gear2 => {
+                if trap_order >= 2
+                    && self.history_count >= 2
+                    && self.prev_prev_dt.is_finite()
+                    && self.prev_prev_dt > 0.0
+                {
+                    dt / (dt + self.prev_dt + self.prev_prev_dt)
+                } else {
+                    one_step
+                }
+            }
+        }
+    }
+
+    fn estimate_prefix_excluding_with_coefficient(
+        &self,
+        current: &[Value],
+        predicted_solution: Option<&[Value]>,
+        prefix_len: usize,
+        dt: Value,
+        excluded_indices: &[usize],
+        error_coefficient: Value,
+        method_order: u32,
+    ) -> (Value, bool) {
         let len = prefix_len.min(current.len());
+        if predicted_solution.is_some_and(|predicted| predicted.len() < len) {
+            return (Value::INFINITY, false);
+        }
         // Need at least one previous point to estimate
         if len == 0 || self.history_count < 1 || self.prev_solution.len() < len {
             return (0.0, true); // Accept, no history yet
         }
 
-        let mut max_lte = 0.0_f64;
-        let mut excluded_pos = 0usize;
+        let mut aggregate = 0.0_f64;
+        let accepted_point_global = match self.reference {
+            TransientLteReference::PredictorLocal
+            | TransientLteReference::PointLocal
+            | TransientLteReference::SignalLocal => 0.0,
+            TransientLteReference::PointGlobal | TransientLteReference::SignalGlobal => {
+                let Some(reference) = self.accepted_point_global_reference() else {
+                    return (Value::INFINITY, false);
+                };
+                reference
+            }
+        };
 
         // For trapezoidal, LTE ~ (dt^3 / 12) * d^3v/dt^3
         // We approximate by comparing predicted (linear extrapolation) vs actual
         for (i, &curr_val) in current.iter().take(len).enumerate() {
-            while excluded_pos < excluded_indices.len() && excluded_indices[excluded_pos] < i {
-                excluded_pos += 1;
-            }
-            if excluded_pos < excluded_indices.len() && excluded_indices[excluded_pos] == i {
+            if excluded_indices.binary_search(&i).is_ok() {
                 continue;
             }
 
@@ -914,19 +1242,50 @@ impl LteEstimator {
                 .get(i)
                 .copied()
                 .unwrap_or(prev_prev_val);
-            let predicted =
-                self.predict_next_value(prev_val, prev_prev_val, prev_prev_prev_val, dt);
+            let predicted = predicted_solution.map_or_else(
+                || {
+                    self.predict_next_value(
+                        prev_val,
+                        prev_prev_val,
+                        prev_prev_prev_val,
+                        dt,
+                        method_order,
+                    )
+                },
+                |predicted| predicted[i],
+            );
+            if !curr_val.is_finite() || !predicted.is_finite() {
+                return (Value::INFINITY, false);
+            }
 
             // LTE estimate: |actual - predicted| with weighted SPICE-like scaling.
             let lte = (curr_val - predicted).abs();
-            let scale = self.lte_scale_denominator(curr_val.abs().max(predicted.abs()));
+            let reference = if self.reference == TransientLteReference::PredictorLocal {
+                curr_val.abs().max(predicted.abs())
+            } else {
+                self.accepted_reference_magnitude(i, accepted_point_global)
+            };
+            let scale = self.lte_scale_denominator(reference);
             let normalized_lte = lte / scale;
 
-            max_lte = max_lte.max(normalized_lte);
+            if self.reference == TransientLteReference::PredictorLocal {
+                aggregate = aggregate.max(normalized_lte);
+            } else {
+                aggregate += normalized_lte * normalized_lte;
+            }
         }
 
-        let accept = max_lte <= self.reltol;
-        (max_lte, accept)
+        let raw_lte = if self.reference == TransientLteReference::PredictorLocal {
+            aggregate
+        } else {
+            // Xyce's device-mask entries receive effectively infinite weights,
+            // so they contribute zero to the sum but remain in the WRMS global
+            // vector length used as the denominator.
+            (aggregate / len as Value).sqrt()
+        };
+        let lte = raw_lte * error_coefficient;
+        let accept = lte <= self.reltol;
+        (lte, accept)
     }
 
     /// Richardson extrapolation LTE estimate (more accurate)
@@ -949,25 +1308,117 @@ impl LteEstimator {
         }
 
         let order_factor = (1u64 << self.method_order) as Value - 1.0; // 2^p - 1
-        let mut max_lte = 0.0_f64;
+        let mut aggregate = 0.0_f64;
+        let accepted_point_global = match self.reference {
+            TransientLteReference::PredictorLocal
+            | TransientLteReference::PointLocal
+            | TransientLteReference::SignalLocal => 0.0,
+            TransientLteReference::PointGlobal | TransientLteReference::SignalGlobal => {
+                let Some(reference) = self.accepted_point_global_reference() else {
+                    return (0.0, true);
+                };
+                reference
+            }
+        };
 
-        for (&full, &half) in x_full.iter().zip(x_half.iter()) {
+        for (index, (&full, &half)) in x_full.iter().zip(x_half.iter()).enumerate() {
+            if !full.is_finite() || !half.is_finite() {
+                return (Value::INFINITY, false);
+            }
             // Richardson extrapolation error estimate
             let richardson_error = (half - full).abs() / order_factor;
 
-            let scale = self.lte_scale_denominator(half.abs().max(full.abs()));
+            let reference = if self.reference == TransientLteReference::PredictorLocal {
+                half.abs().max(full.abs())
+            } else {
+                self.accepted_reference_magnitude(index, accepted_point_global)
+            };
+            let scale = self.lte_scale_denominator(reference);
             let normalized = richardson_error / scale;
 
-            max_lte = max_lte.max(normalized);
+            if self.reference == TransientLteReference::PredictorLocal {
+                aggregate = aggregate.max(normalized);
+            } else {
+                aggregate += normalized * normalized;
+            }
         }
 
-        let accept = max_lte <= self.reltol;
-        (max_lte, accept)
+        let lte = if self.reference == TransientLteReference::PredictorLocal {
+            aggregate
+        } else {
+            (aggregate / x_full.len() as Value).sqrt()
+        };
+        let accept = lte <= self.reltol;
+        (lte, accept)
     }
 
     /// Get recommended timestep scaling factor based on LTE
     /// Uses method order for proper scaling exponent
     pub fn recommend_scale(&self, lte: Value) -> Value {
+        self.recommend_scale_for_order(lte, self.method_order)
+    }
+
+    /// Return the timestep scale for the method/order of the candidate step.
+    pub(crate) fn recommend_scale_for_integration(
+        &self,
+        lte: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+    ) -> Value {
+        self.recommend_scale_for_order(lte, Self::integration_method_order(method, trap_order))
+    }
+
+    /// Xyce's successful-step ratio policy for accepted-solution LTE modes.
+    ///
+    /// Ratios at or above two grow by exactly two, ratios between one and two
+    /// keep the current step, and ratios at or below one shrink within Xyce's
+    /// `[0.25, 0.9]` bounds.
+    pub(crate) fn xyce_accepted_step_scale(
+        &self,
+        lte: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+    ) -> Value {
+        let ratio =
+            self.xyce_raw_step_ratio(lte, Self::integration_method_order(method, trap_order));
+        if ratio >= 2.0 {
+            2.0
+        } else if ratio <= 1.0 {
+            ratio.clamp(0.25, 0.9)
+        } else {
+            1.0
+        }
+    }
+
+    /// Xyce's failed-LTE step ratio policy.
+    pub(crate) fn xyce_rejected_step_scale(
+        &self,
+        lte: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+        first_failure: bool,
+    ) -> Value {
+        if !first_failure {
+            return 0.25;
+        }
+        self.xyce_raw_step_ratio(lte, Self::integration_method_order(method, trap_order))
+            .clamp(0.25, 0.9)
+    }
+
+    /// Whether Xyce's order-2 promotion test passes for the current error.
+    pub(crate) fn xyce_should_promote_order_two(&self, lte: Value) -> bool {
+        self.history_count >= 2 && self.xyce_raw_step_ratio(lte, 2) > 1.05
+    }
+
+    fn xyce_raw_step_ratio(&self, lte: Value, method_order: u32) -> Value {
+        if !lte.is_finite() || lte < 0.0 {
+            return 0.25;
+        }
+        let est_over_tol = lte / self.reltol.max(1.0e-30);
+        (0.5 / (est_over_tol + 0.0001)).powf(1.0 / (method_order.max(1) as Value + 1.0))
+    }
+
+    fn recommend_scale_for_order(&self, lte: Value, method_order: u32) -> Value {
         if !lte.is_finite() {
             0.25
         } else if lte < 1e-15 {
@@ -975,7 +1426,7 @@ impl LteEstimator {
         } else {
             // Optimal scaling: (tol/lte)^(1/(p+1)) where p is method order
             // For order 2: exponent = 1/3, for order 1: exponent = 1/2
-            let exponent = 1.0 / (self.method_order as Value + 1.0);
+            let exponent = 1.0 / (method_order.max(1) as Value + 1.0);
             let ratio = self.reltol / lte;
             ratio.powf(exponent).clamp(0.25, 2.0)
         }
@@ -1083,12 +1534,426 @@ impl LteEstimator {
         (combined_lte, combined_accept)
     }
 
-    /// Reset history (e.g., after discontinuity)
-    pub fn reset(&mut self) {
+    /// Restart predictor history while retaining signal-history LTE references.
+    pub fn restart_history(&mut self) {
         self.prev_solution.clear();
         self.prev_prev_solution.clear();
         self.prev_prev_prev_solution.clear();
+        self.prev_dt = 0.0;
+        self.prev_prev_dt = 0.0;
         self.history_count = 0;
+    }
+
+    /// Restart predictor history at an accepted breakpoint while retaining
+    /// signal-history reference maxima.
+    pub fn restart_history_from(&mut self, accepted_solution: &[Value]) {
+        self.restart_history();
+        self.prev_solution.extend_from_slice(accepted_solution);
+        self.history_count = 1;
+    }
+
+    /// Seed the synthetic equal-step history used by a Xyce integration restart.
+    ///
+    /// OneStep/Gear12 restart with a zero first-difference vector, but initialize
+    /// the previous step size to the first attempted post-breakpoint step. This
+    /// makes the first predictor equal to the accepted breakpoint solution while
+    /// retaining the correct `h / (h + h_prev)` LTE coefficient. Retries keep the
+    /// original seed, matching Xyce's `lastTimeStep` restart state.
+    pub(crate) fn seed_restart_timestep(&mut self, dt: Value) {
+        if self.history_count == 1 && self.prev_dt == 0.0 && dt.is_finite() && dt > 0.0 {
+            self.prev_dt = dt;
+        }
+    }
+
+    /// Reset predictor history and all historical LTE references.
+    pub fn reset(&mut self) {
+        self.restart_history();
+        self.accepted_reference_solution.clear();
+        self.signal_global_reference = 0.0;
+        self.signal_local_reference.clear();
+    }
+}
+
+#[cfg(test)]
+mod lte_estimator_tests {
+    use super::*;
+
+    fn accepted_estimator(
+        reference: TransientLteReference,
+        initial: &[Value],
+        accepted: &[Value],
+    ) -> LteEstimator {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(0.1, 1.0e-6, reference);
+        estimator.seed_reference_prefix(initial, initial.len());
+        estimator.record(accepted, 1.0);
+        estimator
+    }
+
+    #[test]
+    fn candidate_magnitude_cannot_relax_accepted_solution_weights() {
+        let estimator = accepted_estimator(TransientLteReference::SignalGlobal, &[1.0], &[1.0]);
+        let (small_lte, _) = estimator.estimate(&[2.0], 1.0);
+        let (large_lte, _) = estimator.estimate(&[200.0], 1.0);
+
+        assert!(large_lte > small_lte * 100.0);
+        assert_eq!(
+            estimator.signal_global_reference.to_bits(),
+            1.0f64.to_bits()
+        );
+        assert_eq!(estimator.accepted_reference_solution, [1.0]);
+    }
+
+    #[test]
+    fn signal_global_remembers_a_peak_that_point_global_discards() {
+        let point = accepted_estimator(TransientLteReference::PointGlobal, &[100.0], &[1.0]);
+        let signal = accepted_estimator(TransientLteReference::SignalGlobal, &[100.0], &[1.0]);
+
+        let (_, point_accepts) = point.estimate(&[1.2], 1.0);
+        let (_, signal_accepts) = signal.estimate(&[1.2], 1.0);
+
+        assert!(!point_accepts);
+        assert!(signal_accepts);
+    }
+
+    #[test]
+    fn signal_local_retains_independent_per_variable_peaks() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::SignalLocal,
+        );
+        estimator.seed_reference_prefix(&[10.0, 1.0], 2);
+        estimator.record(&[2.0, 20.0], 1.0);
+        estimator.record(&[3.0, 4.0], 1.0);
+
+        assert_eq!(estimator.signal_local_reference, [10.0, 20.0]);
+        assert_eq!(estimator.accepted_reference_solution, [3.0, 4.0]);
+    }
+
+    #[test]
+    fn point_local_uses_each_prior_accepted_state_magnitude() {
+        let estimator = accepted_estimator(
+            TransientLteReference::PointLocal,
+            &[1.0, 100.0],
+            &[1.0, 100.0],
+        );
+        let candidate = [1.1, 100.1];
+
+        let (first_lte, _) = estimator.estimate_prefix_excluding(&candidate, 2, 1.0, &[1]);
+        let (second_lte, _) = estimator.estimate_prefix_excluding(&candidate, 2, 1.0, &[0]);
+
+        assert!(first_lte > second_lte * 50.0);
+    }
+
+    #[test]
+    fn accepted_solution_modes_include_the_full_solution_vector_in_wrms() {
+        let estimator = accepted_estimator(
+            TransientLteReference::SignalGlobal,
+            &[1.0, 1.0],
+            &[1.0, 1.0],
+        );
+        let candidate = [1.0, 1.2];
+
+        let (nodal_prefix_lte, _) = estimator.estimate_prefix(&candidate, 1, 1.0);
+        let (full_lte, _) = estimator.estimate(&candidate, 1.0);
+
+        assert_eq!(nodal_prefix_lte, 0.0);
+        assert!(full_lte > 0.0);
+    }
+
+    #[test]
+    fn xyce_device_mask_zeroes_error_but_keeps_global_wrms_length() {
+        let estimator = accepted_estimator(
+            TransientLteReference::SignalGlobal,
+            &[1.0, 100.0],
+            &[1.0, 100.0],
+        );
+
+        let (lte, accepts) = estimator.estimate_correction_prefix_excluding_for_integration(
+            &[1.0, 200.0],
+            &[1.0, 100.0],
+            2,
+            1.0,
+            &[1],
+            IntegrationMethod::Trapezoidal,
+            2,
+        );
+
+        assert_eq!(lte, 0.0);
+        assert!(accepts);
+    }
+
+    #[test]
+    fn lte_uses_the_exact_predictor_vector_that_seeded_newton() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        estimator.seed_initial_solution(&[0.0]);
+        estimator.record(&[1.0], 1.0);
+
+        let (lte, accepts) = estimator.estimate_correction_prefix_excluding_for_integration(
+            &[123.0],
+            &[123.0],
+            1,
+            1.0,
+            &[],
+            IntegrationMethod::Trapezoidal,
+            2,
+        );
+
+        assert_eq!(lte, 0.0);
+        assert!(accepts);
+    }
+
+    #[test]
+    fn initial_state_seeds_reference_and_rejection_does_not_mutate_it() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::SignalGlobal,
+        );
+        estimator.seed_reference_prefix(&[1.0, -3.0], 2);
+        estimator.record(&[0.5, -2.0], 1.0);
+        let before = estimator.signal_reference_snapshot().0;
+
+        let (_, accepts) = estimator.estimate(&[Value::INFINITY, 1000.0], 1.0);
+
+        assert!(!accepts);
+        assert_eq!(before.to_bits(), 3.0f64.to_bits());
+        assert_eq!(
+            estimator.signal_reference_snapshot().0.to_bits(),
+            before.to_bits()
+        );
+        assert_eq!(estimator.accepted_reference_solution, [0.5, -2.0]);
+    }
+
+    #[test]
+    fn initial_state_seeds_predictor_history_for_the_second_step() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        estimator.seed_initial_solution(&[0.0]);
+        estimator.record(&[1.0], 1.0);
+
+        let (lte, accepts) = estimator.estimate_prefix_excluding_for_integration(
+            &[2.0],
+            1,
+            1.0,
+            &[],
+            IntegrationMethod::BackwardEuler,
+            1,
+        );
+
+        assert_eq!(lte, 0.0);
+        assert!(accepts);
+    }
+
+    #[test]
+    fn restart_preserves_signal_reference_while_reset_clears_it() {
+        let mut estimator = accepted_estimator(TransientLteReference::SignalGlobal, &[5.0], &[1.0]);
+
+        estimator.restart_history();
+        assert_eq!(estimator.history_count, 0);
+        assert_eq!(
+            estimator.signal_global_reference.to_bits(),
+            5.0f64.to_bits()
+        );
+        assert_eq!(estimator.accepted_reference_solution, [1.0]);
+
+        estimator.restart_history_from(&[1.0]);
+        assert_eq!(estimator.history_count, 1);
+        assert_eq!(estimator.prev_solution, [1.0]);
+        assert_eq!(
+            estimator.signal_global_reference.to_bits(),
+            5.0f64.to_bits()
+        );
+
+        estimator.reset();
+        assert_eq!(estimator.signal_global_reference, 0.0);
+        assert!(estimator.accepted_reference_solution.is_empty());
+    }
+
+    #[test]
+    fn xyce_restart_timestep_seed_is_stable_across_retries() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        estimator.seed_reference_prefix(&[7.0, -2.0], 2);
+        estimator.restart_history_from(&[7.0, -2.0]);
+
+        estimator.seed_restart_timestep(0.25);
+        estimator.seed_restart_timestep(0.125);
+
+        assert_eq!(estimator.prev_dt.to_bits(), 0.25f64.to_bits());
+        assert_eq!(
+            estimator
+                .predict_solution(0.125, IntegrationMethod::BackwardEuler, 1)
+                .expect("restart history must predict from the accepted breakpoint"),
+            [7.0, -2.0]
+        );
+        assert_eq!(
+            estimator
+                .integration_error_coefficient(IntegrationMethod::BackwardEuler, 1, 0.125)
+                .to_bits(),
+            (1.0f64 / 3.0).to_bits()
+        );
+    }
+
+    #[test]
+    fn predictor_local_metric_retains_legacy_candidate_scaling() {
+        let mut estimator = LteEstimator::with_tolerances(0.1, 0.01);
+        estimator.record(&[1.0], 1.0);
+
+        let (lte, accepts) = estimator.estimate(&[2.0], 1.0);
+
+        assert!((lte - 1.0 / 2.1).abs() <= 1.0e-15);
+        assert!(!accepts);
+    }
+
+    #[test]
+    fn non_finite_candidate_fails_closed() {
+        let estimator = accepted_estimator(TransientLteReference::PointGlobal, &[1.0], &[1.0]);
+
+        let (lte, accepts) = estimator.estimate(&[Value::NAN], 1.0);
+
+        assert!(lte.is_infinite());
+        assert!(!accepts);
+    }
+
+    #[test]
+    fn timeint_absolute_tolerance_changes_the_weight_and_decision() {
+        let mut strict = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            0.001,
+            TransientLteReference::PointGlobal,
+        );
+        let mut loose = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0,
+            TransientLteReference::PointGlobal,
+        );
+        strict.seed_reference_prefix(&[0.0], 1);
+        loose.seed_reference_prefix(&[0.0], 1);
+        strict.record(&[0.0], 1.0);
+        loose.record(&[0.0], 1.0);
+
+        assert!(!strict.estimate(&[0.05], 1.0).1);
+        assert!(loose.estimate(&[0.05], 1.0).1);
+    }
+
+    #[test]
+    fn xyce_integration_error_coefficients_follow_method_and_step_history() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::PointGlobal,
+        );
+        estimator.seed_reference_prefix(&[0.0], 1);
+        estimator.record(&[0.0], 2.0);
+
+        assert_eq!(
+            estimator
+                .integration_error_coefficient(IntegrationMethod::BackwardEuler, 1, 1.0)
+                .to_bits(),
+            (1.0f64 / 3.0).to_bits()
+        );
+        assert_eq!(
+            estimator
+                .integration_error_coefficient(IntegrationMethod::Trapezoidal, 2, 1.0)
+                .to_bits(),
+            (1.0f64 / 9.0).to_bits()
+        );
+
+        estimator.record(&[0.0], 3.0);
+        assert_eq!(
+            estimator
+                .integration_error_coefficient(IntegrationMethod::Gear2, 2, 1.0)
+                .to_bits(),
+            (1.0f64 / 6.0).to_bits()
+        );
+
+        let mut native = LteEstimator::with_tolerances(0.1, 1.0e-6);
+        native.record(&[0.0], 2.0);
+        assert_eq!(
+            native.integration_error_coefficient(IntegrationMethod::Trapezoidal, 2, 1.0),
+            1.0
+        );
+    }
+
+    #[test]
+    fn candidate_method_order_controls_prediction_and_scale_exponent() {
+        let mut estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::SignalGlobal,
+        );
+        estimator.seed_reference_prefix(&[0.0], 1);
+        estimator.record(&[0.0], 1.0);
+        estimator.record(&[1.0], 1.0);
+        estimator.record(&[4.0], 1.0);
+
+        let (order_one_lte, _) = estimator.estimate_prefix_excluding_for_integration(
+            &[9.0],
+            1,
+            1.0,
+            &[],
+            IntegrationMethod::BackwardEuler,
+            1,
+        );
+        let (order_two_lte, _) = estimator.estimate_prefix_excluding_for_integration(
+            &[9.0],
+            1,
+            1.0,
+            &[],
+            IntegrationMethod::Trapezoidal,
+            2,
+        );
+
+        assert!(order_one_lte > 0.0);
+        assert_eq!(order_two_lte, 0.0);
+        let order_one_scale =
+            estimator.recommend_scale_for_integration(0.4, IntegrationMethod::BackwardEuler, 1);
+        let order_two_scale =
+            estimator.recommend_scale_for_integration(0.4, IntegrationMethod::Trapezoidal, 2);
+        assert!((order_one_scale - 0.5).abs() <= 1.0e-15);
+        assert!((order_two_scale - 0.25f64.powf(1.0 / 3.0)).abs() <= 1.0e-15);
+    }
+
+    #[test]
+    fn xyce_step_ratio_policy_matches_success_and_failure_bounds() {
+        let estimator = LteEstimator::with_tolerances_and_reference(
+            0.1,
+            1.0e-6,
+            TransientLteReference::SignalGlobal,
+        );
+
+        assert_eq!(
+            estimator.xyce_accepted_step_scale(1.0e-4, IntegrationMethod::Trapezoidal, 2),
+            2.0
+        );
+        assert_eq!(
+            estimator.xyce_accepted_step_scale(0.01, IntegrationMethod::Trapezoidal, 2),
+            1.0
+        );
+
+        let boundary_scale =
+            estimator.xyce_accepted_step_scale(0.1, IntegrationMethod::Trapezoidal, 2);
+        let expected = (0.5f64 / 1.0001).powf(1.0 / 3.0);
+        assert!((boundary_scale - expected).abs() <= 1.0e-15);
+
+        let first_reject =
+            estimator.xyce_rejected_step_scale(0.2, IntegrationMethod::Trapezoidal, 2, true);
+        assert!(first_reject > 0.25 && first_reject < 0.9);
+        assert_eq!(
+            estimator.xyce_rejected_step_scale(0.2, IntegrationMethod::Trapezoidal, 2, false),
+            0.25
+        );
     }
 }
 
@@ -1162,6 +2027,44 @@ impl CompanionCoefficients {
         }
     }
 
+    /// Get variable-step Gear2/BDF2 coefficients.
+    ///
+    /// For the current step `h` and the previously accepted step `h_prev`,
+    /// differentiating the quadratic interpolant through the current and two
+    /// preceding solution points gives
+    ///
+    /// `x' = (a0*x[n+1] - a1*x[n] - a2*x[n-1]) / h`,
+    ///
+    /// where, for `r = h / h_prev`, `a0 = (1 + 2r)/(1 + r)`,
+    /// `a1 = 1 + r`, and `a2 = -r^2/(1 + r)`. The equal-step case therefore
+    /// reduces exactly to the ordinary `(3/2, 2, -1/2)` BDF2 coefficients.
+    #[inline]
+    pub fn gear2_variable_step(dt: Value, previous_dt: Value) -> Self {
+        if !dt.is_finite() || dt <= 0.0 || !previous_dt.is_finite() || previous_dt <= 0.0 {
+            return Self::backward_euler();
+        }
+
+        let ratio = dt / previous_dt;
+        if !ratio.is_finite() || ratio <= 0.0 {
+            return Self::backward_euler();
+        }
+        let denominator = 1.0 + ratio;
+        let coeff_g = (1.0 + 2.0 * ratio) / denominator;
+        let coeff_v_n = 1.0 + ratio;
+        let coeff_v_n_minus_1 = -(ratio * ratio) / denominator;
+        if !coeff_g.is_finite() || !coeff_v_n.is_finite() || !coeff_v_n_minus_1.is_finite() {
+            return Self::backward_euler();
+        }
+
+        Self {
+            coeff_g,
+            coeff_v_n,
+            coeff_v_n_minus_1,
+            needs_two_history: true,
+            needs_current_history: false,
+        }
+    }
+
     /// Get coefficients for the specified integration method
     #[inline]
     pub fn for_method(method: IntegrationMethod) -> Self {
@@ -1170,6 +2073,19 @@ impl CompanionCoefficients {
             IntegrationMethod::Trapezoidal => Self::trapezoidal(),
             IntegrationMethod::Gear2 => Self::gear2(),
             IntegrationMethod::TrapGear => Self::trapezoidal(), // Default, actual method chosen dynamically
+        }
+    }
+
+    /// Get coefficients for a method using the accepted timestep history.
+    #[inline]
+    pub fn for_method_with_previous_step(
+        method: IntegrationMethod,
+        dt: Value,
+        previous_dt: Value,
+    ) -> Self {
+        match method {
+            IntegrationMethod::Gear2 => Self::gear2_variable_step(dt, previous_dt),
+            _ => Self::for_method(method),
         }
     }
 
@@ -1244,6 +2160,63 @@ impl CompanionCoefficients {
             veq += v_n;
         }
         veq
+    }
+}
+
+#[cfg(test)]
+mod companion_coefficients_tests {
+    use super::*;
+
+    #[test]
+    fn variable_step_gear2_reduces_to_fixed_bdf2_for_equal_steps() {
+        let variable = CompanionCoefficients::gear2_variable_step(2.0, 2.0);
+        let fixed = CompanionCoefficients::gear2();
+
+        assert_eq!(variable.coeff_g, fixed.coeff_g);
+        assert_eq!(variable.coeff_v_n, fixed.coeff_v_n);
+        assert_eq!(variable.coeff_v_n_minus_1, fixed.coeff_v_n_minus_1);
+        assert_eq!(variable.needs_two_history, fixed.needs_two_history);
+        assert_eq!(variable.needs_current_history, fixed.needs_current_history);
+    }
+
+    #[test]
+    fn variable_step_gear2_differentiates_an_affine_history_exactly() {
+        let dt = 2.0;
+        let previous_dt = 1.0;
+        let slope = 3.0;
+        let offset = 7.0;
+        let inductance = 0.25;
+        let i_prev_prev = offset - slope * previous_dt;
+        let i_prev = offset;
+        let i_curr = offset + slope * dt;
+        let coefficients = CompanionCoefficients::gear2_variable_step(dt, previous_dt);
+
+        assert!((coefficients.coeff_g - 5.0 / 3.0).abs() <= Value::EPSILON);
+        assert!((coefficients.coeff_v_n - 3.0).abs() <= Value::EPSILON);
+        assert!((coefficients.coeff_v_n_minus_1 + 4.0 / 3.0).abs() <= Value::EPSILON);
+
+        let voltage = coefficients.inductor_req(inductance, dt) * i_curr
+            - coefficients.inductor_veq(inductance, dt, i_prev, i_prev_prev, 0.0);
+        assert!((voltage - inductance * slope).abs() <= 8.0 * Value::EPSILON);
+    }
+
+    #[test]
+    fn variable_step_gear2_fails_safe_without_valid_step_history() {
+        let backward_euler = CompanionCoefficients::backward_euler();
+
+        for invalid_previous_dt in [0.0, -1.0, Value::NAN, Value::INFINITY] {
+            let coefficients = CompanionCoefficients::gear2_variable_step(1.0, invalid_previous_dt);
+            assert_eq!(coefficients.coeff_g, backward_euler.coeff_g);
+            assert_eq!(coefficients.coeff_v_n, backward_euler.coeff_v_n);
+            assert_eq!(
+                coefficients.coeff_v_n_minus_1,
+                backward_euler.coeff_v_n_minus_1
+            );
+            assert_eq!(
+                coefficients.needs_two_history,
+                backward_euler.needs_two_history
+            );
+        }
     }
 }
 

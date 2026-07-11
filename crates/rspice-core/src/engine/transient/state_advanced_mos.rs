@@ -178,8 +178,7 @@ impl Engine {
     #[inline]
     #[allow(clippy::too_many_arguments)]
     fn b3soi_companion_currents(
-        effective_method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &B3SoiTransientHistory,
         idx: usize,
@@ -190,15 +189,7 @@ impl Engine {
         qth: Value,
     ) -> (Value, Value, Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
-                q,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            )
+            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
         };
         (
             cq(
@@ -287,17 +278,15 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &B3SoiTransientHistory,
     ) {
         if !circuit.has_b3soi_devices() {
             return;
         }
-        let effective_method = Self::effective_companion_method(method, trap_order);
         // ag0 = the bare integration gain (companion geq for unit capacitance).
-        let ag0 = Self::jfet_companion_geq(effective_method, trap_order, 1.0, dt);
+        let ag0 = Self::jfet_companion_geq(coeff, 1.0, dt);
         if ag0 <= 0.0 {
             return;
         }
@@ -310,16 +299,7 @@ impl Engine {
             }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                charge.qg,
-                charge.qb,
-                charge.qd,
-                charge.qe,
-                charge.qth,
+                coeff, dt, history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth,
             );
             dev.stamp_charge_companion(
                 &charge,
@@ -341,16 +321,7 @@ impl Engine {
             }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                charge.qg,
-                charge.qb,
-                charge.qd,
-                charge.qe,
-                charge.qth,
+                coeff, dt, history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth,
             );
             dev.stamp_charge_companion(
                 &charge,
@@ -372,16 +343,7 @@ impl Engine {
             }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                charge.qg,
-                charge.qb,
-                charge.qd,
-                charge.qe,
-                charge.qth,
+                coeff, dt, history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth,
             );
             dev.stamp_charge_companion(
                 &charge,
@@ -403,15 +365,13 @@ impl Engine {
     pub(super) fn update_b3soi_history(
         circuit: &mut crate::circuit::Circuit,
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &mut B3SoiTransientHistory,
     ) {
         if !circuit.has_b3soi_devices() {
             return;
         }
-        let effective_method = Self::effective_companion_method(method, trap_order);
         let mut idx = 0;
         for dev in &mut circuit.b3soi.devices {
             dev.commit_accepted_transient_state();
@@ -421,16 +381,7 @@ impl Engine {
             }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                charge.qg,
-                charge.qb,
-                charge.qd,
-                charge.qe,
-                charge.qth,
+                coeff, dt, history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth,
             );
             Self::b3soi_commit_history_slot(
                 history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth, cqg, cqb,
@@ -445,16 +396,7 @@ impl Engine {
             }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                charge.qg,
-                charge.qb,
-                charge.qd,
-                charge.qe,
-                charge.qth,
+                coeff, dt, history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth,
             );
             Self::b3soi_commit_history_slot(
                 history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth, cqg, cqb,
@@ -469,16 +411,7 @@ impl Engine {
             }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                charge.qg,
-                charge.qb,
-                charge.qd,
-                charge.qe,
-                charge.qth,
+                coeff, dt, history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth,
             );
             Self::b3soi_commit_history_slot(
                 history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth, cqg, cqb,
@@ -591,8 +524,7 @@ impl Engine {
     /// `BSIM3qg`/`BSIM3qb`/`BSIM3qd`).
     #[inline]
     fn bsim3_companion_currents(
-        effective_method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &Bsim3TransientHistory,
         idx: usize,
@@ -601,15 +533,7 @@ impl Engine {
         qd: Value,
     ) -> (Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
-                q,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            )
+            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
         };
         (
             cq(
@@ -635,8 +559,7 @@ impl Engine {
 
     #[inline]
     fn bsim3_trnqs_companion_currents(
-        effective_method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &Bsim3TransientHistory,
         idx: usize,
@@ -644,15 +567,7 @@ impl Engine {
         qcdump: Value,
     ) -> (Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
-                q,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            )
+            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
         };
         (
             cq(
@@ -680,17 +595,15 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &Bsim3TransientHistory,
     ) {
         if !circuit.has_bsim3v3_devices() {
             return;
         }
-        let effective_method = Self::effective_companion_method(method, trap_order);
         // ag0 = the bare integration gain (companion geq for unit capacitance).
-        let ag0 = Self::jfet_companion_geq(effective_method, trap_order, 1.0, dt);
+        let ag0 = Self::jfet_companion_geq(coeff, 1.0, dt);
         if ag0 <= 0.0 {
             return;
         }
@@ -702,23 +615,14 @@ impl Engine {
             } else {
                 (charge.qg_state(), charge.qb_state(), charge.qd_state())
             };
-            let (cqg, cqb, cqd) = Self::bsim3_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                qg,
-                qb,
-                qd,
-            );
+            let (cqg, cqb, cqd) =
+                Self::bsim3_companion_currents(coeff, dt, history, idx, qg, qb, qd);
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b3ld.c: m * ceqq*).
             if dev.uses_trnqs() {
                 let qcdump = dev.trnqs_qcdump_state(voltages);
                 let (cqcheq, cqcdump) = Self::bsim3_trnqs_companion_currents(
-                    effective_method,
-                    trap_order,
+                    coeff,
                     dt,
                     history,
                     idx,
@@ -757,15 +661,13 @@ impl Engine {
     pub(super) fn update_bsim3_history(
         circuit: &crate::circuit::Circuit,
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &mut Bsim3TransientHistory,
     ) {
         if !circuit.has_bsim3v3_devices() {
             return;
         }
-        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, dev) in circuit.bsim3v3.devices.iter().enumerate() {
             let (charge, _mode) = dev.charge_at(voltages);
             let (qg, qb, qd) = if dev.uses_trnqs() {
@@ -773,16 +675,8 @@ impl Engine {
             } else {
                 (charge.qg_state(), charge.qb_state(), charge.qd_state())
             };
-            let (cqg, cqb, cqd) = Self::bsim3_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                qg,
-                qb,
-                qd,
-            );
+            let (cqg, cqb, cqd) =
+                Self::bsim3_companion_currents(coeff, dt, history, idx, qg, qb, qd);
             history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
             history.qg_prev_prev[idx] = history.qg_prev[idx];
             history.qg_prev[idx] = qg;
@@ -801,15 +695,8 @@ impl Engine {
             } else {
                 0.0
             };
-            let (cqcheq, cqcdump) = Self::bsim3_trnqs_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                qcheq,
-                qcdump,
-            );
+            let (cqcheq, cqcdump) =
+                Self::bsim3_trnqs_companion_currents(coeff, dt, history, idx, qcheq, qcdump);
             history.qcheq_prev_prev_prev[idx] = history.qcheq_prev_prev[idx];
             history.qcheq_prev_prev[idx] = history.qcheq_prev[idx];
             history.qcheq_prev[idx] = qcheq;
@@ -980,8 +867,7 @@ impl Engine {
     /// `BSIM4qd`, plus `qbs`/`qbd` when `rbodyMod > 0`; b4ld.c:4630-4649).
     #[inline]
     fn bsim4_companion_currents(
-        effective_method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &Bsim4TransientHistory,
         idx: usize,
@@ -993,15 +879,7 @@ impl Engine {
         qbd: Value,
     ) -> (Value, Value, Value, Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
-                q,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            )
+            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
         };
         (
             cq(
@@ -1045,8 +923,7 @@ impl Engine {
 
     #[inline]
     fn bsim4_trnqs_companion_currents(
-        effective_method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &Bsim4TransientHistory,
         idx: usize,
@@ -1054,15 +931,7 @@ impl Engine {
         qcdump: Value,
     ) -> (Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
-            Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
-                q,
-                q_prev,
-                q_prev_prev,
-                cq_prev,
-            )
+            Self::jfet_companion_ccap(coeff, dt, q, q_prev, q_prev_prev, cq_prev)
         };
         (
             cq(
@@ -1089,17 +958,15 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &Bsim4TransientHistory,
     ) {
         if !circuit.has_bsim4v8_devices() {
             return;
         }
-        let effective_method = Self::effective_companion_method(method, trap_order);
         // ag0 = the bare integration gain (companion geq for unit capacitance).
-        let ag0 = Self::jfet_companion_geq(effective_method, trap_order, 1.0, dt);
+        let ag0 = Self::jfet_companion_geq(coeff, 1.0, dt);
         if ag0 <= 0.0 {
             return;
         }
@@ -1120,25 +987,14 @@ impl Engine {
                 )
             };
             let (cqg, cqgmid, cqb, cqd, cqbs, cqbd) = Self::bsim4_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                qg,
-                qgmid,
-                qb,
-                qd,
-                qbs,
-                qbd,
+                coeff, dt, history, idx, qg, qgmid, qb, qd, qbs, qbd,
             );
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b4ld.c: mult_q * ceqq*).
             if dev.uses_trnqs() {
                 let qcdump = dev.trnqs_qcdump_state(voltages);
                 let (cqcheq, cqcdump) = Self::bsim4_trnqs_companion_currents(
-                    effective_method,
-                    trap_order,
+                    coeff,
                     dt,
                     history,
                     idx,
@@ -1182,15 +1038,13 @@ impl Engine {
     pub(super) fn update_bsim4_history(
         circuit: &crate::circuit::Circuit,
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &mut Bsim4TransientHistory,
     ) {
         if !circuit.has_bsim4v8_devices() {
             return;
         }
-        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, dev) in circuit.bsim4v8.devices.iter().enumerate() {
             let (charge, _mode) = dev.charge_at(voltages);
             let rbody = dev.rbody_enabled();
@@ -1207,17 +1061,7 @@ impl Engine {
                 )
             };
             let (cqg, cqgmid, cqb, cqd, cqbs, cqbd) = Self::bsim4_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                qg,
-                qgmid,
-                qb,
-                qd,
-                qbs,
-                qbd,
+                coeff, dt, history, idx, qg, qgmid, qb, qd, qbs, qbd,
             );
             history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
             history.qg_prev_prev[idx] = history.qg_prev[idx];
@@ -1249,15 +1093,8 @@ impl Engine {
             } else {
                 0.0
             };
-            let (cqcheq, cqcdump) = Self::bsim4_trnqs_companion_currents(
-                effective_method,
-                trap_order,
-                dt,
-                history,
-                idx,
-                qcheq,
-                qcdump,
-            );
+            let (cqcheq, cqcdump) =
+                Self::bsim4_trnqs_companion_currents(coeff, dt, history, idx, qcheq, qcdump);
             history.qcheq_prev_prev_prev[idx] = history.qcheq_prev_prev[idx];
             history.qcheq_prev_prev[idx] = history.qcheq_prev[idx];
             history.qcheq_prev[idx] = qcheq;
@@ -1297,8 +1134,7 @@ impl Engine {
 
     #[inline]
     fn ekv26_companion_currents(
-        effective_method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &Ekv26TransientHistory,
         idx: usize,
@@ -1307,8 +1143,7 @@ impl Engine {
         let mut cq = [0.0; EKV26_DYNAMIC_CHARGE_COUNT];
         for row in 0..EKV26_DYNAMIC_CHARGE_COUNT {
             cq[row] = Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
+                coeff,
                 dt,
                 q_curr[row],
                 history.q_prev[idx][row],
@@ -1338,24 +1173,21 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &Ekv26TransientHistory,
     ) {
         if circuit.ekv26s.is_empty() {
             return;
         }
-        let effective_method = Self::effective_companion_method(method, trap_order);
-        let ag0 = Self::jfet_companion_geq(effective_method, trap_order, 1.0, dt);
+        let ag0 = Self::jfet_companion_geq(coeff, 1.0, dt);
         if ag0 <= 0.0 {
             return;
         }
         let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
         for (idx, dev) in circuit.ekv26s.devices.iter().enumerate() {
             let q = dev.dynamic_charge_vector_at_solution(voltages);
-            let cq =
-                Self::ekv26_companion_currents(effective_method, trap_order, dt, history, idx, &q);
+            let cq = Self::ekv26_companion_currents(coeff, dt, history, idx, &q);
             let history_currents = Self::ekv26_history_currents(ag0, &q, &cq);
             dev.stamp_dynamic_companion(voltages, ag0, &history_currents, &mut stamper);
         }
@@ -1365,19 +1197,16 @@ impl Engine {
     pub(super) fn update_ekv26_history(
         circuit: &crate::circuit::Circuit,
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &mut Ekv26TransientHistory,
     ) {
         if circuit.ekv26s.is_empty() {
             return;
         }
-        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, dev) in circuit.ekv26s.devices.iter().enumerate() {
             let q = dev.dynamic_charge_vector_at_solution(voltages);
-            let cq =
-                Self::ekv26_companion_currents(effective_method, trap_order, dt, history, idx, &q);
+            let cq = Self::ekv26_companion_currents(coeff, dt, history, idx, &q);
             history.q_prev_prev_prev[idx] = history.q_prev_prev[idx];
             history.q_prev_prev[idx] = history.q_prev[idx];
             history.q_prev[idx] = q;

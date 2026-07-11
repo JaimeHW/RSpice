@@ -8,7 +8,7 @@
 use super::{ConvergenceConfig, JfetLevel2Model, SimulationConfig, SpiceDialect};
 use crate::Value;
 use crate::analysis::IntegrationMethod;
-use crate::netlist::SimulationOptions as NetlistSimulationOptions;
+use crate::netlist::{SimulationOptions as NetlistSimulationOptions, TransientLteReference};
 
 /// Convergence preset selection used by frontends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +51,10 @@ pub struct SimulationConfigOverrides {
     pub max_timestep: Option<Value>,
     pub integration_method: Option<IntegrationMethod>,
     pub transient_trtol: Option<Value>,
+    pub transient_lte_reltol: Option<Value>,
+    pub transient_lte_abstol: Option<Value>,
+    pub transient_lte_reference: Option<TransientLteReference>,
+    pub transient_new_bp_stepping: Option<bool>,
     pub ramptime: Option<Value>,
     pub digital_delay_type: Option<i64>,
     pub convergence_preset: Option<ConvergencePreset>,
@@ -85,6 +89,12 @@ pub fn resolve_simulation_config(
     let mut max_timestep = base.max_timestep;
     let mut integration_method = base.integration_method;
     let mut transient_trtol = base.transient_trtol;
+    let mut transient_lte_reltol = base.transient_lte_reltol;
+    let mut transient_lte_abstol = base.transient_lte_abstol;
+    let mut transient_lte_reference = base
+        .transient_lte_reference
+        .unwrap_or_else(|| base.spice_dialect.default_transient_lte_reference());
+    let mut transient_new_bp_stepping = base.transient_new_bp_stepping;
     let mut ramptime = base.ramptime;
     let mut digital_delay_type = base.digital_delay_type;
     let mut tolerance = base.tolerance;
@@ -117,6 +127,18 @@ pub fn resolve_simulation_config(
         }
         if let Some(trtol) = opts.trtol {
             transient_trtol = trtol;
+        }
+        if let Some(reltol) = opts.timeint_reltol {
+            transient_lte_reltol = Some(reltol);
+        }
+        if let Some(abstol) = opts.timeint_abstol {
+            transient_lte_abstol = Some(abstol);
+        }
+        if let Some(reference) = opts.transient_lte_reference {
+            transient_lte_reference = reference;
+        }
+        if let Some(enabled) = opts.transient_new_bp_stepping {
+            transient_new_bp_stepping = enabled;
         }
         if let Some(value) = opts.ramptime {
             ramptime = value;
@@ -173,6 +195,12 @@ pub fn resolve_simulation_config(
     if let Some(trtol) = overrides.transient_trtol {
         transient_trtol = trtol;
     }
+    if let Some(reltol) = overrides.transient_lte_reltol {
+        transient_lte_reltol = Some(reltol);
+    }
+    if let Some(abstol) = overrides.transient_lte_abstol {
+        transient_lte_abstol = Some(abstol);
+    }
     if let Some(value) = overrides.ramptime {
         ramptime = value;
     }
@@ -204,9 +232,20 @@ pub fn resolve_simulation_config(
     }
     if let Some(dialect) = overrides.spice_dialect {
         resolved = resolved.with_spice_dialect(dialect);
+        if base.transient_lte_reference.is_none()
+            && netlist_options.is_none_or(|options| options.transient_lte_reference.is_none())
+        {
+            transient_lte_reference = dialect.default_transient_lte_reference();
+        }
     }
     if let Some(model) = overrides.jfet_level2_model {
         resolved.jfet_level2_model = model;
+    }
+    if let Some(reference) = overrides.transient_lte_reference {
+        transient_lte_reference = reference;
+    }
+    if let Some(enabled) = overrides.transient_new_bp_stepping {
+        transient_new_bp_stepping = enabled;
     }
 
     if let Some(preset) = overrides.convergence_preset {
@@ -220,6 +259,10 @@ pub fn resolve_simulation_config(
     resolved.max_timestep = max_timestep;
     resolved.integration_method = integration_method;
     resolved.transient_trtol = transient_trtol;
+    resolved.transient_lte_reltol = transient_lte_reltol;
+    resolved.transient_lte_abstol = transient_lte_abstol;
+    resolved.transient_lte_reference = Some(transient_lte_reference);
+    resolved.transient_new_bp_stepping = transient_new_bp_stepping;
     resolved.ramptime = ramptime;
     resolved.digital_delay_type = digital_delay_type;
     resolved.tolerance = tolerance;
@@ -322,6 +365,105 @@ mod tests {
             resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
 
         assert_eq!(resolved.transient_trtol, 2.25);
+    }
+
+    #[test]
+    fn xyce_dialect_derives_point_global_lte_when_mode_is_omitted() {
+        let base = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(
+            &base,
+            Some(&NetlistSimulationOptions::default()),
+            &SimulationConfigOverrides::default(),
+        );
+
+        assert_eq!(
+            resolved.transient_lte_reference,
+            Some(TransientLteReference::PointGlobal)
+        );
+    }
+
+    #[test]
+    fn timeint_lte_settings_are_separate_and_follow_override_precedence() {
+        let mut base = SimulationConfig::default();
+        base.convergence_config.voltage_reltol = 4.0e-3;
+        base.convergence_config.voltage_abstol = 5.0e-6;
+        base.convergence_config.current_abstol = 6.0e-12;
+        let options = NetlistSimulationOptions {
+            timeint_reltol: Some(2.0e-6),
+            timeint_abstol: Some(3.0e-9),
+            transient_lte_reference: Some(TransientLteReference::SignalGlobal),
+            abstol: Some(7.0e-12),
+            ..Default::default()
+        };
+        let overrides = SimulationConfigOverrides {
+            transient_lte_reltol: Some(8.0e-7),
+            transient_lte_abstol: Some(9.0e-10),
+            transient_lte_reference: Some(TransientLteReference::SignalLocal),
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(&base, Some(&options), &overrides);
+
+        assert_eq!(resolved.transient_lte_reltol, Some(8.0e-7));
+        assert_eq!(resolved.transient_lte_abstol, Some(9.0e-10));
+        assert_eq!(
+            resolved.transient_lte_reference,
+            Some(TransientLteReference::SignalLocal)
+        );
+        assert_eq!(resolved.convergence_config.voltage_reltol, 4.0e-3);
+        assert_eq!(resolved.convergence_config.voltage_abstol, 5.0e-6);
+        assert_eq!(resolved.convergence_config.current_abstol, 7.0e-12);
+    }
+
+    #[test]
+    fn new_breakpoint_stepping_follows_config_precedence() {
+        let base = SimulationConfig {
+            transient_new_bp_stepping: true,
+            ..Default::default()
+        };
+        let options = NetlistSimulationOptions {
+            transient_new_bp_stepping: Some(false),
+            ..Default::default()
+        };
+
+        let from_deck =
+            resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
+        assert!(!from_deck.transient_new_bp_stepping);
+
+        let overridden = resolve_simulation_config(
+            &base,
+            Some(&options),
+            &SimulationConfigOverrides {
+                transient_new_bp_stepping: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(overridden.transient_new_bp_stepping);
+    }
+
+    #[test]
+    fn explicit_deck_lte_mode_survives_a_dialect_override() {
+        let options = NetlistSimulationOptions {
+            transient_lte_reference: Some(TransientLteReference::SignalGlobal),
+            ..Default::default()
+        };
+        let overrides = SimulationConfigOverrides {
+            spice_dialect: Some(SpiceDialect::Ngspice),
+            ..Default::default()
+        };
+
+        let resolved =
+            resolve_simulation_config(&SimulationConfig::default(), Some(&options), &overrides);
+
+        assert_eq!(resolved.spice_dialect, SpiceDialect::Ngspice);
+        assert_eq!(
+            resolved.transient_lte_reference,
+            Some(TransientLteReference::SignalGlobal)
+        );
     }
 
     #[test]

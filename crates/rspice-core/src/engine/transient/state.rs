@@ -589,8 +589,7 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
@@ -598,8 +597,7 @@ impl Engine {
         voltage_abstol: Value,
         reltol: Value,
     ) {
-        let effective_method = Self::effective_companion_method(method, trap_order);
-        let charge_factor = Self::jfet_companion_geq(effective_method, trap_order, 1.0, dt);
+        let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(voltages, bjt.node_collector);
             let vb = Self::node_voltage(voltages, bjt.node_base);
@@ -624,8 +622,7 @@ impl Engine {
                         continue;
                     }
                     let cq = Self::jfet_companion_ccap(
-                        effective_method,
-                        trap_order,
+                        coeff,
                         dt,
                         branch.charge,
                         history.charge_q_prev[idx][branch_idx],
@@ -654,8 +651,7 @@ impl Engine {
             let Some(snapshot) = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
                 bjt,
                 [vc, vb, ve, vs],
-                method,
-                trap_order,
+                coeff,
                 dt,
                 &history.charge_q_prev[idx],
                 &history.charge_q_prev_prev[idx],
@@ -677,8 +673,7 @@ impl Engine {
             let Some(linearization) = Self::assemble_vbic_transient_linearization(
                 bjt,
                 &snapshot,
-                effective_method,
-                trap_order,
+                coeff,
                 dt,
                 &history.charge_q_prev[idx],
                 &history.charge_q_prev_prev[idx],
@@ -786,13 +781,11 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &JfetTransientHistory,
         suppress_gate_charge: bool,
     ) {
-        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, jfet) in circuit.jfets.iter().enumerate() {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, voltages);
             let (vgs_charge, vgd_charge) = Self::jfet_charge_branch_voltages(jfet, voltages);
@@ -818,8 +811,7 @@ impl Engine {
             if !suppress_gate_charge && cgs.is_finite() && cgs > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = if let Some(charge) = jfet2_charge {
                     Self::nonlinear_charge_companion_terms(
-                        effective_method,
-                        trap_order,
+                        coeff,
                         dt,
                         cgs,
                         vgs_charge,
@@ -830,8 +822,7 @@ impl Engine {
                     )
                 } else {
                     Self::jfet_companion_terms(
-                        effective_method,
-                        trap_order,
+                        coeff,
                         dt,
                         cgs,
                         vgs_charge,
@@ -847,8 +838,7 @@ impl Engine {
             if !suppress_gate_charge && cgd.is_finite() && cgd > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = if let Some(charge) = jfet2_charge {
                     Self::nonlinear_charge_companion_terms(
-                        effective_method,
-                        trap_order,
+                        coeff,
                         dt,
                         cgd,
                         vgd_charge,
@@ -859,8 +849,7 @@ impl Engine {
                     )
                 } else {
                     Self::jfet_companion_terms(
-                        effective_method,
-                        trap_order,
+                        coeff,
                         dt,
                         cgd,
                         vgd_charge,
@@ -875,8 +864,7 @@ impl Engine {
 
             if cds.is_finite() && cds > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
+                    coeff,
                     dt,
                     cds,
                     vds_charge,
@@ -968,13 +956,11 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &DiodeTransientHistory,
         slots: &[TwoTerminalStampSlots],
     ) {
-        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
             let vd = Self::differential_voltage(voltages, diode.node_anode, diode.node_cathode);
             let (qd, capd) = diode.junction_charge_and_capacitance(vd);
@@ -982,8 +968,7 @@ impl Engine {
                 continue;
             }
             let (geq, ieq, _q_curr, _cq_curr) = Self::nonlinear_charge_companion_terms(
-                effective_method,
-                trap_order,
+                coeff,
                 dt,
                 capd,
                 vd,
@@ -1002,15 +987,12 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         slots: &[[TwoTerminalStampSlots; 5]],
     ) {
-        let effective_method = Self::effective_companion_method(method, trap_order);
-
         // NOTE (M3.2, measured 2026-06-12 on mos_array_4096): evaluating
         // these per-device terms on the rayon pool — par_chunks(256) with a
         // serial in-order apply, bit-identical to this loop at any thread
@@ -1028,8 +1010,7 @@ impl Engine {
                 mos,
                 idx,
                 voltages,
-                effective_method,
-                trap_order,
+                coeff,
                 dt,
                 history,
                 suppress_gate_charge,
@@ -1057,8 +1038,7 @@ impl Engine {
         mos: &crate::device::Mosfet,
         idx: usize,
         voltages: &[Value],
-        effective_method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
@@ -1076,8 +1056,7 @@ impl Engine {
             let cgb = cgb_half + history.capgb_prev_half[idx] + cgb_ov;
 
             let (geq_gs, ieq_gs, _q, _cq) = Self::jfet_companion_terms(
-                effective_method,
-                trap_order,
+                coeff,
                 dt,
                 cgs,
                 vgs,
@@ -1089,8 +1068,7 @@ impl Engine {
             terms[0] = (geq_gs, ieq_gs);
 
             let (geq_gd, ieq_gd, _q, _cq) = Self::jfet_companion_terms(
-                effective_method,
-                trap_order,
+                coeff,
                 dt,
                 cgd,
                 vgd,
@@ -1102,8 +1080,7 @@ impl Engine {
             terms[1] = (geq_gd, ieq_gd);
 
             let (geq_gb, ieq_gb, _q, _cq) = Self::jfet_companion_terms(
-                effective_method,
-                trap_order,
+                coeff,
                 dt,
                 cgb,
                 vgb,
@@ -1121,8 +1098,7 @@ impl Engine {
         let (qbd_curr, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
 
         let (geq_bs, ieq_bs, _q, _cq) = Self::nonlinear_charge_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cbs,
             vbs_j,
@@ -1134,8 +1110,7 @@ impl Engine {
         terms[3] = (geq_bs, ieq_bs);
 
         let (geq_bd, ieq_bd, _q, _cq) = Self::nonlinear_charge_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cbd,
             vbd_j,
@@ -1155,23 +1130,14 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &VdmosTransientHistory,
         slots: &[[TwoTerminalStampSlots; 7]],
     ) {
-        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, vdmos) in circuit.vdmoses.devices.iter().enumerate() {
-            let terms = Self::vdmos_companion_branch_terms(
-                vdmos,
-                idx,
-                voltages,
-                effective_method,
-                trap_order,
-                dt,
-                history,
-            );
+            let terms =
+                Self::vdmos_companion_branch_terms(vdmos, idx, voltages, coeff, dt, history);
             for (branch, &(geq, ieq)) in terms.iter().enumerate() {
                 if geq > 0.0 {
                     Self::stamp_two_terminal_companion_direct(
@@ -1190,8 +1156,7 @@ impl Engine {
         vdmos: &crate::device::Vdmos,
         idx: usize,
         voltages: &[Value],
-        effective_method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         history: &VdmosTransientHistory,
     ) -> [(Value, Value); 7] {
@@ -1206,8 +1171,7 @@ impl Engine {
         let (qd1, cd1) = vdmos.d1_charge_and_capacitance_at(vd1);
 
         let (geq_gs, ieq_gs, _qgs, _cqgs) = Self::jfet_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cgs,
             vgs,
@@ -1219,8 +1183,7 @@ impl Engine {
         terms[0] = (geq_gs, ieq_gs);
 
         let (geq_gd, ieq_gd, _qgd, _cqgd) = Self::jfet_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cgd,
             vgd,
@@ -1232,8 +1195,7 @@ impl Engine {
         terms[1] = (geq_gd, ieq_gd);
 
         let (geq_gb, ieq_gb, _qgb, _cqgb) = Self::jfet_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cgb,
             vgb,
@@ -1245,8 +1207,7 @@ impl Engine {
         terms[2] = (geq_gb, ieq_gb);
 
         let (geq_ds, ieq_ds, _qds, _cqds) = Self::jfet_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cds,
             vds,
@@ -1258,8 +1219,7 @@ impl Engine {
         terms[3] = (geq_ds, ieq_ds);
 
         let (geq_bs, ieq_bs, _qbs, _cqbs) = Self::nonlinear_charge_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cbs,
             vbs,
@@ -1271,8 +1231,7 @@ impl Engine {
         terms[4] = (geq_bs, ieq_bs);
 
         let (geq_bd, ieq_bd, _qbd, _cqbd) = Self::nonlinear_charge_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cbd,
             vbd,
@@ -1284,8 +1243,7 @@ impl Engine {
         terms[5] = (geq_bd, ieq_bd);
 
         let (geq_d1, ieq_d1, _qd1, _cqd1) = Self::nonlinear_charge_companion_terms(
-            effective_method,
-            trap_order,
+            coeff,
             dt,
             cd1,
             vd1,

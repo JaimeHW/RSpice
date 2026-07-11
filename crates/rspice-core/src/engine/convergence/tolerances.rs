@@ -1,6 +1,7 @@
 //! Convergence tolerances, iteration budgets, and voltage-step checks.
 
 use super::*;
+use crate::SpiceDialect;
 
 impl Engine {
     #[inline]
@@ -73,6 +74,28 @@ impl Engine {
     #[inline]
     pub(crate) fn transient_trtol(&self) -> Value {
         Self::sanitize_positive_tolerance(self.config.transient_trtol, crate::constants::TRTOL)
+    }
+
+    #[inline]
+    pub(crate) fn transient_lte_reltol(&self) -> Value {
+        self.config
+            .transient_lte_reltol
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or_else(|| match self.config.spice_dialect {
+                SpiceDialect::Xyce => 1.0e-3,
+                SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self.voltage_reltol(),
+            })
+    }
+
+    #[inline]
+    pub(crate) fn transient_lte_abstol(&self) -> Value {
+        self.config
+            .transient_lte_abstol
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or_else(|| match self.config.spice_dialect {
+                SpiceDialect::Xyce => 1.0e-6,
+                SpiceDialect::BestAvailable | SpiceDialect::Ngspice => self.voltage_abstol(),
+            })
     }
 
     #[inline]
@@ -173,5 +196,34 @@ mod tests {
         let next = [1.0, -2.0, Value::NAN];
 
         assert!(!engine.node_voltage_convergence_met(&previous, &next, 2));
+    }
+
+    #[test]
+    fn xyce_timeint_defaults_are_independent_from_newton_tolerances() {
+        let mut engine = Engine::default();
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        engine.config.convergence_config.voltage_reltol = 0.25;
+        engine.config.convergence_config.voltage_abstol = 0.5;
+
+        assert_eq!(engine.transient_lte_reltol(), 1.0e-3);
+        assert_eq!(engine.transient_lte_abstol(), 1.0e-6);
+
+        engine.config.transient_lte_reltol = Some(2.0e-5);
+        engine.config.transient_lte_abstol = Some(3.0e-8);
+        assert_eq!(engine.transient_lte_reltol(), 2.0e-5);
+        assert_eq!(engine.transient_lte_abstol(), 3.0e-8);
+    }
+
+    #[test]
+    fn native_timeint_defaults_retain_legacy_newton_tolerance_fallbacks() {
+        for dialect in [SpiceDialect::BestAvailable, SpiceDialect::Ngspice] {
+            let mut engine = Engine::default();
+            engine.config.spice_dialect = dialect;
+            engine.config.convergence_config.voltage_reltol = 0.25;
+            engine.config.convergence_config.voltage_abstol = 0.5;
+
+            assert_eq!(engine.transient_lte_reltol(), 0.25);
+            assert_eq!(engine.transient_lte_abstol(), 0.5);
+        }
     }
 }

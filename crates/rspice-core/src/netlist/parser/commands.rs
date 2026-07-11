@@ -1,6 +1,6 @@
 //! Dot-command parsing for analyses, options, measurements, params, and functions.
 
-use crate::netlist::{XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
+use crate::netlist::{TransientLteReference, XspiceAutoBridgeParamName, XspiceAutoBridgeTemplate};
 
 use super::*;
 
@@ -849,6 +849,47 @@ pub(super) fn parse_options_command(
                 options.auto_bridge = Some(enabled);
                 options.auto_bridge_show_generated = Some(show_generated);
             }
+            (Some("TIMEINT"), "RELTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.timeint_reltol = Some(parse_positive_real_option(
+                    "TIMEINT.RELTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (Some("TIMEINT"), "ABSTOL") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.timeint_abstol = Some(parse_positive_real_option(
+                    "TIMEINT.ABSTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            (Some("TIMEINT"), "NEWLTE") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.transient_lte_reference =
+                    Some(parse_transient_lte_reference_option(value, line_num)?);
+            }
+            (Some("TIMEINT"), "NEWBPSTEPPING") => {
+                let value = expect_value(stream, line_num, params)?;
+                options.transient_new_bp_stepping =
+                    Some(parse_new_breakpoint_stepping_option(value, line_num)?);
+            }
+            (Some("TIMEINT"), "METHOD") => {
+                options.method = Some(parse_method_option(stream, line_num, params)?);
+            }
+            (Some("TIMEINT"), _) => {
+                let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+                ignore_unknown_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    warning_key,
+                    unknown_warned,
+                    diagnostics,
+                );
+            }
             (_, "RELTOL") => {
                 let value = expect_value(stream, line_num, params)?;
                 options.reltol = Some(parse_positive_real_option("RELTOL", value, line_num)?);
@@ -973,31 +1014,51 @@ pub(super) fn parse_options_command(
                 options.allow_simplified_mos = Some(enabled);
             }
             _ => {
-                // Unknown option: allow bare flags; consume value only when
-                // explicitly assigned. Silently swallowing tolerance or
-                // compatibility knobs misleads users into thinking they took
-                // effect, so say so once per key.
-                let warning_key = scoped_key.unwrap_or_else(|| key_upper.clone());
-                if unknown_warned.insert(format!(".options {warning_key}")) {
-                    let message = format!("unknown .options key '{key}' ignored");
-                    log::warn!("line {line_num}: {message}");
-                    diagnostics.push(ParseDiagnostic::warning(
-                        line_num,
-                        "unknown-option",
-                        message,
-                    ));
-                }
-                if has_equals
-                    && try_value(stream, params).is_none()
-                    && matches!(stream.peek().kind, TokenKind::Ident(_))
-                {
-                    stream.advance();
-                }
+                let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+                ignore_unknown_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    warning_key,
+                    unknown_warned,
+                    diagnostics,
+                );
             }
         }
     }
 
     Ok(())
+}
+
+fn ignore_unknown_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    has_equals: bool,
+    warning_key: &str,
+    unknown_warned: &mut std::collections::HashSet<String>,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) {
+    // Unknown options may be bare flags. Consume a value only when it was
+    // explicitly assigned. Silently swallowing tolerance or compatibility
+    // knobs misleads users into thinking they took effect, so diagnose each
+    // scoped key once.
+    if unknown_warned.insert(format!(".options {warning_key}")) {
+        let message = format!("unknown .options key '{warning_key}' ignored");
+        log::warn!("line {line_num}: {message}");
+        diagnostics.push(ParseDiagnostic::warning(
+            line_num,
+            "unknown-option",
+            message,
+        ));
+    }
+    if has_equals
+        && try_value(stream, params).is_none()
+        && matches!(stream.peek().kind, TokenKind::Ident(_))
+    {
+        stream.advance();
+    }
 }
 
 fn expect_option_key(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
@@ -1270,7 +1331,7 @@ fn parse_digital_delay_type_option(value: Value, line_num: usize) -> Result<i64,
     }
 
     let rounded = value.round();
-    if (value - rounded).abs() > 1e-9 || !(0.0..=3.0).contains(&rounded) {
+    if value != rounded || !(0.0..=3.0).contains(&rounded) {
         return Err(ParseError::Syntax {
             line: line_num,
             message: format!("DIGITAL_DELAY_TYPE must be an integer from 0 to 3, found {value}"),
@@ -1278,6 +1339,44 @@ fn parse_digital_delay_type_option(value: Value, line_num: usize) -> Result<i64,
     }
 
     Ok(rounded as i64)
+}
+
+fn parse_transient_lte_reference_option(
+    value: Value,
+    line_num: usize,
+) -> Result<TransientLteReference, ParseError> {
+    if !value.is_finite() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("NEWLTE must be an integer from 0 to 3, found {value}"),
+        });
+    }
+
+    let rounded = value.round();
+    if value != rounded || !(0.0..=3.0).contains(&rounded) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("NEWLTE must be an integer from 0 to 3, found {value}"),
+        });
+    }
+
+    TransientLteReference::from_xyce_selector(rounded as u8).ok_or_else(|| ParseError::Syntax {
+        line: line_num,
+        message: format!("NEWLTE must be an integer from 0 to 3, found {value}"),
+    })
+}
+
+fn parse_new_breakpoint_stepping_option(value: Value, line_num: usize) -> Result<bool, ParseError> {
+    if value == 0.0 {
+        Ok(false)
+    } else if value == 1.0 {
+        Ok(true)
+    } else {
+        Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("NEWBPSTEPPING must be the integer 0 or 1, found {value}"),
+        })
+    }
 }
 
 pub(super) fn parse_meas_signal(
@@ -2559,6 +2658,117 @@ mod tests {
         .expect("Xyce numeric TIMEINT method selector parses");
 
         assert_eq!(netlist.options.method.as_deref(), Some("7"));
+        assert_eq!(
+            netlist.options.transient_lte_reference,
+            Some(super::TransientLteReference::PointGlobal)
+        );
+        assert_eq!(netlist.options.transient_new_bp_stepping, Some(true));
+        assert!(netlist.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn options_parse_and_validate_xyce_new_breakpoint_stepping() {
+        for (selector, expected) in [(0, false), (1, true)] {
+            let netlist = Netlist::parse(&deck_with_options(&format!(
+                ".options timeint newbpstepping={selector}"
+            )))
+            .expect("supported Xyce NEWBPSTEPPING selector parses");
+            assert_eq!(netlist.options.transient_new_bp_stepping, Some(expected));
+            assert!(netlist.diagnostics.is_empty());
+        }
+
+        for invalid in ["-1", "0.0000000001", "1.0000000001", "2", "1e309"] {
+            let err = Netlist::parse(&deck_with_options(&format!(
+                ".options timeint newbpstepping={invalid}"
+            )))
+            .expect_err("invalid Xyce NEWBPSTEPPING selector must fail parsing");
+            assert!(
+                err.to_string().contains("NEWBPSTEPPING"),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn options_parse_and_validate_xyce_newlte_reference_modes() {
+        for (selector, expected) in [
+            (0, super::TransientLteReference::PointLocal),
+            (1, super::TransientLteReference::PointGlobal),
+            (2, super::TransientLteReference::SignalGlobal),
+            (3, super::TransientLteReference::SignalLocal),
+        ] {
+            let netlist = Netlist::parse(&deck_with_options(&format!(
+                ".options timeint newlte={selector}"
+            )))
+            .expect("supported Xyce NEWLTE selector parses");
+            assert_eq!(netlist.options.transient_lte_reference, Some(expected));
+            assert!(netlist.diagnostics.is_empty());
+        }
+
+        for invalid in ["-1", "1.0000000001", "1.5", "4", "1e309"] {
+            let err = Netlist::parse(&deck_with_options(&format!(
+                ".options timeint newlte={invalid}"
+            )))
+            .expect_err("invalid Xyce NEWLTE selector must fail parsing");
+            assert!(
+                err.to_string().contains("NEWLTE"),
+                "unexpected error: {err}"
+            );
+        }
+
+        Netlist::parse(&deck_with_options(".options timeint newlte=missing"))
+            .expect_err("a malformed Xyce NEWLTE selector must fail parsing");
+    }
+
+    #[test]
+    fn timeint_tolerances_remain_separate_from_generic_solver_tolerances() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options timeint reltol=2e-6 abstol=3e-9 newlte=2",
+        ))
+        .expect("TIMEINT tolerances parse");
+
+        assert_eq!(netlist.options.timeint_reltol, Some(2.0e-6));
+        assert_eq!(netlist.options.timeint_abstol, Some(3.0e-9));
+        assert_eq!(netlist.options.reltol, None);
+        assert_eq!(netlist.options.abstol, None);
+        assert_eq!(
+            netlist.options.transient_lte_reference,
+            Some(super::TransientLteReference::SignalGlobal)
+        );
+    }
+
+    #[test]
+    fn timeint_package_does_not_capture_unrelated_solver_options() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options timeint gmin=0 vntol=1e-9 itl1=9 trtol=2",
+        ))
+        .expect("unknown TIMEINT keys remain non-fatal diagnostics");
+
+        assert_eq!(netlist.options.gmin, None);
+        assert_eq!(netlist.options.vntol, None);
+        assert_eq!(netlist.options.itl1, None);
+        assert_eq!(netlist.options.trtol, None);
+        for key in [
+            "TIMEINT.GMIN",
+            "TIMEINT.VNTOL",
+            "TIMEINT.ITL1",
+            "TIMEINT.TRTOL",
+        ] {
+            assert!(netlist.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "unknown-option" && diagnostic.message.contains(key)
+            }));
+        }
+    }
+
+    #[test]
+    fn unscoped_newlte_is_diagnosed_and_does_not_change_solver_policy() {
+        let netlist = Netlist::parse(&deck_with_options(".options newlte=2"))
+            .expect("unknown unscoped option remains a non-fatal diagnostic");
+
+        assert_eq!(netlist.options.transient_lte_reference, None);
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unknown-option" && diagnostic.message.contains("NEWLTE")
+        }));
     }
 
     #[test]

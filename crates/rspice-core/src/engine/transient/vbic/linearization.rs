@@ -12,8 +12,7 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
@@ -34,8 +33,7 @@ impl Engine {
                 ve,
                 vs,
                 internal,
-                method,
-                trap_order,
+                coeff,
                 dt,
                 q_prev,
                 q_prev_prev,
@@ -79,8 +77,7 @@ impl Engine {
                     ve,
                     vs,
                     candidate,
-                    method,
-                    trap_order,
+                    coeff,
                     dt,
                     q_prev,
                     q_prev_prev,
@@ -125,8 +122,7 @@ impl Engine {
         ve: Value,
         vs: Value,
         internal: [Value; BJT_INTERNAL_STATE_DIM],
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
@@ -137,12 +133,11 @@ impl Engine {
             bjt.vbic_dynamic_thermal_residual_and_derivative(vc, vb, ve, vs, internal);
 
         let cth = bjt.thermal_capacitance();
-        let charge_factor = Self::jfet_companion_geq(method, trap_order, 1.0, dt);
+        let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         if cth > 0.0 && charge_factor > 0.0 {
             let vrth = internal[BJT_THERMAL_STATE_INDEX];
             let ieq = Self::linear_charge_history_ieq(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 q_prev[thermal_charge_idx],
                 q_prev_prev[thermal_charge_idx],
@@ -159,14 +154,13 @@ impl Engine {
     pub(in crate::engine::transient) fn assemble_vbic_transient_linearization(
         bjt: &crate::device::Bjt,
         snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
     ) -> Option<VbicTransientLinearization> {
-        let charge_factor = Self::jfet_companion_geq(method, trap_order, 1.0, dt);
+        let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         if charge_factor <= 0.0 {
             return None;
         }
@@ -175,8 +169,7 @@ impl Engine {
             return Self::assemble_legacy_bjt_ngspice_transient_linearization(
                 bjt,
                 snapshot,
-                method,
-                trap_order,
+                coeff,
                 dt,
                 q_prev,
                 q_prev_prev,
@@ -275,8 +268,7 @@ impl Engine {
             };
             branch.accumulate_derivatives(&mut c_ii, &mut c_ie, &mut c_ei, &mut c_ee);
             let cq_curr = Self::jfet_companion_ccap(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 branch.charge,
                 q_prev[branch_idx],
@@ -352,14 +344,13 @@ impl Engine {
     pub(in crate::engine::transient) fn assemble_legacy_bjt_ngspice_transient_linearization(
         bjt: &crate::device::Bjt,
         snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
     ) -> Option<VbicTransientLinearization> {
-        let charge_factor = Self::jfet_companion_geq(method, trap_order, 1.0, dt);
+        let charge_factor = Self::jfet_companion_geq(coeff, 1.0, dt);
         if charge_factor <= 0.0 {
             return None;
         }
@@ -382,8 +373,7 @@ impl Engine {
         if qbe_branch.is_active() {
             if charges.capbe.is_finite() && charges.capbe > 0.0 {
                 let cqbe = Self::jfet_companion_ccap(
-                    method,
-                    trap_order,
+                    coeff,
                     dt,
                     charges.qbe,
                     q_prev[BJT_QBE_BRANCH_INDEX],
@@ -441,8 +431,7 @@ impl Engine {
 
         if qbc_branch.is_active() && charges.capbc.is_finite() && charges.capbc > 0.0 {
             let cqbc = Self::jfet_companion_ccap(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 charges.qbc,
                 q_prev[BJT_QBC_BRANCH_INDEX],
@@ -475,8 +464,7 @@ impl Engine {
 
         if qbx_branch.is_active() && charges.capbx.is_finite() && charges.capbx > 0.0 {
             let cqbx = Self::jfet_companion_ccap(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 charges.qbx,
                 q_prev[BJT_QBCX_BRANCH_INDEX],
@@ -501,8 +489,7 @@ impl Engine {
 
         if qcs_branch.is_active() && charges.capcs.is_finite() && charges.capcs > 0.0 {
             let cqcs = Self::jfet_companion_ccap(
-                method,
-                trap_order,
+                coeff,
                 dt,
                 charges.qcs,
                 q_prev[BJT_QBCP_BRANCH_INDEX],
@@ -1015,8 +1002,7 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
-        method: IntegrationMethod,
-        trap_order: u8,
+        coeff: &CompanionCoefficients,
         dt: Value,
         q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
@@ -1063,8 +1049,7 @@ impl Engine {
                 vb,
                 ve,
                 vs,
-                method,
-                trap_order,
+                coeff,
                 dt,
                 q_prev,
                 q_prev_prev,
