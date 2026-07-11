@@ -923,6 +923,44 @@ fn test_xyce_bug_374_passive_primary_value_composite_runs_exact_prn_parity() {
 }
 
 #[test]
+fn test_xyce_capacitor_analytic_first_order_rc_wrapper_runs() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/CAPACITOR/capacitor.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed analytic-wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass the generated Release 7.10 analytic RC oracle, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should satisfy the default xyce_verify integrated transient comparison"
+    );
+    assert_eq!(result.contract, "analytic_first_order_rc_tran_wrapper");
+}
+
+#[test]
+fn test_xyce_capacitor_analytic_contract_does_not_claim_newlte_sibling() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/CAPACITOR/capacitor3.cir";
+
+    assert!(runner.requires_upstream_wrapper(relative));
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && result.expected_unsupported,
+        "{relative} has a distinct NEWLTE=2 wrapper contract and must remain expected-unsupported, got {result:?}"
+    );
+}
+
+#[test]
 fn test_xyce_mid_certification_transient_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
