@@ -610,6 +610,12 @@ enum XyceStrictTransientFamilySnapshot {
 enum XyceStrictDcFamilySnapshot {
     BjtExternalNode(XyceBjtExternalNodeFamilySnapshot),
     PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
+    SubcktParameterPrecedence(XyceSubcktParameterPrecedenceSnapshot),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceSubcktParameterPrecedenceSnapshot {
+    elements: Vec<XyceRelationalElementFingerprint>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -645,7 +651,7 @@ enum XycePassivePrimaryRepresentation {
     Positional,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct XyceRelationalElementFingerprint {
     kind: String,
     nodes: Vec<String>,
@@ -677,6 +683,7 @@ enum XyceBaselineFamilyKind {
     Subckt,
     Supernode,
     ScopedModel,
+    SubcktParameterPrecedence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -734,6 +741,7 @@ impl XyceBaselineFamilyKind {
             Self::Subckt => "SUBCKT",
             Self::Supernode => "SUPERNODE",
             Self::ScopedModel => "SCOPED_MODEL",
+            Self::SubcktParameterPrecedence => "SUBCKT_PARAMETER_PRECEDENCE",
         }
     }
 
@@ -747,6 +755,7 @@ impl XyceBaselineFamilyKind {
             Self::Subckt => "subckt_family_wrapper",
             Self::Supernode => "supernode_family_wrapper",
             Self::ScopedModel => "scoped_model_family_wrapper",
+            Self::SubcktParameterPrecedence => "subckt_parameter_precedence_wrapper",
         }
     }
 
@@ -760,6 +769,7 @@ impl XyceBaselineFamilyKind {
             Self::Subckt => "subckt_family_baseline",
             Self::Supernode => "supernode_family_baseline",
             Self::ScopedModel => "scoped_model_family_baseline",
+            Self::SubcktParameterPrecedence => "subckt_parameter_precedence_baseline",
         }
     }
 
@@ -776,7 +786,8 @@ impl XyceBaselineFamilyKind {
             | Self::PassiveCapPrimaryValue
             | Self::PassiveResPrimaryValue
             | Self::Subckt
-            | Self::Supernode => XyceStaticTranPlanPurpose::RelationalFamily,
+            | Self::Supernode
+            | Self::SubcktParameterPrecedence => XyceStaticTranPlanPurpose::RelationalFamily,
         }
     }
 }
@@ -8311,7 +8322,8 @@ impl XyceTestRunner {
                 )
             ),
             XyceBaselineFamilyKind::BjtExternalNode
-            | XyceBaselineFamilyKind::PassiveResPrimaryValue => false,
+            | XyceBaselineFamilyKind::PassiveResPrimaryValue
+            | XyceBaselineFamilyKind::SubcktParameterPrecedence => false,
             XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
             | XyceBaselineFamilyKind::PassiveCapPrimaryValue
@@ -9291,6 +9303,9 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::PassiveResPrimaryValue => {
                 Self::validate_passive_res_primary_dc_plan(plan)
             }
+            XyceBaselineFamilyKind::SubcktParameterPrecedence => {
+                Self::validate_subckt_parameter_precedence_dc_plan(plan)
+            }
             other => Err(format!(
                 "family kind {} has no qualified exact-DC plan contract",
                 other.name()
@@ -9313,6 +9328,10 @@ impl XyceTestRunner {
                 Self::passive_res_primary_snapshot(netlist, print, sweep_source)
                     .map(XyceStrictDcFamilySnapshot::PassivePrimaryValue)
             }
+            XyceBaselineFamilyKind::SubcktParameterPrecedence => {
+                Self::subckt_parameter_precedence_snapshot(netlist, print, sweep_source)
+                    .map(XyceStrictDcFamilySnapshot::SubcktParameterPrecedence)
+            }
             other => Err(format!(
                 "family kind {} has no qualified exact-DC semantic snapshot",
                 other.name()
@@ -9333,6 +9352,16 @@ impl XyceTestRunner {
                 XyceStrictDcFamilySnapshot::PassivePrimaryValue(baseline),
                 XyceStrictDcFamilySnapshot::PassivePrimaryValue(target),
             ) => Self::compare_passive_primary_snapshots(baseline, target),
+            (
+                XyceStrictDcFamilySnapshot::SubcktParameterPrecedence(baseline),
+                XyceStrictDcFamilySnapshot::SubcktParameterPrecedence(target),
+            ) => {
+                if baseline == target {
+                    Ok(())
+                } else {
+                    Err("flattened resistor-divider semantics differ".to_string())
+                }
+            }
             _ => Err("baseline and target use different exact-DC snapshot kinds".to_string()),
         }
     }
@@ -12497,6 +12526,100 @@ impl XyceTestRunner {
             &plan.source,
             XycePassivePrimaryKind::ResistorDc,
         )
+    }
+
+    fn validate_subckt_parameter_precedence_dc_plan(plan: &XyceStaticDcPlan) -> Result<(), String> {
+        if !plan.steps.is_empty()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+            || !plan.diagnostics.is_empty()
+        {
+            return Err(
+                "subcircuit-parameter precedence requires one diagnostic-free, unstepped, linear default .prn DC analysis"
+                    .to_string(),
+            );
+        }
+        if plan.dc.primary_spec().points().len() != 1 {
+            return Err(
+                "subcircuit-parameter precedence requires exactly one DC sweep point".to_string(),
+            );
+        }
+        if plan.print.probes.len() != 2
+            || plan
+                .print
+                .probes
+                .iter()
+                .any(|probe| Self::parse_voltage_probe(probe).is_none())
+        {
+            return Err(
+                "subcircuit-parameter precedence requires exactly two ordered voltage probes"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    fn subckt_parameter_precedence_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        sweep_source: &str,
+    ) -> Result<XyceSubcktParameterPrecedenceSnapshot, String> {
+        if print.probes.len() != 2
+            || !netlist.models.is_empty()
+            || !netlist.diagnostics.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+        {
+            return Err(
+                "subcircuit-parameter precedence snapshot requires two probes and no model, diagnostic, data, IC, or NODESET state"
+                    .to_string(),
+            );
+        }
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist)
+            .map_err(|error| format!("could not flatten sibling-reference deck: {error}"))?;
+        if flattened.elements.len() != 3 {
+            return Err(format!(
+                "subcircuit-parameter precedence snapshot requires a three-element divider, found {} flattened elements",
+                flattened.elements.len()
+            ));
+        }
+        let voltage_sources = flattened
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::VoltageSource(_)))
+            .collect::<Vec<_>>();
+        let resistor_count = flattened
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Resistor { .. }))
+            .count();
+        if voltage_sources.len() != 1
+            || resistor_count != 2
+            || !voltage_sources[0].name.eq_ignore_ascii_case(sweep_source)
+        {
+            return Err(
+                "subcircuit-parameter precedence snapshot requires two resistors and the swept independent voltage source"
+                    .to_string(),
+            );
+        }
+
+        let mut elements = flattened
+            .elements
+            .iter()
+            .map(|element| {
+                let mut fingerprint =
+                    Self::scoped_model_element_fingerprint(element, &netlist.params)?;
+                for node in &mut fingerprint.nodes {
+                    *node = node.replace(':', ".");
+                }
+                Ok(fingerprint)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        elements.sort();
+        Ok(XyceSubcktParameterPrecedenceSnapshot { elements })
     }
 
     fn passive_primary_name_is_literal_ground(node: &str) -> bool {
@@ -27012,6 +27135,7 @@ impl XyceTestRunner {
         self.bjt_external_node_family_contract(deck)
             .or_else(|| self.sin_expression_family_contract(deck))
             .or_else(|| self.param_expression_family_contract(deck))
+            .or_else(|| self.subckt_parameter_precedence_family_contract(deck))
             .or_else(|| self.scoped_model_family_contract(deck))
             .or_else(|| self.subckt_family_contract(deck))
             .or_else(|| self.supernode_family_contract(deck))
@@ -27629,6 +27753,101 @@ impl XyceTestRunner {
 
         Some(XyceBaselineFamilyContract {
             kind: XyceBaselineFamilyKind::ScopedModel,
+            comparison: XyceBaselineFamilyComparison::Exact,
+            family: owner_name.trim_end_matches(".cir").to_string(),
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path, owner_path],
+            target_path: Some(deck.path.clone()),
+        })
+    }
+
+    fn subckt_parameter_precedence_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/") {
+            return None;
+        }
+        let file_name = deck.path.file_name()?.to_str()?;
+        let stem = file_name.strip_suffix(".cir")?;
+        let parent = deck.path.parent()?;
+        let (owner_name, baseline_name) = if stem
+            .get(stem.len().saturating_sub(3)..)
+            .is_some_and(|suffix| suffix.eq_ignore_ascii_case("ref"))
+        {
+            (
+                format!("{}.cir", &stem[..stem.len() - 3]),
+                file_name.to_string(),
+            )
+        } else {
+            (file_name.to_string(), format!("{stem}Ref.cir"))
+        };
+        let owner_path = parent.join(&owner_name);
+        let baseline_path = parent.join(&baseline_name);
+        if !owner_path.is_file()
+            || !baseline_path.is_file()
+            || (!Self::same_path(&deck.path, &owner_path)
+                && !Self::same_path(&deck.path, &baseline_path))
+        {
+            return None;
+        }
+        let owner_relative = self.relative_key(&owner_path);
+        let baseline_relative = self.relative_key(&baseline_path);
+        if !self.requires_upstream_wrapper(&owner_relative)
+            || self.requires_upstream_wrapper(&baseline_relative)
+            || self
+                .static_prn_reference_path(&owner_path)
+                .is_some_and(|path| path.is_file())
+            || self
+                .static_prn_reference_path(&baseline_path)
+                .is_some_and(|path| path.is_file())
+        {
+            return None;
+        }
+
+        let owner_plan = self
+            .static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)
+            .ok()?;
+        let baseline_plan = self
+            .static_dc_plan_for_path(&baseline_path, ExpressionDialect::Xyce)
+            .ok()?;
+        Self::validate_subckt_parameter_precedence_dc_plan(&owner_plan).ok()?;
+        Self::validate_subckt_parameter_precedence_dc_plan(&baseline_plan).ok()?;
+        if owner_plan.print.probes != baseline_plan.print.probes
+            || !Self::dc_sweeps_match_exactly(&owner_plan.dc, &baseline_plan.dc)
+        {
+            return None;
+        }
+
+        let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_path).ok()?;
+        let mut parameterized_instances_by_definition = BTreeMap::<String, usize>::new();
+        for element in owner_netlist.elements.iter().chain(
+            owner_netlist
+                .subcircuits
+                .iter()
+                .flat_map(|subcircuit| subcircuit.elements.iter()),
+        ) {
+            if let ElementKind::Subcircuit {
+                subckt_name,
+                params,
+            } = &element.kind
+                && !params.is_empty()
+            {
+                *parameterized_instances_by_definition
+                    .entry(subckt_name.to_ascii_uppercase())
+                    .or_default() += 1;
+            }
+        }
+        if !parameterized_instances_by_definition
+            .values()
+            .any(|count| *count >= 2)
+        {
+            return None;
+        }
+
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::SubcktParameterPrecedence,
             comparison: XyceBaselineFamilyComparison::Exact,
             family: owner_name.trim_end_matches(".cir").to_string(),
             baseline_path: baseline_path.clone(),

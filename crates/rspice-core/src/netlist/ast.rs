@@ -646,6 +646,14 @@ impl SaveSet {
 /// so `x1.*` covers `x1.ntail` but not `x1.xb.nref`. Inputs are expected
 /// pre-lowercased by the caller.
 fn pattern_selects(pattern: &str, text: &str) -> bool {
+    // Xyce prints hierarchical nodes with ':', while RSpice's flattened
+    // solution vectors use '.'. Treat the two separators as aliases at the
+    // output-selection boundary so a deck's own .PRINT/.SAVE directives keep
+    // selecting the canonical flattened signal.
+    let pattern = canonical_hierarchy_separators(pattern);
+    let text = canonical_hierarchy_separators(text);
+    let pattern = pattern.as_ref();
+    let text = text.as_ref();
     if !pattern.contains('*') {
         return pattern == text;
     }
@@ -677,6 +685,34 @@ fn pattern_selects(pattern: &str, text: &str) -> bool {
         p += 1;
     }
     p == pattern.len()
+}
+
+fn canonical_hierarchy_separators(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.contains(':') {
+        std::borrow::Cow::Owned(name.replace(':', "."))
+    } else {
+        std::borrow::Cow::Borrowed(name)
+    }
+}
+
+#[cfg(test)]
+mod save_set_tests {
+    use super::*;
+
+    #[test]
+    fn hierarchical_colon_and_dot_names_select_each_other() {
+        let saves = SaveSet {
+            signals: vec![SaveSignal::Voltage("xtest:2".to_string())],
+        };
+        assert!(saves.selects("V(XTEST.2)"));
+        assert!(saves.selects("V(XTEST:2)"));
+    }
+
+    #[test]
+    fn hierarchical_wildcard_does_not_cross_colon_separator() {
+        assert!(pattern_selects("x1:*", "x1:out"));
+        assert!(!pattern_selects("x1:*", "x1:inner:out"));
+    }
 }
 
 //=============================================================================

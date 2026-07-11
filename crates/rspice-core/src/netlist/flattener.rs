@@ -2776,6 +2776,37 @@ mod tests {
     }
 
     #[test]
+    fn sibling_subcircuit_instance_overrides_do_not_consume_shared_defaults() {
+        let netlist = Netlist::parse(
+            "independent subcircuit parameter scopes\n\
+             XTOP in 0 OUTER\n\
+             .subckt OUTER a b\n\
+             X1 a mid CELL bogus=2 rvalue=1\n\
+             X2 mid b CELL bogus=3\n\
+             .ends\n\
+             .subckt CELL a b\n\
+             .param rvalue=10 bogus=1\n\
+             R1 a b {rvalue}\n\
+             .ends\n\
+             V1 in 0 1\n\
+             .end\n",
+        )
+        .expect("deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist).expect("netlist flattens");
+        let mut resistances = flattened
+            .elements
+            .iter()
+            .filter_map(|element| match element.kind {
+                ElementKind::Resistor { value, .. } => Some(value),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        resistances.sort_by(f64::total_cmp);
+        assert_eq!(resistances, vec![1.0, 10.0]);
+    }
+
+    #[test]
     fn behavioral_voltage_probe_remaps_subcircuit_port_case_insensitively() {
         let netlist = Netlist::parse(
             "\

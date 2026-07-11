@@ -4769,6 +4769,33 @@ fn test_xyce_connectivity_warning_wrapper_case_runs() {
 }
 
 #[test]
+fn test_xyce_subcircuit_parameter_precedence_pair_runs() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let cases = [
+        (
+            "Netlists/Certification_Tests/BUGS_ISSUE_54/multiSubcktPar.cir",
+            "subckt_parameter_precedence_wrapper",
+        ),
+        (
+            "Netlists/Certification_Tests/BUGS_ISSUE_54/multiSubcktParRef.cir",
+            "subckt_parameter_precedence_baseline",
+        ),
+    ];
+
+    for (relative, contract) in cases {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as an exact sibling-reference DC comparison, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(result.contract, contract);
+    }
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
