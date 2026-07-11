@@ -6,6 +6,7 @@ use crate::netlist::{Element, ModelDef, ParametricValue};
 struct GeneratedTarget {
     model_name: &'static str,
     pass_level_parameter: bool,
+    consumes_geometry_bin_metadata: bool,
 }
 
 impl GeneratedTarget {
@@ -13,6 +14,7 @@ impl GeneratedTarget {
         Self {
             model_name,
             pass_level_parameter: false,
+            consumes_geometry_bin_metadata: false,
         }
     }
 
@@ -20,6 +22,15 @@ impl GeneratedTarget {
         Self {
             model_name,
             pass_level_parameter: true,
+            consumes_geometry_bin_metadata: false,
+        }
+    }
+
+    const fn consuming_geometry_bin_metadata(model_name: &'static str) -> Self {
+        Self {
+            model_name,
+            pass_level_parameter: false,
+            consumes_geometry_bin_metadata: true,
         }
     }
 
@@ -360,7 +371,9 @@ fn generated_mos_target(
     Ok(match checked_model_level("MOSFET", model_name, model)? {
         Some(104) => Some(GeneratedTarget::with_level_parameter("PSP104VA")),
         Some(10 | 55 | 56 | 57) => Some(GeneratedTarget::new("bsimsoi_va")),
-        Some(107 | 108 | 110 | 111) => Some(GeneratedTarget::new("bsimcmg_va")),
+        Some(107 | 108 | 110 | 111) => Some(GeneratedTarget::consuming_geometry_bin_metadata(
+            "bsimcmg_va",
+        )),
         Some(260) => Some(GeneratedTarget::new("ekv_va")),
         Some(70470) => Some(GeneratedTarget::new("bsimsoi__18c250bc")),
         Some(1000) => Some(GeneratedTarget::with_level_parameter("mosvar")),
@@ -374,8 +387,9 @@ fn generated_mos_target_by_type(model_type: &str) -> Option<GeneratedTarget> {
     match_normalized(model_type, &["BSIMBULK"])
         .then_some(GeneratedTarget::new("bsimbulk"))
         .or_else(|| {
-            match_normalized(model_type, &["BSIMCMG", "BSIMCMG_VA"])
-                .then_some(GeneratedTarget::new("bsimcmg_va"))
+            match_normalized(model_type, &["BSIMCMG", "BSIMCMG_VA"]).then_some(
+                GeneratedTarget::consuming_geometry_bin_metadata("bsimcmg_va"),
+            )
         })
         .or_else(|| {
             match_normalized(model_type, &["BSIMIMG"]).then_some(GeneratedTarget::new("bsimimg"))
@@ -521,7 +535,14 @@ fn generated_params(
 }
 
 fn should_pass_model_param(target: GeneratedTarget, name: &str) -> bool {
-    target.pass_level_parameter || !name.eq_ignore_ascii_case("LEVEL")
+    !(target.consumes_geometry_bin_metadata && is_model_binning_metadata(name))
+        && (target.pass_level_parameter || !name.eq_ignore_ascii_case("LEVEL"))
+}
+
+fn is_model_binning_metadata(name: &str) -> bool {
+    ["LMIN", "LMAX", "WMIN", "WMAX", "NFINMIN", "NFINMAX"]
+        .iter()
+        .any(|metadata| name.eq_ignore_ascii_case(metadata))
 }
 
 fn append_generated_mos_polarity_param(

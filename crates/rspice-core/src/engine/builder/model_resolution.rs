@@ -276,7 +276,7 @@ fn bin_range_contains(value: Option<f64>, min: Option<f64>, max: Option<f64>) ->
     let Some(value) = value else {
         return false;
     };
-    min.is_none_or(|min| value >= min) && max.is_none_or(|max| value <= max)
+    min.is_none_or(|min| value >= min) && max.is_none_or(|max| value < max)
 }
 
 fn model_bin_range_size(model_def: &crate::netlist::ModelDef) -> f64 {
@@ -452,5 +452,21 @@ pub(super) fn map_switch_state(state: crate::netlist::SwitchState) -> crate::dev
     match state {
         crate::netlist::SwitchState::On => crate::device::SwitchState::On,
         crate::netlist::SwitchState::Off => crate::device::SwitchState::Off,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bin_range_contains;
+
+    #[test]
+    fn model_bin_ranges_are_lower_inclusive_and_upper_exclusive() {
+        assert!(bin_range_contains(Some(1.0), Some(1.0), Some(2.0)));
+        assert!(bin_range_contains(Some(1.5), Some(1.0), Some(2.0)));
+        assert!(!bin_range_contains(Some(2.0), Some(1.0), Some(2.0)));
+        assert!(!bin_range_contains(Some(0.5), Some(1.0), Some(2.0)));
+        assert!(bin_range_contains(Some(2.0), Some(1.0), None));
+        assert!(bin_range_contains(Some(1.0), None, Some(2.0)));
+        assert!(!bin_range_contains(None, Some(1.0), Some(2.0)));
     }
 }

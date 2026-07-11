@@ -222,6 +222,46 @@ q1 c b e qv area=1
 }
 
 #[test]
+fn generated_model_compatibility_metadata_does_not_hide_unknown_or_canonical_params() {
+    let bsimcmg = Netlist::parse(
+        r#"
+v1 d 0 dc 0
+m1 d g s b nmos1 tfin=15n l=30n nfin=10 nrs=1 nrd=1
+.model nmos1.1 nmos level=107 lmin=0 lmax=29n nfinmin=1 nfinmax=4 type=1
+.model nmos1.2 nmos level=107 lmin=29n lmax=35n nfinmin=5 nfinmax=100 type=1 not_a_parameter=1
+.op
+.end
+"#,
+    )
+    .expect("BSIM-CMG typo fixture parses");
+    let bsimcmg_error = Engine::new(SimulationConfig::default())
+        .build_circuit(&bsimcmg)
+        .expect_err("selected-bin unknown parameter must fail generated validation");
+    assert!(
+        bsimcmg_error.to_string().contains("NOT_A_PARAMETER"),
+        "unexpected BSIM-CMG routing error: {bsimcmg_error}"
+    );
+
+    let r2 = Netlist::parse(
+        r#"
+v1 a 0 dc 0
+r1 a 0 rmod
+.model rmod r2_cmc lmin=-1
+.op
+.end
+"#,
+    )
+    .expect("R2 CMC range fixture parses");
+    let r2_error = Engine::new(SimulationConfig::default())
+        .build_circuit(&r2)
+        .expect_err("canonical R2 LMIN range validation must remain active");
+    assert!(
+        r2_error.to_string().to_ascii_lowercase().contains("lmin"),
+        "ordinary generated targets must still receive canonical LMIN: {r2_error}"
+    );
+}
+
+#[test]
 fn bjt_explicit_vbic13_4t_model_type_routes_to_generated_vbic13() {
     assert!(
         has_builtin("vbic13_4t"),
