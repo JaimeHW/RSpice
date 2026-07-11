@@ -31,6 +31,13 @@ struct LuWorkspace {
     factor_mem: MemBuffer,
     solve_mem: MemBuffer,
     rhs: Mat<Value>,
+    /// Numerically equilibrated CSC values for faer's factorization. Circuit
+    /// matrices routinely mix conductances, ideal-source rows, and high-gain
+    /// controlled sources across many orders of magnitude; factoring the raw
+    /// values can lose the pivot quality required by Newton iteration.
+    scaled_values: Vec<Value>,
+    row_scale: Vec<Value>,
+    col_scale: Vec<Value>,
 }
 
 //=============================================================================
@@ -120,6 +127,93 @@ fn finite_solution_or_singular(solution: Vec<Value>) -> Result<Vec<Value>, Solve
     } else {
         Err(SolverError::SingularMatrix)
     }
+}
+
+#[inline]
+fn finite_reciprocal_scale(max_abs: Value) -> Value {
+    debug_assert!(max_abs.is_finite() && max_abs >= 0.0);
+    let small_number = Value::MIN_POSITIVE / Value::EPSILON;
+    let large_number = 1.0 / small_number;
+    (1.0 / max_abs).clamp(small_number, large_number)
+}
+
+/// Build `D_r * A * D_c` and the matching `D_r * b` transforms for faer.
+///
+/// Column max scaling followed by row max scaling mirrors the equilibration
+/// used by production SPICE sparse solvers. The original matrix remains
+/// untouched for stamping and residual evaluation; after solving for `y`, the
+/// caller recovers the original-coordinate solution as `x = D_c * y`.
+fn equilibrate_sparse_system(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Value],
+    rhs: &[Value],
+    scaled_values: &mut Vec<Value>,
+    row_scale: &mut Vec<Value>,
+    col_scale: &mut Vec<Value>,
+) -> Result<(), SolverError> {
+    let nrows = csc.nrows();
+    let ncols = csc.ncols();
+    if values.len() != csc.row_idx().len() || rhs.len() != nrows {
+        return Err(SolverError::InvalidCircuit(
+            "Sparse equilibration dimension mismatch".to_string(),
+        ));
+    }
+
+    scaled_values.resize(values.len(), 0.0);
+    row_scale.resize(nrows, 1.0);
+    col_scale.resize(ncols, 1.0);
+
+    let col_ptr = csc.col_ptr();
+    let row_idx = csc.row_idx();
+    for col in 0..ncols {
+        let mut max_abs: Value = 0.0;
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            let value = values[idx];
+            if !value.is_finite() {
+                return Err(SolverError::Overflow);
+            }
+            max_abs = max_abs.max(value.abs());
+        }
+        if max_abs == 0.0 {
+            return Err(SolverError::SingularMatrix);
+        }
+        let scale = finite_reciprocal_scale(max_abs);
+        col_scale[col] = scale;
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            scaled_values[idx] = values[idx] * scale;
+        }
+    }
+
+    row_scale.fill(0.0);
+    for col in 0..ncols {
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            let row = row_idx[idx];
+            row_scale[row] = row_scale[row].max(scaled_values[idx].abs());
+        }
+    }
+    for row in 0..nrows {
+        let rhs_value = rhs[row];
+        if !rhs_value.is_finite() {
+            return Err(SolverError::Overflow);
+        }
+        if row_scale[row] == 0.0 {
+            return Err(SolverError::SingularMatrix);
+        }
+        row_scale[row] = finite_reciprocal_scale(row_scale[row]);
+        if !(rhs_value * row_scale[row]).is_finite() {
+            return Err(SolverError::Overflow);
+        }
+    }
+    for col in 0..ncols {
+        for idx in col_ptr[col]..col_ptr[col + 1] {
+            scaled_values[idx] *= row_scale[row_idx[idx]];
+        }
+    }
+    if scaled_values.iter().any(|value| !value.is_finite()) {
+        return Err(SolverError::Overflow);
+    }
+
+    Ok(())
 }
 
 impl StaticMatrix {
@@ -574,6 +668,9 @@ impl StaticMatrix {
             factor_mem,
             solve_mem,
             rhs: Mat::zeros(self.nrows, 1),
+            scaled_values: Vec::new(),
+            row_scale: Vec::new(),
+            col_scale: Vec::new(),
         });
         Ok(())
     }
@@ -587,10 +684,11 @@ impl StaticMatrix {
         let n = self.nrows;
         self.check_stamping_error()?;
 
-        if n != rhs.len() {
+        if n != rhs.len() || self.ncols != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
-                "Matrix size {} doesn't match RHS size {}",
+                "Matrix size {}x{} doesn't match RHS size {}",
                 n,
+                self.ncols,
                 rhs.len()
             )));
         }
@@ -601,6 +699,14 @@ impl StaticMatrix {
             return finite_solution_or_singular(result);
         }
 
+        self.solve_faer(rhs)
+    }
+
+    /// Solve through faer's sparse LU in equilibrated coordinates.
+    ///
+    /// Kept separate from backend selection so solver tests can exercise this
+    /// path without mutating the process-wide `RSPICE_SOLVER` policy.
+    fn solve_faer(&mut self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
         self.ensure_lu_workspace()?;
 
         let par = get_global_parallelism();
@@ -609,7 +715,16 @@ impl StaticMatrix {
         } = self;
         let ws = lu.as_mut().expect("LU workspace initialized above");
 
-        let mat = SparseColMatRef::new(csc.as_ref(), values.as_slice());
+        equilibrate_sparse_system(
+            csc,
+            values,
+            rhs,
+            &mut ws.scaled_values,
+            &mut ws.row_scale,
+            &mut ws.col_scale,
+        )?;
+
+        let mat = SparseColMatRef::new(csc.as_ref(), ws.scaled_values.as_slice());
 
         let lu_ref = ws
             .symbolic
@@ -622,7 +737,15 @@ impl StaticMatrix {
             )
             .map_err(|_| SolverError::SingularMatrix)?;
 
-        ws.rhs.col_as_slice_mut(0).copy_from_slice(rhs);
+        for ((scaled_rhs, &rhs_value), &row_scale) in ws
+            .rhs
+            .col_as_slice_mut(0)
+            .iter_mut()
+            .zip(rhs)
+            .zip(&ws.row_scale)
+        {
+            *scaled_rhs = rhs_value * row_scale;
+        }
         lu_ref.solve_in_place_with_conj(
             Conj::No,
             ws.rhs.as_mut(),
@@ -630,7 +753,14 @@ impl StaticMatrix {
             MemStack::new(&mut ws.solve_mem),
         );
 
-        finite_solution_or_singular(ws.rhs.col_as_slice(0).to_vec())
+        let solution = ws
+            .rhs
+            .col_as_slice(0)
+            .iter()
+            .zip(&ws.col_scale)
+            .map(|(&value, &col_scale)| value * col_scale)
+            .collect();
+        finite_solution_or_singular(solution)
     }
 
     /// Default KLU-class real solve: values-only
@@ -1205,6 +1335,162 @@ pub fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Valu
 mod tests {
     use super::*;
     use num_complex::Complex64;
+
+    fn scaled_tridiagonal_system(
+        row_factors: [Value; 5],
+        col_factors: [Value; 5],
+    ) -> (Vec<(usize, usize, Value)>, Vec<Value>, Vec<Value>) {
+        let normalized = [
+            [4.0, -1.0, 0.0, 0.0, 0.0],
+            [-1.0, 4.0, -1.0, 0.0, 0.0],
+            [0.0, -1.0, 4.0, -1.0, 0.0],
+            [0.0, 0.0, -1.0, 4.0, -1.0],
+            [0.0, 0.0, 0.0, -1.0, 4.0],
+        ];
+        let solution = col_factors.map(|factor| 1.0 / factor);
+        let mut triplets = Vec::new();
+        let mut rhs = vec![0.0; 5];
+        for row in 0..5 {
+            for col in 0..5 {
+                if normalized[row][col] == 0.0 {
+                    continue;
+                }
+                let value = row_factors[row] * normalized[row][col] * col_factors[col];
+                triplets.push((row, col, value));
+                rhs[row] += value * solution[col];
+            }
+        }
+        (triplets, rhs, solution.to_vec())
+    }
+
+    fn assert_relative_solution(actual: &[Value], expected: &[Value]) {
+        assert_eq!(actual.len(), expected.len());
+        for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+            let relative_error =
+                (actual - expected).abs() / expected.abs().max(Value::MIN_POSITIVE);
+            assert!(
+                relative_error <= 1.0e-10,
+                "solution[{index}] expected {expected:.17e}, got {actual:.17e} (relative error {relative_error:.3e})"
+            );
+        }
+    }
+
+    #[test]
+    fn faer_equilibration_scales_both_axes_and_round_trips() {
+        let (triplets, rhs, _) = scaled_tridiagonal_system(
+            [1.0e-20, 1.0e-10, 1.0, 1.0e10, 1.0e20],
+            [1.0e20, 1.0e10, 1.0, 1.0e-10, 1.0e-20],
+        );
+        let matrix = StaticMatrix::from_triplets(5, 5, &triplets).unwrap();
+        let mut scaled_values = Vec::new();
+        let mut row_scale = Vec::new();
+        let mut col_scale = Vec::new();
+
+        equilibrate_sparse_system(
+            &matrix.csc,
+            &matrix.values,
+            &rhs,
+            &mut scaled_values,
+            &mut row_scale,
+            &mut col_scale,
+        )
+        .unwrap();
+
+        let col_ptr = matrix.csc.col_ptr();
+        let row_idx = matrix.csc.row_idx();
+        for col in 0..matrix.ncols {
+            for idx in col_ptr[col]..col_ptr[col + 1] {
+                let expected = matrix.values[idx] * row_scale[row_idx[idx]] * col_scale[col];
+                assert_eq!(scaled_values[idx].to_bits(), expected.to_bits());
+            }
+        }
+        assert!(
+            scaled_values
+                .iter()
+                .all(|value| value.is_finite() && value.abs() <= 1.0)
+        );
+        assert!(
+            rhs.iter()
+                .zip(&row_scale)
+                .all(|(&value, &scale)| (value * scale).is_finite())
+        );
+    }
+
+    #[test]
+    fn faer_equilibration_solves_ill_scaled_system_and_recomputes_scales() {
+        let row_factors = [1.0e-20, 1.0e-10, 1.0, 1.0e10, 1.0e20];
+        let col_factors = [1.0e20, 1.0e10, 1.0, 1.0e-10, 1.0e-20];
+        let (triplets, rhs, expected) = scaled_tridiagonal_system(row_factors, col_factors);
+        let mut matrix = StaticMatrix::from_triplets(5, 5, &triplets).unwrap();
+
+        let first = matrix.solve_faer(&rhs).unwrap();
+        let repeated = matrix.solve_faer(&rhs).unwrap();
+        assert_relative_solution(&first, &expected);
+        assert_eq!(
+            first
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            repeated
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+
+        let (changed_triplets, changed_rhs, changed_expected) =
+            scaled_tridiagonal_system(col_factors, row_factors);
+        matrix.clear_values();
+        for (row, col, value) in changed_triplets {
+            matrix.add(row, col, value);
+        }
+        let changed = matrix.solve_faer(&changed_rhs).unwrap();
+        assert_relative_solution(&changed, &changed_expected);
+    }
+
+    #[test]
+    fn faer_equilibration_rejects_zero_and_nonfinite_numeric_systems() {
+        let mut zero_column =
+            StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 0.0)]).unwrap();
+        assert!(matches!(
+            zero_column.solve_faer(&[1.0, 0.0]),
+            Err(SolverError::SingularMatrix)
+        ));
+        let mut zero_row = StaticMatrix::from_triplets(
+            2,
+            2,
+            &[(0, 0, 0.0), (0, 1, 0.0), (1, 0, 1.0), (1, 1, 1.0)],
+        )
+        .unwrap();
+        assert!(matches!(
+            zero_row.solve_faer(&[0.0, 2.0]),
+            Err(SolverError::SingularMatrix)
+        ));
+
+        let mut nonfinite =
+            StaticMatrix::from_triplets(2, 2, &[(0, 0, Value::NAN), (1, 1, 1.0)]).unwrap();
+        assert!(matches!(
+            nonfinite.solve_faer(&[0.0, 1.0]),
+            Err(SolverError::Overflow)
+        ));
+        let mut finite = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+        assert!(matches!(
+            finite.solve_faer(&[Value::INFINITY, 1.0]),
+            Err(SolverError::Overflow)
+        ));
+    }
+
+    #[test]
+    fn faer_equilibration_keeps_extreme_finite_scales_finite() {
+        let mut matrix =
+            StaticMatrix::from_triplets(2, 2, &[(0, 0, Value::MIN_POSITIVE), (1, 1, Value::MAX)])
+                .unwrap();
+
+        let solution = matrix
+            .solve_faer(&[Value::MIN_POSITIVE, Value::MAX])
+            .unwrap();
+
+        assert_relative_solution(&solution, &[1.0, 1.0]);
+    }
 
     #[test]
     fn static_matrix_missing_stamp_returns_solver_error() {
