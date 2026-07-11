@@ -44,10 +44,8 @@ jobs:
         run: python3 tools/ci/test_wasm_playground.py
       - name: WASM IDE worker tests
         run: python3 tools/ci/test_ide_worker.py
-      - name: Site deploy gate tests
+      - name: Web release assembler tests
         run: python3 tools/deploy/test_build_site.py
-      - name: Site deploy script tests
-        run: python3 tools/deploy/test_deploy.py
       - name: Check (warnings denied)
         env:
           RUSTFLAGS: -D warnings
@@ -187,11 +185,14 @@ jobs:
             cargo install wasm-bindgen-cli --version "$VERSION" --locked
           fi
           wasm-bindgen --version
-      - name: Build and verify site bundle
+      - name: Build standalone website source
+        working-directory: _site-source
+        run: python3 tools/build_site.py --out dist --rspice-source ..
+      - name: Assemble and verify browser release bundle
         run: |
           mkdir -p _site-ci
-          printf 'site build did not complete; inspect the Build and verify site bundle logs.\n' > _site-ci/BUILD_FAILED.txt
-          python3 tools/deploy/build_site.py --site-source _site-source/public --out _site-ci
+          printf 'browser release assembly did not complete; inspect the preceding logs.\n' > _site-ci/BUILD_FAILED.txt
+          python3 tools/deploy/build_site.py --site-source _site-source/dist --out _site-ci
           rm -f _site-ci/BUILD_FAILED.txt
       - name: Upload verified site bundle
         if: always()

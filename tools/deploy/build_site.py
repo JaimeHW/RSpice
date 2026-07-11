@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
-r"""Build, verify, and assemble the public site into _site/.
+r"""Build, verify, and assemble a complete browser release into _site/.
 
-The single definition of a site build - used verbatim by
-.github/workflows/deploy-site.yml and runnable locally as a dry run:
+This is the client-side release assembler used by the private
+RSpice-Release controller and by RSpice's browser smoke job. The standalone
+website must be built first so its generated reference is tied to the exact
+RSpice revision being assembled:
 
-    python3 tools/deploy/build_site.py --site-source ../RSpice-Site/public
-    # Windows:  py tools\deploy\build_site.py --site-source ..\RSpice-Site\public
+    python3 ../RSpice-Site/tools/build_site.py --out dist --rspice-source .
+    python3 tools/deploy/build_site.py --site-source ../RSpice-Site/dist
+
+    # Windows:
+    py ..\RSpice-Site\tools\build_site.py --out dist --rspice-source .
+    py tools\deploy\build_site.py --site-source ..\RSpice-Site\dist
 
 Stages:
   1. toolchain gate    - wasm-bindgen CLI must match Cargo.lock
   2. build             - rspice-ui (IDE, bin target) + rspice-wasm
                          (playground, lib) for wasm32, release
-  3. assemble          - RSpice-Site/public + client-owned browser shells,
+  3. assemble          - RSpice-Site/dist + client-owned browser shells,
                          generated wasm packages, and build.json
   4. static gates      - \0asm magic + wasm-bindgen export signature
   5. headless gate     - serve _site, load play/ and the IDE worker smoke
                          page in headless Chrome, require completed solves
 
-Any failed gate exits non-zero; the workflow only publishes on success.
+Any failed gate exits non-zero; only the release controller owns upload and
+promotion to production.
 Pure stdlib, no third-party deps - runs the same on the Ubuntu CI runner
 (python3) and on Windows (py). The local HTTP server uses this very
 interpreter (sys.executable), sidestepping the Windows python-stub probe
@@ -462,8 +469,8 @@ def main():
     ap.add_argument("--out", default="_site", help="output directory (default: _site)")
     ap.add_argument(
         "--site-source",
-        default="_site-source/public",
-        help="RSpice-Site public directory (default: _site-source/public)",
+        default="_site-source/dist",
+        help="built RSpice-Site dist directory (default: _site-source/dist)",
     )
     args = ap.parse_args()
 

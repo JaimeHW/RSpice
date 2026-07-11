@@ -7,7 +7,7 @@ performs the oklch -> sRGB conversion using the CSS Color 4 reference math and
 emits a Rust module with one `Palette` const per (direction, mode).
 
 Exception: the Instrument accent family follows the Run brand sheet and the
-public site (cf-pages index.html tokens) instead of the original phosphor
+rspice.app site design tokens instead of the original phosphor
 green. Those entries are exact sRGB hex constants ("#RRGGBB"), not oklch —
 the brand yellow #F2B824 must round-trip exactly. The site splits the accent
 into fill vs line roles; the app has a single `accent` token, so dark mode

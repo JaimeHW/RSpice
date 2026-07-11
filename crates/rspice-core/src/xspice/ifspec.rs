@@ -803,6 +803,7 @@ Null_Allowed:          yes
         assert_eq!(spec.ports[2].vector_bounds.min_usize(), Some(1));
         assert_eq!(spec.parameters.len(), 2);
         assert!(spec.parameters[0].required());
+        assert!(!spec.parameters[1].required());
         assert_eq!(spec.parameters[1].limits.min_real(), Some(1.0e-12));
     }
 }

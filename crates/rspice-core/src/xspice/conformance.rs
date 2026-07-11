@@ -125,6 +125,7 @@ impl XspiceEventPortCatalogReport {
 pub struct IfSpecConformancePolicy {
     model_aliases: BTreeMap<String, String>,
     skipped_models: BTreeSet<String>,
+    runtime_required_parameters: BTreeSet<(String, String)>,
 }
 
 impl IfSpecConformancePolicy {
@@ -142,9 +143,28 @@ impl IfSpecConformancePolicy {
             model_aliases.insert(ngspice.to_string(), rspice.to_string());
         }
 
+        // ngspice 46 declares these parameters Null_Allowed, but its code
+        // models read them without a null fallback and reject an omitted
+        // model-card value at runtime. Keep the raw IFS parser faithful and
+        // record the independently verified runtime contract here.
+        let runtime_required_parameters = [
+            ("d_dt", "out_lower_limit"),
+            ("d_dt", "out_upper_limit"),
+            ("int", "out_lower_limit"),
+            ("int", "out_upper_limit"),
+            ("limit", "out_lower_limit"),
+            ("limit", "out_upper_limit"),
+            ("s_xfer", "num_coeff"),
+            ("s_xfer", "den_coeff"),
+        ]
+        .into_iter()
+        .map(|(model, parameter)| (canonical_key(model), canonical_key(parameter)))
+        .collect();
+
         Self {
             model_aliases,
             skipped_models: BTreeSet::new(),
+            runtime_required_parameters,
         }
     }
 
@@ -158,6 +178,11 @@ impl IfSpecConformancePolicy {
 
     pub fn should_skip_model(&self, name: &str) -> bool {
         self.skipped_models.contains(&canonical_key(name))
+    }
+
+    pub fn parameter_is_runtime_required(&self, model: &str, parameter: &str) -> bool {
+        self.runtime_required_parameters
+            .contains(&(canonical_key(model), canonical_key(parameter)))
     }
 }
 
@@ -353,7 +378,7 @@ pub fn audit_model_ifspec(
     };
 
     compare_ports(spec, model.ports(), path.as_ref(), report);
-    compare_parameters(spec, model.parameters(), path.as_ref(), report);
+    compare_parameters(spec, model.parameters(), path.as_ref(), policy, report);
 }
 
 fn compare_ports(
@@ -455,6 +480,7 @@ fn compare_parameters(
     spec: &IfSpec,
     rspice_params: &[ParamSpec],
     path: Option<&PathBuf>,
+    policy: &IfSpecConformancePolicy,
     report: &mut IfSpecConformanceReport,
 ) {
     let rspice_by_name = rspice_params
@@ -493,15 +519,15 @@ fn compare_parameters(
             ));
         }
 
-        if rspice_param.required != ng_param.required() {
+        let ng_required = ng_param.required()
+            || policy.parameter_is_runtime_required(&spec.spice_model_name, &ng_param.name);
+        if rspice_param.required != ng_required {
             report.issues.push(ConformanceIssue::error(
                 &spec.spice_model_name,
                 path.clone(),
                 format!(
-                    "parameter '{}' required flag mismatch: ngspice {}, RSpice {}",
-                    ng_param.name,
-                    ng_param.required(),
-                    rspice_param.required
+                    "parameter '{}' required flag mismatch: ngspice effective {}, RSpice {}",
+                    ng_param.name, ng_required, rspice_param.required
                 ),
             ));
         }
@@ -1206,6 +1232,27 @@ fn xspice_source_has_print_or_plot(source: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ngspice46_policy_adjudicates_only_verified_runtime_required_parameters() {
+        let policy = IfSpecConformancePolicy::ngspice46();
+
+        for (model, parameter) in [
+            ("d_dt", "out_lower_limit"),
+            ("d_dt", "out_upper_limit"),
+            ("int", "out_lower_limit"),
+            ("int", "out_upper_limit"),
+            ("limit", "out_lower_limit"),
+            ("limit", "out_upper_limit"),
+            ("s_xfer", "num_coeff"),
+            ("s_xfer", "den_coeff"),
+        ] {
+            assert!(policy.parameter_is_runtime_required(model, parameter));
+        }
+
+        assert!(!policy.parameter_is_runtime_required("xfer", "file"));
+        assert!(!policy.parameter_is_runtime_required("filesource", "amploffset"));
+    }
 
     #[test]
     fn parity_instrumentation_skips_unprintable_tf_only_deck() {

@@ -32,7 +32,15 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) baseline_diag_gmin: Value,
     pub(super) tline_dc_refs: &'a [(Value, Value)],
     pub(super) coupled_tline_refs: &'a [CoupledTlineReferenceState],
+    #[cfg_attr(
+        not(any(feature = "veriloga", feature = "veriloga-builtins")),
+        allow(dead_code)
+    )]
     pub(super) analysis_initial_step: bool,
+    #[cfg_attr(
+        not(any(feature = "veriloga", feature = "veriloga-builtins")),
+        allow(dead_code)
+    )]
     pub(super) analysis_final_step: bool,
 }
 

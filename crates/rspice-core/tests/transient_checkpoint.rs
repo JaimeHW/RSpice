@@ -384,7 +384,11 @@ rload out 0 1k
 .end
 ",
             60.0e-9,
-            30.0e-9,
+            // `astate` returns an accepted-sample history value, so inserting
+            // an arbitrary segment endpoint changes its adaptive sample grid.
+            // Split at the source's existing falling-edge breakpoint to compare
+            // checkpoint continuation without introducing a new timepoint.
+            31.0e-9,
             1.0e-9,
             1.0e-9,
         ),

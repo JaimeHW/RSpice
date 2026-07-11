@@ -17,7 +17,6 @@ class CiConfigurationTests(unittest.TestCase):
             ".github/workflows/ci.yml",
             ".github/workflows/nightly.yml",
             ".github/workflows/python.yml",
-            ".github/workflows/deploy-site.yml",
             ".github/workflows/security.yml",
             ".github/workflows/coverage.yml",
         ]
@@ -51,6 +50,7 @@ class CiConfigurationTests(unittest.TestCase):
             ".github/workflows/ci.yml",
             ".github/workflows/nightly.yml",
             ".github/workflows/python.yml",
+            ".github/workflows/release-trigger.yml",
             ".github/workflows/security.yml",
             ".github/workflows/coverage.yml",
         ]
@@ -59,11 +59,6 @@ class CiConfigurationTests(unittest.TestCase):
             with self.subTest(workflow=workflow_path):
                 workflow = read_text(workflow_path)
                 self.assertRegex(workflow, r"(?m)^permissions:\n  contents: read\n")
-
-        deploy = read_text(".github/workflows/deploy-site.yml")
-        self.assertRegex(deploy, r"(?m)^permissions:\n  contents: write\n")
-        self.assertIn("environment:", deploy)
-        self.assertIn("name: production", deploy)
 
     def test_rspice_python_generates_windows_abi3_import_library(self) -> None:
         manifest = read_text("crates/rspice-python/Cargo.toml")
@@ -121,7 +116,6 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("python3 tools/ci/test_wasm_playground.py", workflow)
         self.assertIn("python3 tools/ci/test_ide_worker.py", workflow)
         self.assertIn("python3 tools/deploy/test_build_site.py", workflow)
-        self.assertIn("python3 tools/deploy/test_deploy.py", workflow)
         self.assertRegex(
             workflow,
             r"- name: Clear check artifacts before tests\s+run: cargo clean",
@@ -228,25 +222,27 @@ class CiConfigurationTests(unittest.TestCase):
             "wasm checks should deny warnings for both wasm crates",
         )
 
-    def test_ci_runs_browser_site_smoke_before_deploy(self) -> None:
+    def test_ci_smokes_the_same_browser_release_assembly_used_in_production(self) -> None:
         workflow = read_text(".github/workflows/ci.yml")
-        deploy_workflow = read_text(".github/workflows/deploy-site.yml")
         build_script = read_text("tools/deploy/build_site.py")
-        deploy_script = read_text("tools/deploy/deploy.py")
+        release_trigger = read_text(".github/workflows/release-trigger.yml")
 
         self.assertIn("Browser site smoke (wasm)", workflow)
         self.assertIn("repository: JaimeHW/RSpice-Site", workflow)
         self.assertIn(
-            "python3 tools/deploy/build_site.py --site-source _site-source/public --out _site-ci",
+            "python3 tools/build_site.py --out dist --rspice-source ..",
+            workflow,
+        )
+        self.assertIn(
+            "python3 tools/deploy/build_site.py --site-source _site-source/dist --out _site-ci",
             workflow,
         )
         self.assertIn("wasm-bindgen-cli (pinned to Cargo.lock)", workflow)
         self.assertIn("site-smoke-bundle", workflow)
         self.assertIn("if-no-files-found: error", workflow)
-        self.assertIn("site-source-sha:", deploy_script)
-        self.assertIn('"git", "ls-remote"', deploy_script)
-        self.assertIn("deployment tag is missing a valid site-source-sha", deploy_workflow)
-        self.assertIn("steps.site-source.outputs.ref", deploy_workflow)
+        self.assertIn("RSpice-Release", release_trigger)
+        self.assertIn("github.event.workflow_run.head_sha", release_trigger)
+        self.assertIn("--field channel=production", release_trigger)
         self.assertIn('"tablet", 820, 1180', build_script)
         self.assertIn('"phone", 390, 844', build_script)
         self.assertIn("cargo\", \"build\", \"--locked\"", build_script)
@@ -311,14 +307,16 @@ class CiConfigurationTests(unittest.TestCase):
     def test_browser_surface_docs_distinguish_ide_and_playground(self) -> None:
         ui_readme = read_text("crates/rspice-ui/README.md")
         playground_readme = read_text("crates/rspice-wasm/web/README.md")
-        deployment = read_text(".github/workflows/deploy-site.yml")
+        workflow = read_text(".github/workflows/ci.yml")
+        release_trigger = read_text(".github/workflows/release-trigger.yml")
 
         self.assertNotIn("later milestone", playground_readme)
         self.assertNotIn("not this crate", ui_readme)
         self.assertIn("experimental browser IDE", ui_readme)
         self.assertIn("experimental browser IDE", playground_readme)
-        self.assertIn("repository: JaimeHW/RSpice-Site", deployment)
-        self.assertIn("--site-source _site-source/public", deployment)
+        self.assertIn("repository: JaimeHW/RSpice-Site", workflow)
+        self.assertIn("--site-source _site-source/dist", workflow)
+        self.assertIn("RSpice-Release", release_trigger)
 
     def test_notice_includes_vendored_compact_model_attributions(self) -> None:
         notice = read_text("NOTICE")

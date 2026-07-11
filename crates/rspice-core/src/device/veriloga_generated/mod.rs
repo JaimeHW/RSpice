@@ -13,6 +13,7 @@ pub mod builtins {
 }
 
 #[cfg(feature = "veriloga-builtins")]
+#[rustfmt::skip]
 pub(crate) mod kernel_runtime;
 
 #[derive(Debug, Clone, Copy)]

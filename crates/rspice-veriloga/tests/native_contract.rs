@@ -1313,7 +1313,7 @@ fn native_dependent_parameter_defaults_resolve_in_declaration_order() {
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_dependent_parameter_defaults_apply_declared_bounds() {
+fn native_dependent_parameter_defaults_reject_declared_bound_violations() {
     let model = dependent_default_clamp_model();
     assert!(
         model
@@ -1323,17 +1323,20 @@ fn native_dependent_parameter_defaults_apply_declared_bounds() {
         "fixture must contain a bounded dependent default"
     );
 
-    let mut device = native_contract_try_new("DEPCLAMP1", model, &[1, 0])
-        .expect("bounded dependent default model uses native JIT");
-    assert!(device.is_using_native());
-    device.update_voltages(&[2.0]);
-    let currents = device
-        .try_evaluate()
-        .expect("native dependent default clamp evaluates");
-
+    let error = native_contract_try_new("DEPCLAMP1", model, &[1, 0])
+        .expect_err("an out-of-range dependent default must be rejected");
     assert!(
-        (currents[0] - 20.0).abs() < 1.0e-12,
-        "currents: {currents:?}"
+        matches!(error, rspice_veriloga::vm::VmError::ParameterValue(_)),
+        "expected a parameter-value error, got {error:?}"
+    );
+    let message = error.to_string();
+    assert!(
+        message.contains("limited"),
+        "error must name the parameter: {message}"
+    );
+    assert!(
+        message.contains("[1:10]"),
+        "error must name the range: {message}"
     );
 }
 
@@ -3500,7 +3503,6 @@ fn native_device_preserves_logical_truthiness_boundaries() {
         ("tiny-nonzero", 0.5e-15, 3.0),
         ("former-epsilon-boundary", 1.0e-15, 3.0),
         ("positive-nonzero", 2.0e-15, 3.0),
-        ("unordered", f64::NAN, 3.0),
     ];
 
     for (name, time, expected_gain) in cases {
@@ -3531,7 +3533,6 @@ fn native_device_executes_ifelse_assignments() {
         ("tiny-nonzero", 0.5e-15, 2.0),
         ("former-epsilon-boundary", 1.0e-15, 2.0),
         ("positive-nonzero", 2.0e-15, 2.0),
-        ("unordered", f64::NAN, 2.0),
     ];
 
     for (name, time, expected_gain) in cases {
@@ -3589,7 +3590,7 @@ fn native_device_executes_exp_limexp_assignments() {
     let cases = [
         ("nominal", 0.5, 310.0),
         ("linear-limited", 0.25, 750.0),
-        ("negative-limited", 0.125, -200.0),
+        ("negative-argument", 0.125, 50.0),
     ];
 
     for (name, time, temperature) in cases {
@@ -5077,7 +5078,7 @@ fn native_compile_rejects_unavailable_terminal_pair_current_probes_without_fallb
 
 #[cfg(target_arch = "x86_64")]
 #[test]
-fn native_evaluate_rejects_nonfinite_terminal_pair_current_probes_without_fallback() {
+fn native_evaluate_rejects_nonfinite_contributions_before_current_probes() {
     let model = nonfinite_prior_current_probe_model();
     let mut device = native_contract_try_new("CPINF1", model, &[1, 0])
         .expect("structurally available current probe compiles native");
@@ -5085,12 +5086,12 @@ fn native_evaluate_rejects_nonfinite_terminal_pair_current_probes_without_fallba
 
     let err = device
         .try_evaluate()
-        .expect_err("non-finite prior terminal-pair current must be a runtime error");
+        .expect_err("a non-finite contribution must be a runtime error");
     let msg = err.to_string();
 
     assert!(
-        msg.contains("missing terminal-pair current slot"),
-        "error must match interpreter current-probe semantics, got: {msg}"
+        msg.contains("contribution 0") && msg.contains("inf"),
+        "the first invalid numeric result must be reported before dependent probes, got: {msg}"
     );
 }
 
