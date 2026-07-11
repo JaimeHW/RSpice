@@ -3287,11 +3287,17 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
         ("Netlists/SUBCKT/subckt_f.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_f0.cir", "subckt_family_baseline"),
         ("Netlists/SUBCKT/subckt_f1.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_g.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_g0.cir", "subckt_family_baseline"),
+        ("Netlists/SUBCKT/subckt_g1.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_k.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_k0.cir", "subckt_family_baseline"),
         ("Netlists/SUBCKT/subckt_k1.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_k2.cir", "subckt_family_wrapper"),
         ("Netlists/SUBCKT/subckt_k3.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_l.cir", "subckt_family_wrapper"),
+        ("Netlists/SUBCKT/subckt_l0.cir", "subckt_family_baseline"),
+        ("Netlists/SUBCKT/subckt_l1.cir", "subckt_family_wrapper"),
     ] {
         let result = runner.run_test(root.join(relative));
         assert!(

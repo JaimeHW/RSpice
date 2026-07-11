@@ -348,6 +348,12 @@ enum XyceBaselineFamilyKind {
     Supernode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBaselineFamilyAnalysis {
+    Dc,
+    Tran,
+}
+
 impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
@@ -1718,6 +1724,16 @@ impl XyceTestRunner {
             wrapper_tolerance: Self::native_default_prn_tran_wrapper_tolerance(&deck.relative_path),
             contract,
         })
+    }
+
+    fn static_tran_plan_for_path(&self, deck_path: &Path) -> Result<XyceStaticTranPlan, String> {
+        let relative_path = self.relative_key(deck_path);
+        let deck = XyceDeck {
+            path: deck_path.to_path_buf(),
+            section: Self::section_for_relative_path(&relative_path),
+            relative_path,
+        };
+        self.static_tran_plan_for_deck(&deck)
     }
 
     fn has_static_tran_reference_oracle(&self, deck_path: &Path) -> bool {
@@ -6688,6 +6704,34 @@ impl XyceTestRunner {
         )))
     }
 
+    fn baseline_family_analysis_for_path(
+        &self,
+        baseline_path: &Path,
+    ) -> Result<XyceBaselineFamilyAnalysis, String> {
+        let source = fs::read_to_string(baseline_path)
+            .map_err(|err| format!("failed to read baseline deck: {err}"))?;
+        let dc_outputs = Self::print_output_requests(&source, "DC")?
+            .into_iter()
+            .filter(|request| request.file.is_none())
+            .count();
+        let tran_outputs = Self::print_output_requests(&source, "TRAN")?
+            .into_iter()
+            .filter(|request| request.file.is_none())
+            .count();
+
+        match (dc_outputs, tran_outputs) {
+            (1, 0) => Ok(XyceBaselineFamilyAnalysis::Dc),
+            (0, 1) => Ok(XyceBaselineFamilyAnalysis::Tran),
+            (0, 0) => Err(
+                "deck has neither one primary .PRINT DC nor one primary .PRINT TRAN output"
+                    .to_string(),
+            ),
+            (dc, tran) => Err(format!(
+                "deck has {dc} primary .PRINT DC output(s) and {tran} primary .PRINT TRAN output(s); family analysis selection requires exactly one unambiguous primary output"
+            )),
+        }
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -6697,6 +6741,42 @@ impl XyceTestRunner {
         let kind_name = contract.kind.name();
         let wrapper_contract = contract.kind.wrapper_contract();
         let baseline_contract = contract.kind.baseline_contract();
+        let analysis = match self.baseline_family_analysis_for_path(&contract.baseline_path) {
+            Ok(analysis) => analysis,
+            Err(reason) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    &format!(
+                        "{kind_name} family '{}' baseline analysis is ambiguous or unsupported: {reason}",
+                        contract.family
+                    ),
+                );
+            }
+        };
+        if analysis == XyceBaselineFamilyAnalysis::Tran {
+            let baseline_plan = match self.static_tran_plan_for_path(&contract.baseline_path) {
+                Ok(plan) => plan,
+                Err(reason) => {
+                    return self.expected_unsupported_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            &format!(
+                                "{kind_name} family '{}' baseline is not supported by the static TRAN adapter: {reason}",
+                                contract.family
+                            ),
+                        );
+                }
+            };
+            return self.run_transient_baseline_family_contract(
+                deck,
+                contract,
+                baseline_plan,
+                start,
+            );
+        }
         let baseline_plan = match self
             .static_dc_plan_for_path(&contract.baseline_path, ExpressionDialect::Xyce)
         {
@@ -6953,6 +7033,401 @@ impl XyceTestRunner {
                 all_mismatches,
             )
         }
+    }
+
+    fn run_transient_baseline_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBaselineFamilyContract,
+        baseline_plan: XyceStaticTranPlan,
+        start: Instant,
+    ) -> XyceTestResult {
+        let kind_name = contract.kind.name();
+        let wrapper_contract = contract.kind.wrapper_contract();
+        let baseline_contract = contract.kind.baseline_contract();
+        if !baseline_plan.steps.is_empty() {
+            return self.expected_unsupported_result(
+                deck,
+                start,
+                wrapper_contract,
+                &format!(
+                    "{kind_name} family '{}' transient relational contract does not yet support .STEP output",
+                    contract.family
+                ),
+            );
+        }
+        if baseline_plan.output_override {
+            return self.expected_unsupported_result(
+                deck,
+                start,
+                wrapper_contract,
+                &format!(
+                    "{kind_name} family '{}' transient relational contract does not support wrapper output overrides",
+                    contract.family
+                ),
+            );
+        }
+
+        let (baseline_netlist, baseline_result) = match self.run_transient_family_plan(
+            &baseline_plan,
+            start,
+            None,
+        ) {
+            Ok(result) => result,
+            Err(SimulationError::Aborted) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' transient baseline exceeded timeout ({}ms)",
+                        contract.family, self.config.max_time_per_test_ms
+                    ),
+                    Vec::new(),
+                );
+            }
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        &format!(
+                            "{kind_name} family '{}' transient baseline is not supported by RSpice yet: {err}",
+                            contract.family
+                        ),
+                    );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' transient baseline error: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        let baseline_table = match Self::transient_family_result_to_prn_table(
+            &baseline_plan,
+            &baseline_netlist,
+            &baseline_result,
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' transient baseline output conversion failed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        let baseline_time_scale = match Self::tran_print_time_scale_factor(&baseline_plan.source) {
+            Ok(scale) => scale,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' transient baseline time-scale error: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let targets = if let Some(target_path) = contract.target_path {
+            if Self::same_path(&target_path, &contract.baseline_path) {
+                return self.passed_result(deck, start, baseline_contract);
+            }
+            vec![target_path]
+        } else {
+            contract
+                .member_paths
+                .iter()
+                .filter(|path| !Self::same_path(path, &contract.baseline_path))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        for target_path in targets {
+            let target_plan = match self.static_tran_plan_for_path(&target_path) {
+                Ok(plan) => plan,
+                Err(reason) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        &format!(
+                            "{kind_name} family '{}' member {} is not supported by the static TRAN adapter: {reason}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                    );
+                }
+            };
+            if !target_plan.steps.is_empty() || target_plan.output_override {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    &format!(
+                        "{kind_name} family '{}' member {} uses stepped or overridden transient output, which the relational contract does not yet support",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                );
+            }
+            if target_plan.contract != baseline_plan.contract {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    &format!(
+                        "{kind_name} family '{}' member {} uses {:?} transient output, but the baseline uses {:?}; relational formats must match",
+                        contract.family,
+                        self.display_path(&target_path),
+                        target_plan.contract,
+                        baseline_plan.contract
+                    ),
+                );
+            }
+            let target_time_scale = match Self::tran_print_time_scale_factor(&target_plan.source) {
+                Ok(scale) => scale,
+                Err(err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        &format!(
+                            "{kind_name} family '{}' member {} has an unsupported transient time scale: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                    );
+                }
+            };
+            let scale = baseline_time_scale
+                .abs()
+                .max(target_time_scale.abs())
+                .max(1.0);
+            if (target_time_scale - baseline_time_scale).abs() > Value::EPSILON * scale {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    &format!(
+                        "{kind_name} family '{}' member {} uses transient time scale {}, but the baseline uses {}",
+                        contract.family,
+                        self.display_path(&target_path),
+                        target_time_scale,
+                        baseline_time_scale
+                    ),
+                );
+            }
+
+            let (target_netlist, target_result) = match self.run_transient_family_plan(
+                &target_plan,
+                start,
+                None,
+            ) {
+                Ok(result) => result,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} exceeded timeout ({}ms)",
+                            contract.family,
+                            self.display_path(&target_path),
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            &format!(
+                                "{kind_name} family '{}' member {} is not supported by RSpice yet: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                        );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} error: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mut mismatches = match self.compare_tran_prn_reference(
+                &baseline_table,
+                &target_plan.print,
+                &target_netlist,
+                &baseline_plan.source,
+                &target_result,
+                None,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} comparison error: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            if !mismatches.is_empty() {
+                let locked_run = self.run_transient_family_plan(
+                    &target_plan,
+                    start,
+                    Some(baseline_result.time.clone()),
+                );
+                if let Ok((locked_netlist, locked_result)) = locked_run
+                    && let Ok(locked_mismatches) = self.compare_tran_prn_reference(
+                        &baseline_table,
+                        &target_plan.print,
+                        &locked_netlist,
+                        &baseline_plan.source,
+                        &locked_result,
+                        None,
+                    )
+                    && Self::candidate_mismatches_are_better(Some(&mismatches), &locked_mismatches)
+                {
+                    mismatches = locked_mismatches;
+                }
+            }
+            if !mismatches.is_empty() {
+                for mismatch in &mut mismatches {
+                    mismatch.probe =
+                        format!("{} {}", self.display_path(&target_path), mismatch.probe);
+                }
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{} {kind_name} family '{}' member {} transient baseline mismatch(es)",
+                        mismatches.len(),
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    mismatches,
+                );
+            }
+        }
+
+        self.passed_result(deck, start, wrapper_contract)
+    }
+
+    fn run_transient_family_plan(
+        &self,
+        plan: &XyceStaticTranPlan,
+        start: Instant,
+        locked_time_grid: Option<Vec<Value>>,
+    ) -> Result<(Netlist, TransientResult), SimulationError> {
+        let netlist = Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
+            .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
+        let max_step = Self::transient_family_max_step(&netlist, &plan.tran)
+            .map_err(SimulationError::Netlist)?;
+        let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
+        let engine = self.create_xyce_static_tran_engine(locked_time_grid, initial_step);
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let result = engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort)?;
+        Ok((netlist, result))
+    }
+
+    fn transient_family_max_step(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+    ) -> Result<Value, String> {
+        let requested = tran.max_step.or_else(|| {
+            (tran.step > 0.0)
+                .then_some(tran.step)
+                .and_then(|step| Self::feasible_oracle_limited_step(tran, step))
+        });
+        let source_step = Self::source_transient_max_step(netlist, tran)
+            .and_then(|step| Self::feasible_oracle_limited_step(tran, step));
+        let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
+        let max_step = [requested, source_step, Some(fallback)]
+            .into_iter()
+            .flatten()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .reduce(Value::min)
+            .unwrap_or(fallback);
+        if !max_step.is_finite() || max_step <= 0.0 {
+            return Err(format!(
+                "resolved transient family maximum step must be finite and positive, got {max_step}"
+            ));
+        }
+        let estimated_steps = (tran.stop / max_step).ceil();
+        if estimated_steps > MAX_NATIVE_TRAN_ORACLE_STEPS {
+            return Err(format!(
+                "transient family execution envelope supports at most {:.0} native step(s), but this deck requires about {:.0}",
+                MAX_NATIVE_TRAN_ORACLE_STEPS, estimated_steps
+            ));
+        }
+        Self::validate_transient_execution_envelope(netlist, estimated_steps)?;
+        Ok(max_step)
+    }
+
+    fn transient_family_result_to_prn_table(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> Result<XycePrnTable, String> {
+        Self::validate_transient_result_time_grid(result)?;
+        let time_scale = Self::tran_print_time_scale_factor(&plan.source)?;
+        let mut columns = Vec::with_capacity(plan.print.probes.len() + 2);
+        columns.push("Index".to_string());
+        columns.push("TIME".to_string());
+        columns.extend(plan.print.probes.iter().cloned());
+
+        let mut rows = Vec::with_capacity(result.time.len());
+        for (index, &time) in result.time.iter().enumerate() {
+            let mut row = Vec::with_capacity(columns.len());
+            row.push(index as Value);
+            row.push(time * time_scale);
+            for probe in &plan.print.probes {
+                let value = Self::evaluate_tran_probe(probe, netlist, result, time)?;
+                if !value.is_finite() {
+                    return Err(format!(
+                        "baseline probe '{probe}' produced non-finite value {value} at time {time}"
+                    ));
+                }
+                row.push(value);
+            }
+            rows.push(row);
+        }
+
+        Ok(XycePrnTable { columns, rows })
     }
 
     fn run_static_dc_results(
