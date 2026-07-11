@@ -749,6 +749,47 @@ fn test_xyce_bug_318_scoped_model_family_runs_exactly() {
 }
 
 #[test]
+fn test_xyce_bjt_external_node_family_runs_exact_dc_parity() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/BJT_EXTNODE/npn.cir",
+            "bjt_external_node_family_wrapper",
+            true,
+        ),
+        (
+            "Netlists/BJT_EXTNODE/npn1.cir",
+            "bjt_external_node_family_baseline",
+            false,
+        ),
+        (
+            "Netlists/BJT_EXTNODE/npn2.cir",
+            "bjt_external_node_family_wrapper",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass exact omitted/explicit grounded-substrate DC parity, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should have bit-exact sweep/probe/value parity with its sibling representation"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+}
+
+#[test]
 fn test_xyce_mid_certification_transient_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

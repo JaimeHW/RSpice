@@ -375,21 +375,36 @@ struct XyceBaselineFamilyContract {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceScopedModelFamilySnapshot {
-    elements: BTreeMap<String, XyceScopedElementFingerprint>,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
     bjt_model_bits: BTreeMap<String, (u64, u64)>,
     diode_model_bits: BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct XyceScopedElementFingerprint {
+struct XyceRelationalElementFingerprint {
     kind: String,
     nodes: Vec<String>,
     numeric_bits: Vec<u64>,
     text: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceBjtExternalNodeFamilySnapshot {
+    title: String,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    bjt_model_bits: BTreeMap<String, u64>,
+    representation: XyceBjtExternalNodeRepresentation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBjtExternalNodeRepresentation {
+    OmittedGround,
+    ExplicitGround,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
+    BjtExternalNode,
     Subckt,
     Supernode,
     ScopedModel,
@@ -410,6 +425,7 @@ enum XyceBaselineFamilyComparison {
 impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
+            Self::BjtExternalNode => "BJT_EXTNODE",
             Self::Subckt => "SUBCKT",
             Self::Supernode => "SUPERNODE",
             Self::ScopedModel => "SCOPED_MODEL",
@@ -418,6 +434,7 @@ impl XyceBaselineFamilyKind {
 
     fn wrapper_contract(self) -> &'static str {
         match self {
+            Self::BjtExternalNode => "bjt_external_node_family_wrapper",
             Self::Subckt => "subckt_family_wrapper",
             Self::Supernode => "supernode_family_wrapper",
             Self::ScopedModel => "scoped_model_family_wrapper",
@@ -426,6 +443,7 @@ impl XyceBaselineFamilyKind {
 
     fn baseline_contract(self) -> &'static str {
         match self {
+            Self::BjtExternalNode => "bjt_external_node_family_baseline",
             Self::Subckt => "subckt_family_baseline",
             Self::Supernode => "supernode_family_baseline",
             Self::ScopedModel => "scoped_model_family_baseline",
@@ -439,7 +457,9 @@ impl XyceBaselineFamilyKind {
     fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
         match self {
             Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
-            Self::Subckt | Self::Supernode => XyceStaticTranPlanPurpose::RelationalFamily,
+            Self::BjtExternalNode | Self::Subckt | Self::Supernode => {
+                XyceStaticTranPlanPurpose::RelationalFamily
+            }
         }
     }
 }
@@ -6864,6 +6884,7 @@ impl XyceTestRunner {
                     XyceStaticTranContract::WrapperStatic
                 )
             ),
+            XyceBaselineFamilyKind::BjtExternalNode => false,
             XyceBaselineFamilyKind::Subckt | XyceBaselineFamilyKind::Supernode => {
                 baseline == target
             }
@@ -6917,6 +6938,20 @@ impl XyceTestRunner {
                 );
             }
         };
+        if contract.kind == XyceBaselineFamilyKind::BjtExternalNode
+            && analysis != XyceBaselineFamilyAnalysis::Dc
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' requires a DC analysis",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
         if analysis == XyceBaselineFamilyAnalysis::Tran {
             let baseline_plan = match self.static_tran_family_plan_for_path(
                 &contract.baseline_path,
@@ -6943,34 +6978,31 @@ impl XyceTestRunner {
                 start,
             );
         }
-        if contract.comparison == XyceBaselineFamilyComparison::Exact {
-            return self.failure_result(
-                deck,
-                start,
-                wrapper_contract,
-                format!(
-                    "{kind_name} family '{}' requests exact comparison for a DC analysis; exact family comparison currently requires TRAN",
-                    contract.family
-                ),
-                Vec::new(),
-            );
-        }
         let baseline_plan = match self
             .static_dc_plan_for_path(&contract.baseline_path, ExpressionDialect::Xyce)
         {
             Ok(plan) => plan,
             Err(reason) => {
-                return self.expected_unsupported_result(
+                return self.baseline_family_qualification_result(
                     deck,
                     start,
                     wrapper_contract,
-                    &format!(
+                    contract.comparison,
+                    format!(
                         "{kind_name} family '{}' baseline is not supported by the static DC adapter: {reason}",
                         contract.family
                     ),
                 );
             }
         };
+        if contract.comparison == XyceBaselineFamilyComparison::Exact {
+            return self.run_exact_dc_baseline_family_contract(
+                deck,
+                contract,
+                baseline_plan,
+                start,
+            );
+        }
         let baseline_run = self.run_static_dc_results(&baseline_plan, start);
         let (baseline_netlist, baseline_results) = match baseline_run {
             Ok(results) => results,
@@ -7215,6 +7247,324 @@ impl XyceTestRunner {
                 all_mismatches,
             )
         }
+    }
+
+    fn run_exact_dc_baseline_family_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceBaselineFamilyContract,
+        baseline_plan: XyceStaticDcPlan,
+        start: Instant,
+    ) -> XyceTestResult {
+        let kind_name = contract.kind.name();
+        let wrapper_contract = contract.kind.wrapper_contract();
+        let baseline_contract = contract.kind.baseline_contract();
+        if contract.kind != XyceBaselineFamilyKind::BjtExternalNode {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' has no qualified exact-DC semantic contract",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        if let Err(reason) = Self::validate_bjt_external_node_dc_plan(&baseline_plan) {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline exact-DC qualification failed: {reason}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+
+        let (baseline_netlist, baseline_results) =
+            match self.run_static_dc_results(&baseline_plan, start) {
+                Ok(results) => results,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' baseline exceeded timeout ({}ms)",
+                            contract.family, self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' baseline error: {err}",
+                            contract.family
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+        let baseline_snapshot = match Self::bjt_external_node_family_snapshot(
+            &baseline_netlist,
+            &baseline_plan.print,
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline semantic qualification failed: {reason}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        let baseline_table = match self.dc_results_to_prn_table(
+            &baseline_plan,
+            &baseline_netlist,
+            &baseline_results,
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline exact output conversion failed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+        let baseline_sweep = baseline_results
+            .iter()
+            .map(|point| point.sweep_value)
+            .collect::<Vec<_>>();
+
+        let (targets, baseline_record) = Self::baseline_family_targets(&contract);
+        if targets.is_empty() {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' has no non-baseline member to compare",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+
+        for target_path in targets {
+            let target_plan = match self
+                .static_dc_plan_for_path(&target_path, ExpressionDialect::Xyce)
+            {
+                Ok(plan) => plan,
+                Err(reason) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} is not supported by the static DC adapter: {reason}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            if let Err(reason) = Self::validate_bjt_external_node_dc_plan(&target_plan) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} exact-DC qualification failed: {reason}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if target_plan.print.probes != baseline_plan.print.probes {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' exact member {} changes ordered .PRINT DC probes",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if !Self::dc_sweeps_match_exactly(&baseline_plan.dc, &target_plan.dc) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' exact member {} changes the .DC analysis tuple",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+
+            let (target_netlist, target_results) =
+                match self.run_static_dc_results(&target_plan, start) {
+                    Ok(results) => results,
+                    Err(SimulationError::Aborted) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} exceeded timeout ({}ms)",
+                                contract.family,
+                                self.display_path(&target_path),
+                                self.config.max_time_per_test_ms
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} error: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            let target_snapshot = match Self::bjt_external_node_family_snapshot(
+                &target_netlist,
+                &target_plan.print,
+            ) {
+                Ok(snapshot) => snapshot,
+                Err(reason) => {
+                    return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} semantic qualification failed: {reason}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                }
+            };
+            if let Err(reason) = Self::compare_bjt_external_node_family_snapshots(
+                &baseline_snapshot,
+                &target_snapshot,
+            ) {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} changes semantics outside the omitted/explicit ground representation: {reason}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+
+            let target_table = match self.dc_results_to_prn_table(
+                &target_plan,
+                &target_netlist,
+                &target_results,
+            ) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} exact output conversion failed: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            let target_sweep = target_results
+                .iter()
+                .map(|point| point.sweep_value)
+                .collect::<Vec<_>>();
+            let mut mismatches = match self.compare_exact_dc_prn_tables(
+                &baseline_table,
+                &target_table,
+                &baseline_sweep,
+                &target_sweep,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' member {} exact comparison error: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            if !mismatches.is_empty() {
+                for mismatch in &mut mismatches {
+                    mismatch.probe =
+                        format!("{} {}", self.display_path(&target_path), mismatch.probe);
+                }
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{} {kind_name} family '{}' member {} exact DC mismatch(es)",
+                        mismatches.len(),
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    mismatches,
+                );
+            }
+        }
+
+        let result_contract = if baseline_record {
+            baseline_contract
+        } else {
+            wrapper_contract
+        };
+        self.passed_result(deck, start, result_contract)
     }
 
     fn run_transient_baseline_family_contract(
@@ -7811,7 +8161,7 @@ impl XyceTestRunner {
     fn scoped_model_element_fingerprint(
         element: &crate::netlist::Element,
         params: &crate::netlist::expr::ParamContext,
-    ) -> Result<XyceScopedElementFingerprint, String> {
+    ) -> Result<XyceRelationalElementFingerprint, String> {
         let nodes = element
             .nodes
             .iter()
@@ -7882,7 +8232,7 @@ impl XyceTestRunner {
                 ));
             }
         };
-        Ok(XyceScopedElementFingerprint {
+        Ok(XyceRelationalElementFingerprint {
             kind,
             nodes,
             numeric_bits,
@@ -7980,6 +8330,466 @@ impl XyceTestRunner {
         }))
     }
 
+    fn validate_bjt_external_node_dc_plan(plan: &XyceStaticDcPlan) -> Result<(), String> {
+        if !plan.steps.is_empty() {
+            return Err("exact BJT external-node DC does not admit .STEP".to_string());
+        }
+        if plan.dc_data.is_some() {
+            return Err("exact BJT external-node DC does not admit .DC DATA".to_string());
+        }
+        if plan.print_format.is_some() {
+            return Err(
+                "exact BJT external-node DC requires ordinary primary .prn output without a format override"
+                    .to_string(),
+            );
+        }
+        if plan.dc.sweep2.is_some() {
+            return Err("exact BJT external-node DC requires one sweep dimension".to_string());
+        }
+        if !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear) {
+            return Err("exact BJT external-node DC requires a linear sweep".to_string());
+        }
+        if !plan.dc.start.is_finite()
+            || !plan.dc.stop.is_finite()
+            || !plan.dc.step.is_finite()
+            || plan.dc.step <= 0.0
+            || plan.dc.stop < plan.dc.start
+        {
+            return Err(format!(
+                "exact BJT external-node DC requires a finite ascending sweep, got start={}, stop={}, step={}",
+                plan.dc.start, plan.dc.stop, plan.dc.step
+            ));
+        }
+        if plan.print.probes.is_empty() {
+            return Err("exact BJT external-node DC requires at least one probe".to_string());
+        }
+        let mut probes = BTreeSet::new();
+        for probe in &plan.print.probes {
+            let normalized = Self::normalize_probe(probe);
+            if !probes.insert(normalized) {
+                return Err(format!(
+                    "exact BJT external-node DC does not admit duplicate probe '{probe}'"
+                ));
+            }
+        }
+        if !plan.diagnostics.is_empty() {
+            return Err(format!(
+                "exact BJT external-node DC requires a diagnostic-free parse, found {} diagnostic(s)",
+                plan.diagnostics.len()
+            ));
+        }
+
+        let mut model_count = 0usize;
+        let mut dc_count = 0usize;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        for line in Self::logical_netlist_lines(&plan.source) {
+            let stripped = Self::strip_netlist_comment(&line);
+            let Some(command) = stripped.split_whitespace().next() else {
+                continue;
+            };
+            if !command.starts_with('.') {
+                continue;
+            }
+            match command.to_ascii_lowercase().as_str() {
+                ".model" => model_count += 1,
+                ".dc" => dc_count += 1,
+                ".print" => print_count += 1,
+                ".end" => end_count += 1,
+                other => {
+                    return Err(format!(
+                        "exact BJT external-node DC does not admit directive '{other}'"
+                    ));
+                }
+            }
+        }
+        if (model_count, dc_count, print_count, end_count) != (1, 1, 1, 1) {
+            return Err(format!(
+                "exact BJT external-node DC requires exactly one .MODEL, .DC, .PRINT, and .END; found ({model_count}, {dc_count}, {print_count}, {end_count})"
+            ));
+        }
+        Self::validate_bjt_external_node_print_contract(&plan.source)?;
+        Ok(())
+    }
+
+    fn validate_bjt_external_node_print_contract(source: &str) -> Result<(), String> {
+        for line in Self::logical_netlist_lines(source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim();
+            if !trimmed
+                .split_whitespace()
+                .next()
+                .is_some_and(|command| command.eq_ignore_ascii_case(".print"))
+            {
+                continue;
+            }
+            let tokens = Self::split_print_fields(trimmed)?;
+            if !tokens
+                .get(1)
+                .is_some_and(|analysis| analysis.eq_ignore_ascii_case("DC"))
+            {
+                continue;
+            }
+            let token_refs = tokens.iter().map(String::as_str).collect::<Vec<_>>();
+            let mut index = 2usize;
+            while index < token_refs.len() {
+                if let Some((raw_key, _, _)) = Self::print_option_assignment(&token_refs, index) {
+                    return Err(format!(
+                        "exact BJT external-node DC requires default primary .prn formatting and does not admit .PRINT assignment {raw_key}"
+                    ));
+                }
+                if token_refs[index].eq_ignore_ascii_case("noindex") {
+                    return Err(
+                        "exact BJT external-node DC requires the default indexed .prn layout and does not admit .PRINT NOINDEX"
+                            .to_string(),
+                    );
+                }
+                index += 1;
+            }
+        }
+        Ok(())
+    }
+
+    fn dc_sweep_modes_match_exactly(
+        baseline: &crate::netlist::DcSweepMode,
+        target: &crate::netlist::DcSweepMode,
+    ) -> bool {
+        match (baseline, target) {
+            (crate::netlist::DcSweepMode::Linear, crate::netlist::DcSweepMode::Linear) => true,
+            (
+                crate::netlist::DcSweepMode::List(baseline),
+                crate::netlist::DcSweepMode::List(target),
+            ) => {
+                baseline.len() == target.len()
+                    && baseline.iter().all(|value| value.is_finite())
+                    && target.iter().all(|value| value.is_finite())
+                    && baseline
+                        .iter()
+                        .zip(target)
+                        .all(|(baseline, target)| baseline.to_bits() == target.to_bits())
+            }
+            (
+                crate::netlist::DcSweepMode::Decade {
+                    points_per_decade: baseline,
+                },
+                crate::netlist::DcSweepMode::Decade {
+                    points_per_decade: target,
+                },
+            ) => baseline == target,
+            (
+                crate::netlist::DcSweepMode::Octave {
+                    points_per_octave: baseline,
+                },
+                crate::netlist::DcSweepMode::Octave {
+                    points_per_octave: target,
+                },
+            ) => baseline == target,
+            _ => false,
+        }
+    }
+
+    fn dc_second_sweeps_match_exactly(
+        baseline: Option<&DcSecondSweep>,
+        target: Option<&DcSecondSweep>,
+    ) -> bool {
+        match (baseline, target) {
+            (None, None) => true,
+            (Some(baseline), Some(target)) => {
+                baseline.start.is_finite()
+                    && baseline.stop.is_finite()
+                    && baseline.step.is_finite()
+                    && target.start.is_finite()
+                    && target.stop.is_finite()
+                    && target.step.is_finite()
+                    && baseline.source == target.source
+                    && baseline.start.to_bits() == target.start.to_bits()
+                    && baseline.stop.to_bits() == target.stop.to_bits()
+                    && baseline.step.to_bits() == target.step.to_bits()
+                    && Self::dc_sweep_modes_match_exactly(&baseline.mode, &target.mode)
+            }
+            _ => false,
+        }
+    }
+
+    fn dc_sweeps_match_exactly(baseline: &XyceDcSweep, target: &XyceDcSweep) -> bool {
+        baseline.start.is_finite()
+            && baseline.stop.is_finite()
+            && baseline.step.is_finite()
+            && target.start.is_finite()
+            && target.stop.is_finite()
+            && target.step.is_finite()
+            && baseline.source == target.source
+            && baseline.start.to_bits() == target.start.to_bits()
+            && baseline.stop.to_bits() == target.stop.to_bits()
+            && baseline.step.to_bits() == target.step.to_bits()
+            && Self::dc_sweep_modes_match_exactly(&baseline.mode, &target.mode)
+            && Self::dc_second_sweeps_match_exactly(
+                baseline.sweep2.as_ref(),
+                target.sweep2.as_ref(),
+            )
+    }
+
+    fn bjt_external_node_name_is_literal_ground(node: &str) -> bool {
+        node.trim() == "0"
+    }
+
+    fn canonical_bjt_external_node_name(node: &str) -> String {
+        if Self::bjt_external_node_name_is_literal_ground(node) {
+            "0".to_string()
+        } else {
+            node.trim().to_ascii_lowercase()
+        }
+    }
+
+    fn model_is_native_bjt_external_node_level1_npn(model: &crate::netlist::ModelDef) -> bool {
+        model.model_type.eq_ignore_ascii_case("NPN")
+            && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model.params.len() == 1
+            && model.params[0].0.eq_ignore_ascii_case("BF")
+            && model.params[0].1.is_finite()
+            && model.params[0].1 > 0.0
+    }
+
+    fn validate_bjt_external_node_dc_probes(
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        for probe in &print.probes {
+            if Self::parse_voltage_probe(probe)
+                .is_some_and(|probe| probe.accessor == XyceVoltageAccessor::Value)
+            {
+                continue;
+            }
+            if Self::parse_current_probe(probe)
+                .is_some_and(|source| Self::source_is_voltage_source(netlist, &source))
+            {
+                continue;
+            }
+            return Err(format!(
+                "exact BJT external-node DC probe '{probe}' is not an atomic voltage or independent voltage-source current"
+            ));
+        }
+        Ok(())
+    }
+
+    fn bjt_external_node_family_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XyceBjtExternalNodeFamilySnapshot, String> {
+        Self::validate_bjt_external_node_dc_probes(print, netlist)?;
+        if !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+        {
+            return Err(
+                "exact BJT external-node DC contains auxiliary analysis, hierarchy, or external-model state"
+                    .to_string(),
+            );
+        }
+        if !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(
+                "exact BJT external-node DC does not admit parameters or user functions"
+                    .to_string(),
+            );
+        }
+        if netlist.models.len() != 1 {
+            return Err(format!(
+                "exact BJT external-node DC requires exactly one model, found {}",
+                netlist.models.len()
+            ));
+        }
+        let effective_model = &netlist.models[0];
+        if !Self::model_is_native_bjt_external_node_level1_npn(effective_model) {
+            return Err(format!(
+                "model '{}' is not the qualified implicit-Level-1 NPN with one finite positive BF",
+                effective_model.name
+            ));
+        }
+
+        let mut elements = BTreeMap::new();
+        let mut bjt_model_bits = BTreeMap::new();
+        let mut representation = None;
+        for element in &netlist.elements {
+            let key = Self::normalize_device_instance_name(&element.name);
+            if let Some(alias) = element.nodes.iter().find(|node| {
+                crate::compat::ground::is_spice_ground_name(node)
+                    && !Self::bjt_external_node_name_is_literal_ground(node)
+            }) {
+                return Err(format!(
+                    "element '{}' uses ground alias '{}'; exact Xyce parity requires literal node 0 without .PREPROCESS REPLACEGND",
+                    element.name, alias
+                ));
+            }
+            let mut nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_bjt_external_node_name(node))
+                .collect::<Vec<_>>();
+            let (kind, numeric_bits, text) = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    if element.nodes.len() != 2
+                        || !value.is_finite()
+                        || *value <= 0.0
+                        || value_expr.is_some()
+                        || model.is_some()
+                        || !instance_params.is_empty()
+                        || !deferred_params.is_empty()
+                    {
+                        return Err(format!(
+                            "resistor '{}' is outside the finite numeric two-terminal envelope",
+                            element.name
+                        ));
+                    }
+                    ("R".to_string(), vec![value.to_bits()], Vec::new())
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) => {
+                    if element.nodes.len() != 2 || !value.is_finite() {
+                        return Err(format!(
+                            "voltage source '{}' is outside the finite two-terminal DC envelope",
+                            element.name
+                        ));
+                    }
+                    ("V:DC".to_string(), vec![value.to_bits()], Vec::new())
+                }
+                ElementKind::Bjt {
+                    model,
+                    instance_params,
+                    deferred_params,
+                    ..
+                } => {
+                    if representation.is_some() {
+                        return Err(
+                            "exact BJT external-node DC requires exactly one BJT".to_string()
+                        );
+                    }
+                    if !instance_params.is_empty() || !deferred_params.is_empty() {
+                        return Err(format!(
+                            "BJT '{}' has unqualified instance parameters",
+                            element.name
+                        ));
+                    }
+                    if !model.eq_ignore_ascii_case(&effective_model.name) {
+                        return Err(format!(
+                            "BJT '{}' does not reference the unique effective model '{}'",
+                            element.name, effective_model.name
+                        ));
+                    }
+                    if !element.nodes.get(2).is_some_and(|emitter| {
+                        Self::bjt_external_node_name_is_literal_ground(emitter)
+                    }) {
+                        return Err(format!(
+                            "BJT '{}' emitter must be ground in the qualified external-node envelope",
+                            element.name
+                        ));
+                    }
+                    let form = match element.nodes.as_slice() {
+                        [_, _, _] => {
+                            nodes.push("0".to_string());
+                            XyceBjtExternalNodeRepresentation::OmittedGround
+                        }
+                        [_, _, _, substrate]
+                            if Self::bjt_external_node_name_is_literal_ground(substrate) =>
+                        {
+                            XyceBjtExternalNodeRepresentation::ExplicitGround
+                        }
+                        [_, _, _, _] => {
+                            return Err(format!(
+                                "BJT '{}' explicit substrate must be ground",
+                                element.name
+                            ));
+                        }
+                        _ => {
+                            return Err(format!(
+                                "BJT '{}' must have exactly three or four terminals",
+                                element.name
+                            ));
+                        }
+                    };
+                    representation = Some(form);
+                    bjt_model_bits.insert(
+                        effective_model.name.to_ascii_lowercase(),
+                        effective_model.params[0].1.to_bits(),
+                    );
+                    (
+                        "Q:NPN:L1".to_string(),
+                        Vec::new(),
+                        vec![model.to_ascii_lowercase()],
+                    )
+                }
+                _ => {
+                    return Err(format!(
+                        "element '{}' is outside the resistor/DC-voltage-source/Level-1-NPN envelope",
+                        element.name
+                    ));
+                }
+            };
+            let fingerprint = XyceRelationalElementFingerprint {
+                kind,
+                nodes,
+                numeric_bits,
+                text,
+            };
+            if elements.insert(key.clone(), fingerprint).is_some() {
+                return Err(format!(
+                    "exact BJT external-node DC contains duplicate element name '{key}'"
+                ));
+            }
+        }
+        let representation = representation
+            .ok_or_else(|| "exact BJT external-node DC contains no qualified BJT".to_string())?;
+        if bjt_model_bits.len() != 1 {
+            return Err(
+                "exact BJT external-node DC did not resolve exactly one BJT model".to_string(),
+            );
+        }
+        Ok(XyceBjtExternalNodeFamilySnapshot {
+            title: netlist.title.trim().to_string(),
+            elements,
+            bjt_model_bits,
+            representation,
+        })
+    }
+
+    fn compare_bjt_external_node_family_snapshots(
+        baseline: &XyceBjtExternalNodeFamilySnapshot,
+        target: &XyceBjtExternalNodeFamilySnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation == target.representation {
+            return Err(
+                "both members use the same BJT substrate representation instead of an omitted/explicit pair"
+                    .to_string(),
+            );
+        }
+        if baseline.title != target.title {
+            return Err("circuit titles differ".to_string());
+        }
+        if baseline.elements != target.elements {
+            return Err("element topology or values differ".to_string());
+        }
+        if baseline.bjt_model_bits != target.bjt_model_bits {
+            return Err("explicit BJT model fields differ".to_string());
+        }
+        Ok(())
+    }
+
     fn compare_exact_prn_tables(
         &self,
         expected: &XycePrnTable,
@@ -7987,46 +8797,81 @@ impl XyceTestRunner {
         expected_raw_time: &[Value],
         actual_raw_time: &[Value],
     ) -> Result<Vec<XyceValueMismatch>, String> {
-        if expected_raw_time.len() != expected.rows.len()
-            || actual_raw_time.len() != actual.rows.len()
+        self.compare_exact_prn_tables_with_axis(
+            expected,
+            actual,
+            expected_raw_time,
+            actual_raw_time,
+            "TIME",
+        )
+    }
+
+    fn compare_exact_dc_prn_tables(
+        &self,
+        expected: &XycePrnTable,
+        actual: &XycePrnTable,
+        expected_raw_sweep: &[Value],
+        actual_raw_sweep: &[Value],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        self.compare_exact_prn_tables_with_axis(
+            expected,
+            actual,
+            expected_raw_sweep,
+            actual_raw_sweep,
+            "DC_SWEEP",
+        )
+    }
+
+    fn compare_exact_prn_tables_with_axis(
+        &self,
+        expected: &XycePrnTable,
+        actual: &XycePrnTable,
+        expected_raw_axis: &[Value],
+        actual_raw_axis: &[Value],
+        axis_name: &str,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if expected_raw_axis.len() != expected.rows.len()
+            || actual_raw_axis.len() != actual.rows.len()
         {
             return Err(format!(
-                "exact relational raw time lengths ({}, {}) do not match table row counts ({}, {})",
-                expected_raw_time.len(),
-                actual_raw_time.len(),
+                "exact relational raw {axis_name} lengths ({}, {}) do not match table row counts ({}, {})",
+                expected_raw_axis.len(),
+                actual_raw_axis.len(),
                 expected.rows.len(),
                 actual.rows.len()
             ));
         }
-        if expected_raw_time.len() != actual_raw_time.len() {
+        if expected_raw_axis.len() != actual_raw_axis.len() {
             return Err(format!(
-                "exact relational raw time count differs: expected {}, actual {}",
-                expected_raw_time.len(),
-                actual_raw_time.len()
+                "exact relational raw {axis_name} count differs: expected {}, actual {}",
+                expected_raw_axis.len(),
+                actual_raw_axis.len()
             ));
         }
-        let raw_time_mismatches = expected_raw_time
-            .iter()
-            .zip(actual_raw_time)
-            .enumerate()
-            .filter_map(|(row, (&expected, &actual))| {
-                (expected.to_bits() != actual.to_bits()).then(|| XyceValueMismatch {
+        let mut axis_mismatches = Vec::new();
+        for (row, (&expected, &actual)) in expected_raw_axis.iter().zip(actual_raw_axis).enumerate()
+        {
+            if !expected.is_finite() || !actual.is_finite() {
+                return Err(format!(
+                    "exact relational raw {axis_name} row {row} contains non-finite value(s): expected {expected}, actual {actual}"
+                ));
+            }
+            if expected.to_bits() != actual.to_bits() {
+                axis_mismatches.push(XyceValueMismatch {
                     row,
-                    probe: "TIME".to_string(),
+                    probe: axis_name.to_string(),
                     expected,
                     actual,
-                    relative_error: if expected.is_finite() && actual.is_finite() {
-                        (expected - actual).abs()
-                            / expected.abs().max(actual.abs()).max(Value::MIN_POSITIVE)
-                    } else {
-                        Value::INFINITY
-                    },
-                })
-            })
-            .take(self.config.max_mismatches)
-            .collect::<Vec<_>>();
-        if !raw_time_mismatches.is_empty() {
-            return Ok(raw_time_mismatches);
+                    relative_error: (expected - actual).abs()
+                        / expected.abs().max(actual.abs()).max(Value::MIN_POSITIVE),
+                });
+                if axis_mismatches.len() >= self.config.max_mismatches {
+                    return Ok(axis_mismatches);
+                }
+            }
+        }
+        if !axis_mismatches.is_empty() {
+            return Ok(axis_mismatches);
         }
 
         if expected.columns != actual.columns {
@@ -8057,6 +8902,12 @@ impl XyceTestRunner {
             for (column_index, (&expected_value, &actual_value)) in
                 expected_row.iter().zip(actual_row).enumerate()
             {
+                if !expected_value.is_finite() || !actual_value.is_finite() {
+                    return Err(format!(
+                        "exact relational row {row_index} column '{}' contains non-finite value(s): expected {expected_value}, actual {actual_value}",
+                        expected.columns[column_index]
+                    ));
+                }
                 if expected_value.to_bits() == actual_value.to_bits() {
                     continue;
                 }
@@ -8064,11 +8915,7 @@ impl XyceTestRunner {
                     .abs()
                     .max(actual_value.abs())
                     .max(f64::MIN_POSITIVE);
-                let relative_error = if expected_value.is_finite() && actual_value.is_finite() {
-                    (expected_value - actual_value).abs() / scale
-                } else {
-                    f64::INFINITY
-                };
+                let relative_error = (expected_value - actual_value).abs() / scale;
                 mismatches.push(XyceValueMismatch {
                     row: row_index,
                     probe: expected.columns[column_index].clone(),
@@ -18781,9 +19628,122 @@ impl XyceTestRunner {
     }
 
     fn baseline_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
-        self.scoped_model_family_contract(deck)
+        self.bjt_external_node_family_contract(deck)
+            .or_else(|| self.scoped_model_family_contract(deck))
             .or_else(|| self.subckt_family_contract(deck))
             .or_else(|| self.supernode_family_contract(deck))
+    }
+
+    fn bjt_external_node_family_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/bjt_extnode/") {
+            return None;
+        }
+
+        let file_name = deck.path.file_name()?.to_str()?;
+        let parent = deck.path.parent()?;
+        if self.requires_upstream_wrapper(&deck.relative_path)
+            && fs::metadata(&deck.path)
+                .ok()
+                .is_some_and(|metadata| metadata.len() == 0)
+        {
+            let family = file_name.strip_suffix(".cir")?;
+            if family.is_empty() || family.chars().last().is_some_and(|ch| ch.is_ascii_digit()) {
+                return None;
+            }
+            return self.bjt_external_node_family_contract_for(parent, family, None);
+        }
+
+        let (family, member_index) = Self::parse_bjt_external_node_member_file_name(file_name)?;
+        if !matches!(member_index, 1 | 2) {
+            return None;
+        }
+        self.bjt_external_node_family_contract_for(parent, &family, Some(deck.path.clone()))
+    }
+
+    fn bjt_external_node_family_contract_for(
+        &self,
+        parent: &Path,
+        family: &str,
+        target_path: Option<PathBuf>,
+    ) -> Option<XyceBaselineFamilyContract> {
+        let owner_path = parent.join(format!("{family}.cir"));
+        let baseline_path = parent.join(format!("{family}1.cir"));
+        let explicit_path = parent.join(format!("{family}2.cir"));
+        let family_lower = family.to_ascii_lowercase();
+        let numbered_suffixes = fs::read_dir(parent)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if !path.is_file()
+                    || !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+                {
+                    return None;
+                }
+                let stem = path.file_stem()?.to_str()?;
+                let stem_lower = stem.to_ascii_lowercase();
+                let suffix = stem_lower.strip_prefix(&family_lower)?.to_string();
+                (!suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
+                    .then_some(suffix)
+            })
+            .collect::<BTreeSet<_>>();
+        let required_suffixes = ["1".to_string(), "2".to_string()]
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        if !owner_path.is_file()
+            || !baseline_path.is_file()
+            || !explicit_path.is_file()
+            || numbered_suffixes != required_suffixes
+            || fs::metadata(&owner_path)
+                .ok()
+                .is_none_or(|metadata| metadata.len() != 0)
+        {
+            return None;
+        }
+        let owner_relative = self.relative_key(&owner_path);
+        let baseline_relative = self.relative_key(&baseline_path);
+        let explicit_relative = self.relative_key(&explicit_path);
+        if !self.requires_upstream_wrapper(&owner_relative)
+            || self.requires_upstream_wrapper(&baseline_relative)
+            || self.requires_upstream_wrapper(&explicit_relative)
+        {
+            return None;
+        }
+        if let Some(target_path) = target_path.as_ref()
+            && !Self::same_path(target_path, &baseline_path)
+            && !Self::same_path(target_path, &explicit_path)
+        {
+            return None;
+        }
+
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::BjtExternalNode,
+            comparison: XyceBaselineFamilyComparison::Exact,
+            family: family.to_string(),
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path, explicit_path],
+            target_path,
+        })
+    }
+
+    fn parse_bjt_external_node_member_file_name(file_name: &str) -> Option<(String, u8)> {
+        let stem = file_name.strip_suffix(".cir")?;
+        let member_index = stem.chars().last()?.to_digit(10)? as u8;
+        let family = &stem[..stem.len() - 1];
+        if family.is_empty()
+            || family.chars().last().is_some_and(|ch| ch.is_ascii_digit())
+            || !matches!(member_index, 1 | 2)
+        {
+            return None;
+        }
+        Some((family.to_string(), member_index))
     }
 
     fn scoped_model_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
@@ -21600,6 +22560,426 @@ C1 mid out 1u
             &baseline_tran,
             &changed_tran
         ));
+    }
+
+    #[test]
+    fn exact_dc_comparison_checks_raw_sweep_bits_and_rejects_nonfinite_values() {
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+        let expected = XycePrnTable {
+            columns: vec!["Index".to_string(), "V(4)".to_string()],
+            rows: vec![vec![0.0, 1.0], vec![1.0, 2.0]],
+        };
+        let raw_sweep = vec![1.0, 2.0];
+        assert!(
+            runner
+                .compare_exact_dc_prn_tables(&expected, &expected, &raw_sweep, &raw_sweep)
+                .expect("identical exact DC tables compare")
+                .is_empty()
+        );
+
+        let mut one_ulp = expected.clone();
+        one_ulp.rows[1][1] = f64::from_bits(one_ulp.rows[1][1].to_bits() + 1);
+        assert_eq!(
+            runner
+                .compare_exact_dc_prn_tables(&expected, &one_ulp, &raw_sweep, &raw_sweep)
+                .expect("one-ULP DC table remains structurally comparable")
+                .len(),
+            1
+        );
+
+        let mut changed_sweep = raw_sweep.clone();
+        changed_sweep[1] = f64::from_bits(changed_sweep[1].to_bits() + 1);
+        let sweep_mismatches = runner
+            .compare_exact_dc_prn_tables(&expected, &expected, &raw_sweep, &changed_sweep)
+            .expect("one-ULP raw sweep remains structurally comparable");
+        assert_eq!(sweep_mismatches.len(), 1);
+        assert_eq!(sweep_mismatches[0].probe, "DC_SWEEP");
+
+        let mut nonfinite_table = expected.clone();
+        nonfinite_table.rows[0][1] = f64::NAN;
+        assert!(
+            runner
+                .compare_exact_dc_prn_tables(
+                    &nonfinite_table,
+                    &nonfinite_table,
+                    &raw_sweep,
+                    &raw_sweep,
+                )
+                .is_err(),
+            "matching NaNs must never satisfy an exact relational oracle"
+        );
+        let nonfinite_axis = vec![1.0, f64::INFINITY];
+        assert!(
+            runner
+                .compare_exact_dc_prn_tables(
+                    &expected,
+                    &expected,
+                    &nonfinite_axis,
+                    &nonfinite_axis,
+                )
+                .is_err(),
+            "matching infinite sweep samples must never satisfy an exact relational oracle"
+        );
+    }
+
+    #[test]
+    fn exact_dc_sweep_comparison_is_bitwise_for_every_dimension() {
+        let baseline = XyceDcSweep {
+            source: "VBIAS".to_string(),
+            start: 1.0,
+            stop: 12.0,
+            step: 1.0,
+            mode: crate::netlist::DcSweepMode::Linear,
+            sweep2: None,
+        };
+        assert!(XyceTestRunner::dc_sweeps_match_exactly(
+            &baseline, &baseline
+        ));
+
+        let mut changed_source_case = baseline.clone();
+        changed_source_case.source = "vbias".to_string();
+        assert!(
+            !XyceTestRunner::dc_sweeps_match_exactly(&baseline, &changed_source_case),
+            "raw .prn sweep-column names participate in exact parity"
+        );
+
+        let mut changed_start = baseline.clone();
+        changed_start.start = f64::from_bits(changed_start.start.to_bits() + 1);
+        assert!(!XyceTestRunner::dc_sweeps_match_exactly(
+            &baseline,
+            &changed_start
+        ));
+
+        let listed = XyceDcSweep {
+            mode: crate::netlist::DcSweepMode::List(vec![1.0, 2.0, 4.0]),
+            ..baseline.clone()
+        };
+        let mut changed_list = listed.clone();
+        let crate::netlist::DcSweepMode::List(values) = &mut changed_list.mode else {
+            panic!("changed list remains a list sweep");
+        };
+        values[1] = f64::from_bits(values[1].to_bits() + 1);
+        assert!(!XyceTestRunner::dc_sweeps_match_exactly(
+            &listed,
+            &changed_list
+        ));
+
+        let nonfinite_primary = XyceDcSweep {
+            start: f64::NAN,
+            ..baseline.clone()
+        };
+        assert!(
+            !XyceTestRunner::dc_sweeps_match_exactly(&nonfinite_primary, &nonfinite_primary,),
+            "matching non-finite primary tuples are never exact"
+        );
+        let nonfinite_list = XyceDcSweep {
+            mode: crate::netlist::DcSweepMode::List(vec![1.0, f64::INFINITY]),
+            ..baseline.clone()
+        };
+        assert!(
+            !XyceTestRunner::dc_sweeps_match_exactly(&nonfinite_list, &nonfinite_list),
+            "matching non-finite list entries are never exact"
+        );
+
+        let with_second = XyceDcSweep {
+            sweep2: Some(DcSecondSweep::linear("VOUTER".to_string(), 0.0, 1.0, 1.0)),
+            ..baseline.clone()
+        };
+        assert!(!XyceTestRunner::dc_sweeps_match_exactly(
+            &baseline,
+            &with_second
+        ));
+        let nonfinite_second = XyceDcSweep {
+            sweep2: Some(DcSecondSweep::linear(
+                "VOUTER".to_string(),
+                0.0,
+                1.0,
+                f64::INFINITY,
+            )),
+            ..baseline
+        };
+        assert!(
+            !XyceTestRunner::dc_sweeps_match_exactly(&nonfinite_second, &nonfinite_second,),
+            "matching non-finite secondary tuples are never exact"
+        );
+    }
+
+    #[test]
+    fn bjt_external_node_plan_rejects_named_or_reformatted_print_destinations() {
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+        let source_for = |print_line: &str| {
+            format!(
+                "validated BJT external-node print contract\n\
+VCC 4 0 DC 12\n\
+R1 4 2 2k\n\
+VMON 2 1 0\n\
+Q1 1 3 0 QN\n\
+.MODEL QN NPN (BF=100)\n\
+.DC VCC 1 12 1\n\
+{print_line}\n\
+.END\n"
+            )
+        };
+        for print_line in [
+            ".PRINT DC FILE=only.prn V(4) I(VMON)",
+            ".PRINT DC FORMAT=STD V(4) I(VMON)",
+            ".PRINT DC PRECISION=12 V(4) I(VMON)",
+            ".PRINT DC WIDTH=120 V(4) I(VMON)",
+            ".PRINT DC NOINDEX V(4) I(VMON)",
+            ".PRINT DC NOINDEX=TRUE V(4) I(VMON)",
+            ".PRINT DC FUTURE_OPTION=1 V(4) I(VMON)",
+        ] {
+            let source = source_for(print_line);
+            let plan = runner
+                .static_dc_plan_for_source_with_execution_dir(
+                    Path::new("print-contract.cir"),
+                    source,
+                    ExpressionDialect::Xyce,
+                    None,
+                )
+                .expect("generic static DC adapter accepts the output form");
+            assert!(
+                XyceTestRunner::validate_bjt_external_node_dc_plan(&plan).is_err(),
+                "exact default .prn parity must reject {print_line}"
+            );
+        }
+    }
+
+    #[test]
+    fn bjt_external_node_snapshot_admits_only_the_grounded_representation_pair() {
+        let source_for = |q_line: &str, model_line: &str| {
+            format!(
+                "validated BJT external-node pair\n\
+VCC 4 0 DC 12\n\
+R1 4 2 2k\n\
+VMON 2 1 0\n\
+{q_line}\n\
+{model_line}\n\
+.DC VCC 1 12 1\n\
+.PRINT DC V(4) I(VMON)\n\
+.END\n"
+            )
+        };
+        let print = XycePrintRequest {
+            probes: vec!["V(4)".to_string(), "I(VMON)".to_string()],
+        };
+        let implicit = Netlist::parse(&source_for("Q1 1 3 0 QN", ".MODEL QN NPN (BF=100)"))
+            .expect("implicit-ground BJT fixture parses");
+        let explicit = Netlist::parse(&source_for("Q1 1 3 0 0 QN", ".MODEL QN NPN (BF=100)"))
+            .expect("explicit-ground BJT fixture parses");
+        let implicit_snapshot =
+            XyceTestRunner::bjt_external_node_family_snapshot(&implicit, &print)
+                .expect("implicit-ground snapshot qualifies");
+        let explicit_snapshot =
+            XyceTestRunner::bjt_external_node_family_snapshot(&explicit, &print)
+                .expect("explicit-ground snapshot qualifies");
+        XyceTestRunner::compare_bjt_external_node_family_snapshots(
+            &implicit_snapshot,
+            &explicit_snapshot,
+        )
+        .expect("omitted and explicit grounded substrate forms are semantically identical");
+        assert!(
+            XyceTestRunner::compare_bjt_external_node_family_snapshots(
+                &implicit_snapshot,
+                &implicit_snapshot,
+            )
+            .is_err(),
+            "two omitted-node members do not exercise the wrapper contract"
+        );
+
+        let mut changed_title = explicit.clone();
+        changed_title.title = "different raw-output title".to_string();
+        let changed_title_snapshot =
+            XyceTestRunner::bjt_external_node_family_snapshot(&changed_title, &print)
+                .expect("changed title remains individually qualified");
+        assert!(
+            XyceTestRunner::compare_bjt_external_node_family_snapshots(
+                &implicit_snapshot,
+                &changed_title_snapshot,
+            )
+            .is_err(),
+            "circuit titles participate in exact raw-output parity"
+        );
+
+        let non_ground_substrate =
+            Netlist::parse(&source_for("Q1 1 3 0 7 QN", ".MODEL QN NPN (BF=100)"))
+                .expect("non-ground substrate fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&non_ground_substrate, &print,)
+                .is_err()
+        );
+
+        let emitter_equal_non_ground =
+            Netlist::parse(&source_for("Q1 1 3 7 7 QN", ".MODEL QN NPN (BF=100)"))
+                .expect("non-ground emitter/substrate fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&emitter_equal_non_ground, &print,)
+                .is_err(),
+            "substrate equal to a non-ground emitter is not equivalent to an omitted ground node"
+        );
+
+        let gnd_emitter = Netlist::parse(&source_for("Q1 1 3 GND QN", ".MODEL QN NPN (BF=100)"))
+            .expect("GND emitter fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&gnd_emitter, &print).is_err(),
+            "GND is not Xyce node zero without .PREPROCESS REPLACEGND"
+        );
+        let ground_substrate =
+            Netlist::parse(&source_for("Q1 1 3 0 GROUND QN", ".MODEL QN NPN (BF=100)"))
+                .expect("GROUND substrate fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&ground_substrate, &print).is_err(),
+            "GROUND is not Xyce node zero without .PREPROCESS REPLACEGND"
+        );
+        let gnd_source = Netlist::parse(
+            &source_for("Q1 1 3 0 QN", ".MODEL QN NPN (BF=100)").replace("VCC 4 0", "VCC 4 GND"),
+        )
+        .expect("GND source fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&gnd_source, &print).is_err(),
+            "ground aliases are rejected on every admitted element"
+        );
+        let gnd_bang_source = Netlist::parse(
+            &source_for("Q1 1 3 0 QN", ".MODEL QN NPN (BF=100)").replace("VCC 4 0", "VCC 4 GND!"),
+        )
+        .expect("GND! source fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&gnd_bang_source, &print).is_err(),
+            "GND! is not Xyce node zero without .PREPROCESS REPLACEGND"
+        );
+
+        let extra_model_field = Netlist::parse(&source_for(
+            "Q1 1 3 0 0 QN",
+            ".MODEL QN NPN (BF=100 IS=1e-15)",
+        ))
+        .expect("extra model-field fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&extra_model_field, &print).is_err(),
+            "the bounded oracle must not infer or duplicate additional model behavior"
+        );
+
+        let generated_level = Netlist::parse(&source_for(
+            "Q1 1 3 0 0 QN",
+            ".MODEL QN NPN (LEVEL=4 BF=100)",
+        ))
+        .expect("generated-level fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&generated_level, &print).is_err(),
+            "generated-device levels remain outside the native Level-1 relational envelope"
+        );
+
+        let instance_parameter = Netlist::parse(&source_for(
+            "Q1 1 3 0 0 QN AREA=2",
+            ".MODEL QN NPN (BF=100)",
+        ))
+        .expect("instance-parameter fixture parses");
+        assert!(
+            XyceTestRunner::bjt_external_node_family_snapshot(&instance_parameter, &print).is_err(),
+            "instance parameters are not part of the proven wrapper representation pair"
+        );
+
+        let mut changed_resistor = explicit.clone();
+        let ElementKind::Resistor { value, .. } = &mut changed_resistor.elements[1].kind else {
+            panic!("fixture element remains a resistor");
+        };
+        *value = 2_001.0;
+        let changed_snapshot =
+            XyceTestRunner::bjt_external_node_family_snapshot(&changed_resistor, &print)
+                .expect("changed resistor remains individually qualified");
+        assert!(
+            XyceTestRunner::compare_bjt_external_node_family_snapshots(
+                &implicit_snapshot,
+                &changed_snapshot,
+            )
+            .is_err(),
+            "all non-representation element values participate in the semantic fingerprint"
+        );
+    }
+
+    #[test]
+    fn bjt_external_node_family_detection_is_manifest_and_sibling_driven() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-bjt-external-node-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root.join("Netlists").join("BJT_EXTNODE").join("GENERIC");
+        fs::create_dir_all(&family_dir).expect("create generic BJT family fixture");
+        let owner_path = family_dir.join("representation.cir");
+        let baseline_path = family_dir.join("representation1.cir");
+        let explicit_path = family_dir.join("representation2.cir");
+        fs::write(&owner_path, "").expect("write empty wrapper fixture");
+        fs::write(&baseline_path, "implicit member\n.end\n").expect("write baseline fixture");
+        fs::write(&explicit_path, "explicit member\n.end\n").expect("write explicit fixture");
+        let owner_relative = "Netlists/BJT_EXTNODE/GENERIC/representation.cir";
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper manifest fixture");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (path, relative, target_expected) in [
+            (&owner_path, owner_relative, false),
+            (
+                &baseline_path,
+                "Netlists/BJT_EXTNODE/GENERIC/representation1.cir",
+                true,
+            ),
+            (
+                &explicit_path,
+                "Netlists/BJT_EXTNODE/GENERIC/representation2.cir",
+                true,
+            ),
+        ] {
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: relative.to_string(),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .bjt_external_node_family_contract(&deck)
+                .expect("manifest owner and two direct numbered siblings form a family");
+            assert_eq!(contract.kind, XyceBaselineFamilyKind::BjtExternalNode);
+            assert_eq!(contract.comparison, XyceBaselineFamilyComparison::Exact);
+            assert_eq!(contract.target_path.is_some(), target_expected);
+            assert!(XyceTestRunner::same_path(
+                &contract.baseline_path,
+                &baseline_path
+            ));
+            assert_eq!(contract.member_paths.len(), 2);
+        }
+
+        let owner_deck = XyceDeck {
+            path: owner_path.clone(),
+            relative_path: owner_relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let zero_path = family_dir.join("representation0.cir");
+        fs::write(&zero_path, "unqualified zero member\n.end\n")
+            .expect("write zero-member fixture");
+        assert!(
+            runner
+                .bjt_external_node_family_contract(&owner_deck)
+                .is_none(),
+            "a zero-index direct-numbered sibling is a different upstream family shape"
+        );
+        fs::remove_file(&zero_path).expect("remove zero-member fixture");
+
+        let third_path = family_dir.join("representation3.cir");
+        fs::write(&third_path, "unqualified third member\n.end\n")
+            .expect("write third-member fixture");
+        assert!(
+            runner
+                .bjt_external_node_family_contract(&owner_deck)
+                .is_none(),
+            "a third direct-numbered sibling is a different upstream family shape"
+        );
+
+        fs::remove_dir_all(&root).expect("remove generic BJT family fixture");
     }
 
     #[test]
