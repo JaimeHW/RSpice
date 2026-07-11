@@ -42,6 +42,7 @@ const TRAN_ORACLE_STEPS_PER_SOURCE_PERIOD: f64 = 64.0;
 const TRAN_ORACLE_STEPS_PER_SOURCE_TRANSITION: f64 = 200.0;
 const XYCE_DEFAULT_PRN_FRACTION_DIGITS: f64 = 8.0;
 const XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION: usize = 8;
+const XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION: usize = 16;
 const PRN_TIME_NEIGHBOR_HALF_ULPS: f64 = 4.0;
 const XYCE_VERIFY_DEFAULT_RELATIVE_TOLERANCE: f64 = 1.0e-2;
 const XYCE_VERIFY_DEFAULT_ABSOLUTE_TOLERANCE: f64 = 1.0e-12;
@@ -235,6 +236,32 @@ struct XyceStaticTranPlan {
     steps: Vec<StepCommand>,
     contract: XyceStaticTranContract,
     wrapper_tolerance: Option<XyceComparisonTolerance>,
+    comparison_mode: XyceStaticTranComparisonMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceStaticTranComparisonMode {
+    Pointwise,
+    Release710IntegratedRms { scientific_precision: usize },
+}
+
+impl XyceStaticTranComparisonMode {
+    fn uses_adaptive_grid_only(self) -> bool {
+        matches!(self, Self::Release710IntegratedRms { .. })
+    }
+}
+
+impl XyceStaticTranPlan {
+    fn result_contract(&self) -> &'static str {
+        match self.comparison_mode {
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
+                "static_xyce_verify_prn_tran"
+            }
+            XyceStaticTranComparisonMode::Pointwise => {
+                self.contract.result_contract(!self.steps.is_empty())
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -323,6 +350,12 @@ enum XyceStaticTranPlanPurpose {
     /// path admits only device families whose absolute transient behavior is
     /// covered by the native oracle contract.
     AbsoluteOracle,
+    /// Compare a checked-in ordinary PRN waveform for the narrowly qualified
+    /// bare Xyce LEVEL=9 BSIM3 subset using Release 7.10's default integrated
+    /// `xyce_verify` contract on the simulator's own adaptive output grid.
+    /// This is an oracle-bounded compatibility envelope, not a declaration of
+    /// general BSIM3 3.2.2/3.3.0 model-version equivalence.
+    DefaultLevel9XyceVerifyOracle,
     /// Compare two independently simulated representations of the same
     /// circuit. The freshly simulated baseline is the oracle, so a redundant
     /// per-member gold file and absolute device-model eligibility are neither
@@ -343,11 +376,21 @@ enum XyceStaticTranPlanPurpose {
 
 impl XyceStaticTranPlanPurpose {
     fn requires_reference_file(self) -> bool {
-        matches!(self, Self::AbsoluteOracle)
+        matches!(
+            self,
+            Self::AbsoluteOracle | Self::DefaultLevel9XyceVerifyOracle
+        )
     }
 
     fn validates_absolute_device_contract(self) -> bool {
-        matches!(self, Self::AbsoluteOracle | Self::AnalyticOracle)
+        matches!(
+            self,
+            Self::AbsoluteOracle | Self::DefaultLevel9XyceVerifyOracle | Self::AnalyticOracle
+        )
+    }
+
+    fn admits_default_level9_bsim3(self) -> bool {
+        matches!(self, Self::DefaultLevel9XyceVerifyOracle)
     }
 }
 
@@ -2183,17 +2226,8 @@ impl XyceTestRunner {
             }
         }
         Self::validate_static_tran_analysis_contract(&netlist, &tran, &print)?;
-        if purpose.validates_absolute_device_contract() {
-            Self::validate_native_transient_contract(&netlist)?;
-        } else if purpose == XyceStaticTranPlanPurpose::ScopedModelRelationalFamily {
-            Self::validate_native_transient_contract_for_purpose(&netlist, purpose)?;
-        } else {
-            Self::validate_native_relational_transient_contract(&netlist)?;
-        }
-
         let timeint_conststep = Self::source_enables_constant_time_step_output(&source);
-
-        Ok(XyceStaticTranPlan {
+        let mut plan = XyceStaticTranPlan {
             deck_path: deck.path.clone(),
             reference_path,
             source,
@@ -2204,7 +2238,27 @@ impl XyceTestRunner {
             steps,
             wrapper_tolerance: Self::native_default_prn_tran_wrapper_tolerance(&deck.relative_path),
             contract,
-        })
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+        };
+        plan.comparison_mode =
+            Self::select_static_tran_comparison_mode(&plan, &netlist, purpose, requires_wrapper)?;
+        let validation_purpose = if matches!(
+            plan.comparison_mode,
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. }
+        ) {
+            XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle
+        } else {
+            purpose
+        };
+        if validation_purpose.validates_absolute_device_contract()
+            || validation_purpose == XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
+        {
+            Self::validate_native_transient_contract_for_purpose(&netlist, validation_purpose)?;
+        } else {
+            Self::validate_native_relational_transient_contract(&netlist)?;
+        }
+
+        Ok(plan)
     }
 
     fn static_tran_family_plan_for_path(
@@ -2258,6 +2312,310 @@ impl XyceTestRunner {
             ));
         }
         Ok(())
+    }
+
+    fn select_static_tran_comparison_mode(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        purpose: XyceStaticTranPlanPurpose,
+        requires_wrapper: bool,
+    ) -> Result<XyceStaticTranComparisonMode, String> {
+        let pointwise = XyceStaticTranComparisonMode::Pointwise;
+        if purpose == XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle {
+            return Err(
+                "the default LEVEL=9 xyce_verify purpose is derived internally only after the strict integrated-RMS selector succeeds"
+                    .to_string(),
+            );
+        }
+        if purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
+            || requires_wrapper
+            || plan.contract != XyceStaticTranContract::PlainStatic
+            || plan.output_override
+            || plan.timeint_conststep
+            || !plan.steps.is_empty()
+            || plan.wrapper_tolerance.is_some()
+            || !plan.reference_path.is_file()
+            || Self::source_has_comp_directive(&plan.source)
+            || !Self::native_transient_uses_standard_startup(netlist)
+            || !netlist.diagnostics.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || netlist
+                .elements
+                .iter()
+                .any(|element| matches!(element.kind, ElementKind::Subcircuit { .. }))
+        {
+            return Ok(pointwise);
+        }
+
+        let mosfets = netlist
+            .elements
+            .iter()
+            .filter(|element| matches!(element.kind, ElementKind::Mosfet { .. }))
+            .collect::<Vec<_>>();
+        if mosfets.is_empty()
+            || mosfets.iter().any(|element| {
+                !Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
+            })
+            || netlist.elements.iter().any(|element| {
+                !Self::netlist_element_is_native_level9_xyce_verify_supported(element)
+            })
+        {
+            return Ok(pointwise);
+        }
+
+        let referenced_models = mosfets
+            .iter()
+            .filter_map(|element| match &element.kind {
+                ElementKind::Mosfet { model, .. } => Some(model.to_ascii_lowercase()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        if netlist.models.len() != referenced_models.len()
+            || netlist.models.iter().any(|model| {
+                !referenced_models.contains(&model.name.to_ascii_lowercase())
+                    || !Self::model_is_native_absolute_transient_level9_bsim3(model)
+            })
+        {
+            return Ok(pointwise);
+        }
+
+        let Some(scientific_precision) =
+            Self::strict_level9_xyce_verify_source_precision(&plan.source, netlist.models.len())?
+        else {
+            return Ok(pointwise);
+        };
+        Ok(XyceStaticTranComparisonMode::Release710IntegratedRms {
+            scientific_precision,
+        })
+    }
+
+    fn source_has_comp_directive(source: &str) -> bool {
+        source
+            .lines()
+            .any(|line| Self::comp_directive_body(line).is_some())
+    }
+
+    fn comp_directive_body(line: &str) -> Option<&str> {
+        let trimmed = line
+            .split_once(';')
+            .map_or(line, |(head, _)| head)
+            .trim_start();
+        let prefix = trimmed.get(..5)?;
+        let body = trimmed.get(5..)?;
+        (prefix.eq_ignore_ascii_case("*COMP")
+            && body.chars().next().is_none_or(char::is_whitespace))
+        .then(|| body.trim_start())
+    }
+
+    fn strict_level9_xyce_verify_source_precision(
+        source: &str,
+        expected_model_count: usize,
+    ) -> Result<Option<usize>, String> {
+        let lines = Self::logical_netlist_lines(source);
+        if lines.is_empty() {
+            return Ok(None);
+        }
+        let mut model_count = 0usize;
+        let mut tran_count = 0usize;
+        let mut print_count = 0usize;
+        let mut end_count = 0usize;
+        let mut scientific_precision = None;
+        let mut saw_end = false;
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            if stripped.is_empty() {
+                continue;
+            }
+            if saw_end {
+                return Ok(None);
+            }
+            let fields = Self::split_print_fields(stripped)?;
+            let Some(command) = fields.first() else {
+                continue;
+            };
+            if !command.starts_with('.') {
+                continue;
+            }
+            match command.to_ascii_lowercase().as_str() {
+                ".model" => model_count += 1,
+                ".tran" => {
+                    tran_count += 1;
+                    if fields.len() != 3 {
+                        return Ok(None);
+                    }
+                }
+                ".print" => {
+                    print_count += 1;
+                    scientific_precision =
+                        Some(Self::strict_level9_xyce_verify_print_precision(&fields)?);
+                }
+                ".end" => {
+                    end_count += 1;
+                    if fields.len() != 1 {
+                        return Ok(None);
+                    }
+                    saw_end = true;
+                }
+                _ => return Ok(None),
+            }
+        }
+        if model_count != expected_model_count
+            || tran_count != 1
+            || print_count != 1
+            || end_count != 1
+        {
+            return Ok(None);
+        }
+        Ok(scientific_precision)
+    }
+
+    fn strict_level9_xyce_verify_print_precision(fields: &[String]) -> Result<usize, String> {
+        if fields.len() < 3
+            || !fields[0].eq_ignore_ascii_case(".PRINT")
+            || !fields[1].eq_ignore_ascii_case("TRAN")
+        {
+            return Err(
+                "integrated-RMS output requires one ordinary .PRINT TRAN statement".to_string(),
+            );
+        }
+        let field_refs = fields.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut precision = None;
+        let mut width = None;
+        let mut format = None;
+        let mut filter = None;
+        let mut time_scale_factor = None;
+        let mut saw_probe = false;
+        let mut index = 2usize;
+        while index < fields.len() {
+            if let Some((raw_key, raw_value, consumed)) =
+                Self::print_option_assignment(&field_refs, index)
+            {
+                if saw_probe {
+                    return Err(format!(
+                        "integrated-RMS .PRINT TRAN does not admit option assignment '{raw_key}' after the first probe"
+                    ));
+                }
+                let key = raw_key.trim().to_ascii_lowercase();
+                let verifier_value = raw_value.trim();
+                if !verifier_value
+                    .chars()
+                    .next()
+                    .is_some_and(|first| first.is_ascii_alphanumeric() || first == '_')
+                {
+                    return Err(format!(
+                        "integrated-RMS .PRINT TRAN option '{raw_key}' is not consumable by Release 7.10 xyce_verify.pl: '{raw_value}'"
+                    ));
+                }
+                let value = verifier_value;
+                match key.as_str() {
+                    "precision" => precision = Some(value.to_string()),
+                    "width" => width = Some(value.to_string()),
+                    "format" => {
+                        format = Some(value.to_string());
+                    }
+                    "filter" => filter = Some(value.to_string()),
+                    "timescalefactor" => time_scale_factor = Some(value.to_string()),
+                    _ => {
+                        return Err(format!(
+                            "integrated-RMS .PRINT TRAN does not admit output option '{raw_key}'"
+                        ));
+                    }
+                }
+                index += consumed;
+                continue;
+            }
+
+            let normalized = field_refs[index].to_ascii_lowercase();
+            if Self::is_print_option_token(&normalized)
+                || matches!(
+                    normalized.as_str(),
+                    "file"
+                        | "format"
+                        | "width"
+                        | "precision"
+                        | "delimiter"
+                        | "noindex"
+                        | "index"
+                        | "filter"
+                        | "timescalefactor"
+                )
+            {
+                return Err(format!(
+                    "integrated-RMS .PRINT TRAN does not admit output option '{}'",
+                    fields[index]
+                ));
+            }
+            saw_probe = true;
+            index += 1;
+        }
+
+        if !saw_probe {
+            return Err("integrated-RMS .PRINT TRAN contains no probes".to_string());
+        }
+        let parse_effective_integer_option = |name: &str,
+                                              raw: Option<&str>|
+         -> Result<Option<i32>, String> {
+            raw.map(|value| {
+                    let parsed = crate::netlist::lexer::parse_spice_value(value).map_err(|err| {
+                        format!(
+                            "integrated-RMS .PRINT TRAN {name} must be numeric: '{value}': {err}"
+                        )
+                    })?;
+                    if !parsed.is_finite()
+                        || parsed < f64::from(i32::MIN)
+                        || parsed > f64::from(i32::MAX)
+                    {
+                        return Err(format!(
+                            "integrated-RMS .PRINT TRAN {name} must be a finite Xyce integer value in the i32 range: '{value}'"
+                        ));
+                    }
+                    Ok(parsed as i32)
+                })
+                .transpose()
+        };
+        let effective_precision =
+            parse_effective_integer_option("PRECISION", precision.as_deref())?;
+        if effective_precision != Some(12) {
+            return Err(format!(
+                "integrated-RMS .PRINT TRAN requires explicit effective PRECISION=12, got {effective_precision:?}"
+            ));
+        }
+        let _effective_width = parse_effective_integer_option("WIDTH", width.as_deref())?;
+        if format
+            .as_deref()
+            .is_some_and(|value| !value.eq_ignore_ascii_case("STD"))
+        {
+            return Err(format!(
+                "integrated-RMS .PRINT TRAN requires effective FORMAT=STD, got {format:?}"
+            ));
+        }
+        let parse_finite_option =
+            |name: &str, raw: Option<&str>| -> Result<Option<Value>, String> {
+                raw.map(|value| {
+                    let parsed = crate::netlist::lexer::parse_spice_value(value).map_err(|err| {
+                    format!("integrated-RMS .PRINT TRAN {name} must be numeric: '{value}': {err}")
+                })?;
+                    if !parsed.is_finite() {
+                        return Err(format!("integrated-RMS .PRINT TRAN {name} must be finite"));
+                    }
+                    Ok(parsed)
+                })
+                .transpose()
+            };
+        let effective_filter = parse_finite_option("FILTER", filter.as_deref())?;
+        if effective_filter.is_some_and(|value| value != 0.0) {
+            return Err(format!(
+                "integrated-RMS .PRINT TRAN requires effective FILTER=0, got {effective_filter:?}"
+            ));
+        }
+        let effective_time_scale =
+            parse_finite_option("TIMESCALEFACTOR", time_scale_factor.as_deref())?;
+        if effective_time_scale.is_some_and(|value| value != 1.0) {
+            return Err(format!(
+                "integrated-RMS .PRINT TRAN requires effective TIMESCALEFACTOR=1, got {effective_time_scale:?}"
+            ));
+        }
+        Ok(12)
     }
 
     fn static_ac_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticAcPlan, String> {
@@ -5876,7 +6234,7 @@ impl XyceTestRunner {
         plan: &XyceStaticTranPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = plan.contract.result_contract(!plan.steps.is_empty());
+        let contract = plan.result_contract();
         if !plan.steps.is_empty() {
             return self.failure_result(
                 deck,
@@ -5943,7 +6301,7 @@ impl XyceTestRunner {
         plan: XyceStaticTranPlan,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = plan.contract.result_contract(!plan.steps.is_empty());
+        let contract = plan.result_contract();
         if matches!(plan.contract, XyceStaticTranContract::WrapperNoIndexHeader) {
             return self.run_noindex_header_tran_wrapper_plan(deck, &plan, start);
         }
@@ -5960,7 +6318,15 @@ impl XyceTestRunner {
             }
         };
 
-        let reference = match Self::parse_tran_reference_file(plan.contract, &plan.reference_path) {
+        let reference_result = match plan.comparison_mode {
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
+                Self::parse_xyce_verify_tran_reference_file(&plan.reference_path)
+            }
+            XyceStaticTranComparisonMode::Pointwise => {
+                Self::parse_tran_reference_file(plan.contract, &plan.reference_path)
+            }
+        };
+        let reference = match reference_result {
             Ok(reference) => reference,
             Err(err) => {
                 return self.failure_result(
@@ -5993,26 +6359,30 @@ impl XyceTestRunner {
             reference_time_grid.as_slice(),
         );
 
-        let max_step = match Self::transient_max_step_for_reference(&netlist, &tran, &reference) {
-            Ok(max_step) => max_step,
-            Err(err) if err.contains("transient harness execution envelope") => {
-                return self.expected_unsupported_result(
-                    deck,
-                    start,
-                    "unsupported_xyce_contract",
-                    &err,
-                );
-            }
-            Err(err) => {
-                return self.failure_result(
-                    deck,
-                    start,
-                    contract,
-                    format!("reference time-grid error: {err}"),
-                    Vec::new(),
-                );
-            }
-        };
+        let max_step =
+            match Self::transient_max_step_for_static_plan(&plan, &netlist, &tran, &reference) {
+                Ok(max_step) => max_step,
+                Err(err)
+                    if !plan.comparison_mode.uses_adaptive_grid_only()
+                        && err.contains("transient harness execution envelope") =>
+                {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_contract",
+                        &err,
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("transient maximum-step or execution-envelope error: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
 
         let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
         let engine = self.create_xyce_static_tran_engine(None, initial_step);
@@ -6021,14 +6391,9 @@ impl XyceTestRunner {
         let mut simulation_error = None;
         match engine.run_tran_with_abort(&netlist, tran.stop, max_step, &abort) {
             Ok(result) => {
-                let mismatches = match self.compare_tran_prn_reference(
-                    &reference,
-                    &plan.print,
-                    &netlist,
-                    &plan.source,
-                    &result,
-                    plan.wrapper_tolerance,
-                ) {
+                let mismatches = match self
+                    .compare_static_tran_primary_reference(&reference, &plan, &netlist, &result)
+                {
                     Ok(mismatches) => mismatches,
                     Err(err) => {
                         return self.failure_result(
@@ -6047,6 +6412,19 @@ impl XyceTestRunner {
                     );
                 }
 
+                if plan.comparison_mode.uses_adaptive_grid_only() {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "{} Xyce integrated-RMS transient reference mismatch(es)",
+                            mismatches.len()
+                        ),
+                        mismatches,
+                    );
+                }
+
                 best_mismatches = Some(mismatches);
             }
             Err(SimulationError::Aborted) => {
@@ -6061,7 +6439,10 @@ impl XyceTestRunner {
                     Vec::new(),
                 );
             }
-            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+            Err(err)
+                if !plan.comparison_mode.uses_adaptive_grid_only()
+                    && Self::is_expected_unsupported_runtime_error(&err) =>
+            {
                 return self.expected_unsupported_result(
                     deck,
                     start,
@@ -6072,6 +6453,19 @@ impl XyceTestRunner {
             Err(err) => {
                 simulation_error = Some(format!("simulation error: {err}"));
             }
+        }
+
+        if plan.comparison_mode.uses_adaptive_grid_only() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                simulation_error.unwrap_or_else(|| {
+                    "adaptive integrated-RMS transient execution produced no comparable result"
+                        .to_string()
+                }),
+                Vec::new(),
+            );
         }
 
         let capacitor_branch_print =
@@ -6262,7 +6656,7 @@ impl XyceTestRunner {
         reference: XycePrnTable,
         start: Instant,
     ) -> XyceTestResult {
-        let contract = plan.contract.result_contract(true);
+        let contract = plan.result_contract();
         let expansion_engine = self.create_xyce_engine();
         let step_runs =
             match Self::nested_step_runs_for_commands(&expansion_engine, &netlist, &plan.steps) {
@@ -14304,6 +14698,7 @@ impl XyceTestRunner {
         table: &XycePrnTable,
         role: &str,
         tolerance: XyceVerifyTransientTolerance,
+        scientific_precision: usize,
     ) -> Result<Vec<(Value, Vec<Value>)>, String> {
         if table.columns.len() < 3
             || !table.columns[0].eq_ignore_ascii_case("Index")
@@ -14342,20 +14737,22 @@ impl XyceTestRunner {
             // rc_osc overrides only its expression's *COMP tolerance. TIME
             // retains Release 7.10's independent default zero threshold.
             let time = zero_small(
-                Self::xyce_default_prn_roundtrip(row[1]).map_err(|err| {
-                    format!("could not serialize {role} TIME at row {row_index}: {err}")
-                })?,
+                Self::xyce_prn_scientific_roundtrip(row[1], scientific_precision).map_err(
+                    |err| format!("could not serialize {role} TIME at row {row_index}: {err}"),
+                )?,
                 XYCE_VERIFY_DEFAULT_ZERO_TOLERANCE,
             );
             let mut values = Vec::with_capacity(row.len() - 2);
             for (column_index, &value) in row[2..].iter().enumerate() {
                 values.push(zero_small(
-                    Self::xyce_default_prn_roundtrip(value).map_err(|err| {
-                        format!(
-                            "could not serialize {role} {} at row {row_index}: {err}",
-                            table.columns[column_index + 2]
-                        )
-                    })?,
+                    Self::xyce_prn_scientific_roundtrip(value, scientific_precision).map_err(
+                        |err| {
+                            format!(
+                                "could not serialize {role} {} at row {row_index}: {err}",
+                                table.columns[column_index + 2]
+                            )
+                        },
+                    )?,
                     tolerance.zero,
                 ));
             }
@@ -14387,19 +14784,38 @@ impl XyceTestRunner {
     }
 
     fn xyce_default_prn_roundtrip(value: Value) -> Result<Value, String> {
-        let printed = Self::xyce_default_prn_text(value)?;
+        Self::xyce_prn_scientific_roundtrip(value, XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION)
+    }
+
+    fn xyce_prn_scientific_roundtrip(
+        value: Value,
+        scientific_precision: usize,
+    ) -> Result<Value, String> {
+        let printed = Self::xyce_prn_scientific_text(value, scientific_precision)?;
         printed
             .parse::<Value>()
-            .map_err(|err| format!("could not parse default .prn value '{printed}': {err}"))
+            .map_err(|err| format!("could not parse scientific .prn value '{printed}': {err}"))
     }
 
     fn xyce_default_prn_text(value: Value) -> Result<String, String> {
+        Self::xyce_prn_scientific_text(value, XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION)
+    }
+
+    fn xyce_prn_scientific_text(
+        value: Value,
+        scientific_precision: usize,
+    ) -> Result<String, String> {
         if !value.is_finite() {
-            return Err(format!("default .prn output cannot serialize {value}"));
+            return Err(format!("scientific .prn output cannot serialize {value}"));
+        }
+        if !(1..=XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION).contains(&scientific_precision) {
+            return Err(format!(
+                "scientific .prn precision must be between 1 and {XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION}, got {scientific_precision}"
+            ));
         }
         Ok(format!(
             "{value:.precision$e}",
-            precision = XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION
+            precision = scientific_precision
         ))
     }
 
@@ -14443,6 +14859,7 @@ impl XyceTestRunner {
             good,
             test,
             XyceVerifyTransientTolerance::release_7_10_default(),
+            XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
         )
     }
 
@@ -14458,7 +14875,12 @@ impl XyceTestRunner {
                 good.columns, test.columns
             ));
         }
-        self.compare_xyce_verify_transient_tables_with_uniform_tolerance(good, test, tolerance)
+        self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+            good,
+            test,
+            tolerance,
+            XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        )
     }
 
     fn compare_xyce_verify_transient_tables_with_uniform_tolerance(
@@ -14466,8 +14888,10 @@ impl XyceTestRunner {
         good: &XycePrnTable,
         test: &XycePrnTable,
         tolerance: XyceVerifyTransientTolerance,
+        scientific_precision: usize,
     ) -> Result<Vec<XyceValueMismatch>, String> {
         let tolerance = tolerance.validate()?;
+        Self::xyce_prn_scientific_text(0.0, scientific_precision)?;
         if good.columns.len() != test.columns.len()
             || !good
                 .columns
@@ -14481,8 +14905,18 @@ impl XyceTestRunner {
             ));
         }
 
-        let good_rows = Self::normalized_xyce_verify_transient_rows(good, "good", tolerance)?;
-        let test_rows = Self::normalized_xyce_verify_transient_rows(test, "test", tolerance)?;
+        let good_rows = Self::normalized_xyce_verify_transient_rows(
+            good,
+            "good",
+            tolerance,
+            scientific_precision,
+        )?;
+        let test_rows = Self::normalized_xyce_verify_transient_rows(
+            test,
+            "test",
+            tolerance,
+            scientific_precision,
+        )?;
         if good_rows.len() < 2 || test_rows.len() < 2 {
             return Err(format!(
                 "xyce_verify transient RMS requires at least two distinct printed times in both series, found good={} and test={}",
@@ -15791,6 +16225,36 @@ impl XyceTestRunner {
         Ok(mismatches)
     }
 
+    fn compare_static_tran_primary_reference(
+        &self,
+        reference: &XycePrnTable,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        match plan.comparison_mode {
+            XyceStaticTranComparisonMode::Pointwise => self.compare_tran_prn_reference(
+                reference,
+                &plan.print,
+                netlist,
+                &plan.source,
+                result,
+                plan.wrapper_tolerance,
+            ),
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision,
+            } => {
+                let actual = Self::transient_family_result_to_prn_table(plan, netlist, result)?;
+                self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+                    reference,
+                    &actual,
+                    XyceVerifyTransientTolerance::release_7_10_default(),
+                    scientific_precision,
+                )
+            }
+        }
+    }
+
     fn compare_tran_prn_reference(
         &self,
         reference: &XycePrnTable,
@@ -16274,41 +16738,43 @@ impl XyceTestRunner {
             }
 
             let mut index = 2usize;
+            let mut line_factor = None;
             while index < token_refs.len() {
                 if let Some((raw_key, raw_value, consumed)) =
                     Self::print_option_assignment(&token_refs, index)
                 {
                     if raw_key.trim().eq_ignore_ascii_case("TIMESCALEFACTOR") {
-                        let parsed = crate::netlist::lexer::parse_spice_value(
-                            raw_value.trim().trim_matches(['"', '\'']),
-                        )
-                        .map_err(|err| {
-                            format!(
-                                "failed to parse .PRINT TRAN TIMESCALEFACTOR value '{}': {err}",
-                                raw_value.trim()
-                            )
-                        })?;
-                        if !parsed.is_finite() || parsed <= 0.0 {
-                            return Err(format!(
-                                ".PRINT TRAN TIMESCALEFACTOR must be positive and finite, got {parsed}"
-                            ));
-                        }
-                        if let Some(existing) = factor {
-                            let scale = existing.abs().max(parsed.abs()).max(1.0);
-                            if (existing - parsed).abs() > 1.0e-12 * scale {
-                                return Err(
-                                    "conflicting .PRINT TRAN TIMESCALEFACTOR options are not supported"
-                                        .to_string(),
-                                );
-                            }
-                        } else {
-                            factor = Some(parsed);
-                        }
+                        line_factor = Some(raw_value.trim().trim_matches(['"', '\'']).to_string());
                     }
                     index += consumed;
                 } else {
-                    index += 1;
+                    break;
                 }
+            }
+            let parsed = match line_factor {
+                Some(raw_factor) => crate::netlist::lexer::parse_spice_value(&raw_factor).map_err(
+                    |err| {
+                        format!(
+                            "failed to parse .PRINT TRAN TIMESCALEFACTOR value '{raw_factor}': {err}"
+                        )
+                    },
+                )?,
+                None => 1.0,
+            };
+            if !parsed.is_finite() || parsed <= 0.0 {
+                return Err(format!(
+                    ".PRINT TRAN TIMESCALEFACTOR must be positive and finite, got {parsed}"
+                ));
+            }
+            if let Some(existing) = factor {
+                if existing.to_bits() != parsed.to_bits() {
+                    return Err(
+                        "different .PRINT TRAN output blocks use conflicting TIMESCALEFACTOR values"
+                            .to_string(),
+                    );
+                }
+            } else {
+                factor = Some(parsed);
             }
         }
 
@@ -16377,17 +16843,41 @@ impl XyceTestRunner {
         Ok(data_columns)
     }
 
+    fn transient_max_step_for_static_plan(
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+        reference: &XycePrnTable,
+    ) -> Result<Value, String> {
+        match plan.comparison_mode {
+            XyceStaticTranComparisonMode::Release710IntegratedRms { .. } => {
+                Self::transient_max_step_with_optional_reference(netlist, tran, None)
+            }
+            XyceStaticTranComparisonMode::Pointwise => {
+                Self::transient_max_step_for_reference(netlist, tran, reference)
+            }
+        }
+    }
+
     fn transient_max_step_for_reference(
         netlist: &Netlist,
         tran: &XyceTranAnalysis,
         reference: &XycePrnTable,
+    ) -> Result<Value, String> {
+        let reference_step = Self::reference_min_positive_time_step(reference)?;
+        Self::transient_max_step_with_optional_reference(netlist, tran, reference_step)
+    }
+
+    fn transient_max_step_with_optional_reference(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+        reference_step: Option<Value>,
     ) -> Result<Value, String> {
         let requested = tran.max_step.or_else(|| {
             (tran.step > 0.0)
                 .then_some(tran.step)
                 .and_then(|step| Self::feasible_oracle_limited_step(tran, step))
         });
-        let reference_step = Self::reference_min_positive_time_step(reference)?;
         let source_step = Self::source_transient_max_step(netlist, tran)
             .and_then(|step| Self::feasible_oracle_limited_step(tran, step));
         let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
@@ -16407,7 +16897,7 @@ impl XyceTestRunner {
         let unconstrained_estimated_steps = (tran.stop / max_step).ceil();
         if unconstrained_estimated_steps > MAX_NATIVE_TRAN_ORACLE_STEPS {
             return Err(format!(
-                "transient harness execution envelope supports at most {:.0} oracle-derived native step(s), but this deck requires about {:.0}",
+                "transient harness execution envelope supports at most {:.0} native step(s), but this deck requires about {:.0}",
                 MAX_NATIVE_TRAN_ORACLE_STEPS, unconstrained_estimated_steps
             ));
         }
@@ -16436,11 +16926,11 @@ impl XyceTestRunner {
             return Ok(None);
         }
 
-        // The harness compares by interpolation and can retry on the exact
-        // reference grid. Do not turn one tiny adaptive Xyce gap into hundreds
-        // of thousands of globally capped nonlinear solves. This relaxes only
-        // the harness-imposed cap; engine LTE control and source breakpoints
-        // may still accept smaller steps, and an explicit deck TMAX always wins.
+        // The harness compares by interpolation. Do not turn one tiny oracle
+        // or source-resolution target into hundreds of thousands of globally
+        // capped nonlinear solves. This relaxes only the harness-imposed cap;
+        // engine LTE control and source breakpoints may still accept smaller
+        // steps, and an explicit deck TMAX always wins.
         Ok(Some(
             tran.stop * compact_device_count as Value / MAX_NATIVE_TRAN_TARGET_COMPACT_DEVICE_STEPS,
         ))
@@ -17529,18 +18019,9 @@ impl XyceTestRunner {
 
         let mut tolerances = BTreeMap::new();
         for line in source.lines() {
-            let trimmed = line
-                .split_once(';')
-                .map(|(head, _)| head)
-                .unwrap_or(line)
-                .trim_start();
-            if !trimmed
-                .get(..5)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("*comp"))
-            {
+            let Some(rest) = Self::comp_directive_body(line) else {
                 continue;
-            }
-            let rest = trimmed[5..].trim_start();
+            };
             let Some((probe, options)) = Self::split_comp_directive(rest) else {
                 continue;
             };
@@ -18441,6 +18922,7 @@ impl XyceTestRunner {
         }
     }
 
+    #[cfg(test)]
     fn validate_native_transient_contract(netlist: &Netlist) -> Result<(), String> {
         Self::validate_native_transient_contract_for_purpose(
             netlist,
@@ -18492,9 +18974,15 @@ impl XyceTestRunner {
             && elements.iter().any(|element| {
                 Self::netlist_element_is_native_transient_level1_npn(netlist, element)
             });
-        if has_qualified_bjt && !Self::native_level1_npn_transient_uses_standard_startup(netlist) {
+        let has_qualified_level9_bsim3 = purpose.admits_default_level9_bsim3()
+            && elements.iter().any(|element| {
+                Self::netlist_element_is_native_absolute_transient_level9_bsim3(netlist, element)
+            });
+        if (has_qualified_bjt || has_qualified_level9_bsim3)
+            && !Self::native_transient_uses_standard_startup(netlist)
+        {
             return Err(
-                "native qualified-NPN transient comparison requires a single ordinary DC operating-point startup at the default 27 C TEMP and TNOM, without UIC/NOOP, .TEMP analyses, explicit initial conditions, or node-set hints"
+                "native qualified absolute-device transient comparison requires a single ordinary DC operating-point startup at the default 27 C TEMP and TNOM, without UIC/NOOP, .TEMP analyses, explicit initial conditions, or node-set hints"
                     .to_string(),
             );
         }
@@ -18635,6 +19123,11 @@ impl XyceTestRunner {
                             netlist, element,
                         ) => {}
                 ElementKind::Mosfet { .. }
+                    if purpose.admits_default_level9_bsim3()
+                        && Self::netlist_element_is_native_absolute_transient_level9_bsim3(
+                            netlist, element,
+                        ) => {}
+                ElementKind::Mosfet { .. }
                     if Self::netlist_device_is_native_b3soi_mosfet(netlist, &element.name) => {}
                 ElementKind::Mosfet { .. }
                     if purpose == XyceStaticTranPlanPurpose::RelationalFamily
@@ -18657,6 +19150,10 @@ impl XyceTestRunner {
                             "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
+                        XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle => format!(
+                            "native Release 7.10 integrated-RMS .PRINT TRAN comparison supports the strict bare Xyce LEVEL=9 BSIM3 subset in addition to the ordinary absolute-device envelope; element '{}' requires a broader transient oracle contract",
+                            element.name
+                        ),
                         XyceStaticTranPlanPurpose::RelationalFamily => format!(
                             "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3 and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
                             element.name
@@ -18675,7 +19172,7 @@ impl XyceTestRunner {
     fn validate_native_scoped_model_relational_transient_contract_flat(
         netlist: &Netlist,
     ) -> Result<(), String> {
-        if !Self::native_level1_npn_transient_uses_standard_startup(netlist) {
+        if !Self::native_transient_uses_standard_startup(netlist) {
             return Err(
                 "native scoped-model relational comparison requires ordinary DC operating-point startup at the default 27 C TEMP and TNOM, without UIC/NOOP, .TEMP analyses, explicit initial conditions, or node-set hints"
                     .to_string(),
@@ -18752,11 +19249,8 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn validate_scoped_model_relational_source(
-        source_name: &str,
-        spec: &crate::netlist::SourceSpec,
-    ) -> Result<(), String> {
-        let qualified = match spec {
+    fn source_spec_is_finite_dc_or_pulse(spec: &crate::netlist::SourceSpec) -> bool {
+        match spec {
             crate::netlist::SourceSpec::Dc(value) => value.is_finite(),
             crate::netlist::SourceSpec::Pulse {
                 v1,
@@ -18779,8 +19273,14 @@ impl XyceTestRunner {
                     && *period > 0.0
             }
             _ => false,
-        };
-        if qualified {
+        }
+    }
+
+    fn validate_scoped_model_relational_source(
+        source_name: &str,
+        spec: &crate::netlist::SourceSpec,
+    ) -> Result<(), String> {
+        if Self::source_spec_is_finite_dc_or_pulse(spec) {
             Ok(())
         } else {
             Err(format!(
@@ -22206,7 +22706,7 @@ impl XyceTestRunner {
         }
     }
 
-    fn native_level1_npn_transient_uses_standard_startup(netlist: &Netlist) -> bool {
+    fn native_transient_uses_standard_startup(netlist: &Netlist) -> bool {
         !Self::tran_uses_uic(netlist)
             && !netlist
                 .analyses
@@ -22245,6 +22745,127 @@ impl XyceTestRunner {
             .filter(|model| model.name.eq_ignore_ascii_case(name));
         let model = matches.next()?;
         matches.next().is_none().then_some(model)
+    }
+
+    fn netlist_element_is_native_absolute_transient_level9_bsim3(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 4
+            && !compact_syntax
+            && deferred_params.is_empty()
+            && Self::native_absolute_transient_level9_bsim3_instance_params(instance_params)
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_absolute_transient_level9_bsim3)
+    }
+
+    fn netlist_element_is_native_level9_xyce_verify_supported(
+        element: &crate::netlist::Element,
+    ) -> bool {
+        match &element.kind {
+            ElementKind::Mosfet { .. } => true,
+            ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                element.nodes.len() == 2 && Self::source_spec_is_finite_dc_or_pulse(spec)
+            }
+            ElementKind::Resistor {
+                value,
+                value_expr,
+                model,
+                instance_params,
+                deferred_params,
+            } => {
+                element.nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+            }
+            ElementKind::Capacitor {
+                value,
+                value_expr,
+                initial_voltage,
+                model,
+                instance_params,
+                deferred_params,
+            } => {
+                element.nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_voltage.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+            }
+            ElementKind::Inductor {
+                value,
+                value_expr,
+                initial_current,
+                model,
+                instance_params,
+                deferred_params,
+            } => {
+                element.nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_current.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty()
+            }
+            _ => false,
+        }
+    }
+
+    fn native_absolute_transient_level9_bsim3_instance_params(params: &[(String, Value)]) -> bool {
+        if params.len() != 2
+            || !params.iter().all(|(name, value)| {
+                value.is_finite()
+                    && *value > 0.0
+                    && matches!(name.to_ascii_uppercase().as_str(), "W" | "L")
+            })
+        {
+            return false;
+        }
+        params
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("W"))
+            .count()
+            == 1
+            && params
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("L"))
+                .count()
+                == 1
+    }
+
+    fn model_is_native_absolute_transient_level9_bsim3(model: &crate::netlist::ModelDef) -> bool {
+        matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "NMOS" | "PMOS"
+        ) && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && matches!(model.params.as_slice(), [(name, level)]
+                if name.eq_ignore_ascii_case("LEVEL")
+                    && level.is_finite()
+                    && level.to_bits() == 9.0f64.to_bits())
     }
 
     fn netlist_element_is_native_scoped_model_relational_bjt(
@@ -24274,6 +24895,49 @@ impl XyceTestRunner {
             }
             _ => Self::parse_tran_prn_or_legacy_probe_file(path),
         }
+    }
+
+    fn parse_xyce_verify_tran_reference_file(path: &Path) -> Result<XycePrnTable, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_xyce_verify_tran_reference_table(&content)
+    }
+
+    fn parse_xyce_verify_tran_reference_table(content: &str) -> Result<XycePrnTable, String> {
+        let first_classified_line = content
+            .lines()
+            .find(|line| !line.is_empty())
+            .ok_or_else(|| "empty Release 7.10 xyce_verify transient input".to_string())?;
+        let first_header = first_classified_line.trim();
+        if Self::prn_header_delimiter(first_header) != Some(XycePrnDelimiter::Whitespace) {
+            return Err(
+                "Release 7.10 xyce_verify transient input must begin with an indexed STD PRN header"
+                    .to_string(),
+            );
+        }
+        let first_columns = Self::parse_prn_columns(first_header, XycePrnDelimiter::Whitespace)?;
+        if first_columns.first().map(String::as_str) != Some("Index") {
+            return Err(
+                "Release 7.10 xyce_verify transient input must begin with an indexed STD PRN header"
+                    .to_string(),
+            );
+        }
+        let table = Self::parse_prn_table(content)?;
+        let header_index = content
+            .lines()
+            .position(|line| Self::is_prn_header_line(line.trim()))
+            .expect("a parsed PRN table has a header");
+        if !content
+            .lines()
+            .skip(header_index + 1)
+            .any(|line| line.contains("End of Xyce"))
+        {
+            return Err(
+                "Release 7.10 xyce_verify transient input has no normal 'End of Xyce' completion footer"
+                    .to_string(),
+            );
+        }
+        Ok(table)
     }
 
     fn parse_tran_prn_or_legacy_probe_file(path: &Path) -> Result<XycePrnTable, String> {
@@ -27905,6 +28569,34 @@ timescale output
         .expect("TRAN print time scale factor parses");
 
         assert!((factor - 10.0).abs() <= 1.0e-15);
+
+        let repeated = XyceTestRunner::tran_print_time_scale_factor(
+            "timescale output\n.PRINT TRAN TIMESCALEFACTOR=bogus TIMESCALEFACTOR=1 V(1)\n.END\n",
+        )
+        .expect("repeated TRAN print time scale factors use Xyce last-assignment semantics");
+        assert!((repeated - 1.0).abs() <= 1.0e-15);
+
+        let conflict = XyceTestRunner::tran_print_time_scale_factor(
+            "timescale output\n.PRINT TRAN TIMESCALEFACTOR=10 V(1)\n.PRINT TRAN FILE='side.prn' TIMESCALEFACTOR=1 V(2)\n.END\n",
+        )
+        .expect_err("independent TRAN output blocks must not share one effective time scale");
+        assert!(conflict.contains("different .PRINT TRAN output blocks"));
+
+        for source in [
+            "timescale output\n.PRINT TRAN TIMESCALEFACTOR=10 V(1)\n.PRINT TRAN FILE='side.prn' V(2)\n.END\n",
+            "timescale output\n.PRINT TRAN V(1)\n.PRINT TRAN FILE='side.prn' TIMESCALEFACTOR=10 V(2)\n.END\n",
+        ] {
+            assert!(
+                XyceTestRunner::tran_print_time_scale_factor(source).is_err(),
+                "an omitted TIMESCALEFACTOR contributes the effective default 1 for its own output block"
+            );
+        }
+
+        let after_probe = XyceTestRunner::tran_print_time_scale_factor(
+            "timescale output\n.PRINT TRAN V(1) TIMESCALEFACTOR=10\n.END\n",
+        )
+        .expect("assignment-like probes do not become leading PRINT options");
+        assert_eq!(after_probe.to_bits(), 1.0f64.to_bits());
     }
 
     #[test]
@@ -29032,6 +29724,7 @@ Vbias source 0 0\n\
             steps: Vec::new(),
             contract: XyceStaticTranContract::WrapperStatic,
             wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
         }
     }
 
@@ -29396,6 +30089,7 @@ Cload out 0 2u\n\
             steps: Vec::new(),
             contract: XyceStaticTranContract::WrapperStatic,
             wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
         }
     }
 
@@ -29806,6 +30500,97 @@ Cload out 0 2u\n\
     }
 
     #[test]
+    fn xyce_verify_transient_comparison_uses_selected_scientific_precision() {
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+        let columns = vec![
+            "Index".to_string(),
+            "TIME".to_string(),
+            "V(out)".to_string(),
+        ];
+        let good = XycePrnTable {
+            columns: columns.clone(),
+            rows: vec![vec![0.0, 0.0, 1.0], vec![1.0, 1.0, 1.0]],
+        };
+        let test = XycePrnTable {
+            columns,
+            rows: vec![vec![0.0, 0.0, 3.000000004], vec![1.0, 1.0, 3.000000004]],
+        };
+        let tolerance = XyceVerifyTransientTolerance {
+            relative: 1.0,
+            absolute: 1.0,
+            zero: 0.0,
+            absolute_difference: 0.0,
+        };
+
+        assert!(
+            runner
+                .compare_xyce_verify_transient_tables_with_uniform_tolerance(
+                    &good, &test, tolerance, 8,
+                )
+                .expect("precision-8 comparison succeeds structurally")
+                .is_empty(),
+            "precision 8 rounds the normalized RMS exactly to the passing boundary"
+        );
+        let mismatches = runner
+            .compare_xyce_verify_transient_tables_with_uniform_tolerance(
+                &good, &test, tolerance, 12,
+            )
+            .expect("precision-12 comparison succeeds structurally");
+        assert_eq!(mismatches.len(), 1);
+        assert!(mismatches[0].relative_error > 1.0);
+        assert!(
+            XyceTestRunner::xyce_prn_scientific_text(1.2345678901234, 0).is_err(),
+            "zero precision must fail closed"
+        );
+        assert!(
+            XyceTestRunner::xyce_prn_scientific_text(
+                1.2345678901234,
+                XYCE_MAX_IEEE754_PRN_SCIENTIFIC_PRECISION + 1,
+            )
+            .is_err(),
+            "precision beyond the binary64 envelope must fail closed"
+        );
+    }
+
+    #[test]
+    fn xyce_verify_transient_reference_requires_normal_completion_footer() {
+        let complete = "Index TIME V(out)\n0 0.0 1.0\n1 1.0 2.0\nEnd of Xyce(TM) Simulation\n";
+        let table = XyceTestRunner::parse_xyce_verify_tran_reference_table(complete)
+            .expect("normally completed xyce_verify reference parses");
+        assert_eq!(table.rows.len(), 2);
+        XyceTestRunner::parse_xyce_verify_tran_reference_table(&format!("\n\n{complete}"))
+            .expect("Release 7.10 skips exactly empty leading lines");
+
+        let truncated = complete.replace("End of Xyce(TM) Simulation\n", "");
+        let error = XyceTestRunner::parse_xyce_verify_tran_reference_table(&truncated)
+            .expect_err("truncated xyce_verify reference must fail closed");
+        assert!(error.contains("no normal 'End of Xyce' completion footer"));
+
+        let preheader_decoy = format!("End of Xyce(TM) Simulation\n{truncated}");
+        assert!(
+            XyceTestRunner::parse_xyce_verify_tran_reference_table(&preheader_decoy).is_err(),
+            "a completion marker before the PRN header must not authenticate truncated data"
+        );
+        let preamble = format!("unexpected preamble\n{complete}");
+        assert!(
+            XyceTestRunner::parse_xyce_verify_tran_reference_table(&preamble).is_err(),
+            "Release 7.10 classifies the first nonblank line and does not search ahead for a PRN header"
+        );
+        let whitespace_preamble = format!(" \t\n{complete}");
+        assert!(
+            XyceTestRunner::parse_xyce_verify_tran_reference_table(&whitespace_preamble).is_err(),
+            "Release 7.10 does not skip a whitespace-only classification line"
+        );
+        for noncanonical_index in ["index", "INDEX"] {
+            let noncanonical = complete.replacen("Index", noncanonical_index, 1);
+            assert!(
+                XyceTestRunner::parse_xyce_verify_tran_reference_table(&noncanonical).is_err(),
+                "Release 7.10 PRN classification requires case-sensitive Index metadata"
+            );
+        }
+    }
+
+    #[test]
     fn analytic_sinusoidal_rc_detector_is_path_independent_and_fail_closed() {
         let root = std::env::temp_dir().join(format!(
             "rspice-xyce-analytic-sinusoidal-rc-{}-{}",
@@ -29857,6 +30642,15 @@ Cload out 0 2u\n\
     fn transient_plan_purpose_keeps_absolute_and_relational_requirements_distinct() {
         assert!(XyceStaticTranPlanPurpose::AbsoluteOracle.requires_reference_file());
         assert!(XyceStaticTranPlanPurpose::AbsoluteOracle.validates_absolute_device_contract());
+        assert!(XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle.requires_reference_file());
+        assert!(
+            XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle
+                .validates_absolute_device_contract()
+        );
+        assert!(
+            XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle.admits_default_level9_bsim3()
+        );
+        assert!(!XyceStaticTranPlanPurpose::AbsoluteOracle.admits_default_level9_bsim3());
         assert!(!XyceStaticTranPlanPurpose::AnalyticOracle.requires_reference_file());
         assert!(XyceStaticTranPlanPurpose::AnalyticOracle.validates_absolute_device_contract());
         assert!(!XyceStaticTranPlanPurpose::RelationalFamily.requires_reference_file());
@@ -30221,6 +31015,7 @@ VMON 2 3 0\n\
             steps: Vec::new(),
             contract: XyceStaticTranContract::PlainStatic,
             wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
         };
         XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_plan)
             .expect("canonical capacitor plan qualifies");
@@ -31193,6 +31988,7 @@ Rload out 0 1\n\
             steps: Vec::new(),
             contract: XyceStaticTranContract::PlainStatic,
             wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
         };
         XyceTestRunner::validate_param_expression_transient_plan(&plan)
             .expect("canonical parameter-expression transient plan qualifies");
@@ -31314,6 +32110,7 @@ RLOAD out 0 5\n\
             steps: Vec::new(),
             contract: XyceStaticTranContract::PlainStatic,
             wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
         };
         XyceTestRunner::validate_sin_expression_transient_plan(&plan)
             .expect("canonical two-field TRAN and ordinary voltage print qualify");
@@ -32365,6 +33162,619 @@ Q2 c b 0 0 QN
             XyceTestRunner::validate_native_relational_transient_contract(&netlist).is_err(),
             "absolute Level-1 NPN qualification must not broaden relational family contracts"
         );
+    }
+
+    fn absolute_level9_bsim3_test_source() -> &'static str {
+        "\
+validated Xyce LEVEL=9 BSIM3 absolute transient
+VDD vdd 0 5
+VIN in 0 PULSE(0 5 1n .1n .1n 5n 10n)
+M1 out in 0 0 NMOD W=1.8u L=1.2u
+M2 out in vdd vdd PMOD W=3.6u L=1.2u
+C1 out 0 10f
+.MODEL NMOD NMOS (LEVEL=9)
+.MODEL PMOD PMOS (LEVEL=9)
+.TRAN .1n 12n
+.PRINT TRAN PRECISION=12 WIDTH=21 V(out)
+.END
+"
+    }
+
+    fn absolute_level9_bsim3_test_netlist() -> Netlist {
+        Netlist::parse(absolute_level9_bsim3_test_source())
+            .expect("validated Xyce LEVEL=9 BSIM3 deck parses")
+    }
+
+    fn absolute_level9_bsim3_selector_test_plan(
+        source: &str,
+        reference_path: PathBuf,
+    ) -> XyceStaticTranPlan {
+        XyceStaticTranPlan {
+            deck_path: PathBuf::from("renamed-level9.cir"),
+            reference_path,
+            source: source.to_string(),
+            print: XycePrintRequest {
+                probes: vec!["V(out)".to_string()],
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 1.0e-10,
+                stop: 12.0e-9,
+                start: None,
+                max_step: None,
+                uic: false,
+            },
+            steps: Vec::new(),
+            contract: XyceStaticTranContract::PlainStatic,
+            wrapper_tolerance: None,
+            comparison_mode: XyceStaticTranComparisonMode::Pointwise,
+        }
+    }
+
+    #[test]
+    fn level9_xyce_verify_source_precision_is_strict_and_canonical() {
+        let source = absolute_level9_bsim3_test_source();
+        assert_eq!(
+            XyceTestRunner::strict_level9_xyce_verify_source_precision(source, 2)
+                .expect("canonical source qualifies"),
+            Some(12)
+        );
+
+        let equivalent_output_forms = [
+            source.replace("WIDTH=21", "WIDTH=20"),
+            source.replace("WIDTH=21", "WIDTH=0"),
+            source.replace("WIDTH=21", "WIDTH=21.0"),
+            source.replace("WIDTH=21", "WIDTH=21 WIDTH=30"),
+            source.replace("PRECISION=12", "PRECISION=12.0"),
+            source.replace("PRECISION=12", "PRECISION=12e0"),
+            source.replace("PRECISION=12", "PRECISION=12.9"),
+            source.replace("PRECISION=12", "PRECISION=8 PRECISION=12"),
+            source.replace("PRECISION=12 WIDTH=21", "WIDTH=21 PRECISION=12"),
+            source.replace("PRECISION=12", "FORMAT=STD PRECISION=12"),
+            source.replace("PRECISION=12", "FORMAT=STD FORMAT=STD PRECISION=12"),
+            source.replace("PRECISION=12", "FORMAT=CSV FORMAT=STD PRECISION=12"),
+            source.replace("PRECISION=12", "FORMAT=NOINDEX FORMAT=STD PRECISION=12"),
+            source.replace("PRECISION=12", "FILTER=1 FILTER=0 PRECISION=12"),
+            source.replace(
+                "PRECISION=12",
+                "TIMESCALEFACTOR=2 TIMESCALEFACTOR=1 PRECISION=12",
+            ),
+            source.replace(" WIDTH=21", ""),
+        ];
+        for equivalent in equivalent_output_forms {
+            assert_eq!(
+                XyceTestRunner::strict_level9_xyce_verify_source_precision(&equivalent, 2)
+                    .expect("semantically equivalent STD output form evaluates"),
+                Some(12),
+                "WIDTH padding and leading tagged-option order must not alter numeric verifier semantics"
+            );
+        }
+
+        let mutations = [
+            source.replace("PRECISION=12", "PRECISION=8"),
+            source.replace("PRECISION=12", "PRECISION=11.9"),
+            source.replace("PRECISION=12", "PRECISION=1e100"),
+            source.replace("PRECISION=12", "PRECISION=-1 PRECISION=12"),
+            source.replace("PRECISION=12 ", ""),
+            source.replace("WIDTH=21", "WIDTH=not-an-integer"),
+            source.replace("WIDTH=21", "WIDTH=1e100"),
+            source.replace("WIDTH=21", "WIDTH=-5"),
+            source.replace("WIDTH=21", "WIDTH=-5.5"),
+            source.replace("WIDTH=21", "WIDTH='21'"),
+            source.replace("PRECISION=12", "PRECISION=12 PRECISION=8"),
+            source.replace("PRECISION=12", "FORMAT=CSV PRECISION=12"),
+            source.replace("PRECISION=12", "FORMAT=STD FORMAT=CSV PRECISION=12"),
+            source.replace("PRECISION=12", "FILTER=1 PRECISION=12"),
+            source.replace("PRECISION=12", "TIMESCALEFACTOR=2 PRECISION=12"),
+            source.replace("V(out)", "NOINDEX V(out)"),
+            source.replace("V(out)", "V(out) NOINDEX"),
+            source.replace("V(out)", "FILE='side.prn' V(out)"),
+            source.replace("V(out)", "V(out) DELIMITER=','"),
+            source.replace("V(out)", "V(out) FILTER=1"),
+            source.replace("V(out)", "V(out) TIMESCALEFACTOR=1"),
+            source.replace("V(out)", "V(out) UNKNOWN=1"),
+            source.replace(".TRAN .1n 12n", ".TRAN .1n 12n UIC"),
+            source.replace(".END", ".OPTIONS RELTOL=1e-4\n.END"),
+            source.replace(".END", ".PARAM P=1\n.END"),
+            source.replace(".END", ".SAVE V(out)\n.END"),
+            source.replace(".END", ".PRINT TRAN PRECISION=12 WIDTH=21 V(out)\n.END"),
+        ];
+        for mutation in mutations {
+            assert!(
+                !matches!(
+                    XyceTestRunner::strict_level9_xyce_verify_source_precision(&mutation, 2),
+                    Ok(Some(12))
+                ),
+                "mutated source must not retain the integrated-RMS contract: {mutation}"
+            );
+        }
+        assert!(XyceTestRunner::source_has_comp_directive(
+            &source.replace(".END", "*COMP V(out)\n.END")
+        ));
+        assert!(!XyceTestRunner::source_has_comp_directive(
+            &source.replace(".END", "*COMP{V(out)} RELTOL=1e-3\n.END")
+        ));
+        assert!(!XyceTestRunner::source_has_comp_directive(
+            &source.replace(".END", "*Comparator documentation\n.END")
+        ));
+    }
+
+    #[test]
+    fn level9_xyce_verify_comparison_selector_fails_closed() {
+        let source = absolute_level9_bsim3_test_source();
+        let netlist = absolute_level9_bsim3_test_netlist();
+        let reference_path = std::env::current_exe().expect("test executable is an existing file");
+        let plan = absolute_level9_bsim3_selector_test_plan(source, reference_path.clone());
+        let selected = XyceTestRunner::select_static_tran_comparison_mode(
+            &plan,
+            &netlist,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+            false,
+        )
+        .expect("canonical selector evaluates");
+        assert_eq!(
+            selected,
+            XyceStaticTranComparisonMode::Release710IntegratedRms {
+                scientific_precision: 12
+            }
+        );
+        assert!(selected.uses_adaptive_grid_only());
+        let mut selected_plan = plan.clone();
+        selected_plan.comparison_mode = selected;
+        assert_eq!(
+            selected_plan.result_contract(),
+            "static_xyce_verify_prn_tran"
+        );
+        let coarse_reference = XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(out)".to_string(),
+            ],
+            rows: vec![vec![0.0, 0.0, 0.0], vec![1.0, selected_plan.tran.stop, 0.0]],
+        };
+        let mut dense_reference = coarse_reference.clone();
+        dense_reference
+            .rows
+            .insert(1, vec![1.0, selected_plan.tran.stop / 10_000.0, 0.0]);
+        dense_reference.rows[2][0] = 2.0;
+        let dc_netlist =
+            Netlist::parse(&source.replace("VIN in 0 PULSE(0 5 1n .1n .1n 5n 10n)", "VIN in 0 0"))
+                .expect("reference-independence fixture parses");
+        let coarse_step = XyceTestRunner::transient_max_step_for_static_plan(
+            &selected_plan,
+            &dc_netlist,
+            &selected_plan.tran,
+            &coarse_reference,
+        )
+        .expect("reference-independent adaptive maximum step resolves");
+        let dense_step = XyceTestRunner::transient_max_step_for_static_plan(
+            &selected_plan,
+            &dc_netlist,
+            &selected_plan.tran,
+            &dense_reference,
+        )
+        .expect("reference-independent adaptive maximum step ignores gold density");
+        assert_eq!(
+            coarse_step.to_bits(),
+            dense_step.to_bits(),
+            "the checked oracle time grid must not influence the simulator's adaptive maximum step"
+        );
+
+        for purpose in [
+            XyceStaticTranPlanPurpose::AnalyticOracle,
+            XyceStaticTranPlanPurpose::RelationalFamily,
+        ] {
+            assert_eq!(
+                XyceTestRunner::select_static_tran_comparison_mode(
+                    &plan, &netlist, purpose, false,
+                )
+                .expect("non-absolute purpose evaluates"),
+                XyceStaticTranComparisonMode::Pointwise
+            );
+        }
+        assert!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &plan,
+                &netlist,
+                XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle,
+                false,
+            )
+            .is_err(),
+            "the dedicated purpose must be derived from a successful selector, never supplied as an input"
+        );
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &plan,
+                &netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                true,
+            )
+            .expect("wrapper provenance evaluates"),
+            XyceStaticTranComparisonMode::Pointwise
+        );
+
+        let mut plan_mutations = Vec::new();
+        let mut csv = plan.clone();
+        csv.contract = XyceStaticTranContract::PlainCsv;
+        plan_mutations.push(csv);
+        let mut override_output = plan.clone();
+        override_output.output_override = true;
+        plan_mutations.push(override_output);
+        let mut constant_step = plan.clone();
+        constant_step.timeint_conststep = true;
+        plan_mutations.push(constant_step);
+        let mut tolerance = plan.clone();
+        tolerance.wrapper_tolerance = Some(XyceComparisonTolerance::from_config(
+            &XyceRunnerConfig::default(),
+        ));
+        plan_mutations.push(tolerance);
+        let mut missing_reference = plan.clone();
+        missing_reference.reference_path = reference_path.with_extension("missing");
+        plan_mutations.push(missing_reference);
+        let mut comp = plan.clone();
+        comp.source = source.replace(".END", "*COMP V(out)\n.END");
+        plan_mutations.push(comp);
+        for mutated_plan in plan_mutations {
+            assert_eq!(
+                XyceTestRunner::select_static_tran_comparison_mode(
+                    &mutated_plan,
+                    &netlist,
+                    XyceStaticTranPlanPurpose::AbsoluteOracle,
+                    false,
+                )
+                .expect("plan mutation evaluates"),
+                XyceStaticTranComparisonMode::Pointwise
+            );
+        }
+
+        let mut diagnostic_netlist = netlist.clone();
+        diagnostic_netlist
+            .diagnostics
+            .push(crate::netlist::ParseDiagnostic::warning(
+                1,
+                "test-warning",
+                "selector diagnostic fixture",
+            ));
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &plan,
+                &diagnostic_netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("diagnostic mutation evaluates"),
+            XyceStaticTranComparisonMode::Pointwise
+        );
+        let mut no_mos = netlist;
+        no_mos
+            .elements
+            .retain(|element| !matches!(element.kind, ElementKind::Mosfet { .. }));
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &plan,
+                &no_mos,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("missing-device mutation evaluates"),
+            XyceStaticTranComparisonMode::Pointwise
+        );
+
+        let behavioral_source =
+            source.replace("C1 out 0 10f", "C1 out 0 10f\nB1 auxiliary 0 V=V(out)");
+        let behavioral_netlist = Netlist::parse(&behavioral_source)
+            .expect("behavioral companion mutation parses for selector rejection");
+        let behavioral_element = behavioral_netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("B1"))
+            .expect("behavioral companion exists");
+        assert!(
+            !XyceTestRunner::netlist_element_is_native_level9_xyce_verify_supported(
+                behavioral_element,
+            )
+        );
+        let behavioral_plan =
+            absolute_level9_bsim3_selector_test_plan(&behavioral_source, reference_path.clone());
+        assert_eq!(
+            XyceTestRunner::select_static_tran_comparison_mode(
+                &behavioral_plan,
+                &behavioral_netlist,
+                XyceStaticTranPlanPurpose::AbsoluteOracle,
+                false,
+            )
+            .expect("behavioral companion mutation evaluates"),
+            XyceStaticTranComparisonMode::Pointwise,
+            "behavioral and other nonlinear companion elements must remain outside the strict LEVEL=9 envelope"
+        );
+    }
+
+    #[test]
+    fn level9_bsim3_transient_contract_requires_dedicated_xyce_verify_purpose() {
+        let netlist = absolute_level9_bsim3_test_netlist();
+
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+            "ordinary absolute-oracle plans must not admit LEVEL=9"
+        );
+        assert!(
+            XyceTestRunner::validate_native_transient_contract_for_purpose(
+                &netlist,
+                XyceStaticTranPlanPurpose::AnalyticOracle,
+            )
+            .is_err(),
+            "analytic-oracle plans must not acquire LEVEL=9 eligibility"
+        );
+        XyceTestRunner::validate_native_transient_contract_for_purpose(
+            &netlist,
+            XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle,
+        )
+        .expect("the dedicated integrated-RMS purpose admits the strict LEVEL=9 subset");
+        assert!(
+            XyceTestRunner::validate_native_relational_transient_contract(&netlist).is_err(),
+            "the dedicated LEVEL=9 purpose must not broaden relational family contracts"
+        );
+    }
+
+    #[test]
+    fn absolute_level9_bsim3_instance_contract_fails_closed() {
+        let netlist = absolute_level9_bsim3_test_netlist();
+        let qualified = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists")
+            .clone();
+        assert!(
+            XyceTestRunner::netlist_element_is_native_absolute_transient_level9_bsim3(
+                &netlist, &qualified,
+            )
+        );
+
+        let mut mutations = Vec::new();
+
+        let mut missing_width = qualified.clone();
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut missing_width.kind
+        else {
+            panic!("M1 is a MOSFET");
+        };
+        instance_params.retain(|(name, _)| !name.eq_ignore_ascii_case("W"));
+        mutations.push(("missing W", missing_width));
+
+        let mut duplicate_width = qualified.clone();
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut duplicate_width.kind
+        else {
+            panic!("M1 is a MOSFET");
+        };
+        instance_params.push(("W".to_string(), 2.0e-6));
+        mutations.push(("duplicate W", duplicate_width));
+
+        let mut extra_parameter = qualified.clone();
+        let ElementKind::Mosfet {
+            instance_params, ..
+        } = &mut extra_parameter.kind
+        else {
+            panic!("M1 is a MOSFET");
+        };
+        instance_params.push(("M".to_string(), 1.0));
+        mutations.push(("extra instance parameter", extra_parameter));
+
+        for (label, value) in [("zero L", 0.0), ("negative L", -1.0), ("NaN L", Value::NAN)] {
+            let mut invalid_dimension = qualified.clone();
+            let ElementKind::Mosfet {
+                instance_params, ..
+            } = &mut invalid_dimension.kind
+            else {
+                panic!("M1 is a MOSFET");
+            };
+            instance_params
+                .iter_mut()
+                .find(|(name, _)| name.eq_ignore_ascii_case("L"))
+                .expect("L exists")
+                .1 = value;
+            mutations.push((label, invalid_dimension));
+        }
+
+        let mut deferred_dimension = qualified.clone();
+        let ElementKind::Mosfet {
+            deferred_params, ..
+        } = &mut deferred_dimension.kind
+        else {
+            panic!("M1 is a MOSFET");
+        };
+        deferred_params.push(("W".to_string(), "WIDTH".to_string()));
+        mutations.push(("deferred instance parameter", deferred_dimension));
+
+        let mut compact = qualified.clone();
+        let ElementKind::Mosfet { compact_syntax, .. } = &mut compact.kind else {
+            panic!("M1 is a MOSFET");
+        };
+        *compact_syntax = true;
+        mutations.push(("compact topology", compact));
+
+        let mut three_terminal = qualified.clone();
+        three_terminal.nodes.pop();
+        mutations.push(("three-terminal topology", three_terminal));
+
+        let mut five_terminal = qualified.clone();
+        five_terminal.nodes.push("thermal".to_string());
+        mutations.push(("five-terminal topology", five_terminal));
+
+        let mut missing_model = qualified.clone();
+        let ElementKind::Mosfet { model, .. } = &mut missing_model.kind else {
+            panic!("M1 is a MOSFET");
+        };
+        *model = "UNKNOWN".to_string();
+        mutations.push(("missing model binding", missing_model));
+
+        for (label, element) in mutations {
+            assert!(
+                !XyceTestRunner::netlist_element_is_native_absolute_transient_level9_bsim3(
+                    &netlist, &element,
+                ),
+                "{label} must remain outside the absolute LEVEL=9 BSIM3 envelope"
+            );
+        }
+
+        let mut duplicate_model = netlist.clone();
+        let model = duplicate_model
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("NMOD"))
+            .expect("NMOD exists")
+            .clone();
+        duplicate_model.models.push(model);
+        let element = duplicate_model
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("M1"))
+            .expect("M1 exists");
+        assert!(
+            !XyceTestRunner::netlist_element_is_native_absolute_transient_level9_bsim3(
+                &duplicate_model,
+                element,
+            ),
+            "ambiguous model bindings must fail closed"
+        );
+    }
+
+    #[test]
+    fn absolute_level9_bsim3_model_contract_fails_closed() {
+        let netlist = absolute_level9_bsim3_test_netlist();
+        let qualified = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("NMOD"))
+            .expect("NMOD exists")
+            .clone();
+        assert!(XyceTestRunner::model_is_native_absolute_transient_level9_bsim3(&qualified));
+        let pmos = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("PMOD"))
+            .expect("PMOD exists");
+        assert!(XyceTestRunner::model_is_native_absolute_transient_level9_bsim3(pmos));
+
+        let mut mutations = Vec::new();
+
+        for model_type in ["MOS", "VDMOS", "NPN"] {
+            let mut model = qualified.clone();
+            model.model_type = model_type.to_string();
+            mutations.push((model_type, model));
+        }
+        for (label, level) in [("LEVEL=8", 8.0), ("nonfinite LEVEL", Value::NAN)] {
+            let mut model = qualified.clone();
+            model.params[0].1 = level;
+            mutations.push((label, model));
+        }
+
+        let mut missing_level = qualified.clone();
+        missing_level.params.clear();
+        mutations.push(("missing LEVEL", missing_level));
+
+        let mut extra_numeric = qualified.clone();
+        extra_numeric.params.push(("VTH0".to_string(), 0.7));
+        mutations.push(("extra numeric model parameter", extra_numeric));
+
+        let mut duplicate_level = qualified.clone();
+        duplicate_level.params.push(("LEVEL".to_string(), 9.0));
+        mutations.push(("duplicate LEVEL", duplicate_level));
+
+        let mut expression = qualified.clone();
+        expression
+            .expr_params
+            .push(("VTH0".to_string(), "VT".to_string()));
+        mutations.push(("expression model parameter", expression));
+
+        let mut string = qualified.clone();
+        string
+            .string_params
+            .push(("VERSION".to_string(), "3.3.0".to_string()));
+        mutations.push(("string model parameter", string));
+
+        let mut string_vector = qualified.clone();
+        string_vector
+            .string_vector_params
+            .push(("LABELS".to_string(), vec!["fast".to_string()]));
+        mutations.push(("string-vector model parameter", string_vector));
+
+        let mut real_vector = qualified.clone();
+        real_vector
+            .real_vector_params
+            .push(("VALUES".to_string(), vec![1.0]));
+        mutations.push(("real-vector model parameter", real_vector));
+
+        let mut real_vector_expression = qualified.clone();
+        real_vector_expression
+            .real_vector_expr_params
+            .push(("VALUES".to_string(), vec!["P".to_string()]));
+        mutations.push((
+            "real-vector-expression model parameter",
+            real_vector_expression,
+        ));
+
+        let mut integer_vector = qualified;
+        integer_vector
+            .integer_vector_params
+            .push(("VALUES".to_string(), vec![1]));
+        mutations.push(("integer-vector model parameter", integer_vector));
+
+        for (label, model) in mutations {
+            assert!(
+                !XyceTestRunner::model_is_native_absolute_transient_level9_bsim3(&model),
+                "{label} must remain outside the bare LEVEL=9 model envelope"
+            );
+        }
+    }
+
+    #[test]
+    fn absolute_level9_bsim3_transient_contract_requires_standard_startup() {
+        let source = absolute_level9_bsim3_test_source();
+        let variants = [
+            ("UIC", source.replace(".TRAN .1n 12n", ".TRAN .1n 12n UIC")),
+            (
+                "explicit node initial condition",
+                source.replace(".TRAN .1n 12n", ".IC V(out)=0\n.TRAN .1n 12n"),
+            ),
+            (
+                "node-set hint",
+                source.replace(".TRAN .1n 12n", ".NODESET V(out)=0\n.TRAN .1n 12n"),
+            ),
+            (
+                "capacitor initial state",
+                source.replace("C1 out 0 10f", "C1 out 0 10f IC=.1"),
+            ),
+            (
+                "nondefault TEMP",
+                source.replace(".TRAN .1n 12n", ".OPTIONS TEMP=50\n.TRAN .1n 12n"),
+            ),
+            (
+                "nondefault TNOM",
+                source.replace(".TRAN .1n 12n", ".OPTIONS TNOM=50\n.TRAN .1n 12n"),
+            ),
+            (
+                "temperature analysis",
+                source.replace(".TRAN .1n 12n", ".TEMP 27 50\n.TRAN .1n 12n"),
+            ),
+        ];
+
+        for (label, source) in variants {
+            let netlist = Netlist::parse(&source).expect("startup mutation parses");
+            assert!(
+                XyceTestRunner::validate_native_transient_contract_for_purpose(
+                    &netlist,
+                    XyceStaticTranPlanPurpose::DefaultLevel9XyceVerifyOracle,
+                )
+                .is_err(),
+                "{label} must remain outside the absolute LEVEL=9 BSIM3 startup contract"
+            );
+        }
     }
 
     #[test]

@@ -993,6 +993,29 @@ fn test_xyce_analytic_sinusoidal_rc_wrappers_run() {
 }
 
 #[test]
+fn test_xyce_bare_level9_comparator_uses_release_710_integrated_verifier() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/COMPARATOR/comparator.cir";
+
+    assert!(
+        !runner.requires_upstream_wrapper(relative),
+        "{relative} is an ordinary checked-PRN regression, not a wrapper-origin contract"
+    );
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass the Release 7.10 integrated transient verifier, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should remain inside the authoritative normalized-RMS bound"
+    );
+    assert_eq!(result.contract, "static_xyce_verify_prn_tran");
+}
+
+#[test]
 fn test_xyce_mid_certification_transient_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
