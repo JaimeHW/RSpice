@@ -377,6 +377,36 @@ fn test_xyce_static_prn_cases_run() {
 }
 
 #[test]
+fn test_xyce_level1_npn_transient_cases_run() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/MCNC_BJT_LATCH/latch.cir",
+        "Netlists/MCNC_BJT_RCA/rca.cir",
+    ] {
+        assert!(
+            !runner.requires_upstream_wrapper(relative),
+            "{relative} should be a native Xyce deck without removed wrapper provenance"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run inside the validated native Level-1 NPN transient envelope, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

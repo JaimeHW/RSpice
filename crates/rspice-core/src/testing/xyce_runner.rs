@@ -11105,12 +11105,28 @@ impl XyceTestRunner {
             let mut flat_netlist = netlist.clone();
             flat_netlist.elements = flattened.elements;
             flat_netlist.models.extend(flattened.scoped_models);
+            flat_netlist
+                .initial_conditions
+                .extend(flattened.scoped_initial_conditions);
+            flat_netlist.node_sets.extend(flattened.scoped_node_sets);
             flat_netlist.subcircuits.clear();
             return Self::validate_native_transient_contract_for_purpose(&flat_netlist, purpose);
         }
 
         let elements = &netlist.elements;
         let params = &netlist.params;
+        if purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
+            && elements.iter().any(|element| {
+                matches!(element.kind, ElementKind::Bjt { .. })
+                    && Self::netlist_element_is_native_transient_level1_npn(netlist, element)
+            })
+            && !Self::native_level1_npn_transient_uses_standard_startup(netlist)
+        {
+            return Err(
+                "native Level-1 NPN transient comparison requires a single ordinary DC operating-point startup at the default 27 C TEMP and TNOM, without UIC/NOOP, .TEMP analyses, explicit initial conditions, or node-set hints"
+                    .to_string(),
+            );
+        }
         for element in elements {
             match &element.kind {
                 ElementKind::VoltageSource(_) | ElementKind::CurrentSource(_) => {}
@@ -11242,6 +11258,11 @@ impl XyceTestRunner {
                         )?;
                     }
                 }
+                ElementKind::Bjt { .. }
+                    if purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
+                        && Self::netlist_element_is_native_transient_level1_npn(
+                            netlist, element,
+                        ) => {}
                 ElementKind::Mosfet { .. }
                     if Self::netlist_device_is_native_b3soi_mosfet(netlist, &element.name) => {}
                 ElementKind::Mosfet { .. }
@@ -11261,11 +11282,11 @@ impl XyceTestRunner {
                 _ => {
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle => format!(
-                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
+                            "native static .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, validated native Level-1 NPN, native B3SOI, and native classic JFET transient decks; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
                         XyceStaticTranPlanPurpose::RelationalFamily => format!(
-                            "native relational .PRINT TRAN comparison currently supports the absolute transient device envelope plus validated native MOS3 and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
+                            "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3 and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
                             element.name
                         ),
                     });
@@ -14688,6 +14709,93 @@ impl XyceTestRunner {
             "MJ" | "MJSW" => (0.0..=1.0).contains(&value),
             "FC" => (0.0..1.0).contains(&value),
             "TNOM" => value > -273.15,
+            _ => false,
+        }
+    }
+
+    fn native_level1_npn_transient_uses_standard_startup(netlist: &Netlist) -> bool {
+        !Self::tran_uses_uic(netlist)
+            && !netlist
+                .analyses
+                .iter()
+                .any(|analysis| matches!(analysis, AnalysisCommand::Temp { .. }))
+            && netlist.initial_conditions.is_empty()
+            && netlist.node_sets.is_empty()
+            && netlist
+                .options
+                .temp
+                .is_none_or(|temp| temp.is_finite() && (temp - 27.0).abs() <= 1.0e-9)
+            && netlist
+                .options
+                .tnom
+                .is_none_or(|tnom| tnom.is_finite() && (tnom - 27.0).abs() <= 1.0e-9)
+            && netlist.elements.iter().all(|element| match &element.kind {
+                ElementKind::Capacitor {
+                    initial_voltage, ..
+                } => initial_voltage.is_none(),
+                ElementKind::Inductor {
+                    initial_current, ..
+                } => initial_current.is_none(),
+                ElementKind::VSwitch { initial_state, .. }
+                | ElementKind::ISwitch { initial_state, .. }
+                | ElementKind::GenericSwitch { initial_state, .. } => initial_state.is_none(),
+                _ => true,
+            })
+    }
+
+    fn netlist_element_is_native_transient_level1_npn(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Bjt {
+            model,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        let topology_is_qualified = match element.nodes.as_slice() {
+            [_, _, _] => true,
+            [_, _, _, substrate] => Self::node_name_is_ground(substrate),
+            _ => false,
+        };
+        topology_is_qualified
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_model(&netlist.models, model)
+                .is_some_and(Self::model_is_native_transient_level1_npn)
+    }
+
+    fn model_is_native_transient_level1_npn(model: &crate::netlist::ModelDef) -> bool {
+        if !model.model_type.eq_ignore_ascii_case("NPN")
+            || Self::numeric_param_value(&model.params, "LEVEL")
+                .is_some_and(|level| !level.is_finite() || (level - 1.0).abs() > 1.0e-9)
+        {
+            return false;
+        }
+        model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model
+                .params
+                .iter()
+                .all(|(name, value)| Self::native_transient_level1_npn_model_param(name, *value))
+    }
+
+    fn native_transient_level1_npn_model_param(name: &str, value: Value) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
+        match name.to_ascii_uppercase().as_str() {
+            "LEVEL" => (value - 1.0).abs() <= 1.0e-9,
+            "BF" | "BR" | "IS" | "NE" | "NC" | "VJE" | "VJC" | "VAF" | "EG" => value > 0.0,
+            "RB" | "RC" | "RE" | "CJS" | "CJE" | "CJC" | "TF" | "TR" => value >= 0.0,
+            "MJE" | "MJC" => (0.0..1.0).contains(&value),
             _ => false,
         }
     }
@@ -20555,6 +20663,316 @@ D1 d 0 DM
             XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
             "the same devices must remain outside the absolute Xyce transient oracle envelope"
         );
+    }
+
+    #[test]
+    fn absolute_transient_contract_accepts_only_validated_level1_npn_subset() {
+        let netlist = Netlist::parse(
+            "\
+validated native Level-1 NPN transient subset
+VCC c 0 5
+VB b 0 PULSE(0 0.8 1n 1n 1n 10n 20n)
+Q1 c b 0 QN
+Q2 c b 0 0 QN
+.MODEL QN NPN (LEVEL=1 BF=80 BR=.2 RB=100 RC=0 RE=0 CJS=.3p TF=.3n TR=6n CJE=3p CJC=2p IS=1e-16 NE=1 NC=1.1 VJE=.84 VJC=1.1 MJE=.36 MJC=.76 VAF=50 EG=1.1)
+.TRAN .5n 25n
+.PRINT TRAN V(c)
+.END
+",
+        )
+        .expect("validated Level-1 NPN deck parses");
+
+        XyceTestRunner::validate_native_transient_contract(&netlist)
+            .expect("validated three-terminal and grounded-substrate NPN devices are eligible");
+        assert!(
+            XyceTestRunner::validate_native_relational_transient_contract(&netlist).is_err(),
+            "absolute Level-1 NPN qualification must not broaden relational family contracts"
+        );
+    }
+
+    #[test]
+    fn absolute_level1_npn_transient_contract_rejects_unqualified_state_and_parameters() {
+        for (name, value) in [
+            ("BF", 0.0),
+            ("BF", Value::NAN),
+            ("IS", 0.0),
+            ("VJE", 0.0),
+            ("MJE", 1.0),
+            ("RB", -1.0),
+            ("TF", -1.0e-9),
+            ("LEVEL", 2.0),
+            ("IRB", 1.0e-3),
+        ] {
+            assert!(
+                !XyceTestRunner::native_transient_level1_npn_model_param(name, value),
+                "{name}={value} must stay outside the validated Level-1 NPN envelope"
+            );
+        }
+
+        let uic = Netlist::parse(
+            "\
+unqualified NPN UIC startup
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n UIC
+.PRINT TRAN V(c)
+.END
+",
+        )
+        .expect("UIC deck parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&uic).is_err(),
+            "validated NPN transient comparisons require ordinary DC operating-point startup"
+        );
+
+        let scoped_ic = Netlist::parse(
+            "\
+unqualified scoped NPN initial state
+VCC c 0 5
+VB b 0 .7
+X1 c b 0 QB
+.SUBCKT QB c b e
+Q1 c b e QN
+.IC V(b)=.7
+.ENDS
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        )
+        .expect("scoped-IC deck parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&scoped_ic).is_err(),
+            "flattening must preserve scoped initial conditions for eligibility checks"
+        );
+
+        let nondefault_tnom = Netlist::parse(
+            "\
+unqualified NPN nominal temperature
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.OPTIONS TNOM=50
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        )
+        .expect("nondefault-TNOM deck parses");
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&nondefault_tnom).is_err(),
+            "nondefault BJT nominal temperature must remain outside the validated envelope"
+        );
+
+        for deck in [
+            "\
+unqualified NPN instance scaling
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN AREA=2
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+unqualified NPN model parameter
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100 IRB=.001)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+unqualified NPN substrate topology
+VCC c 0 5
+VB b 0 .7
+VS s 0 0
+Q1 c b 0 s QN
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        ] {
+            let netlist = Netlist::parse(deck).expect("negative Level-1 NPN deck parses");
+            assert!(
+                XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+                "unqualified instance, model, and topology forms must remain unsupported"
+            );
+        }
+    }
+
+    #[test]
+    fn absolute_level1_npn_model_contract_rejects_other_routes_and_nonnumeric_fields() {
+        let qualified = crate::netlist::ModelDef {
+            name: "QN".to_string(),
+            model_type: "NPN".to_string(),
+            params: vec![("BF".to_string(), 100.0)],
+            expr_params: Vec::new(),
+            string_params: Vec::new(),
+            string_vector_params: Vec::new(),
+            real_vector_params: Vec::new(),
+            real_vector_expr_params: Vec::new(),
+            integer_vector_params: Vec::new(),
+        };
+        assert!(XyceTestRunner::model_is_native_transient_level1_npn(
+            &qualified
+        ));
+
+        for model_type in ["PNP", "LPNP"] {
+            let mut model = qualified.clone();
+            model.model_type = model_type.to_string();
+            assert!(
+                !XyceTestRunner::model_is_native_transient_level1_npn(&model),
+                "{model_type} must remain outside the NPN-only transient envelope"
+            );
+        }
+
+        let mut generated_level = qualified.clone();
+        generated_level.params.push(("LEVEL".to_string(), 11.0));
+        assert!(
+            !XyceTestRunner::model_is_native_transient_level1_npn(&generated_level),
+            "VBIC LEVEL=11 must remain on its generated-device route"
+        );
+
+        let mut unknown = qualified.clone();
+        unknown.params.push(("BOGUS".to_string(), 1.0));
+        assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
+            &unknown
+        ));
+
+        let mut expression = qualified.clone();
+        expression
+            .expr_params
+            .push(("BF".to_string(), "gain".to_string()));
+        assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
+            &expression
+        ));
+
+        let mut string = qualified.clone();
+        string
+            .string_params
+            .push(("BF".to_string(), "fast".to_string()));
+        assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
+            &string
+        ));
+
+        let mut vector = qualified;
+        vector
+            .real_vector_params
+            .push(("BF".to_string(), vec![100.0, 200.0]));
+        assert!(!XyceTestRunner::model_is_native_transient_level1_npn(
+            &vector
+        ));
+    }
+
+    #[test]
+    fn absolute_level1_npn_transient_contract_rejects_all_explicit_startup_forms() {
+        for deck in [
+            "\
+top-level NPN initial condition
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.IC V(b)=.7
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+top-level NPN node-set hint
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.NODESET V(b)=.7
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+NPN deck with passive initial state
+VCC c 0 5
+VB b 0 .7
+C1 b 0 1p IC=.1
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+NPN deck with nondefault temperature
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.OPTIONS TEMP=50
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+NPN deck with temperature analysis
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QN
+.MODEL QN NPN (BF=100)
+.TEMP 27 50
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+NPN deck with resolved deferred instance scaling
+VCC c 0 5
+VB b 0 .7
+X1 c b 0 QB AREA=2
+.SUBCKT QB c b e PARAMS: AREA=1
+Q1 c b e QN AREA={AREA}
+.ENDS
+.MODEL QN NPN (BF=100)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+five-terminal generated-level BJT
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 s dt QV
+.MODEL QV NPN (LEVEL=11 RBX=1 RBI=1 RCX=1 RCI=1 RE=1 RBP=1)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+            "\
+duplicate normalized BJT names with different models
+VCC c 0 5
+VB b 0 .7
+Q1 c b 0 QGOOD
+q1 c b 0 QBAD
+.MODEL QGOOD NPN (BF=100)
+.MODEL QBAD NPN (LEVEL=11 RBX=1 RBI=1 RCX=1 RCI=1 RE=1 RBP=1)
+.TRAN 1n 10n
+.PRINT TRAN V(c)
+.END
+",
+        ] {
+            let netlist = Netlist::parse(deck).expect("negative NPN startup/route deck parses");
+            assert!(
+                XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+                "explicit startup, temperature, scaling, and generated-device routes must remain unsupported"
+            );
+        }
     }
 
     #[test]
