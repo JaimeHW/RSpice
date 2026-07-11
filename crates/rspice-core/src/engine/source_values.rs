@@ -82,7 +82,7 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
 /// waveform such as SIN never excites small-signal AC analysis on its
 /// own (vsrcacld.c stamps VSRCacGiven values exclusively). Harmonic
 /// balance, which does interpret SIN drives, falls back to the waveform
-/// spec separately via hb_source_drive_terms.
+/// specification separately through its periodic-source spectrum builder.
 pub(crate) fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
     match spec {
         SourceSpec::RfPort { inner, .. } => extract_ac_value(inner),

@@ -3460,7 +3460,11 @@ impl Engine {
                     }
                     diode.set_sidewall_perimeter(sidewall_perimeter * mult);
                     diode.multiplicity = mult;
-                    diode.set_temperature(temp_k, tnom_k);
+                    if self.config.spice_dialect == SpiceDialect::Xyce {
+                        diode.set_temperature_xyce_7(temp_k, tnom_k);
+                    } else {
+                        diode.set_temperature(temp_k, tnom_k);
+                    }
 
                     // Series resistance participates in the solution as an
                     // explicit resistor between the anode and an internal

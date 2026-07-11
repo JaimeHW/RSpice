@@ -368,6 +368,7 @@ fn command_name(command: &AnalysisCommand) -> &'static str {
         AnalysisCommand::Dc { .. } => ".dc",
         AnalysisCommand::Ac { .. } => ".ac",
         AnalysisCommand::AcData { .. } => ".ac data",
+        AnalysisCommand::Hb { .. } => ".hb",
         AnalysisCommand::Sp { .. } => ".sp",
         AnalysisCommand::Stb { .. } => ".stb",
         AnalysisCommand::Disto { .. } => ".disto",
@@ -618,6 +619,62 @@ fn command_to_queue_item(
             spec_options,
             analysis_line: format!(".ac data={table_name}"),
         }),
+        AnalysisCommand::Hb { frequencies } => {
+            let defaults = rspice_core::analysis::HbConfig::new(
+                frequencies.first().copied().unwrap_or(1.0),
+            );
+            let order_for = |index: usize| {
+                netlist
+                    .options
+                    .hb_num_frequencies
+                    .get(index)
+                    .copied()
+                    .or_else(|| netlist.options.hb_num_frequencies.first().copied())
+                    .unwrap_or(defaults.num_harmonics)
+            };
+            let tones = frequencies
+                .iter()
+                .enumerate()
+                .map(|(index, frequency)| {
+                    HbToneSpec::new(*frequency, order_for(index))
+                        .with_name(format!("tone{}", index + 1))
+                })
+                .collect();
+            let collocation_points = if frequencies.len() == 1
+                && !netlist.options.hb_num_frequencies.is_empty()
+            {
+                Some(
+                    order_for(0)
+                        .checked_mul(2)
+                        .and_then(|value| value.checked_add(1))
+                        .ok_or_else(|| {
+                            "HB harmonic count exceeds the addressable collocation grid"
+                                .to_string()
+                        })?,
+                )
+            } else {
+                None
+            };
+            Ok(QueuedAnalysis {
+                spec: AnalysisSpec::HarmonicBalance {
+                    tones,
+                    reltol: defaults.tolerance,
+                    abstol: defaults.abstol,
+                    max_iterations: defaults.max_iterations,
+                    damping: defaults.damping,
+                    oversample: defaults.oversample_factor,
+                    collocation_points,
+                    max_mixing_order: defaults.max_mixing_order,
+                    use_krylov: defaults.use_krylov,
+                    gmres_restart: defaults.gmres_restart,
+                    source_stepping: defaults.source_stepping,
+                    verbose: defaults.verbose,
+                },
+                config: None,
+                spec_options,
+                analysis_line: ".hb".to_string(),
+            })
+        }
         AnalysisCommand::Sp {
             variation,
             points,
@@ -888,6 +945,24 @@ mod tests {
             } if (step_time - 1e-9).abs() < 1e-21
                 && (stop_time - 1e-6).abs() < 1e-18
                 && start_time == 0.0
+        ));
+    }
+
+    #[test]
+    fn manual_deck_maps_hbint_order_to_exact_collocation_grid() {
+        let specs = specs_for(
+            "HB deck\nV1 in 0 PULSE(0 1 0 1n 1n 4n 10n)\nR1 in 0 1k\n.hb 100meg\n.options hbint numfreq=12\n.end\n",
+        );
+
+        assert!(matches!(
+            &specs[0],
+            AnalysisSpec::HarmonicBalance {
+                tones,
+                collocation_points: Some(25),
+                ..
+            } if tones.len() == 1
+                && tones[0].harmonics == 12
+                && (tones[0].frequency - 100.0e6).abs() < 1.0
         ));
     }
 

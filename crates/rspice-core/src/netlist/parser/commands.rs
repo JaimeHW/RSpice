@@ -95,6 +95,34 @@ pub(super) fn parse_command(
                 stop_freq,
             });
         }
+        ".HB" => {
+            let mut frequencies = Vec::new();
+            while !stream.is_eof()
+                && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+            {
+                skip_commas(stream);
+                if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                    break;
+                }
+                let frequency = expect_value(stream, line_num, params)?;
+                if !frequency.is_finite() || frequency <= 0.0 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            ".HB frequencies must be positive finite numbers, found {frequency}"
+                        ),
+                    });
+                }
+                frequencies.push(frequency);
+            }
+            if frequencies.is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".HB requires at least one positive frequency".to_string(),
+                });
+            }
+            analyses.push(AnalysisCommand::Hb { frequencies });
+        }
         ".SP" => {
             let sp = parse_sp_command(stream, line_num, params)?;
             analyses.push(sp);
@@ -804,6 +832,29 @@ pub(super) fn parse_options_command(
             .map(|package| format!("{package}.{key_upper}"));
 
         match (option_package.as_deref(), key_upper.as_str()) {
+            (Some("HBINT"), key) if key.starts_with("NUMFREQ") => {
+                let value = expect_value(stream, line_num, params)?;
+                let count = parse_usize_option("HBINT.NUMFREQ", value, line_num)?;
+                if count == 0 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "HBINT.NUMFREQ must be a positive integer, found 0".to_string(),
+                    });
+                }
+                options.hb_num_frequencies.push(count);
+            }
+            (Some("HBINT"), _) => {
+                let warning_key = scoped_key.as_deref().unwrap_or(&key_upper);
+                ignore_unknown_option(
+                    stream,
+                    line_num,
+                    params,
+                    has_equals,
+                    warning_key,
+                    unknown_warned,
+                    diagnostics,
+                );
+            }
             (Some("TOPOLOGY"), "SUPERNODE") => {
                 options.topology_supernode =
                     Some(parse_boolean_option(stream, line_num, params, has_equals)?);
@@ -1101,6 +1152,7 @@ fn option_package_key_is_known(key_upper: &str) -> bool {
             | "NONLIN-CONTINUATION"
             | "LOCA"
             | "OUTPUT"
+            | "HBINT"
     )
 }
 
@@ -2567,6 +2619,41 @@ pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::Netlist;
+
+    #[test]
+    fn harmonic_balance_command_and_hbint_orders_parse() {
+        let netlist = Netlist::parse(
+            "HB parser\n\
+             V1 1 0 SIN(0 1 10k)\n\
+             R1 1 0 1k\n\
+             .param tone=10k\n\
+             .hb {tone} 20k\n\
+             .options hbint numfreq=50 numfreq2=25\n\
+             .end\n",
+        )
+        .expect("valid multi-tone HB deck parses");
+
+        let [crate::netlist::AnalysisCommand::Hb { frequencies }] = netlist.analyses.as_slice()
+        else {
+            panic!("expected one HB analysis")
+        };
+        assert_eq!(frequencies, &[10.0e3, 20.0e3]);
+        assert_eq!(netlist.options.hb_num_frequencies, vec![50, 25]);
+    }
+
+    #[test]
+    fn harmonic_balance_rejects_missing_or_invalid_frequency_and_order() {
+        for line in [".hb", ".hb 0", ".hb -1k", ".hb 1e309"] {
+            let deck = format!("invalid HB\nV1 1 0 0\nR1 1 0 1k\n{line}\n.end\n");
+            assert!(Netlist::parse(&deck).is_err(), "{line} must fail");
+        }
+        for value in ["0", "1.5", "-2"] {
+            let deck = format!(
+                "invalid HBINT\nV1 1 0 0\nR1 1 0 1k\n.hb 1k\n.options hbint numfreq={value}\n.end\n"
+            );
+            assert!(Netlist::parse(&deck).is_err(), "NUMFREQ={value} must fail");
+        }
+    }
 
     fn deck_with_options(options: &str) -> String {
         format!(

@@ -7,6 +7,8 @@ use crate::{Value, circuit::NodeId};
 /// Boltzmann over charge with ngspice-46's CODATA constants
 /// (const.h: CONSTboltz / CHARGE).
 const KOVERQ: Value = 1.38064852e-23 / 1.6021766208e-19;
+/// Legacy physical constants retained by Xyce 7.x's SPICE diode model.
+const XYCE_7_KOVERQ: Value = 1.3806226e-23 / 1.6021918e-19;
 /// SPICE reference temperature, 27C in Kelvin (ngspice REFTEMP).
 const REFTEMP: Value = 300.15;
 const EPSMIN: Value = 1.0e-28;
@@ -485,6 +487,25 @@ impl Diode {
     ///
     /// Call once after model parameters and junction scaling are applied.
     pub fn set_temperature(&mut self, temp_kelvin: Value, default_tnom_kelvin: Value) {
+        self.set_temperature_with_k_over_q(temp_kelvin, default_tnom_kelvin, KOVERQ);
+    }
+
+    /// Scale the junction using Xyce 7.x's legacy Boltzmann/charge ratio.
+    ///
+    /// Xyce's open SPICE models intentionally retain their historical
+    /// physical constants. The small difference is observable in precision
+    /// regression work, so the Xyce compatibility dialect selects this path
+    /// while native/ngspice operation keeps the modern default above.
+    pub fn set_temperature_xyce_7(&mut self, temp_kelvin: Value, default_tnom_kelvin: Value) {
+        self.set_temperature_with_k_over_q(temp_kelvin, default_tnom_kelvin, XYCE_7_KOVERQ);
+    }
+
+    fn set_temperature_with_k_over_q(
+        &mut self,
+        temp_kelvin: Value,
+        default_tnom_kelvin: Value,
+        k_over_q: Value,
+    ) {
         let tnom = self
             .tnom_c
             .map(|c| c + 273.15)
@@ -494,8 +515,8 @@ impl Diode {
             return;
         }
 
-        let vt = KOVERQ * temp;
-        let vtnom = KOVERQ * tnom;
+        let vt = k_over_q * temp;
+        let vtnom = k_over_q * tnom;
 
         // Silicon bandgap at both temperatures (TLEV 0/1 form).
         let egfet = 1.16 - (7.02e-4 * temp * temp) / (temp + 1108.0);
@@ -504,8 +525,8 @@ impl Diode {
         let fact2 = temp / REFTEMP;
         // ngspice's CHARGE*arg terms, folded through k/q so everything
         // stays in volts.
-        let arg = -egfet / (2.0 * vt) + 1.1150877 / (2.0 * KOVERQ * REFTEMP);
-        let arg1 = -egfet1 / (2.0 * vtnom) + 1.1150877 / (2.0 * KOVERQ * REFTEMP);
+        let arg = -egfet / (2.0 * vt) + 1.1150877 / (2.0 * k_over_q * REFTEMP);
+        let arg1 = -egfet1 / (2.0 * vtnom) + 1.1150877 / (2.0 * k_over_q * REFTEMP);
         let pbfact = -2.0 * vt * (1.5 * fact2.ln() + arg);
         let pbfact1 = -2.0 * vtnom * (1.5 * fact1.ln() + arg1);
 
@@ -1129,6 +1150,17 @@ mod tests {
         assert!((d.is - is0).abs() <= is0 * 1e-12);
         assert!((d.vj - vj0).abs() <= vj0 * 1e-12, "vj={} vs {}", d.vj, vj0);
         assert!((d.cj0 - cj0).abs() <= cj0 * 1e-12);
+    }
+
+    #[test]
+    fn xyce_7_compatibility_uses_its_published_legacy_thermal_constant() {
+        let mut d = test_diode();
+        d.set_temperature_xyce_7(REFTEMP, REFTEMP);
+        assert_eq!(d.vt, XYCE_7_KOVERQ * REFTEMP);
+        assert!(
+            d.vt < KOVERQ * REFTEMP,
+            "Xyce 7's historical k/q must remain distinct from the native constant"
+        );
     }
 
     #[test]

@@ -114,6 +114,15 @@ struct HbDriveTone {
     source_filter: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct HbSourceSpectrum {
+    dc: Value,
+    /// Physical peak amplitudes and phases for positive harmonics. The HB
+    /// solver's stamping boundary converts these to one-sided Fourier
+    /// coefficients.
+    harmonics: Vec<(usize, Value, Value)>,
+}
+
 impl HbDriveTone {
     fn broadcast(harmonic: usize) -> Self {
         Self {
@@ -160,9 +169,9 @@ impl Engine {
         config: HbConfig,
     ) -> Result<HbAnalysisResult, SimulationError> {
         // Validate configuration
-        if config.fundamental_freq <= 0.0 {
+        if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
             return Err(HbError::InvalidConfig(
-                "Fundamental frequency must be positive".to_string(),
+                "Fundamental frequency must be finite and positive".to_string(),
             )
             .into());
         }
@@ -191,6 +200,23 @@ impl Engine {
         let drive_tones = Self::hb_collect_drive_tones(&config)?;
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
 
+        let minimum_points = config.minimum_collocation_points().ok_or_else(|| {
+            HbError::InvalidConfig(format!(
+                "harmonic count {} exceeds the addressable collocation grid",
+                config.num_harmonics
+            ))
+        })?;
+        if let Some(points) = config.collocation_points
+            && (points % 2 == 0 || points < minimum_points)
+        {
+            return Err(HbError::InvalidConfig(format!(
+                "collocation grid must be odd and contain at least {} points for {} harmonics; found {points}",
+                minimum_points,
+                config.num_harmonics
+            ))
+            .into());
+        }
+
         // Create solver
         let mut solver = HbSolver::new(config.clone(), num_nodes);
 
@@ -203,11 +229,11 @@ impl Engine {
         self.hb_stamp_capacitors(&circuit, &mut solver);
         self.hb_stamp_inductors(&circuit, &mut solver);
         if has_supported_nonlinear {
-            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &drive_tones);
+            self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &config, &drive_tones)?;
         } else {
-            self.hb_stamp_voltage_sources(&circuit, &mut solver, &drive_tones);
+            self.hb_stamp_voltage_sources(&circuit, &mut solver, &config, &drive_tones)?;
         }
-        self.hb_stamp_current_sources(&circuit, &mut solver, &drive_tones);
+        self.hb_stamp_current_sources(&circuit, &mut solver, &config, &drive_tones)?;
         if has_supported_nonlinear {
             self.hb_stamp_supported_nonlinear_devices(&circuit, &mut solver, num_nodes);
         }
@@ -273,3 +299,152 @@ impl Engine {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SimulationConfig;
+
+    #[test]
+    fn pulse_source_uses_the_exact_configured_collocation_grid() {
+        let config = HbConfig::new(10.0e3)
+            .with_harmonics(50)
+            .with_collocation_points(101);
+        let pulse = SourceSpec::Pulse {
+            v1: 1.0,
+            v2: 2.0,
+            delay: 0.0,
+            rise: 10.0e-6,
+            fall: 10.0e-6,
+            width: 40.0e-6,
+            period: 100.0e-6,
+            phase: 0.0,
+            width_defaults_to_zero: false,
+        };
+        let spectrum = Engine::hb_source_spectrum(1.0, 0.0, 0.0, Some(&pulse), &config, &[1])
+            .expect("periodic pulse spectrum");
+
+        assert!((spectrum.dc - 1.499_950_985_197_529_7).abs() < 1.0e-14);
+        let (_, h1_amplitude, h1_phase) = spectrum.harmonics[0];
+        let h1 = Complex64::from_polar(h1_amplitude, h1_phase);
+        assert!(
+            (h1.re - -1.935_850_060_379_601_7e-1).abs() < 1.0e-12,
+            "h1={h1:?}"
+        );
+        assert!(
+            (h1.im - -5.955_525_013_998_652e-1).abs() < 1.0e-12,
+            "h1={h1:?}"
+        );
+        let h2 = spectrum
+            .harmonics
+            .iter()
+            .find(|(harmonic, _, _)| *harmonic == 2)
+            .map(|(_, amplitude, phase)| Complex64::from_polar(*amplitude, *phase))
+            .expect("minimal odd grid aliases the continuous even harmonic onto the grid");
+        assert!(h2.norm() > 1.0e-4);
+    }
+
+    #[test]
+    fn sin_source_is_converted_from_sine_to_cosine_reference() {
+        let config = HbConfig::new(1.0e3).with_harmonics(3);
+        let sin = SourceSpec::Sin {
+            offset: 2.0,
+            amplitude: 3.0,
+            frequency: 1.0e3,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        };
+        let spectrum = Engine::hb_source_spectrum(2.0, 0.0, 0.0, Some(&sin), &config, &[1])
+            .expect("periodic sine spectrum");
+
+        assert_eq!(spectrum.dc, 2.0);
+        let (_, amplitude, phase) = spectrum.harmonics[0];
+        let phasor = Complex64::from_polar(amplitude, phase);
+        assert!(phasor.re.abs() < 1.0e-12, "phasor={phasor:?}");
+        assert!((phasor.im + 3.0).abs() < 1.0e-12, "phasor={phasor:?}");
+    }
+
+    #[test]
+    fn transient_waveform_takes_precedence_over_small_signal_ac_annotation() {
+        let config = HbConfig::new(1.0e3).with_harmonics(3);
+        let source = SourceSpec::DcAcTransient {
+            dc_value: 0.0,
+            ac_magnitude: 99.0,
+            ac_phase: 1.0,
+            transient: Box::new(SourceSpec::Sin {
+                offset: 1.0,
+                amplitude: 2.0,
+                frequency: 1.0e3,
+                delay: 0.0,
+                damping: 0.0,
+                phase: 0.0,
+            }),
+        };
+        let spectrum = Engine::hb_source_spectrum(0.0, 99.0, 1.0, Some(&source), &config, &[1])
+            .expect("periodic transient spectrum");
+
+        assert_eq!(spectrum.dc, 1.0);
+        let (_, amplitude, phase) = spectrum.harmonics[0];
+        let phasor = Complex64::from_polar(amplitude, phase);
+        assert!(phasor.re.abs() < 1.0e-12, "phasor={phasor:?}");
+        assert!((phasor.im + 2.0).abs() < 1.0e-12, "phasor={phasor:?}");
+    }
+
+    #[test]
+    fn unmatched_periodic_source_contributes_dc_but_no_harmonics() {
+        let config = HbConfig::new(1.0e3).with_harmonics(3);
+        let sin = SourceSpec::Sin {
+            offset: 2.0,
+            amplitude: 3.0,
+            frequency: 1.0e3,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        };
+        let spectrum = Engine::hb_source_spectrum(2.0, 0.0, 0.0, Some(&sin), &config, &[])
+            .expect("filtered periodic source");
+
+        assert_eq!(spectrum.dc, 2.0);
+        assert!(spectrum.harmonics.is_empty());
+    }
+
+    #[test]
+    fn periodic_source_rejects_non_finite_parameters() {
+        let config = HbConfig::new(1.0e3).with_harmonics(3);
+        let sin = SourceSpec::Sin {
+            offset: 0.0,
+            amplitude: f64::NAN,
+            frequency: 1.0e3,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        };
+        let err = Engine::hb_source_spectrum(0.0, 0.0, 0.0, Some(&sin), &config, &[1])
+            .expect_err("non-finite source parameters must fail");
+        assert!(err.to_string().contains("amplitude must be finite"));
+    }
+
+    #[test]
+    fn invalid_exact_collocation_grid_fails_before_solver_construction() {
+        let netlist =
+            Netlist::parse("invalid HB grid\nV1 1 0 1\nR1 1 0 1k\n.end\n").expect("deck parses");
+        let config = HbConfig::new(1.0e3)
+            .with_harmonics(5)
+            .with_collocation_points(10);
+        let err = Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, config)
+            .expect_err("even/undersized collocation grid must fail");
+        assert!(err.to_string().contains("collocation grid"));
+    }
+
+    #[test]
+    fn non_finite_fundamental_is_rejected() {
+        let netlist = Netlist::parse("invalid HB frequency\nV1 1 0 1\nR1 1 0 1k\n.end\n")
+            .expect("deck parses");
+        let err = Engine::new(SimulationConfig::default())
+            .run_hb(&netlist, HbConfig::new(f64::NAN))
+            .expect_err("NaN fundamental must fail");
+        assert!(err.to_string().contains("finite and positive"));
+    }
+}

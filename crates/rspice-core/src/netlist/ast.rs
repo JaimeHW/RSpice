@@ -1465,6 +1465,13 @@ pub enum AnalysisCommand {
     /// supplies an explicit `FREQ` column.
     AcData { table_name: String },
 
+    /// Harmonic-balance analysis: `.HB f1 [f2 ...]`.
+    ///
+    /// Frequencies are the independent large-signal tones. A single entry
+    /// is ordinary one-tone HB; multiple entries use their common spectral
+    /// basis in the engine.
+    Hb { frequencies: Vec<Value> },
+
     /// S-parameter analysis: .SP DEC|LIN|OCT np fstart fstop [donoise]
     Sp {
         variation: FreqVariation,
@@ -1840,6 +1847,9 @@ impl TransientLteReference {
 /// All fields are optional - unspecified values use engine defaults.
 #[derive(Debug, Clone, Default)]
 pub struct SimulationOptions {
+    /// Xyce `.OPTIONS HBINT NUMFREQ[<n>]=...` harmonic orders.
+    /// Each order produces a bilateral `2*N+1` collocation grid.
+    pub hb_num_frequencies: Vec<usize>,
     /// Relative tolerance for convergence (default: 1e-3)
     pub reltol: Option<Value>,
     /// Absolute current tolerance (default: 1e-12 A)
@@ -2036,6 +2046,9 @@ impl SimulationOptions {
         }
         if other.b3soi_gmin_scaling.is_some() {
             self.b3soi_gmin_scaling = other.b3soi_gmin_scaling;
+        }
+        if !other.hb_num_frequencies.is_empty() {
+            self.hb_num_frequencies = other.hb_num_frequencies.clone();
         }
     }
 

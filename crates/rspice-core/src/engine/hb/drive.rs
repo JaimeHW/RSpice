@@ -1,6 +1,293 @@
 use super::*;
 
 impl Engine {
+    pub(in crate::engine::hb) fn hb_source_spectrum(
+        fallback_dc: Value,
+        ac_mag: Value,
+        ac_phase: Value,
+        spec: Option<&SourceSpec>,
+        config: &HbConfig,
+        drive_harmonics: &[usize],
+    ) -> Result<HbSourceSpectrum, SimulationError> {
+        let Some(spec) = spec else {
+            return Ok(HbSourceSpectrum {
+                dc: fallback_dc,
+                harmonics: drive_harmonics
+                    .iter()
+                    .copied()
+                    .filter(|_| ac_mag.abs() > HB_ZERO_SENSE_TOL)
+                    .map(|harmonic| (harmonic, ac_mag, ac_phase))
+                    .collect(),
+            });
+        };
+        match spec {
+            SourceSpec::RfPort { inner, .. } => Self::hb_source_spectrum(
+                fallback_dc,
+                ac_mag,
+                ac_phase,
+                Some(inner),
+                config,
+                drive_harmonics,
+            ),
+            SourceSpec::Dc(value) => Ok(HbSourceSpectrum {
+                dc: *value,
+                harmonics: Vec::new(),
+            }),
+            SourceSpec::Ac { magnitude, phase } => Ok(HbSourceSpectrum {
+                dc: 0.0,
+                harmonics: drive_harmonics
+                    .iter()
+                    .copied()
+                    .map(|harmonic| (harmonic, *magnitude, *phase))
+                    .collect(),
+            }),
+            SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+            } => Ok(HbSourceSpectrum {
+                dc: *dc_value,
+                harmonics: drive_harmonics
+                    .iter()
+                    .copied()
+                    .filter(|_| ac_magnitude.abs() > HB_ZERO_SENSE_TOL)
+                    .map(|harmonic| (harmonic, *ac_magnitude, *ac_phase))
+                    .collect(),
+            }),
+            SourceSpec::DcTransient {
+                dc_value: _,
+                transient,
+            }
+            | SourceSpec::DcAcTransient {
+                transient,
+                dc_value: _,
+                ac_magnitude: _,
+                ac_phase: _,
+            } => Self::hb_source_spectrum(
+                fallback_dc,
+                0.0,
+                0.0,
+                Some(transient),
+                config,
+                drive_harmonics,
+            ),
+            SourceSpec::Sin {
+                offset,
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+            } => {
+                for (name, value) in [
+                    ("offset", *offset),
+                    ("amplitude", *amplitude),
+                    ("delay", *delay),
+                    ("damping", *damping),
+                    ("phase", *phase),
+                ] {
+                    if !value.is_finite() {
+                        return Err(HbError::InvalidConfig(format!(
+                            "HB SIN source {name} must be finite"
+                        ))
+                        .into());
+                    }
+                }
+                if amplitude.abs() <= HB_ZERO_SENSE_TOL || drive_harmonics.is_empty() {
+                    return Ok(HbSourceSpectrum {
+                        dc: *offset,
+                        harmonics: Vec::new(),
+                    });
+                }
+                if *damping != 0.0 {
+                    return Err(HbError::InvalidConfig(
+                        "HB requires periodic sources; a damped SIN waveform is not periodic"
+                            .to_string(),
+                    )
+                    .into());
+                }
+                if !frequency.is_finite() || *frequency <= 0.0 {
+                    return Err(HbError::InvalidConfig(
+                        "HB SIN source frequency must be finite and positive".to_string(),
+                    )
+                    .into());
+                }
+                let harmonic = Self::hb_periodic_source_harmonic(
+                    *frequency,
+                    config.fundamental_freq,
+                    config.num_harmonics,
+                    "SIN",
+                )?;
+                // HB coefficients use cosine-reference phasors, whereas the
+                // netlist SIN waveform is defined with a sine reference.
+                let phase = *phase
+                    - std::f64::consts::FRAC_PI_2
+                    - std::f64::consts::TAU * frequency * delay;
+                Ok(HbSourceSpectrum {
+                    dc: *offset,
+                    harmonics: vec![(harmonic, *amplitude, phase)],
+                })
+            }
+            SourceSpec::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+                phase,
+                width_defaults_to_zero: _,
+            } => {
+                let mut spectrum = Self::hb_pulse_source_spectrum(
+                    *v1, *v2, *delay, *rise, *fall, *width, *period, *phase, config,
+                )?;
+                if drive_harmonics.is_empty() {
+                    spectrum.harmonics.clear();
+                }
+                Ok(spectrum)
+            }
+            _ => Ok(HbSourceSpectrum {
+                dc: fallback_dc,
+                harmonics: Vec::new(),
+            }),
+        }
+    }
+
+    fn hb_periodic_source_harmonic(
+        source_frequency: Value,
+        fundamental_frequency: Value,
+        num_harmonics: usize,
+        source_kind: &str,
+    ) -> Result<usize, SimulationError> {
+        let ratio = source_frequency / fundamental_frequency;
+        let rounded = ratio.round();
+        let relative_error = (ratio - rounded).abs() / rounded.abs().max(1.0);
+        if !ratio.is_finite() || rounded < 1.0 || relative_error > 1.0e-9 {
+            return Err(HbError::InvalidConfig(format!(
+                "HB {source_kind} source frequency {source_frequency:.12e} Hz is not a positive integer harmonic of the configured fundamental {fundamental_frequency:.12e} Hz"
+            ))
+            .into());
+        }
+        let harmonic = rounded as usize;
+        if harmonic > num_harmonics {
+            return Err(HbError::InvalidConfig(format!(
+                "HB {source_kind} source maps to harmonic {harmonic}, beyond the configured {num_harmonics} harmonics"
+            ))
+            .into());
+        }
+        Ok(harmonic)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn hb_pulse_source_spectrum(
+        v1: Value,
+        v2: Value,
+        delay: Value,
+        rise: Value,
+        fall: Value,
+        width: Value,
+        period: Value,
+        phase_degrees: Value,
+        config: &HbConfig,
+    ) -> Result<HbSourceSpectrum, SimulationError> {
+        for (name, value) in [
+            ("initial value", v1),
+            ("pulsed value", v2),
+            ("delay", delay),
+            ("phase", phase_degrees),
+        ] {
+            if !value.is_finite() {
+                return Err(HbError::InvalidConfig(format!(
+                    "HB PULSE source {name} must be finite"
+                ))
+                .into());
+            }
+        }
+        if !period.is_finite() || period <= 0.0 {
+            return Err(HbError::InvalidConfig(
+                "HB PULSE source period must be finite and positive".to_string(),
+            )
+            .into());
+        }
+        for (name, value) in [("rise", rise), ("fall", fall), ("width", width)] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(HbError::InvalidConfig(format!(
+                    "HB PULSE source {name} time must be finite and non-negative"
+                ))
+                .into());
+            }
+        }
+        let occupied = rise + width + fall;
+        if !occupied.is_finite() {
+            return Err(HbError::InvalidConfig(
+                "HB PULSE source rise + width + fall must be finite".to_string(),
+            )
+            .into());
+        }
+        let time_tolerance = 1.0e-12 * period.abs().max(occupied.abs()).max(1.0e-30);
+        if occupied > period + time_tolerance {
+            return Err(HbError::InvalidConfig(format!(
+                "HB PULSE source rise + width + fall ({occupied:.12e} s) exceeds its period ({period:.12e} s)"
+            ))
+            .into());
+        }
+
+        let source_frequency = period.recip();
+        let _source_harmonic = Self::hb_periodic_source_harmonic(
+            source_frequency,
+            config.fundamental_freq,
+            config.num_harmonics,
+            "PULSE",
+        )?;
+        let area = v1 * period + (v2 - v1) * (width + 0.5 * rise + 0.5 * fall);
+        let dc = area / period;
+        if (v2 - v1).abs() <= HB_ZERO_SENSE_TOL {
+            return Ok(HbSourceSpectrum {
+                dc,
+                harmonics: Vec::new(),
+            });
+        }
+
+        let shift = delay - phase_degrees / 360.0 * period;
+        let collocation_points = config.fft_size();
+        let hb_period = config.fundamental_freq.recip();
+        let samples: Vec<Value> = (0..collocation_points)
+            .map(|sample| {
+                let time = sample as Value * hb_period / collocation_points as Value;
+                let local_time = (time - shift).rem_euclid(period);
+                if rise > 0.0 && local_time < rise {
+                    v1 + (v2 - v1) * local_time / rise
+                } else if local_time < rise + width {
+                    v2
+                } else if fall > 0.0 && local_time < occupied {
+                    v2 + (v1 - v2) * (local_time - rise - width) / fall
+                } else {
+                    v1
+                }
+            })
+            .collect();
+        let dc = samples.iter().sum::<Value>() / collocation_points as Value;
+        let mut harmonics = Vec::new();
+        for harmonic in 1..=config.num_harmonics {
+            let coefficient = samples
+                .iter()
+                .enumerate()
+                .map(|(sample, value)| {
+                    let angle = -std::f64::consts::TAU * harmonic as Value * sample as Value
+                        / collocation_points as Value;
+                    Complex64::from_polar(*value, angle)
+                })
+                .sum::<Complex64>()
+                / collocation_points as Value;
+            let amplitude = 2.0 * coefficient.norm();
+            if amplitude > HB_ZERO_SENSE_TOL {
+                harmonics.push((harmonic, amplitude, coefficient.arg()));
+            }
+        }
+        Ok(HbSourceSpectrum { dc, harmonics })
+    }
+
     /// Build node names from circuit node map
     pub(in crate::engine::hb) fn hb_build_node_names(
         &self,
@@ -232,6 +519,14 @@ impl Engine {
                 dc_value,
                 transient,
             }) => Self::hb_extract_static_source_voltage(Some(transient), *dc_value),
+            Some(SourceSpec::DcAcTransient {
+                dc_value,
+                ac_magnitude,
+                transient,
+                ..
+            }) if ac_magnitude.abs() <= HB_ZERO_SENSE_TOL => {
+                Self::hb_extract_static_source_voltage(Some(transient), *dc_value)
+            }
             Some(SourceSpec::Ac { magnitude, .. }) if magnitude.abs() <= HB_ZERO_SENSE_TOL => {
                 Some(0.0)
             }
@@ -317,40 +612,5 @@ impl Engine {
     #[inline]
     pub(in crate::engine::hb) fn hb_node_to_solver_index(node: usize, num_nodes: usize) -> usize {
         if node == 0 { num_nodes } else { node - 1 }
-    }
-
-    /// HB drive terms for one source. An explicit AC keyword wins; a
-    /// source specified only as a SIN waveform drives its tone with the
-    /// waveform amplitude and phase (Spectre-style). Small-signal AC
-    /// deliberately ignores SIN waveforms, so the stored AC arrays alone
-    /// are not enough here.
-    #[inline]
-    pub(in crate::engine::hb) fn hb_source_drive_terms(
-        ac_mag: Value,
-        ac_phase: Value,
-        spec: Option<&SourceSpec>,
-    ) -> (Value, Value) {
-        if ac_mag.abs() > HB_ZERO_SENSE_TOL {
-            return (ac_mag, ac_phase);
-        }
-        match spec {
-            Some(SourceSpec::RfPort { inner, .. }) => {
-                Self::hb_source_drive_terms(ac_mag, ac_phase, Some(inner))
-            }
-            Some(SourceSpec::Sin {
-                amplitude, phase, ..
-            }) => (*amplitude, *phase),
-            Some(SourceSpec::DcTransient { transient, .. }) => {
-                if let SourceSpec::Sin {
-                    amplitude, phase, ..
-                } = transient.as_ref()
-                {
-                    (*amplitude, *phase)
-                } else {
-                    (ac_mag, ac_phase)
-                }
-            }
-            _ => (ac_mag, ac_phase),
-        }
     }
 }

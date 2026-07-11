@@ -201,6 +201,7 @@ impl AnalysisSpec {
                 max_iterations,
                 damping,
                 oversample,
+                collocation_points,
                 max_mixing_order,
                 gmres_restart,
                 ..
@@ -216,10 +217,10 @@ impl AnalysisSpec {
                         return Err(format!("HB tone {} harmonics must be > 0", idx + 1));
                     }
                 }
-                if *reltol <= 0.0 {
+                if !reltol.is_finite() || *reltol <= 0.0 {
                     return Err("HB reltol must be > 0".to_string());
                 }
-                if *abstol <= 0.0 {
+                if !abstol.is_finite() || *abstol <= 0.0 {
                     return Err("HB abstol must be > 0".to_string());
                 }
                 if *max_iterations == 0 {
@@ -230,6 +231,28 @@ impl AnalysisSpec {
                 }
                 if *oversample == 0 {
                     return Err("HB oversample must be > 0".to_string());
+                }
+                if let Some(points) = collocation_points {
+                    if *points == 0 || *points % 2 == 0 {
+                        return Err(
+                            "HB collocation_points must be a positive odd integer".to_string()
+                        );
+                    }
+                    let core_tones = tones
+                        .iter()
+                        .map(|tone| {
+                            rspice_core::analysis::HbTone::new(tone.frequency, tone.harmonics)
+                        })
+                        .collect();
+                    let core_config = rspice_core::analysis::HbConfig::multi_tone(core_tones);
+                    let minimum = core_config.minimum_collocation_points().ok_or_else(|| {
+                        "HB harmonic count exceeds the addressable collocation grid".to_string()
+                    })?;
+                    if *points < minimum {
+                        return Err(format!(
+                            "HB collocation_points must contain at least {minimum} points for the configured tones"
+                        ));
+                    }
                 }
                 if *max_mixing_order == 0 {
                     return Err("HB max_mixing_order must be > 0".to_string());
@@ -563,5 +586,51 @@ impl AnalysisSpec {
             | AnalysisSpec::Parametric
             | AnalysisSpec::Corner => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::simulation::multi_run::HbToneSpec;
+
+    fn hb_spec(collocation_points: Option<usize>) -> AnalysisSpec {
+        AnalysisSpec::HarmonicBalance {
+            tones: vec![HbToneSpec::new(1.0e6, 3)],
+            reltol: 1.0e-6,
+            abstol: 1.0e-12,
+            max_iterations: 40,
+            damping: 1.0,
+            oversample: 2,
+            collocation_points,
+            max_mixing_order: 3,
+            use_krylov: false,
+            gmres_restart: 20,
+            source_stepping: false,
+            verbose: false,
+        }
+    }
+
+    #[test]
+    fn hb_validation_rejects_undersized_exact_grid() {
+        let err = hb_spec(Some(5)).validate().expect_err("grid is undersized");
+        assert!(err.contains("at least 7 points"));
+    }
+
+    #[test]
+    fn hb_validation_rejects_non_finite_tolerances() {
+        assert!(hb_spec_with_reltol(f64::NAN).validate().is_err());
+    }
+
+    fn hb_spec_with_reltol(reltol: f64) -> AnalysisSpec {
+        let mut spec = hb_spec(None);
+        let AnalysisSpec::HarmonicBalance {
+            reltol: configured, ..
+        } = &mut spec
+        else {
+            unreachable!();
+        };
+        *configured = reltol;
+        spec
     }
 }

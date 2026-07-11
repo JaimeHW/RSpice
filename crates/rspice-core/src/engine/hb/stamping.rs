@@ -16,7 +16,7 @@ impl Engine {
                 NonlinearDeviceInstance::diode(anode, cathode, diode.is, diode.n)
                     .with_thermal_voltage(diode.vt)
                     .with_junction_caps(
-                        DepletionCap::new(diode.cj0, diode.vj, diode.m, 0.5),
+                        DepletionCap::new(diode.cj0, diode.vj, diode.m, diode.fc),
                         DepletionCap::none(),
                         diode.tt,
                         0.0,
@@ -271,8 +271,9 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         solver: &mut HbSolver,
+        config: &HbConfig,
         drive_tones: &[HbDriveTone],
-    ) {
+    ) -> Result<(), SimulationError> {
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
             let nn = circuit.voltage_sources.node_neg[i];
@@ -294,7 +295,6 @@ impl Engine {
                 .source_specs
                 .get(i)
                 .and_then(|s| s.as_ref());
-            let (ac_mag, ac_phase) = Self::hb_source_drive_terms(ac_mag, ac_phase, spec);
             let source_name = circuit
                 .voltage_sources
                 .names
@@ -302,18 +302,15 @@ impl Engine {
                 .map(|name| name.as_str())
                 .unwrap_or("");
             let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
-            if ac_mag.abs() <= 1e-30 || harmonics.is_empty() {
-                solver.add_voltage_source_branch(np, nn, dc);
+            let spectrum =
+                Self::hb_source_spectrum(dc, ac_mag, ac_phase, spec, config, &harmonics)?;
+            if spectrum.harmonics.is_empty() {
+                solver.add_voltage_source_branch(np, nn, spectrum.dc);
                 continue;
             }
-
-            let harmonic_terms: Vec<(usize, Value, Value)> = harmonics
-                .iter()
-                .copied()
-                .map(|harmonic| (harmonic, ac_mag, ac_phase))
-                .collect();
-            solver.add_voltage_source_branch_harmonics(np, nn, dc, &harmonic_terms);
+            solver.add_voltage_source_branch_harmonics(np, nn, spectrum.dc, &spectrum.harmonics);
         }
+        Ok(())
     }
 
     /// Stamp ideal voltage sources as stiff Norton equivalents for nonlinear HB.
@@ -325,8 +322,9 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         solver: &mut HbSolver,
+        config: &HbConfig,
         drive_tones: &[HbDriveTone],
-    ) {
+    ) -> Result<(), SimulationError> {
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
             let nn = circuit.voltage_sources.node_neg[i];
@@ -348,7 +346,6 @@ impl Engine {
                 .source_specs
                 .get(i)
                 .and_then(|s| s.as_ref());
-            let (ac_mag, ac_phase) = Self::hb_source_drive_terms(ac_mag, ac_phase, spec);
             let source_name = circuit
                 .voltage_sources
                 .names
@@ -357,13 +354,16 @@ impl Engine {
                 .unwrap_or("");
             let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
 
+            let spectrum =
+                Self::hb_source_spectrum(dc, ac_mag, ac_phase, spec, config, &harmonics)?;
+
             self.hb_stamp_admittance(solver, np, nn, HB_NORTON_G, true);
 
             // Norton conversion of `V` in series with Rs = 1/G: a current source
             // G*V injecting INTO the positive node, in parallel with G. The
             // independent-current-source convention (current pulled out of the
             // positive node) does not apply here.
-            let i_dc = dc * HB_NORTON_G;
+            let i_dc = spectrum.dc * HB_NORTON_G;
             if np > 0 {
                 solver.add_dc_source(np - 1, i_dc);
             }
@@ -371,18 +371,19 @@ impl Engine {
                 solver.add_dc_source(nn - 1, -i_dc);
             }
 
-            let i_ac = ac_mag * HB_NORTON_G;
-            if i_ac.abs() > 1e-30 && !harmonics.is_empty() {
-                for harmonic in harmonics {
+            for (harmonic, amplitude, phase) in spectrum.harmonics {
+                let i_ac = amplitude * HB_NORTON_G;
+                if i_ac.abs() > 1e-30 {
                     if np > 0 {
-                        solver.add_harmonic_source(np - 1, harmonic, i_ac, ac_phase);
+                        solver.add_harmonic_source(np - 1, harmonic, i_ac, phase);
                     }
                     if nn > 0 {
-                        solver.add_harmonic_source(nn - 1, harmonic, -i_ac, ac_phase);
+                        solver.add_harmonic_source(nn - 1, harmonic, -i_ac, phase);
                     }
                 }
             }
         }
+        Ok(())
     }
 
     /// Stamp current sources into HB solver
@@ -394,22 +395,14 @@ impl Engine {
         &self,
         circuit: &CircuitData,
         solver: &mut HbSolver,
+        config: &HbConfig,
         drive_tones: &[HbDriveTone],
-    ) {
+    ) -> Result<(), SimulationError> {
         for i in 0..circuit.current_sources.len() {
             let np = circuit.current_sources.node_pos[i];
             let nn = circuit.current_sources.node_neg[i];
             let dc = circuit.current_sources.dc_values[i];
 
-            // Stamp DC component (harmonic 0)
-            if np > 0 {
-                solver.add_dc_source(np - 1, -dc); // Current leaves at + terminal
-            }
-            if nn > 0 {
-                solver.add_dc_source(nn - 1, dc); // Current enters at - terminal
-            }
-
-            // Stamp AC component across configured drive harmonics.
             let ac_mag = circuit
                 .current_sources
                 .ac_magnitudes
@@ -427,7 +420,6 @@ impl Engine {
                 .source_specs
                 .get(i)
                 .and_then(|s| s.as_ref());
-            let (ac_mag, ac_phase) = Self::hb_source_drive_terms(ac_mag, ac_phase, spec);
             let source_name = circuit
                 .current_sources
                 .names
@@ -435,20 +427,31 @@ impl Engine {
                 .map(|name| name.as_str())
                 .unwrap_or("");
             let harmonics = Self::hb_drive_harmonics_for_source(drive_tones, source_name);
+            let spectrum =
+                Self::hb_source_spectrum(dc, ac_mag, ac_phase, spec, config, &harmonics)?;
 
-            if ac_mag.abs() > 1e-30 {
-                for harmonic in harmonics {
+            // Stamp DC component (harmonic 0)
+            if np > 0 {
+                solver.add_dc_source(np - 1, -spectrum.dc); // Current leaves at + terminal
+            }
+            if nn > 0 {
+                solver.add_dc_source(nn - 1, spectrum.dc); // Current enters at - terminal
+            }
+
+            for (harmonic, amplitude, phase) in spectrum.harmonics {
+                if amplitude.abs() > 1e-30 {
                     if np > 0 {
                         // Current leaves at + terminal.
-                        solver.add_harmonic_source(np - 1, harmonic, -ac_mag, ac_phase);
+                        solver.add_harmonic_source(np - 1, harmonic, -amplitude, phase);
                     }
                     if nn > 0 {
                         // Current enters at - terminal.
-                        solver.add_harmonic_source(nn - 1, harmonic, ac_mag, ac_phase);
+                        solver.add_harmonic_source(nn - 1, harmonic, amplitude, phase);
                     }
                 }
             }
         }
+        Ok(())
     }
 
     /// Stamp a two-terminal admittance (conductance or capacitance) into HB solver

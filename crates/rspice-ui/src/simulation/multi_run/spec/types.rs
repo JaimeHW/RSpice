@@ -158,6 +158,8 @@ pub enum AnalysisSpec {
         max_iterations: usize,
         damping: f64,
         oversample: usize,
+        #[serde(default)]
+        collocation_points: Option<usize>,
         max_mixing_order: usize,
         use_krylov: bool,
         gmres_restart: usize,

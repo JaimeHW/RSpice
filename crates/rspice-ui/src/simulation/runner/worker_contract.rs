@@ -34,6 +34,54 @@ mod tests {
     }
 
     #[test]
+    fn legacy_hb_specs_default_the_exact_collocation_grid() {
+        let analysis = AnalysisSpec::HarmonicBalance {
+            tones: vec![HbToneSpec::new(1.0e6, 3)],
+            reltol: 1.0e-6,
+            abstol: 1.0e-12,
+            max_iterations: 40,
+            damping: 0.7,
+            oversample: 4,
+            collocation_points: Some(7),
+            max_mixing_order: 3,
+            use_krylov: false,
+            gmres_restart: 12,
+            source_stepping: false,
+            verbose: false,
+        };
+        let mut analysis_json = serde_json::to_value(&analysis).expect("analysis serializes");
+        analysis_json["HarmonicBalance"]
+            .as_object_mut()
+            .expect("HB payload is an object")
+            .remove("collocation_points");
+        let decoded: AnalysisSpec =
+            serde_json::from_value(analysis_json).expect("legacy analysis spec deserializes");
+        assert!(matches!(
+            decoded,
+            AnalysisSpec::HarmonicBalance {
+                collocation_points: None,
+                ..
+            }
+        ));
+
+        let worker = WorkerAnalysisSpec::try_from(&analysis).expect("worker spec converts");
+        let mut worker_json = serde_json::to_value(&worker).expect("worker spec serializes");
+        worker_json["HarmonicBalance"]
+            .as_object_mut()
+            .expect("worker HB payload is an object")
+            .remove("collocation_points");
+        let decoded: WorkerAnalysisSpec =
+            serde_json::from_value(worker_json).expect("legacy worker spec deserializes");
+        assert!(matches!(
+            decoded,
+            WorkerAnalysisSpec::HarmonicBalance {
+                collocation_points: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn transient_worker_result_round_trips_through_json() {
         let result = WorkerSimulationResult::Transient {
             time: vec![0.0, 1e-9],
@@ -659,6 +707,7 @@ mod tests {
                 max_iterations: 40,
                 damping: 0.7,
                 oversample: 4,
+                collocation_points: Some(7),
                 max_mixing_order: 3,
                 use_krylov: true,
                 gmres_restart: 12,
@@ -2634,6 +2683,8 @@ pub(crate) enum WorkerAnalysisSpec {
         max_iterations: usize,
         damping: f64,
         oversample: usize,
+        #[serde(default)]
+        collocation_points: Option<usize>,
         max_mixing_order: usize,
         use_krylov: bool,
         gmres_restart: usize,
@@ -2875,6 +2926,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 max_iterations,
                 damping,
                 oversample,
+                collocation_points,
                 max_mixing_order,
                 use_krylov,
                 gmres_restart,
@@ -2887,6 +2939,7 @@ impl TryFrom<&AnalysisSpec> for WorkerAnalysisSpec {
                 max_iterations: *max_iterations,
                 damping: *damping,
                 oversample: *oversample,
+                collocation_points: *collocation_points,
                 max_mixing_order: *max_mixing_order,
                 use_krylov: *use_krylov,
                 gmres_restart: *gmres_restart,
@@ -3140,6 +3193,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 max_iterations,
                 damping,
                 oversample,
+                collocation_points,
                 max_mixing_order,
                 use_krylov,
                 gmres_restart,
@@ -3152,6 +3206,7 @@ impl From<WorkerAnalysisSpec> for AnalysisSpec {
                 max_iterations,
                 damping,
                 oversample,
+                collocation_points,
                 max_mixing_order,
                 use_krylov,
                 gmres_restart,

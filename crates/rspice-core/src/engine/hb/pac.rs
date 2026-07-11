@@ -79,7 +79,7 @@ impl Engine {
             .with_oversample(4);
         let drive_tones = Self::hb_collect_drive_tones(&hb_config)?;
 
-        let mut solver = HbSolver::new(hb_config, num_nodes);
+        let mut solver = HbSolver::new(hb_config.clone(), num_nodes);
         let node_names = self.hb_build_node_names(&circuit, num_nodes);
         solver.set_node_names(node_names.clone());
 
@@ -89,8 +89,8 @@ impl Engine {
         // Always Norton form: the small-signal system must short the
         // large-signal voltage sources, and the input excitation needs a
         // node-space current injection.
-        self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &drive_tones);
-        self.hb_stamp_current_sources(&circuit, &mut solver, &drive_tones);
+        self.hb_stamp_voltage_sources_norton(&circuit, &mut solver, &hb_config, &drive_tones)?;
+        self.hb_stamp_current_sources(&circuit, &mut solver, &hb_config, &drive_tones)?;
 
         let has_nonlinear = Self::hb_has_supported_nonlinear_devices(&circuit, num_nodes);
         if has_nonlinear {

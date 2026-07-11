@@ -70,6 +70,7 @@ pub struct HbRunConfig {
     pub max_iterations: usize,
     pub damping: Value,
     pub oversample: usize,
+    pub collocation_points: Option<usize>,
     pub max_mixing_order: usize,
     pub use_krylov: bool,
     pub gmres_restart: usize,
@@ -86,6 +87,7 @@ impl Default for HbRunConfig {
             max_iterations: 100,
             damping: 1.0,
             oversample: 2,
+            collocation_points: None,
             max_mixing_order: 5,
             use_krylov: false,
             gmres_restart: 30,
@@ -122,6 +124,25 @@ impl HbRunConfig {
         }
         if self.oversample == 0 {
             return Err("HB oversample must be > 0".to_string());
+        }
+        if let Some(points) = self.collocation_points {
+            if points == 0 || points % 2 == 0 {
+                return Err("HB collocation_points must be a positive odd integer".to_string());
+            }
+            let core_tones = self
+                .tones
+                .iter()
+                .map(|tone| rspice_core::analysis::HbTone::new(tone.frequency, tone.harmonics))
+                .collect();
+            let core_config = rspice_core::analysis::HbConfig::multi_tone(core_tones);
+            let minimum = core_config.minimum_collocation_points().ok_or_else(|| {
+                "HB harmonic count exceeds the addressable collocation grid".to_string()
+            })?;
+            if points < minimum {
+                return Err(format!(
+                    "HB collocation_points must contain at least {minimum} points for the configured tones"
+                ));
+            }
         }
         if self.max_mixing_order == 0 {
             return Err("HB max_mixing_order must be > 0".to_string());
@@ -189,6 +210,9 @@ pub fn run_hb_analysis_with_source_path(
         .with_max_iterations(config.max_iterations)
         .with_damping(config.damping)
         .with_oversample(config.oversample);
+    if let Some(points) = config.collocation_points {
+        hb_config = hb_config.with_collocation_points(points);
+    }
     hb_config.abstol = config.abstol;
     hb_config.max_mixing_order = config.max_mixing_order;
     hb_config.use_krylov = config.use_krylov;
@@ -244,4 +268,21 @@ pub fn run_hb_analysis_with_source_path(
         num_components,
         converged: hb_result.converged,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_config_rejects_undersized_exact_grid() {
+        let config = HbRunConfig {
+            tones: vec![HbToneRunConfig::new(1.0e6, 3)],
+            collocation_points: Some(5),
+            ..HbRunConfig::default()
+        };
+
+        let err = config.validate().expect_err("grid is undersized");
+        assert!(err.contains("at least 7 points"));
+    }
 }

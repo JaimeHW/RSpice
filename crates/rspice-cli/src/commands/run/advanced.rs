@@ -3,6 +3,56 @@ use super::basic::{run_dc_op, run_temp};
 use super::shared::{generate_frequency_sweep, generate_step_values};
 use crate::cli::CliError;
 
+pub(super) fn run_hb_from_command(
+    ctx: &RunContext<'_>,
+    frequencies: &[f64],
+) -> Result<(), CliError> {
+    use rspice_core::analysis::{HbConfig, HbTone};
+
+    if frequencies.is_empty() {
+        return Err(CliError::simulation_error_in(
+            ".HB requires at least one positive frequency",
+            "HB",
+        ));
+    }
+    let orders = &ctx.netlist.options.hb_num_frequencies;
+    let order_for = |index: usize| {
+        orders
+            .get(index)
+            .copied()
+            .or_else(|| orders.first().copied())
+            .unwrap_or(9)
+    };
+    let config = if frequencies.len() == 1 {
+        let order = order_for(0);
+        let config = HbConfig::new(frequencies[0]).with_harmonics(order);
+        if orders.is_empty() {
+            config
+        } else {
+            let points = config.minimum_collocation_points().ok_or_else(|| {
+                CliError::simulation_error_in(
+                    format!("HB harmonic count {order} exceeds the addressable collocation grid"),
+                    "HB",
+                )
+            })?;
+            config.with_collocation_points(points)
+        }
+    } else {
+        HbConfig::multi_tone(
+            frequencies
+                .iter()
+                .enumerate()
+                .map(|(index, frequency)| {
+                    HbTone::new(*frequency, order_for(index))
+                        .with_name(format!("tone{}", index + 1))
+                })
+                .collect(),
+        )
+    };
+
+    run_hb_with_config(ctx, config)
+}
+
 pub(super) fn run_step(
     ctx: &RunContext<'_>,
     step_cmd: &rspice_core::netlist::StepCommand,
@@ -559,14 +609,23 @@ fn export_pss(
 }
 
 pub(super) fn run_hb(ctx: &RunContext<'_>, freq: f64, harmonics: usize) -> Result<(), CliError> {
+    let config = rspice_core::analysis::HbConfig::new(freq).with_harmonics(harmonics);
+    run_hb_with_config(ctx, config)
+}
+
+fn run_hb_with_config(
+    ctx: &RunContext<'_>,
+    config: rspice_core::analysis::HbConfig,
+) -> Result<(), CliError> {
     if !ctx.quiet {
         println!(
             "Running HB analysis: f₀ = {:.3e} Hz, {} harmonics",
-            freq, harmonics
+            config.fundamental_freq, config.num_harmonics
         );
     }
 
-    let config = rspice_core::analysis::HbConfig::new(freq).with_harmonics(harmonics);
+    let fundamental = config.fundamental_freq;
+    let harmonics = config.num_harmonics;
 
     match ctx.engine.run_hb(ctx.netlist, config) {
         Ok(hb_result) => {
@@ -578,7 +637,7 @@ pub(super) fn run_hb(ctx: &RunContext<'_>, freq: f64, harmonics: usize) -> Resul
                 if ctx.verbose && !hb_result.result.spectral_voltages.is_empty() {
                     println!("\n  Spectral content (first node):");
                     let sv = &hb_result.result.spectral_voltages[0];
-                    for k in 0..5.min(harmonics) {
+                    for k in 0..=4.min(harmonics) {
                         println!(
                             "    H{}: mag={:.6e}, phase={:.2}°",
                             k,
@@ -589,7 +648,7 @@ pub(super) fn run_hb(ctx: &RunContext<'_>, freq: f64, harmonics: usize) -> Resul
                 }
             }
 
-            export_hb(ctx, freq, &hb_result.result)?;
+            export_hb(ctx, fundamental, &hb_result.result)?;
             Ok(())
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "HB")),

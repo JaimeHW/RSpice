@@ -409,6 +409,19 @@ struct XyceStaticAcPlan {
     contract: XyceStaticAcContract,
 }
 
+#[derive(Debug, Clone)]
+struct XyceStaticHbPlan {
+    deck_path: PathBuf,
+    source: String,
+    print: XycePrintRequest,
+    frequency: Value,
+    num_harmonics: usize,
+    fd_reference_path: PathBuf,
+    td_reference_path: PathBuf,
+    ic_reference_path: PathBuf,
+    wrapper: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceStaticTranContract {
     PlainStatic,
@@ -1861,27 +1874,32 @@ impl XyceTestRunner {
             return result;
         }
 
-        let result = match self.execution_plan(deck) {
-            Ok(plan) => self.run_static_prn_dc_plan(deck, plan, start),
-            Err(dc_reason) => match self.static_ac_plan_for_deck(deck) {
-                Ok(plan) => self.run_static_fd_prn_ac_plan(deck, plan, start),
-                Err(ac_reason) => match self.static_tran_plan_for_deck(deck) {
-                    Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
-                    Err(tran_reason) => {
-                        let reason = if self.deck_has_print_analysis(deck, "AC") {
-                            ac_reason
-                        } else if self.deck_has_print_analysis(deck, "TRAN") {
-                            tran_reason
-                        } else {
-                            dc_reason
-                        };
-                        return self.expected_unsupported_result(
-                            deck,
-                            start,
-                            "unsupported_xyce_contract",
-                            &reason,
-                        );
-                    }
+        let result = match self.static_hb_plan_for_deck(deck) {
+            Ok(plan) => self.run_static_prn_hb_plan(deck, plan, start),
+            Err(hb_reason) => match self.execution_plan(deck) {
+                Ok(plan) => self.run_static_prn_dc_plan(deck, plan, start),
+                Err(dc_reason) => match self.static_ac_plan_for_deck(deck) {
+                    Ok(plan) => self.run_static_fd_prn_ac_plan(deck, plan, start),
+                    Err(ac_reason) => match self.static_tran_plan_for_deck(deck) {
+                        Ok(plan) => self.run_static_prn_tran_plan(deck, plan, start),
+                        Err(tran_reason) => {
+                            let reason = if self.deck_has_print_analysis(deck, "HB") {
+                                hb_reason
+                            } else if self.deck_has_print_analysis(deck, "AC") {
+                                ac_reason
+                            } else if self.deck_has_print_analysis(deck, "TRAN") {
+                                tran_reason
+                            } else {
+                                dc_reason
+                            };
+                            return self.expected_unsupported_result(
+                                deck,
+                                start,
+                                "unsupported_xyce_contract",
+                                &reason,
+                            );
+                        }
+                    },
                 },
             },
         };
@@ -2075,6 +2093,197 @@ impl XyceTestRunner {
             dc_data: static_plan.dc_data,
             steps: static_plan.steps,
             contract,
+        })
+    }
+
+    fn static_hb_plan_for_deck(&self, deck: &XyceDeck) -> Result<XyceStaticHbPlan, String> {
+        let source =
+            fs::read_to_string(&deck.path).map_err(|err| format!("failed to read deck: {err}"))?;
+        if !self.requires_upstream_wrapper(&deck.relative_path) {
+            return Err(
+                "static HB currently implements the canonical three-file upstream-wrapper contract"
+                    .to_string(),
+            );
+        }
+        if Self::contains_control_block(&source) {
+            return Err("HB deck uses a .control block; simulator scripting is not part of the static HB contract".to_string());
+        }
+        let requests = Self::print_output_requests(&source, "HB")?;
+        if requests.len() != 1 {
+            return Err(format!(
+                "static HB requires exactly one .PRINT HB request, found {}",
+                requests.len()
+            ));
+        }
+        let request = requests.into_iter().next().expect("one HB print request");
+        if request.file.is_some() {
+            return Err("static HB does not combine the three canonical outputs with FILE= side destinations".to_string());
+        }
+        if !request
+            .format
+            .as_deref()
+            .unwrap_or("STD")
+            .eq_ignore_ascii_case("STD")
+        {
+            return Err(format!(
+                "static HB currently requires PRN/STD output, found FORMAT={}",
+                request.format.as_deref().unwrap_or("STD")
+            ));
+        }
+        if source.lines().any(|line| {
+            Self::strip_netlist_comment(line)
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with(".fft")
+        }) {
+            return Err("static HB wrapper contract does not admit .FFT output".to_string());
+        }
+
+        let mut print_count = 0usize;
+        let mut option_lines = Vec::new();
+        for line in Self::logical_netlist_lines(&source) {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            let Some(command) = trimmed.split_whitespace().next() else {
+                continue;
+            };
+            if command.eq_ignore_ascii_case(".print") {
+                print_count += 1;
+            } else if command.eq_ignore_ascii_case(".probe") {
+                return Err(
+                    "static HB wrapper contract does not admit .PROBE directives".to_string(),
+                );
+            } else if command.eq_ignore_ascii_case(".options") {
+                option_lines.push(trimmed);
+            }
+        }
+        if print_count != 1 {
+            return Err(format!(
+                "static HB wrapper contract requires exactly one .PRINT directive, found {print_count}"
+            ));
+        }
+
+        let netlist = Self::parse_xyce_netlist(&source, &deck.path)
+            .map_err(|err| format!("HB netlist parse failed: {err}"))?;
+        let [AnalysisCommand::Hb { frequencies }] = netlist.analyses.as_slice() else {
+            return Err(
+                "static HB requires exactly one .HB analysis and no other analysis cards"
+                    .to_string(),
+            );
+        };
+        let [frequency] = frequencies.as_slice() else {
+            return Err(format!(
+                "static HB currently supports one tone, found {}",
+                frequencies.len()
+            ));
+        };
+        if !frequency.is_finite() || *frequency <= 0.0 {
+            return Err(format!(
+                "static HB fundamental must be finite and positive, found {frequency}"
+            ));
+        }
+        let [num_harmonics] = netlist.options.hb_num_frequencies.as_slice() else {
+            return Err(format!(
+                "static HB requires exactly one positive HBINT NUMFREQ value, found {}",
+                netlist.options.hb_num_frequencies.len()
+            ));
+        };
+        if *num_harmonics == 0 || *num_harmonics > 256 {
+            return Err(format!(
+                "static HB harmonic order must be in 1..=256, found {num_harmonics}"
+            ));
+        }
+        let normalized_options = option_lines
+            .iter()
+            .map(|line| {
+                line.chars()
+                    .filter(|character| !character.is_whitespace())
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        let accepted_options = [
+            format!(".optionshbintnumfreq={num_harmonics}"),
+            format!(".optionshbintnumfreq[1]={num_harmonics}"),
+        ];
+        if normalized_options.len() != 1 || !accepted_options.contains(&normalized_options[0]) {
+            return Err(
+                "static HB wrapper contract currently admits only HBINT NUMFREQ; startup, output, and linear-solver options require distinct typed contracts"
+                    .to_string(),
+            );
+        }
+
+        for probe in &request.probes {
+            let normalized = Self::normalize_probe(probe);
+            let unsupported_device_probe = normalized.contains("i(")
+                || ["id(", "ig(", "is(", "ib(", "ic(", "ie(", "p(", "w("]
+                    .iter()
+                    .any(|prefix| normalized.starts_with(prefix))
+                || normalized.contains('@');
+            if unsupported_device_probe {
+                return Err(format!(
+                    "static HB wrapper contract does not yet support branch, device-current, or device-parameter probe '{probe}'"
+                ));
+            }
+        }
+
+        if netlist.elements.iter().any(|element| {
+            !matches!(
+                &element.kind,
+                crate::netlist::ElementKind::Resistor { .. }
+                    | crate::netlist::ElementKind::Capacitor { .. }
+                    | crate::netlist::ElementKind::Diode { .. }
+                    | crate::netlist::ElementKind::VoltageSource(_)
+            )
+        }) {
+            return Err(
+                "static HB wrapper contract currently covers R/C/diode circuits driven by independent voltage sources"
+                    .to_string(),
+            );
+        }
+
+        let fd_reference_path = self
+            .static_output_reference_path(&deck.path, "HB.FD.prn")
+            .ok_or_else(|| "HB deck is not under tests/xyce/Netlists".to_string())?;
+        let td_reference_path = self
+            .static_output_reference_path(&deck.path, "HB.TD.prn")
+            .ok_or_else(|| "HB deck is not under tests/xyce/Netlists".to_string())?;
+        let ic_reference_path = self
+            .static_output_reference_path(&deck.path, "hb_ic.prn")
+            .ok_or_else(|| "HB deck is not under tests/xyce/Netlists".to_string())?;
+        let startup_reference_path = self
+            .static_output_reference_path(&deck.path, "startup.prn")
+            .ok_or_else(|| "HB deck is not under tests/xyce/Netlists".to_string())?;
+        if startup_reference_path.is_file() {
+            return Err(
+                "static HB wrapper contract does not yet implement the additional startup.prn artifact"
+                    .to_string(),
+            );
+        }
+        for (label, path) in [
+            ("HB frequency-domain", &fd_reference_path),
+            ("HB time-domain", &td_reference_path),
+            ("HB startup transient", &ic_reference_path),
+        ] {
+            if !path.is_file() {
+                return Err(format!(
+                    "no checked-in {label} oracle at {}",
+                    self.display_path(path)
+                ));
+            }
+        }
+
+        Ok(XyceStaticHbPlan {
+            deck_path: deck.path.clone(),
+            source,
+            print: XycePrintRequest {
+                probes: request.probes,
+            },
+            frequency: *frequency,
+            num_harmonics: *num_harmonics,
+            fd_reference_path,
+            td_reference_path,
+            ic_reference_path,
+            wrapper: self.requires_upstream_wrapper(&deck.relative_path),
         })
     }
 
@@ -4892,6 +5101,207 @@ impl XyceTestRunner {
             };
             Self::is_extra_wrapper_output_analysis_command(command)
         })
+    }
+
+    fn run_static_prn_hb_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceStaticHbPlan,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = if plan.wrapper {
+            "wrapper_static_prn_hb"
+        } else {
+            "static_prn_hb"
+        };
+        let netlist = match Self::parse_xyce_netlist(&plan.source, &plan.deck_path) {
+            Ok(netlist) => netlist,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("parse failed after HB contract validation: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let fd_reference = match Self::parse_ac_comparator_prn_file(&plan.fd_reference_path) {
+            Ok(reference) => reference,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("failed to parse HB.FD oracle: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let td_reference =
+            match Self::parse_xyce_verify_tran_reference_file(&plan.td_reference_path) {
+                Ok(reference) => reference,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("failed to parse HB.TD oracle: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+        let ic_reference =
+            match Self::parse_xyce_verify_tran_reference_file(&plan.ic_reference_path) {
+                Ok(reference) => reference,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("failed to parse HB startup oracle: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+
+        let hb_config = crate::analysis::HbConfig::new(plan.frequency)
+            .with_harmonics(plan.num_harmonics)
+            .with_collocation_points(2 * plan.num_harmonics + 1);
+        let hb = match self.create_xyce_engine().run_hb(&netlist, hb_config) {
+            Ok(result) => result,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("native HB simulation failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let fd_actual = match Self::hb_frequency_result_to_prn_table(
+            &fd_reference,
+            &plan.print,
+            &netlist,
+            &hb.result,
+        ) {
+            Ok(table) => table,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("HB.FD output construction failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let mut mismatches = match self.compare_ac_comparator_tables(&fd_reference, &fd_actual) {
+            Ok(mismatches) => mismatches,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("HB.FD ACComparator comparison failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let td_result = Self::hb_result_to_transient_result(&hb.result);
+        let td_actual =
+            match Self::hb_transient_result_to_prn_table(&plan.print, &netlist, &td_result) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("HB.TD output construction failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+        match self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+            &td_reference,
+            &td_actual,
+            XyceVerifyTransientTolerance::release_7_10_default(),
+            XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        ) {
+            Ok(td_mismatches) => mismatches.extend(td_mismatches),
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("HB.TD xyce_verify comparison failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        }
+
+        let period = plan.frequency.recip();
+        let mut startup_config = self.xyce_engine_config(None);
+        startup_config.integration_method = crate::analysis::IntegrationMethod::BackwardEuler;
+        startup_config.transient_initial_timestep = Some(period / 1.0e6);
+        let startup = match Engine::new(startup_config).run_tran(&netlist, period, period / 1000.0)
+        {
+            Ok(result) => result,
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("HB startup transient failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        let ic_actual =
+            match Self::hb_transient_result_to_prn_table(&plan.print, &netlist, &startup) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("HB startup output construction failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+        match self.compare_xyce_verify_transient_tables_with_uniform_tolerance(
+            &ic_reference,
+            &ic_actual,
+            XyceVerifyTransientTolerance::release_7_10_default(),
+            XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+        ) {
+            Ok(ic_mismatches) => mismatches.extend(ic_mismatches),
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!("HB startup xyce_verify comparison failed: {err}"),
+                    Vec::new(),
+                );
+            }
+        }
+
+        mismatches.truncate(self.config.max_mismatches);
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!("{} HB oracle mismatch(es)", mismatches.len()),
+                mismatches,
+            )
+        }
     }
 
     fn run_static_fd_prn_ac_plan(
@@ -10396,6 +10806,7 @@ impl XyceTestRunner {
             topology_supernode,
             device_zero_resistance_tol,
             b3soi_gmin_scaling,
+            hb_num_frequencies,
         } = options;
         reltol.is_none()
             && abstol.is_none()
@@ -10430,6 +10841,7 @@ impl XyceTestRunner {
             && topology_supernode.is_none()
             && device_zero_resistance_tol.is_none()
             && b3soi_gmin_scaling.is_none()
+            && hb_num_frequencies.is_empty()
     }
 
     fn analytic_rc_options_match(
@@ -20554,6 +20966,239 @@ impl XyceTestRunner {
         }
     }
 
+    fn hb_frequency_result_to_prn_table(
+        reference: &XycePrnTable,
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        result: &crate::analysis::HbResult,
+    ) -> Result<XycePrnTable, String> {
+        if reference.columns.len() < 3
+            || reference.columns.first().map(String::as_str) != Some("Index")
+            || reference.columns.get(1).map(String::as_str) != Some("FREQ")
+        {
+            return Err(
+                "HB.FD ACComparator table must begin with exact 'Index FREQ' columns".to_string(),
+            );
+        }
+        let data_columns = Self::reference_ac_data_columns(reference, print, 2)?;
+        let expected_rows = 2 * result.num_harmonics + 1;
+        if reference.rows.len() != expected_rows {
+            return Err(format!(
+                "HB.FD oracle has {} rows, expected {expected_rows} for {} harmonics",
+                reference.rows.len(),
+                result.num_harmonics
+            ));
+        }
+
+        let node_names = result
+            .spectral_voltages
+            .iter()
+            .map(|node| node.node_name.clone())
+            .collect::<Vec<_>>();
+        let mut rows = Vec::with_capacity(expected_rows);
+        for (row_index, signed_harmonic) in
+            (-(result.num_harmonics as isize)..=result.num_harmonics as isize).enumerate()
+        {
+            let harmonic = signed_harmonic.unsigned_abs();
+            let voltages = result
+                .spectral_voltages
+                .iter()
+                .map(|node| {
+                    let coefficient =
+                        node.coefficients.get(harmonic).copied().ok_or_else(|| {
+                            format!(
+                                "HB node '{}' is missing harmonic {harmonic}",
+                                node.node_name
+                            )
+                        })?;
+                    let coefficient = if harmonic == 0 {
+                        coefficient
+                    } else {
+                        coefficient / 2.0
+                    };
+                    Ok(if signed_harmonic < 0 {
+                        coefficient.conj()
+                    } else {
+                        coefficient
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let frequency = signed_harmonic as Value * result.fundamental_freq;
+            let ac_result = AcResult {
+                frequency,
+                node_names: node_names.clone(),
+                branch_names: Vec::new(),
+                voltages,
+                currents: Vec::new(),
+            };
+            let mut row = Vec::with_capacity(reference.columns.len());
+            row.push(row_index as Value);
+            row.push(frequency);
+            for column in &data_columns {
+                row.push(Self::evaluate_ac_reference_column(
+                    column, netlist, &ac_result, false,
+                )?);
+            }
+            rows.push(row);
+        }
+        Ok(XycePrnTable {
+            columns: reference.columns.clone(),
+            rows,
+        })
+    }
+
+    fn hb_result_to_transient_result(result: &crate::analysis::HbResult) -> TransientResult {
+        let sample_count = 2 * result.num_harmonics + 1;
+        let period = result.fundamental_freq.recip();
+        let time = (0..sample_count)
+            .map(|sample| sample as Value * period / sample_count as Value)
+            .collect::<Vec<_>>();
+        let voltages = result
+            .spectral_voltages
+            .iter()
+            .map(|node| {
+                time.iter()
+                    .map(|time| {
+                        let mut value = node
+                            .coefficients
+                            .first()
+                            .map(|value| value.re)
+                            .unwrap_or(0.0);
+                        for (harmonic, coefficient) in
+                            node.coefficients.iter().copied().enumerate().skip(1)
+                        {
+                            let angle = std::f64::consts::TAU
+                                * harmonic as Value
+                                * result.fundamental_freq
+                                * time;
+                            value += (coefficient * Complex64::from_polar(1.0, angle)).re;
+                        }
+                        value
+                    })
+                    .collect()
+            })
+            .collect::<Vec<_>>();
+        TransientResult {
+            time,
+            voltages,
+            branch_currents: Vec::new(),
+            num_nodes: result.spectral_voltages.len(),
+            node_names: result
+                .spectral_voltages
+                .iter()
+                .map(|node| node.node_name.clone())
+                .collect(),
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+        }
+    }
+
+    fn hb_transient_result_to_prn_table(
+        print: &XycePrintRequest,
+        netlist: &Netlist,
+        result: &TransientResult,
+    ) -> Result<XycePrnTable, String> {
+        Self::validate_transient_result_time_grid(result)?;
+        let columns = Self::transient_prn_header_columns(print, true);
+        let mut rows = Vec::with_capacity(result.time.len());
+        for (index, time) in result.time.iter().copied().enumerate() {
+            let mut row = Vec::with_capacity(columns.len());
+            row.push(index as Value);
+            row.push(time);
+            for probe in &print.probes {
+                row.push(Self::evaluate_tran_probe(probe, netlist, result, time)?);
+            }
+            rows.push(row);
+        }
+        Ok(XycePrnTable { columns, rows })
+    }
+
+    fn compare_ac_comparator_tables(
+        &self,
+        gold: &XycePrnTable,
+        test: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        const ABS_TOL: Value = 1.0e-6;
+        const REL_TOL: Value = 1.0e-3;
+        const ZERO_TOL: Value = 1.0e-10;
+        const FREQ_REL_TOL: Value = 1.0e-6;
+
+        if gold.columns != test.columns {
+            return Err(format!(
+                "ACComparator headers differ: gold {:?}, test {:?}",
+                gold.columns, test.columns
+            ));
+        }
+        if gold.rows.len() != test.rows.len() {
+            return Err(format!(
+                "ACComparator row counts differ: gold {}, test {}",
+                gold.rows.len(),
+                test.rows.len()
+            ));
+        }
+        let mut mismatches = Vec::new();
+        for (row_index, (gold_row, test_row)) in gold.rows.iter().zip(&test.rows).enumerate() {
+            if gold_row.len() != gold.columns.len() || test_row.len() != test.columns.len() {
+                return Err(format!(
+                    "ACComparator row {row_index} width differs from its header"
+                ));
+            }
+            if gold_row[0] != test_row[0] {
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: gold.columns[0].clone(),
+                    expected: gold_row[0],
+                    actual: test_row[0],
+                    relative_error: 1.0,
+                });
+            }
+            if gold_row[1] != test_row[1] {
+                let difference = (test_row[1] - gold_row[1]).abs();
+                let failed = if gold_row[1] == 0.0 {
+                    test_row[1] > ABS_TOL
+                } else {
+                    difference / gold_row[1] > FREQ_REL_TOL
+                };
+                if failed {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: gold.columns[1].clone(),
+                        expected: gold_row[1],
+                        actual: test_row[1],
+                        relative_error: difference / gold_row[1].abs().max(ABS_TOL),
+                    });
+                }
+            }
+            for column in 2..gold.columns.len() {
+                let expected = gold_row[column];
+                let actual = test_row[column];
+                if expected == actual || (expected.abs() < ZERO_TOL && actual.abs() < ZERO_TOL) {
+                    continue;
+                }
+                let absolute_difference = (actual - expected).abs();
+                let relative_difference = absolute_difference / expected.abs();
+                if !(absolute_difference < ABS_TOL && relative_difference < REL_TOL) {
+                    mismatches.push(XyceValueMismatch {
+                        row: row_index,
+                        probe: gold.columns[column].clone(),
+                        expected,
+                        actual,
+                        relative_error: relative_difference,
+                    });
+                }
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
+            }
+            if mismatches.len() >= self.config.max_mismatches {
+                return Ok(mismatches);
+            }
+        }
+        Ok(mismatches)
+    }
+
     fn evaluate_ac_probe(
         probe: &str,
         netlist: &Netlist,
@@ -24851,6 +25496,22 @@ impl XyceTestRunner {
     fn parse_prn_file(path: &Path) -> Result<XycePrnTable, String> {
         let content =
             fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        Self::parse_prn_table(&content)
+    }
+
+    fn parse_ac_comparator_prn_file(path: &Path) -> Result<XycePrnTable, String> {
+        let content =
+            fs::read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        if content.is_empty() {
+            return Err(format!("{} is empty", path.display()));
+        }
+        let last_nonempty = content.lines().rev().find(|line| !line.trim().is_empty());
+        if last_nonempty.map(str::trim) != Some("End of Xyce(TM) Simulation") {
+            return Err(format!(
+                "{} has no exact ACComparator footer 'End of Xyce(TM) Simulation'",
+                path.display()
+            ));
+        }
         Self::parse_prn_table(&content)
     }
 
@@ -34803,6 +35464,46 @@ R2 2 0 1
         assert!(
             XyceTestRunner::parse_subckt_family_member_file_name("subckt_j1.cir").is_some(),
             "matching the filename glob is separate from requiring a sibling wrapper manifest entry"
+        );
+    }
+
+    #[test]
+    fn ac_comparator_preserves_strict_boundaries_and_signed_frequency_quirks() {
+        let runner = XyceTestRunner::new(".", XyceRunnerConfig::default());
+        let table = |frequency: Value, value: Value| XycePrnTable {
+            columns: vec!["Index".to_string(), "FREQ".to_string(), "V(1)".to_string()],
+            rows: vec![vec![0.0, frequency, value]],
+        };
+
+        let gold = table(-10.0, 1.0);
+        let signed_frequency_quirk = table(100.0, 1.0);
+        assert!(
+            runner
+                .compare_ac_comparator_tables(&gold, &signed_frequency_quirk)
+                .expect("structurally valid tables compare")
+                .is_empty(),
+            "Release 7.10 divides frequency error by signed negative gold frequency"
+        );
+
+        let boundary_gold = table(-10.0, 0.0);
+        let exact_absolute_boundary = table(-10.0, 1.0e-6);
+        assert_eq!(
+            runner
+                .compare_ac_comparator_tables(&boundary_gold, &exact_absolute_boundary)
+                .expect("structurally valid tables compare")
+                .len(),
+            1,
+            "ACComparator requires absDiff strictly below its tolerance"
+        );
+
+        let zero_gold = table(0.0, 1.0);
+        let negative_zero_frequency_deviation = table(-1.0, 1.0);
+        assert!(
+            runner
+                .compare_ac_comparator_tables(&zero_gold, &negative_zero_frequency_deviation)
+                .expect("structurally valid tables compare")
+                .is_empty(),
+            "Release 7.10 zero-frequency check rejects only positive test deviations"
         );
     }
 }

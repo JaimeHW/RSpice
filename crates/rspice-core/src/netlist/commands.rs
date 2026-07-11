@@ -98,6 +98,32 @@ pub fn parse_command(
                 stop_freq,
             });
         }
+        ".HB" => {
+            let mut frequencies = Vec::new();
+            while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline) {
+                skip_commas(stream);
+                if stream.is_eof() || matches!(stream.peek().kind, TokenKind::Newline) {
+                    break;
+                }
+                let frequency = expect_value(stream, line_num, params)?;
+                if !frequency.is_finite() || frequency <= 0.0 {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            ".HB frequencies must be positive finite numbers, found {frequency}"
+                        ),
+                    });
+                }
+                frequencies.push(frequency);
+            }
+            if frequencies.is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".HB requires at least one positive frequency".to_string(),
+                });
+            }
+            analyses.push(AnalysisCommand::Hb { frequencies });
+        }
         ".TRAN" => {
             let step = expect_value(stream, line_num, params)?;
             let stop = expect_value(stream, line_num, params)?;

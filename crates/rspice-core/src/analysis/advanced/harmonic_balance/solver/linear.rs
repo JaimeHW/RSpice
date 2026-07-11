@@ -7,7 +7,10 @@ impl HbSolver {
     /// Create a new HB solver
     pub fn new(config: HbConfig, num_nodes: usize) -> Self {
         let num_harmonics = config.num_harmonics;
-        let fft = HbFft::new(num_harmonics, config.oversample_factor);
+        let fft = match config.collocation_points {
+            Some(points) => HbFft::with_size(num_harmonics, points),
+            None => HbFft::new(num_harmonics, config.oversample_factor),
+        };
 
         Self {
             config,

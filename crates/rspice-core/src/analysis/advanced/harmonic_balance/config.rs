@@ -112,6 +112,14 @@ pub struct HbConfig {
     /// Higher values reduce aliasing in nonlinear evaluation
     pub oversample_factor: usize,
 
+    /// Optional exact number of time-domain collocation points.
+    ///
+    /// When unset, the solver chooses an oversampled power-of-two FFT grid.
+    /// Set this for simulator-compatible minimal odd grids such as Xyce's
+    /// `2 * NUMFREQ + 1` HB discretization. The engine validates that the
+    /// grid is odd and can represent every configured harmonic.
+    pub collocation_points: Option<usize>,
+
     /// Maximum intermodulation order for multi-tone
     /// Limits the number of mixing products considered
     pub max_mixing_order: usize,
@@ -157,6 +165,7 @@ impl HbConfig {
             damping: 1.0,
             min_damping: 0.1,
             oversample_factor: 2,
+            collocation_points: None,
             max_mixing_order: 5,
             use_krylov: false,
             gmres_restart: 30,
@@ -252,6 +261,21 @@ impl HbConfig {
         self
     }
 
+    /// Use an exact odd time-domain collocation grid.
+    pub fn with_collocation_points(mut self, points: usize) -> Self {
+        self.collocation_points = Some(points);
+        self
+    }
+
+    /// Smallest odd collocation grid that can represent DC and every
+    /// configured positive and negative harmonic.
+    ///
+    /// Returns `None` when the configured harmonic count cannot be
+    /// represented by `usize`; callers should reject that configuration.
+    pub fn minimum_collocation_points(&self) -> Option<usize> {
+        self.num_harmonics.checked_mul(2)?.checked_add(1)
+    }
+
     /// Set maximum mixing order for multi-tone
     pub fn with_max_mixing_order(mut self, order: usize) -> Self {
         self.max_mixing_order = order;
@@ -299,6 +323,9 @@ impl HbConfig {
 
     /// Get FFT size for time-domain evaluation
     pub fn fft_size(&self) -> usize {
+        if let Some(points) = self.collocation_points {
+            return points;
+        }
         // Power of 2 for efficient FFT
         let min_size = self.num_spectral_components() * self.oversample_factor;
         min_size.next_power_of_two()

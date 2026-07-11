@@ -4724,6 +4724,30 @@ fn test_xyce_complex_param_dc_real_default_wrapper_case_runs() {
 }
 
 #[test]
+fn test_xyce_complex_param_harmonic_balance_wrapper_case_runs() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/COMPLEX_NUM/test5.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a three-oracle harmonic-balance comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in HB.FD, HB.TD, and hb_ic oracles"
+    );
+    assert_eq!(result.contract, "wrapper_static_prn_hb");
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

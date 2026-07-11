@@ -15,7 +15,7 @@ use crate::Value;
 /// Encapsulates rustfft planner and provides convenient methods for
 /// converting between time and frequency domains with proper normalization.
 pub struct HbFft {
-    /// FFT size (power of 2)
+    /// FFT/collocation-grid size
     fft_size: usize,
 
     /// Number of harmonics (not including DC)
@@ -54,6 +54,20 @@ impl HbFft {
         let min_size = (num_harmonics + 1) * oversample.max(2);
         let fft_size = min_size.next_power_of_two();
 
+        Self::with_size(num_harmonics, fft_size)
+    }
+
+    /// Create a processor with an exact collocation-grid size.
+    pub fn with_size(num_harmonics: usize, fft_size: usize) -> Self {
+        let minimum_size = num_harmonics
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(1))
+            .expect("HB harmonic count exceeds the addressable collocation grid");
+        assert!(
+            fft_size >= minimum_size,
+            "HB collocation grid must represent DC and ± every configured harmonic"
+        );
+
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft(fft_size, FftDirection::Forward);
         let ifft = planner.plan_fft(fft_size, FftDirection::Inverse);
@@ -69,6 +83,11 @@ impl HbFft {
             ifft,
             scratch: vec![Complex64::new(0.0, 0.0); scratch_len],
         }
+    }
+
+    #[inline]
+    fn positive_harmonic_limit(&self) -> usize {
+        (self.fft_size - 1) / 2
     }
 
     /// Get FFT size
@@ -100,14 +119,13 @@ impl HbFft {
         }
 
         // Positive frequencies
-        for (k, &coeff) in spectrum.iter().skip(1).enumerate() {
-            if k + 1 < n / 2 {
-                full_spectrum[k + 1] = coeff;
-            }
+        let positive_limit = self.positive_harmonic_limit();
+        for (k, &coeff) in spectrum.iter().enumerate().skip(1).take(positive_limit) {
+            full_spectrum[k] = coeff;
         }
 
         // Negative frequencies (conjugate symmetry for real output)
-        for k in 1..n / 2 {
+        for k in 1..=positive_limit {
             if k < spectrum.len() {
                 full_spectrum[n - k] = spectrum[k].conj();
             }
@@ -139,7 +157,7 @@ impl HbFft {
             .process_with_scratch(&mut buffer, &mut self.scratch);
 
         let norm = 1.0 / n as f64;
-        let max_kept = (n / 2).saturating_sub(1);
+        let max_kept = self.positive_harmonic_limit();
         (0..=count.min(max_kept))
             .map(|k| buffer[k] * norm)
             .collect()
@@ -259,6 +277,29 @@ impl HbFft {
 
 impl Clone for HbFft {
     fn clone(&self) -> Self {
-        Self::new(self.num_harmonics, self.fft_size / (self.num_harmonics + 1))
+        Self::with_size(self.num_harmonics, self.fft_size)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn odd_minimal_grid_round_trips_the_highest_harmonic() {
+        let mut fft = HbFft::with_size(5, 11);
+        let mut spectrum = vec![Complex64::new(0.0, 0.0); 6];
+        spectrum[0] = Complex64::new(0.75, 0.0);
+        spectrum[5] = Complex64::new(-0.2, 0.35);
+
+        let waveform = fft.to_time_domain(&spectrum);
+        let round_trip = fft.to_frequency_domain(&waveform);
+        assert_eq!(waveform.len(), 11);
+        for (expected, actual) in spectrum.iter().zip(&round_trip) {
+            assert!(
+                (*expected - *actual).norm() < 1.0e-12,
+                "expected {expected:?}, got {actual:?}"
+            );
+        }
     }
 }

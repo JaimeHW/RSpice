@@ -335,6 +335,7 @@ impl SimulationController {
             max_iterations: hb_cfg.maxiter as usize,
             damping: hb_cfg.damping,
             oversample: hb_cfg.oversample as usize,
+            collocation_points: None,
             max_mixing_order: hb_cfg.max_mixing_order as usize,
             use_krylov: matches!(
                 hb_cfg.solver,
