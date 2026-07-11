@@ -946,7 +946,7 @@ fn test_xyce_capacitor_analytic_first_order_rc_wrapper_runs() {
 }
 
 #[test]
-fn test_xyce_capacitor_analytic_contract_does_not_claim_newlte_sibling() {
+fn test_xyce_capacitor_analytic_newlte_sibling_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
@@ -955,9 +955,11 @@ fn test_xyce_capacitor_analytic_contract_does_not_claim_newlte_sibling() {
     assert!(runner.requires_upstream_wrapper(relative));
     let result = runner.run_test(root.join(relative));
     assert!(
-        result.passed && result.expected_unsupported,
-        "{relative} has a distinct NEWLTE=2 wrapper contract and must remain expected-unsupported, got {result:?}"
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass its generated Release 7.10 NEWLTE=2 analytic RC oracle, got {result:?}"
     );
+    assert!(result.mismatches.is_empty());
+    assert_eq!(result.contract, "analytic_first_order_rc_tran_wrapper");
 }
 
 #[test]

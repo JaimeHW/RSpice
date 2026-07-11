@@ -20,7 +20,7 @@ use crate::netlist::expr::ComplexValue as ExprComplexValue;
 use crate::netlist::expr::prepare_behavioral_expression;
 use crate::netlist::{
     AnalysisCommand, DcSecondSweep, ElementKind, ExpressionDialect, Netlist, NetlistParseOptions,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef,
+    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, TransientLteReference,
     XYCE_DEFAULT_ZERO_RESISTANCE_TOL,
 };
 use crate::{Complex64, Engine, Value};
@@ -241,6 +241,7 @@ struct XyceAnalyticRcSourceContract {
     tran_stop_bits: u64,
     reltol_bits: u64,
     abstol_bits: u64,
+    transient_lte_reference: Option<TransientLteReference>,
 }
 
 #[derive(Debug, Clone)]
@@ -9258,7 +9259,7 @@ impl XyceTestRunner {
                         print_count += 1;
                     }
                     ".tran" if fields.len() == 3 => tran_count += 1,
-                    ".options" if fields.len() == 4 => {
+                    ".options" if matches!(fields.len(), 4 | 5) => {
                         let keys = fields[1..]
                             .iter()
                             .map(|field| {
@@ -9268,12 +9269,15 @@ impl XyceTestRunner {
                                     .to_ascii_lowercase()
                             })
                             .collect::<BTreeSet<_>>();
-                        if keys
-                            != ["timeint", "reltol", "abstol"]
-                                .into_iter()
-                                .map(str::to_string)
-                                .collect()
-                        {
+                        let base_keys = ["timeint", "reltol", "abstol"]
+                            .into_iter()
+                            .map(str::to_string)
+                            .collect::<BTreeSet<_>>();
+                        let newlte_keys = ["timeint", "reltol", "abstol", "newlte"]
+                            .into_iter()
+                            .map(str::to_string)
+                            .collect::<BTreeSet<_>>();
+                        if keys != base_keys && keys != newlte_keys {
                             return false;
                         }
                         options_count += 1;
@@ -9381,14 +9385,15 @@ impl XyceTestRunner {
                         tran_values = Some((step.to_bits(), stop.to_bits()));
                     }
                     ".options" => {
-                        if option_values.is_some() || fields.len() != 4 {
+                        if option_values.is_some() || !matches!(fields.len(), 4 | 5) {
                             return Err(format!(
-                                "{LABEL} requires exactly '.OPTIONS TIMEINT RELTOL=<numeric> ABSTOL=<numeric>'"
+                                "{LABEL} requires exactly '.OPTIONS TIMEINT RELTOL=<numeric> ABSTOL=<numeric> [NEWLTE=<0..3>]'"
                             ));
                         }
                         let mut timeint = false;
                         let mut reltol = None;
                         let mut abstol = None;
+                        let mut transient_lte_reference = None;
                         for option in &fields[1..] {
                             if option.eq_ignore_ascii_case("TIMEINT") {
                                 if timeint {
@@ -9410,21 +9415,41 @@ impl XyceTestRunner {
                                 ));
                             }
                             let value = Self::single_spice_numeric_literal_value(value)?;
-                            if value <= 0.0 {
-                                return Err(format!(
-                                    "{LABEL} option '{name}' must be finite and positive"
-                                ));
-                            }
                             if name.eq_ignore_ascii_case("RELTOL") {
+                                if value <= 0.0 {
+                                    return Err(format!(
+                                        "{LABEL} option '{name}' must be finite and positive"
+                                    ));
+                                }
                                 if reltol.replace(value.to_bits()).is_some() {
                                     return Err(format!(
                                         "{LABEL} contains duplicate RELTOL options"
                                     ));
                                 }
                             } else if name.eq_ignore_ascii_case("ABSTOL") {
+                                if value <= 0.0 {
+                                    return Err(format!(
+                                        "{LABEL} option '{name}' must be finite and positive"
+                                    ));
+                                }
                                 if abstol.replace(value.to_bits()).is_some() {
                                     return Err(format!(
                                         "{LABEL} contains duplicate ABSTOL options"
+                                    ));
+                                }
+                            } else if name.eq_ignore_ascii_case("NEWLTE") {
+                                let rounded = value.round();
+                                if value != rounded || !(0.0..=3.0).contains(&rounded) {
+                                    return Err(format!(
+                                        "{LABEL} NEWLTE must be an integer from 0 to 3, found {value}"
+                                    ));
+                                }
+                                let reference =
+                                    TransientLteReference::from_xyce_selector(rounded as u8)
+                                        .expect("range was checked above");
+                                if transient_lte_reference.replace(reference).is_some() {
+                                    return Err(format!(
+                                        "{LABEL} contains duplicate NEWLTE options"
                                     ));
                                 }
                             } else {
@@ -9441,6 +9466,7 @@ impl XyceTestRunner {
                         option_values = Some((
                             reltol.expect("checked above"),
                             abstol.expect("checked above"),
+                            transient_lte_reference,
                         ));
                     }
                     ".end" if fields.len() == 1 => end_count += 1,
@@ -9535,7 +9561,7 @@ impl XyceTestRunner {
             print_probe.ok_or_else(|| format!("{LABEL} contains no qualified print probe"))?;
         let (tran_step_bits, tran_stop_bits) =
             tran_values.ok_or_else(|| format!("{LABEL} contains no qualified .TRAN"))?;
-        let (reltol_bits, abstol_bits) =
+        let (reltol_bits, abstol_bits, transient_lte_reference) =
             option_values.ok_or_else(|| format!("{LABEL} contains no qualified .OPTIONS"))?;
 
         Ok(XyceAnalyticRcSourceContract {
@@ -9554,6 +9580,7 @@ impl XyceTestRunner {
             tran_stop_bits,
             reltol_bits,
             abstol_bits,
+            transient_lte_reference,
         })
     }
 
@@ -9600,7 +9627,7 @@ impl XyceTestRunner {
             && abstol.is_none()
             && timeint_reltol.is_some_and(|value| value.to_bits() == source.reltol_bits)
             && timeint_abstol.is_some_and(|value| value.to_bits() == source.abstol_bits)
-            && transient_lte_reference.is_none()
+            && *transient_lte_reference == source.transient_lte_reference
             && transient_new_bp_stepping.is_none()
             && vntol.is_none()
             && iabstol.is_none()
@@ -27688,6 +27715,7 @@ Vbias source 0 0\n\
         assert_eq!(contract.source_name, "vbias");
         assert_eq!(contract.probe_node, "out");
         assert_eq!(contract.tran_step_bits, 0.0f64.to_bits());
+        assert_eq!(contract.transient_lte_reference, None);
 
         for malformed in [
             source.replace("IC=1", "IC={1}"),
@@ -27713,9 +27741,31 @@ Vbias source 0 0\n\
             ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6 NEWLTE=2",
         );
         assert!(
-            !XyceTestRunner::is_analytic_rc_wrapper_candidate(&newlte),
-            "NEWLTE belongs to a distinct wrapper contract"
+            XyceTestRunner::is_analytic_rc_wrapper_candidate(&newlte),
+            "typed NEWLTE remains within the same generated analytic-oracle shape"
         );
+        for (selector, reference) in [
+            (0, TransientLteReference::PointLocal),
+            (1, TransientLteReference::PointGlobal),
+            (2, TransientLteReference::SignalGlobal),
+            (3, TransientLteReference::SignalLocal),
+        ] {
+            let qualified = newlte.replace("NEWLTE=2", &format!("NEWLTE={selector}"));
+            let contract = XyceTestRunner::analytic_rc_source_contract(&qualified)
+                .expect("direct NEWLTE selector qualifies");
+            assert_eq!(contract.transient_lte_reference, Some(reference));
+        }
+        for invalid_newlte in ["-1", "1.0000000001", "4"] {
+            let malformed = newlte.replace("NEWLTE=2", &format!("NEWLTE={invalid_newlte}"));
+            assert!(
+                XyceTestRunner::is_analytic_rc_wrapper_candidate(&malformed),
+                "an invalid direct selector must reach strict typed qualification"
+            );
+            assert!(
+                XyceTestRunner::analytic_rc_source_contract(&malformed).is_err(),
+                "invalid NEWLTE selector must fail closed: {invalid_newlte}"
+            );
+        }
         let formatted = source.replace(".PRINT TRAN V(out)", ".PRINT TRAN FORMAT=TECPLOT V(out)");
         assert!(
             !XyceTestRunner::is_analytic_rc_wrapper_candidate(&formatted),
@@ -27741,6 +27791,21 @@ Vbias source 0 0\n\
         assert_eq!(
             specification.time_constant.to_bits(),
             XYCE_ANALYTIC_RC_ORACLE_TIME_CONSTANT.to_bits()
+        );
+
+        let newlte = source.replace(
+            ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6",
+            ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6 NEWLTE=2",
+        );
+        let newlte_specification = analytic_rc_test_specification(&newlte)
+            .expect("typed NEWLTE=2 uses the same exact generated exponential oracle");
+        assert_eq!(
+            newlte_specification.time_constant.to_bits(),
+            specification.time_constant.to_bits()
+        );
+        assert_eq!(
+            newlte_specification.initial_voltage.to_bits(),
+            specification.initial_voltage.to_bits()
         );
 
         for changed in [
@@ -27886,7 +27951,7 @@ Vbias source 0 0\n\
     }
 
     #[test]
-    fn analytic_rc_detector_is_path_independent_and_preserves_failures() {
+    fn analytic_rc_detector_is_path_independent_and_preserves_typed_failures() {
         let root = std::env::temp_dir().join(format!(
             "rspice-xyce-analytic-rc-{}-{}",
             std::process::id(),
@@ -27934,10 +27999,23 @@ Vbias source 0 0\n\
                 ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6 NEWLTE=2",
             ),
         )
-        .expect("write distinct NEWLTE sibling shape");
+        .expect("write typed NEWLTE sibling shape");
+        runner
+            .analytic_rc_wrapper_contract(&deck)
+            .expect("typed NEWLTE source shape is detected")
+            .expect("typed NEWLTE source shape qualifies without a path allowlist");
+
+        fs::write(
+            &deck_path,
+            analytic_rc_test_source().replace(
+                ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6",
+                ".OPTIONS TIMEINT RELTOL=1e-6 ABSTOL=1e-6 NEWLTE=1.5",
+            ),
+        )
+        .expect("write invalid NEWLTE sibling shape");
         assert!(
-            runner.analytic_rc_wrapper_contract(&deck).is_none(),
-            "a distinct wrapper shape must not be claimed"
+            matches!(runner.analytic_rc_wrapper_contract(&deck), Some(Err(_))),
+            "an invalid typed selector must remain an executed qualification failure"
         );
 
         fs::remove_dir_all(&root).expect("remove renamed analytic fixture");
