@@ -33,6 +33,7 @@ const EXPECTED_UNSUPPORTED_MARKER: &str = "EXPECTED_UNSUPPORTED:";
 const HARNESS_MANIFEST_FILE: &str = "RSPICE-HARNESS-MANIFEST.tsv";
 const REQUIRES_UPSTREAM_WRAPPER_CONTRACT: &str = "requires_upstream_wrapper";
 const MAX_NATIVE_TRAN_ORACLE_STEPS: f64 = 250_000.0;
+const MAX_NATIVE_TRAN_TARGET_COMPACT_DEVICE_STEPS: f64 = 10_000.0;
 const MAX_NATIVE_TRAN_ELEMENT_STEPS: f64 = 250_000_000.0;
 const MAX_NATIVE_TRAN_COMPACT_DEVICE_STEPS: f64 = 2_500_000.0;
 const MAX_NATIVE_TRAN_NODE_SOLVE_STEPS: f64 = 2_500_000_000.0;
@@ -9058,7 +9059,7 @@ impl XyceTestRunner {
         let fallback = (tran.stop / 1000.0).max(f64::MIN_POSITIVE);
         let reference_limited_step = Self::feasible_reference_limited_step(tran, reference_step);
         let fallback_limit = reference_limited_step.is_none().then_some(fallback);
-        let max_step = [
+        let mut max_step = [
             requested,
             reference_limited_step,
             source_step,
@@ -9069,20 +9070,46 @@ impl XyceTestRunner {
         .filter(|value| value.is_finite() && *value > 0.0)
         .reduce(Value::min)
         .unwrap_or(fallback);
+        let unconstrained_estimated_steps = (tran.stop / max_step).ceil();
+        if unconstrained_estimated_steps > MAX_NATIVE_TRAN_ORACLE_STEPS {
+            return Err(format!(
+                "transient harness execution envelope supports at most {:.0} oracle-derived native step(s), but this deck requires about {:.0}",
+                MAX_NATIVE_TRAN_ORACLE_STEPS, unconstrained_estimated_steps
+            ));
+        }
+        Self::validate_transient_execution_envelope(netlist, unconstrained_estimated_steps)?;
+        if let Some(work_limited_step) = Self::compact_device_work_limited_step(netlist, tran)? {
+            max_step = max_step.max(work_limited_step);
+        }
         if !max_step.is_finite() || max_step <= 0.0 {
             return Err(format!(
                 "resolved transient maximum step must be finite and positive, got {max_step}"
             ));
         }
-        let estimated_steps = (tran.stop / max_step).ceil();
-        if estimated_steps > MAX_NATIVE_TRAN_ORACLE_STEPS {
-            return Err(format!(
-                "transient harness execution envelope supports at most {:.0} oracle-derived native step(s), but this deck requires about {:.0}",
-                MAX_NATIVE_TRAN_ORACLE_STEPS, estimated_steps
-            ));
-        }
-        Self::validate_transient_execution_envelope(netlist, estimated_steps)?;
         Ok(max_step)
+    }
+
+    fn compact_device_work_limited_step(
+        netlist: &Netlist,
+        tran: &XyceTranAnalysis,
+    ) -> Result<Option<Value>, String> {
+        if tran.max_step.is_some() {
+            return Ok(None);
+        }
+        let compact_device_count =
+            Self::transient_flattened_problem_size(netlist)?.compact_device_count;
+        if compact_device_count == 0 {
+            return Ok(None);
+        }
+
+        // The harness compares by interpolation and can retry on the exact
+        // reference grid. Do not turn one tiny adaptive Xyce gap into hundreds
+        // of thousands of globally capped nonlinear solves. This relaxes only
+        // the harness-imposed cap; engine LTE control and source breakpoints
+        // may still accept smaller steps, and an explicit deck TMAX always wins.
+        Ok(Some(
+            tran.stop * compact_device_count as Value / MAX_NATIVE_TRAN_TARGET_COMPACT_DEVICE_STEPS,
+        ))
     }
 
     fn validate_transient_execution_envelope(
@@ -19072,6 +19099,43 @@ C1 out 0 40u IC=1
                 .expect("long transient falls back to bounded native step count");
 
         assert_eq!(max_step, 400.0e-6);
+    }
+
+    #[test]
+    fn transient_max_step_bounds_reference_oversampling_for_nonlinear_deck() {
+        let mut deck = String::from(
+            "isolated adaptive reference gap\nV1 c 0 5\nV2 b 0 PULSE(0 1 1n 1n 1n 10n 40n)\n.model qn NPN BF=50\n",
+        );
+        for index in 0..14 {
+            deck.push_str(&format!("Q{index} c b 0 qn\n"));
+        }
+        deck.push_str(".tran 1n 75n\n.print tran v(c)\n.end\n");
+
+        let netlist = Netlist::parse(&deck).expect("nonlinear test netlist parses");
+        let tran = XyceTranAnalysis {
+            step: 1.0e-9,
+            stop: 75.0e-9,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+        let reference = XycePrnTable {
+            columns: ["Index", "TIME", "V(c)"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            rows: vec![
+                vec![0.0, 0.0, 5.0],
+                vec![1.0, 0.58e-12, 5.0],
+                vec![2.0, 75.0e-9, 5.0],
+            ],
+        };
+
+        let max_step =
+            XyceTestRunner::transient_max_step_for_reference(&netlist, &tran, &reference)
+                .expect("source cadence remains inside the nonlinear work envelope");
+
+        assert!((max_step - 105.0e-12).abs() <= 1.0e-24, "got {max_step}");
     }
 
     #[test]
