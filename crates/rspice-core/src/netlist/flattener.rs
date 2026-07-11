@@ -843,8 +843,15 @@ impl<'a> Flattener<'a> {
             return "0".to_string();
         }
 
-        // .GLOBAL nodes retain their original names across hierarchy levels.
-        if self.global_nodes.contains(&node.to_ascii_uppercase()) {
+        // Explicit .GLOBAL nodes and Xyce's implicit $G* global-node names
+        // retain their original names across hierarchy levels. Xyce applies
+        // the $G prefix rule during subcircuit expansion, so recognizing it
+        // here is essential before connectivity and device construction.
+        if self.global_nodes.contains(&node.to_ascii_uppercase())
+            || node
+                .get(..2)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("$G"))
+        {
             return node.to_string();
         }
 
@@ -2734,6 +2741,39 @@ fn is_simple_probe_name(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xyce_dollar_g_nodes_remain_global_across_subcircuits() {
+        let netlist = Netlist::parse(
+            "implicit global node\n\
+             X1 a CELL\n\
+             X2 b CELL\n\
+             .subckt CELL p\n\
+             C1 p $G_SHARED 1p\n\
+             .ends\n\
+             .end\n",
+        )
+        .expect("deck parses");
+
+        let flattened = flatten_netlist_with_models(&netlist).expect("netlist flattens");
+        let global_attachments = flattened
+            .elements
+            .iter()
+            .filter(|element| {
+                element
+                    .nodes
+                    .iter()
+                    .any(|node| node.eq_ignore_ascii_case("$G_SHARED"))
+            })
+            .count();
+        assert_eq!(global_attachments, 2);
+        assert!(flattened.elements.iter().all(|element| {
+            element
+                .nodes
+                .iter()
+                .all(|node| !node.to_ascii_uppercase().contains(".$G_SHARED"))
+        }));
+    }
 
     #[test]
     fn behavioral_voltage_probe_remaps_subcircuit_port_case_insensitively() {

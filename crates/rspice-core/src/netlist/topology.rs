@@ -6,7 +6,7 @@
 
 use super::{Element, ElementKind, XspiceDigitalNode, XspicePort};
 use crate::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Xyce 7.10 `DeviceOptions::zeroResistanceTol` default.
 pub const XYCE_DEFAULT_ZERO_RESISTANCE_TOL: Value = 1.0e-100;
@@ -15,6 +15,217 @@ pub const XYCE_DEFAULT_ZERO_RESISTANCE_TOL: Value = 1.0e-100;
 #[derive(Debug, Clone)]
 pub struct TopologyReduction {
     pub elements: Vec<Element>,
+}
+
+/// Xyce-compatible connectivity warnings computed from a flattened circuit.
+///
+/// Node identity is case-insensitive, while each diagnostic retains the first
+/// source spelling so user-facing messages point back to the deck naturally.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConnectivityDiagnostics {
+    /// Non-ground nodes adjacent to no more than one distinct device.
+    pub one_device_terminal_nodes: Vec<String>,
+    /// Non-ground nodes whose device lead groups do not reach ground at DC.
+    pub no_dc_path_nodes: Vec<String>,
+}
+
+/// A flattened element whose Xyce DC lead grouping is not modeled yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectivityAnalysisError {
+    pub element: String,
+    pub reason: String,
+}
+
+impl std::fmt::Display for ConnectivityAnalysisError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "cannot analyze connectivity for element '{}': {}",
+            self.element, self.reason
+        )
+    }
+}
+
+impl std::error::Error for ConnectivityAnalysisError {}
+
+/// Compute Xyce-style one-device and no-DC-path topology diagnostics.
+///
+/// Xyce assigns every external device terminal a lead-group number. Terminals
+/// in the same nonzero group are considered DC-connected; capacitors put each
+/// lead in a separate group. This routine mirrors those maps for native SPICE
+/// elements and fails closed for code models whose connectivity is model
+/// specific.
+pub fn analyze_xyce_connectivity(
+    elements: &[Element],
+) -> Result<ConnectivityDiagnostics, ConnectivityAnalysisError> {
+    let mut union = NodeUnion::default();
+    let mut attachments: BTreeMap<String, (String, BTreeSet<String>)> = BTreeMap::new();
+
+    for element in elements {
+        union.collect_element_nodes(element);
+        let mut seen_on_device = BTreeSet::new();
+        for node in connectivity_terminal_nodes(element)? {
+            let key = node_key(node);
+            if seen_on_device.insert(key.clone()) {
+                attachments
+                    .entry(key)
+                    .or_insert_with(|| (normalize_node_name(node), BTreeSet::new()))
+                    .1
+                    .insert(element.name.to_ascii_uppercase());
+            }
+        }
+        for group in xyce_dc_lead_groups(element)? {
+            if let Some((first, rest)) = group.split_first() {
+                for node in rest {
+                    union.union_nodes(first, node);
+                }
+            }
+        }
+    }
+
+    let one_device_terminal_nodes = attachments
+        .values()
+        .filter(|(node, devices)| !is_ground_name(node) && devices.len() <= 1)
+        .map(|(node, _)| node.clone())
+        .collect();
+
+    let ground_root = union
+        .index_by_key
+        .get(&node_key("0"))
+        .map(|index| union.root_of(*index));
+    let mut no_dc_path_nodes = union
+        .entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| !is_ground_name(&entry.original))
+        .filter(|(index, _)| ground_root.is_none_or(|ground| union.root_of(*index) != ground))
+        .map(|(_, entry)| entry.original.clone())
+        .collect::<Vec<_>>();
+    no_dc_path_nodes.sort_by_key(|node| node_key(node));
+
+    Ok(ConnectivityDiagnostics {
+        one_device_terminal_nodes,
+        no_dc_path_nodes,
+    })
+}
+
+fn connectivity_terminal_nodes(element: &Element) -> Result<Vec<&str>, ConnectivityAnalysisError> {
+    let mut nodes = element.nodes.iter().map(String::as_str).collect::<Vec<_>>();
+    match &element.kind {
+        ElementKind::Vcvs { control_nodes, .. } | ElementKind::Vccs { control_nodes, .. } => {
+            nodes.push(&control_nodes.0);
+            nodes.push(&control_nodes.1);
+        }
+        ElementKind::VSwitch {
+            control_pos,
+            control_neg,
+            ..
+        } => {
+            nodes.push(control_pos);
+            nodes.push(control_neg);
+        }
+        ElementKind::Xspice { .. } => {
+            return Err(ConnectivityAnalysisError {
+                element: element.name.clone(),
+                reason: "XSPICE lead groups are model-specific".to_string(),
+            });
+        }
+        _ => {}
+    }
+    Ok(nodes)
+}
+
+fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, ConnectivityAnalysisError> {
+    let all = || vec![element.nodes.iter().map(String::as_str).collect::<Vec<_>>()];
+    let separate = || {
+        element
+            .nodes
+            .iter()
+            .map(|node| vec![node.as_str()])
+            .collect::<Vec<_>>()
+    };
+    let groups = match &element.kind {
+        ElementKind::Capacitor { .. } => separate(),
+        ElementKind::Bjt { .. } if element.nodes.len() >= 3 => {
+            let mut groups = vec![vec![
+                element.nodes[0].as_str(),
+                element.nodes[1].as_str(),
+                element.nodes[2].as_str(),
+            ]];
+            groups.extend(element.nodes[3..].iter().map(|node| vec![node.as_str()]));
+            groups
+        }
+        ElementKind::Mosfet { .. } if element.nodes.len() >= 4 => vec![
+            vec![element.nodes[0].as_str(), element.nodes[2].as_str()],
+            vec![element.nodes[1].as_str()],
+            vec![element.nodes[3].as_str()],
+        ],
+        ElementKind::Jfet { .. } | ElementKind::Mesfet { .. } if element.nodes.len() >= 3 => {
+            vec![
+                vec![element.nodes[0].as_str(), element.nodes[2].as_str()],
+                vec![element.nodes[1].as_str()],
+            ]
+        }
+        ElementKind::Vcvs { control_nodes, .. } | ElementKind::Vccs { control_nodes, .. } => {
+            let mut groups = all();
+            groups.push(vec![control_nodes.0.as_str(), control_nodes.1.as_str()]);
+            groups
+        }
+        ElementKind::VSwitch {
+            control_pos,
+            control_neg,
+            ..
+        } => {
+            let mut groups = all();
+            groups.push(vec![control_pos.as_str(), control_neg.as_str()]);
+            groups
+        }
+        ElementKind::TransmissionLine { .. } if element.nodes.len() >= 4 => vec![
+            vec![element.nodes[0].as_str(), element.nodes[2].as_str()],
+            vec![element.nodes[1].as_str(), element.nodes[3].as_str()],
+        ],
+        ElementKind::Coupling { .. } => Vec::new(),
+        ElementKind::Subcircuit { .. }
+        | ElementKind::VoltageSourceDeferred(_)
+        | ElementKind::CurrentSourceDeferred(_) => {
+            return Err(ConnectivityAnalysisError {
+                element: element.name.clone(),
+                reason: "element must be resolved during flattening".to_string(),
+            });
+        }
+        ElementKind::Xspice { .. } => {
+            return Err(ConnectivityAnalysisError {
+                element: element.name.clone(),
+                reason: "XSPICE lead groups are model-specific".to_string(),
+            });
+        }
+        ElementKind::Resistor { .. }
+        | ElementKind::Inductor { .. }
+        | ElementKind::JilesAthertonInductor { .. }
+        | ElementKind::VoltageSource(_)
+        | ElementKind::CurrentSource(_)
+        | ElementKind::Diode { .. }
+        | ElementKind::Cccs { .. }
+        | ElementKind::Ccvs { .. }
+        | ElementKind::BehavioralVoltage { .. }
+        | ElementKind::BehavioralCurrent { .. }
+        | ElementKind::ISwitch { .. }
+        | ElementKind::GenericSwitch { .. } => all(),
+        ElementKind::Bjt { .. }
+        | ElementKind::Mosfet { .. }
+        | ElementKind::Jfet { .. }
+        | ElementKind::Mesfet { .. }
+        | ElementKind::TransmissionLine { .. } => {
+            return Err(ConnectivityAnalysisError {
+                element: element.name.clone(),
+                reason: format!(
+                    "unexpected terminal count {} for native device",
+                    element.nodes.len()
+                ),
+            });
+        }
+    };
+    Ok(groups)
 }
 
 #[derive(Debug, Clone)]
@@ -558,6 +769,65 @@ fn extract_parenthesized(chars: &[char], lparen_idx: usize) -> Option<(String, u
 mod tests {
     use super::*;
     use crate::netlist::{Netlist, flatten_netlist_with_models};
+
+    #[test]
+    fn xyce_connectivity_reports_one_device_and_capacitor_only_global_nodes() {
+        let deck = "connectivity diagnostics\n\
+                    V1 root 0 1\n\
+                    Rbad root BAD_ONE 10\n\
+                    X1 root CELL\n\
+                    X2 root CELL\n\
+                    X3 root CELL\n\
+                    X4 root CELL\n\
+                    .subckt CELL p\n\
+                    Cbad p $G_BAD_PATH 1p\n\
+                    .ends\n\
+                    .end\n";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let flat = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+
+        let diagnostics = analyze_xyce_connectivity(&flat).expect("topology is supported");
+        assert_eq!(
+            diagnostics.one_device_terminal_nodes,
+            vec!["BAD_ONE".to_string()]
+        );
+        assert_eq!(
+            diagnostics.no_dc_path_nodes,
+            vec!["$G_BAD_PATH".to_string()]
+        );
+    }
+
+    #[test]
+    fn xyce_connectivity_uses_controlled_source_lead_groups() {
+        let deck = "controlled-source lead groups\n\
+                    V1 out 0 1\n\
+                    G1 out 0 sense ref 1m\n\
+                    R1 sense 0 1k\n\
+                    C1 ref isolated 1p\n\
+                    C2 ref isolated 1p\n\
+                    .end\n";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let flat = flatten_netlist_with_models(&netlist)
+            .expect("deck flattens")
+            .elements;
+
+        let diagnostics = analyze_xyce_connectivity(&flat).expect("topology is supported");
+        assert!(
+            !diagnostics
+                .no_dc_path_nodes
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case("ref"))
+        );
+        assert!(
+            diagnostics
+                .no_dc_path_nodes
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case("isolated")),
+            "diagnostics={diagnostics:?}"
+        );
+    }
 
     #[test]
     fn supernode_reduction_collapses_zero_resistor_nodes_and_removes_noop_passives() {

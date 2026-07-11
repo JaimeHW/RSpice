@@ -38,7 +38,8 @@ pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
 pub use source_map::*;
 pub use topology::{
-    TopologyReduction, XYCE_DEFAULT_ZERO_RESISTANCE_TOL, reduce_supernode_topology,
+    ConnectivityAnalysisError, ConnectivityDiagnostics, TopologyReduction,
+    XYCE_DEFAULT_ZERO_RESISTANCE_TOL, analyze_xyce_connectivity, reduce_supernode_topology,
 };
 pub(crate) use xspice_parser::{
     DeferredXspiceStringVectorEntry, encode_deferred_xspice_complex,

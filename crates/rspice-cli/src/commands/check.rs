@@ -352,6 +352,32 @@ fn add_parser_diagnostics(netlist: &Netlist, result: &mut ValidationResult) {
 }
 
 fn check_connectivity(netlist: &Netlist, result: &mut ValidationResult) {
+    if let Ok(flattened) = rspice_core::netlist::flatten_netlist_with_models(netlist)
+        && let Ok(diagnostics) =
+            rspice_core::netlist::analyze_xyce_connectivity(&flattened.elements)
+    {
+        for node in diagnostics.one_device_terminal_nodes {
+            result.warnings.push(ValidationIssue {
+                message: format!("Voltage Node ({node}) connected to only 1 device Terminal"),
+                element: None,
+                line: None,
+                code: Some("TOPOLOGY_ONE_DEVICE_TERMINAL".to_string()),
+            });
+        }
+        for node in diagnostics.no_dc_path_nodes {
+            result.warnings.push(ValidationIssue {
+                message: format!("Voltage Node ({node}) does not have a DC path to ground"),
+                element: None,
+                line: None,
+                code: Some("TOPOLOGY_NO_DC_PATH".to_string()),
+            });
+        }
+        return;
+    }
+
+    // Model-specific XSPICE lead groups are not available to the core
+    // analyzer. Preserve the older top-level adjacency check as a conservative
+    // fallback instead of silently omitting connectivity feedback.
     let mut node_connections: HashMap<String, usize> = HashMap::new();
     let mut node_elements: HashMap<String, Vec<String>> = HashMap::new();
 

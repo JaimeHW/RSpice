@@ -1976,6 +1976,10 @@ impl XyceTestRunner {
             return None;
         }
 
+        if let Some(result) = self.run_connectivity_diagnostic_contract(deck, start) {
+            return Some(result);
+        }
+
         let source = fs::read_to_string(&deck.path).ok()?;
         if Self::is_expected_missing_inductor_value_error_deck(&deck.relative_path, &source) {
             let contract = "expected_error_missing_inductor_value";
@@ -1994,6 +1998,135 @@ impl XyceTestRunner {
         Self::validate_expected_pwl_repeat_value_error_source(&source, &deck.path)
             .ok()
             .map(|()| self.passed_result(deck, start, contract))
+    }
+
+    fn run_connectivity_diagnostic_contract(
+        &self,
+        deck: &XyceDeck,
+        start: Instant,
+    ) -> Option<XyceTestResult> {
+        const CONTRACT: &str = "wrapper_expected_topology_warnings";
+        if !self.requires_upstream_wrapper(&deck.relative_path) {
+            return None;
+        }
+        let reference_path = self.static_output_reference_path(&deck.path, "err")?;
+        if !reference_path.is_file() {
+            return None;
+        }
+        let expected = match Self::parse_connectivity_diagnostic_reference(&reference_path) {
+            Ok(Some(expected)) => expected,
+            Ok(None) => return None,
+            Err(error) => {
+                return Some(self.failure_result(deck, start, CONTRACT, error, Vec::new()));
+            }
+        };
+
+        let outcome = (|| -> Result<(), String> {
+            if expected.one_device_terminal_nodes.len() != 1 || expected.no_dc_path_nodes.len() != 1
+            {
+                return Err(
+                    "topology-warning wrapper currently requires exactly one expected node per warning category"
+                        .to_string(),
+                );
+            }
+            let source = fs::read_to_string(&deck.path)
+                .map_err(|error| format!("failed to read connectivity deck: {error}"))?;
+            for line in Self::logical_netlist_lines(&source) {
+                let normalized = Self::strip_netlist_comment(&line)
+                    .chars()
+                    .filter(|character| !character.is_whitespace())
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>();
+                if normalized.starts_with(".optionstopology")
+                    && normalized.contains("check_connectivity")
+                {
+                    return Err(
+                        "topology-warning wrapper does not admit an explicit CHECK_CONNECTIVITY override"
+                            .to_string(),
+                    );
+                }
+            }
+            let netlist = Self::parse_xyce_netlist(&source, &deck.path)
+                .map_err(|error| format!("connectivity deck parse failed: {error}"))?;
+            let flattened = crate::netlist::flatten_netlist_with_models(&netlist)
+                .map_err(|error| format!("connectivity deck flattening failed: {error}"))?;
+            let actual = crate::netlist::analyze_xyce_connectivity(&flattened.elements)
+                .map_err(|error| error.to_string())?;
+            if actual != expected {
+                return Err(format!(
+                    "topology diagnostics differ: expected one-terminal {:?} and no-DC-path {:?}, found one-terminal {:?} and no-DC-path {:?}",
+                    expected.one_device_terminal_nodes,
+                    expected.no_dc_path_nodes,
+                    actual.one_device_terminal_nodes,
+                    actual.no_dc_path_nodes
+                ));
+            }
+            Ok(())
+        })();
+
+        Some(match outcome {
+            Ok(()) => self.passed_result(deck, start, CONTRACT),
+            Err(error) => self.failure_result(deck, start, CONTRACT, error, Vec::new()),
+        })
+    }
+
+    fn parse_connectivity_diagnostic_reference(
+        path: &Path,
+    ) -> Result<Option<crate::netlist::ConnectivityDiagnostics>, String> {
+        const PREFIX: &str = "User warning: Voltage Node (";
+        const ONE_TERMINAL: &str = "connected to only 1 device Terminal";
+        const NO_DC_PATH: &str = "does not have a DC path to ground";
+
+        let source = fs::read_to_string(path).map_err(|error| {
+            format!(
+                "failed to read topology diagnostic reference {}: {error}",
+                path.display()
+            )
+        })?;
+        let lines = source
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>();
+        if lines.is_empty() || lines.iter().any(|line| !line.starts_with(PREFIX)) {
+            return Ok(None);
+        }
+
+        let mut one_device_terminal_nodes = BTreeSet::new();
+        let mut no_dc_path_nodes = BTreeSet::new();
+        for line in lines {
+            let remainder = line
+                .strip_prefix(PREFIX)
+                .expect("prefix was checked before parsing");
+            let (node, message) = remainder
+                .split_once(") ")
+                .ok_or_else(|| format!("malformed topology diagnostic reference line '{line}'"))?;
+            if node.is_empty() {
+                return Err("topology diagnostic reference contains an empty node".to_string());
+            }
+            match message {
+                ONE_TERMINAL => {
+                    if !one_device_terminal_nodes.insert(node.to_string()) {
+                        return Err(format!(
+                            "duplicate one-device topology diagnostic for node '{node}'"
+                        ));
+                    }
+                }
+                NO_DC_PATH => {
+                    if !no_dc_path_nodes.insert(node.to_string()) {
+                        return Err(format!(
+                            "duplicate no-DC-path topology diagnostic for node '{node}'"
+                        ));
+                    }
+                }
+                _ => return Ok(None),
+            }
+        }
+
+        Ok(Some(crate::netlist::ConnectivityDiagnostics {
+            one_device_terminal_nodes: one_device_terminal_nodes.into_iter().collect(),
+            no_dc_path_nodes: no_dc_path_nodes.into_iter().collect(),
+        }))
     }
 
     fn execution_plan(&self, deck: &XyceDeck) -> Result<XyceExecutionPlan, String> {

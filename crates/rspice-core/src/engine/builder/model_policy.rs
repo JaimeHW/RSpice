@@ -1109,6 +1109,16 @@ pub(super) fn warn_floating_nodes(flat_elements: &[crate::netlist::Element]) {
     use crate::netlist::ElementKind;
     use std::collections::HashMap;
 
+    if let Ok(diagnostics) = crate::netlist::analyze_xyce_connectivity(flat_elements) {
+        for node in diagnostics.one_device_terminal_nodes {
+            log::warn!("Voltage Node ({node}) connected to only 1 device Terminal");
+        }
+        for node in diagnostics.no_dc_path_nodes {
+            log::warn!("Voltage Node ({node}) does not have a DC path to ground");
+        }
+        return;
+    }
+
     let canonical = |node: &str| -> String {
         let lower = node.to_ascii_lowercase();
         if lower == "gnd" {

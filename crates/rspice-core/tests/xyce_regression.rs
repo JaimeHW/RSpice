@@ -4748,6 +4748,27 @@ fn test_xyce_complex_param_harmonic_balance_wrapper_case_runs() {
 }
 
 #[test]
+fn test_xyce_connectivity_warning_wrapper_case_runs() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/CONNECTIVITY/connect.cir";
+
+    assert!(
+        runner.requires_upstream_wrapper(relative),
+        "{relative} should retain removed wrapper provenance"
+    );
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a topology-diagnostic comparison, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+    assert_eq!(result.contract, "wrapper_expected_topology_warnings");
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
