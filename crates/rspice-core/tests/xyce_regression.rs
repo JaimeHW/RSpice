@@ -713,6 +713,42 @@ fn test_xyce_bug_307_311_native_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_bug_318_scoped_model_family_runs_exactly() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/Certification_Tests/BUG_318/bug_318.cir",
+            "scoped_model_family_wrapper",
+            true,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_318/bug_318_noscope.cir",
+            "scoped_model_family_baseline",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass the exact scoped-model relational contract, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should have bit-exact time/probe/value parity with its sibling representation"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+}
+
+#[test]
 fn test_xyce_mid_certification_transient_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -223,6 +223,12 @@ enum XyceStaticTranPlanPurpose {
     /// per-member gold file and absolute device-model eligibility are neither
     /// required nor consulted.
     RelationalFamily,
+    /// Compare scoped-model and explicitly expanded representations under an
+    /// exact qualified-topology, model-parameter, and waveform-parity
+    /// contract. This purpose has a separately qualified native BJT envelope
+    /// so ordinary relational families cannot gain BJT eligibility by
+    /// association.
+    ScopedModelRelationalFamily,
 }
 
 impl XyceStaticTranPlanPurpose {
@@ -360,16 +366,33 @@ impl XyceStaticAcContract {
 #[derive(Debug, Clone)]
 struct XyceBaselineFamilyContract {
     kind: XyceBaselineFamilyKind,
+    comparison: XyceBaselineFamilyComparison,
     family: String,
     baseline_path: PathBuf,
     member_paths: Vec<PathBuf>,
     target_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceScopedModelFamilySnapshot {
+    elements: BTreeMap<String, XyceScopedElementFingerprint>,
+    bjt_model_bits: BTreeMap<String, (u64, u64)>,
+    diode_model_bits: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceScopedElementFingerprint {
+    kind: String,
+    nodes: Vec<String>,
+    numeric_bits: Vec<u64>,
+    text: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceBaselineFamilyKind {
     Subckt,
     Supernode,
+    ScopedModel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -378,11 +401,18 @@ enum XyceBaselineFamilyAnalysis {
     Tran,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XyceBaselineFamilyComparison {
+    Toleranced,
+    Exact,
+}
+
 impl XyceBaselineFamilyKind {
     fn name(self) -> &'static str {
         match self {
             Self::Subckt => "SUBCKT",
             Self::Supernode => "SUPERNODE",
+            Self::ScopedModel => "SCOPED_MODEL",
         }
     }
 
@@ -390,6 +420,7 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::Subckt => "subckt_family_wrapper",
             Self::Supernode => "supernode_family_wrapper",
+            Self::ScopedModel => "scoped_model_family_wrapper",
         }
     }
 
@@ -397,11 +428,19 @@ impl XyceBaselineFamilyKind {
         match self {
             Self::Subckt => "subckt_family_baseline",
             Self::Supernode => "supernode_family_baseline",
+            Self::ScopedModel => "scoped_model_family_baseline",
         }
     }
 
     fn compares_baseline_oracle(self) -> bool {
         matches!(self, Self::Supernode)
+    }
+
+    fn transient_plan_purpose(self) -> XyceStaticTranPlanPurpose {
+        match self {
+            Self::ScopedModel => XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+            Self::Subckt | Self::Supernode => XyceStaticTranPlanPurpose::RelationalFamily,
+        }
     }
 }
 
@@ -1737,6 +1776,8 @@ impl XyceTestRunner {
         Self::validate_static_tran_analysis_contract(&netlist, &tran, &print)?;
         if purpose.validates_absolute_device_contract() {
             Self::validate_native_transient_contract(&netlist)?;
+        } else if purpose == XyceStaticTranPlanPurpose::ScopedModelRelationalFamily {
+            Self::validate_native_transient_contract_for_purpose(&netlist, purpose)?;
         } else {
             Self::validate_native_relational_transient_contract(&netlist)?;
         }
@@ -1760,11 +1801,9 @@ impl XyceTestRunner {
     fn static_tran_family_plan_for_path(
         &self,
         deck_path: &Path,
+        purpose: XyceStaticTranPlanPurpose,
     ) -> Result<XyceStaticTranPlan, String> {
-        self.static_tran_plan_for_path_with_purpose(
-            deck_path,
-            XyceStaticTranPlanPurpose::RelationalFamily,
-        )
+        self.static_tran_plan_for_path_with_purpose(deck_path, purpose)
     }
 
     fn static_tran_plan_for_path_with_purpose(
@@ -6812,6 +6851,48 @@ impl XyceTestRunner {
         (targets, baseline_record)
     }
 
+    fn baseline_family_tran_contracts_compatible(
+        kind: XyceBaselineFamilyKind,
+        baseline: XyceStaticTranContract,
+        target: XyceStaticTranContract,
+    ) -> bool {
+        match kind {
+            XyceBaselineFamilyKind::ScopedModel => matches!(
+                (baseline, target),
+                (
+                    XyceStaticTranContract::PlainStatic,
+                    XyceStaticTranContract::WrapperStatic
+                )
+            ),
+            XyceBaselineFamilyKind::Subckt | XyceBaselineFamilyKind::Supernode => {
+                baseline == target
+            }
+        }
+    }
+
+    fn tran_analyses_match_exactly(baseline: &XyceTranAnalysis, target: &XyceTranAnalysis) -> bool {
+        baseline.step.to_bits() == target.step.to_bits()
+            && baseline.stop.to_bits() == target.stop.to_bits()
+            && baseline.start.map(Value::to_bits) == target.start.map(Value::to_bits)
+            && baseline.max_step.map(Value::to_bits) == target.max_step.map(Value::to_bits)
+            && baseline.uic == target.uic
+    }
+
+    fn baseline_family_qualification_result(
+        &self,
+        deck: &XyceDeck,
+        start: Instant,
+        result_contract: &str,
+        comparison: XyceBaselineFamilyComparison,
+        reason: String,
+    ) -> XyceTestResult {
+        if comparison == XyceBaselineFamilyComparison::Exact {
+            self.failure_result(deck, start, result_contract, reason, Vec::new())
+        } else {
+            self.expected_unsupported_result(deck, start, result_contract, &reason)
+        }
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -6824,11 +6905,12 @@ impl XyceTestRunner {
         let analysis = match self.baseline_family_analysis_for_path(&contract.baseline_path) {
             Ok(analysis) => analysis,
             Err(reason) => {
-                return self.expected_unsupported_result(
+                return self.baseline_family_qualification_result(
                     deck,
                     start,
                     wrapper_contract,
-                    &format!(
+                    contract.comparison,
+                    format!(
                         "{kind_name} family '{}' baseline analysis is ambiguous or unsupported: {reason}",
                         contract.family
                     ),
@@ -6836,19 +6918,22 @@ impl XyceTestRunner {
             }
         };
         if analysis == XyceBaselineFamilyAnalysis::Tran {
-            let baseline_plan = match self.static_tran_family_plan_for_path(&contract.baseline_path)
-            {
+            let baseline_plan = match self.static_tran_family_plan_for_path(
+                &contract.baseline_path,
+                contract.kind.transient_plan_purpose(),
+            ) {
                 Ok(plan) => plan,
                 Err(reason) => {
-                    return self.expected_unsupported_result(
-                            deck,
-                            start,
-                            wrapper_contract,
-                            &format!(
-                                "{kind_name} family '{}' baseline is not supported by the static TRAN adapter: {reason}",
-                                contract.family
-                            ),
-                        );
+                    return self.baseline_family_qualification_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        contract.comparison,
+                        format!(
+                            "{kind_name} family '{}' baseline is not supported by the static TRAN adapter: {reason}",
+                            contract.family
+                        ),
+                    );
                 }
             };
             return self.run_transient_baseline_family_contract(
@@ -6856,6 +6941,18 @@ impl XyceTestRunner {
                 contract,
                 baseline_plan,
                 start,
+            );
+        }
+        if contract.comparison == XyceBaselineFamilyComparison::Exact {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' requests exact comparison for a DC analysis; exact family comparison currently requires TRAN",
+                    contract.family
+                ),
+                Vec::new(),
             );
         }
         let baseline_plan = match self
@@ -7131,22 +7228,24 @@ impl XyceTestRunner {
         let wrapper_contract = contract.kind.wrapper_contract();
         let baseline_contract = contract.kind.baseline_contract();
         if !baseline_plan.steps.is_empty() {
-            return self.expected_unsupported_result(
+            return self.baseline_family_qualification_result(
                 deck,
                 start,
                 wrapper_contract,
-                &format!(
+                contract.comparison,
+                format!(
                     "{kind_name} family '{}' transient relational contract does not yet support .STEP output",
                     contract.family
                 ),
             );
         }
         if baseline_plan.output_override {
-            return self.expected_unsupported_result(
+            return self.baseline_family_qualification_result(
                 deck,
                 start,
                 wrapper_contract,
-                &format!(
+                contract.comparison,
+                format!(
                     "{kind_name} family '{}' transient relational contract does not support wrapper output overrides",
                     contract.family
                 ),
@@ -7172,15 +7271,16 @@ impl XyceTestRunner {
                 );
             }
             Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                return self.expected_unsupported_result(
-                        deck,
-                        start,
-                        wrapper_contract,
-                        &format!(
-                            "{kind_name} family '{}' transient baseline is not supported by RSpice yet: {err}",
-                            contract.family
-                        ),
-                    );
+                return self.baseline_family_qualification_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    contract.comparison,
+                    format!(
+                        "{kind_name} family '{}' transient baseline is not supported by RSpice yet: {err}",
+                        contract.family
+                    ),
+                );
             }
             Err(err) => {
                 return self.failure_result(
@@ -7195,6 +7295,22 @@ impl XyceTestRunner {
                 );
             }
         };
+        let baseline_snapshot =
+            match Self::scoped_model_family_snapshot(&contract, &baseline_netlist) {
+                Ok(snapshot) => snapshot,
+                Err(err) => {
+                    return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' baseline scoped-model qualification failed: {err}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+                }
+            };
         let baseline_table = match Self::transient_family_result_to_prn_table(
             &baseline_plan,
             &baseline_netlist,
@@ -7232,11 +7348,12 @@ impl XyceTestRunner {
 
         let (targets, baseline_record) = Self::baseline_family_targets(&contract);
         if targets.is_empty() {
-            return self.expected_unsupported_result(
+            return self.baseline_family_qualification_result(
                 deck,
                 start,
                 wrapper_contract,
-                &format!(
+                contract.comparison,
+                format!(
                     "{kind_name} family '{}' has no non-baseline member to compare",
                     contract.family
                 ),
@@ -7244,14 +7361,18 @@ impl XyceTestRunner {
         }
 
         for target_path in targets {
-            let target_plan = match self.static_tran_family_plan_for_path(&target_path) {
+            let target_plan = match self.static_tran_family_plan_for_path(
+                &target_path,
+                contract.kind.transient_plan_purpose(),
+            ) {
                 Ok(plan) => plan,
                 Err(reason) => {
-                    return self.expected_unsupported_result(
+                    return self.baseline_family_qualification_result(
                         deck,
                         start,
                         wrapper_contract,
-                        &format!(
+                        contract.comparison,
+                        format!(
                             "{kind_name} family '{}' member {} is not supported by the static TRAN adapter: {reason}",
                             contract.family,
                             self.display_path(&target_path)
@@ -7260,23 +7381,29 @@ impl XyceTestRunner {
                 }
             };
             if !target_plan.steps.is_empty() || target_plan.output_override {
-                return self.expected_unsupported_result(
+                return self.baseline_family_qualification_result(
                     deck,
                     start,
                     wrapper_contract,
-                    &format!(
+                    contract.comparison,
+                    format!(
                         "{kind_name} family '{}' member {} uses stepped or overridden transient output, which the relational contract does not yet support",
                         contract.family,
                         self.display_path(&target_path)
                     ),
                 );
             }
-            if target_plan.contract != baseline_plan.contract {
-                return self.expected_unsupported_result(
+            if !Self::baseline_family_tran_contracts_compatible(
+                contract.kind,
+                baseline_plan.contract,
+                target_plan.contract,
+            ) {
+                return self.baseline_family_qualification_result(
                     deck,
                     start,
                     wrapper_contract,
-                    &format!(
+                    contract.comparison,
+                    format!(
                         "{kind_name} family '{}' member {} uses {:?} transient output, but the baseline uses {:?}; relational formats must match",
                         contract.family,
                         self.display_path(&target_path),
@@ -7285,14 +7412,56 @@ impl XyceTestRunner {
                     ),
                 );
             }
-            let target_time_scale = match Self::tran_print_time_scale_factor(&target_plan.source) {
-                Ok(scale) => scale,
-                Err(err) => {
-                    return self.expected_unsupported_result(
+            if contract.comparison == XyceBaselineFamilyComparison::Exact {
+                if target_plan.print.probes != baseline_plan.print.probes {
+                    return self.failure_result(
                         deck,
                         start,
                         wrapper_contract,
-                        &format!(
+                        format!(
+                            "{kind_name} family '{}' exact member {} changes ordered .PRINT TRAN probes",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+                if !Self::tran_analyses_match_exactly(&baseline_plan.tran, &target_plan.tran) {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' exact member {} changes the .TRAN analysis tuple",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+                if target_plan.timeint_conststep != baseline_plan.timeint_conststep {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        format!(
+                            "{kind_name} family '{}' exact member {} changes constant-step output semantics",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                        Vec::new(),
+                    );
+                }
+            }
+            let target_time_scale = match Self::tran_print_time_scale_factor(&target_plan.source) {
+                Ok(scale) => scale,
+                Err(err) => {
+                    return self.baseline_family_qualification_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        contract.comparison,
+                        format!(
                             "{kind_name} family '{}' member {} has an unsupported transient time scale: {err}",
                             contract.family,
                             self.display_path(&target_path)
@@ -7300,22 +7469,29 @@ impl XyceTestRunner {
                     );
                 }
             };
-            let scale = baseline_time_scale
-                .abs()
-                .max(target_time_scale.abs())
-                .max(1.0);
-            if (target_time_scale - baseline_time_scale).abs() > Value::EPSILON * scale {
-                return self.expected_unsupported_result(
+            let time_scale_differs = if contract.comparison == XyceBaselineFamilyComparison::Exact {
+                target_time_scale.to_bits() != baseline_time_scale.to_bits()
+            } else {
+                let scale = baseline_time_scale
+                    .abs()
+                    .max(target_time_scale.abs())
+                    .max(1.0);
+                (target_time_scale - baseline_time_scale).abs() > Value::EPSILON * scale
+            };
+            if time_scale_differs {
+                let reason = format!(
+                    "{kind_name} family '{}' member {} uses transient time scale {}, but the baseline uses {}",
+                    contract.family,
+                    self.display_path(&target_path),
+                    target_time_scale,
+                    baseline_time_scale
+                );
+                return self.baseline_family_qualification_result(
                     deck,
                     start,
                     wrapper_contract,
-                    &format!(
-                        "{kind_name} family '{}' member {} uses transient time scale {}, but the baseline uses {}",
-                        contract.family,
-                        self.display_path(&target_path),
-                        target_time_scale,
-                        baseline_time_scale
-                    ),
+                    contract.comparison,
+                    reason,
                 );
             }
 
@@ -7340,16 +7516,17 @@ impl XyceTestRunner {
                     );
                 }
                 Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
-                    return self.expected_unsupported_result(
-                            deck,
-                            start,
-                            wrapper_contract,
-                            &format!(
-                                "{kind_name} family '{}' member {} is not supported by RSpice yet: {err}",
-                                contract.family,
-                                self.display_path(&target_path)
-                            ),
-                        );
+                    return self.baseline_family_qualification_result(
+                        deck,
+                        start,
+                        wrapper_contract,
+                        contract.comparison,
+                        format!(
+                            "{kind_name} family '{}' member {} is not supported by RSpice yet: {err}",
+                            contract.family,
+                            self.display_path(&target_path)
+                        ),
+                    );
                 }
                 Err(err) => {
                     return self.failure_result(
@@ -7365,22 +7542,18 @@ impl XyceTestRunner {
                     );
                 }
             };
-            let mut mismatches = match self.compare_tran_prn_reference(
-                &baseline_table,
-                &target_plan.print,
+            let target_snapshot = match Self::scoped_model_family_snapshot(
+                &contract,
                 &target_netlist,
-                &baseline_plan.source,
-                &target_result,
-                None,
             ) {
-                Ok(mismatches) => mismatches,
+                Ok(snapshot) => snapshot,
                 Err(err) => {
                     return self.failure_result(
                         deck,
                         start,
                         wrapper_contract,
                         format!(
-                            "{kind_name} family '{}' member {} comparison error: {err}",
+                            "{kind_name} family '{}' member {} scoped-model qualification failed: {err}",
                             contract.family,
                             self.display_path(&target_path)
                         ),
@@ -7388,7 +7561,90 @@ impl XyceTestRunner {
                     );
                 }
             };
-            if !mismatches.is_empty() {
+            if target_snapshot != baseline_snapshot {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} changes qualified flattened element semantics or effective nonlinear model parameters",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+
+            let mut mismatches = if contract.comparison == XyceBaselineFamilyComparison::Exact {
+                let target_table = match Self::transient_family_result_to_prn_table(
+                    &target_plan,
+                    &target_netlist,
+                    &target_result,
+                ) {
+                    Ok(table) => table,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} exact output conversion failed: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+                match self.compare_exact_prn_tables(
+                    &baseline_table,
+                    &target_table,
+                    &baseline_result.time,
+                    &target_result.time,
+                ) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} exact comparison error: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                }
+            } else {
+                match self.compare_tran_prn_reference(
+                    &baseline_table,
+                    &target_plan.print,
+                    &target_netlist,
+                    &baseline_plan.source,
+                    &target_result,
+                    None,
+                ) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            wrapper_contract,
+                            format!(
+                                "{kind_name} family '{}' member {} comparison error: {err}",
+                                contract.family,
+                                self.display_path(&target_path)
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                }
+            };
+            if contract.comparison == XyceBaselineFamilyComparison::Toleranced
+                && !mismatches.is_empty()
+            {
                 let locked_run = self.run_transient_family_plan(
                     &target_plan,
                     start,
@@ -7517,6 +7773,315 @@ impl XyceTestRunner {
         }
 
         Ok(XycePrnTable { columns, rows })
+    }
+
+    fn scoped_model_source_fingerprint(
+        spec: &crate::netlist::SourceSpec,
+    ) -> Result<(String, Vec<u64>), String> {
+        match spec {
+            crate::netlist::SourceSpec::Dc(value) => Ok(("DC".to_string(), vec![value.to_bits()])),
+            crate::netlist::SourceSpec::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+                phase,
+                width_defaults_to_zero,
+            } => Ok((
+                "PULSE".to_string(),
+                vec![
+                    v1.to_bits(),
+                    v2.to_bits(),
+                    delay.to_bits(),
+                    rise.to_bits(),
+                    fall.to_bits(),
+                    width.to_bits(),
+                    period.to_bits(),
+                    phase.to_bits(),
+                    u64::from(*width_defaults_to_zero),
+                ],
+            )),
+            _ => Err("unqualified scoped-model source waveform".to_string()),
+        }
+    }
+
+    fn scoped_model_element_fingerprint(
+        element: &crate::netlist::Element,
+        params: &crate::netlist::expr::ParamContext,
+    ) -> Result<XyceScopedElementFingerprint, String> {
+        let nodes = element
+            .nodes
+            .iter()
+            .map(|node| node.trim().to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        let (kind, numeric_bits, text) = match &element.kind {
+            ElementKind::Resistor { value, .. } => {
+                ("R".to_string(), vec![value.to_bits()], Vec::new())
+            }
+            ElementKind::Capacitor { value, .. } => {
+                ("C".to_string(), vec![value.to_bits()], Vec::new())
+            }
+            ElementKind::VoltageSource(spec) => {
+                let (waveform, numeric_bits) = Self::scoped_model_source_fingerprint(spec)?;
+                (format!("V:{waveform}"), numeric_bits, Vec::new())
+            }
+            ElementKind::CurrentSource(spec) => {
+                let (waveform, numeric_bits) = Self::scoped_model_source_fingerprint(spec)?;
+                (format!("I:{waveform}"), numeric_bits, Vec::new())
+            }
+            ElementKind::Vccs {
+                transconductance,
+                control_nodes,
+                ..
+            } => (
+                "G".to_string(),
+                vec![transconductance.to_bits()],
+                vec![
+                    control_nodes.0.trim().to_ascii_lowercase(),
+                    control_nodes.1.trim().to_ascii_lowercase(),
+                ],
+            ),
+            ElementKind::BehavioralVoltage {
+                expression,
+                tc1,
+                tc2,
+            }
+            | ElementKind::BehavioralCurrent {
+                expression,
+                tc1,
+                tc2,
+            } => {
+                let kind = if matches!(&element.kind, ElementKind::BehavioralVoltage { .. }) {
+                    "BV"
+                } else {
+                    "BI"
+                };
+                let prepared =
+                    crate::netlist::expr::prepare_behavioral_expression(expression, params)
+                        .map_err(|err| {
+                            format!(
+                                "could not canonicalize behavioral expression for '{}': {err}",
+                                element.name
+                            )
+                        })?;
+                (
+                    kind.to_string(),
+                    vec![tc1.to_bits(), tc2.to_bits()],
+                    vec![prepared.trim().to_ascii_lowercase()],
+                )
+            }
+            ElementKind::Bjt { .. } => ("Q".to_string(), Vec::new(), Vec::new()),
+            ElementKind::Diode { .. } => ("D".to_string(), Vec::new(), Vec::new()),
+            _ => {
+                return Err(format!(
+                    "flattened scoped-model family contains unqualified element '{}'",
+                    element.name
+                ));
+            }
+        };
+        Ok(XyceScopedElementFingerprint {
+            kind,
+            nodes,
+            numeric_bits,
+            text,
+        })
+    }
+
+    fn scoped_model_family_snapshot(
+        contract: &XyceBaselineFamilyContract,
+        netlist: &Netlist,
+    ) -> Result<Option<XyceScopedModelFamilySnapshot>, String> {
+        if contract.kind != XyceBaselineFamilyKind::ScopedModel {
+            return Ok(None);
+        }
+
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist)
+            .map_err(|err| format!("could not flatten scoped-model family member: {err}"))?;
+
+        let mut elements = BTreeMap::new();
+        let mut bjt_model_bits = BTreeMap::new();
+        let mut diode_model_bits = BTreeMap::new();
+        for element in &flattened.elements {
+            let key = Self::normalize_device_instance_name(&element.name);
+            let fingerprint = Self::scoped_model_element_fingerprint(element, &netlist.params)?;
+            if elements.insert(key.clone(), fingerprint).is_some() {
+                return Err(format!(
+                    "flattened scoped-model family contains duplicate element name '{key}'"
+                ));
+            }
+
+            match &element.kind {
+                ElementKind::Bjt { model, .. } => {
+                    let effective_model = Self::find_unique_model_in(
+                        flattened
+                            .scoped_models
+                            .iter()
+                            .chain(netlist.models.iter()),
+                        model,
+                    )
+                    .ok_or_else(|| {
+                        format!(
+                            "scoped-model BJT '{key}' must reference exactly one effective model '{model}'"
+                        )
+                    })?;
+                    if !Self::model_is_native_scoped_model_relational_bjt(effective_model) {
+                        return Err(format!(
+                            "scoped-model BJT '{key}' references an unresolved or unqualified effective model '{model}'"
+                        ));
+                    }
+                    let bf = Self::numeric_param_value(&effective_model.params, "BF")
+                        .expect("qualified scoped-model BJT has exactly one BF");
+                    let saturation_current =
+                        Self::numeric_param_value(&effective_model.params, "IS")
+                            .expect("qualified scoped-model BJT has exactly one IS");
+                    bjt_model_bits.insert(key, (bf.to_bits(), saturation_current.to_bits()));
+                }
+                ElementKind::Diode { model, .. } => {
+                    let effective_model = Self::find_unique_model_in(
+                        flattened
+                            .scoped_models
+                            .iter()
+                            .chain(netlist.models.iter()),
+                        model,
+                    )
+                    .ok_or_else(|| {
+                        format!(
+                            "scoped-model diode '{key}' must reference exactly one effective model '{model}'"
+                        )
+                    })?;
+                    if !Self::model_is_native_scoped_model_relational_diode(effective_model) {
+                        return Err(format!(
+                            "scoped-model diode '{key}' references an unresolved or unqualified effective model '{model}'"
+                        ));
+                    }
+                    let saturation_current =
+                        Self::numeric_param_value(&effective_model.params, "IS")
+                            .expect("qualified scoped-model diode has exactly one IS");
+                    diode_model_bits.insert(key, saturation_current.to_bits());
+                }
+                _ => {}
+            }
+        }
+
+        if bjt_model_bits.is_empty() && diode_model_bits.is_empty() {
+            return Err(format!(
+                "scoped-model family '{}' does not exercise a qualified nonlinear model",
+                contract.family
+            ));
+        }
+
+        Ok(Some(XyceScopedModelFamilySnapshot {
+            elements,
+            bjt_model_bits,
+            diode_model_bits,
+        }))
+    }
+
+    fn compare_exact_prn_tables(
+        &self,
+        expected: &XycePrnTable,
+        actual: &XycePrnTable,
+        expected_raw_time: &[Value],
+        actual_raw_time: &[Value],
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if expected_raw_time.len() != expected.rows.len()
+            || actual_raw_time.len() != actual.rows.len()
+        {
+            return Err(format!(
+                "exact relational raw time lengths ({}, {}) do not match table row counts ({}, {})",
+                expected_raw_time.len(),
+                actual_raw_time.len(),
+                expected.rows.len(),
+                actual.rows.len()
+            ));
+        }
+        if expected_raw_time.len() != actual_raw_time.len() {
+            return Err(format!(
+                "exact relational raw time count differs: expected {}, actual {}",
+                expected_raw_time.len(),
+                actual_raw_time.len()
+            ));
+        }
+        let raw_time_mismatches = expected_raw_time
+            .iter()
+            .zip(actual_raw_time)
+            .enumerate()
+            .filter_map(|(row, (&expected, &actual))| {
+                (expected.to_bits() != actual.to_bits()).then(|| XyceValueMismatch {
+                    row,
+                    probe: "TIME".to_string(),
+                    expected,
+                    actual,
+                    relative_error: if expected.is_finite() && actual.is_finite() {
+                        (expected - actual).abs()
+                            / expected.abs().max(actual.abs()).max(Value::MIN_POSITIVE)
+                    } else {
+                        Value::INFINITY
+                    },
+                })
+            })
+            .take(self.config.max_mismatches)
+            .collect::<Vec<_>>();
+        if !raw_time_mismatches.is_empty() {
+            return Ok(raw_time_mismatches);
+        }
+
+        if expected.columns != actual.columns {
+            return Err(format!(
+                "exact relational columns differ: expected {:?}, actual {:?}",
+                expected.columns, actual.columns
+            ));
+        }
+        if expected.rows.len() != actual.rows.len() {
+            return Err(format!(
+                "exact relational row count differs: expected {}, actual {}",
+                expected.rows.len(),
+                actual.rows.len()
+            ));
+        }
+
+        let mut mismatches = Vec::new();
+        for (row_index, (expected_row, actual_row)) in
+            expected.rows.iter().zip(&actual.rows).enumerate()
+        {
+            if expected_row.len() != expected.columns.len()
+                || actual_row.len() != actual.columns.len()
+            {
+                return Err(format!(
+                    "exact relational row {row_index} width differs from its column layout"
+                ));
+            }
+            for (column_index, (&expected_value, &actual_value)) in
+                expected_row.iter().zip(actual_row).enumerate()
+            {
+                if expected_value.to_bits() == actual_value.to_bits() {
+                    continue;
+                }
+                let scale = expected_value
+                    .abs()
+                    .max(actual_value.abs())
+                    .max(f64::MIN_POSITIVE);
+                let relative_error = if expected_value.is_finite() && actual_value.is_finite() {
+                    (expected_value - actual_value).abs() / scale
+                } else {
+                    f64::INFINITY
+                };
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: expected.columns[column_index].clone(),
+                    expected: expected_value,
+                    actual: actual_value,
+                    relative_error,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
+            }
+        }
+        Ok(mismatches)
     }
 
     fn run_static_dc_results(
@@ -10779,8 +11344,16 @@ impl XyceTestRunner {
                         control_element,
                     )?;
                 }
-                ElementKind::BehavioralVoltage { expression, .. }
-                | ElementKind::BehavioralCurrent { expression, .. } => {
+                ElementKind::BehavioralVoltage {
+                    expression,
+                    tc1,
+                    tc2,
+                }
+                | ElementKind::BehavioralCurrent {
+                    expression,
+                    tc1,
+                    tc2,
+                } if tc1.is_finite() && tc2.is_finite() => {
                     Self::validate_ac_behavioral_expression(
                         &element.name,
                         expression,
@@ -11140,17 +11713,19 @@ impl XyceTestRunner {
             return Self::validate_native_transient_contract_for_purpose(&flat_netlist, purpose);
         }
 
+        if purpose == XyceStaticTranPlanPurpose::ScopedModelRelationalFamily {
+            return Self::validate_native_scoped_model_relational_transient_contract_flat(netlist);
+        }
+
         let elements = &netlist.elements;
         let params = &netlist.params;
-        if purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
+        let has_qualified_bjt = purpose == XyceStaticTranPlanPurpose::AbsoluteOracle
             && elements.iter().any(|element| {
-                matches!(element.kind, ElementKind::Bjt { .. })
-                    && Self::netlist_element_is_native_transient_level1_npn(netlist, element)
-            })
-            && !Self::native_level1_npn_transient_uses_standard_startup(netlist)
-        {
+                Self::netlist_element_is_native_transient_level1_npn(netlist, element)
+            });
+        if has_qualified_bjt && !Self::native_level1_npn_transient_uses_standard_startup(netlist) {
             return Err(
-                "native Level-1 NPN transient comparison requires a single ordinary DC operating-point startup at the default 27 C TEMP and TNOM, without UIC/NOOP, .TEMP analyses, explicit initial conditions, or node-set hints"
+                "native qualified-NPN transient comparison requires a single ordinary DC operating-point startup at the default 27 C TEMP and TNOM, without UIC/NOOP, .TEMP analyses, explicit initial conditions, or node-set hints"
                     .to_string(),
             );
         }
@@ -11316,11 +11891,132 @@ impl XyceTestRunner {
                             "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3 and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
                             element.name
                         ),
+                        XyceStaticTranPlanPurpose::ScopedModelRelationalFamily => format!(
+                            "native scoped-model relational .PRINT TRAN comparison currently supports finite independent and behavioral sources, static numeric R/C, finite VCCS, exact scalar IS/BF NPN models, and exact scalar IS diode models; element '{}' requires a broader scoped-model runtime contract",
+                            element.name
+                        ),
                     });
                 }
             }
         }
         Ok(())
+    }
+
+    fn validate_native_scoped_model_relational_transient_contract_flat(
+        netlist: &Netlist,
+    ) -> Result<(), String> {
+        if !Self::native_level1_npn_transient_uses_standard_startup(netlist) {
+            return Err(
+                "native scoped-model relational comparison requires ordinary DC operating-point startup at the default 27 C TEMP and TNOM, without UIC/NOOP, .TEMP analyses, explicit initial conditions, or node-set hints"
+                    .to_string(),
+            );
+        }
+
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Self::validate_scoped_model_relational_source(&element.name, spec)?;
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() => {}
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_voltage.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() => {}
+                ElementKind::Vccs {
+                    transconductance,
+                    transconductance_expr,
+                    ..
+                } if transconductance_expr.is_none() => {
+                    Self::validate_finite_controlled_source_gain(
+                        "VCCS",
+                        &element.name,
+                        "transconductance",
+                        *transconductance,
+                    )?
+                }
+                ElementKind::BehavioralVoltage { expression, .. }
+                | ElementKind::BehavioralCurrent { expression, .. } => {
+                    Self::validate_transient_behavioral_expression(
+                        &element.name,
+                        expression,
+                        &netlist.params,
+                    )?;
+                }
+                ElementKind::Bjt { .. }
+                    if Self::netlist_element_is_native_scoped_model_relational_bjt(
+                        netlist, element,
+                    ) => {}
+                ElementKind::Diode { .. }
+                    if Self::netlist_element_is_native_scoped_model_relational_diode(
+                        netlist, element,
+                    ) => {}
+                _ => {
+                    return Err(format!(
+                        "native scoped-model relational comparison does not qualify element '{}'",
+                        element.name
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_scoped_model_relational_source(
+        source_name: &str,
+        spec: &crate::netlist::SourceSpec,
+    ) -> Result<(), String> {
+        let qualified = match spec {
+            crate::netlist::SourceSpec::Dc(value) => value.is_finite(),
+            crate::netlist::SourceSpec::Pulse {
+                v1,
+                v2,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+                phase,
+                ..
+            } => {
+                [*v1, *v2, *delay, *rise, *fall, *width, *period, *phase]
+                    .into_iter()
+                    .all(Value::is_finite)
+                    && *delay >= 0.0
+                    && *rise >= 0.0
+                    && *fall >= 0.0
+                    && *width >= 0.0
+                    && *period > 0.0
+            }
+            _ => false,
+        };
+        if qualified {
+            Ok(())
+        } else {
+            Err(format!(
+                "native scoped-model relational source '{source_name}' must be finite DC or PULSE"
+            ))
+        }
     }
 
     fn validate_flattened_subcircuit_instances_resolved(
@@ -14770,6 +15466,103 @@ impl XyceTestRunner {
             })
     }
 
+    fn find_unique_model_in<'a>(
+        models: impl IntoIterator<Item = &'a crate::netlist::ModelDef>,
+        name: &str,
+    ) -> Option<&'a crate::netlist::ModelDef> {
+        let mut matches = models
+            .into_iter()
+            .filter(|model| model.name.eq_ignore_ascii_case(name));
+        let model = matches.next()?;
+        matches.next().is_none().then_some(model)
+    }
+
+    fn netlist_element_is_native_scoped_model_relational_bjt(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Bjt {
+            model,
+            instance_params,
+            deferred_params,
+            ..
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 3
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_scoped_model_relational_bjt)
+    }
+
+    fn model_is_native_scoped_model_relational_bjt(model: &crate::netlist::ModelDef) -> bool {
+        if !model.model_type.eq_ignore_ascii_case("NPN")
+            || !model.expr_params.is_empty()
+            || !model.string_params.is_empty()
+            || !model.string_vector_params.is_empty()
+            || !model.real_vector_params.is_empty()
+            || !model.real_vector_expr_params.is_empty()
+            || !model.integer_vector_params.is_empty()
+            || model.params.len() != 2
+        {
+            return false;
+        }
+        let bf_count = model
+            .params
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("BF"))
+            .count();
+        let is_count = model
+            .params
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("IS"))
+            .count();
+        bf_count == 1
+            && is_count == 1
+            && model.params.iter().all(|(name, value)| {
+                value.is_finite()
+                    && *value > 0.0
+                    && matches!(name.to_ascii_uppercase().as_str(), "BF" | "IS")
+            })
+    }
+
+    fn netlist_element_is_native_scoped_model_relational_diode(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+    ) -> bool {
+        let ElementKind::Diode {
+            model,
+            instance_params,
+            deferred_params,
+        } = &element.kind
+        else {
+            return false;
+        };
+        element.nodes.len() == 2
+            && instance_params.is_empty()
+            && deferred_params.is_empty()
+            && Self::find_unique_model_in(&netlist.models, model)
+                .is_some_and(Self::model_is_native_scoped_model_relational_diode)
+    }
+
+    fn model_is_native_scoped_model_relational_diode(model: &crate::netlist::ModelDef) -> bool {
+        matches!(
+            model.model_type.to_ascii_uppercase().as_str(),
+            "D" | "DIODE"
+        ) && model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+            && model.params.len() == 1
+            && model.params[0].0.eq_ignore_ascii_case("IS")
+            && model.params[0].1.is_finite()
+            && model.params[0].1 > 0.0
+    }
+
     fn netlist_element_is_native_transient_level1_npn(
         netlist: &Netlist,
         element: &crate::netlist::Element,
@@ -17988,8 +18781,51 @@ impl XyceTestRunner {
     }
 
     fn baseline_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
-        self.subckt_family_contract(deck)
+        self.scoped_model_family_contract(deck)
+            .or_else(|| self.subckt_family_contract(deck))
             .or_else(|| self.supernode_family_contract(deck))
+    }
+
+    fn scoped_model_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/certification_tests/") {
+            return None;
+        }
+
+        let file_name = deck.path.file_name()?.to_str()?;
+        let parent = deck.path.parent()?;
+        let (owner_name, baseline_name) = if let Some(stem) = file_name.strip_suffix("_noscope.cir")
+        {
+            (format!("{stem}.cir"), file_name.to_string())
+        } else {
+            let stem = file_name.strip_suffix(".cir")?;
+            (file_name.to_string(), format!("{stem}_noscope.cir"))
+        };
+        let owner_path = parent.join(&owner_name);
+        let baseline_path = parent.join(&baseline_name);
+        if !owner_path.is_file()
+            || !baseline_path.is_file()
+            || (!Self::same_path(&deck.path, &owner_path)
+                && !Self::same_path(&deck.path, &baseline_path))
+        {
+            return None;
+        }
+        let owner_relative = self.relative_key(&owner_path);
+        let baseline_relative = self.relative_key(&baseline_path);
+        if !self.requires_upstream_wrapper(&owner_relative)
+            || self.requires_upstream_wrapper(&baseline_relative)
+        {
+            return None;
+        }
+
+        Some(XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::ScopedModel,
+            comparison: XyceBaselineFamilyComparison::Exact,
+            family: owner_name.trim_end_matches(".cir").to_string(),
+            baseline_path: baseline_path.clone(),
+            member_paths: vec![baseline_path, owner_path],
+            target_path: Some(deck.path.clone()),
+        })
     }
 
     fn subckt_family_contract(&self, deck: &XyceDeck) -> Option<XyceBaselineFamilyContract> {
@@ -18052,6 +18888,7 @@ impl XyceTestRunner {
 
         Some(XyceBaselineFamilyContract {
             kind: XyceBaselineFamilyKind::Subckt,
+            comparison: XyceBaselineFamilyComparison::Toleranced,
             family: family.to_string(),
             baseline_path,
             member_paths,
@@ -18102,6 +18939,7 @@ impl XyceTestRunner {
 
         Some(XyceBaselineFamilyContract {
             kind: XyceBaselineFamilyKind::Supernode,
+            comparison: XyceBaselineFamilyComparison::Toleranced,
             family: "supernode1".to_string(),
             baseline_path: parent.join("supernode1.cir"),
             member_paths,
@@ -20666,6 +21504,11 @@ C1 mid out 1u
         assert!(XyceStaticTranPlanPurpose::AbsoluteOracle.validates_absolute_device_contract());
         assert!(!XyceStaticTranPlanPurpose::RelationalFamily.requires_reference_file());
         assert!(!XyceStaticTranPlanPurpose::RelationalFamily.validates_absolute_device_contract());
+        assert!(!XyceStaticTranPlanPurpose::ScopedModelRelationalFamily.requires_reference_file());
+        assert!(
+            !XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
+                .validates_absolute_device_contract()
+        );
 
         let missing = Path::new("definitely-missing-transient-oracle.prn");
         assert!(
@@ -20686,11 +21529,142 @@ C1 mid out 1u
     }
 
     #[test]
+    fn scoped_model_family_contract_keeps_format_and_exact_comparison_boundaries() {
+        assert!(XyceTestRunner::baseline_family_tran_contracts_compatible(
+            XyceBaselineFamilyKind::ScopedModel,
+            XyceStaticTranContract::PlainStatic,
+            XyceStaticTranContract::WrapperStatic,
+        ));
+        assert!(!XyceTestRunner::baseline_family_tran_contracts_compatible(
+            XyceBaselineFamilyKind::ScopedModel,
+            XyceStaticTranContract::PlainStatic,
+            XyceStaticTranContract::PlainStatic,
+        ));
+        assert!(!XyceTestRunner::baseline_family_tran_contracts_compatible(
+            XyceBaselineFamilyKind::Subckt,
+            XyceStaticTranContract::PlainStatic,
+            XyceStaticTranContract::WrapperStatic,
+        ));
+
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+        let expected = XycePrnTable {
+            columns: vec!["Index".to_string(), "TIME".to_string(), "V(4)".to_string()],
+            rows: vec![vec![0.0, 0.0, 1.0], vec![1.0, 1.0e-6, 2.0]],
+        };
+        let raw_time = vec![0.0, 1.0e-6];
+        assert!(
+            runner
+                .compare_exact_prn_tables(&expected, &expected, &raw_time, &raw_time)
+                .expect("identical exact tables compare")
+                .is_empty()
+        );
+
+        let mut one_ulp = expected.clone();
+        one_ulp.rows[1][2] = f64::from_bits(one_ulp.rows[1][2].to_bits() + 1);
+        assert_eq!(
+            runner
+                .compare_exact_prn_tables(&expected, &one_ulp, &raw_time, &raw_time)
+                .expect("one-ULP table remains structurally comparable")
+                .len(),
+            1,
+            "exact comparison must not apply a tolerance"
+        );
+
+        let mut reordered = expected.clone();
+        reordered.columns.swap(1, 2);
+        assert!(
+            runner
+                .compare_exact_prn_tables(&expected, &reordered, &raw_time, &raw_time)
+                .is_err(),
+            "exact comparison must reject reordered probes"
+        );
+
+        let mut changed_raw_time = raw_time.clone();
+        changed_raw_time[1] = f64::from_bits(changed_raw_time[1].to_bits() + 1);
+        let raw_time_mismatches = runner
+            .compare_exact_prn_tables(&expected, &expected, &raw_time, &changed_raw_time)
+            .expect("raw time vectors remain structurally comparable");
+        assert_eq!(raw_time_mismatches.len(), 1);
+        assert_eq!(raw_time_mismatches[0].probe, "TIME");
+
+        let baseline_tran = XyceTranAnalysis {
+            step: 5.0e-6,
+            stop: 7.0e-3,
+            start: None,
+            max_step: None,
+            uic: false,
+        };
+        let mut changed_tran = baseline_tran;
+        changed_tran.step = f64::from_bits(changed_tran.step.to_bits() + 1);
+        assert!(!XyceTestRunner::tran_analyses_match_exactly(
+            &baseline_tran,
+            &changed_tran
+        ));
+    }
+
+    #[test]
+    fn scoped_model_family_detection_is_manifest_and_sibling_driven() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-scoped-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root
+            .join("Netlists")
+            .join("Certification_Tests")
+            .join("GENERIC_SCOPE");
+        fs::create_dir_all(&family_dir).expect("create generic scoped-family fixture");
+        let owner_path = family_dir.join("representation.cir");
+        let baseline_path = family_dir.join("representation_noscope.cir");
+        fs::write(&owner_path, "generic scoped owner\n.end\n").expect("write owner fixture");
+        fs::write(&baseline_path, "generic explicit baseline\n.end\n")
+            .expect("write baseline fixture");
+        let owner_relative = "Netlists/Certification_Tests/GENERIC_SCOPE/representation.cir";
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper manifest fixture");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (path, relative) in [
+            (&owner_path, owner_relative),
+            (
+                &baseline_path,
+                "Netlists/Certification_Tests/GENERIC_SCOPE/representation_noscope.cir",
+            ),
+        ] {
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: relative.to_string(),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .scoped_model_family_contract(&deck)
+                .expect("manifest owner and _noscope sibling form a scoped family");
+            assert_eq!(contract.kind, XyceBaselineFamilyKind::ScopedModel);
+            assert_eq!(contract.comparison, XyceBaselineFamilyComparison::Exact);
+            assert!(XyceTestRunner::same_path(
+                &contract.baseline_path,
+                &baseline_path
+            ));
+            assert_eq!(contract.member_paths.len(), 2);
+            assert_eq!(contract.target_path.as_deref(), Some(path.as_path()));
+        }
+
+        fs::remove_dir_all(&root).expect("remove generic scoped-family fixture");
+    }
+
+    #[test]
     fn baseline_family_record_still_selects_a_real_comparison_target() {
         let baseline = PathBuf::from("family0.cir");
         let member = PathBuf::from("family1.cir");
         let contract = XyceBaselineFamilyContract {
             kind: XyceBaselineFamilyKind::Subckt,
+            comparison: XyceBaselineFamilyComparison::Toleranced,
             family: "family".to_string(),
             baseline_path: baseline.clone(),
             member_paths: vec![baseline.clone(), member.clone()],
@@ -20726,6 +21700,242 @@ D1 d 0 DM
         assert!(
             XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
             "the same devices must remain outside the absolute Xyce transient oracle envelope"
+        );
+    }
+
+    #[test]
+    fn scoped_model_relational_purpose_has_a_separate_exact_device_envelope() {
+        let netlist = Netlist::parse(
+            "\
+validated scoped-model relational subset
+VCC c 0 5
+VB b 0 PULSE(0 .8 0 1n 1n 10n 20n)
+R1 c 0 1k
+C1 b 0 1p
+G1 c 0 b 0 1m
+B1 x 0 V={V(c)*K}
+Q1 c b 0 QN
+D1 c 0 DX
+.PARAM K=.5
+.MODEL QN NPN (IS=8e-16 BF=62.5)
+.MODEL DX D (IS=8e-16)
+.TRAN 1n 20n
+.PRINT TRAN V(c)
+.END
+",
+        )
+        .expect("scoped-model relational subset parses");
+
+        XyceTestRunner::validate_native_transient_contract_for_purpose(
+            &netlist,
+            XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+        )
+        .expect("exact scoped-model purpose accepts only its qualified BJT/diode subset");
+        assert!(
+            XyceTestRunner::validate_native_relational_transient_contract(&netlist).is_err(),
+            "ordinary relational families must continue rejecting BJT devices"
+        );
+        assert!(
+            XyceTestRunner::validate_native_transient_contract(&netlist).is_err(),
+            "the absolute transient purpose must continue rejecting this diode"
+        );
+
+        let contract = XyceBaselineFamilyContract {
+            kind: XyceBaselineFamilyKind::ScopedModel,
+            comparison: XyceBaselineFamilyComparison::Exact,
+            family: "derived-model-semantics".to_string(),
+            baseline_path: PathBuf::from("baseline.cir"),
+            member_paths: vec![PathBuf::from("baseline.cir"), PathBuf::from("owner.cir")],
+            target_path: Some(PathBuf::from("owner.cir")),
+        };
+        let baseline_snapshot = XyceTestRunner::scoped_model_family_snapshot(&contract, &netlist)
+            .expect("qualified scoped snapshot builds")
+            .expect("scoped family has a snapshot");
+        let snapshot_for = |candidate: &Netlist| {
+            XyceTestRunner::scoped_model_family_snapshot(&contract, candidate)
+                .expect("changed semantic snapshot builds")
+                .expect("scoped family has a snapshot")
+        };
+
+        let mut changed_resistor = netlist.clone();
+        let ElementKind::Resistor { value, .. } = &mut changed_resistor
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .expect("R1 exists")
+            .kind
+        else {
+            panic!("R1 remains a resistor");
+        };
+        *value = 2.0e3;
+        assert_ne!(baseline_snapshot, snapshot_for(&changed_resistor));
+
+        let mut changed_capacitor = netlist.clone();
+        let ElementKind::Capacitor { value, .. } = &mut changed_capacitor
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("C1"))
+            .expect("C1 exists")
+            .kind
+        else {
+            panic!("C1 remains a capacitor");
+        };
+        *value = 2.0e-12;
+        assert_ne!(baseline_snapshot, snapshot_for(&changed_capacitor));
+
+        let mut changed_dc_source = netlist.clone();
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) =
+            &mut changed_dc_source
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case("VCC"))
+                .expect("VCC exists")
+                .kind
+        else {
+            panic!("VCC remains a DC voltage source");
+        };
+        *value = 6.0;
+        assert_ne!(baseline_snapshot, snapshot_for(&changed_dc_source));
+
+        let mut changed_pulse_source = netlist.clone();
+        let ElementKind::VoltageSource(crate::netlist::SourceSpec::Pulse { v2, .. }) =
+            &mut changed_pulse_source
+                .elements
+                .iter_mut()
+                .find(|element| element.name.eq_ignore_ascii_case("VB"))
+                .expect("VB exists")
+                .kind
+        else {
+            panic!("VB remains a pulse voltage source");
+        };
+        *v2 = 0.9;
+        assert_ne!(baseline_snapshot, snapshot_for(&changed_pulse_source));
+
+        let mut changed_vccs = netlist.clone();
+        let ElementKind::Vccs {
+            transconductance, ..
+        } = &mut changed_vccs
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("G1"))
+            .expect("G1 exists")
+            .kind
+        else {
+            panic!("G1 remains a VCCS");
+        };
+        *transconductance = 2.0e-3;
+        assert_ne!(baseline_snapshot, snapshot_for(&changed_vccs));
+
+        let mut changed_behavioral_binding = netlist.clone();
+        changed_behavioral_binding.params.set("K", 0.6);
+        assert_ne!(baseline_snapshot, snapshot_for(&changed_behavioral_binding));
+
+        let mut changed_behavioral_expression = netlist.clone();
+        let ElementKind::BehavioralVoltage { expression, .. } = &mut changed_behavioral_expression
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("B1"))
+            .expect("B1 exists")
+            .kind
+        else {
+            panic!("B1 remains a behavioral voltage source");
+        };
+        *expression = "V(c)*0.7".to_string();
+        assert_ne!(
+            baseline_snapshot,
+            snapshot_for(&changed_behavioral_expression)
+        );
+
+        let mut changed_kind = netlist.clone();
+        changed_kind
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("G1"))
+            .expect("G1 exists")
+            .kind = ElementKind::Resistor {
+            value: 1.0e3,
+            value_expr: None,
+            model: None,
+            instance_params: Vec::new(),
+            deferred_params: Vec::new(),
+        };
+        let changed_kind_snapshot = snapshot_for(&changed_kind);
+        assert_ne!(baseline_snapshot, changed_kind_snapshot);
+
+        let mut changed_bf = netlist.clone();
+        changed_bf
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("QN"))
+            .expect("QN model exists")
+            .params
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case("BF"))
+            .expect("BF exists")
+            .1 = 63.5;
+        let changed_bf_snapshot = snapshot_for(&changed_bf);
+        assert_ne!(baseline_snapshot, changed_bf_snapshot);
+
+        let mut changed_diode_is = netlist.clone();
+        changed_diode_is
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("DX"))
+            .expect("DX model exists")
+            .params[0]
+            .1 = 9.0e-16;
+        let changed_diode_snapshot = snapshot_for(&changed_diode_is);
+        assert_ne!(baseline_snapshot, changed_diode_snapshot);
+
+        let mut extra_parameter = netlist.clone();
+        extra_parameter
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case("QN"))
+            .expect("QN model exists")
+            .params
+            .push(("RC".to_string(), 1.0));
+        assert!(
+            XyceTestRunner::validate_native_transient_contract_for_purpose(
+                &extra_parameter,
+                XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+            )
+            .is_err(),
+            "extra BJT parameters must remain outside the scoped-model proof envelope"
+        );
+
+        let mut duplicate_bjt_model = netlist.clone();
+        let qn = duplicate_bjt_model
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("QN"))
+            .expect("QN model exists")
+            .clone();
+        duplicate_bjt_model.models.push(qn);
+        assert!(
+            XyceTestRunner::validate_native_transient_contract_for_purpose(
+                &duplicate_bjt_model,
+                XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+            )
+            .is_err(),
+            "ambiguous BJT model definitions must fail closed"
+        );
+
+        let mut duplicate_diode_model = netlist.clone();
+        let dx = duplicate_diode_model
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("DX"))
+            .expect("DX model exists")
+            .clone();
+        duplicate_diode_model.models.push(dx);
+        assert!(
+            XyceTestRunner::validate_native_transient_contract_for_purpose(
+                &duplicate_diode_model,
+                XyceStaticTranPlanPurpose::ScopedModelRelationalFamily,
+            )
+            .is_err(),
+            "ambiguous diode model definitions must fail closed"
         );
     }
 
