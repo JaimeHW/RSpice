@@ -6,10 +6,24 @@
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
-fn compile(source: &str) -> rspice_veriloga::CompiledModel {
-    VerilogACompiler::new(CompilerOptions::default())
+fn compile_device(instance: &str, source: &str) -> VerilogADevice {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
         .compile(source)
-        .expect("compilation failed")
+        .expect("compile timestep-control model");
+    #[cfg(feature = "native")]
+    {
+        let canonical_ir = compiler
+            .compile_canonical_ir(source)
+            .expect("compile timestep-control canonical IR");
+        VerilogADevice::try_new_with_canonical_ir(instance, model, &canonical_ir, &[1, 0])
+            .expect("construct timestep-control device from canonical IR")
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        VerilogADevice::try_new(instance, model, &[1, 0])
+            .expect("construct timestep-control bytecode device")
+    }
 }
 
 fn stamp_once(device: &mut VerilogADevice, voltages: &[f64]) {
@@ -33,8 +47,7 @@ endmodule
 
 #[test]
 fn bound_step_takes_the_min_of_active_calls() {
-    let model = compile(BOUNDED);
-    let mut device = VerilogADevice::new("B1", model, &[1, 0]);
+    let mut device = compile_device("B1", BOUNDED);
 
     // Guard inactive: only the unconditional 1 us bound applies
     stamp_once(&mut device, &[0.2]);
@@ -60,8 +73,7 @@ endmodule
 
 #[test]
 fn models_without_bound_step_report_none() {
-    let model = compile(UNBOUNDED);
-    let mut device = VerilogADevice::new("P1", model, &[1, 0]);
+    let mut device = compile_device("P1", UNBOUNDED);
     stamp_once(&mut device, &[1.0]);
     assert_eq!(device.transient_bound_step(), None);
     assert!(!device.discontinuity_pending());
@@ -82,8 +94,7 @@ endmodule
 
 #[test]
 fn discontinuity_reports_rising_edges_only() {
-    let model = compile(DISCONTINUOUS);
-    let mut device = VerilogADevice::new("D1", model, &[1, 0]);
+    let mut device = compile_device("D1", DISCONTINUOUS);
 
     // Below threshold: quiet
     stamp_once(&mut device, &[0.5]);

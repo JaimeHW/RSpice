@@ -5,10 +5,24 @@
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
-fn compile(source: &str) -> rspice_veriloga::CompiledModel {
-    VerilogACompiler::new(CompilerOptions::default())
+fn compile_device(instance: &str, source: &str) -> VerilogADevice {
+    let compiler = VerilogACompiler::new(CompilerOptions::default());
+    let model = compiler
         .compile(source)
-        .expect("compilation failed")
+        .expect("compile sampled-data filter model");
+    #[cfg(feature = "native")]
+    {
+        let canonical_ir = compiler
+            .compile_canonical_ir(source)
+            .expect("compile sampled-data filter canonical IR");
+        VerilogADevice::try_new_with_canonical_ir(instance, model, &canonical_ir, &[1, 0])
+            .expect("construct sampled-data filter device from canonical IR")
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        VerilogADevice::try_new(instance, model, &[1, 0])
+            .expect("construct sampled-data filter bytecode device")
+    }
 }
 
 fn stamp_once(device: &mut VerilogADevice, voltages: &[f64]) {
@@ -31,8 +45,7 @@ endmodule
 
 #[test]
 fn dc_sits_at_unity_gain_steady_state() {
-    let model = compile(IIR);
-    let mut device = VerilogADevice::new("Z1", model, &[1, 0]);
+    let mut device = compile_device("Z1", IIR);
     device.set_analysis_type(0);
     stamp_once(&mut device, &[2.0]);
     // H(1) = 0.25 / (1 - 0.75) = 1 -> y = input
@@ -41,8 +54,7 @@ fn dc_sits_at_unity_gain_steady_state() {
 
 #[test]
 fn transient_follows_the_difference_equation_with_hold() {
-    let model = compile(IIR);
-    let mut device = VerilogADevice::new("Z1", model, &[1, 0]);
+    let mut device = compile_device("Z1", IIR);
     device.set_analysis_type(2);
     device.set_timestep(0.5e-6);
 
@@ -74,7 +86,8 @@ fn transient_follows_the_difference_equation_with_hold() {
 #[test]
 fn zp_form_expands_z_roots() {
     // One zero at z=0, one pole at z=0.5: H(z) = z/(z-0.5), H(1) = 2
-    let model = compile(
+    let mut device = compile_device(
+        "Z2",
         r#"
 `include "disciplines.vams"
 module zizp(p, n);
@@ -88,7 +101,6 @@ module zizp(p, n);
 endmodule
 "#,
     );
-    let mut device = VerilogADevice::new("Z2", model, &[1, 0]);
     device.set_analysis_type(0);
     stamp_once(&mut device, &[1.5]);
     assert!((device.variable("y").unwrap() - 3.0).abs() < 1e-12);

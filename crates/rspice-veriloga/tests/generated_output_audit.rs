@@ -1,43 +1,25 @@
+use rspice_veriloga::rust_backend::validate_generated_builtins;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-const LEGACY_AD_MARKERS: &[&str] = &[
-    "GenericAdValue",
-    "AdValue",
-    "GenericScratch",
-    "GenericReactiveScratch",
-    "scratch:",
-    "reactive_scratch:",
-    "scratch.",
-    "reactive_scratch.",
-    "::support::",
-];
 
 const LEGACY_LOCAL_SLOT_MARKERS: &[&str] =
     &["_slot: &mut f64", "_slot: &mut [f64]", " = *var_", "*var_"];
 
 #[test]
 fn generated_veriloga_devices_do_not_use_legacy_ad_runtime() {
+    let workspace_root = workspace_root();
     let generated_root = generated_veriloga_root();
-    assert!(
-        generated_root.is_dir(),
-        "generated Verilog-A source root is missing: {}",
-        generated_root.display()
-    );
-
-    let mut failures = Vec::new();
-    scan_generated_rust(&generated_root, &mut |path, source| {
-        for marker in LEGACY_AD_MARKERS {
-            if source.contains(marker) {
-                failures.push(format!("{} contains `{marker}`", display_path(path)));
-            }
-        }
-    });
+    let manifest = validate_generated_builtins(
+        &workspace_root.join("models/veriloga"),
+        &generated_root,
+        &workspace_root.join("crates/rspice-veriloga"),
+        false,
+    )
+    .expect("generated Verilog-A built-ins must match the current production validator");
 
     assert!(
-        failures.is_empty(),
-        "generated Verilog-A devices must stay off the legacy AD runtime:\n{}",
-        failures.join("\n")
+        manifest.device_count > 0,
+        "generated manifest must not be empty"
     );
 }
 
@@ -67,7 +49,7 @@ fn generated_veriloga_devices_do_not_use_legacy_local_slot_abi() {
 }
 
 #[test]
-fn generated_veriloga_devices_include_local_frame_helpers() {
+fn generated_veriloga_devices_include_compact_local_frame_helpers() {
     let generated_root = generated_veriloga_root();
     assert!(
         generated_root.is_dir(),
@@ -76,16 +58,30 @@ fn generated_veriloga_devices_include_local_frame_helpers() {
     );
 
     let mut saw_local_frame_type = false;
-    let mut saw_local_frame_access = false;
+    let mut saw_local_frame_initialization = false;
+    let mut saw_local_frame_field_access = false;
+    let mut saw_local_frame_argument = false;
     scan_generated_rust(&generated_root, &mut |_path, source| {
         saw_local_frame_type |= source.contains("pub(crate) struct StampLocals");
-        saw_local_frame_access |= source.contains("locals.var_");
+        saw_local_frame_initialization |= source.contains("let mut l = StampLocals::default()");
+        saw_local_frame_field_access |= source.contains("l.f");
+        saw_local_frame_argument |= source.contains("&mut l");
     });
 
     assert!(
-        saw_local_frame_type && saw_local_frame_access,
-        "expected at least one generated Verilog-A device to use StampLocals local frame helpers"
+        saw_local_frame_type
+            && saw_local_frame_initialization
+            && saw_local_frame_field_access
+            && saw_local_frame_argument,
+        "expected at least one generated Verilog-A device to use the compact StampLocals frame ABI"
     );
+}
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .components()
+        .collect()
 }
 
 fn generated_veriloga_root() -> PathBuf {
