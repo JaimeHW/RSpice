@@ -378,6 +378,15 @@ struct XyceBaselineFamilyContract {
     target_path: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone)]
+struct XycePassivePrimaryCompositeContract {
+    family: String,
+    owner_path: PathBuf,
+    capacitor_tran: XyceBaselineFamilyContract,
+    resistor_dc: XyceBaselineFamilyContract,
+    target_path: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct XyceScopedModelFamilySnapshot {
     elements: BTreeMap<String, XyceRelationalElementFingerprint>,
@@ -406,10 +415,30 @@ struct XyceParamExpressionFamilySnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct XycePassivePrimaryValueSnapshot {
+    title: String,
+    device_kind: XycePassivePrimaryKind,
+    representation: XycePassivePrimaryRepresentation,
+    active_source_fingerprint: Vec<String>,
+    model_name: String,
+    model_type: String,
+    model_numeric_bits: Vec<(String, u64)>,
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    effective_primary_bits: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum XyceStrictTransientFamilySnapshot {
     ScopedModel(XyceScopedModelFamilySnapshot),
     SinExpression(XyceSinExpressionFamilySnapshot),
     ParamExpression(XyceParamExpressionFamilySnapshot),
+    PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum XyceStrictDcFamilySnapshot {
+    BjtExternalNode(XyceBjtExternalNodeFamilySnapshot),
+    PassivePrimaryValue(XycePassivePrimaryValueSnapshot),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -422,6 +451,27 @@ enum XyceSinExpressionRepresentation {
 enum XyceParamExpressionRepresentation {
     ParameterCoefficient,
     LiteralCoefficient,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XycePassivePrimaryKind {
+    CapacitorTran,
+    ResistorDc,
+}
+
+impl XycePassivePrimaryKind {
+    fn primary_parameter(self) -> &'static str {
+        match self {
+            Self::CapacitorTran => "C",
+            Self::ResistorDc => "R",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum XycePassivePrimaryRepresentation {
+    Named,
+    Positional,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -451,6 +501,8 @@ enum XyceBaselineFamilyKind {
     BjtExternalNode,
     SinExpression,
     ParamExpression,
+    PassiveCapPrimaryValue,
+    PassiveResPrimaryValue,
     Subckt,
     Supernode,
     ScopedModel,
@@ -467,6 +519,7 @@ enum XyceBaselineFamilyComparison {
     Toleranced,
     TolerancedStrict,
     Exact,
+    ExactPrn,
 }
 
 impl XyceBaselineFamilyComparison {
@@ -483,7 +536,11 @@ impl XyceBaselineFamilyComparison {
     }
 
     fn compares_waveforms_exactly(self) -> bool {
-        matches!(self, Self::Exact)
+        matches!(self, Self::Exact | Self::ExactPrn)
+    }
+
+    fn compares_serialized_prn_exactly(self) -> bool {
+        matches!(self, Self::ExactPrn)
     }
 
     fn uses_xyce_verify_transient_oracle(self) -> bool {
@@ -501,6 +558,8 @@ impl XyceBaselineFamilyKind {
             Self::BjtExternalNode => "BJT_EXTNODE",
             Self::SinExpression => "SIN_EXPRESSION",
             Self::ParamExpression => "PARAM_EXPRESSION",
+            Self::PassiveCapPrimaryValue => "PASSIVE_CAP_PRIMARY_VALUE",
+            Self::PassiveResPrimaryValue => "PASSIVE_RES_PRIMARY_VALUE",
             Self::Subckt => "SUBCKT",
             Self::Supernode => "SUPERNODE",
             Self::ScopedModel => "SCOPED_MODEL",
@@ -512,6 +571,8 @@ impl XyceBaselineFamilyKind {
             Self::BjtExternalNode => "bjt_external_node_family_wrapper",
             Self::SinExpression => "sin_expression_family_wrapper",
             Self::ParamExpression => "param_expression_family_wrapper",
+            Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_wrapper",
+            Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_wrapper",
             Self::Subckt => "subckt_family_wrapper",
             Self::Supernode => "supernode_family_wrapper",
             Self::ScopedModel => "scoped_model_family_wrapper",
@@ -523,6 +584,8 @@ impl XyceBaselineFamilyKind {
             Self::BjtExternalNode => "bjt_external_node_family_baseline",
             Self::SinExpression => "sin_expression_family_baseline",
             Self::ParamExpression => "param_expression_family_baseline",
+            Self::PassiveCapPrimaryValue => "passive_primary_value_capacitor_tran_baseline",
+            Self::PassiveResPrimaryValue => "passive_primary_value_resistor_dc_baseline",
             Self::Subckt => "subckt_family_baseline",
             Self::Supernode => "supernode_family_baseline",
             Self::ScopedModel => "scoped_model_family_baseline",
@@ -539,6 +602,8 @@ impl XyceBaselineFamilyKind {
             Self::BjtExternalNode
             | Self::SinExpression
             | Self::ParamExpression
+            | Self::PassiveCapPrimaryValue
+            | Self::PassiveResPrimaryValue
             | Self::Subckt
             | Self::Supernode => XyceStaticTranPlanPurpose::RelationalFamily,
         }
@@ -1513,6 +1578,19 @@ impl XyceTestRunner {
         }
 
         if let Some(result) = self.run_expected_error_contract(deck, start) {
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
+        if let Some(contract) = self.passive_primary_value_composite_contract(deck) {
+            let result = self.run_passive_primary_value_composite_contract(deck, contract, start);
             if self.config.verbose {
                 println!(
                     "{} [{}] {}",
@@ -6965,9 +7043,11 @@ impl XyceTestRunner {
                     XyceStaticTranContract::WrapperStatic
                 )
             ),
-            XyceBaselineFamilyKind::BjtExternalNode => false,
+            XyceBaselineFamilyKind::BjtExternalNode
+            | XyceBaselineFamilyKind::PassiveResPrimaryValue => false,
             XyceBaselineFamilyKind::SinExpression
             | XyceBaselineFamilyKind::ParamExpression
+            | XyceBaselineFamilyKind::PassiveCapPrimaryValue
             | XyceBaselineFamilyKind::Subckt
             | XyceBaselineFamilyKind::Supernode => baseline == target,
         }
@@ -6996,6 +7076,94 @@ impl XyceTestRunner {
         }
     }
 
+    fn run_passive_primary_value_composite_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XycePassivePrimaryCompositeContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const COMPOSITE_CONTRACT: &str = "passive_primary_value_composite_wrapper";
+
+        if let Some(target_path) = contract.target_path.as_ref() {
+            let pair = if contract
+                .capacitor_tran
+                .member_paths
+                .iter()
+                .any(|path| Self::same_path(path, target_path))
+            {
+                contract.capacitor_tran
+            } else if contract
+                .resistor_dc
+                .member_paths
+                .iter()
+                .any(|path| Self::same_path(path, target_path))
+            {
+                contract.resistor_dc
+            } else {
+                return self.failure_result(
+                    deck,
+                    start,
+                    COMPOSITE_CONTRACT,
+                    format!(
+                        "passive primary-value family '{}' target {} is not one of its four qualified members",
+                        contract.family,
+                        self.display_path(target_path)
+                    ),
+                    Vec::new(),
+                );
+            };
+            return self.run_baseline_family_contract(deck, pair, start);
+        }
+
+        if !Self::same_path(&deck.path, &contract.owner_path) {
+            return self.failure_result(
+                deck,
+                start,
+                COMPOSITE_CONTRACT,
+                format!(
+                    "passive primary-value family '{}' owner routing does not match {}",
+                    contract.family,
+                    self.display_path(&contract.owner_path)
+                ),
+                Vec::new(),
+            );
+        }
+
+        for pair in [contract.capacitor_tran, contract.resistor_dc] {
+            let result = self.run_baseline_family_contract(deck, pair, start);
+            if result.expected_unsupported {
+                return self.failure_result(
+                    deck,
+                    start,
+                    COMPOSITE_CONTRACT,
+                    format!(
+                        "passive primary-value composite family '{}' did not execute a required pair: {}",
+                        contract.family,
+                        result
+                            .error
+                            .as_deref()
+                            .unwrap_or("pair returned expected-unsupported without a reason")
+                    ),
+                    result.mismatches,
+                );
+            }
+            if !result.passed {
+                return XyceTestResult {
+                    contract: COMPOSITE_CONTRACT.to_string(),
+                    error: result.error.map(|error| {
+                        format!(
+                            "passive primary-value composite family '{}' failed: {error}",
+                            contract.family
+                        )
+                    }),
+                    ..result
+                };
+            }
+        }
+
+        self.passed_result(deck, start, COMPOSITE_CONTRACT)
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -7020,8 +7188,11 @@ impl XyceTestRunner {
                 );
             }
         };
-        if contract.kind == XyceBaselineFamilyKind::BjtExternalNode
-            && analysis != XyceBaselineFamilyAnalysis::Dc
+        if matches!(
+            contract.kind,
+            XyceBaselineFamilyKind::BjtExternalNode
+                | XyceBaselineFamilyKind::PassiveResPrimaryValue
+        ) && analysis != XyceBaselineFamilyAnalysis::Dc
         {
             return self.failure_result(
                 deck,
@@ -7034,22 +7205,12 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
-        if contract.kind == XyceBaselineFamilyKind::SinExpression
-            && analysis != XyceBaselineFamilyAnalysis::Tran
-        {
-            return self.failure_result(
-                deck,
-                start,
-                wrapper_contract,
-                format!(
-                    "{kind_name} family '{}' requires a transient analysis",
-                    contract.family
-                ),
-                Vec::new(),
-            );
-        }
-        if contract.kind == XyceBaselineFamilyKind::ParamExpression
-            && analysis != XyceBaselineFamilyAnalysis::Tran
+        if matches!(
+            contract.kind,
+            XyceBaselineFamilyKind::SinExpression
+                | XyceBaselineFamilyKind::ParamExpression
+                | XyceBaselineFamilyKind::PassiveCapPrimaryValue
+        ) && analysis != XyceBaselineFamilyAnalysis::Tran
         {
             return self.failure_result(
                 deck,
@@ -7359,6 +7520,63 @@ impl XyceTestRunner {
         }
     }
 
+    fn validate_exact_dc_family_plan(
+        kind: XyceBaselineFamilyKind,
+        plan: &XyceStaticDcPlan,
+    ) -> Result<(), String> {
+        match kind {
+            XyceBaselineFamilyKind::BjtExternalNode => {
+                Self::validate_bjt_external_node_dc_plan(plan)
+            }
+            XyceBaselineFamilyKind::PassiveResPrimaryValue => {
+                Self::validate_passive_res_primary_dc_plan(plan)
+            }
+            other => Err(format!(
+                "family kind {} has no qualified exact-DC plan contract",
+                other.name()
+            )),
+        }
+    }
+
+    fn strict_dc_family_snapshot(
+        kind: XyceBaselineFamilyKind,
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        sweep_source: &str,
+    ) -> Result<XyceStrictDcFamilySnapshot, String> {
+        match kind {
+            XyceBaselineFamilyKind::BjtExternalNode => {
+                Self::bjt_external_node_family_snapshot(netlist, print)
+                    .map(XyceStrictDcFamilySnapshot::BjtExternalNode)
+            }
+            XyceBaselineFamilyKind::PassiveResPrimaryValue => {
+                Self::passive_res_primary_snapshot(netlist, print, sweep_source)
+                    .map(XyceStrictDcFamilySnapshot::PassivePrimaryValue)
+            }
+            other => Err(format!(
+                "family kind {} has no qualified exact-DC semantic snapshot",
+                other.name()
+            )),
+        }
+    }
+
+    fn compare_strict_dc_family_snapshots(
+        baseline: &XyceStrictDcFamilySnapshot,
+        target: &XyceStrictDcFamilySnapshot,
+    ) -> Result<(), String> {
+        match (baseline, target) {
+            (
+                XyceStrictDcFamilySnapshot::BjtExternalNode(baseline),
+                XyceStrictDcFamilySnapshot::BjtExternalNode(target),
+            ) => Self::compare_bjt_external_node_family_snapshots(baseline, target),
+            (
+                XyceStrictDcFamilySnapshot::PassivePrimaryValue(baseline),
+                XyceStrictDcFamilySnapshot::PassivePrimaryValue(target),
+            ) => Self::compare_passive_primary_snapshots(baseline, target),
+            _ => Err("baseline and target use different exact-DC snapshot kinds".to_string()),
+        }
+    }
+
     fn run_exact_dc_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -7369,19 +7587,7 @@ impl XyceTestRunner {
         let kind_name = contract.kind.name();
         let wrapper_contract = contract.kind.wrapper_contract();
         let baseline_contract = contract.kind.baseline_contract();
-        if contract.kind != XyceBaselineFamilyKind::BjtExternalNode {
-            return self.failure_result(
-                deck,
-                start,
-                wrapper_contract,
-                format!(
-                    "{kind_name} family '{}' has no qualified exact-DC semantic contract",
-                    contract.family
-                ),
-                Vec::new(),
-            );
-        }
-        if let Err(reason) = Self::validate_bjt_external_node_dc_plan(&baseline_plan) {
+        if let Err(reason) = Self::validate_exact_dc_family_plan(contract.kind, &baseline_plan) {
             return self.failure_result(
                 deck,
                 start,
@@ -7422,9 +7628,11 @@ impl XyceTestRunner {
                     );
                 }
             };
-        let baseline_snapshot = match Self::bjt_external_node_family_snapshot(
+        let baseline_snapshot = match Self::strict_dc_family_snapshot(
+            contract.kind,
             &baseline_netlist,
             &baseline_plan.print,
+            &baseline_plan.dc.source,
         ) {
             Ok(snapshot) => snapshot,
             Err(reason) => {
@@ -7497,7 +7705,7 @@ impl XyceTestRunner {
                     );
                 }
             };
-            if let Err(reason) = Self::validate_bjt_external_node_dc_plan(&target_plan) {
+            if let Err(reason) = Self::validate_exact_dc_family_plan(contract.kind, &target_plan) {
                 return self.failure_result(
                     deck,
                     start,
@@ -7568,9 +7776,11 @@ impl XyceTestRunner {
                         );
                     }
                 };
-            let target_snapshot = match Self::bjt_external_node_family_snapshot(
+            let target_snapshot = match Self::strict_dc_family_snapshot(
+                contract.kind,
                 &target_netlist,
                 &target_plan.print,
+                &target_plan.dc.source,
             ) {
                 Ok(snapshot) => snapshot,
                 Err(reason) => {
@@ -7587,16 +7797,15 @@ impl XyceTestRunner {
                         );
                 }
             };
-            if let Err(reason) = Self::compare_bjt_external_node_family_snapshots(
-                &baseline_snapshot,
-                &target_snapshot,
-            ) {
+            if let Err(reason) =
+                Self::compare_strict_dc_family_snapshots(&baseline_snapshot, &target_snapshot)
+            {
                 return self.failure_result(
                     deck,
                     start,
                     wrapper_contract,
                     format!(
-                        "{kind_name} family '{}' member {} changes semantics outside the omitted/explicit ground representation: {reason}",
+                        "{kind_name} family '{}' member {} changes semantics outside its qualified representation pair: {reason}",
                         contract.family,
                         self.display_path(&target_path)
                     ),
@@ -7628,12 +7837,17 @@ impl XyceTestRunner {
                 .iter()
                 .map(|point| point.sweep_value)
                 .collect::<Vec<_>>();
-            let mut mismatches = match self.compare_exact_dc_prn_tables(
-                &baseline_table,
-                &target_table,
-                &baseline_sweep,
-                &target_sweep,
-            ) {
+            let comparison = if contract.comparison.compares_serialized_prn_exactly() {
+                self.compare_serialized_default_prn_tables(&baseline_table, &target_table)
+            } else {
+                self.compare_exact_dc_prn_tables(
+                    &baseline_table,
+                    &target_table,
+                    &baseline_sweep,
+                    &target_sweep,
+                )
+            };
+            let mut mismatches = match comparison {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
                     return self.failure_result(
@@ -7727,6 +7941,20 @@ impl XyceTestRunner {
         }
         if contract.kind == XyceBaselineFamilyKind::ParamExpression
             && let Err(err) = Self::validate_param_expression_transient_plan(&baseline_plan)
+        {
+            return self.failure_result(
+                deck,
+                start,
+                wrapper_contract,
+                format!(
+                    "{kind_name} family '{}' baseline qualification failed: {err}",
+                    contract.family
+                ),
+                Vec::new(),
+            );
+        }
+        if contract.kind == XyceBaselineFamilyKind::PassiveCapPrimaryValue
+            && let Err(err) = Self::validate_passive_cap_primary_transient_plan(&baseline_plan)
         {
             return self.failure_result(
                 deck,
@@ -7905,6 +8133,21 @@ impl XyceTestRunner {
             }
             if contract.kind == XyceBaselineFamilyKind::ParamExpression
                 && let Err(err) = Self::validate_param_expression_transient_plan(&target_plan)
+            {
+                return self.failure_result(
+                    deck,
+                    start,
+                    wrapper_contract,
+                    format!(
+                        "{kind_name} family '{}' member {} qualification failed: {err}",
+                        contract.family,
+                        self.display_path(&target_path)
+                    ),
+                    Vec::new(),
+                );
+            }
+            if contract.kind == XyceBaselineFamilyKind::PassiveCapPrimaryValue
+                && let Err(err) = Self::validate_passive_cap_primary_transient_plan(&target_plan)
             {
                 return self.failure_result(
                     deck,
@@ -8127,12 +8370,17 @@ impl XyceTestRunner {
                         );
                     }
                 };
-                match self.compare_exact_prn_tables(
-                    &baseline_table,
-                    &target_table,
-                    &baseline_result.time,
-                    &target_result.time,
-                ) {
+                let comparison = if contract.comparison.compares_serialized_prn_exactly() {
+                    self.compare_serialized_default_prn_tables(&baseline_table, &target_table)
+                } else {
+                    self.compare_exact_prn_tables(
+                        &baseline_table,
+                        &target_table,
+                        &baseline_result.time,
+                        &target_result.time,
+                    )
+                };
+                match comparison {
                     Ok(mismatches) => mismatches,
                     Err(err) => {
                         return self.failure_result(
@@ -8456,6 +8704,987 @@ impl XyceTestRunner {
         })
     }
 
+    fn single_spice_numeric_literal_value(field: &str) -> Result<Value, String> {
+        if !Self::is_single_spice_numeric_literal(field) {
+            return Err(format!(
+                "'{field}' is not one direct finite SPICE numeric literal"
+            ));
+        }
+        crate::netlist::lexer::parse_spice_value(field.trim())
+            .map_err(|err| format!("could not parse direct numeric literal '{field}': {err}"))
+    }
+
+    fn is_single_spice_identifier(field: &str) -> bool {
+        let Ok(tokens) = crate::netlist::lexer::tokenize(field.trim()) else {
+            return false;
+        };
+        matches!(
+            tokens
+                .iter()
+                .map(|token| &token.kind)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            [
+                crate::netlist::lexer::TokenKind::Ident(_),
+                crate::netlist::lexer::TokenKind::Eof
+            ]
+        )
+    }
+
+    fn direct_numeric_function_arguments(
+        field: &str,
+        function_name: &str,
+        arity: usize,
+    ) -> Result<Vec<Value>, String> {
+        let field = field.trim();
+        let Some(open) = field.find('(') else {
+            return Err(format!("expected {function_name}(...) source form"));
+        };
+        if !field[..open].eq_ignore_ascii_case(function_name)
+            || !field.ends_with(')')
+            || field[open + 1..field.len() - 1]
+                .chars()
+                .any(|ch| matches!(ch, ',' | '=' | '{' | '}' | '\'' | '"' | '(' | ')'))
+        {
+            return Err(format!(
+                "expected one direct whitespace-separated {function_name}(...) source field"
+            ));
+        }
+        let arguments = Self::split_grouped_whitespace_fields(
+            &field[open + 1..field.len() - 1],
+            &format!("{function_name} argument list"),
+        )?;
+        if arguments.len() != arity {
+            return Err(format!(
+                "{function_name} requires exactly {arity} direct numeric arguments, found {}",
+                arguments.len()
+            ));
+        }
+        arguments
+            .iter()
+            .map(|argument| Self::single_spice_numeric_literal_value(argument))
+            .collect()
+    }
+
+    fn passive_primary_source_contract(
+        source: &str,
+        element_name: &str,
+        model_name: &str,
+        kind: XycePassivePrimaryKind,
+    ) -> Result<(XycePassivePrimaryRepresentation, u64, Vec<String>), String> {
+        let mut representation = None;
+        let mut value_bits = None;
+        let mut fingerprint = Vec::new();
+        let lines = Self::logical_netlist_lines(source);
+        let Some(title) = lines.first() else {
+            return Err("passive primary-value parity requires a circuit title".to_string());
+        };
+        fingerprint.push(Self::strip_netlist_comment(title).trim().to_string());
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let mut fields = Self::split_grouped_whitespace_fields(
+                stripped,
+                "passive primary-value source statement",
+            )?;
+            if fields
+                .first()
+                .is_some_and(|name| name.eq_ignore_ascii_case(element_name))
+            {
+                if representation.is_some() {
+                    return Err(format!(
+                        "passive primary-value parity requires exactly one active statement for '{element_name}'"
+                    ));
+                }
+                if fields.len() != 5
+                    || !Self::is_single_spice_identifier(&fields[3])
+                    || !fields[3].eq_ignore_ascii_case(model_name)
+                {
+                    return Err(format!(
+                        "primary device '{element_name}' must use exactly 'name n+ n- model primary-value'"
+                    ));
+                }
+                let token = &fields[4];
+                let (form, numeric) = if let Some((parameter, numeric)) = token.split_once('=') {
+                    if numeric.contains('=')
+                        || !parameter.eq_ignore_ascii_case(kind.primary_parameter())
+                    {
+                        return Err(format!(
+                            "named primary token for '{element_name}' must be exactly {}=<numeric>",
+                            kind.primary_parameter()
+                        ));
+                    }
+                    (XycePassivePrimaryRepresentation::Named, numeric)
+                } else {
+                    (XycePassivePrimaryRepresentation::Positional, token.as_str())
+                };
+                let value = Self::single_spice_numeric_literal_value(numeric)?;
+                representation = Some(form);
+                value_bits = Some(value.to_bits());
+                fields[4] = "<PRIMARY_VALUE>".to_string();
+            }
+            fingerprint.push(fields.join("\u{1f}"));
+        }
+        Ok((
+            representation.ok_or_else(|| {
+                format!("no active primary device statement found for '{element_name}'")
+            })?,
+            value_bits.expect("representation and value bits are set together"),
+            fingerprint,
+        ))
+    }
+
+    fn validate_passive_primary_source_forms(
+        source: &str,
+        kind: XycePassivePrimaryKind,
+    ) -> Result<(), String> {
+        let lines = Self::logical_netlist_lines(source);
+        let Some(title) = lines.first() else {
+            return Err("passive primary-value parity requires a circuit title".to_string());
+        };
+        let title = Self::strip_netlist_comment(title).trim();
+        if title.is_empty() || title.starts_with('.') {
+            return Err(
+                "passive primary-value parity requires an ordinary circuit title".to_string(),
+            );
+        }
+
+        let mut element_counts = BTreeMap::<char, usize>::new();
+        let mut directive_counts = BTreeMap::<String, usize>::new();
+        let mut pulse_count = 0usize;
+        let mut direct_voltage_count = 0usize;
+        for line in lines.iter().skip(1) {
+            let stripped = Self::strip_netlist_comment(line).trim();
+            let fields = Self::split_grouped_whitespace_fields(
+                stripped,
+                "passive primary-value source statement",
+            )?;
+            let Some(command) = fields.first() else {
+                continue;
+            };
+            if command.starts_with('.') {
+                let directive = command.to_ascii_lowercase();
+                *directive_counts.entry(directive.clone()).or_default() += 1;
+                match (kind, directive.as_str()) {
+                    (XycePassivePrimaryKind::CapacitorTran, ".model") => {
+                        if fields.len() != 4
+                            || !Self::is_single_spice_identifier(&fields[1])
+                            || !fields[2].eq_ignore_ascii_case("C")
+                            || fields[3] != "()"
+                        {
+                            return Err("capacitor primary-value parity requires exactly '.MODEL name C ()'".to_string());
+                        }
+                    }
+                    (XycePassivePrimaryKind::ResistorDc, ".model") => {
+                        if fields.len() != 4
+                            || !Self::is_single_spice_identifier(&fields[1])
+                            || !fields[2].eq_ignore_ascii_case("R")
+                        {
+                            return Err("resistor primary-value parity requires exactly '.MODEL name R (RSH=<numeric>)'".to_string());
+                        }
+                        let parameter = fields[3]
+                            .strip_prefix('(')
+                            .and_then(|inner| inner.strip_suffix(')'))
+                            .ok_or_else(|| "resistor model parameters must use one parenthesized RSH assignment".to_string())?;
+                        let Some((name, value)) = parameter.split_once('=') else {
+                            return Err("resistor model must contain one RSH=<numeric> assignment"
+                                .to_string());
+                        };
+                        if value.contains('=')
+                            || !name.eq_ignore_ascii_case("RSH")
+                            || Self::single_spice_numeric_literal_value(value)? <= 0.0
+                        {
+                            return Err("resistor model must contain exactly one finite positive RSH=<numeric> assignment".to_string());
+                        }
+                    }
+                    (XycePassivePrimaryKind::CapacitorTran, ".tran") => {
+                        if fields.len() != 3 {
+                            return Err(
+                                "capacitor primary-value parity requires '.TRAN step stop'"
+                                    .to_string(),
+                            );
+                        }
+                        Self::single_spice_numeric_literal_value(&fields[1])?;
+                        Self::single_spice_numeric_literal_value(&fields[2])?;
+                    }
+                    (XycePassivePrimaryKind::ResistorDc, ".dc") => {
+                        if fields.len() != 5 || !Self::is_single_spice_identifier(&fields[1]) {
+                            return Err("resistor primary-value parity requires '.DC source start stop step'".to_string());
+                        }
+                        for value in &fields[2..] {
+                            Self::single_spice_numeric_literal_value(value)?;
+                        }
+                    }
+                    (XycePassivePrimaryKind::CapacitorTran, ".print") => {
+                        if fields.len() != 4 || !fields[1].eq_ignore_ascii_case("TRAN") {
+                            return Err("capacitor primary-value parity requires one canonical two-probe '.PRINT TRAN' statement".to_string());
+                        }
+                    }
+                    (XycePassivePrimaryKind::ResistorDc, ".print") => {
+                        if fields.len() != 4 || !fields[1].eq_ignore_ascii_case("DC") {
+                            return Err("resistor primary-value parity requires one canonical two-probe '.PRINT DC' statement".to_string());
+                        }
+                    }
+                    (_, ".end") if fields.len() == 1 => {}
+                    _ => {
+                        return Err(format!(
+                            "passive primary-value parity does not admit directive '{command}'"
+                        ));
+                    }
+                }
+                continue;
+            }
+
+            let designator = command
+                .chars()
+                .next()
+                .map(|ch| ch.to_ascii_uppercase())
+                .ok_or_else(|| {
+                    "passive primary-value parity contains an empty element name".to_string()
+                })?;
+            *element_counts.entry(designator).or_default() += 1;
+            match (kind, designator) {
+                (XycePassivePrimaryKind::CapacitorTran, 'C')
+                | (XycePassivePrimaryKind::ResistorDc, 'R') => {
+                    if fields.len() != 5 {
+                        return Err(format!(
+                            "primary device '{command}' must contain exactly one model and one primary-value token"
+                        ));
+                    }
+                }
+                (XycePassivePrimaryKind::CapacitorTran, 'R') => {
+                    if fields.len() != 4 {
+                        return Err(
+                            "capacitor parity resistor must use 'Rname n+ n- value'".to_string()
+                        );
+                    }
+                    Self::single_spice_numeric_literal_value(&fields[3])?;
+                }
+                (_, 'V') => {
+                    if fields.len() != 4 {
+                        return Err("passive primary-value voltage sources require exactly one source field".to_string());
+                    }
+                    if kind == XycePassivePrimaryKind::CapacitorTran
+                        && fields[3]
+                            .get(..5)
+                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("PULSE"))
+                    {
+                        Self::direct_numeric_function_arguments(&fields[3], "PULSE", 6)?;
+                        pulse_count += 1;
+                    } else {
+                        Self::single_spice_numeric_literal_value(&fields[3])?;
+                        direct_voltage_count += 1;
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "passive primary-value parity does not admit element '{command}'"
+                    ));
+                }
+            }
+        }
+
+        let model_count = directive_counts.get(".model").copied().unwrap_or(0);
+        let print_count = directive_counts.get(".print").copied().unwrap_or(0);
+        let end_count = directive_counts.get(".end").copied().unwrap_or(0);
+        match kind {
+            XycePassivePrimaryKind::CapacitorTran
+                if element_counts.get(&'C') == Some(&1)
+                    && element_counts.get(&'R') == Some(&1)
+                    && element_counts.get(&'V') == Some(&2)
+                    && pulse_count == 1
+                    && direct_voltage_count == 1
+                    && model_count == 1
+                    && directive_counts.get(".tran") == Some(&1)
+                    && print_count == 1
+                    && end_count == 1
+                    && directive_counts.len() == 4 => {}
+            XycePassivePrimaryKind::ResistorDc
+                if element_counts.get(&'R') == Some(&1)
+                    && element_counts.get(&'V') == Some(&2)
+                    && direct_voltage_count == 2
+                    && model_count == 1
+                    && directive_counts.get(".dc") == Some(&1)
+                    && print_count == 1
+                    && end_count == 1
+                    && directive_counts.len() == 4 => {}
+            _ => {
+                return Err(format!(
+                    "passive primary-value {:?} source does not have the required bounded element and directive inventory",
+                    kind
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_passive_cap_primary_transient_plan(
+        plan: &XyceStaticTranPlan,
+    ) -> Result<(), String> {
+        if plan.contract != XyceStaticTranContract::PlainStatic
+            || !plan.steps.is_empty()
+            || plan.output_override
+            || plan.timeint_conststep
+        {
+            return Err("capacitor primary-value parity requires one ordinary unstepped default .prn transient output".to_string());
+        }
+        if !plan.tran.step.is_finite()
+            || !plan.tran.stop.is_finite()
+            || plan.tran.step <= 0.0
+            || plan.tran.stop <= 0.0
+            || plan.tran.step > plan.tran.stop
+            || plan.tran.start.is_some()
+            || plan.tran.max_step.is_some()
+            || plan.tran.uic
+        {
+            return Err("capacitor primary-value parity requires finite '.TRAN step stop' values and no START, MAXSTEP, or UIC".to_string());
+        }
+        if plan.print.probes.len() != 2 {
+            return Err(
+                "capacitor primary-value parity requires exactly two ordered probes".to_string(),
+            );
+        }
+        Self::validate_passive_primary_source_forms(
+            &plan.source,
+            XycePassivePrimaryKind::CapacitorTran,
+        )
+    }
+
+    fn validate_passive_res_primary_dc_plan(plan: &XyceStaticDcPlan) -> Result<(), String> {
+        if !plan.steps.is_empty()
+            || plan.dc_data.is_some()
+            || plan.print_format.is_some()
+            || plan.dc.sweep2.is_some()
+            || !matches!(plan.dc.mode, crate::netlist::DcSweepMode::Linear)
+        {
+            return Err(
+                "resistor primary-value parity requires one unstepped linear default .prn DC sweep"
+                    .to_string(),
+            );
+        }
+        let span = plan.dc.stop - plan.dc.start;
+        if !plan.dc.start.is_finite()
+            || !plan.dc.stop.is_finite()
+            || !plan.dc.step.is_finite()
+            || plan.dc.step == 0.0
+            || span == 0.0
+            || span.signum() != plan.dc.step.signum()
+            || (span / plan.dc.step).abs() < 1.0
+        {
+            return Err("resistor primary-value parity requires a finite directed DC sweep with at least two points".to_string());
+        }
+        if plan.print.probes.len() != 2 || !plan.diagnostics.is_empty() {
+            return Err("resistor primary-value parity requires exactly two ordered probes and a diagnostic-free parse".to_string());
+        }
+        Self::validate_passive_primary_source_forms(
+            &plan.source,
+            XycePassivePrimaryKind::ResistorDc,
+        )
+    }
+
+    fn passive_primary_name_is_literal_ground(node: &str) -> bool {
+        node.trim() == "0"
+    }
+
+    fn canonical_passive_primary_node_name(node: &str) -> String {
+        if Self::passive_primary_name_is_literal_ground(node) {
+            "0".to_string()
+        } else {
+            node.trim().to_ascii_lowercase()
+        }
+    }
+
+    fn validate_passive_primary_common_netlist(
+        netlist: &Netlist,
+        kind: XycePassivePrimaryKind,
+    ) -> Result<(), String> {
+        if netlist.title.trim().is_empty() {
+            return Err("passive primary-value parity requires a nonempty title".to_string());
+        }
+        if !netlist.data_tables.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.initial_conditions.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+        {
+            return Err("passive primary-value parity contains auxiliary analysis, hierarchy, external-model, or diagnostic state".to_string());
+        }
+        if !netlist.params.all_params().is_empty()
+            || !netlist.params.all_string_params().is_empty()
+            || !netlist.params.all_functions().is_empty()
+        {
+            return Err(
+                "passive primary-value parity does not admit parameters or user functions"
+                    .to_string(),
+            );
+        }
+        if netlist.models.len() != 1 {
+            return Err(format!(
+                "passive primary-value parity requires exactly one model, found {}",
+                netlist.models.len()
+            ));
+        }
+        let analysis_matches = matches!(
+            (kind, netlist.analyses.as_slice()),
+            (
+                XycePassivePrimaryKind::CapacitorTran,
+                [AnalysisCommand::Tran { .. }]
+            ) | (
+                XycePassivePrimaryKind::ResistorDc,
+                [AnalysisCommand::Dc { .. }]
+            )
+        );
+        if !analysis_matches {
+            return Err(format!(
+                "passive primary-value {:?} parity requires exactly one matching analysis command",
+                kind
+            ));
+        }
+        for element in &netlist.elements {
+            if let Some(alias) = element.nodes.iter().find(|node| {
+                crate::compat::ground::is_spice_ground_name(node)
+                    && !Self::passive_primary_name_is_literal_ground(node)
+            }) {
+                return Err(format!(
+                    "element '{}' uses ground alias '{}'; passive primary-value parity requires literal node 0",
+                    element.name, alias
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn passive_model_has_no_deferred_state(model: &crate::netlist::ModelDef) -> bool {
+        model.expr_params.is_empty()
+            && model.string_params.is_empty()
+            && model.string_vector_params.is_empty()
+            && model.real_vector_params.is_empty()
+            && model.real_vector_expr_params.is_empty()
+            && model.integer_vector_params.is_empty()
+    }
+
+    fn passive_cap_primary_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+    ) -> Result<XycePassivePrimaryValueSnapshot, String> {
+        let kind = XycePassivePrimaryKind::CapacitorTran;
+        Self::validate_passive_primary_common_netlist(netlist, kind)?;
+        let model = &netlist.models[0];
+        if !model.model_type.eq_ignore_ascii_case("C")
+            || !model.params.is_empty()
+            || !Self::passive_model_has_no_deferred_state(model)
+        {
+            return Err(format!(
+                "capacitor primary-value model '{}' must be a parameter-free C model",
+                model.name
+            ));
+        }
+
+        let mut capacitor = None;
+        let mut resistor = None;
+        let mut pulse = None;
+        let mut monitor = None;
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let key = Self::normalize_device_instance_name(&element.name);
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_passive_primary_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage,
+                    model: element_model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    if capacitor.is_some()
+                        || element.nodes.len() != 2
+                        || !value.is_finite()
+                        || *value <= 0.0
+                        || value_expr.is_some()
+                        || initial_voltage.is_some()
+                        || !instance_params.is_empty()
+                        || !deferred_params.is_empty()
+                    {
+                        return Err(format!(
+                            "capacitor '{}' is outside the explicit finite modeled primary-value envelope",
+                            element.name
+                        ));
+                    }
+                    let element_model = element_model.as_ref().ok_or_else(|| {
+                        format!(
+                            "capacitor '{}' must reference the unique model",
+                            element.name
+                        )
+                    })?;
+                    if !element_model.eq_ignore_ascii_case(&model.name) {
+                        return Err(format!(
+                            "capacitor '{}' does not reference model '{}'",
+                            element.name, model.name
+                        ));
+                    }
+                    capacitor = Some((
+                        element.name.clone(),
+                        nodes.clone(),
+                        element_model.clone(),
+                        *value,
+                    ));
+                    XyceRelationalElementFingerprint {
+                        kind: "C:MODEL".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: vec![element_model.to_ascii_lowercase()],
+                    }
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    if resistor.is_some()
+                        || element.nodes.len() != 2
+                        || !value.is_finite()
+                        || *value <= 0.0
+                        || value_expr.is_some()
+                        || model.is_some()
+                        || !instance_params.is_empty()
+                        || !deferred_params.is_empty()
+                    {
+                        return Err(format!(
+                            "resistor '{}' is outside the direct finite two-terminal envelope",
+                            element.name
+                        ));
+                    }
+                    resistor = Some((element.name.clone(), nodes.clone(), *value));
+                    XyceRelationalElementFingerprint {
+                        kind: "R".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Pulse {
+                    v1,
+                    v2,
+                    delay,
+                    rise,
+                    fall,
+                    width,
+                    period,
+                    phase,
+                    width_defaults_to_zero,
+                }) => {
+                    if pulse.is_some()
+                        || element.nodes.len() != 2
+                        || !v1.is_finite()
+                        || !v2.is_finite()
+                        || v1 == v2
+                        || !delay.is_finite()
+                        || *delay < 0.0
+                        || !rise.is_finite()
+                        || *rise <= 0.0
+                        || !fall.is_finite()
+                        || *fall <= 0.0
+                        || !width.is_finite()
+                        || *width <= 0.0
+                        || !period.is_nan()
+                        || phase.to_bits() != 0.0f64.to_bits()
+                        || *width_defaults_to_zero
+                    {
+                        return Err(format!(
+                            "pulse source '{}' is outside the direct six-argument nontrivial waveform envelope",
+                            element.name
+                        ));
+                    }
+                    let numeric_bits = vec![
+                        v1.to_bits(),
+                        v2.to_bits(),
+                        delay.to_bits(),
+                        rise.to_bits(),
+                        fall.to_bits(),
+                        width.to_bits(),
+                        period.to_bits(),
+                        phase.to_bits(),
+                        u64::from(*width_defaults_to_zero),
+                    ];
+                    pulse = Some((element.name.clone(), nodes.clone()));
+                    XyceRelationalElementFingerprint {
+                        kind: "V:PULSE6".to_string(),
+                        nodes,
+                        numeric_bits,
+                        text: Vec::new(),
+                    }
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) => {
+                    if monitor.is_some()
+                        || element.nodes.len() != 2
+                        || value.to_bits() != 0.0f64.to_bits()
+                    {
+                        return Err(format!(
+                            "monitor source '{}' must be the unique direct positive-zero DC source",
+                            element.name
+                        ));
+                    }
+                    monitor = Some((element.name.clone(), nodes.clone()));
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "element '{}' is outside the qualified capacitor primary-value topology",
+                        element.name
+                    ));
+                }
+            };
+            if elements.insert(key.clone(), fingerprint).is_some() {
+                return Err(format!(
+                    "capacitor primary-value parity contains duplicate element name '{key}'"
+                ));
+            }
+        }
+        if elements.len() != 4 {
+            return Err(format!(
+                "capacitor primary-value parity requires exactly four elements, found {}",
+                elements.len()
+            ));
+        }
+        let (capacitor_name, capacitor_nodes, capacitor_model, capacitor_value) =
+            capacitor.ok_or_else(|| "no qualified modeled capacitor found".to_string())?;
+        let (_, resistor_nodes, _) =
+            resistor.ok_or_else(|| "no qualified ordinary resistor found".to_string())?;
+        let (_, pulse_nodes) =
+            pulse.ok_or_else(|| "no qualified six-argument pulse source found".to_string())?;
+        let (monitor_name, monitor_nodes) =
+            monitor.ok_or_else(|| "no qualified zero-volt monitor found".to_string())?;
+        let [drive, ground] = pulse_nodes.as_slice() else {
+            return Err("pulse source must have two terminals".to_string());
+        };
+        let [resistor_drive, monitor_input] = resistor_nodes.as_slice() else {
+            return Err("ordinary resistor must have two terminals".to_string());
+        };
+        let [monitor_input_again, capacitor_node] = monitor_nodes.as_slice() else {
+            return Err("monitor source must have two terminals".to_string());
+        };
+        let [capacitor_node_again, capacitor_ground] = capacitor_nodes.as_slice() else {
+            return Err("capacitor must have two terminals".to_string());
+        };
+        if ground != "0"
+            || capacitor_ground != "0"
+            || drive == "0"
+            || monitor_input == "0"
+            || capacitor_node == "0"
+            || drive == monitor_input
+            || drive == capacitor_node
+            || monitor_input == capacitor_node
+            || resistor_drive != drive
+            || monitor_input_again != monitor_input
+            || capacitor_node_again != capacitor_node
+        {
+            return Err("capacitor primary-value topology must be Pulse -> R -> +0 V monitor -> modeled C with three distinct non-ground nodes".to_string());
+        }
+        let [voltage_text, current_text] = print.probes.as_slice() else {
+            return Err(
+                "capacitor primary-value parity requires exactly two ordered probes".to_string(),
+            );
+        };
+        let voltage = Self::parse_voltage_probe(voltage_text)
+            .ok_or_else(|| format!("'{voltage_text}' is not an atomic voltage probe"))?;
+        let current = Self::parse_current_probe(current_text)
+            .ok_or_else(|| format!("'{current_text}' is not an atomic current probe"))?;
+        if voltage.accessor != XyceVoltageAccessor::Value
+            || voltage.node_neg.is_some()
+            || Self::canonical_passive_primary_node_name(&voltage.node_pos) != *capacitor_node
+            || !Self::device_instance_names_match(&current, &monitor_name)
+        {
+            return Err("capacitor primary-value probes must be ordered V(capacitor-node), I(monitor-source)".to_string());
+        }
+
+        let source = netlist.source_text.as_deref().ok_or_else(|| {
+            "capacitor primary-value parity requires original source text".to_string()
+        })?;
+        let (representation, literal_bits, active_source_fingerprint) =
+            Self::passive_primary_source_contract(source, &capacitor_name, &capacitor_model, kind)?;
+        if literal_bits != capacitor_value.to_bits() {
+            return Err("capacitor source literal and parsed primary value differ".to_string());
+        }
+        let effective = Self::effective_capacitor_value(netlist, &capacitor_name)
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .ok_or_else(|| "capacitor effective primary value did not resolve".to_string())?;
+        if effective.to_bits() != capacitor_value.to_bits() {
+            return Err("capacitor parsed and effective primary values differ".to_string());
+        }
+        Ok(XycePassivePrimaryValueSnapshot {
+            title: netlist.title.trim().to_string(),
+            device_kind: kind,
+            representation,
+            active_source_fingerprint,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_numeric_bits: Vec::new(),
+            elements,
+            effective_primary_bits: effective.to_bits(),
+        })
+    }
+
+    fn passive_res_primary_snapshot(
+        netlist: &Netlist,
+        print: &XycePrintRequest,
+        sweep_source: &str,
+    ) -> Result<XycePassivePrimaryValueSnapshot, String> {
+        let kind = XycePassivePrimaryKind::ResistorDc;
+        Self::validate_passive_primary_common_netlist(netlist, kind)?;
+        let model = &netlist.models[0];
+        if !model.model_type.eq_ignore_ascii_case("R")
+            || model.params.len() != 1
+            || !model.params[0].0.eq_ignore_ascii_case("RSH")
+            || !model.params[0].1.is_finite()
+            || model.params[0].1 <= 0.0
+            || !Self::passive_model_has_no_deferred_state(model)
+        {
+            return Err(format!(
+                "resistor primary-value model '{}' must be an R model with exactly one finite positive RSH",
+                model.name
+            ));
+        }
+
+        let mut resistor = None;
+        let mut swept_source = None;
+        let mut monitor = None;
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            let key = Self::normalize_device_instance_name(&element.name);
+            let nodes = element
+                .nodes
+                .iter()
+                .map(|node| Self::canonical_passive_primary_node_name(node))
+                .collect::<Vec<_>>();
+            let fingerprint = match &element.kind {
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model: element_model,
+                    instance_params,
+                    deferred_params,
+                } => {
+                    if resistor.is_some()
+                        || element.nodes.len() != 2
+                        || !value.is_finite()
+                        || *value <= 0.0
+                        || value_expr.is_some()
+                        || !deferred_params.is_empty()
+                    {
+                        return Err(format!(
+                            "resistor '{}' is outside the explicit finite modeled primary-value envelope",
+                            element.name
+                        ));
+                    }
+                    let element_model = element_model.as_ref().ok_or_else(|| {
+                        format!(
+                            "resistor '{}' must reference the unique model",
+                            element.name
+                        )
+                    })?;
+                    if !element_model.eq_ignore_ascii_case(&model.name) {
+                        return Err(format!(
+                            "resistor '{}' does not reference model '{}'",
+                            element.name, model.name
+                        ));
+                    }
+                    resistor = Some((
+                        element.name.clone(),
+                        nodes.clone(),
+                        element_model.clone(),
+                        *value,
+                        instance_params.clone(),
+                    ));
+                    XyceRelationalElementFingerprint {
+                        kind: "R:MODEL".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: vec![element_model.to_ascii_lowercase()],
+                    }
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value)) => {
+                    if element.nodes.len() != 2 || !value.is_finite() {
+                        return Err(format!(
+                            "voltage source '{}' must be a finite direct DC source",
+                            element.name
+                        ));
+                    }
+                    if Self::device_instance_names_match(&element.name, sweep_source) {
+                        if swept_source.is_some() || *value == 0.0 {
+                            return Err("resistor primary-value sweep requires one nonzero source"
+                                .to_string());
+                        }
+                        swept_source = Some((element.name.clone(), nodes.clone(), *value));
+                    } else {
+                        if monitor.is_some() || value.to_bits() != 0.0f64.to_bits() {
+                            return Err("resistor primary-value monitor must be the unique positive-zero source".to_string());
+                        }
+                        monitor = Some((element.name.clone(), nodes.clone()));
+                    }
+                    XyceRelationalElementFingerprint {
+                        kind: "V:DC".to_string(),
+                        nodes,
+                        numeric_bits: vec![value.to_bits()],
+                        text: Vec::new(),
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "element '{}' is outside the qualified resistor primary-value topology",
+                        element.name
+                    ));
+                }
+            };
+            if elements.insert(key.clone(), fingerprint).is_some() {
+                return Err(format!(
+                    "resistor primary-value parity contains duplicate element name '{key}'"
+                ));
+            }
+        }
+        if elements.len() != 3 {
+            return Err(format!(
+                "resistor primary-value parity requires exactly three elements, found {}",
+                elements.len()
+            ));
+        }
+        let (resistor_name, resistor_nodes, resistor_model, resistor_value, instance_params) =
+            resistor.ok_or_else(|| "no qualified modeled resistor found".to_string())?;
+        let (_, sweep_nodes, _) =
+            swept_source.ok_or_else(|| "qualified swept voltage source not found".to_string())?;
+        let (monitor_name, monitor_nodes) =
+            monitor.ok_or_else(|| "qualified zero-volt monitor not found".to_string())?;
+        let [drive, ground] = sweep_nodes.as_slice() else {
+            return Err("swept source must have two terminals".to_string());
+        };
+        let [monitor_drive, resistor_node] = monitor_nodes.as_slice() else {
+            return Err("monitor source must have two terminals".to_string());
+        };
+        let [resistor_node_again, resistor_ground] = resistor_nodes.as_slice() else {
+            return Err("resistor must have two terminals".to_string());
+        };
+        if ground != "0"
+            || resistor_ground != "0"
+            || drive == "0"
+            || resistor_node == "0"
+            || drive == resistor_node
+            || monitor_drive != drive
+            || resistor_node_again != resistor_node
+        {
+            return Err("resistor primary-value topology must be swept source -> +0 V monitor -> modeled R with two distinct non-ground nodes".to_string());
+        }
+        let [voltage_text, current_text] = print.probes.as_slice() else {
+            return Err(
+                "resistor primary-value parity requires exactly two ordered probes".to_string(),
+            );
+        };
+        let voltage = Self::parse_voltage_probe(voltage_text)
+            .ok_or_else(|| format!("'{voltage_text}' is not an atomic voltage probe"))?;
+        let current = Self::parse_current_probe(current_text)
+            .ok_or_else(|| format!("'{current_text}' is not an atomic current probe"))?;
+        if voltage.accessor != XyceVoltageAccessor::Value
+            || voltage.node_neg.is_some()
+            || Self::canonical_passive_primary_node_name(&voltage.node_pos) != *drive
+            || !Self::device_instance_names_match(&current, &monitor_name)
+        {
+            return Err(
+                "resistor primary-value probes must be ordered V(drive), I(monitor-source)"
+                    .to_string(),
+            );
+        }
+
+        let source = netlist.source_text.as_deref().ok_or_else(|| {
+            "resistor primary-value parity requires original source text".to_string()
+        })?;
+        let (representation, literal_bits, active_source_fingerprint) =
+            Self::passive_primary_source_contract(source, &resistor_name, &resistor_model, kind)?;
+        let instance_form_matches = match representation {
+            XycePassivePrimaryRepresentation::Named => {
+                matches!(
+                    instance_params.as_slice(),
+                    [(name, value)]
+                        if name.eq_ignore_ascii_case("R")
+                            && value.to_bits() == resistor_value.to_bits()
+                )
+            }
+            XycePassivePrimaryRepresentation::Positional => instance_params.is_empty(),
+        };
+        if !instance_form_matches || literal_bits != resistor_value.to_bits() {
+            return Err("resistor source representation, parsed primary value, or normalized R instance parameter differs".to_string());
+        }
+        let effective = Self::effective_resistor_value(netlist, &resistor_name)
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .ok_or_else(|| "resistor effective primary value did not resolve".to_string())?;
+        if effective.to_bits() != resistor_value.to_bits() {
+            return Err("resistor parsed and effective primary values differ".to_string());
+        }
+        Ok(XycePassivePrimaryValueSnapshot {
+            title: netlist.title.trim().to_string(),
+            device_kind: kind,
+            representation,
+            active_source_fingerprint,
+            model_name: model.name.to_ascii_lowercase(),
+            model_type: model.model_type.to_ascii_lowercase(),
+            model_numeric_bits: vec![(
+                model.params[0].0.to_ascii_lowercase(),
+                model.params[0].1.to_bits(),
+            )],
+            elements,
+            effective_primary_bits: effective.to_bits(),
+        })
+    }
+
+    fn compare_passive_primary_snapshots(
+        baseline: &XycePassivePrimaryValueSnapshot,
+        target: &XycePassivePrimaryValueSnapshot,
+    ) -> Result<(), String> {
+        if baseline.representation != XycePassivePrimaryRepresentation::Named
+            || target.representation != XycePassivePrimaryRepresentation::Positional
+        {
+            return Err("passive primary-value parity requires named baseline -> positional target representation order".to_string());
+        }
+        if baseline.device_kind != target.device_kind {
+            return Err("passive primary-value device kinds differ".to_string());
+        }
+        if baseline.title != target.title {
+            return Err("circuit titles differ".to_string());
+        }
+        if baseline.active_source_fingerprint != target.active_source_fingerprint {
+            return Err(
+                "active source differs outside the admitted primary-value token".to_string(),
+            );
+        }
+        if baseline.model_name != target.model_name
+            || baseline.model_type != target.model_type
+            || baseline.model_numeric_bits != target.model_numeric_bits
+        {
+            return Err("passive model identity, type, or numeric state differs".to_string());
+        }
+        if baseline.elements != target.elements {
+            return Err(
+                "element topology, waveform, or non-representation values differ".to_string(),
+            );
+        }
+        if baseline.effective_primary_bits != target.effective_primary_bits {
+            return Err("effective passive primary values differ".to_string());
+        }
+        Ok(())
+    }
+
     fn strict_transient_family_snapshot(
         contract: &XyceBaselineFamilyContract,
         netlist: &Netlist,
@@ -8476,6 +9705,10 @@ impl XyceTestRunner {
             XyceBaselineFamilyKind::ParamExpression => {
                 Self::param_expression_family_snapshot(netlist, print)
                     .map(XyceStrictTransientFamilySnapshot::ParamExpression)
+            }
+            XyceBaselineFamilyKind::PassiveCapPrimaryValue => {
+                Self::passive_cap_primary_snapshot(netlist, print)
+                    .map(XyceStrictTransientFamilySnapshot::PassivePrimaryValue)
             }
             other => Err(format!(
                 "strict transient family kind {} has no semantic snapshot contract",
@@ -8507,6 +9740,10 @@ impl XyceTestRunner {
                 XyceStrictTransientFamilySnapshot::ParamExpression(baseline),
                 XyceStrictTransientFamilySnapshot::ParamExpression(target),
             ) => Self::compare_param_expression_family_snapshots(baseline, target),
+            (
+                XyceStrictTransientFamilySnapshot::PassivePrimaryValue(baseline),
+                XyceStrictTransientFamilySnapshot::PassivePrimaryValue(target),
+            ) => Self::compare_passive_primary_snapshots(baseline, target),
             _ => Err("baseline and target use different strict family snapshot kinds".to_string()),
         }
     }
@@ -10664,16 +11901,20 @@ impl XyceTestRunner {
     }
 
     fn xyce_default_prn_roundtrip(value: Value) -> Result<Value, String> {
-        if !value.is_finite() {
-            return Err(format!("default .prn output cannot serialize {value}"));
-        }
-        let printed = format!(
-            "{value:.precision$e}",
-            precision = XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION
-        );
+        let printed = Self::xyce_default_prn_text(value)?;
         printed
             .parse::<Value>()
             .map_err(|err| format!("could not parse default .prn value '{printed}': {err}"))
+    }
+
+    fn xyce_default_prn_text(value: Value) -> Result<String, String> {
+        if !value.is_finite() {
+            return Err(format!("default .prn output cannot serialize {value}"));
+        }
+        Ok(format!(
+            "{value:.precision$e}",
+            precision = XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION
+        ))
     }
 
     fn xyce_verify_linear_interpolate(
@@ -10870,6 +12111,95 @@ impl XyceTestRunner {
             actual_raw_time,
             "TIME",
         )
+    }
+
+    fn compare_serialized_default_prn_tables(
+        &self,
+        expected: &XycePrnTable,
+        actual: &XycePrnTable,
+    ) -> Result<Vec<XyceValueMismatch>, String> {
+        if expected.columns != actual.columns {
+            return Err(format!(
+                "default .prn columns differ: expected {:?}, actual {:?}",
+                expected.columns, actual.columns
+            ));
+        }
+        if expected.columns.len() < 2 || !expected.columns[0].eq_ignore_ascii_case("Index") {
+            return Err(format!(
+                "default .prn relational output requires an indexed table, got columns {:?}",
+                expected.columns
+            ));
+        }
+        if expected.rows.is_empty() || actual.rows.is_empty() {
+            return Err(format!(
+                "default .prn relational output must be nonempty, got {} baseline row(s) and {} target row(s)",
+                expected.rows.len(),
+                actual.rows.len()
+            ));
+        }
+        if expected.rows.len() != actual.rows.len() {
+            return Err(format!(
+                "default .prn row count differs: expected {}, actual {}",
+                expected.rows.len(),
+                actual.rows.len()
+            ));
+        }
+
+        let mut mismatches = Vec::new();
+        for (row_index, (expected_row, actual_row)) in
+            expected.rows.iter().zip(&actual.rows).enumerate()
+        {
+            if expected_row.len() != expected.columns.len()
+                || actual_row.len() != actual.columns.len()
+            {
+                return Err(format!(
+                    "default .prn row {row_index} width differs from its column layout"
+                ));
+            }
+            let canonical_index = row_index as Value;
+            if expected_row[0].to_bits() != canonical_index.to_bits()
+                || actual_row[0].to_bits() != canonical_index.to_bits()
+            {
+                return Err(format!(
+                    "default .prn row {row_index} does not preserve the canonical Index sequence: expected table {}, actual table {}",
+                    expected_row[0], actual_row[0]
+                ));
+            }
+            for column_index in 1..expected.columns.len() {
+                let expected_value = expected_row[column_index];
+                let actual_value = actual_row[column_index];
+                let expected_text = Self::xyce_default_prn_text(expected_value).map_err(|err| {
+                    format!(
+                        "could not serialize baseline row {row_index} column '{}': {err}",
+                        expected.columns[column_index]
+                    )
+                })?;
+                let actual_text = Self::xyce_default_prn_text(actual_value).map_err(|err| {
+                    format!(
+                        "could not serialize target row {row_index} column '{}': {err}",
+                        actual.columns[column_index]
+                    )
+                })?;
+                if expected_text == actual_text {
+                    continue;
+                }
+                let scale = expected_value
+                    .abs()
+                    .max(actual_value.abs())
+                    .max(Value::MIN_POSITIVE);
+                mismatches.push(XyceValueMismatch {
+                    row: row_index,
+                    probe: expected.columns[column_index].clone(),
+                    expected: expected_value,
+                    actual: actual_value,
+                    relative_error: (expected_value - actual_value).abs() / scale,
+                });
+                if mismatches.len() >= self.config.max_mismatches {
+                    return Ok(mismatches);
+                }
+            }
+        }
+        Ok(mismatches)
     }
 
     fn compare_exact_dc_prn_tables(
@@ -21702,6 +23032,163 @@ impl XyceTestRunner {
             .or_else(|| self.supernode_family_contract(deck))
     }
 
+    fn passive_primary_value_composite_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XycePassivePrimaryCompositeContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let directory_entries = fs::read_dir(parent)
+            .ok()?
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        let mut cir_paths = Vec::new();
+        for entry in directory_entries {
+            let path = entry.path();
+            if !path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+            cir_paths.push(path);
+        }
+        if cir_paths.len() != 5
+            || !cir_paths
+                .iter()
+                .any(|path| Self::same_path(path, &deck.path))
+        {
+            return None;
+        }
+        cir_paths.sort_by(|left, right| {
+            left.file_name()
+                .unwrap_or_default()
+                .cmp(right.file_name().unwrap_or_default())
+        });
+
+        let mut paths_by_stem = BTreeMap::new();
+        for path in &cir_paths {
+            let stem = path.file_stem()?.to_str()?.to_ascii_lowercase();
+            if stem.is_empty() || paths_by_stem.insert(stem, path.clone()).is_some() {
+                return None;
+            }
+        }
+
+        let mut owner_paths = Vec::new();
+        let mut member_paths = Vec::new();
+        for path in &cir_paths {
+            let metadata = fs::metadata(path).ok()?;
+            if metadata.len() == 0 {
+                owner_paths.push(path.clone());
+            } else {
+                member_paths.push(path.clone());
+            }
+        }
+        let [owner_path] = owner_paths.as_slice() else {
+            return None;
+        };
+        if member_paths.len() != 4
+            || !self.requires_upstream_wrapper(&self.relative_key(owner_path))
+            || member_paths
+                .iter()
+                .any(|path| self.requires_upstream_wrapper(&self.relative_key(path)))
+        {
+            return None;
+        }
+
+        let member_stems = member_paths
+            .iter()
+            .map(|path| path.file_stem()?.to_str().map(str::to_ascii_lowercase))
+            .collect::<Option<BTreeSet<_>>>()?;
+        let target_stems = member_stems
+            .iter()
+            .filter(|stem| stem.ends_with("-bug"))
+            .cloned()
+            .collect::<Vec<_>>();
+        if target_stems.len() != 2 {
+            return None;
+        }
+
+        let mut pair_contracts = Vec::new();
+        let mut consumed_stems = BTreeSet::new();
+        for target_stem in target_stems {
+            let baseline_stem = target_stem.strip_suffix("-bug")?;
+            if baseline_stem.is_empty()
+                || baseline_stem.ends_with("-bug")
+                || !member_stems.contains(baseline_stem)
+                || !consumed_stems.insert(baseline_stem.to_string())
+                || !consumed_stems.insert(target_stem.clone())
+            {
+                return None;
+            }
+            let baseline_path = paths_by_stem.get(baseline_stem)?.clone();
+            let target_path = paths_by_stem.get(&target_stem)?.clone();
+            let baseline_analysis = self
+                .baseline_family_analysis_for_path(&baseline_path)
+                .ok()?;
+            let target_analysis = self.baseline_family_analysis_for_path(&target_path).ok()?;
+            if baseline_analysis != target_analysis {
+                return None;
+            }
+            pair_contracts.push((
+                baseline_analysis,
+                baseline_stem.to_string(),
+                baseline_path,
+                target_path,
+            ));
+        }
+        if consumed_stems != member_stems {
+            return None;
+        }
+
+        let target_path = (!Self::same_path(&deck.path, owner_path)).then(|| deck.path.clone());
+        let mut capacitor_tran = None;
+        let mut resistor_dc = None;
+        for (analysis, pair_family, baseline_path, positional_path) in pair_contracts {
+            let (kind, slot) = match analysis {
+                XyceBaselineFamilyAnalysis::Tran => (
+                    XyceBaselineFamilyKind::PassiveCapPrimaryValue,
+                    &mut capacitor_tran,
+                ),
+                XyceBaselineFamilyAnalysis::Dc => (
+                    XyceBaselineFamilyKind::PassiveResPrimaryValue,
+                    &mut resistor_dc,
+                ),
+            };
+            if slot.is_some() {
+                return None;
+            }
+            let pair_target_path = target_path.as_ref().and_then(|target| {
+                (Self::same_path(target, &baseline_path)
+                    || Self::same_path(target, &positional_path))
+                .then(|| target.clone())
+            });
+            *slot = Some(XyceBaselineFamilyContract {
+                kind,
+                comparison: XyceBaselineFamilyComparison::ExactPrn,
+                family: pair_family,
+                baseline_path: baseline_path.clone(),
+                member_paths: vec![baseline_path, positional_path],
+                target_path: pair_target_path,
+            });
+        }
+
+        Some(XycePassivePrimaryCompositeContract {
+            family: owner_path.file_stem()?.to_str()?.to_string(),
+            owner_path: owner_path.clone(),
+            capacitor_tran: capacitor_tran?,
+            resistor_dc: resistor_dc?,
+            target_path,
+        })
+    }
+
     fn param_expression_family_contract(
         &self,
         deck: &XyceDeck,
@@ -24925,6 +26412,442 @@ C1 mid out 1u
     }
 
     #[test]
+    fn exact_prn_comparison_matches_release_7_10_serialization() {
+        let runner = XyceTestRunner::new(Path::new("."), XyceRunnerConfig::default());
+        let table = |value| XycePrnTable {
+            columns: vec![
+                "Index".to_string(),
+                "TIME".to_string(),
+                "V(out)".to_string(),
+            ],
+            rows: vec![vec![0.0, 0.0, value]],
+        };
+        let baseline = table(1.0);
+        let same_printed_value = table(1.000000004);
+        assert!(
+            runner
+                .compare_serialized_default_prn_tables(&baseline, &same_printed_value)
+                .expect("precision-8 tables compare structurally")
+                .is_empty(),
+            "Release 7.10 byte diff compares the precision-8 serialized value, not raw f64 bits"
+        );
+
+        let changed_printed_value = table(1.000000006);
+        assert_eq!(
+            runner
+                .compare_serialized_default_prn_tables(&baseline, &changed_printed_value)
+                .expect("rounding-boundary tables compare structurally")
+                .len(),
+            1,
+            "crossing the precision-8 rounding boundary must change the PRN byte stream"
+        );
+
+        let positive_zero = table(0.0);
+        let negative_zero = table(-0.0);
+        assert_eq!(
+            runner
+                .compare_serialized_default_prn_tables(&positive_zero, &negative_zero)
+                .expect("signed-zero tables compare structurally")
+                .len(),
+            1,
+            "positive and negative zero serialize to different default-PRN tokens"
+        );
+
+        let nonfinite = table(f64::NAN);
+        assert!(
+            runner
+                .compare_serialized_default_prn_tables(&nonfinite, &nonfinite)
+                .is_err(),
+            "matching nonfinite values never satisfy an exact serialized oracle"
+        );
+        let mut reordered = baseline.clone();
+        reordered.columns.swap(1, 2);
+        assert!(
+            runner
+                .compare_serialized_default_prn_tables(&baseline, &reordered)
+                .is_err(),
+            "column order and spelling are byte-visible"
+        );
+        let mut bad_index = baseline.clone();
+        bad_index.rows[0][0] = -0.0;
+        assert!(
+            runner
+                .compare_serialized_default_prn_tables(&baseline, &bad_index)
+                .is_err(),
+            "the default indexed layout preserves the canonical integer Index sequence"
+        );
+    }
+
+    #[test]
+    fn passive_primary_source_forms_use_only_active_structural_fields() {
+        let cap_source = |named: bool| {
+            let (named_prefix, positional_prefix) = if named { ("", "*") } else { ("*", "") };
+            format!(
+                "generic capacitor primary-value pair\n\
+VIN 1 0 PULSE(0 1 10U 1N 1N 30U)\n\
+R1 1 2 1K\n\
+{named_prefix}C1 3 0 CMODEL C=1pf\n\
+{positional_prefix}C1 3 0 CMODEL 1pf\n\
+VMON 2 3 0\n\
+.MODEL CMODEL C ()\n\
+.TRAN 1N 20U\n\
+.PRINT TRAN V(3) I(VMON)\n\
+.END\n"
+            )
+        };
+        for named in [true, false] {
+            XyceTestRunner::validate_passive_primary_source_forms(
+                &cap_source(named),
+                XycePassivePrimaryKind::CapacitorTran,
+            )
+            .expect("six-argument direct-numeric capacitor source form qualifies");
+            let netlist = XyceTestRunner::parse_xyce_netlist(
+                &cap_source(named),
+                Path::new("passive-cap-source.cir"),
+            )
+            .expect("capacitor fixture parses");
+            let (representation, bits, _) = XyceTestRunner::passive_primary_source_contract(
+                netlist
+                    .source_text
+                    .as_deref()
+                    .expect("source text retained"),
+                "C1",
+                "CMODEL",
+                XycePassivePrimaryKind::CapacitorTran,
+            )
+            .expect("active primary source token qualifies");
+            assert_eq!(
+                representation,
+                if named {
+                    XycePassivePrimaryRepresentation::Named
+                } else {
+                    XycePassivePrimaryRepresentation::Positional
+                },
+                "commented alternate form must not influence representation detection"
+            );
+            assert_eq!(bits, 1.0e-12f64.to_bits());
+        }
+
+        for invalid in [
+            cap_source(true).replace("C=1pf", "CAP=1pf"),
+            cap_source(true).replace("C=1pf", "VALUE=1pf"),
+            cap_source(true).replace("C=1pf", "C={1pf}"),
+            cap_source(true).replace("CMODEL C=1pf", "1pf CMODEL"),
+            cap_source(true).replace("C=1pf", "C=1pf M=1"),
+        ] {
+            let parsed = XyceTestRunner::parse_xyce_netlist(
+                &invalid,
+                Path::new("invalid-passive-cap-source.cir"),
+            );
+            if let Ok(netlist) = parsed {
+                assert!(
+                    XyceTestRunner::passive_primary_source_contract(
+                        netlist
+                            .source_text
+                            .as_deref()
+                            .expect("source text retained"),
+                        "C1",
+                        "CMODEL",
+                        XycePassivePrimaryKind::CapacitorTran,
+                    )
+                    .is_err(),
+                    "unqualified primary syntax must fail source provenance"
+                );
+            }
+        }
+
+        let explicit_period =
+            cap_source(true).replace("PULSE(0 1 10U 1N 1N 30U)", "PULSE(0 1 10U 1N 1N 30U 100U)");
+        assert!(
+            XyceTestRunner::validate_passive_primary_source_forms(
+                &explicit_period,
+                XycePassivePrimaryKind::CapacitorTran,
+            )
+            .is_err(),
+            "the oracle exercises exactly six direct PULSE arguments and an omitted period"
+        );
+        let parameterized_pulse = cap_source(true).replace("10U", "{TD}");
+        assert!(
+            XyceTestRunner::validate_passive_primary_source_forms(
+                &parameterized_pulse,
+                XycePassivePrimaryKind::CapacitorTran,
+            )
+            .is_err(),
+            "PULSE provenance must remain direct numeric"
+        );
+    }
+
+    #[test]
+    fn passive_primary_plans_admit_only_default_prn_output() {
+        let cap_source = "validated capacitor primary-value plan\n\
+VIN 1 0 PULSE(0 1 10U 1N 1N 30U)\n\
+R1 1 2 1K\n\
+C1 3 0 CMODEL C=1pf\n\
+VMON 2 3 0\n\
+.MODEL CMODEL C ()\n\
+.TRAN 1N 20U\n\
+.PRINT TRAN V(3) I(VMON)\n\
+.END\n";
+        let cap_plan = XyceStaticTranPlan {
+            deck_path: PathBuf::from("cap-plan.cir"),
+            reference_path: PathBuf::from("unused.prn"),
+            source: cap_source.to_string(),
+            print: XycePrintRequest {
+                probes: vec!["V(3)".to_string(), "I(VMON)".to_string()],
+            },
+            output_override: false,
+            timeint_conststep: false,
+            tran: XyceTranAnalysis {
+                step: 1.0e-9,
+                stop: 20.0e-6,
+                start: None,
+                max_step: None,
+                uic: false,
+            },
+            steps: Vec::new(),
+            contract: XyceStaticTranContract::PlainStatic,
+            wrapper_tolerance: None,
+        };
+        XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_plan)
+            .expect("canonical capacitor plan qualifies");
+        let mut cap_csv = cap_plan.clone();
+        cap_csv.contract = XyceStaticTranContract::PlainCsv;
+        assert!(XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_csv).is_err());
+        let mut cap_override = cap_plan.clone();
+        cap_override.output_override = true;
+        assert!(
+            XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_override).is_err()
+        );
+        let mut cap_start = cap_plan.clone();
+        cap_start.tran.start = Some(1.0e-9);
+        assert!(XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_start).is_err());
+        let mut cap_option = cap_plan.clone();
+        cap_option.source = cap_option
+            .source
+            .replace(".END", ".OPTIONS TIMEINT CONSTSTEP=1\n.END");
+        assert!(
+            XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_option).is_err(),
+            "active options are outside the exact wrapper envelope"
+        );
+        let mut cap_one_probe = cap_plan;
+        cap_one_probe.print.probes.pop();
+        assert!(
+            XyceTestRunner::validate_passive_cap_primary_transient_plan(&cap_one_probe).is_err()
+        );
+
+        let res_source = "validated resistor primary-value plan\n\
+R1 2 0 RMOD R=1k\n\
+VIN 1 0 5V\n\
+VMON 1 2 0V\n\
+.DC VIN 0 5V 1V\n\
+.MODEL RMOD R (RSH=1)\n\
+.PRINT DC V(1) I(VMON)\n\
+.END\n";
+        let res_plan = XyceStaticDcPlan {
+            deck_path: PathBuf::from("res-plan.cir"),
+            execution_dir: None,
+            source: res_source.to_string(),
+            expression_dialect: ExpressionDialect::Xyce,
+            print: XycePrintRequest {
+                probes: vec!["V(1)".to_string(), "I(VMON)".to_string()],
+            },
+            print_format: None,
+            dc: XyceDcSweep {
+                source: "VIN".to_string(),
+                start: 0.0,
+                stop: 5.0,
+                step: 1.0,
+                mode: crate::netlist::DcSweepMode::Linear,
+                sweep2: None,
+            },
+            dc_data: None,
+            steps: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        XyceTestRunner::validate_passive_res_primary_dc_plan(&res_plan)
+            .expect("canonical resistor plan qualifies");
+        let mut res_formatted = res_plan.clone();
+        res_formatted.print_format = Some("STD".to_string());
+        assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_formatted).is_err());
+        let mut res_second = res_plan.clone();
+        res_second.dc.sweep2 = Some(DcSecondSweep::linear("V2".to_string(), 0.0, 1.0, 1.0));
+        assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_second).is_err());
+        let mut res_list = res_plan.clone();
+        res_list.dc.mode = crate::netlist::DcSweepMode::List(vec![0.0, 1.0]);
+        assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_list).is_err());
+        let mut res_diagnostic = res_plan.clone();
+        res_diagnostic
+            .diagnostics
+            .push(crate::netlist::ParseDiagnostic::warning(
+                1,
+                "test",
+                "unqualified parser state",
+            ));
+        assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_diagnostic).is_err());
+        let mut res_option = res_plan;
+        res_option.source = res_option.source.replace(".END", ".OPTIONS TEMP=27\n.END");
+        assert!(XyceTestRunner::validate_passive_res_primary_dc_plan(&res_option).is_err());
+    }
+
+    #[test]
+    fn passive_cap_primary_snapshot_proves_only_named_to_positional_equivalence() {
+        let source_for = |named: bool| {
+            let (named_prefix, positional_prefix) = if named { ("", "*") } else { ("*", "") };
+            format!(
+                "validated capacitor primary-value pair\n\
+VIN 1 0 PULSE(0 1 10U 1N 1N 30U)\n\
+R1 1 2 1K\n\
+{named_prefix}C1 3 0 CMODEL C=1pf\n\
+{positional_prefix}C1 3 0 CMODEL 1pf\n\
+VMON 2 3 0\n\
+.MODEL CMODEL C ()\n\
+.TRAN 1N 20U\n\
+.PRINT TRAN V(3) I(VMON)\n\
+.END\n"
+            )
+        };
+        let print = XycePrintRequest {
+            probes: vec!["V(3)".to_string(), "I(VMON)".to_string()],
+        };
+        let named =
+            XyceTestRunner::parse_xyce_netlist(&source_for(true), Path::new("cap-named.cir"))
+                .expect("named capacitor fixture parses");
+        let positional =
+            XyceTestRunner::parse_xyce_netlist(&source_for(false), Path::new("cap-positional.cir"))
+                .expect("positional capacitor fixture parses");
+        let named_snapshot = XyceTestRunner::passive_cap_primary_snapshot(&named, &print)
+            .expect("named capacitor snapshot qualifies");
+        let positional_snapshot = XyceTestRunner::passive_cap_primary_snapshot(&positional, &print)
+            .expect("positional capacitor snapshot qualifies");
+        assert_eq!(named_snapshot.effective_primary_bits, 1.0e-12f64.to_bits());
+        XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &positional_snapshot)
+            .expect("named -> positional capacitance is the qualified representation pair");
+        assert!(
+            XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &named_snapshot,)
+                .is_err()
+        );
+        assert!(
+            XyceTestRunner::compare_passive_primary_snapshots(
+                &positional_snapshot,
+                &named_snapshot,
+            )
+            .is_err(),
+            "representation direction is part of the upstream wrapper contract"
+        );
+
+        let changed_resistor_source = source_for(false).replace("R1 1 2 1K", "R1 1 2 2K");
+        let changed_resistor = XyceTestRunner::parse_xyce_netlist(
+            &changed_resistor_source,
+            Path::new("cap-changed-resistor.cir"),
+        )
+        .expect("changed resistor fixture parses");
+        let changed_snapshot =
+            XyceTestRunner::passive_cap_primary_snapshot(&changed_resistor, &print)
+                .expect("changed resistor remains individually qualified");
+        assert!(
+            XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &changed_snapshot,)
+                .is_err(),
+            "all non-primary active source and semantic state participates in parity"
+        );
+
+        let explicit_period_source = source_for(false).replace("30U)", "30U 100U)");
+        let explicit_period = XyceTestRunner::parse_xyce_netlist(
+            &explicit_period_source,
+            Path::new("cap-explicit-period.cir"),
+        )
+        .expect("explicit-period fixture parses");
+        assert!(
+            XyceTestRunner::passive_cap_primary_snapshot(&explicit_period, &print).is_err(),
+            "only the canonical omitted-period NaN sentinel is admitted"
+        );
+        let ground_alias_source = source_for(false).replace("C1 3 0", "C1 3 GND");
+        let ground_alias = XyceTestRunner::parse_xyce_netlist(
+            &ground_alias_source,
+            Path::new("cap-ground-alias.cir"),
+        )
+        .expect("ground-alias fixture parses");
+        assert!(
+            XyceTestRunner::passive_cap_primary_snapshot(&ground_alias, &print).is_err(),
+            "literal node zero is required"
+        );
+    }
+
+    #[test]
+    fn passive_res_primary_snapshot_normalizes_only_the_named_r_assignment() {
+        let source_for = |named: bool| {
+            let (named_prefix, positional_prefix) = if named { ("", "*") } else { ("*", "") };
+            format!(
+                "validated resistor primary-value pair\n\
+{named_prefix}R1 2 0 RMOD R=1k\n\
+{positional_prefix}R1 2 0 RMOD 1k\n\
+VIN 1 0 5V\n\
+VMON 1 2 0V\n\
+.DC VIN 0 5V 1V\n\
+.MODEL RMOD R (RSH=1)\n\
+.PRINT DC V(1) I(VMON)\n\
+.END\n"
+            )
+        };
+        let print = XycePrintRequest {
+            probes: vec!["V(1)".to_string(), "I(VMON)".to_string()],
+        };
+        let named =
+            XyceTestRunner::parse_xyce_netlist(&source_for(true), Path::new("res-named.cir"))
+                .expect("named resistor fixture parses");
+        let positional =
+            XyceTestRunner::parse_xyce_netlist(&source_for(false), Path::new("res-positional.cir"))
+                .expect("positional resistor fixture parses");
+        let named_snapshot = XyceTestRunner::passive_res_primary_snapshot(&named, &print, "VIN")
+            .expect("named resistor snapshot qualifies");
+        let positional_snapshot =
+            XyceTestRunner::passive_res_primary_snapshot(&positional, &print, "VIN")
+                .expect("positional resistor snapshot qualifies");
+        assert_eq!(named_snapshot.effective_primary_bits, 1000.0f64.to_bits());
+        XyceTestRunner::compare_passive_primary_snapshots(&named_snapshot, &positional_snapshot)
+            .expect("named -> positional resistance is the qualified representation pair");
+
+        let mut extra_instance_parameter = named.clone();
+        let resistor = extra_instance_parameter
+            .elements
+            .iter_mut()
+            .find(|element| element.name.eq_ignore_ascii_case("R1"))
+            .expect("R1 exists");
+        let ElementKind::Resistor {
+            instance_params, ..
+        } = &mut resistor.kind
+        else {
+            panic!("R1 remains a resistor");
+        };
+        instance_params.push(("M".to_string(), 2.0));
+        assert!(
+            XyceTestRunner::passive_res_primary_snapshot(&extra_instance_parameter, &print, "VIN",)
+                .is_err(),
+            "only the redundant named R assignment may be normalized"
+        );
+
+        let zero_rsh_source = source_for(false).replace("RSH=1", "RSH=0");
+        let zero_rsh =
+            XyceTestRunner::parse_xyce_netlist(&zero_rsh_source, Path::new("res-zero-rsh.cir"))
+                .expect("zero-RSH fixture parses");
+        assert!(XyceTestRunner::passive_res_primary_snapshot(&zero_rsh, &print, "VIN").is_err());
+        let negative_zero_monitor_source = source_for(false).replace("VMON 1 2 0V", "VMON 1 2 -0V");
+        let negative_zero_monitor = XyceTestRunner::parse_xyce_netlist(
+            &negative_zero_monitor_source,
+            Path::new("res-negative-zero-monitor.cir"),
+        )
+        .expect("negative-zero monitor fixture parses");
+        assert!(
+            XyceTestRunner::passive_res_primary_snapshot(&negative_zero_monitor, &print, "VIN",)
+                .is_err(),
+            "the monitor source must be exact positive zero"
+        );
+        assert!(
+            XyceTestRunner::passive_res_primary_snapshot(&positional, &print, "VMON").is_err(),
+            "the .DC sweep must name the nonzero drive source"
+        );
+    }
+
+    #[test]
     fn exact_dc_sweep_comparison_is_bitwise_for_every_dimension() {
         let baseline = XyceDcSweep {
             source: "VBIAS".to_string(),
@@ -25282,6 +27205,149 @@ VMON 2 1 0\n\
         );
 
         fs::remove_dir_all(&root).expect("remove generic BJT family fixture");
+    }
+
+    #[test]
+    fn passive_primary_composite_detection_is_manifest_and_sibling_driven() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-passive-primary-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root.join("Netlists").join("GENERIC_PASSIVE");
+        fs::create_dir_all(&family_dir).expect("create generic passive family fixture");
+        let owner_path = family_dir.join("orchestrator.cir");
+        let cap_baseline = family_dir.join("alpha.cir");
+        let cap_target = family_dir.join("alpha-bug.cir");
+        let res_baseline = family_dir.join("zeta.cir");
+        let res_target = family_dir.join("zeta-bug.cir");
+        let tran_member = "transient pair member\n.PRINT TRAN V(1)\n.END\n";
+        let dc_member = "dc pair member\n.PRINT DC V(1)\n.END\n";
+        fs::write(&owner_path, "").expect("write empty composite owner");
+        fs::write(&cap_baseline, tran_member).expect("write TRAN named baseline");
+        fs::write(&cap_target, tran_member).expect("write TRAN positional target");
+        fs::write(&res_baseline, dc_member).expect("write DC named baseline");
+        fs::write(&res_target, dc_member).expect("write DC positional target");
+        let owner_relative = "Netlists/GENERIC_PASSIVE/orchestrator.cir";
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper manifest fixture");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (path, relative, target_expected) in [
+            (&owner_path, owner_relative, false),
+            (&cap_baseline, "Netlists/GENERIC_PASSIVE/alpha.cir", true),
+            (&cap_target, "Netlists/GENERIC_PASSIVE/alpha-bug.cir", true),
+            (&res_baseline, "Netlists/GENERIC_PASSIVE/zeta.cir", true),
+            (&res_target, "Netlists/GENERIC_PASSIVE/zeta-bug.cir", true),
+        ] {
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: relative.to_string(),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .passive_primary_value_composite_contract(&deck)
+                .expect("one owner and two exact base/-bug analysis pairs form a composite");
+            assert_eq!(contract.target_path.is_some(), target_expected);
+            assert_eq!(
+                contract.capacitor_tran.kind,
+                XyceBaselineFamilyKind::PassiveCapPrimaryValue
+            );
+            assert_eq!(
+                contract.resistor_dc.kind,
+                XyceBaselineFamilyKind::PassiveResPrimaryValue
+            );
+            assert_eq!(
+                contract.capacitor_tran.comparison,
+                XyceBaselineFamilyComparison::ExactPrn
+            );
+            assert_eq!(
+                contract.resistor_dc.comparison,
+                XyceBaselineFamilyComparison::ExactPrn
+            );
+            assert!(
+                XyceTestRunner::same_path(&contract.capacitor_tran.baseline_path, &cap_baseline,),
+                "lexically earlier '-bug' target must never become the baseline"
+            );
+            assert!(XyceTestRunner::same_path(
+                &contract.resistor_dc.baseline_path,
+                &res_baseline,
+            ));
+        }
+
+        let owner_deck = XyceDeck {
+            path: owner_path.clone(),
+            relative_path: owner_relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        let extra_path = family_dir.join("extra.cir");
+        fs::write(&extra_path, dc_member).expect("write extra sibling");
+        assert!(
+            runner
+                .passive_primary_value_composite_contract(&owner_deck)
+                .is_none(),
+            "an extra circuit is a different upstream family shape"
+        );
+        fs::remove_file(&extra_path).expect("remove extra sibling");
+
+        let non_file_path = family_dir.join("non-file.cir");
+        fs::create_dir(&non_file_path).expect("create non-file .cir entry");
+        assert!(
+            runner
+                .passive_primary_value_composite_contract(&owner_deck)
+                .is_none(),
+            "every .cir directory entry must resolve to an ordinary file"
+        );
+        fs::remove_dir(&non_file_path).expect("remove non-file .cir entry");
+
+        fs::write(&owner_path, "nonempty owner\n.END\n").expect("make owner nonempty");
+        assert!(
+            runner
+                .passive_primary_value_composite_contract(&owner_deck)
+                .is_none(),
+            "the manifest owner must be the unique zero-byte circuit"
+        );
+        fs::write(&owner_path, "").expect("restore empty owner");
+
+        fs::write(&res_target, tran_member).expect("change target analysis");
+        assert!(
+            runner
+                .passive_primary_value_composite_contract(&owner_deck)
+                .is_none(),
+            "members of one pair must declare the same unambiguous analysis"
+        );
+        fs::write(&res_baseline, tran_member).expect("change baseline analysis");
+        assert!(
+            runner
+                .passive_primary_value_composite_contract(&owner_deck)
+                .is_none(),
+            "the composite must contain exactly one TRAN pair and one DC pair"
+        );
+        fs::write(&res_baseline, dc_member).expect("restore DC baseline");
+        fs::write(&res_target, dc_member).expect("restore DC target");
+
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!(
+                "{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\nNetlists/GENERIC_PASSIVE/alpha.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
+            ),
+        )
+        .expect("mark executable member as wrapper-origin");
+        let marked_member_runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        assert!(
+            marked_member_runner
+                .passive_primary_value_composite_contract(&owner_deck)
+                .is_none(),
+            "only the zero-byte owner may carry wrapper provenance"
+        );
+
+        fs::remove_dir_all(&root).expect("remove generic passive family fixture");
     }
 
     #[test]

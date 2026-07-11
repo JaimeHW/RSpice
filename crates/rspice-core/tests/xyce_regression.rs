@@ -872,6 +872,57 @@ fn test_xyce_bug_1806_parameter_expression_family_runs_canonical_transient_parit
 }
 
 #[test]
+fn test_xyce_bug_374_passive_primary_value_composite_runs_exact_prn_parity() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for (relative, expected_contract, wrapper_origin) in [
+        (
+            "Netlists/BUG_374/bug_374.cir",
+            "passive_primary_value_composite_wrapper",
+            true,
+        ),
+        (
+            "Netlists/BUG_374/capacitor.cir",
+            "passive_primary_value_capacitor_tran_baseline",
+            false,
+        ),
+        (
+            "Netlists/BUG_374/capacitor-bug.cir",
+            "passive_primary_value_capacitor_tran_wrapper",
+            false,
+        ),
+        (
+            "Netlists/BUG_374/resistor.cir",
+            "passive_primary_value_resistor_dc_baseline",
+            false,
+        ),
+        (
+            "Netlists/BUG_374/resistor-bug.cir",
+            "passive_primary_value_resistor_dc_wrapper",
+            false,
+        ),
+    ] {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            wrapper_origin,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass exact named/positional passive primary-value PRN parity, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should satisfy the Release 7.10 byte-exact default-PRN comparison"
+        );
+        assert_eq!(result.contract, expected_contract);
+    }
+}
+
+#[test]
 fn test_xyce_mid_certification_transient_cases_run() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
