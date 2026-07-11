@@ -8,11 +8,20 @@ use rspice_core::testing::{XyceDeckSection, XyceRunnerConfig, XyceTestRunner};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 fn xyce_runner_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn lock_xyce_runner() -> MutexGuard<'static, ()> {
+    // Assertions run while the serialization guard is held. Recover after a
+    // failed assertion so one fixture reports one failure instead of poisoning
+    // every later Xyce test in the process.
+    xyce_runner_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn get_xyce_tests_dir() -> PathBuf {
@@ -183,6 +192,23 @@ fn test_xyce_discovery_covers_every_vendored_circuit() {
 }
 
 #[test]
+fn test_xyce_hard_coded_deck_paths_use_exact_vendored_case() {
+    let root = get_xyce_tests_dir();
+    let filesystem = all_circuit_paths(&root);
+    let referenced = include_str!("xyce_regression.rs")
+        .split('"')
+        .filter(|fragment| fragment.starts_with("Netlists/") && fragment.ends_with(".cir"))
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    let missing = referenced.difference(&filesystem).collect::<Vec<_>>();
+
+    assert!(
+        missing.is_empty(),
+        "hard-coded Xyce deck paths must match the vendored path and case exactly: {missing:#?}"
+    );
+}
+
+#[test]
 fn test_xyce_corpus_omits_upstream_platform_harness_artifacts() {
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
@@ -239,7 +265,7 @@ fn test_xyce_wrapper_manifest_covers_trimmed_sidecar_contracts() {
 
 #[test]
 fn test_xyce_static_prn_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -260,7 +286,6 @@ fn test_xyce_static_prn_cases_run() {
         "Netlists/Certification_Tests/BUG_1602/vbic_3T_et_cf_TNOM27.cir",
         "Netlists/Certification_Tests/BUG_1807/vbic_pnp_default.cir",
         "Netlists/EXPPRINT/expPrint.cir",
-        "Netlists/EXPPRINT/expprint.cir",
         "Netlists/MOS6/nmos6_dc.cir",
         "Netlists/MOS6/pmos6_dc.cir",
         "Netlists/NMESFET/nmesfet.cir",
@@ -353,7 +378,7 @@ fn test_xyce_static_prn_cases_run() {
 
 #[test]
 fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -404,7 +429,7 @@ fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
 
 #[test]
 fn test_xyce_static_ac_fd_csv_wrapper_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -435,7 +460,7 @@ fn test_xyce_static_ac_fd_csv_wrapper_case_runs() {
 
 #[test]
 fn test_xyce_static_ac_ic_td_wrapper_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -461,7 +486,7 @@ fn test_xyce_static_ac_ic_td_wrapper_case_runs() {
 
 #[test]
 fn test_xyce_static_ac_probe_wrapper_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -487,7 +512,7 @@ fn test_xyce_static_ac_probe_wrapper_case_runs() {
 
 #[test]
 fn test_xyce_static_ac_step_fd_prn_wrapper_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -519,7 +544,7 @@ fn test_xyce_static_ac_step_fd_prn_wrapper_cases_run() {
 
 #[test]
 fn test_xyce_static_ac_step_probe_wrapper_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -549,7 +574,7 @@ fn test_xyce_static_ac_step_probe_wrapper_cases_run() {
 
 #[test]
 fn test_xyce_transient_delimiter_option_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -577,7 +602,7 @@ fn test_xyce_transient_delimiter_option_cases_run() {
 
 #[test]
 fn test_xyce_hyperbolic_abm_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_254/atanh_tanh.cir";
@@ -599,7 +624,7 @@ fn test_xyce_hyperbolic_abm_transient_case_runs() {
 
 #[test]
 fn test_xyce_bug_307_311_wrapper_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -629,7 +654,7 @@ fn test_xyce_bug_307_311_wrapper_transient_cases_run() {
 
 #[test]
 fn test_xyce_bug_307_311_native_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -659,7 +684,7 @@ fn test_xyce_bug_307_311_native_transient_cases_run() {
 
 #[test]
 fn test_xyce_mid_certification_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -709,7 +734,7 @@ fn test_xyce_mid_certification_transient_cases_run() {
 
 #[test]
 fn test_xyce_bug_229_native_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_229_SON/bug229son.cir";
@@ -732,7 +757,7 @@ fn test_xyce_bug_229_native_transient_case_runs() {
 
 #[test]
 fn test_xyce_bug_629_power_alias_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_629_SON/bug_629.cir";
@@ -755,7 +780,7 @@ fn test_xyce_bug_629_power_alias_transient_case_runs() {
 
 #[test]
 fn test_xyce_bug_1301_wrapper_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/BUG_1301/rlc_tranline.cir";
@@ -782,7 +807,7 @@ fn test_xyce_bug_1301_wrapper_transient_case_runs() {
 
 #[test]
 fn test_xyce_prf_parameter_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_1210_SON/bug1210.cir";
@@ -809,7 +834,7 @@ fn test_xyce_prf_parameter_transient_case_runs() {
 
 #[test]
 fn test_xyce_tl1x_mpi_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/TL1X/TL1X_mpi.cir";
@@ -832,7 +857,7 @@ fn test_xyce_tl1x_mpi_transient_case_runs() {
 
 #[test]
 fn test_xyce_bug_61_constant_step_transient_wrapper_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_61/capacitor.cir";
@@ -859,7 +884,7 @@ fn test_xyce_bug_61_constant_step_transient_wrapper_case_runs() {
 
 #[test]
 fn test_xyce_mixed_signal_python_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -904,7 +929,7 @@ fn test_xyce_mixed_signal_python_transient_cases_run() {
 
 #[test]
 fn test_xyce_nonlinear_convergence_wrapper_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Nonlinear/ConvergenceTests/Nox1Tran0.cir";
@@ -931,7 +956,7 @@ fn test_xyce_nonlinear_convergence_wrapper_transient_case_runs() {
 
 #[test]
 fn test_xyce_zero_resistance_branch_current_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -953,7 +978,7 @@ fn test_xyce_zero_resistance_branch_current_cases_run() {
 
 #[test]
 fn test_xyce_resistor_default_value_warning_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/RESISTOR/DefaultValueWarning.cir";
@@ -980,7 +1005,7 @@ fn test_xyce_resistor_default_value_warning_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_diode_sidewall_cd_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1007,7 +1032,7 @@ fn test_xyce_diode_sidewall_cd_cases_run() {
 
 #[test]
 fn test_xyce_include_alias_and_path_resolution_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1031,7 +1056,7 @@ fn test_xyce_include_alias_and_path_resolution_cases_run() {
 
 #[test]
 fn test_xyce_top_level_execution_dir_include_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_1325_SON/top_level_file_path.cir";
@@ -1057,7 +1082,7 @@ fn test_xyce_top_level_execution_dir_include_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_absolute_include_library_wrapper_cases_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1087,7 +1112,7 @@ fn test_xyce_absolute_include_library_wrapper_cases_run_natively() {
 
 #[test]
 fn test_xyce_vpwl_delay_repeat_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1106,7 +1131,7 @@ fn test_xyce_vpwl_delay_repeat_cases_run() {
 
 #[test]
 fn test_xyce_vpwl_step_delay_repeat_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/VPWL/vpwl_repeat_step.cir";
@@ -1133,7 +1158,7 @@ fn test_xyce_vpwl_step_delay_repeat_case_runs() {
 
 #[test]
 fn test_xyce_vpwl_repeat_error_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1185,7 +1210,7 @@ fn test_xyce_vpwl_repeat_error_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_pat_pattern_source_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1208,7 +1233,7 @@ fn test_xyce_pat_pattern_source_cases_run() {
 
 #[test]
 fn test_xyce_independent_voltage_source_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1241,7 +1266,7 @@ fn test_xyce_independent_voltage_source_transient_cases_run() {
 
 #[test]
 fn test_xyce_source_waveform_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1273,7 +1298,7 @@ fn test_xyce_source_waveform_transient_cases_run() {
 
 #[test]
 fn test_xyce_global_node_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1303,7 +1328,7 @@ fn test_xyce_global_node_transient_cases_run() {
 
 #[test]
 fn test_xyce_current_source_waveform_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1336,7 +1361,7 @@ fn test_xyce_current_source_waveform_transient_cases_run() {
 
 #[test]
 fn test_xyce_pat_pattern_source_step_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1363,7 +1388,7 @@ fn test_xyce_pat_pattern_source_step_cases_run() {
 
 #[test]
 fn test_xyce_sin_source_step_transient_output_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1395,7 +1420,7 @@ fn test_xyce_sin_source_step_transient_output_cases_run() {
 
 #[test]
 fn test_xyce_default_prn_transient_output_wrapper_cases_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1434,7 +1459,7 @@ fn test_xyce_default_prn_transient_output_wrapper_cases_run_natively() {
 
 #[test]
 fn test_xyce_probe_transient_output_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1460,7 +1485,7 @@ fn test_xyce_probe_transient_output_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_csv_transient_output_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1490,7 +1515,7 @@ fn test_xyce_csv_transient_output_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_output_initial_interval_transient_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1520,7 +1545,7 @@ fn test_xyce_output_initial_interval_transient_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_hierarchical_passive_transient_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1538,7 +1563,7 @@ fn test_xyce_hierarchical_passive_transient_case_runs_natively() {
 
 #[test]
 fn test_xyce_scoped_ic_hierarchical_passive_transient_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1556,7 +1581,7 @@ fn test_xyce_scoped_ic_hierarchical_passive_transient_case_runs_natively() {
 
 #[test]
 fn test_xyce_hierarchical_print_alias_transient_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1574,7 +1599,7 @@ fn test_xyce_hierarchical_print_alias_transient_case_runs_natively() {
 
 #[test]
 fn test_xyce_nodeset_hierarchical_behavioral_transient_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1592,7 +1617,7 @@ fn test_xyce_nodeset_hierarchical_behavioral_transient_case_runs_natively() {
 
 #[test]
 fn test_xyce_mixed_device_param_source_step_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_466_SON/bug_466.cir";
@@ -1615,7 +1640,7 @@ fn test_xyce_mixed_device_param_source_step_transient_case_runs() {
 
 #[test]
 fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1644,7 +1669,7 @@ fn test_xyce_inductor_ic_transient_operating_point_case_runs() {
 
 #[test]
 fn test_xyce_midrange_certification_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1671,7 +1696,7 @@ fn test_xyce_midrange_certification_transient_cases_run() {
 
 #[test]
 fn test_xyce_noise_cancel_wrapper_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1702,7 +1727,7 @@ fn test_xyce_noise_cancel_wrapper_transient_cases_run() {
 
 #[test]
 fn test_xyce_dc_upgrade_sweep_modes_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1725,7 +1750,7 @@ fn test_xyce_dc_upgrade_sweep_modes_run() {
 
 #[test]
 fn test_xyce_issue_405_static_dc_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1761,7 +1786,7 @@ fn test_xyce_issue_405_static_dc_cases_run() {
 
 #[test]
 fn test_xyce_step_static_dc_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1797,7 +1822,7 @@ fn test_xyce_step_static_dc_cases_run() {
 
 #[test]
 fn test_xyce_bug_616_wrapper_step_dc_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_616/bug_616.cir";
@@ -1824,7 +1849,7 @@ fn test_xyce_bug_616_wrapper_step_dc_case_runs_natively() {
 
 #[test]
 fn test_xyce_param_refactor_dependency_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1850,7 +1875,7 @@ fn test_xyce_param_refactor_dependency_cases_run() {
 
 #[test]
 fn test_xyce_step_data_static_dc_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/PARAM_REFACTOR/paramStep2.cir";
@@ -1877,7 +1902,7 @@ fn test_xyce_step_data_static_dc_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_repeated_dc_cards_form_one_sweep_vector() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_695/bug695.cir";
@@ -1900,7 +1925,7 @@ fn test_xyce_repeated_dc_cards_form_one_sweep_vector() {
 
 #[test]
 fn test_xyce_solution_dependent_resistor_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1924,7 +1949,7 @@ fn test_xyce_solution_dependent_resistor_cases_run() {
 
 #[test]
 fn test_xyce_semiconductor_resistor_step_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/SEMIC_RESISTOR/semic_resistor_step.cir";
@@ -1951,7 +1976,7 @@ fn test_xyce_semiconductor_resistor_step_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_resistor_family_native_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -1980,7 +2005,7 @@ fn test_xyce_resistor_family_native_cases_run() {
 
 #[test]
 fn test_xyce_deep_function_parameter_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2003,7 +2028,7 @@ fn test_xyce_deep_function_parameter_case_runs() {
 
 #[test]
 fn test_xyce_param_function_syntax_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2029,7 +2054,7 @@ fn test_xyce_param_function_syntax_cases_run() {
 
 #[test]
 fn test_xyce_parser_certification_static_dc_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2057,7 +2082,7 @@ fn test_xyce_parser_certification_static_dc_cases_run() {
 
 #[test]
 fn test_xyce_inline_comment_static_dc_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/BUG_139/in_line_comment.cir";
@@ -2080,7 +2105,7 @@ fn test_xyce_inline_comment_static_dc_case_runs() {
 
 #[test]
 fn test_xyce_legacy_test_static_dc_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2118,7 +2143,7 @@ fn test_xyce_legacy_test_static_dc_cases_run() {
 
 #[test]
 fn test_xyce_load_static_dc_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/LOAD/load.cir";
@@ -2141,7 +2166,7 @@ fn test_xyce_load_static_dc_case_runs() {
 
 #[test]
 fn test_xyce_sandler_op_amp_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/SANDLER23/sandler23.cir";
@@ -2164,7 +2189,7 @@ fn test_xyce_sandler_op_amp_transient_case_runs() {
 
 #[test]
 fn test_xyce_bug_1302_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_1302/bug_1302.cir";
@@ -2187,7 +2212,7 @@ fn test_xyce_bug_1302_transient_case_runs() {
 
 #[test]
 fn test_xyce_bug_1173_1176_certification_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2214,7 +2239,7 @@ fn test_xyce_bug_1173_1176_certification_transient_cases_run() {
 
 #[test]
 fn test_xyce_post_1770_certification_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2269,7 +2294,7 @@ fn test_xyce_post_1770_certification_transient_cases_run() {
 
 #[test]
 fn test_xyce_certification_static_dc_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2312,7 +2337,7 @@ fn test_xyce_certification_static_dc_cases_run() {
 
 #[test]
 fn test_xyce_meter_unit_suffix_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/PARSER/meterUnit.cir";
@@ -2331,7 +2356,7 @@ fn test_xyce_meter_unit_suffix_case_runs() {
 
 #[test]
 fn test_xyce_transient_x_scale_suffix_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/PARSER/scalingFactors.cir";
@@ -2354,7 +2379,7 @@ fn test_xyce_transient_x_scale_suffix_case_runs() {
 
 #[test]
 fn test_xyce_transient_branch_current_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2380,7 +2405,7 @@ fn test_xyce_transient_branch_current_cases_run() {
 
 #[test]
 fn test_xyce_transient_resistor_branch_current_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2406,7 +2431,7 @@ fn test_xyce_transient_resistor_branch_current_cases_run() {
 
 #[test]
 fn test_xyce_resistor_model_static_dc_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_524_SON/rmod_resmod.cir";
@@ -2429,7 +2454,7 @@ fn test_xyce_resistor_model_static_dc_case_runs() {
 
 #[test]
 fn test_xyce_inductor_model_static_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_524_SON/lmod_indmod.cir";
@@ -2452,7 +2477,7 @@ fn test_xyce_inductor_model_static_transient_case_runs() {
 
 #[test]
 fn test_xyce_transient_capacitor_branch_current_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2478,7 +2503,7 @@ fn test_xyce_transient_capacitor_branch_current_cases_run() {
 
 #[test]
 fn test_xyce_capacitor_multiplicity_step_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2504,7 +2529,7 @@ fn test_xyce_capacitor_multiplicity_step_transient_cases_run() {
 
 #[test]
 fn test_xyce_linear_coupled_inductor_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2534,7 +2559,7 @@ fn test_xyce_linear_coupled_inductor_transient_cases_run() {
 
 #[test]
 fn test_xyce_zero_step_coupled_inductor_parameter_print_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2562,7 +2587,7 @@ fn test_xyce_zero_step_coupled_inductor_parameter_print_cases_run() {
 
 #[test]
 fn test_xyce_semiconductor_capacitor_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2589,7 +2614,7 @@ fn test_xyce_semiconductor_capacitor_transient_case_runs() {
 
 #[test]
 fn test_xyce_classic_jfet_switch_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/PJFET_SWITCH/pjfet_tran.cir";
@@ -2612,7 +2637,7 @@ fn test_xyce_classic_jfet_switch_transient_case_runs() {
 
 #[test]
 fn test_xyce_polyg_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/POLYG/polyg.cir";
@@ -2635,7 +2660,7 @@ fn test_xyce_polyg_transient_case_runs() {
 
 #[test]
 fn test_xyce_behavioral_source_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2671,7 +2696,7 @@ fn test_xyce_behavioral_source_transient_cases_run() {
 
 #[test]
 fn test_xyce_abm_math_function_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2697,7 +2722,7 @@ fn test_xyce_abm_math_function_cases_run() {
 
 #[test]
 fn test_xyce_braced_print_expression_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/AMPMOD/amp_mod.cir";
@@ -2720,7 +2745,7 @@ fn test_xyce_braced_print_expression_transient_case_runs() {
 
 #[test]
 fn test_xyce_bsource_static_dc_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2743,7 +2768,7 @@ fn test_xyce_bsource_static_dc_cases_run() {
 
 #[test]
 fn test_xyce_bsource_table_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/BSRC/Bsrc_C1.cir";
@@ -2766,7 +2791,7 @@ fn test_xyce_bsource_table_transient_case_runs() {
 
 #[test]
 fn test_xyce_bsource_table_digitizer_transition_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_332/bug_332.cir";
@@ -2789,7 +2814,7 @@ fn test_xyce_bsource_table_digitizer_transition_case_runs() {
 
 #[test]
 fn test_xyce_controlled_source_table_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_1012/negtable.cir";
@@ -2812,7 +2837,7 @@ fn test_xyce_controlled_source_table_transient_case_runs() {
 
 #[test]
 fn test_xyce_behavioral_file_table_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2847,7 +2872,7 @@ fn test_xyce_behavioral_file_table_transient_cases_run() {
 
 #[test]
 fn test_xyce_static_capacitor_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2869,7 +2894,7 @@ fn test_xyce_static_capacitor_transient_case_runs() {
 
 #[test]
 fn test_xyce_static_inductor_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2895,7 +2920,7 @@ fn test_xyce_static_inductor_transient_cases_run() {
 
 #[test]
 fn test_xyce_temperature_dependent_passive_model_value_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2921,7 +2946,7 @@ fn test_xyce_temperature_dependent_passive_model_value_cases_run() {
 
 #[test]
 fn test_xyce_param_type_meter_suffix_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/PARAM_TYPES/par_types.cir";
@@ -2940,7 +2965,7 @@ fn test_xyce_param_type_meter_suffix_case_runs() {
 
 #[test]
 fn test_xyce_naked_conditional_parameter_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2962,7 +2987,7 @@ fn test_xyce_naked_conditional_parameter_cases_run() {
 
 #[test]
 fn test_xyce_subckt_bare_resistor_parameter_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -2986,7 +3011,7 @@ fn test_xyce_subckt_bare_resistor_parameter_cases_run() {
 
 #[test]
 fn test_xyce_resistor_value_model_temperature_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3016,7 +3041,7 @@ fn test_xyce_resistor_value_model_temperature_case_runs() {
 
 #[test]
 fn test_xyce_static_device_parameter_probe_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_971_SON/bug971.cir";
@@ -3035,7 +3060,7 @@ fn test_xyce_static_device_parameter_probe_case_runs() {
 
 #[test]
 fn test_xyce_model_parameter_probe_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_601_SON/bug_601.cir";
@@ -3054,7 +3079,7 @@ fn test_xyce_model_parameter_probe_case_runs() {
 
 #[test]
 fn test_xyce_parameter_dc_sweep_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/PARAM_REFACTOR/paramDc1.cir";
@@ -3073,7 +3098,7 @@ fn test_xyce_parameter_dc_sweep_case_runs() {
 
 #[test]
 fn test_xyce_resistor_model_suffix_value_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3101,7 +3126,7 @@ fn test_xyce_resistor_model_suffix_value_case_runs() {
 
 #[test]
 fn test_xyce_special_character_function_name_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/INVALID_CHARS/valid_chars_func_names.cir";
@@ -3120,7 +3145,7 @@ fn test_xyce_special_character_function_name_case_runs() {
 
 #[test]
 fn test_xyce_standalone_punctuation_node_name_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     for relative in [
@@ -3150,7 +3175,7 @@ fn test_xyce_standalone_punctuation_node_name_case_runs() {
 
 #[test]
 fn test_xyce_period_hierarchy_node_name_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/INVALID_CHARS/period_in_node_name.cir";
@@ -3177,7 +3202,7 @@ fn test_xyce_period_hierarchy_node_name_case_runs() {
 
 #[test]
 fn test_xyce_punctuation_node_ac_expression_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/INVALID_CHARS/valid_chars_ac_expressions.cir";
@@ -3204,7 +3229,7 @@ fn test_xyce_punctuation_node_ac_expression_case_runs() {
 
 #[test]
 fn test_xyce_naked_random_parameter_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3226,7 +3251,7 @@ fn test_xyce_naked_random_parameter_cases_run() {
 
 #[test]
 fn test_xyce_hspice_random_wrapper_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/PARSER/random.cir";
@@ -3246,7 +3271,7 @@ fn test_xyce_hspice_random_wrapper_case_runs() {
 
 #[test]
 fn test_xyce_subcircuit_qualified_node_probe_wrapper_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_792/bug_792.cir";
@@ -3272,7 +3297,7 @@ fn test_xyce_subcircuit_qualified_node_probe_wrapper_case_runs() {
 
 #[test]
 fn test_xyce_subckt_wrapper_family_members_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3313,7 +3338,7 @@ fn test_xyce_subckt_wrapper_family_members_run_natively() {
 
 #[test]
 fn test_xyce_subckt_j_family_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3340,7 +3365,7 @@ fn test_xyce_subckt_j_family_transient_cases_run() {
 
 #[test]
 fn test_xyce_supernode_wrapper_family_members_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3368,7 +3393,7 @@ fn test_xyce_supernode_wrapper_family_members_run_natively() {
 
 #[test]
 fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3422,7 +3447,7 @@ fn test_xyce_output_dc_default_prn_wrapper_cases_run_natively() {
 
 #[test]
 fn test_xyce_output_dc_csv_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Output/DC/dc-csv.cir";
@@ -3448,7 +3473,7 @@ fn test_xyce_output_dc_csv_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_output_dc_probe_wrapper_cases_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3481,7 +3506,7 @@ fn test_xyce_output_dc_probe_wrapper_cases_run_natively() {
 
 #[test]
 fn test_xyce_output_dc_file_only_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Output/DC/dc-multiprn.cir";
@@ -3507,7 +3532,7 @@ fn test_xyce_output_dc_file_only_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_plain_static_dc_wrapper_cases_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3543,7 +3568,7 @@ fn test_xyce_plain_static_dc_wrapper_cases_run_natively() {
 
 #[test]
 fn test_xyce_model_binning_static_dc_wrapper_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/MODEL_BINNING/dcModelBinning.cir";
@@ -3569,7 +3594,7 @@ fn test_xyce_model_binning_static_dc_wrapper_case_runs() {
 
 #[test]
 fn test_xyce_plain_static_dc_wrapper_guardrails_stay_unsupported() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3596,7 +3621,7 @@ fn test_xyce_plain_static_dc_wrapper_guardrails_stay_unsupported() {
 
 #[test]
 fn test_xyce_output_dc_raw_wrapper_cases_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3644,7 +3669,7 @@ fn test_xyce_output_dc_raw_wrapper_cases_run_natively() {
 
 #[test]
 fn test_xyce_output_dc_gnuplot_splot_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3680,7 +3705,7 @@ fn test_xyce_output_dc_gnuplot_splot_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_hspice_math_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/PARSER/hspiceMath.cir";
@@ -3713,7 +3738,7 @@ fn test_xyce_hspice_math_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_voltage_accessor_wrapper_case_runs_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_407_SON/bug_407_dc.cir";
@@ -3739,7 +3764,7 @@ fn test_xyce_voltage_accessor_wrapper_case_runs_natively() {
 
 #[test]
 fn test_xyce_bsim_gm_device_operating_point_probes_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3767,7 +3792,7 @@ fn test_xyce_bsim_gm_device_operating_point_probes_run() {
 
 #[test]
 fn test_xyce_bsim4_static_dc_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3865,7 +3890,7 @@ fn test_xyce_bsim4_static_dc_cases_run() {
 
 #[test]
 fn test_xyce_bsimsoi3_gmin_scaling_dc_sweep_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3893,7 +3918,7 @@ fn test_xyce_bsimsoi3_gmin_scaling_dc_sweep_runs() {
 
 #[test]
 fn test_xyce_bsimsoi3_default_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3921,7 +3946,7 @@ fn test_xyce_bsimsoi3_default_transient_cases_run() {
 
 #[test]
 fn test_xyce_lead_current_probe_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -3959,7 +3984,7 @@ fn test_xyce_lead_current_probe_cases_run() {
 
 #[test]
 fn test_xyce_empty_wildcard_lead_current_probe_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_983_SON/noThreeTerminal.cir";
@@ -3986,7 +4011,7 @@ fn test_xyce_empty_wildcard_lead_current_probe_case_runs() {
 
 #[test]
 fn test_xyce_current_source_probe_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -4008,7 +4033,7 @@ fn test_xyce_current_source_probe_cases_run() {
 
 #[test]
 fn test_xyce_generic_switch_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -4034,7 +4059,7 @@ fn test_xyce_generic_switch_transient_cases_run() {
 
 #[test]
 fn test_xyce_switch_on_off_family_transient_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -4062,7 +4087,7 @@ fn test_xyce_switch_on_off_family_transient_cases_run() {
 
 #[test]
 fn test_xyce_voltage_controlled_source_cases_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -4094,7 +4119,7 @@ fn test_xyce_voltage_controlled_source_cases_run() {
 
 #[test]
 fn test_xyce_cccs_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/CCCS/ftest.cir";
@@ -4117,7 +4142,7 @@ fn test_xyce_cccs_transient_case_runs() {
 
 #[test]
 fn test_xyce_subckt_controlled_source_parameter_gain_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_1020_SON/subcparam.cir";
@@ -4140,7 +4165,7 @@ fn test_xyce_subckt_controlled_source_parameter_gain_case_runs() {
 
 #[test]
 fn test_xyce_controlled_source_branch_current_probe_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/BSRC/Bsrc_D1.cir";
@@ -4159,7 +4184,7 @@ fn test_xyce_controlled_source_branch_current_probe_case_runs() {
 
 #[test]
 fn test_xyce_multiplicity_factor_resistor_wrapper_cases_run_natively() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -4189,7 +4214,7 @@ fn test_xyce_multiplicity_factor_resistor_wrapper_cases_run_natively() {
 
 #[test]
 fn test_xyce_multiplicity_factor_inductor_step_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/MULTIPLICITY_FACTOR/inductor.cir";
@@ -4212,7 +4237,7 @@ fn test_xyce_multiplicity_factor_inductor_step_transient_case_runs() {
 
 #[test]
 fn test_xyce_rf_port_static_dc_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Output/SPARAMS/RCladderSPdc.cir";
@@ -4231,7 +4256,7 @@ fn test_xyce_rf_port_static_dc_case_runs() {
 
 #[test]
 fn test_xyce_rf_port_transient_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Output/SPARAMS/RCladderSPtran.cir";
@@ -4258,7 +4283,7 @@ fn test_xyce_rf_port_transient_case_runs() {
 
 #[test]
 fn test_xyce_ekv3_150nm_static_terminal_currents_run() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -4281,7 +4306,7 @@ fn test_xyce_ekv3_150nm_static_terminal_currents_run() {
 
 #[test]
 fn test_xyce_mesfet_model_parameter_step_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/Certification_Tests/BUG_647_SON/mesfet.cir";
@@ -4300,7 +4325,7 @@ fn test_xyce_mesfet_model_parameter_step_case_runs() {
 
 #[test]
 fn test_xyce_complex_param_re_img_print_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/COMPLEX_NUM/test2.cir";
@@ -4319,7 +4344,7 @@ fn test_xyce_complex_param_re_img_print_case_runs() {
 
 #[test]
 fn test_xyce_complex_param_dc_real_default_wrapper_case_runs() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     let relative = "Netlists/COMPLEX_NUM/test4.cir";
@@ -4346,7 +4371,7 @@ fn test_xyce_complex_param_dc_real_default_wrapper_case_runs() {
 
 #[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
@@ -4386,7 +4411,7 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
 
 #[test]
 fn test_full_xyce_suite_summary_accounts_for_every_deck() {
-    let _xyce_runner_guard = xyce_runner_lock().lock().expect("Xyce runner mutex");
+    let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
 
