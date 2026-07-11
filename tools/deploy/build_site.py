@@ -409,9 +409,11 @@ def validate_site_source(site_source):
     """Validate the cross-repository static-source boundary before building."""
     if not site_source.is_dir():
         fail("site source directory does not exist: %s" % site_source)
-    for required in ("index.html", "404.html", "assets"):
-        if not (site_source / required).exists():
-            fail("site source is missing required path: %s" % (site_source / required))
+    for required in ("index.html", "404.html"):
+        if not (site_source / required).is_file():
+            fail("site source is missing required file: %s" % (site_source / required))
+    if not (site_source / "assets").is_dir():
+        fail("site source is missing required directory: %s" % (site_source / "assets"))
     for reserved in ("ide", "play"):
         if (site_source / reserved).exists():
             fail(
@@ -421,6 +423,56 @@ def validate_site_source(site_source):
     for path in site_source.rglob("*"):
         if path.is_symlink():
             fail("site source must not contain symlinks: %s" % path)
+
+
+def validated_output_path(root, site_source, output):
+    """Resolve an assembler output without permitting destructive path overlap."""
+    root = root.resolve()
+    site_source = site_source.resolve()
+    candidate = Path(output)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+
+    # Never follow an operator-supplied output link into an otherwise valid
+    # directory. Parent links are resolved below and still have to remain inside
+    # the allowed release boundary.
+    is_junction = getattr(candidate, "is_junction", lambda: False)
+    if candidate.is_symlink() or is_junction():
+        fail("output directory must not be a symlink or junction: %s" % candidate)
+    out = candidate.resolve()
+
+    # Normal local/CI assembly writes to a reserved, direct child of the RSpice
+    # checkout. The dedicated release controller checks RSpice out at exactly
+    # <release>/_sources/rspice and stages the artifact at <release>/dist.
+    # Keeping this allowlist narrow is what makes the rmtree below safe: merely
+    # being somewhere under a checkout is not sufficient (for example, crates/
+    # and .git/ are descendants too).
+    release_layout = (
+        root.name.lower() == "rspice" and root.parent.name.lower() == "_sources"
+    )
+    boundary = root.parent.parent if release_layout else root
+    if out == boundary or boundary not in out.parents:
+        fail("output directory must be below the release boundary: %s" % boundary)
+    if out == root or out in root.parents:
+        fail("output directory must not be the RSpice checkout or one of its ancestors")
+    if release_layout:
+        if out != boundary / "dist":
+            fail("release-controller output directory must be: %s" % (boundary / "dist"))
+    elif out.parent != root or not (
+        out.name == "dist" or out.name == "_site" or out.name.startswith("_site-")
+    ):
+        fail(
+            "local output must be a direct RSpice child named dist, _site, or _site-*"
+        )
+    if (
+        out == site_source
+        or out in site_source.parents
+        or site_source in out.parents
+    ):
+        fail("output directory must not overlap the standalone site source")
+    if out.exists() and not out.is_dir():
+        fail("output path exists but is not a directory: %s" % out)
+    return out
 
 
 def site_source_revision(site_source):
@@ -448,7 +500,9 @@ def copy_runtime_shell(source, destination, names):
 
 def assemble_site_sources(root, site_source, out):
     """Combine static site source with client-owned browser runtime shells."""
-    shutil.rmtree(out, ignore_errors=True)
+    out = validated_output_path(root, site_source, out)
+    if out.exists():
+        shutil.rmtree(out)
     shutil.copytree(site_source, out)
     copy_runtime_shell(
         root / "crates" / "rspice-ui" / "web",
@@ -466,7 +520,11 @@ def main():
     ap = argparse.ArgumentParser(description="Build, verify, and assemble _site/.")
     ap.add_argument("--skip-headless", action="store_true",
                     help="skip the headless playground solve gate (no local Chrome)")
-    ap.add_argument("--out", default="_site", help="output directory (default: _site)")
+    ap.add_argument(
+        "--out",
+        default="_site",
+        help="reserved output directory: dist, _site, or _site-* (default: _site)",
+    )
     ap.add_argument(
         "--site-source",
         default="_site-source/dist",
@@ -477,9 +535,9 @@ def main():
     root = Path(capture(["git", "rev-parse", "--show-toplevel"]))
     os.chdir(root)
     target = Path("target/wasm32-unknown-unknown/release")
-    out = Path(args.out)
     site_source = Path(args.site_source).resolve()
     validate_site_source(site_source)
+    out = validated_output_path(root, site_source, args.out)
     site_sha = site_source_revision(site_source)
 
     # 1. toolchain gate

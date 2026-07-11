@@ -11,6 +11,9 @@
 node_modules/
 dist/
 
+# Separately versioned local prototypes
+/mockups/
+
 # Tauri
 src-tauri/target/
 
@@ -44,4 +47,5 @@ __pycache__/
 .agent/
 .worktrees/
 /_site
+/_site-*/
 /_site-source/

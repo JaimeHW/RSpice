@@ -20,30 +20,111 @@ def assert_gate_fails(testcase: unittest.TestCase, func, *args) -> None:
 
 
 class BuildSiteGateTests(unittest.TestCase):
+    @staticmethod
+    def make_site_source(path: Path) -> None:
+        (path / "assets").mkdir(parents=True)
+        (path / "index.html").write_text("index", encoding="utf-8")
+        (path / "404.html").write_text("missing", encoding="utf-8")
+
     def test_site_source_boundary_rejects_client_runtime_routes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             site = Path(tmp) / "public"
-            (site / "assets").mkdir(parents=True)
-            (site / "index.html").write_text("index", encoding="utf-8")
-            (site / "404.html").write_text("missing", encoding="utf-8")
+            self.make_site_source(site)
 
             build_site.validate_site_source(site)
             (site / "ide").mkdir()
             assert_gate_fails(self, build_site.validate_site_source, site)
 
+    def test_site_source_boundary_requires_expected_path_types(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            site = Path(tmp) / "public"
+            self.make_site_source(site)
+            (site / "index.html").unlink()
+            (site / "index.html").mkdir()
+
+            assert_gate_fails(self, build_site.validate_site_source, site)
+
+    def test_output_boundary_rejects_checkout_source_overlap_and_external_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "rspice"
+            site_parent = root / "_site-source"
+            site = site_parent / "dist"
+            root.mkdir()
+            self.make_site_source(site)
+            source_directory = root / "crates"
+            source_directory.mkdir()
+            non_directory_output = root / "_site-file"
+            non_directory_output.write_text("not a directory", encoding="utf-8")
+
+            for output in (
+                root,
+                site_parent,
+                site,
+                site / "nested",
+                source_directory,
+                non_directory_output,
+                base / "external",
+            ):
+                assert_gate_fails(
+                    self,
+                    build_site.validated_output_path,
+                    root,
+                    site,
+                    output,
+                )
+
+    def test_output_boundary_allows_release_controller_staging_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            release = Path(tmp) / "release"
+            root = release / "_sources" / "rspice"
+            site = release / "_sources" / "site" / "dist"
+            root.mkdir(parents=True)
+            self.make_site_source(site)
+
+            output = build_site.validated_output_path(
+                root, site, release / "dist"
+            )
+
+            self.assertEqual(output, (release / "dist").resolve())
+
+            for protected in (release / ".git", release / "_sources"):
+                protected.mkdir(exist_ok=True)
+                assert_gate_fails(
+                    self,
+                    build_site.validated_output_path,
+                    root,
+                    site,
+                    protected,
+                )
+
+    def test_assembly_refuses_checkout_root_without_deleting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "rspice"
+            site = root / "site-source"
+            root.mkdir()
+            self.make_site_source(site)
+            sentinel = root / "keep.txt"
+            sentinel.write_text("keep", encoding="utf-8")
+
+            assert_gate_fails(
+                self, build_site.assemble_site_sources, root, site, root
+            )
+
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+
     def test_assembly_overlays_only_canonical_client_shell_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             site = root / "site-source" / "public"
-            out = root / "assembled"
+            out = root / "_site-test"
             ui = root / "crates" / "rspice-ui" / "web"
             play = root / "crates" / "rspice-wasm" / "web"
-            (site / "assets").mkdir(parents=True)
+            self.make_site_source(site)
             ui.mkdir(parents=True)
             play.mkdir(parents=True)
 
             (site / "index.html").write_text("marketing", encoding="utf-8")
-            (site / "404.html").write_text("missing", encoding="utf-8")
             (site / "assets" / "site.css").write_text("body{}", encoding="utf-8")
             (ui / "index.html").write_text("ide", encoding="utf-8")
             (ui / "simulation-worker.js").write_text("ide worker", encoding="utf-8")

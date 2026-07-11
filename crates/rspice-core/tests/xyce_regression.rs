@@ -4708,6 +4708,13 @@ fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     }
 }
 
+// The aggregate intentionally replays every retained deck and therefore has
+// release-profile runtime requirements. Individual supported contracts remain
+// in the normal test tier above, while nightly release CI runs this full census.
+#[cfg_attr(
+    debug_assertions,
+    ignore = "release-only full Xyce corpus; run with `cargo test --release -p rspice-core --test xyce_regression test_full_xyce_suite_summary_accounts_for_every_deck`"
+)]
 #[test]
 fn test_full_xyce_suite_summary_accounts_for_every_deck() {
     let _xyce_runner_guard = lock_xyce_runner();

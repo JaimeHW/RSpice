@@ -1,7 +1,10 @@
 use super::*;
 
 #[cfg(feature = "veriloga")]
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 13;
+// Bump whenever a persisted runtime artifact or its integrity contract changes.
+// Version 14 invalidates records written before canonical-IR digest validation
+// became a mandatory cache-load boundary.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 14;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -85,10 +88,65 @@ pub(super) struct VerilogADiskCacheRecord {
 #[cfg(feature = "veriloga")]
 #[derive(Debug, Clone)]
 pub(super) struct CachedVerilogAModel {
+    // Every production constructor validates the model/artifact pair before
+    // this entry is admitted to the in-memory cache. Cache hits therefore only
+    // need the comparatively cheap dependency freshness check.
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: std::sync::Arc<rspice_veriloga::CompiledModel>,
     pub(super) canonical_ir:
         Option<std::sync::Arc<rspice_veriloga::canonical_ir::CanonicalIrArtifact>>,
+}
+
+/// Verify that cached bytecode and canonical IR can safely be paired at runtime.
+///
+/// A persisted entry is an optimization, never an authority. In particular,
+/// older compiler builds can deserialize after an IR-digest change while still
+/// looking structurally valid to serde. Treat that as a cache miss here rather
+/// than allowing a stale artifact to reach the native JIT.
+#[cfg(feature = "veriloga")]
+fn validate_runtime_artifact_pair(
+    model: &rspice_veriloga::CompiledModel,
+    canonical_ir: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+) -> Result<(), String> {
+    #[cfg(feature = "veriloga-native")]
+    let artifact = canonical_ir.ok_or_else(|| {
+        "native Verilog-A runtime cache entry requires canonical IR (no interpreter fallback)"
+            .to_string()
+    })?;
+    #[cfg(not(feature = "veriloga-native"))]
+    let Some(artifact) = canonical_ir else {
+        return Ok(());
+    };
+
+    artifact.validate().map_err(|diagnostics| {
+        let detail = diagnostics
+            .first()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .unwrap_or("canonical artifact validation failed");
+        format!("canonical Verilog-A artifact failed integrity validation: {detail}")
+    })?;
+
+    if artifact.metadata.source_digest != model.source_digest {
+        return Err(format!(
+            "canonical Verilog-A source digest '{}' does not match compiled model digest '{}'",
+            artifact.metadata.source_digest, model.source_digest
+        ));
+    }
+    if artifact.mir.module_name != model.name {
+        return Err(format!(
+            "canonical Verilog-A module '{}' does not match compiled model '{}'",
+            artifact.mir.module_name, model.name
+        ));
+    }
+    if artifact.mir.equations.len() != model.stamp_programs.len() {
+        return Err(format!(
+            "canonical Verilog-A equation count {} does not match compiled stamp count {}",
+            artifact.mir.equations.len(),
+            model.stamp_programs.len()
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "veriloga")]
@@ -625,6 +683,17 @@ pub(super) fn load_model_from_disk_locked(
         return Ok(None);
     }
 
+    if let Err(error) = validate_runtime_artifact_pair(&record.model, record.canonical_ir.as_ref())
+    {
+        log::warn!(
+            "discarding invalid Verilog-A cache record '{}': {}",
+            cache_path.display(),
+            error
+        );
+        remove_cache_file(&cache_path);
+        return Ok(None);
+    }
+
     Ok(Some(CachedVerilogAModel {
         dependencies: record.dependencies,
         model: std::sync::Arc::new(record.model),
@@ -675,6 +744,11 @@ pub fn veriloga_cache_entries() -> Result<Vec<VerilogACacheEntry>, String> {
                 continue;
             };
             if record.version != VERILOGA_CACHE_RECORD_VERSION {
+                remove_cache_file(&file.path);
+                continue;
+            }
+            if validate_runtime_artifact_pair(&record.model, record.canonical_ir.as_ref()).is_err()
+            {
                 remove_cache_file(&file.path);
                 continue;
             }
@@ -778,6 +852,15 @@ pub(super) fn resolve_cached_or_compile_veriloga(
             ))
         })?;
 
+    validate_runtime_artifact_pair(&compiled.model, Some(&compiled.canonical_ir)).map_err(
+        |error| {
+            SimulationError::Netlist(format!(
+                "Compiled Verilog-A runtime artifacts for '{}' failed integrity validation: {}",
+                path.display(),
+                error
+            ))
+        },
+    )?;
     let dependencies = fingerprint_paths(&compiled.dependencies)?;
     let entry = CachedVerilogAModel {
         dependencies,
@@ -814,6 +897,8 @@ fn register_precompiled_veriloga_entry_with_dependencies(
                 .to_string(),
         );
     }
+
+    validate_runtime_artifact_pair(&model, canonical_ir.as_ref())?;
 
     let canonical_source = canonicalize_for_cache(source_path.as_ref());
 
@@ -902,4 +987,114 @@ pub fn register_precompiled_veriloga_model(
 ) -> Result<(), String> {
     let dependency = vec![canonicalize_for_cache(source_path.as_ref())];
     register_precompiled_veriloga_model_with_dependencies(source_path, &dependency, model)
+}
+
+#[cfg(all(test, feature = "veriloga", not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_root(name: &str) -> PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is after the Unix epoch")
+            .as_nanos();
+        let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "rspice-veriloga-cache-{name}-{}-{nonce}-{sequence}",
+            std::process::id()
+        ))
+    }
+
+    fn compiled_entry(source_path: &Path) -> CachedVerilogAModel {
+        std::fs::write(
+            source_path,
+            r#"
+`include "disciplines.vams"
+module cached_resistor(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1000.0 from (0:inf);
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+"#,
+        )
+        .expect("write temporary Verilog-A source");
+
+        let runtime = rspice_veriloga::VerilogACompiler::default()
+            .compile_file_runtime_with_metadata(source_path, None)
+            .expect("compile runtime artifacts");
+        let dependencies = fingerprint_paths(&runtime.dependencies).expect("fingerprint source");
+        CachedVerilogAModel {
+            dependencies,
+            model: std::sync::Arc::new(runtime.model),
+            canonical_ir: Some(std::sync::Arc::new(runtime.canonical_ir)),
+        }
+    }
+
+    #[test]
+    fn disk_cache_loads_a_valid_paired_runtime_artifact() {
+        let root = unique_test_root("valid");
+        let source_path = root.join("model.va");
+        std::fs::create_dir_all(&root).expect("create temporary cache root");
+        let entry = compiled_entry(&source_path);
+        let cache_root = root.join("cache");
+
+        persist_model_to_disk_locked(&source_path, &entry, &cache_root)
+            .expect("persist valid cache record");
+        let loaded = load_model_from_disk_locked(&source_path, &cache_root)
+            .expect("load valid cache record")
+            .expect("valid cache record is retained");
+
+        assert_eq!(loaded.model.name, entry.model.name);
+        assert_eq!(
+            loaded
+                .canonical_ir
+                .as_ref()
+                .expect("canonical IR")
+                .hir_digest,
+            entry
+                .canonical_ir
+                .as_ref()
+                .expect("canonical IR")
+                .hir_digest
+        );
+
+        std::fs::remove_dir_all(root).expect("remove temporary cache root");
+    }
+
+    #[test]
+    fn disk_cache_discards_a_stale_canonical_artifact() {
+        let root = unique_test_root("stale-artifact");
+        let source_path = root.join("model.va");
+        std::fs::create_dir_all(&root).expect("create temporary cache root");
+        let mut entry = compiled_entry(&source_path);
+        let artifact = std::sync::Arc::make_mut(
+            entry
+                .canonical_ir
+                .as_mut()
+                .expect("compiled entry carries canonical IR"),
+        );
+        artifact.hir_digest = "stale-hir-digest".into();
+        let cache_root = root.join("cache");
+        let cache_path = cache_record_path_with_root(&source_path, &cache_root);
+
+        persist_model_to_disk_locked(&source_path, &entry, &cache_root)
+            .expect("persist stale cache record");
+        assert!(cache_path.is_file(), "test must materialize a cache record");
+        assert!(
+            load_model_from_disk_locked(&source_path, &cache_root)
+                .expect("stale cache load is recoverable")
+                .is_none(),
+            "stale canonical IR must force a cache miss"
+        );
+        assert!(
+            !cache_path.exists(),
+            "stale cache record must be removed to prevent repeated failures"
+        );
+
+        std::fs::remove_dir_all(root).expect("remove temporary cache root");
+    }
 }

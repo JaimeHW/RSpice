@@ -74,6 +74,14 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("abi3-py310", features)
         self.assertIn("generate-import-lib", features)
 
+    def test_rspice_python_windows_runtime_detection_supports_py_launcher(self) -> None:
+        build_script = read_text("crates/rspice-python/build.rs")
+
+        self.assertIn('OsString::from("python")', build_script)
+        self.assertIn('OsString::from("py")', build_script)
+        self.assertIn('&["-3"]', build_script)
+        self.assertIn("query_python_base_prefix", build_script)
+
     def test_native_jit_has_no_cranelift_dependency_or_source_references(self) -> None:
         active_paths = [ROOT / "Cargo.toml", ROOT / "Cargo.lock"]
         active_paths.extend((ROOT / "crates").rglob("Cargo.toml"))

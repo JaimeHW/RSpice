@@ -54,18 +54,30 @@ fn ensure_windows_python_runtime_is_available() {
 
 #[cfg(windows)]
 fn discover_python_runtime_dir() -> Option<PathBuf> {
-    let interpreter = pyo3_build_config::get()
+    let configured_interpreter = pyo3_build_config::get()
         .executable()
         .map(OsString::from)
-        .or_else(|| env::var_os("PYO3_PYTHON"))
-        .unwrap_or_else(|| OsString::from("python"));
+        .or_else(|| env::var_os("PYO3_PYTHON"));
+    if let Some(interpreter) = configured_interpreter
+        && let Some(runtime_dir) =
+            query_python_base_prefix(&interpreter, &[]).filter(|path| path.exists())
+    {
+        return Some(runtime_dir);
+    }
 
-    query_python_base_prefix(&interpreter).filter(|path| path.exists())
+    // Windows installations managed by the Python install manager commonly
+    // expose only the `py` launcher, not a `python.exe` shim on PATH. Try the
+    // conventional executable first, then request Python 3 through the native
+    // launcher so local tests and release builds stage the runtime DLLs.
+    query_python_base_prefix(&OsString::from("python"), &[])
+        .or_else(|| query_python_base_prefix(&OsString::from("py"), &["-3"]))
+        .filter(|path| path.exists())
 }
 
 #[cfg(windows)]
-fn query_python_base_prefix(interpreter: &OsString) -> Option<PathBuf> {
+fn query_python_base_prefix(interpreter: &OsString, interpreter_args: &[&str]) -> Option<PathBuf> {
     let output = Command::new(interpreter)
+        .args(interpreter_args)
         .args([
             "-c",
             "import pathlib, sys; print(pathlib.Path(sys.base_prefix).resolve())",

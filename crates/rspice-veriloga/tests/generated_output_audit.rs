@@ -1,25 +1,29 @@
-use rspice_veriloga::rust_backend::validate_generated_builtins;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use rspice_veriloga::rust_backend::validate_generated_builtins;
 
 const LEGACY_LOCAL_SLOT_MARKERS: &[&str] =
     &["_slot: &mut f64", "_slot: &mut [f64]", " = *var_", "*var_"];
 
 #[test]
-fn generated_veriloga_devices_do_not_use_legacy_ad_runtime() {
+fn generated_veriloga_bundle_passes_the_authoritative_generator_audit() {
     let workspace_root = workspace_root();
     let generated_root = generated_veriloga_root();
+
     let manifest = validate_generated_builtins(
         &workspace_root.join("models/veriloga"),
         &generated_root,
         &workspace_root.join("crates/rspice-veriloga"),
         false,
     )
-    .expect("generated Verilog-A built-ins must match the current production validator");
+    .unwrap_or_else(|error| {
+        panic!("generated Verilog-A bundle must pass generator audit: {error}")
+    });
 
     assert!(
         manifest.device_count > 0,
-        "generated manifest must not be empty"
+        "authoritative generated-builtin manifest must not be empty"
     );
 }
 
@@ -51,11 +55,6 @@ fn generated_veriloga_devices_do_not_use_legacy_local_slot_abi() {
 #[test]
 fn generated_veriloga_devices_include_compact_local_frame_helpers() {
     let generated_root = generated_veriloga_root();
-    assert!(
-        generated_root.is_dir(),
-        "generated Verilog-A source root is missing: {}",
-        generated_root.display()
-    );
 
     let mut saw_local_frame_type = false;
     let mut saw_local_frame_initialization = false;
@@ -77,18 +76,45 @@ fn generated_veriloga_devices_include_compact_local_frame_helpers() {
     );
 }
 
+#[test]
+fn generated_veriloga_devices_use_the_partitioned_kernel_runtime() {
+    let generated_root = generated_veriloga_root();
+
+    let mut saw_kernel_runtime = false;
+    let mut saw_kernel_alias = false;
+    let mut saw_partitioned_stamp = false;
+    scan_generated_rust(&generated_root, &mut |path, source| {
+        if path
+            .file_name()
+            .is_some_and(|name| name == "kernel_runtime.rs")
+        {
+            saw_kernel_runtime |= source.contains("pub(crate) struct AdValue")
+                && source.contains("pub(crate) struct Scratch")
+                && source.contains("pub(crate) struct ReactiveScratch");
+        }
+        saw_kernel_alias |= source.contains("KernelAdValue")
+            && (source.contains("KernelScratch") || source.contains("KernelReactiveScratch"));
+        saw_partitioned_stamp |= path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("stamp_blocks_"));
+    });
+
+    assert!(
+        saw_kernel_runtime && saw_kernel_alias && saw_partitioned_stamp,
+        "expected generated Verilog-A output to use the current partitioned kernel runtime"
+    );
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .components()
-        .collect()
+        .parent()
+        .and_then(Path::parent)
+        .expect("rspice-veriloga must live under the workspace crates directory")
+        .to_path_buf()
 }
 
 fn generated_veriloga_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../rspice-core/src/device/veriloga_generated")
-        .components()
-        .collect()
+    workspace_root().join("crates/rspice-core/src/device/veriloga_generated")
 }
 
 fn scan_generated_rust(root: &Path, visit: &mut dyn FnMut(&Path, &str)) {
@@ -121,7 +147,7 @@ fn scan_generated_rust(root: &Path, visit: &mut dyn FnMut(&Path, &str)) {
 }
 
 fn display_path(path: &Path) -> String {
-    path.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
+    path.strip_prefix(workspace_root())
         .unwrap_or(path)
         .display()
         .to_string()
