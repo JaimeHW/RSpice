@@ -4796,6 +4796,50 @@ fn test_xyce_subcircuit_parameter_precedence_pair_runs() {
 }
 
 #[test]
+fn test_xyce_stepped_initial_condition_reference_family_runs() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let cases = [
+        (
+            "Netlists/Certification_Tests/BUG_1007_SON/ic_cap_step.cir",
+            "stepped_ic_reference_wrapper",
+            true,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1007_SON/ic_cap0.cir",
+            "stepped_ic_reference_baseline",
+            false,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1007_SON/ic_cap1.cir",
+            "stepped_ic_reference_baseline",
+            false,
+        ),
+        (
+            "Netlists/Certification_Tests/BUG_1007_SON/ic_cap2.cir",
+            "stepped_ic_reference_baseline",
+            false,
+        ),
+    ];
+
+    for (relative, contract, requires_wrapper) in cases {
+        assert_eq!(
+            runner.requires_upstream_wrapper(relative),
+            requires_wrapper,
+            "{relative} wrapper provenance changed"
+        );
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should satisfy independent-run parity through the Release 7.10 interpolated-RMS oracle, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+        assert_eq!(result.contract, contract);
+    }
+}
+
+#[test]
 fn test_xyce_unsupported_decks_are_named_results_not_omitted() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

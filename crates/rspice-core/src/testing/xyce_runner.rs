@@ -361,6 +361,11 @@ enum XyceStaticTranPlanPurpose {
     /// per-member gold file and absolute device-model eligibility are neither
     /// required nor consulted.
     RelationalFamily,
+    /// Parse a manifest-marked wrapper whose reference waveforms are generated
+    /// by independently simulated sibling decks. Admission to this purpose is
+    /// deliberately available only after a dedicated family selector has
+    /// proven the wrapper/sibling provenance and naming contract.
+    GeneratedReferenceRelationalFamily,
     /// Compare scoped-model and explicitly expanded representations under an
     /// exact qualified-topology, model-parameter, and waveform-parity
     /// contract. This purpose has a separately qualified native BJT envelope
@@ -547,6 +552,22 @@ struct XyceBaselineFamilyContract {
     baseline_path: PathBuf,
     member_paths: Vec<PathBuf>,
     target_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct XyceSteppedIcReferenceContract {
+    family: String,
+    owner_path: PathBuf,
+    member_paths: Vec<PathBuf>,
+    target_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct XyceSteppedIcSnapshot {
+    elements: BTreeMap<String, XyceRelationalElementFingerprint>,
+    initial_conditions: Vec<(String, u64)>,
+    capacitor_name: String,
+    capacitor_value_bits: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -1872,6 +1893,19 @@ impl XyceTestRunner {
             return result;
         }
 
+        if let Some(contract) = self.stepped_ic_reference_contract(deck) {
+            let result = self.run_stepped_ic_reference_contract(deck, contract, start);
+            if self.config.verbose {
+                println!(
+                    "{} [{}] {}",
+                    result.relative_path,
+                    result.contract,
+                    if result.passed { "PASS" } else { "FAIL" }
+                );
+            }
+            return result;
+        }
+
         if let Some(contract) = self.baseline_family_contract(deck) {
             let result = self.run_baseline_family_contract(deck, contract, start);
             if self.config.verbose {
@@ -2442,9 +2476,17 @@ impl XyceTestRunner {
     ) -> Result<XyceStaticTranPlan, String> {
         let requires_wrapper = self.requires_upstream_wrapper(&deck.relative_path);
         let analytic_wrapper = purpose == XyceStaticTranPlanPurpose::AnalyticOracle;
+        let generated_reference_wrapper =
+            purpose == XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily;
         if analytic_wrapper && !requires_wrapper {
             return Err(
                 "analytic transient oracle purpose requires wrapper provenance".to_string(),
+            );
+        }
+        if generated_reference_wrapper && !requires_wrapper {
+            return Err(
+                "generated-reference relational transient purpose requires wrapper provenance"
+                    .to_string(),
             );
         }
         let source =
@@ -2470,6 +2512,7 @@ impl XyceTestRunner {
             && !has_static_tran_oracle
             && !Self::source_may_have_pwl_repeat_option(&source)
             && !analytic_wrapper
+            && !generated_reference_wrapper
         {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
@@ -2515,6 +2558,7 @@ impl XyceTestRunner {
             && requires_wrapper
             && native_static_prn_wrapper.is_none()
             && !analytic_wrapper
+            && !generated_reference_wrapper
         {
             return Err(Self::upstream_wrapper_required_reason().to_string());
         }
@@ -8936,6 +8980,599 @@ impl XyceTestRunner {
         }
     }
 
+    fn run_stepped_ic_reference_contract(
+        &self,
+        deck: &XyceDeck,
+        contract: XyceSteppedIcReferenceContract,
+        start: Instant,
+    ) -> XyceTestResult {
+        const WRAPPER_CONTRACT: &str = "stepped_ic_reference_wrapper";
+        const BASELINE_CONTRACT: &str = "stepped_ic_reference_baseline";
+
+        let result_contract = if Self::same_path(&contract.target_path, &contract.owner_path) {
+            WRAPPER_CONTRACT
+        } else {
+            BASELINE_CONTRACT
+        };
+        let qualification = (|| {
+            let owner_plan = self.static_tran_family_plan_for_path(
+                &contract.owner_path,
+                XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+            )?;
+            if owner_plan.output_override || owner_plan.timeint_conststep {
+                return Err(
+                    "stepped-IC generated-reference wrapper requires ordinary default transient output"
+                        .to_string(),
+                );
+            }
+            let [step] = owner_plan.steps.as_slice() else {
+                return Err(format!(
+                    "stepped-IC generated-reference wrapper requires exactly one .STEP command, found {}",
+                    owner_plan.steps.len()
+                ));
+            };
+            if step.target != StepTarget::Device
+                || step
+                    .param_name
+                    .as_deref()
+                    .is_none_or(|name| !name.eq_ignore_ascii_case("c"))
+                || !matches!(
+                    step.sweep,
+                    StepSweep::Decade {
+                        points_per_decade: 1..,
+                        start,
+                        stop,
+                    } if start.is_finite() && stop.is_finite() && start > 0.0 && stop >= start
+                )
+            {
+                return Err(
+                    "stepped-IC generated-reference wrapper requires a finite positive DEC device-parameter sweep of capacitor parameter C"
+                        .to_string(),
+                );
+            }
+            let owner_options = Self::stepped_ic_option_signature(&owner_plan.source)?;
+            let owner_netlist = Self::parse_xyce_netlist(&owner_plan.source, &owner_plan.deck_path)
+                .map_err(|err| format!("owner netlist parse failed: {err}"))?;
+            let step_runs = Self::nested_step_runs_for_commands(
+                &self.create_xyce_engine(),
+                &owner_netlist,
+                &owner_plan.steps,
+            )
+            .map_err(|err| format!("owner .STEP expansion failed: {err}"))?;
+            if step_runs.len() != contract.member_paths.len() {
+                return Err(format!(
+                    "owner .STEP expands to {} run(s), but the family contains {} independent baseline deck(s)",
+                    step_runs.len(),
+                    contract.member_paths.len()
+                ));
+            }
+
+            let mut members = Vec::with_capacity(contract.member_paths.len());
+            for (index, (member_path, step_run)) in contract
+                .member_paths
+                .iter()
+                .zip(step_runs.iter())
+                .enumerate()
+            {
+                let member_plan = self.static_tran_family_plan_for_path(
+                    member_path,
+                    XyceStaticTranPlanPurpose::RelationalFamily,
+                )?;
+                if !member_plan.steps.is_empty()
+                    || member_plan.output_override
+                    || member_plan.timeint_conststep
+                {
+                    return Err(format!(
+                        "independent baseline {} must use one ordinary non-stepped transient output",
+                        self.display_path(member_path)
+                    ));
+                }
+                if member_plan.print.probes != owner_plan.print.probes {
+                    return Err(format!(
+                        "independent baseline {} changes the ordered .PRINT TRAN probes",
+                        self.display_path(member_path)
+                    ));
+                }
+                if !Self::tran_analyses_match_exactly(&owner_plan.tran, &member_plan.tran) {
+                    return Err(format!(
+                        "independent baseline {} changes the .TRAN analysis tuple",
+                        self.display_path(member_path)
+                    ));
+                }
+                let member_options = Self::stepped_ic_option_signature(&member_plan.source)?;
+                if member_options != owner_options {
+                    return Err(format!(
+                        "independent baseline {} changes the .OPTIONS contract",
+                        self.display_path(member_path)
+                    ));
+                }
+                let owner_scale = Self::tran_print_time_scale_factor(&owner_plan.source)?;
+                let member_scale = Self::tran_print_time_scale_factor(&member_plan.source)?;
+                if owner_scale.to_bits() != member_scale.to_bits() {
+                    return Err(format!(
+                        "independent baseline {} changes transient output time units",
+                        self.display_path(member_path)
+                    ));
+                }
+                let member_netlist =
+                    Self::parse_xyce_netlist(&member_plan.source, &member_plan.deck_path).map_err(
+                        |err| {
+                            format!(
+                                "independent baseline {} parse failed: {err}",
+                                self.display_path(member_path)
+                            )
+                        },
+                    )?;
+                let stepped_snapshot = Self::stepped_ic_snapshot(&step_run.netlist)?;
+                let member_snapshot = Self::stepped_ic_snapshot(&member_netlist)?;
+                if !step
+                    .name
+                    .eq_ignore_ascii_case(&stepped_snapshot.capacitor_name)
+                {
+                    return Err(format!(
+                        "owner step targets '{}', but the materialized circuit's qualified capacitor is '{}'",
+                        step.name, stepped_snapshot.capacitor_name
+                    ));
+                }
+                if !Self::stepped_ic_snapshots_match(&stepped_snapshot, &member_snapshot) {
+                    return Err(format!(
+                        "owner step {} is not structurally and numerically identical to independent baseline {}",
+                        index,
+                        self.display_path(member_path)
+                    ));
+                }
+                let step_value = step_run.step_values.first().copied().ok_or_else(|| {
+                    format!(
+                        "owner step {index} did not retain its swept {}:C value",
+                        step.name
+                    )
+                })?;
+                let member_capacitance = Value::from_bits(member_snapshot.capacitor_value_bits);
+                if step_run.step_values.len() != 1
+                    || (step_value - member_capacitance).abs() > 1.0e-12
+                {
+                    return Err(format!(
+                        "owner step {index} {}:C value {step_value} does not match independent baseline {} within the Release 7.10 sweep-result tolerance",
+                        step.name,
+                        self.display_path(member_path)
+                    ));
+                }
+                if !step
+                    .name
+                    .eq_ignore_ascii_case(&member_snapshot.capacitor_name)
+                {
+                    return Err(format!(
+                        "owner step targets '{}', but independent baseline {} names its qualified capacitor '{}'",
+                        step.name,
+                        self.display_path(member_path),
+                        member_snapshot.capacitor_name
+                    ));
+                }
+                members.push((member_plan, member_netlist));
+            }
+            Ok((owner_plan, step_runs, members))
+        })();
+
+        let (owner_plan, step_runs, members) = match qualification {
+            Ok(qualified) => qualified,
+            Err(reason) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    result_contract,
+                    format!(
+                        "stepped-IC generated-reference family '{}' qualification failed: {reason}",
+                        contract.family
+                    ),
+                    Vec::new(),
+                );
+            }
+        };
+
+        let mut mismatches = Vec::new();
+        let mut row_offset = 0usize;
+        for (index, ((member_plan, member_netlist), step_run)) in
+            members.iter().zip(step_runs.iter()).enumerate()
+        {
+            let member_result = match self.run_transient_family_netlist(
+                member_plan,
+                member_netlist,
+                start,
+                None,
+            ) {
+                Ok(result) => result,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "independent baseline step {index} exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support stepped-IC baseline step {index}: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("independent baseline step {index} simulation failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let stepped_result = match self.run_transient_family_netlist(
+                &owner_plan,
+                &step_run.netlist,
+                start,
+                None,
+            ) {
+                Ok(result) => result,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!(
+                            "owner step {index} exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support stepped-IC owner step {index}: {err}"
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("owner step {index} simulation failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let baseline_table = match Self::transient_family_result_to_prn_table(
+                member_plan,
+                member_netlist,
+                &member_result,
+            ) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("independent baseline step {index} output failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let stepped_table = match Self::transient_family_result_to_prn_table(
+                &owner_plan,
+                &step_run.netlist,
+                &stepped_result,
+            ) {
+                Ok(table) => table,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        result_contract,
+                        format!("owner step {index} output failed: {err}"),
+                        Vec::new(),
+                    );
+                }
+            };
+            let mut step_mismatches =
+                match self.compare_xyce_verify_transient_tables(&baseline_table, &stepped_table) {
+                    Ok(found) => found,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            result_contract,
+                            format!(
+                                "Release 7.10 xyce_verify comparison failed for step {index}: {err}"
+                            ),
+                            Vec::new(),
+                        );
+                    }
+                };
+            for mismatch in &mut step_mismatches {
+                mismatch.row += row_offset;
+                mismatch.probe = format!("step {index}: {}", mismatch.probe);
+            }
+            row_offset += stepped_table.rows.len();
+            mismatches.extend(step_mismatches);
+            if mismatches.len() >= self.config.max_mismatches {
+                mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if mismatches.is_empty() {
+            self.passed_result(deck, start, result_contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                result_contract,
+                format!(
+                    "{} stepped-IC Release 7.10 xyce_verify mismatch(es)",
+                    mismatches.len()
+                ),
+                mismatches,
+            )
+        }
+    }
+
+    fn stepped_ic_option_signature(source: &str) -> Result<Vec<String>, String> {
+        let statements = Self::logical_netlist_lines(source)
+            .into_iter()
+            .map(|line| Self::strip_netlist_comment(&line).trim().to_string())
+            .filter(|line| {
+                line.split_whitespace()
+                    .next()
+                    .is_some_and(|command| command.eq_ignore_ascii_case(".options"))
+            })
+            .map(|line| {
+                line.chars()
+                    .filter(|ch| !ch.is_whitespace())
+                    .collect::<String>()
+                    .to_ascii_lowercase()
+            })
+            .collect::<Vec<_>>();
+        if statements.len() != 1 {
+            return Err(format!(
+                "stepped-IC family requires exactly one .OPTIONS statement, found {}",
+                statements.len()
+            ));
+        }
+        Ok(statements)
+    }
+
+    fn stepped_ic_snapshot(netlist: &Netlist) -> Result<XyceSteppedIcSnapshot, String> {
+        if !netlist.models.is_empty()
+            || !netlist.subcircuits.is_empty()
+            || !netlist.data_tables.is_empty()
+            || !netlist.node_sets.is_empty()
+            || !netlist.global_nodes.is_empty()
+            || !netlist.measurements.is_empty()
+            || !netlist.veriloga_includes.is_empty()
+            || !netlist.spef_includes.is_empty()
+            || !netlist.diagnostics.is_empty()
+        {
+            return Err(
+                "stepped-IC family must be a diagnostic-free flat RC circuit without models, data, node sets, measurements, globals, or external model data"
+                    .to_string(),
+            );
+        }
+        if netlist.elements.len() != 3 {
+            return Err(format!(
+                "stepped-IC family requires exactly three circuit elements, found {}",
+                netlist.elements.len()
+            ));
+        }
+
+        let mut capacitor = None;
+        let mut resistor_nodes = None;
+        let mut source_nodes = None;
+        let mut elements = BTreeMap::new();
+        for element in &netlist.elements {
+            match &element.kind {
+                ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if element.nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && initial_voltage.is_none()
+                    && model.is_none()
+                    && instance_params.len() <= 1
+                    && instance_params.iter().all(|(name, parameter_value)| {
+                        name.eq_ignore_ascii_case("c")
+                            && parameter_value.to_bits() == value.to_bits()
+                    })
+                    && deferred_params.is_empty() =>
+                {
+                    if capacitor
+                        .replace((element.name.clone(), element.nodes.clone(), *value))
+                        .is_some()
+                    {
+                        return Err(
+                            "stepped-IC family contains more than one qualified capacitor"
+                                .to_string(),
+                        );
+                    }
+                }
+                ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model,
+                    instance_params,
+                    deferred_params,
+                } if element.nodes.len() == 2
+                    && value.is_finite()
+                    && *value > 0.0
+                    && value_expr.is_none()
+                    && model.is_none()
+                    && instance_params.is_empty()
+                    && deferred_params.is_empty() =>
+                {
+                    if resistor_nodes.replace(element.nodes.clone()).is_some() {
+                        return Err(
+                            "stepped-IC family contains more than one qualified resistor"
+                                .to_string(),
+                        );
+                    }
+                }
+                ElementKind::VoltageSource(crate::netlist::SourceSpec::Dc(value))
+                    if element.nodes.len() == 2
+                        && value.is_finite()
+                        && value.to_bits() == 0.0f64.to_bits() =>
+                {
+                    if source_nodes.replace(element.nodes.clone()).is_some() {
+                        return Err(
+                            "stepped-IC family contains more than one qualified zero-volt source"
+                                .to_string(),
+                        );
+                    }
+                }
+                _ => {
+                    return Err(format!(
+                        "stepped-IC family contains unqualified element '{}'",
+                        element.name
+                    ));
+                }
+            }
+            let name = element.name.trim().to_ascii_lowercase();
+            if name.is_empty()
+                || elements
+                    .insert(
+                        name,
+                        Self::scoped_model_element_fingerprint(element, &netlist.params)?,
+                    )
+                    .is_some()
+            {
+                return Err(
+                    "stepped-IC family contains an empty or duplicate element name".to_string(),
+                );
+            }
+        }
+
+        let (capacitor_name, capacitor_nodes, capacitance) =
+            capacitor.ok_or_else(|| "stepped-IC family has no qualified capacitor".to_string())?;
+        let resistor_nodes = resistor_nodes
+            .ok_or_else(|| "stepped-IC family has no qualified resistor".to_string())?;
+        let source_nodes = source_nodes
+            .ok_or_else(|| "stepped-IC family has no qualified zero-volt source".to_string())?;
+        let capacitor_signal = capacitor_nodes
+            .iter()
+            .find(|node| !Self::node_name_is_ground(node))
+            .ok_or_else(|| "stepped-IC capacitor has no non-ground signal node".to_string())?;
+        if capacitor_nodes
+            .iter()
+            .filter(|node| Self::node_name_is_ground(node))
+            .count()
+            != 1
+        {
+            return Err("stepped-IC capacitor must connect one signal node to ground".to_string());
+        }
+        let source_signal = source_nodes
+            .iter()
+            .find(|node| !Self::node_name_is_ground(node))
+            .ok_or_else(|| "stepped-IC zero-volt source has no non-ground node".to_string())?;
+        if source_nodes
+            .iter()
+            .filter(|node| Self::node_name_is_ground(node))
+            .count()
+            != 1
+            || !resistor_nodes
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case(capacitor_signal))
+            || !resistor_nodes
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case(source_signal))
+        {
+            return Err(
+                "stepped-IC topology must be grounded C -> R -> grounded zero-volt source"
+                    .to_string(),
+            );
+        }
+
+        let [initial_condition] = netlist.initial_conditions.as_slice() else {
+            return Err(format!(
+                "stepped-IC family requires exactly one .IC voltage, found {}",
+                netlist.initial_conditions.len()
+            ));
+        };
+        if initial_condition.voltage_expr.is_some()
+            || !initial_condition.voltage.is_finite()
+            || !initial_condition
+                .node
+                .eq_ignore_ascii_case(capacitor_signal)
+        {
+            return Err(
+                "stepped-IC .IC must be one finite direct voltage on the capacitor signal node"
+                    .to_string(),
+            );
+        }
+        let initial_conditions = vec![(
+            initial_condition.node.trim().to_ascii_lowercase(),
+            initial_condition.voltage.to_bits(),
+        )];
+
+        Ok(XyceSteppedIcSnapshot {
+            elements,
+            initial_conditions,
+            capacitor_name,
+            capacitor_value_bits: capacitance.to_bits(),
+        })
+    }
+
+    fn stepped_ic_snapshots_match(
+        stepped: &XyceSteppedIcSnapshot,
+        independent: &XyceSteppedIcSnapshot,
+    ) -> bool {
+        if !stepped
+            .capacitor_name
+            .eq_ignore_ascii_case(&independent.capacitor_name)
+            || stepped.initial_conditions != independent.initial_conditions
+        {
+            return false;
+        }
+        let capacitor_key = stepped.capacitor_name.trim().to_ascii_lowercase();
+        let mut stepped_elements = stepped.elements.clone();
+        let mut independent_elements = independent.elements.clone();
+        let Some(mut stepped_capacitor) = stepped_elements.remove(&capacitor_key) else {
+            return false;
+        };
+        let Some(mut independent_capacitor) = independent_elements.remove(&capacitor_key) else {
+            return false;
+        };
+        let Some(stepped_bits) = stepped_capacitor.numeric_bits.first_mut() else {
+            return false;
+        };
+        let Some(independent_bits) = independent_capacitor.numeric_bits.first_mut() else {
+            return false;
+        };
+        *stepped_bits = 0.0f64.to_bits();
+        *independent_bits = 0.0f64.to_bits();
+        let stepped_value = Value::from_bits(stepped.capacitor_value_bits);
+        let independent_value = Value::from_bits(independent.capacitor_value_bits);
+        stepped_elements == independent_elements
+            && stepped_capacitor == independent_capacitor
+            && stepped_value.is_finite()
+            && independent_value.is_finite()
+            && (stepped_value - independent_value).abs() <= 1.0e-12
+    }
+
     fn run_baseline_family_contract(
         &self,
         deck: &XyceDeck,
@@ -10303,13 +10940,23 @@ impl XyceTestRunner {
     ) -> Result<(Netlist, TransientResult), SimulationError> {
         let netlist = Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
             .map_err(|err| SimulationError::Netlist(format!("{err}")))?;
-        let max_step = Self::transient_family_max_step(&netlist, &plan.tran)
+        let result = self.run_transient_family_netlist(plan, &netlist, start, locked_time_grid)?;
+        Ok((netlist, result))
+    }
+
+    fn run_transient_family_netlist(
+        &self,
+        plan: &XyceStaticTranPlan,
+        netlist: &Netlist,
+        start: Instant,
+        locked_time_grid: Option<Vec<Value>>,
+    ) -> Result<TransientResult, SimulationError> {
+        let max_step = Self::transient_family_max_step(netlist, &plan.tran)
             .map_err(SimulationError::Netlist)?;
         let initial_step = Self::xyce_initial_timestep_for_tran(&plan.tran);
         let engine = self.create_xyce_static_tran_engine(locked_time_grid, initial_step);
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let result = engine.run_tran_with_abort(&netlist, plan.tran.stop, max_step, &abort)?;
-        Ok((netlist, result))
+        engine.run_tran_with_abort(netlist, plan.tran.stop, max_step, &abort)
     }
 
     fn transient_family_max_step(
@@ -19798,19 +20445,25 @@ impl XyceTestRunner {
                 ElementKind::Mosfet { .. }
                     if Self::netlist_device_is_native_b3soi_mosfet(netlist, &element.name) => {}
                 ElementKind::Mosfet { .. }
-                    if purpose == XyceStaticTranPlanPurpose::RelationalFamily
-                        && Self::netlist_device_is_native_relational_mos3(
-                            netlist,
-                            &element.name,
-                        ) => {}
+                    if matches!(
+                        purpose,
+                        XyceStaticTranPlanPurpose::RelationalFamily
+                            | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+                    ) && Self::netlist_device_is_native_relational_mos3(
+                        netlist,
+                        &element.name,
+                    ) => {}
                 ElementKind::Jfet { .. }
                     if Self::netlist_device_is_native_classic_jfet(netlist, &element.name) => {}
                 ElementKind::Diode { .. }
-                    if purpose == XyceStaticTranPlanPurpose::RelationalFamily
-                        && Self::netlist_device_is_native_relational_legacy_diode(
-                            netlist,
-                            &element.name,
-                        ) => {}
+                    if matches!(
+                        purpose,
+                        XyceStaticTranPlanPurpose::RelationalFamily
+                            | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+                    ) && Self::netlist_device_is_native_relational_legacy_diode(
+                        netlist,
+                        &element.name,
+                    ) => {}
                 _ => {
                     return Err(match purpose {
                         XyceStaticTranPlanPurpose::AbsoluteOracle
@@ -19822,7 +20475,8 @@ impl XyceTestRunner {
                             "native Release 7.10 integrated-RMS .PRINT TRAN comparison supports the strict bare Xyce LEVEL=9 BSIM3 subset in addition to the ordinary absolute-device envelope; element '{}' requires a broader transient oracle contract",
                             element.name
                         ),
-                        XyceStaticTranPlanPurpose::RelationalFamily => format!(
+                        XyceStaticTranPlanPurpose::RelationalFamily
+                        | XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily => format!(
                             "native relational .PRINT TRAN comparison currently supports independent, behavioral, static R/L/C, switch, controlled-source, native B3SOI, native classic JFET, and validated native MOS3 and legacy-diode subsets; element '{}' requires a broader relational runtime contract",
                             element.name
                         ),
@@ -27141,6 +27795,97 @@ impl XyceTestRunner {
             .or_else(|| self.supernode_family_contract(deck))
     }
 
+    fn stepped_ic_reference_contract(
+        &self,
+        deck: &XyceDeck,
+    ) -> Option<XyceSteppedIcReferenceContract> {
+        let relative_path = Self::normalize_manifest_key(&deck.relative_path);
+        if !relative_path.starts_with("netlists/") {
+            return None;
+        }
+        let parent = deck.path.parent()?;
+        let stem = deck.path.file_stem()?.to_str()?;
+        let stem_lower = stem.to_ascii_lowercase();
+        let family = if let Some(family) = stem_lower.strip_suffix("_step") {
+            (!family.is_empty()).then_some(family.to_string())?
+        } else {
+            let digit_start = stem_lower
+                .char_indices()
+                .rev()
+                .find(|(_, ch)| !ch.is_ascii_digit())
+                .map_or(0, |(index, ch)| index + ch.len_utf8());
+            if digit_start == 0 || digit_start == stem_lower.len() {
+                return None;
+            }
+            stem_lower[..digit_start].to_string()
+        };
+        let owner_stem = format!("{family}_step");
+        let mut owner_path = None;
+        let mut numbered = BTreeMap::new();
+        for entry in fs::read_dir(parent).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if !entry.file_type().ok()?.is_file()
+                || !path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
+            {
+                continue;
+            }
+            let candidate_stem = path.file_stem()?.to_str()?.to_ascii_lowercase();
+            if candidate_stem == owner_stem {
+                if owner_path.replace(path).is_some() {
+                    return None;
+                }
+                continue;
+            }
+            let Some(index_text) = candidate_stem.strip_prefix(&family) else {
+                continue;
+            };
+            if index_text.is_empty() || !index_text.bytes().all(|byte| byte.is_ascii_digit()) {
+                continue;
+            }
+            let index = index_text.parse::<usize>().ok()?;
+            if numbered.insert(index, path).is_some() {
+                return None;
+            }
+        }
+        let owner_path = owner_path?;
+        if !self.requires_upstream_wrapper(&self.relative_key(&owner_path)) {
+            return None;
+        }
+        if numbered.len() < 2 || numbered.keys().copied().ne(0..numbered.len()) {
+            return None;
+        }
+        let member_paths = numbered.into_values().collect::<Vec<_>>();
+        if member_paths.iter().any(|path| {
+            self.requires_upstream_wrapper(&self.relative_key(path))
+                || fs::metadata(path)
+                    .ok()
+                    .is_none_or(|metadata| !metadata.is_file() || metadata.len() == 0)
+        }) || fs::metadata(&owner_path)
+            .ok()
+            .is_none_or(|metadata| !metadata.is_file() || metadata.len() == 0)
+        {
+            return None;
+        }
+        if !Self::same_path(&deck.path, &owner_path)
+            && !member_paths
+                .iter()
+                .any(|path| Self::same_path(path, &deck.path))
+        {
+            return None;
+        }
+
+        Some(XyceSteppedIcReferenceContract {
+            family,
+            owner_path,
+            member_paths,
+            target_path: deck.path.clone(),
+        })
+    }
+
     fn analytic_generated_wrapper_source(&self, deck: &XyceDeck) -> Option<String> {
         let relative_path = Self::normalize_manifest_key(&deck.relative_path);
         if !relative_path.starts_with("netlists/")
@@ -31668,6 +32413,14 @@ Cload out 0 2u\n\
         assert!(XyceStaticTranPlanPurpose::AnalyticOracle.validates_absolute_device_contract());
         assert!(!XyceStaticTranPlanPurpose::RelationalFamily.requires_reference_file());
         assert!(!XyceStaticTranPlanPurpose::RelationalFamily.validates_absolute_device_contract());
+        assert!(
+            !XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+                .requires_reference_file()
+        );
+        assert!(
+            !XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily
+                .validates_absolute_device_contract()
+        );
         assert!(!XyceStaticTranPlanPurpose::ScopedModelRelationalFamily.requires_reference_file());
         assert!(
             !XyceStaticTranPlanPurpose::ScopedModelRelationalFamily
@@ -31690,6 +32443,12 @@ Cload out 0 2u\n\
             missing,
         )
         .expect("relational plans use the freshly simulated baseline instead of a gold file");
+        XyceTestRunner::validate_static_tran_reference_requirement(
+            XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
+            XyceStaticTranContract::WrapperStatic,
+            missing,
+        )
+        .expect("generated-reference wrappers use independently simulated sibling decks");
         XyceTestRunner::validate_static_tran_reference_requirement(
             XyceStaticTranPlanPurpose::AnalyticOracle,
             XyceStaticTranContract::WrapperStatic,
@@ -32627,6 +33386,146 @@ VMON 2 1 0\n\
         );
 
         fs::remove_dir_all(&root).expect("remove generic BJT family fixture");
+    }
+
+    #[test]
+    fn stepped_ic_reference_detection_is_manifest_and_sibling_driven() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rspice-xyce-stepped-ic-family-{}-{nonce}",
+            std::process::id()
+        ));
+        let family_dir = root.join("Netlists").join("GENERIC_STEP_IC");
+        fs::create_dir_all(&family_dir).expect("create generic stepped-IC family fixture");
+        let source = |capacitance: &str, step: bool| {
+            format!(
+                "generic stepped IC family\n\
+.ic v(out)=1\n\
+CMAIN out 0 {capacitance}\n\
+RLOAD out bias 1k\n\
+VBIAS bias 0 0\n\
+{}\
+.print tran v(out)\n\
+.tran 0 1m\n\
+.options timeint reltol=1e-6 abstol=1e-6\n\
+.end\n",
+                if step {
+                    ".step dec CMAIN:C 1u 100u 1"
+                } else {
+                    ""
+                }
+            )
+        };
+        let owner_path = family_dir.join("decay_step.cir");
+        let member_paths = [
+            family_dir.join("decay0.cir"),
+            family_dir.join("decay1.cir"),
+            family_dir.join("decay2.cir"),
+        ];
+        fs::write(&owner_path, source("1u", true)).expect("write stepped owner");
+        for (path, value) in member_paths.iter().zip(["1u", "10u", "100u"]) {
+            fs::write(path, source(value, false)).expect("write independent baseline");
+        }
+        let owner_relative = "Netlists/GENERIC_STEP_IC/decay_step.cir";
+        fs::write(
+            root.join(HARNESS_MANIFEST_FILE),
+            format!("{owner_relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write wrapper manifest fixture");
+
+        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        for (path, relative) in std::iter::once((&owner_path, owner_relative)).chain(
+            member_paths.iter().enumerate().map(|(index, path)| {
+                (
+                    path,
+                    match index {
+                        0 => "Netlists/GENERIC_STEP_IC/decay0.cir",
+                        1 => "Netlists/GENERIC_STEP_IC/decay1.cir",
+                        _ => "Netlists/GENERIC_STEP_IC/decay2.cir",
+                    },
+                )
+            }),
+        ) {
+            let deck = XyceDeck {
+                path: path.clone(),
+                relative_path: relative.to_string(),
+                section: XyceDeckSection::Netlists,
+            };
+            let contract = runner
+                .stepped_ic_reference_contract(&deck)
+                .expect("manifest owner and contiguous numbered siblings form a family");
+            assert_eq!(contract.family, "decay");
+            assert!(XyceTestRunner::same_path(&contract.owner_path, &owner_path));
+            assert_eq!(contract.member_paths, member_paths);
+            assert!(XyceTestRunner::same_path(&contract.target_path, path));
+        }
+
+        fs::remove_file(&member_paths[1]).expect("remove middle baseline");
+        let owner_deck = XyceDeck {
+            path: owner_path,
+            relative_path: owner_relative.to_string(),
+            section: XyceDeckSection::Netlists,
+        };
+        assert!(
+            runner.stepped_ic_reference_contract(&owner_deck).is_none(),
+            "numbered sibling holes must fail family discovery"
+        );
+        fs::remove_dir_all(&root).expect("remove generic stepped-IC family fixture");
+    }
+
+    #[test]
+    fn stepped_ic_snapshot_proves_initial_condition_and_named_circuit_identity() {
+        let source = |capacitance: Value, initial_voltage: Value, resistor: Value| {
+            format!(
+                "stepped IC snapshot\n\
+.ic v(out)={initial_voltage}\n\
+CMAIN out 0 {capacitance}\n\
+RLOAD out bias {resistor}\n\
+VBIAS bias 0 0\n\
+.print tran v(out)\n\
+.tran 0 1m\n\
+.options timeint reltol=1e-6 abstol=1e-6\n\
+.end\n"
+            )
+        };
+        let baseline = XyceTestRunner::parse_xyce_netlist(
+            &source(1.0e-6, 1.0, 1.0e3),
+            Path::new("baseline.cir"),
+        )
+        .expect("baseline snapshot fixture parses");
+        let same = XyceTestRunner::parse_xyce_netlist(
+            &source(1.0e-6 + 5.0e-13, 1.0, 1.0e3),
+            Path::new("same.cir"),
+        )
+        .expect("tolerance snapshot fixture parses");
+        let baseline_snapshot =
+            XyceTestRunner::stepped_ic_snapshot(&baseline).expect("baseline snapshot qualifies");
+        let same_snapshot =
+            XyceTestRunner::stepped_ic_snapshot(&same).expect("matching snapshot qualifies");
+        assert!(XyceTestRunner::stepped_ic_snapshots_match(
+            &baseline_snapshot,
+            &same_snapshot
+        ));
+
+        for changed_source in [
+            source(1.0e-6, 0.5, 1.0e3),
+            source(1.0e-6, 1.0, 2.0e3),
+            source(1.0e-6 + 2.0e-12, 1.0, 1.0e3),
+            source(1.0e-6, 1.0, 1.0e3).replace("RLOAD", "RRENAMED"),
+        ] {
+            let changed =
+                XyceTestRunner::parse_xyce_netlist(&changed_source, Path::new("changed.cir"))
+                    .expect("changed snapshot fixture parses");
+            let changed_snapshot = XyceTestRunner::stepped_ic_snapshot(&changed)
+                .expect("changed circuit remains individually qualified");
+            assert!(
+                !XyceTestRunner::stepped_ic_snapshots_match(&baseline_snapshot, &changed_snapshot),
+                "IC, topology values, swept value tolerance, and element names all participate in parity"
+            );
+        }
     }
 
     #[test]
