@@ -765,6 +765,8 @@ impl<'a> Parser<'a> {
                 "FASTTABLEFILE" => Some(Function::FastTableFile),
                 "CUBIC" => Some(Function::Cubic),
                 "CUBICFILE" => Some(Function::CubicFile),
+                "AKIMA" | "SPLINE" => Some(Function::Akima),
+                "AKIMAFILE" | "SPLINEFILE" => Some(Function::AkimaFile),
                 "PWL" => Some(Function::Pwl),
                 "MOD" | "FMOD" => Some(Function::Mod),
                 "SPICE_PULSE" => Some(Function::SpicePulse),
@@ -797,7 +799,9 @@ impl<'a> Parser<'a> {
             Function::SpiceSin => Some((3, 6)),
             Function::SpiceExp => Some((2, 6)),
             Function::SpiceSffm => Some((2, 5)),
-            Function::Cubic | Function::CubicFile => Some((1, 1)),
+            Function::Cubic | Function::CubicFile | Function::Akima | Function::AkimaFile => {
+                Some((1, 1))
+            }
             _ => None,
         };
 
@@ -824,7 +828,16 @@ impl<'a> Parser<'a> {
     fn parse_first_function_argument(&mut self, function_name: &str) -> Expr {
         let file_capable_table = matches!(
             function_name,
-            "TABLE" | "TABLEFILE" | "FASTTABLE" | "FASTTABLEFILE" | "CUBIC" | "CUBICFILE"
+            "TABLE"
+                | "TABLEFILE"
+                | "FASTTABLE"
+                | "FASTTABLEFILE"
+                | "CUBIC"
+                | "CUBICFILE"
+                | "AKIMA"
+                | "AKIMAFILE"
+                | "SPLINE"
+                | "SPLINEFILE"
         );
         if file_capable_table {
             match &self.current {

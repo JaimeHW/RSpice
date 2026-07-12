@@ -1119,7 +1119,9 @@ fn eval_function_with_derivative(
         | Function::FastTable
         | Function::FastTableFile
         | Function::Cubic
-        | Function::CubicFile => Some((0.0, 0.0)),
+        | Function::CubicFile
+        | Function::Akima
+        | Function::AkimaFile => Some((0.0, 0.0)),
         Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
             None
         }

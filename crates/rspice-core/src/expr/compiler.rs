@@ -138,7 +138,9 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 | Function::FastTable
                 | Function::FastTableFile
                 | Function::Cubic
-                | Function::CubicFile => Instruction::PushConst(0.0),
+                | Function::CubicFile
+                | Function::Akima
+                | Function::AkimaFile => Instruction::PushConst(0.0),
                 Function::Mod => Instruction::Mod,
                 Function::SpicePulse => Instruction::SpicePulse(args.len()),
                 Function::SpiceSin => Instruction::SpiceSin(args.len()),

@@ -119,6 +119,8 @@ pub enum Function {
     FastTableFile, // fasttablefile("path") / fasttablefile(path)
     Cubic,         // cubic("path") = file-backed natural cubic spline of time
     CubicFile,     // cubicfile("path") alias
+    Akima,         // akima("path") / spline("path") = file-backed Akima spline
+    AkimaFile,     // akimafile("path") / splinefile("path") alias
     Mod,           // mod(x, y) = x % y - modulo
     SpicePulse,    // spice_pulse(v1, v2, td, tr, tf, pw[, per])
     SpiceSin,      // spice_sin(vo, va, freq, td, theta[, phase_degrees])
@@ -146,6 +148,8 @@ pub enum LookupInterpolation {
     Linear,
     /// Natural cubic spline, with one second derivative per knot.
     NaturalCubic { second_derivatives: Arc<[Value]> },
+    /// Original Akima spline, with `(p1, p2, p3)` for each interval.
+    Akima { coefficients: Arc<[[Value; 3]]> },
 }
 
 #[allow(clippy::should_implement_trait)]

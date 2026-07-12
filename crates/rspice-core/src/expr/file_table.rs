@@ -60,6 +60,7 @@ fn resolve_expr(expr: Expr, source_path: Option<&Path>) -> Result<Expr, String> 
 enum FileInterpolation {
     Linear,
     NaturalCubic,
+    Akima,
 }
 
 fn table_file_mode(func: Function) -> Option<(bool, FileInterpolation)> {
@@ -67,6 +68,7 @@ fn table_file_mode(func: Function) -> Option<(bool, FileInterpolation)> {
         Function::Table | Function::TableFile => Some((true, FileInterpolation::Linear)),
         Function::FastTable | Function::FastTableFile => Some((false, FileInterpolation::Linear)),
         Function::Cubic | Function::CubicFile => Some((false, FileInterpolation::NaturalCubic)),
+        Function::Akima | Function::AkimaFile => Some((false, FileInterpolation::Akima)),
         _ => None,
     }
 }
@@ -104,6 +106,9 @@ fn resolve_table_file_function(
                 natural_cubic_second_derivatives(&points).into_boxed_slice(),
             ),
         },
+        FileInterpolation::Akima => LookupInterpolation::Akima {
+            coefficients: Arc::from(akima_coefficients(&points).into_boxed_slice()),
+        },
     };
     Ok(Expr::LookupTable(LookupTable {
         points: Arc::from(points.into_boxed_slice()),
@@ -135,6 +140,45 @@ fn natural_cubic_second_derivatives(points: &[(Value, Value)]) -> Vec<Value> {
             second_derivatives[index] * second_derivatives[index + 1] + decomposition[index];
     }
     second_derivatives
+}
+
+fn akima_coefficients(points: &[(Value, Value)]) -> Vec<[Value; 3]> {
+    let count = points.len();
+    let mut slopes = vec![0.0; count + 3];
+    for index in 0..count - 1 {
+        slopes[index + 2] =
+            (points[index + 1].1 - points[index].1) / (points[index + 1].0 - points[index].0);
+    }
+
+    slopes[0] = 3.0 * slopes[2] - 2.0 * slopes[3];
+    slopes[1] = 2.0 * slopes[2] - slopes[3];
+    slopes[count + 1] = 2.0 * slopes[count] - slopes[count - 1];
+    slopes[count + 2] = 3.0 * slopes[count] - 2.0 * slopes[count - 1];
+
+    let mut tangents = vec![0.0; count];
+    for index in 0..count {
+        let forward_weight = (slopes[index + 3] - slopes[index + 2]).abs();
+        let backward_weight = (slopes[index + 1] - slopes[index]).abs();
+        let weight = forward_weight + backward_weight;
+        tangents[index] = if weight == 0.0 {
+            0.5 * (slopes[index + 1] + slopes[index + 2])
+        } else {
+            (forward_weight * slopes[index + 1] + backward_weight * slopes[index + 2]) / weight
+        };
+    }
+
+    (0..count - 1)
+        .map(|index| {
+            let span = points[index + 1].0 - points[index].0;
+            let left_tangent = tangents[index];
+            let right_tangent = tangents[index + 1];
+            [
+                left_tangent,
+                (3.0 * slopes[index + 2] - 2.0 * left_tangent - right_tangent) / span,
+                (left_tangent + right_tangent - 2.0 * slopes[index + 2]) / span.powi(2),
+            ]
+        })
+        .collect()
 }
 
 fn resolve_table_path(path: &str, source_path: Option<&Path>) -> PathBuf {
@@ -241,6 +285,8 @@ fn function_name(func: Function) -> &'static str {
         Function::FastTableFile => "fasttablefile",
         Function::Cubic => "cubic",
         Function::CubicFile => "cubicfile",
+        Function::Akima => "akima",
+        Function::AkimaFile => "akimafile",
         _ => "function",
     }
 }
@@ -332,6 +378,55 @@ mod tests {
             .expect_err("unsupported resampling arguments must fail")
             .to_string();
         assert!(too_many.contains("at most 1 arguments"), "{too_many}");
+    }
+
+    #[test]
+    fn akima_matches_original_local_slope_construction() {
+        let dir = unique_temp_dir("xyce-akima");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        std::fs::write(dir.join("curve.dat"), "0 0\n1 1\n2 0\n3 1\n").expect("write spline data");
+        let deck_path = dir.join("deck.cir");
+
+        for function in ["akima", "akimafile", "spline", "splinefile"] {
+            let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
+                .expect("Akima expression parses");
+            let resolved =
+                resolve_file_lookup_functions(ast, Some(&deck_path)).expect("Akima file resolves");
+            let Expr::LookupTable(table) = &resolved else {
+                panic!("Akima file should resolve into lookup data");
+            };
+            assert!(!table.transient_breakpoints);
+            assert!(matches!(
+                table.interpolation,
+                LookupInterpolation::Akima { .. }
+            ));
+
+            let program = compile(&resolved);
+            let mut vm = Vm::new();
+            for (time, expected) in [
+                (-1.0, 0.0),
+                (0.0, 0.0),
+                (0.5, 0.75),
+                (1.5, 0.5),
+                (2.5, 0.25),
+                (3.0, 1.0),
+                (4.0, 1.0),
+            ] {
+                let actual = vm.execute(&program, &Context::transient(&[], &[], time));
+                assert!((actual - expected).abs() < 1.0e-14, "time={time}");
+            }
+        }
+
+        std::fs::write(dir.join("two-points.dat"), "0 0\n1 1\n")
+            .expect("write two-point spline data");
+        let ast = parse_expression_strict("akima(\"two-points.dat\")")
+            .expect("two-point Akima expression parses");
+        let resolved = resolve_file_lookup_functions(ast, Some(&deck_path))
+            .expect("two-point Akima file resolves");
+        let program = compile(&resolved);
+        let mut vm = Vm::new();
+        let midpoint = vm.execute(&program, &Context::transient(&[], &[], 0.5));
+        assert!((midpoint - 0.625).abs() < 1.0e-14);
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {
