@@ -290,11 +290,23 @@ class CiConfigurationTests(unittest.TestCase):
         constraints = read_text("crates/rspice-python/ci-constraints.txt")
 
         self.assertIn('requires-python = ">=3.10"', pyproject)
-        self.assertIn('"3.10", "3.13", "3.14"', workflow)
+        self.assertIn('requires = ["maturin==1.14.1"]', pyproject)
+        self.assertIn('python: ["3.10", "3.11", "3.12", "3.13", "3.14"]', workflow)
         self.assertIn("maturin develop --release --locked", workflow)
-        self.assertIn("maturin build --release --locked --out dist", workflow)
+        self.assertIn("args: --release --locked --compatibility pypi --out dist", workflow)
         self.assertIn("python -m pip install --force-reinstall -c ci-constraints.txt dist/*.whl", workflow)
         self.assertIn("wheel smoke passed", workflow)
+        self.assertIn("Python 3.10 abi3 smoke passed", workflow)
+        self.assertIn(
+            "cargo clippy --locked -p rspice-core -p rspice-python --all-targets --all-features -- -D warnings",
+            workflow,
+        )
+        self.assertIn("python scripts/repair_sdist_lock.py", workflow)
+        self.assertIn("CARGO_NET_OFFLINE=true", workflow)
+        self.assertEqual(workflow.count("actions/attest@"), 2)
+        self.assertIn("subject-path: crates/rspice-python/dist/*.whl", workflow)
+        self.assertIn("subject-path: crates/rspice-python/dist/*.tar.gz", workflow)
+        self.assertIn("maturin==1.14.1", constraints)
         self.assertIn("numpy==2.2.6", constraints)
         self.assertIn("numpy==2.5.0", constraints)
 

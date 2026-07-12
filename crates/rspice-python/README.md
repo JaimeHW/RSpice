@@ -19,8 +19,9 @@ regression tests in CI the same way you run unit tests.
   ndarrays
 - **Releases the GIL** — long simulations run with the GIL released; other
   Python threads stay live, and engines can simulate in parallel threads
-- **Ctrl-C works** — transient and DC sweep runs are cancellable with
-  KeyboardInterrupt instead of blocking until completion
+- **Ctrl-C works** — long-running DC, AC/RF, transient, noise, statistical,
+  sensitivity, and periodic analyses are cooperatively cancellable with
+  `KeyboardInterrupt` instead of blocking until completion
 - **Strict error discipline** — accessors raise `IndexError`/`KeyError` for
   invalid nodes; argument errors raise `ValueError`; nothing fabricates
   silent zeros
@@ -31,10 +32,10 @@ regression tests in CI the same way you run unit tests.
 ### From Source
 
 ```bash
-pip install maturin
+python -m pip install "maturin==1.14.1"
 
 cd crates/rspice-python
-maturin develop --release
+maturin develop --release --locked
 ```
 
 `maturin build --release --locked` produces a redistributable abi3 wheel that
@@ -49,7 +50,8 @@ maturin sdist --out dist
 python scripts/repair_sdist_lock.py dist/rspice-*.tar.gz
 ```
 
-The repair runs offline by default and verifies the resulting archive with
+The repair runs offline by default, rejects any new or changed external Cargo
+package identity, source, or checksum, and verifies the resulting archive with
 Cargo's `--locked` mode. Run `cargo fetch --locked` first on a clean build
 machine so the dependency index and sources are present locally.
 
@@ -352,8 +354,8 @@ development install:
 
 ```bash
 cd crates/rspice-python
-python -m pip install maturin numpy pytest
-maturin develop --release
+python -m pip install "maturin==1.14.1" "numpy>=2.0,<3" "pytest==9.1.1"
+maturin develop --release --locked
 python -m pytest tests/ -v
 ```
 

@@ -71,6 +71,9 @@ jobs:
       - name: Run Rust-side binding invariants
         working-directory: crates/rspice-python
         run: cargo test --locked -p rspice-python --lib
+      - name: Lint every native feature combination
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.14'
+        run: cargo clippy --locked -p rspice-core -p rspice-python --all-targets --all-features -- -D warnings
       - name: Validate type stubs against runtime
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.14'
         working-directory: crates/rspice-python
@@ -83,6 +86,11 @@ jobs:
   wheels:
     name: abi3 wheel (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -143,15 +151,44 @@ jobs:
           assert abs(result.voltage("in") - 1.0) < 1e-9
           print(f"rspice {rspice.__version__} wheel smoke passed")
           PY
+      - name: Select Python 3.10 for abi3 floor validation
+        if: matrix.platform.name == 'linux-x86_64'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.10"
+      - name: Install the abi3 wheel at its declared Python floor
+        if: matrix.platform.name == 'linux-x86_64'
+        shell: bash
+        working-directory: crates/rspice-python
+        run: |
+          python -m pip install --force-reinstall -c ci-constraints.txt dist/*.whl
+          python - <<'PY'
+          import rspice
+
+          netlist = rspice.Netlist.parse("V1 in 0 1\nR1 in 0 1k\n.op\n.end\n")
+          result = rspice.Engine().run_dc_op(netlist)
+          assert abs(result.voltage("in") - 1.0) < 1e-9
+          print(f"rspice {rspice.__version__} Python 3.10 abi3 smoke passed")
+          PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wheels-${{ matrix.platform.name }}
           path: crates/rspice-python/dist/*.whl
           if-no-files-found: error
+      - name: Generate wheel provenance attestation
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: crates/rspice-python/dist/*.whl
 
   source-distribution:
     name: locked source distribution
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install Rust toolchain
@@ -191,3 +228,8 @@ jobs:
           name: source-distribution
           path: crates/rspice-python/dist/*.tar.gz
           if-no-files-found: error
+      - name: Generate source-distribution provenance attestation
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: crates/rspice-python/dist/*.tar.gz

@@ -13,8 +13,10 @@ from __future__ import annotations
 import argparse
 import gzip
 import io
+import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +27,77 @@ from typing import Iterable
 
 class RepairError(RuntimeError):
     """Raised when an sdist cannot be repaired safely."""
+
+
+_LOCK_STRING = re.compile(
+    r'^(name|version|source|checksum)\s*=\s*("(?:[^"\\]|\\.)*")\s*$'
+)
+
+
+def _external_package_identities(lockfile: bytes) -> frozenset[tuple[str, str, str, str | None]]:
+    """Return immutable identities for every registry or Git lockfile package."""
+
+    try:
+        text = lockfile.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RepairError("Cargo.lock is not valid UTF-8") from exc
+
+    packages: list[dict[str, str]] = []
+    package: dict[str, str] | None = None
+    for line in text.splitlines():
+        if line.strip() == "[[package]]":
+            if package is not None:
+                packages.append(package)
+            package = {}
+            continue
+        if package is None:
+            continue
+        match = _LOCK_STRING.match(line.strip())
+        if match is None:
+            continue
+        try:
+            value = json.loads(match.group(2))
+        except json.JSONDecodeError as exc:
+            raise RepairError(f"invalid quoted value in Cargo.lock: {line!r}") from exc
+        if not isinstance(value, str):
+            raise RepairError(f"non-string package identity in Cargo.lock: {line!r}")
+        package[match.group(1)] = value
+    if package is not None:
+        packages.append(package)
+
+    identities: set[tuple[str, str, str, str | None]] = set()
+    for fields in packages:
+        source = fields.get("source")
+        if source is None:
+            # Workspace and path packages intentionally have no immutable source.
+            continue
+        try:
+            identity = (fields["name"], fields["version"], source, fields.get("checksum"))
+        except KeyError as exc:
+            raise RepairError(
+                f"external Cargo.lock package is missing {exc.args[0]!r}: {fields!r}"
+            ) from exc
+        if identity in identities:
+            raise RepairError(f"duplicate external Cargo.lock package identity: {identity!r}")
+        identities.add(identity)
+    return frozenset(identities)
+
+
+def _validate_reconciliation(original_lock: bytes, repaired_lock: bytes) -> None:
+    """Prove unlocked reconciliation did not introduce or alter dependencies."""
+
+    original = _external_package_identities(original_lock)
+    repaired = _external_package_identities(repaired_lock)
+    introduced = sorted(repaired - original)
+    if introduced:
+        details = "\n".join(
+            f"  {name} {version} ({source}, checksum={checksum or 'none'})"
+            for name, version, source, checksum in introduced
+        )
+        raise RepairError(
+            "Cargo lockfile reconciliation introduced or changed external packages:\n"
+            f"{details}"
+        )
 
 
 def _safe_member_path(root: Path, member: tarfile.TarInfo) -> Path:
@@ -149,13 +222,17 @@ def repair_archive(archive: Path, cargo: str, offline: bool) -> None:
         extraction_root.mkdir()
         members = _extract_regular_archive(archive, extraction_root)
         root_name, root = _workspace_root(extraction_root, members)
+        original_lock = (root / "Cargo.lock").read_bytes()
 
         # The first command is intentionally unlocked: it removes stale workspace
-        # packages from the copied lockfile. Existing locked dependency versions are
-        # retained. The second command proves consumers can use --locked.
+        # packages from the copied lockfile. The identity comparison proves it did
+        # not add or alter any external dependency; removals are allowed because the
+        # sdist prunes unrelated workspace members. The second Cargo command proves
+        # consumers can use --locked.
         _run_cargo_metadata(root, cargo, offline=offline, locked=False)
-        _run_cargo_metadata(root, cargo, offline=offline, locked=True)
         repaired_lock = (root / "Cargo.lock").read_bytes()
+        _validate_reconciliation(original_lock, repaired_lock)
+        _run_cargo_metadata(root, cargo, offline=offline, locked=True)
 
         temporary_archive = archive.with_name(f".{archive.name}.repairing")
         try:
