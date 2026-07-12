@@ -46,6 +46,13 @@ struct IncludeKey {
     section: Option<String>,
 }
 
+#[derive(Debug)]
+struct InlineLibFrame {
+    name: String,
+    opened_at_line: usize,
+    selected: bool,
+}
+
 impl IncludeKey {
     fn new(path: PathBuf, section: Option<&str>) -> Self {
         Self {
@@ -146,7 +153,7 @@ impl IncludeProcessor {
         current_path: &Path,
     ) -> Result<String, ParseError> {
         let current_dir = current_path.parent().unwrap_or(Path::new("."));
-        self.expand_content_from(content, current_dir)
+        self.expand_content_from(content, current_dir, None)
     }
 
     /// Resolve a filename to an absolute path
@@ -234,6 +241,15 @@ impl IncludeProcessor {
         base_dir: &Path,
         filename: &str,
     ) -> Result<String, ParseError> {
+        self.process_include_from_with_selection(base_dir, filename, None)
+    }
+
+    fn process_include_from_with_selection(
+        &mut self,
+        base_dir: &Path,
+        filename: &str,
+        selected_section: Option<&str>,
+    ) -> Result<String, ParseError> {
         let path = self.resolve_path_from(base_dir, filename)?;
         let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
         let key = IncludeKey::new(canonical, None);
@@ -246,7 +262,8 @@ impl IncludeProcessor {
             })?;
 
             let content = strip_terminal_end_cards(&content);
-            self.expand_content(&content, &path)
+            let include_dir = path.parent().unwrap_or(Path::new("."));
+            self.expand_content_from(&content, include_dir, selected_section)
         })();
 
         self.leave_include(&key);
@@ -270,11 +287,8 @@ impl IncludeProcessor {
                 message: format!("Failed to include '{}': {}", filename, e),
             })?;
             let content = strip_terminal_end_cards(&content);
-            let selected = match section {
-                Some(sect) => self.extract_section(&content, sect)?,
-                None => content,
-            };
-            self.expand_content(&selected, &path)
+            let library_dir = path.parent().unwrap_or(Path::new("."));
+            self.expand_content_from(&content, library_dir, section)
         })();
 
         self.leave_include(&key);
@@ -285,12 +299,72 @@ impl IncludeProcessor {
         &mut self,
         content: &str,
         base_dir: &Path,
+        selected_section: Option<&str>,
     ) -> Result<String, ParseError> {
         let mut result = String::new();
+        let mut inline_sections: Vec<InlineLibFrame> = Vec::new();
 
-        for line in content.lines() {
+        for (line_index, line) in content.lines().enumerate() {
+            let line_number = line_index + 1;
             let trimmed = line.trim();
             let upper = trimmed.to_ascii_uppercase();
+
+            if upper.starts_with(".LIB")
+                && !upper.starts_with(".LIBS")
+                && let Some((filename, section)) = parse_lib_directive(trimmed)
+            {
+                if section.is_none() {
+                    let parent_selected = inline_sections
+                        .last()
+                        .map(|frame| frame.selected)
+                        .unwrap_or(true);
+                    let selected = parent_selected
+                        && selected_section
+                            .is_some_and(|wanted| filename.eq_ignore_ascii_case(wanted));
+                    inline_sections.push(InlineLibFrame {
+                        name: filename,
+                        opened_at_line: line_number,
+                        selected,
+                    });
+                    continue;
+                }
+                if inline_sections.last().is_some_and(|frame| !frame.selected) {
+                    continue;
+                }
+
+                let included = self.process_lib_from(base_dir, &filename, section.as_deref())?;
+                result.push_str(&included);
+                if !included.ends_with('\n') {
+                    result.push('\n');
+                }
+                continue;
+            }
+
+            if let Some(end_name) = parse_endl_directive(trimmed, line_number)? {
+                let Some(open_frame) = inline_sections.last() else {
+                    return Err(ParseError::Syntax {
+                        line: line_number,
+                        message: ".ENDL encountered without an open .LIB section".to_string(),
+                    });
+                };
+                if let Some(end_name) = end_name
+                    && !end_name.eq_ignore_ascii_case(&open_frame.name)
+                {
+                    return Err(ParseError::Syntax {
+                        line: line_number,
+                        message: format!(
+                            ".ENDL section '{end_name}' does not match open .LIB section '{}'",
+                            open_frame.name
+                        ),
+                    });
+                }
+                inline_sections.pop();
+                continue;
+            }
+
+            if inline_sections.last().is_some_and(|frame| !frame.selected) {
+                continue;
+            }
 
             if let Some(filename) = parse_include_directive(trimmed) {
                 // SPEF files are parasitic data, not SPICE text: route to
@@ -302,19 +376,11 @@ impl IncludeProcessor {
                     result.push_str(&format!(".spef_include \"{normalized}\"\n"));
                     continue;
                 }
-                let included = self.process_include_from(base_dir, &filename)?;
-                result.push_str(&included);
-                if !included.ends_with('\n') {
-                    result.push('\n');
-                }
-                continue;
-            }
-
-            if upper.starts_with(".LIB")
-                && !upper.starts_with(".LIBS")
-                && let Some((filename, section)) = parse_lib_directive(trimmed)
-            {
-                let included = self.process_lib_from(base_dir, &filename, section.as_deref())?;
+                let included = self.process_include_from_with_selection(
+                    base_dir,
+                    &filename,
+                    selected_section,
+                )?;
                 result.push_str(&included);
                 if !included.ends_with('\n') {
                     result.push('\n');
@@ -324,6 +390,13 @@ impl IncludeProcessor {
 
             result.push_str(line);
             result.push('\n');
+        }
+
+        if let Some(frame) = inline_sections.last() {
+            return Err(ParseError::Syntax {
+                line: frame.opened_at_line,
+                message: format!("Library section '{}' missing .ENDL", frame.name),
+            });
         }
 
         Ok(result)
@@ -361,6 +434,7 @@ impl IncludeProcessor {
     /// ... content ...
     /// .ENDL [section_name]
     /// ```
+    #[cfg(test)]
     fn extract_section(&self, content: &str, section: &str) -> Result<String, ParseError> {
         let mut in_section = false;
         let mut section_content = Vec::new();
@@ -543,13 +617,11 @@ fn spice_relative_path(path: &str) -> PathBuf {
 /// Returns (filename, optional_section)
 pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = line.trim();
-    let upper = trimmed.to_uppercase();
-
-    if !upper.starts_with(".LIB") || upper.starts_with(".LIBS") {
+    let (directive, rest) = split_directive(trimmed)?;
+    if !directive.eq_ignore_ascii_case(".lib") {
         return None;
     }
-
-    let rest = &trimmed[4..].trim();
+    let rest = rest.trim();
     let parts: Vec<&str> = rest.split_whitespace().collect();
 
     if parts.is_empty() {
@@ -588,6 +660,26 @@ pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
     };
 
     Some((filename, section))
+}
+
+fn parse_endl_directive(
+    line: &str,
+    line_number: usize,
+) -> Result<Option<Option<String>>, ParseError> {
+    let Some((directive, rest)) = split_directive(line.trim()) else {
+        return Ok(None);
+    };
+    if !directive.eq_ignore_ascii_case(".endl") {
+        return Ok(None);
+    }
+
+    let fields = rest.split_whitespace().collect::<Vec<_>>();
+    if fields.len() > 1 {
+        log::warn!(
+            ".ENDL at line {line_number} has extraneous fields after the section name; ignoring them"
+        );
+    }
+    Ok(Some(fields.first().map(|name| (*name).to_string())))
 }
 
 //=============================================================================
@@ -734,6 +826,103 @@ mod tests {
 
         assert!(expanded.contains("RDRIVE 1 0 7"), "{expanded}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn inline_library_definitions_are_omitted_with_nested_scope_tracking() {
+        let deck = "\
+.lib Unused
+.invalid line hidden from the parser
+.include missing-file.inc
+.lib missing-library.lib nominal
+.lib nested
+Rhidden 1 0 1
+.endl NESTED
+.endl unused
+Rkept 1 0 2
+";
+        let deck_path = Path::new("deck.cir");
+        let expanded = IncludeProcessor::new(deck_path)
+            .expand_content(deck, deck_path)
+            .expect("inline library definitions preprocess");
+
+        assert_eq!(expanded, "Rkept 1 0 2\n");
+    }
+
+    #[test]
+    fn external_library_section_still_expands_after_inline_definition() {
+        let dir = unique_include_temp_dir("inline-and-external-lib");
+        std::fs::create_dir_all(&dir).expect("create library fixture");
+        let deck_path = dir.join("deck.cir");
+        std::fs::write(
+            dir.join("models.lib"),
+            ".lib nominal\n.param selected=7\n.include child.lib\n.endl NOMINAL\n",
+        )
+        .expect("write library fixture");
+        std::fs::write(
+            dir.join("child.lib"),
+            ".lib low\n.param inherited=1\n.endl low\n.lib nominal\n.param inherited=9\n.endl nominal\n",
+        )
+        .expect("write nested library fixture");
+        let deck = "\
+.lib ignored
+.invalid hidden
+.endl ignored
+.lib models.lib nominal
+R1 1 0 {selected}
+";
+        let expanded = IncludeProcessor::new(&deck_path)
+            .expand_content(deck, &deck_path)
+            .expect("external library section expands");
+
+        assert!(expanded.contains(".param selected=7"), "{expanded}");
+        assert!(expanded.contains(".param inherited=9"), "{expanded}");
+        assert!(!expanded.contains(".param inherited=1"), "{expanded}");
+        assert!(expanded.contains("R1 1 0 {selected}"), "{expanded}");
+        assert!(!expanded.contains("hidden"), "{expanded}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn inline_library_scope_errors_are_line_aware() {
+        for (deck, expected_line, expected_message) in [
+            (
+                ".endl orphan\n",
+                1,
+                ".ENDL encountered without an open .LIB section",
+            ),
+            (
+                ".lib first\n.endl second\n",
+                2,
+                ".ENDL section 'second' does not match open .LIB section 'first'",
+            ),
+            (
+                ".lib unfinished\nR1 1 0 1\n",
+                1,
+                "Library section 'unfinished' missing .ENDL",
+            ),
+        ] {
+            let err = IncludeProcessor::new(Path::new("deck.cir"))
+                .expand_content(deck, Path::new("deck.cir"))
+                .expect_err("malformed inline library scope must reject");
+            match err {
+                ParseError::Syntax { line, message } => {
+                    assert_eq!(line, expected_line, "{message}");
+                    assert!(message.contains(expected_message), "{message}");
+                }
+                other => panic!("expected syntax error, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn lib_parser_rejects_longer_directive_lookalikes() {
+        assert_eq!(parse_lib_directive(".libs foo"), None);
+        assert_eq!(parse_lib_directive(".library foo"), None);
+        assert_eq!(
+            parse_lib_directive(".LIB \"model cards.lib\" nominal"),
+            Some(("model cards.lib".to_string(), Some("nominal".to_string())))
+        );
     }
 
     fn unique_include_temp_dir(label: &str) -> PathBuf {
