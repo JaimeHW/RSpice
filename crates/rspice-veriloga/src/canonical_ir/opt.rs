@@ -272,6 +272,13 @@ pub enum OptValueKind {
     ParamGiven {
         parameter: ParamId,
     },
+    SimParam {
+        name: SmolStr,
+        fallback: ValueId,
+    },
+    SimParamGiven {
+        name: SmolStr,
+    },
     Temperature,
     ThermalVoltage,
     Multiplicity,
@@ -767,6 +774,8 @@ enum OptValueKey {
     BooleanConstant(bool),
     Parameter(ParamId),
     ParamGiven(ParamId),
+    SimParam(SmolStr, ValueId),
+    SimParamGiven(SmolStr),
     Temperature,
     ThermalVoltage,
     Multiplicity,
@@ -834,6 +843,8 @@ impl OptValueKey {
             OptValueKind::BooleanConstant(value) => Self::BooleanConstant(*value),
             OptValueKind::Parameter { parameter } => Self::Parameter(*parameter),
             OptValueKind::ParamGiven { parameter } => Self::ParamGiven(*parameter),
+            OptValueKind::SimParam { name, fallback } => Self::SimParam(name.clone(), *fallback),
+            OptValueKind::SimParamGiven { name } => Self::SimParamGiven(name.clone()),
             OptValueKind::Temperature => Self::Temperature,
             OptValueKind::ThermalVoltage => Self::ThermalVoltage,
             OptValueKind::Multiplicity => Self::Multiplicity,
@@ -1116,6 +1127,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::BooleanConstant(_)
             | OptValueKind::Parameter { .. }
             | OptValueKind::ParamGiven { .. }
+            | OptValueKind::SimParamGiven { .. }
             | OptValueKind::Temperature
             | OptValueKind::ThermalVoltage
             | OptValueKind::Multiplicity
@@ -1129,6 +1141,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::RuntimeLoopVariableDerivative { .. }
             | OptValueKind::EquationValue { .. }
             | OptValueKind::DdtScale => {}
+            OptValueKind::SimParam { fallback, .. } => stack.push(fallback),
             OptValueKind::RuntimeLoopResult { loop_id, .. }
             | OptValueKind::RuntimeLoopResultDerivative { loop_id, .. } => {
                 self.push_runtime_loop_live_dependencies(loop_id, stack);
@@ -1325,8 +1338,9 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     /// Fold assignments only when every write to the variable belongs to one
     /// unfiltered `initial_step` event and each sequential result is entirely
-    /// instance- or temperature-static. Exact semantic provenance ensures this
-    /// removes no nested user condition and fails closed for other event shapes.
+    /// instance-/temperature-static or a live simulator-parameter expression.
+    /// Exact semantic provenance ensures this removes no nested user condition
+    /// and fails closed for other event shapes.
     fn lower_static_unfiltered_initial_step_assignment(
         &mut self,
         assignment: &HirAssignment,
@@ -1370,10 +1384,15 @@ impl<'a> ScalarGraphBuilder<'a> {
             };
 
         let mut memo = vec![None; self.values.len()];
-        match value_invalidation(&self.values, value, &mut memo) {
-            InvalidationClass::InstanceStatic | InvalidationClass::TemperatureStatic => Some(value),
-            _ => None,
-        }
+        let invalidation = value_invalidation(&self.values, value, &mut memo);
+        let mut live_simparam_memo = vec![None; self.values.len()];
+        let (simparam_safe, contains_simparam) =
+            value_is_live_simparam_expression(&self.values, value, &mut live_simparam_memo);
+        (matches!(
+            invalidation,
+            InvalidationClass::InstanceStatic | InvalidationClass::TemperatureStatic
+        ) || (simparam_safe && contains_simparam))
+            .then_some(value)
     }
 
     fn prove_initial_step_group_static(&mut self, variable: VariableId, guard_name: &str) -> bool {
@@ -1452,10 +1471,15 @@ impl<'a> ScalarGraphBuilder<'a> {
                 active
             };
             let mut memo = vec![None; self.values.len()];
-            if !matches!(
-                value_invalidation(&self.values, value, &mut memo),
+            let invalidation = value_invalidation(&self.values, value, &mut memo);
+            let mut live_simparam_memo = vec![None; self.values.len()];
+            let (simparam_safe, contains_simparam) =
+                value_is_live_simparam_expression(&self.values, value, &mut live_simparam_memo);
+            if !(matches!(
+                invalidation,
                 InvalidationClass::InstanceStatic | InvalidationClass::TemperatureStatic
-            ) {
+            ) || simparam_safe && contains_simparam)
+            {
                 return false;
             }
             fallback = value;
@@ -3864,6 +3888,7 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::BooleanConstant(_)
             | OptValueKind::Parameter { .. }
             | OptValueKind::ParamGiven { .. }
+            | OptValueKind::SimParamGiven { .. }
             | OptValueKind::Temperature
             | OptValueKind::ThermalVoltage
             | OptValueKind::Multiplicity
@@ -3875,6 +3900,29 @@ impl<'a> ScalarGraphBuilder<'a> {
             | OptValueKind::RuntimeLoopVariableDerivative { .. }
             | OptValueKind::RuntimeLoopResultDerivative { .. }
             | OptValueKind::EquationValue { .. } => BTreeMap::new(),
+            OptValueKind::SimParam { name, fallback } => {
+                let fallback_derivatives = self.derivative_map(fallback);
+                if fallback_derivatives.is_empty() {
+                    return BTreeMap::new();
+                }
+                let condition =
+                    self.push_value(OptValueType::Boolean, OptValueKind::SimParamGiven { name });
+                let zero = self.push_value(OptValueType::Real, OptValueKind::RealConstant(0.0));
+                fallback_derivatives
+                    .into_iter()
+                    .map(|(lane, derivative)| {
+                        let selected = self.push_value(
+                            OptValueType::Real,
+                            OptValueKind::Select {
+                                condition,
+                                then_value: zero,
+                                else_value: derivative,
+                            },
+                        );
+                        (lane, selected)
+                    })
+                    .collect()
+            }
             OptValueKind::RuntimeLoopVariable { loop_id, slot } => self
                 .all_derivative_lanes()
                 .into_iter()
@@ -7983,11 +8031,25 @@ impl<'a> ScalarGraphBuilder<'a> {
                 );
                 Some(self.push_binary_value(OptBinaryOp::Mul, temperature, scale))
             }
-            "$simparam" if args.len() == 1 => {
-                let default = self.simparam_default(args[0])?;
-                Some(self.push_value(OptValueType::Real, OptValueKind::RealConstant(default)))
+            "$simparam" if args.len() == 1 || args.len() == 2 => {
+                let expression = self.mir.expressions.get(usize::from(args[0]))?;
+                let HirExprKind::StringLiteral { value: name } = &expression.kind else {
+                    return None;
+                };
+                let fallback = if let Some(fallback) = args.get(1) {
+                    self.lower_expression(*fallback)?
+                } else {
+                    let default = self.simparam_default(args[0]).unwrap_or(0.0);
+                    self.push_value(OptValueType::Real, OptValueKind::RealConstant(default))
+                };
+                Some(self.push_value(
+                    OptValueType::Real,
+                    OptValueKind::SimParam {
+                        name: SmolStr::new(name.to_ascii_lowercase()),
+                        fallback,
+                    },
+                ))
             }
-            "$simparam" if args.len() == 2 => self.lower_expression(args[1]),
             "$param_given" if args.len() == 1 => {
                 let parameter = self.parameter_arg(args[0])?;
                 Some(self.push_value(OptValueType::Real, OptValueKind::ParamGiven { parameter }))
@@ -9011,6 +9073,11 @@ fn remap_value_kind(kind: &OptValueKind, remap: &[Option<ValueId>]) -> OptValueK
         OptValueKind::ParamGiven { parameter } => OptValueKind::ParamGiven {
             parameter: *parameter,
         },
+        OptValueKind::SimParam { name, fallback } => OptValueKind::SimParam {
+            name: name.clone(),
+            fallback: remap_value_id(*fallback, remap),
+        },
+        OptValueKind::SimParamGiven { name } => OptValueKind::SimParamGiven { name: name.clone() },
         OptValueKind::Temperature => OptValueKind::Temperature,
         OptValueKind::ThermalVoltage => OptValueKind::ThermalVoltage,
         OptValueKind::Multiplicity => OptValueKind::Multiplicity,
@@ -9156,6 +9223,14 @@ fn validate_value_kind(diagnostics: &mut Vec<IrDiagnostic>, opt: &OptModel, valu
         | OptValueKind::RuntimeLoopVariableDerivative { .. }
         | OptValueKind::RuntimeLoopResult { .. }
         | OptValueKind::RuntimeLoopResultDerivative { .. } => {}
+        OptValueKind::SimParam { fallback, .. } => validate_value_operand(
+            diagnostics,
+            opt.values.len(),
+            value.id,
+            *fallback,
+            "simparam fallback",
+        ),
+        OptValueKind::SimParamGiven { .. } => {}
         OptValueKind::Ddx {
             value: input,
             pos_node,
@@ -9629,6 +9704,8 @@ fn value_invalidation(
             InvalidationClass::TemperatureStatic
         }
         OptValueKind::Multiplicity
+        | OptValueKind::SimParam { .. }
+        | OptValueKind::SimParamGiven { .. }
         | OptValueKind::Time
         | OptValueKind::Analysis { .. }
         | OptValueKind::Ddx { .. }
@@ -9675,6 +9752,71 @@ fn value_invalidation(
     invalidation
 }
 
+/// Returns whether `value` can be safely propagated out of an unfiltered
+/// `initial_step` assignment and whether it actually contains a live
+/// simulator-parameter query. This deliberately accepts only pure scalar
+/// expressions whose non-static leaves are `$simparam`; circuit state, time,
+/// analysis predicates, derivatives, and runtime loops fail closed.
+fn value_is_live_simparam_expression(
+    values: &[OptValue],
+    value: ValueId,
+    memo: &mut [Option<(bool, bool)>],
+) -> (bool, bool) {
+    let index = usize::from(value);
+    if let Some(result) = memo[index] {
+        return result;
+    }
+
+    let combine = |left: (bool, bool), right: (bool, bool)| (left.0 && right.0, left.1 || right.1);
+    let result = match values[index].kind {
+        OptValueKind::RealConstant(_)
+        | OptValueKind::BooleanConstant(_)
+        | OptValueKind::Parameter { .. }
+        | OptValueKind::ParamGiven { .. }
+        | OptValueKind::Temperature
+        | OptValueKind::ThermalVoltage
+        | OptValueKind::Multiplicity => (true, false),
+        OptValueKind::SimParam { fallback, .. } => {
+            let (safe, _) = value_is_live_simparam_expression(values, fallback, memo);
+            (safe, true)
+        }
+        OptValueKind::SimParamGiven { .. } => (true, true),
+        OptValueKind::Unary { input, .. } => value_is_live_simparam_expression(values, input, memo),
+        OptValueKind::Binary { left, right, .. } => combine(
+            value_is_live_simparam_expression(values, left, memo),
+            value_is_live_simparam_expression(values, right, memo),
+        ),
+        OptValueKind::Select {
+            condition,
+            then_value,
+            else_value,
+        } => combine(
+            value_is_live_simparam_expression(values, condition, memo),
+            combine(
+                value_is_live_simparam_expression(values, then_value, memo),
+                value_is_live_simparam_expression(values, else_value, memo),
+            ),
+        ),
+        OptValueKind::Time
+        | OptValueKind::Analysis { .. }
+        | OptValueKind::Ddx { .. }
+        | OptValueKind::Ddt { .. }
+        | OptValueKind::DdtScale
+        | OptValueKind::NodePotential { .. }
+        | OptValueKind::BranchFlow { .. }
+        | OptValueKind::BranchUnknownFlow { .. }
+        | OptValueKind::LoopIndex { .. }
+        | OptValueKind::CountedSum { .. }
+        | OptValueKind::RuntimeLoopVariable { .. }
+        | OptValueKind::RuntimeLoopVariableDerivative { .. }
+        | OptValueKind::RuntimeLoopResult { .. }
+        | OptValueKind::RuntimeLoopResultDerivative { .. }
+        | OptValueKind::EquationValue { .. } => (false, false),
+    };
+    memo[index] = Some(result);
+    result
+}
+
 fn value_depends_on_parameter(
     values: &[OptValue],
     value: ValueId,
@@ -9687,8 +9829,12 @@ fn value_depends_on_parameter(
 
     let depends = match values[index].kind {
         OptValueKind::Parameter { .. } | OptValueKind::ParamGiven { .. } => true,
+        OptValueKind::SimParam { fallback, .. } => {
+            value_depends_on_parameter(values, fallback, memo)
+        }
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
+        | OptValueKind::SimParamGiven { .. }
         | OptValueKind::Temperature
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity
@@ -9747,10 +9893,14 @@ fn value_depends_on_temperature(
 
     let depends = match values[index].kind {
         OptValueKind::Temperature | OptValueKind::ThermalVoltage => true,
+        OptValueKind::SimParam { fallback, .. } => {
+            value_depends_on_temperature(values, fallback, memo)
+        }
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
         | OptValueKind::ParamGiven { .. }
+        | OptValueKind::SimParamGiven { .. }
         | OptValueKind::Multiplicity
         | OptValueKind::Time
         | OptValueKind::Analysis { .. }
@@ -9809,10 +9959,14 @@ fn value_depends_on_loop_index(
         OptValueKind::LoopIndex { .. }
         | OptValueKind::RuntimeLoopVariable { .. }
         | OptValueKind::RuntimeLoopVariableDerivative { .. } => true,
+        OptValueKind::SimParam { fallback, .. } => {
+            value_depends_on_loop_index(values, fallback, memo)
+        }
         OptValueKind::RealConstant(_)
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
         | OptValueKind::ParamGiven { .. }
+        | OptValueKind::SimParamGiven { .. }
         | OptValueKind::Temperature
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity

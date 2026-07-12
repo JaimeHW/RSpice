@@ -498,7 +498,7 @@ pub struct Instance {
     pub(crate) time: f64,
     pub(crate) timestep: f64,
     pub(crate) ddt_coefficients: GeneratedDdtCoefficients,
-    pub(crate) scalar_static_f64: Box<[f64; 410]>,
+    pub(crate) scalar_static_f64: Box<[f64; 406]>,
     pub(crate) scalar_static_bool: Box<[bool; 86]>,
     pub(crate) scalar_temperature_static_valid: bool,
     pub(crate) scalar_temperature_static_temperature: f64,
@@ -571,7 +571,7 @@ impl Instance {
             time: 0.0,
             timestep: 0.0,
             ddt_coefficients: GeneratedDdtCoefficients::inactive(),
-            scalar_static_f64: boxed_zero_f64_array::<410>(),
+            scalar_static_f64: boxed_zero_f64_array::<406>(),
             scalar_static_bool: boxed_zero_bool_array::<86>(),
             scalar_temperature_static_valid: false,
             scalar_temperature_static_temperature: 0.0,
@@ -1219,28 +1219,24 @@ impl Instance {
         self.scalar_static_f64[372]=(if self.scalar_static_bool[30]{self.scalar_static_f64[0]}else{self.scalar_static_f64[370]});
         self.scalar_static_f64[373]=(if self.scalar_static_bool[30]{0.0}else{self.scalar_static_f64[371]});
         self.scalar_static_f64[374]=(if self.scalar_static_bool[30]{self.scalar_static_f64[331]}else{0.0});
-        self.scalar_static_f64[375]=(0.0*self.scalar_static_f64[331]);
-        self.scalar_static_f64[376]=(self.scalar_static_f64[0]*0.0);
-        self.scalar_static_f64[377]=(0.0*self.scalar_static_f64[332]);
-        self.scalar_static_f64[378]=(0.0*self.scalar_static_f64[333]);
-        self.scalar_static_f64[379]=(self.scalar_static_f64[301]-1.0);
-        self.scalar_static_f64[380]=(self.scalar_static_f64[0]/self.scalar_static_f64[304]);
-        self.scalar_static_f64[381]=(self.scalar_static_f64[332]/self.scalar_static_f64[304]);
-        self.scalar_static_f64[382]=(self.scalar_static_f64[333]/self.scalar_static_f64[304]);
-        self.scalar_static_f64[383]=(self.scalar_static_f64[331]/self.scalar_static_f64[304]);
-        self.scalar_static_f64[384]=(self.scalar_static_f64[309]-1.0);
-        self.scalar_static_f64[385]=(self.scalar_static_f64[0]*0.2);
-        self.scalar_static_f64[386]=(0.2*self.scalar_static_f64[331]);
-        self.scalar_static_f64[387]=(self.scalar_static_f64[315]-1.0);
-        self.scalar_static_f64[388]=(1.0/self.scalar_static_f64[14]);
-        self.scalar_static_f64[389]=(self.scalar_static_f64[0]*self.scalar_static_f64[0]);
-        self.scalar_static_f64[390]=(self.scalar_static_f64[0]*self.scalar_static_f64[331]);
-        self.scalar_static_f64[391]=(self.scalar_static_f64[0]*self.scalar_static_f64[329]);
-        self.scalar_static_f64[392]=(self.scalar_static_f64[329]*self.scalar_static_f64[331]);
-        self.scalar_static_f64[393]=(self.scalar_static_f64[330]*self.scalar_static_f64[331]);
-        self.scalar_static_f64[394]=(self.scalar_static_f64[0]*self.scalar_static_f64[330]);
-        self.scalar_static_f64[395]=(self.scalar_static_f64[0]*self.scalar_static_f64[332]);
-        self.scalar_static_f64[396]=(self.scalar_static_f64[0]*self.scalar_static_f64[333]);
+        self.scalar_static_f64[375]=(self.scalar_static_f64[301]-1.0);
+        self.scalar_static_f64[376]=(self.scalar_static_f64[0]/self.scalar_static_f64[304]);
+        self.scalar_static_f64[377]=(self.scalar_static_f64[332]/self.scalar_static_f64[304]);
+        self.scalar_static_f64[378]=(self.scalar_static_f64[333]/self.scalar_static_f64[304]);
+        self.scalar_static_f64[379]=(self.scalar_static_f64[331]/self.scalar_static_f64[304]);
+        self.scalar_static_f64[380]=(self.scalar_static_f64[309]-1.0);
+        self.scalar_static_f64[381]=(self.scalar_static_f64[0]*0.2);
+        self.scalar_static_f64[382]=(0.2*self.scalar_static_f64[331]);
+        self.scalar_static_f64[383]=(self.scalar_static_f64[315]-1.0);
+        self.scalar_static_f64[384]=(1.0/self.scalar_static_f64[14]);
+        self.scalar_static_f64[385]=(self.scalar_static_f64[0]*self.scalar_static_f64[0]);
+        self.scalar_static_f64[386]=(self.scalar_static_f64[0]*self.scalar_static_f64[331]);
+        self.scalar_static_f64[387]=(self.scalar_static_f64[0]*self.scalar_static_f64[329]);
+        self.scalar_static_f64[388]=(self.scalar_static_f64[329]*self.scalar_static_f64[331]);
+        self.scalar_static_f64[389]=(self.scalar_static_f64[330]*self.scalar_static_f64[331]);
+        self.scalar_static_f64[390]=(self.scalar_static_f64[0]*self.scalar_static_f64[330]);
+        self.scalar_static_f64[391]=(self.scalar_static_f64[0]*self.scalar_static_f64[332]);
+        self.scalar_static_f64[392]=(self.scalar_static_f64[0]*self.scalar_static_f64[333]);
     }
 
     #[inline]
@@ -1261,19 +1257,19 @@ impl Instance {
     #[inline]
     fn recompute_temperature_static(&mut self, temperature: f64, thermal_voltage: f64) {
         let p = &(*self.params);
-        self.scalar_static_f64[397]=(temperature+self.scalar_static_f64[10]);
-        self.scalar_static_f64[398]=(self.scalar_static_f64[397]/self.scalar_static_f64[9]);
-        self.scalar_static_f64[399]=f64::powf(self.scalar_static_f64[398],self.scalar_static_f64[197]);
-        self.scalar_static_f64[400]=(self.scalar_static_f64[196]*self.scalar_static_f64[399]);
-        self.scalar_static_f64[401]=(self.scalar_static_f64[397]/self.scalar_static_f64[400]);
-        self.scalar_static_f64[402]=(self.scalar_static_f64[15]*self.scalar_static_f64[401]);
-        self.scalar_static_f64[403]=(self.scalar_static_f64[400]*self.scalar_static_f64[315]);
-        self.scalar_static_f64[404]=(self.scalar_static_f64[397]/self.scalar_static_f64[403]);
-        self.scalar_static_f64[405]=(self.scalar_static_f64[15]*self.scalar_static_f64[404]);
-        self.scalar_static_f64[406]=(1.0/self.scalar_static_f64[400]);
-        self.scalar_static_f64[407]=(self.scalar_static_f64[15]*self.scalar_static_f64[406]);
-        self.scalar_static_f64[408]=(if self.scalar_static_bool[70]{self.scalar_static_f64[407]}else{0.0});
-        self.scalar_static_f64[409]=(1.0/self.scalar_static_f64[397]);
+        self.scalar_static_f64[393]=(temperature+self.scalar_static_f64[10]);
+        self.scalar_static_f64[394]=(self.scalar_static_f64[393]/self.scalar_static_f64[9]);
+        self.scalar_static_f64[395]=f64::powf(self.scalar_static_f64[394],self.scalar_static_f64[197]);
+        self.scalar_static_f64[396]=(self.scalar_static_f64[196]*self.scalar_static_f64[395]);
+        self.scalar_static_f64[397]=(self.scalar_static_f64[393]/self.scalar_static_f64[396]);
+        self.scalar_static_f64[398]=(self.scalar_static_f64[15]*self.scalar_static_f64[397]);
+        self.scalar_static_f64[399]=(self.scalar_static_f64[396]*self.scalar_static_f64[315]);
+        self.scalar_static_f64[400]=(self.scalar_static_f64[393]/self.scalar_static_f64[399]);
+        self.scalar_static_f64[401]=(self.scalar_static_f64[15]*self.scalar_static_f64[400]);
+        self.scalar_static_f64[402]=(1.0/self.scalar_static_f64[396]);
+        self.scalar_static_f64[403]=(self.scalar_static_f64[15]*self.scalar_static_f64[402]);
+        self.scalar_static_f64[404]=(if self.scalar_static_bool[70]{self.scalar_static_f64[403]}else{0.0});
+        self.scalar_static_f64[405]=(1.0/self.scalar_static_f64[393]);
         self.scalar_temperature_static_temperature = temperature;
         self.scalar_temperature_static_thermal_voltage = thermal_voltage;
         self.scalar_temperature_static_valid = true;

@@ -74,6 +74,9 @@ impl CircuitData {
             #[cfg(feature = "veriloga-builtins")]
             generated_veriloga_devices:
                 crate::device::veriloga_generated::BuiltinVerilogADevices::new(),
+            #[cfg(feature = "veriloga-builtins")]
+            generated_simulation_parameters:
+                crate::device::veriloga_generated::GeneratedSimulationParameters::default(),
         }
     }
 

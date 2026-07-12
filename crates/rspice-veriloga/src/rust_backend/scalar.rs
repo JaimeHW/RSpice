@@ -3377,6 +3377,13 @@ fn emit_value_expr(
             let index = usize::from(*parameter);
             format!("if {}[{index}]{{1.0}}else{{0.0}}", context.param_given_expr)
         }
+        OptValueKind::SimParam { name, fallback } => {
+            let fallback = value_ref(artifact, parameter_fields, *fallback, context)?;
+            format!("ctx.simparam_or({:?}, {fallback})", name.as_str())
+        }
+        OptValueKind::SimParamGiven { name } => {
+            format!("ctx.has_simparam({:?})", name.as_str())
+        }
         OptValueKind::Temperature => context.temperature_expr.clone(),
         OptValueKind::ThermalVoltage => context.thermal_voltage_expr.clone(),
         OptValueKind::Multiplicity => context.multiplicity_expr.to_string(),
@@ -5029,6 +5036,9 @@ fn value_graph_contains_ddt(
         .ok_or_else(|| unsupported(artifact, format!("missing scalar value {value}")))?;
     match value_slot.kind {
         OptValueKind::Ddt { .. } => Ok(true),
+        OptValueKind::SimParam { fallback, .. } => {
+            value_graph_contains_ddt(artifact, fallback, visited)
+        }
         OptValueKind::Ddx { value: input, .. } | OptValueKind::Unary { input, .. } => {
             value_graph_contains_ddt(artifact, input, visited)
         }
@@ -5059,6 +5069,7 @@ fn value_graph_contains_ddt(
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
         | OptValueKind::ParamGiven { .. }
+        | OptValueKind::SimParamGiven { .. }
         | OptValueKind::Temperature
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity
@@ -5541,6 +5552,7 @@ fn scalar_value_dependencies(
             neg_node,
         } => projected_ddx_derivative_values(artifact, value, pos_node, neg_node)?,
         OptValueKind::Ddt { input, .. } => vec![input],
+        OptValueKind::SimParam { fallback, .. } => vec![fallback],
         OptValueKind::CountedSum { count, initial, .. } => vec![count, initial],
         OptValueKind::RuntimeLoopResult { loop_id, .. } => {
             runtime_loop_initial_values(artifact, loop_id)?
@@ -5559,6 +5571,7 @@ fn scalar_value_dependencies(
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
         | OptValueKind::ParamGiven { .. }
+        | OptValueKind::SimParamGiven { .. }
         | OptValueKind::Temperature
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity
@@ -5856,6 +5869,7 @@ fn scalar_value_dependency_values(
         | OptValueKind::BooleanConstant(_)
         | OptValueKind::Parameter { .. }
         | OptValueKind::ParamGiven { .. }
+        | OptValueKind::SimParamGiven { .. }
         | OptValueKind::Temperature
         | OptValueKind::ThermalVoltage
         | OptValueKind::Multiplicity
@@ -5869,6 +5883,7 @@ fn scalar_value_dependency_values(
         | OptValueKind::RuntimeLoopVariableDerivative { .. }
         | OptValueKind::EquationValue { .. }
         | OptValueKind::DdtScale => Vec::new(),
+        OptValueKind::SimParam { fallback, .. } => vec![fallback],
         OptValueKind::RuntimeLoopResult { loop_id, .. }
             if mode == ScalarValueDependencyMode::Stamp =>
         {

@@ -215,6 +215,8 @@ impl<'a> OptEvaluator<'a> {
                 parameter.index(),
             )?)),
             OptValueKind::ParamGiven { .. } => Ok(OptEvalValue::Real(0.0)),
+            OptValueKind::SimParam { fallback, .. } => self.value_at(*fallback),
+            OptValueKind::SimParamGiven { .. } => Ok(OptEvalValue::Boolean(false)),
             OptValueKind::Temperature => Ok(OptEvalValue::Real(300.15)),
             OptValueKind::ThermalVoltage => Ok(OptEvalValue::Real(300.15 * THERMAL_VOLTAGE_PER_K)),
             OptValueKind::Multiplicity => Ok(OptEvalValue::Real(1.0)),
@@ -475,6 +477,9 @@ impl<'a> OptEvaluator<'a> {
             OptValueKind::LoopIndex { .. }
             | OptValueKind::RuntimeLoopVariable { .. }
             | OptValueKind::RuntimeLoopVariableDerivative { .. } => true,
+            OptValueKind::SimParam { fallback, .. } => {
+                self.value_depends_on_loop_index(fallback, memo)
+            }
             OptValueKind::Unary { input, .. } => self.value_depends_on_loop_index(input, memo),
             OptValueKind::Binary { left, right, .. } => {
                 self.value_depends_on_loop_index(left, memo)
@@ -506,6 +511,7 @@ impl<'a> OptEvaluator<'a> {
             | OptValueKind::BooleanConstant(_)
             | OptValueKind::Parameter { .. }
             | OptValueKind::ParamGiven { .. }
+            | OptValueKind::SimParamGiven { .. }
             | OptValueKind::Temperature
             | OptValueKind::ThermalVoltage
             | OptValueKind::Multiplicity

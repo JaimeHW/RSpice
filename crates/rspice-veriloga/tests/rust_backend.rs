@@ -1,3 +1,4 @@
+use rspice_veriloga::canonical_ir::{InvalidationClass, OptOp, OptValueKind};
 use rspice_veriloga::rust_backend::{
     GeneratedBuiltinManifest, GeneratedRustDevice, GeneratedRustDeviceReport, GeneratedRustFile,
     RustBackendError, RustBackendSelection, RustDeviceNames, RustTranspileOptions, RustTranspiler,
@@ -13699,6 +13700,14 @@ pub mod runtime {{
             self.voltages.get(branch_ordinal).copied().unwrap_or(0.0)
         }}
 
+        pub fn simparam_or(&self, _name: &str, fallback: f64) -> f64 {{
+            fallback
+        }}
+
+        pub fn has_simparam(&self, _name: &str) -> bool {{
+            false
+        }}
+
         pub fn analysis(&self, query: &str) -> bool {{
             self.analysis.matches_query(query)
         }}
@@ -14459,6 +14468,14 @@ pub mod runtime {{
 
         pub fn branch_current(&self, branch_ordinal: usize) -> f64 {{
             self.voltages.get(branch_ordinal).copied().unwrap_or(0.0)
+        }}
+
+        pub fn simparam_or(&self, _name: &str, fallback: f64) -> f64 {{
+            fallback
+        }}
+
+        pub fn has_simparam(&self, _name: &str) -> bool {{
+            false
         }}
 
         pub fn analysis(&self, query: &str) -> bool {{
@@ -15341,6 +15358,87 @@ fn generated_simparam_parameter_default_rust_compiles_with_runtime_stub() {
     .transpile(&artifact)
     .expect("transpile simparam default");
 
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn generated_scalar_simparam_is_a_live_context_query() {
+    let source = r#"
+`include "disciplines.vams"
+module live_simparam(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ $simparam("gmin", 4.0) * V(p, n);
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("canonical IR");
+    let simparam = artifact
+        .opt
+        .values
+        .iter()
+        .find(|value| matches!(&value.kind, OptValueKind::SimParam { name, .. } if name == "gmin"))
+        .expect("simparam remains represented in OptIR");
+    assert!(
+        artifact.opt.schedules.iter().all(|schedule| {
+            schedule.invalidation == InvalidationClass::NewtonIteration
+                || schedule
+                    .ops
+                    .iter()
+                    .all(|op| !matches!(op, OptOp::ComputeValue { value } if *value == simparam.id))
+        }),
+        "simparam must never enter a static cache"
+    );
+
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile live simparam");
+    let generated_source = generated
+        .files
+        .iter()
+        .map(|file| file.contents.as_str())
+        .collect::<String>();
+    assert!(
+        generated_source.contains("ctx.simparam_or(\"gmin\", 4.0)"),
+        "{generated_source}"
+    );
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
+fn generated_scalar_simparam_override_suppresses_fallback_derivative() {
+    let source = r#"
+`include "disciplines.vams"
+module live_simparam_fallback(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ $simparam("custom", V(p, n));
+endmodule
+"#;
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("canonical IR");
+    assert!(artifact.opt.values.iter().any(
+        |value| matches!(&value.kind, OptValueKind::SimParamGiven { name } if name == "custom")
+    ));
+
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile simparam fallback derivative");
+    let generated_source = generated
+        .files
+        .iter()
+        .map(|file| file.contents.as_str())
+        .collect::<String>();
+    assert!(
+        generated_source.contains("ctx.has_simparam(\"custom\")"),
+        "{generated_source}"
+    );
     assert_generated_rust_compiles(&generated);
 }
 

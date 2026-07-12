@@ -884,7 +884,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 4);
+    assert_eq!(metadata.schema_version, 5);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -1455,6 +1455,41 @@ fn opt_lowering_folds_temperature_static_unfiltered_initial_step_initialization(
             .iter()
             .any(|schedule| schedule.invalidation == InvalidationClass::TemperatureStatic)
     );
+}
+
+#[test]
+fn opt_lowering_propagates_live_simparam_initial_step_alias() {
+    let source =
+        initial_step_assignment_source("@(initial_step) seed = $simparam(\"gain_scale\", gain);");
+    let opt = lower_initial_step_assignment(&source);
+    let root = equation_scalar_root(&opt, EquationId::new(0));
+    assert!(!value_depends_on_initial_step(&opt, root));
+    assert!(opt.values.iter().any(|value| matches!(
+        &value.kind,
+        OptValueKind::SimParam { name, .. } if name == "gain_scale"
+    )));
+    assert_eq!(
+        opt.evaluate(&OptEvalInputs {
+            parameters: vec![2.0],
+            node_potentials: vec![3.0, 0.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate live simparam fallback")
+        .real(root),
+        Some(6.0)
+    );
+}
+
+#[test]
+fn opt_lowering_keeps_state_dependent_simparam_fallback_guarded() {
+    let source = initial_step_assignment_source(
+        "@(initial_step) seed = $simparam(\"stateful_fallback\", V(p, n));",
+    );
+    let opt = lower_initial_step_assignment(&source);
+    assert!(value_depends_on_initial_step(
+        &opt,
+        equation_scalar_root(&opt, EquationId::new(0))
+    ));
 }
 
 #[test]
@@ -2592,7 +2627,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=4"));
+    assert!(first.contains("schema_version=5"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("compiler_version="));

@@ -59,6 +59,22 @@ mod tests {
         assert_eq!(circuit.ekv26s.devices[0].eval_gmin(), 0.0);
     }
 
+    #[cfg(feature = "veriloga-builtins")]
+    #[test]
+    fn generated_simparam_gmin_is_solver_controlled_and_not_rolled_back() {
+        let mut circuit = CircuitData::new();
+        circuit.set_semiconductor_junction_gmin(1.0e-6);
+        let snapshot = circuit.nonlinear_state_snapshot();
+
+        circuit.set_semiconductor_junction_gmin(0.0);
+        circuit.restore_nonlinear_state(snapshot);
+
+        assert_eq!(
+            circuit.generated_simulation_parameters.get("gmin"),
+            Some(0.0)
+        );
+    }
+
     #[test]
     fn time_only_behavioral_source_does_not_make_circuit_nonlinear() {
         let mut circuit = CircuitData::new();
@@ -403,6 +419,8 @@ impl CircuitData {
         for dev in &mut self.ekv26s.devices {
             dev.set_eval_gmin(gmin);
         }
+        #[cfg(feature = "veriloga-builtins")]
+        self.generated_simulation_parameters.set_gmin(gmin);
     }
 
     /// Return true when any JFET-family compact model exposes a stiff gate
@@ -755,12 +773,14 @@ impl CircuitData {
                 _ => crate::device::veriloga_generated::GeneratedAnalysisKind::Dc,
             };
             let num_nodes = self.num_nodes;
+            let simparams = self.generated_simulation_parameters;
             self.generated_veriloga_devices_mut().stamp_all(
                 matrix,
                 rhs,
                 solution,
                 num_nodes,
                 generated_analysis,
+                simparams,
             );
         }
     }

@@ -159,9 +159,10 @@ impl BuiltinVerilogADevices {
         voltages: &[Value],
         num_nodes: usize,
         analysis: GeneratedAnalysisKind,
+        simparams: GeneratedSimulationParameters,
     ) {
         for device in &mut self.devices {
-            device.stamp(matrix, rhs, voltages, num_nodes, analysis);
+            device.stamp(matrix, rhs, voltages, num_nodes, analysis, simparams);
         }
     }
 
@@ -203,9 +204,10 @@ impl BuiltinVerilogADevices {
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
         num_nodes: usize,
+        simparams: GeneratedSimulationParameters,
     ) {
         for device in &mut self.devices {
-            device.stamp_ac_real(matrix, voltages, num_nodes);
+            device.stamp_ac_real(matrix, voltages, num_nodes, simparams);
         }
     }
 
@@ -215,9 +217,10 @@ impl BuiltinVerilogADevices {
         voltages: &[Value],
         num_nodes: usize,
         omega: Value,
+        simparams: GeneratedSimulationParameters,
     ) {
         for device in &mut self.devices {
-            device.stamp_reactive(matrix, voltages, num_nodes, omega);
+            device.stamp_reactive(matrix, voltages, num_nodes, omega, simparams);
         }
     }
 }
@@ -250,16 +253,18 @@ impl BuiltinVerilogAInstance {
         voltages: &[Value],
         num_nodes: usize,
         analysis: GeneratedAnalysisKind,
+        simparams: GeneratedSimulationParameters,
     ) {
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
-        let ctx = GeneratedEvalContext::with_analysis_step(
+        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
             voltages,
             self.temperature,
             num_nodes,
             analysis,
             self.analysis_initial_step,
             self.analysis_final_step,
+            simparams,
         );
         let mut stamper = GeneratedStamper::new_with_static_cache(
             matrix,
@@ -305,14 +310,16 @@ impl BuiltinVerilogAInstance {
         matrix: &mut ComplexMatrix,
         voltages: &[Value],
         num_nodes: usize,
+        simparams: GeneratedSimulationParameters,
     ) {
-        let ctx = GeneratedEvalContext::with_analysis_step(
+        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
             voltages,
             self.temperature,
             num_nodes,
             GeneratedAnalysisKind::Ac,
             self.analysis_initial_step,
             self.analysis_final_step,
+            simparams,
         );
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
@@ -332,14 +339,16 @@ impl BuiltinVerilogAInstance {
         voltages: &[Value],
         num_nodes: usize,
         omega: Value,
+        simparams: GeneratedSimulationParameters,
     ) {
-        let ctx = GeneratedEvalContext::with_analysis_step(
+        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
             voltages,
             self.temperature,
             num_nodes,
             GeneratedAnalysisKind::Ac,
             self.analysis_initial_step,
             self.analysis_final_step,
+            simparams,
         );
         self.static_stamp_cache
             .ensure_axis_indices(&self.nodes, &self.branches, num_nodes);
@@ -466,6 +475,54 @@ pub enum GeneratedAnalysisKind {
     Ic,
 }
 
+/// Simulator-owned parameters visible to generated Verilog-A `$simparam` calls.
+///
+/// `Option` distinguishes an explicitly configured zero from an unavailable
+/// parameter, in which case the model-provided fallback remains authoritative.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeneratedSimulationParameters {
+    gmin: Option<Value>,
+    pnjmaxi: Option<Value>,
+}
+
+impl GeneratedSimulationParameters {
+    #[inline]
+    pub const fn new() -> Self {
+        Self {
+            gmin: Some(crate::constants::GMIN),
+            pnjmaxi: None,
+        }
+    }
+
+    #[inline]
+    pub fn set_gmin(&mut self, value: Value) {
+        self.gmin = value.is_finite().then_some(value.max(0.0));
+    }
+
+    #[inline]
+    pub fn set_pnjmaxi(&mut self, value: Option<Value>) {
+        self.pnjmaxi = value.filter(|value| value.is_finite() && *value >= 0.0);
+    }
+
+    #[inline]
+    pub fn get(&self, name: &str) -> Option<Value> {
+        if name.eq_ignore_ascii_case("gmin") {
+            self.gmin
+        } else if name.eq_ignore_ascii_case("pnjmaxi") {
+            self.pnjmaxi
+        } else {
+            None
+        }
+    }
+}
+
+impl Default for GeneratedSimulationParameters {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GeneratedAnalysisKind {
     #[inline]
     fn matches_query(self, query: &str) -> bool {
@@ -490,6 +547,7 @@ pub struct GeneratedEvalContext<'a> {
     analysis: GeneratedAnalysisKind,
     analysis_initial_step: bool,
     analysis_final_step: bool,
+    simparams: GeneratedSimulationParameters,
 }
 
 impl<'a> GeneratedEvalContext<'a> {
@@ -517,6 +575,27 @@ impl<'a> GeneratedEvalContext<'a> {
         initial: bool,
         final_step: bool,
     ) -> Self {
+        Self::with_analysis_step_and_simparams(
+            voltages,
+            temperature,
+            num_nodes,
+            analysis,
+            initial,
+            final_step,
+            GeneratedSimulationParameters::default(),
+        )
+    }
+
+    #[inline]
+    pub fn with_analysis_step_and_simparams(
+        voltages: &'a [Value],
+        temperature: Value,
+        num_nodes: usize,
+        analysis: GeneratedAnalysisKind,
+        initial: bool,
+        final_step: bool,
+        simparams: GeneratedSimulationParameters,
+    ) -> Self {
         Self {
             voltages,
             temperature,
@@ -524,7 +603,18 @@ impl<'a> GeneratedEvalContext<'a> {
             analysis,
             analysis_initial_step: initial,
             analysis_final_step: final_step,
+            simparams,
         }
+    }
+
+    #[inline]
+    pub fn simparam_or(&self, name: &str, fallback: Value) -> Value {
+        self.simparams.get(name).unwrap_or(fallback)
+    }
+
+    #[inline]
+    pub fn has_simparam(&self, name: &str) -> bool {
+        self.simparams.get(name).is_some()
     }
 
     #[inline]
@@ -5099,7 +5189,7 @@ impl<'a> GeneratedReactiveStamper<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GeneratedAnalysisKind, GeneratedEvalContext};
+    use super::{GeneratedAnalysisKind, GeneratedEvalContext, GeneratedSimulationParameters};
 
     #[test]
     fn generated_analysis_predicates_match_runtime_contract() {
@@ -5124,5 +5214,39 @@ mod tests {
         assert!(ac.analysis_smallsig());
         assert!(!ac.analysis_initial_step());
         assert!(!ac.analysis_final_step());
+    }
+
+    #[test]
+    fn generated_simparams_distinguish_overrides_from_fallbacks() {
+        let voltages = [0.0];
+        let mut simparams = GeneratedSimulationParameters::default();
+        simparams.set_gmin(0.0);
+        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
+            &voltages,
+            300.15,
+            1,
+            GeneratedAnalysisKind::Dc,
+            false,
+            false,
+            simparams,
+        );
+
+        assert!(ctx.has_simparam("GMIN"));
+        assert_eq!(ctx.simparam_or("gmin", 9.0), 0.0);
+        assert!(!ctx.has_simparam("pnjmaxi"));
+        assert_eq!(ctx.simparam_or("PNJMAXI", 1.0), 1.0);
+        assert_eq!(ctx.simparam_or("unknown", 7.0), 7.0);
+
+        simparams.set_pnjmaxi(Some(2.5));
+        let ctx = GeneratedEvalContext::with_analysis_step_and_simparams(
+            &voltages,
+            300.15,
+            1,
+            GeneratedAnalysisKind::Dc,
+            false,
+            false,
+            simparams,
+        );
+        assert_eq!(ctx.simparam_or("pnjmaxi", 1.0), 2.5);
     }
 }
