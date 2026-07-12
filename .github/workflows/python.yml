@@ -34,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install Rust toolchain
@@ -176,6 +176,87 @@ jobs:
           path: crates/rspice-python/dist/*.whl
           if-no-files-found: error
       - name: Generate wheel provenance attestation
+        if: github.event_name != 'pull_request'
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: crates/rspice-python/dist/*.whl
+
+  free-threaded-wheels:
+    name: cp314t wheel (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: linux-x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2014"
+          - name: linux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2014"
+          - name: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            manylinux: "off"
+          - name: macos-x86_64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            manylinux: "off"
+          - name: windows-x86_64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            manylinux: "off"
+          - name: windows-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            manylinux: "off"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: wheels-cp314t-${{ matrix.platform.name }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14t"
+      - name: Build free-threaded CPython 3.14 wheel
+        uses: PyO3/maturin-action@3e2bdf6ba6453a61e649744019b8a2d906c7eb38 # v1.51.0
+        with:
+          maturin-version: v${{ env.MATURIN_VERSION }}
+          rust-toolchain: ${{ env.RUST_TOOLCHAIN }}
+          working-directory: crates/rspice-python
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux }}
+          args: --release --locked --compatibility pypi -i python3.14t --out dist
+      - name: Install cp314t wheel and verify the GIL stays disabled
+        shell: bash
+        working-directory: crates/rspice-python
+        run: |
+          python -m pip install --force-reinstall -c ci-constraints.txt dist/*.whl
+          python -Xgil=0 - <<'PY'
+          import sys
+          import rspice
+
+          assert not sys._is_gil_enabled()
+          netlist = rspice.Netlist.parse("V1 in 0 1\nR1 in 0 1k\n.op\n.end\n")
+          result = rspice.Engine().run_dc_op(netlist)
+          assert abs(result.voltage("in") - 1.0) < 1e-9
+          print(f"rspice {rspice.__version__} cp314t smoke passed with the GIL disabled")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheels-cp314t-${{ matrix.platform.name }}
+          path: crates/rspice-python/dist/*.whl
+          if-no-files-found: error
+      - name: Generate free-threaded wheel provenance attestation
         if: github.event_name != 'pull_request'
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
         with:

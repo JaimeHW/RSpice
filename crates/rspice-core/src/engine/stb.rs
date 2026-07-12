@@ -28,6 +28,7 @@
 //! what `StbAnalyzer` extracts.
 
 use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::advanced::stb::{StbAnalyzer, StbConfig, StbResult};
 use crate::{Complex64, Netlist, Value};
 use std::f64::consts::PI;
@@ -59,6 +60,19 @@ impl Engine {
         netlist: &Netlist,
         config: StbConfig,
     ) -> Result<StbAnalysisResult, SimulationError> {
+        self.run_stb_with_abort(netlist, config, &NoAbort)
+    }
+
+    /// Cancellable form of [`Self::run_stb`].
+    pub fn run_stb_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: StbConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<StbAnalysisResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         config
             .validate()
             .map_err(|err| SimulationError::Circuit(format!("Invalid STB config: {err}")))?;
@@ -133,7 +147,12 @@ impl Engine {
         circuit.link_indices(&matrix);
 
         let has_nonlinear = circuit.has_nonlinear_devices();
-        let dc_solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let dc_solution = engine.solve_dc_operating_point_with_abort(
+            netlist,
+            &mut circuit,
+            &mut matrix,
+            abort,
+        )?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if has_nonlinear {
             circuit.update_nonlinear(&dc_solution);
@@ -146,7 +165,10 @@ impl Engine {
         let frequencies = config.frequency_points();
         let mut loop_gains = Vec::with_capacity(frequencies.len());
 
-        for &freq in &frequencies {
+        for (frequency_index, &freq) in frequencies.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let omega = 2.0 * PI * freq;
             let mut ac_matrix =
                 Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
@@ -177,6 +199,11 @@ impl Engine {
                 d / denom
             };
             loop_gains.push(t);
+            abort.observe_progress((frequency_index + 1) as f64 / frequencies.len() as f64);
+        }
+
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
         }
 
         let analyzer = StbAnalyzer::new(config);

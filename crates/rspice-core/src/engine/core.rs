@@ -637,6 +637,7 @@ impl Engine {
     }
 
     /// Solve the DC operating point with optional node-voltage hints.
+    #[cfg(test)]
     pub(crate) fn solve_dc_operating_point(
         &self,
         netlist: &Netlist,

@@ -12,6 +12,7 @@
 //!    the probe voltage is the output impedance.
 
 use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::TransferFunctionResult;
 use crate::analysis::ac::AcResult;
 use crate::netlist::{Element, ElementKind, SourceSpec};
@@ -40,6 +41,29 @@ impl Engine {
         output_is_current: bool,
         input_source: &str,
     ) -> Result<TransferFunctionResult, SimulationError> {
+        self.run_transfer_function_with_abort(
+            netlist,
+            output_node,
+            reference_node,
+            output_is_current,
+            input_source,
+            &NoAbort,
+        )
+    }
+
+    /// Cancellable form of [`Self::run_transfer_function`].
+    pub fn run_transfer_function_with_abort(
+        &self,
+        netlist: &Netlist,
+        output_node: &str,
+        reference_node: Option<&str>,
+        output_is_current: bool,
+        input_source: &str,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransferFunctionResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         // Base deck: every independent source's AC excitation cleared, so
         // each solve below is driven purely by its own unit excitation.
         let mut base = netlist.clone();
@@ -60,7 +84,8 @@ impl Engine {
         // Solve 1: unit drive at the input source.
         let mut driven = base.clone();
         set_source_ac(&mut driven, input_source, 1.0, 0.0);
-        let drive_solution = self.single_zero_hz_solve(&driven)?;
+        let drive_solution = self.single_zero_hz_solve_with_abort(&driven, abort)?;
+        abort.observe_progress(0.5);
 
         let gain = if output_is_current {
             branch_current(&drive_solution, output_node).ok_or_else(|| {
@@ -119,9 +144,14 @@ impl Engine {
                 // injected into the probe's positive node.
                 nodes: vec![probe_neg.clone(), probe_pos.clone()],
             });
-            let zout_solution = self.single_zero_hz_solve(&zout_deck)?;
+            let zout_solution = self.single_zero_hz_solve_with_abort(&zout_deck, abort)?;
             voltage_difference(&zout_solution, &probe_pos, Some(&probe_neg))?
         };
+
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        abort.observe_progress(1.0);
 
         let probe_label = if output_is_current {
             format!("I({output_node})")
@@ -142,12 +172,18 @@ impl Engine {
     }
 
     /// Linearize at the DC operating point and solve once at 0 Hz.
-    fn single_zero_hz_solve(&self, netlist: &Netlist) -> Result<AcResult, SimulationError> {
-        self.run_ac(netlist, &[0.0])?.pop().ok_or_else(|| {
-            SimulationError::Circuit(
-                "transfer-function AC solve produced no sample at 0 Hz".to_string(),
-            )
-        })
+    fn single_zero_hz_solve_with_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<AcResult, SimulationError> {
+        self.run_ac_with_abort(netlist, &[0.0], abort)?
+            .pop()
+            .ok_or_else(|| {
+                SimulationError::Circuit(
+                    "transfer-function AC solve produced no sample at 0 Hz".to_string(),
+                )
+            })
     }
 }
 

@@ -1,6 +1,8 @@
 """Configuration classes: kwargs construction, copy semantics, enums."""
 
+import ast
 import math
+from pathlib import Path
 
 import pytest
 
@@ -235,8 +237,22 @@ class TestModuleSurface:
         assert isinstance(rspice.__author__, str)
 
     def test_all_exports_exist(self):
+        assert len(rspice.__all__) == len(set(rspice.__all__))
         for name in rspice.__all__:
             assert hasattr(rspice, name), f"__all__ lists missing attribute {name}"
+
+    def test_runtime_exports_match_installed_type_stub(self):
+        stub = Path(rspice.__file__).with_name("__init__.pyi")
+        assert stub.is_file(), "installed package is missing __init__.pyi"
+        module = ast.parse(stub.read_text(encoding="utf-8"), filename=str(stub))
+        assignment = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets)
+        )
+        stub_exports = ast.literal_eval(assignment.value)
+        assert stub_exports == rspice.__all__
 
     def test_exception_hierarchy(self):
         assert issubclass(rspice.ParseError, rspice.RSpiceError)

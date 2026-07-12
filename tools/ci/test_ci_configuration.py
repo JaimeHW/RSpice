@@ -291,7 +291,10 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn('requires-python = ">=3.10"', pyproject)
         self.assertIn('requires = ["maturin==1.14.1"]', pyproject)
-        self.assertIn('python: ["3.10", "3.11", "3.12", "3.13", "3.14"]', workflow)
+        self.assertIn(
+            'python: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]',
+            workflow,
+        )
         self.assertIn("maturin develop --release --locked", workflow)
         self.assertIn("args: --release --locked --compatibility pypi --out dist", workflow)
         self.assertIn("python -m pip install --force-reinstall -c ci-constraints.txt dist/*.whl", workflow)
@@ -303,7 +306,10 @@ class CiConfigurationTests(unittest.TestCase):
         )
         self.assertIn("python scripts/repair_sdist_lock.py", workflow)
         self.assertIn("CARGO_NET_OFFLINE=true", workflow)
-        self.assertEqual(workflow.count("actions/attest@"), 2)
+        self.assertIn("cp314t wheel (${{ matrix.platform.name }})", workflow)
+        self.assertIn("-i python3.14t", workflow)
+        self.assertIn("assert not sys._is_gil_enabled()", workflow)
+        self.assertEqual(workflow.count("actions/attest@"), 3)
         self.assertIn("subject-path: crates/rspice-python/dist/*.whl", workflow)
         self.assertIn("subject-path: crates/rspice-python/dist/*.tar.gz", workflow)
         self.assertIn("maturin==1.14.1", constraints)

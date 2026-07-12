@@ -89,6 +89,11 @@ fn ac_frequencies<'py>(
 /// analyses, plus .MEAS-based automated verification.
 #[pymodule]
 fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Every exposed Rust type is Send and internally immutable or protected by
+    // PyO3's per-object borrow checker. Keep the interpreter's GIL disabled on
+    // free-threaded CPython; CI runs the complete suite under Python 3.14t.
+    m.gil_used(false)?;
+
     // Version information
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add("__author__", "RSpice Contributors")?;

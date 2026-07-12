@@ -1,6 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use super::*;
+use crate::abort_signal::{AbortSignal, NoAbort};
 
 impl Engine {
     #[inline]
@@ -246,7 +247,18 @@ impl Engine {
         input_node: usize,
         output_node: usize,
     ) -> Result<PoleZeroResult, SimulationError> {
-        self.run_pz_ports(
+        self.run_pz_with_abort(netlist, input_node, output_node, &NoAbort)
+    }
+
+    /// Cancellable form of [`Self::run_pz`].
+    pub fn run_pz_with_abort(
+        &self,
+        netlist: &Netlist,
+        input_node: usize,
+        output_node: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<PoleZeroResult, SimulationError> {
+        self.run_pz_ports_with_abort(
             netlist,
             input_node,
             None,
@@ -255,6 +267,7 @@ impl Engine {
             true,
             true,
             true,
+            abort,
         )
     }
 
@@ -270,6 +283,36 @@ impl Engine {
         compute_poles: bool,
         compute_zeros: bool,
     ) -> Result<PoleZeroResult, SimulationError> {
+        self.run_pz_ports_with_abort(
+            netlist,
+            input_pos,
+            input_neg,
+            output_pos,
+            output_neg,
+            input_is_current,
+            compute_poles,
+            compute_zeros,
+            &NoAbort,
+        )
+    }
+
+    /// Cancellable form of [`Self::run_pz_ports`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_pz_ports_with_abort(
+        &self,
+        netlist: &Netlist,
+        input_pos: usize,
+        input_neg: Option<usize>,
+        output_pos: usize,
+        output_neg: Option<usize>,
+        input_is_current: bool,
+        compute_poles: bool,
+        compute_zeros: bool,
+        abort: &dyn AbortSignal,
+    ) -> Result<PoleZeroResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let mut circuit = self.build_circuit(netlist)?;
         Self::warn_xspice_mif_analysis_boundary(
             &circuit,
@@ -330,7 +373,9 @@ impl Engine {
 
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
-        let dc_solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let dc_solution =
+            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?;
+        abort.observe_progress(0.25);
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
@@ -342,6 +387,10 @@ impl Engine {
             Self::try_build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 0.0)?;
         let c_descriptor =
             Self::try_build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 1.0)?;
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        abort.observe_progress(0.5);
         let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
         let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
         Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
@@ -391,6 +440,11 @@ impl Engine {
         config.compute_poles = compute_poles;
         config.compute_zeros = compute_zeros;
 
-        Ok(analyzer.analyze(&config))
+        let result = analyzer.analyze(&config);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        abort.observe_progress(1.0);
+        Ok(result)
     }
 }

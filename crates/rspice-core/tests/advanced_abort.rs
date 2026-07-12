@@ -5,6 +5,7 @@ use rspice_core::analysis::Distribution;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
 use rspice_core::analysis::advanced::pac::PacConfig;
+use rspice_core::analysis::advanced::stb::StbConfig;
 use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 
@@ -103,4 +104,16 @@ fn statistical_and_parametric_analyses_honor_abort() {
 fn checkpointed_transient_honors_abort() {
     let (engine, netlist, abort) = fixture();
     assert_aborted(engine.run_tran_checkpointed_with_abort(&netlist, 1.0, 1.0e-6, &abort));
+}
+
+#[test]
+fn transfer_stb_and_pole_zero_honor_abort() {
+    let (engine, netlist, abort) = fixture();
+    assert_aborted(
+        engine.run_transfer_function_with_abort(&netlist, "out", None, false, "v1", &abort),
+    );
+    assert_aborted(engine.run_stb_with_abort(&netlist, StbConfig::new(), &abort));
+    assert_aborted(
+        engine.run_pz_ports_with_abort(&netlist, 1, None, 2, None, true, true, true, &abort),
+    );
 }

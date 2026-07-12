@@ -1,6 +1,7 @@
 """GIL release, parallel engines, and Ctrl-C cancellation."""
 
 import signal
+import sys
 import threading
 import time
 
@@ -20,6 +21,14 @@ V1 in 0 0
 R1 in out 1k
 D1 out 0 dmod
 .model dmod D(IS=1e-14 N=1 RS=10)
+.end
+"""
+
+STB_LOOP = """* Loop stability cancellation workload
+E1 eo 0 ctrl 0 -1000
+VPROBE eo x 0
+R1 x ctrl 1k
+C1 ctrl 0 159.154943091895n
 .end
 """
 
@@ -89,6 +98,41 @@ class TestGilRelease:
         assert not errors
         assert all(r is not None and r.num_points > 10 for r in results)
         assert elapsed < 60
+
+    def test_one_engine_and_netlist_are_safe_to_share(self):
+        engine = rspice.Engine()
+        netlist = rspice.Netlist.parse("V1 in 0 1\nR1 in 0 1k\n.end\n")
+        barrier = threading.Barrier(8)
+        results = [None] * 8
+        errors = []
+
+        def work(index):
+            try:
+                barrier.wait(timeout=10)
+                result = engine.run_dc_op(netlist)
+                # Exercise scalar and NumPy access against independently
+                # produced results while all threads remain active.
+                results[index] = (result.voltage("in"), result.node_voltages)
+            except BaseException as exc:  # pragma: no cover - diagnostic path
+                errors.append(exc)
+
+        threads = [threading.Thread(target=work, args=(index,)) for index in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert not errors
+        assert all(value == pytest.approx(1.0) for value, _ in results)
+        assert all(array.flags.owndata for _, array in results)
+
+    @pytest.mark.skipif(
+        not hasattr(sys, "_is_gil_enabled") or sys._is_gil_enabled(),
+        reason="requires free-threaded CPython with the GIL disabled",
+    )
+    def test_free_threaded_import_keeps_gil_disabled(self):
+        assert not sys._is_gil_enabled()
 
 
 class TestCancellation:
@@ -179,6 +223,27 @@ class TestCancellation:
         try:
             with pytest.raises(KeyboardInterrupt):
                 engine.run_ac(netlist, frequencies)
+        finally:
+            done.set()
+            killer.join()
+        assert time.monotonic() - start < 10.0
+
+    def test_keyboard_interrupt_cancels_stb_sweep(self, engine):
+        netlist = rspice.Netlist.parse(STB_LOOP)
+
+        done = threading.Event()
+        killer = start_sigint_timer(0.01, done)
+        start = time.monotonic()
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                engine.run_stb(
+                    netlist,
+                    "VPROBE",
+                    variation="lin",
+                    points=200_000,
+                    start_freq=10.0,
+                    stop_freq=10e6,
+                )
         finally:
             done.set()
             killer.join()

@@ -501,17 +501,16 @@ impl PyEngine {
         input_source: &str,
     ) -> PyResult<PyTransferFunctionResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = py
-            .detach(|| {
-                engine.run_transfer_function(
-                    &netlist.inner,
-                    output_node,
-                    reference_node,
-                    output_is_current,
-                    input_source,
-                )
-            })
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let result = run_interruptible(py, |abort| {
+            engine.run_transfer_function_with_abort(
+                &netlist.inner,
+                output_node,
+                reference_node,
+                output_is_current,
+                input_source,
+                abort,
+            )
+        })?;
         Ok(PyTransferFunctionResult::from_core(&result))
     }
 
@@ -537,9 +536,9 @@ impl PyEngine {
             .with_probe(probe)
             .with_nyquist(true);
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = py
-            .detach(|| engine.run_stb(&netlist.inner, config))
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let result = run_interruptible(py, |abort| {
+            engine.run_stb_with_abort(&netlist.inner, config, abort)
+        })?;
         Ok(PyStbResult::from_core(&result))
     }
 
@@ -565,20 +564,19 @@ impl PyEngine {
         let output_neg = output_neg
             .map(|node| self.resolve_node(&engine, &netlist.inner, node, "PZ output-"))
             .transpose()?;
-        let result = py
-            .detach(|| {
-                engine.run_pz_ports(
-                    &netlist.inner,
-                    input_pos,
-                    input_neg,
-                    output_pos,
-                    output_neg,
-                    input_is_current,
-                    compute_poles,
-                    compute_zeros,
-                )
-            })
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let result = run_interruptible(py, |abort| {
+            engine.run_pz_ports_with_abort(
+                &netlist.inner,
+                input_pos,
+                input_neg,
+                output_pos,
+                output_neg,
+                input_is_current,
+                compute_poles,
+                compute_zeros,
+                abort,
+            )
+        })?;
         Ok(PyPoleZeroResult::from_core(&result))
     }
 

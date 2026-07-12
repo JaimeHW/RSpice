@@ -40,7 +40,9 @@ maturin develop --release --locked
 
 `maturin build --release --locked` produces a redistributable abi3 wheel that
 works on Python 3.10+. Release CI builds manylinux2014 x86-64/AArch64, macOS
-Intel/Apple-Silicon, and Windows x86-64/ARM64 wheels.
+Intel/Apple-Silicon, and Windows x86-64/ARM64 wheels. The same six targets also
+ship version-specific `cp314t` wheels for free-threaded CPython 3.14; the full
+binding suite runs with the GIL disabled on Linux, macOS, and Windows.
 
 The workspace-aware source distribution requires one post-processing step to
 reconcile maturin's pruned workspace with the repository lockfile:
@@ -317,11 +319,16 @@ Simulation calls release the GIL, so a long transient can run in a worker
 thread while the main thread stays responsive, and several engines can
 simulate different netlists in parallel threads.
 
-DC operating points and sweeps, AC and S-parameter sweeps, transient and
-checkpoint/resume runs, noise, Monte Carlo, parameter steps, sensitivity,
-PSS, HB, PAC, driven PNoise, and oscillator-noise calls poll Python signal
-handlers while they run. Ctrl-C (`KeyboardInterrupt`) cancels these
-simulations promptly instead of arriving after completion.
+RSpice also supports free-threaded CPython 3.14. Dedicated `cp314t` wheels keep
+the GIL disabled, and immutable `Netlist`, `Engine`, and result objects may be
+shared across Python threads.
+
+DC operating points and sweeps, AC and S-parameter sweeps, transfer-function,
+STB, pole-zero, transient and checkpoint/resume runs, noise, Monte Carlo,
+parameter steps, sensitivity, PSS, HB, PAC, driven PNoise, and
+oscillator-noise calls poll Python signal handlers while they run. Ctrl-C
+(`KeyboardInterrupt`) cancels these simulations instead of arriving only
+after a completed result is returned.
 
 ## Testing
 
