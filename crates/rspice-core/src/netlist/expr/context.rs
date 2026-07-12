@@ -401,6 +401,13 @@ impl ParamContext {
         self.functions.get(&name.to_uppercase())
     }
 
+    /// Number of user-defined functions in this scope. Behavioral lowering
+    /// uses this to enable eager constant folding for large function graphs,
+    /// preventing repeated argument substitution from multiplying static ASTs.
+    pub fn function_count(&self) -> usize {
+        self.functions.len()
+    }
+
     /// Call a user-defined function with the given argument values
     ///
     /// Creates a temporary context with the arguments bound to their values

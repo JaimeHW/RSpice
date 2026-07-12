@@ -10,7 +10,13 @@ use super::{
 use crate::Value;
 use std::collections::HashMap;
 
-const MAX_FUNCTION_EXPANSION_DEPTH: usize = 64;
+/// Match the evaluator's production recursion guard. Expansion depth counts
+/// named `.FUNC` and `.GLOBAL_PARAM` dependencies only; ordinary AST shape is
+/// not recursion and must not consume this budget.
+const MAX_NAMED_EXPANSION_DEPTH: usize = 4096;
+const MAX_EXPANDED_EXPRESSION_NODES: usize = 1_000_000;
+const STACK_SAFE_CONSTANT_FOLD_DEPTH: usize = 256;
+const LARGE_FUNCTION_GRAPH_THRESHOLD: usize = 64;
 
 /// Prepare a behavioral source expression for strict compilation.
 ///
@@ -165,6 +171,7 @@ struct FunctionExpander<'a, 'p> {
     call_stack: Vec<String>,
     global_body_cache: HashMap<String, NetExpr>,
     global_stack: Vec<String>,
+    fold_static_function_graph: bool,
 }
 
 impl<'a, 'p> FunctionExpander<'a, 'p> {
@@ -176,76 +183,166 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             call_stack: Vec::new(),
             global_body_cache: HashMap::new(),
             global_stack: Vec::new(),
+            fold_static_function_graph: params.function_count() > LARGE_FUNCTION_GRAPH_THRESHOLD,
         }
     }
 
-    fn expand_expr(&mut self, expr: &NetExpr, depth: usize) -> Result<NetExpr, String> {
-        if depth > MAX_FUNCTION_EXPANSION_DEPTH {
-            return Err(format!(
-                "Behavioral expression exceeded function expansion depth (>{})",
-                MAX_FUNCTION_EXPANSION_DEPTH
-            ));
+    fn expand_expr(&mut self, expr: &NetExpr, named_depth: usize) -> Result<NetExpr, String> {
+        enum Task {
+            Expand(NetExpr, usize),
+            FinishUnary(UnaryOpKind, usize),
+            FinishBinary(BinOpKind, usize),
+            ApplyFunction(String, usize, usize),
+            ExitFunction(String),
+            ExitGlobal(String),
         }
 
-        match expr {
-            NetExpr::Number(v) => Ok(NetExpr::Number(*v)),
-            NetExpr::ComplexNumber(v) => Ok(NetExpr::Number(v.real_projection())),
-            NetExpr::Param(name) => {
-                if is_behavioral_runtime_symbol(name) {
-                    Ok(NetExpr::Param(name.clone()))
-                } else if let Some(expression) = self.params.get_global_expression(name) {
-                    let key = name.to_ascii_uppercase();
-                    if self.global_stack.iter().any(|active| active == &key) {
-                        let mut cycle = self.global_stack.clone();
-                        cycle.push(key);
+        let mut tasks = vec![Task::Expand(expr.clone(), named_depth)];
+        let mut values = Vec::new();
+        let mut expanded_nodes = 0usize;
+
+        while let Some(task) = tasks.pop() {
+            match task {
+                Task::Expand(expr, depth) => {
+                    if depth > MAX_NAMED_EXPANSION_DEPTH {
                         return Err(format!(
-                            "Detected cyclic .GLOBAL_PARAM dependency: {}",
-                            cycle.join(" -> ")
+                            "Behavioral expression exceeded named dependency expansion depth (>{})",
+                            MAX_NAMED_EXPANSION_DEPTH
                         ));
                     }
-                    let parsed = if let Some(cached) = self.global_body_cache.get(&key) {
-                        cached.clone()
-                    } else {
-                        let protected = self.probe_protector.protect(expression);
-                        let parsed = parse_net_expr(&protected).map_err(|error| {
-                            format!(
-                                "Failed to parse .GLOBAL_PARAM {} expression '{}': {}",
-                                name, expression, error
-                            )
-                        })?;
-                        self.global_body_cache.insert(key.clone(), parsed.clone());
-                        parsed
-                    };
-                    self.global_stack.push(key);
-                    let result = self.expand_expr(&parsed, depth + 1);
-                    self.global_stack.pop();
-                    result
-                } else if let Some(v) = self.params.get(name) {
-                    Ok(NetExpr::Number(v))
-                } else {
-                    Ok(NetExpr::Param(name.clone()))
+                    expanded_nodes += 1;
+                    if expanded_nodes > MAX_EXPANDED_EXPRESSION_NODES {
+                        return Err(format!(
+                            "Behavioral expression expansion exceeded {} nodes",
+                            MAX_EXPANDED_EXPRESSION_NODES
+                        ));
+                    }
+                    match expr {
+                        NetExpr::Number(value) => values.push(NetExpr::Number(value)),
+                        NetExpr::ComplexNumber(value) => {
+                            values.push(NetExpr::Number(value.real_projection()));
+                        }
+                        NetExpr::Param(name) if is_behavioral_runtime_symbol(&name) => {
+                            values.push(NetExpr::Param(name));
+                        }
+                        NetExpr::Param(name) => {
+                            if let Some(expression) = self.params.get_global_expression(&name) {
+                                let key = name.to_ascii_uppercase();
+                                if self.global_stack.iter().any(|active| active == &key) {
+                                    let mut cycle = self.global_stack.clone();
+                                    cycle.push(key);
+                                    return Err(format!(
+                                        "Detected cyclic .GLOBAL_PARAM dependency: {}",
+                                        cycle.join(" -> ")
+                                    ));
+                                }
+                                let parsed = if let Some(cached) = self.global_body_cache.get(&key)
+                                {
+                                    cached.clone()
+                                } else {
+                                    let protected = self.probe_protector.protect(expression);
+                                    let parsed = parse_net_expr(&protected).map_err(|error| {
+                                        format!(
+                                            "Failed to parse .GLOBAL_PARAM {} expression '{}': {}",
+                                            name, expression, error
+                                        )
+                                    })?;
+                                    self.global_body_cache.insert(key.clone(), parsed.clone());
+                                    parsed
+                                };
+                                self.global_stack.push(key.clone());
+                                tasks.push(Task::ExitGlobal(key));
+                                tasks.push(Task::Expand(parsed, depth + 1));
+                            } else if let Some(value) = self.params.get(&name) {
+                                values.push(NetExpr::Number(value));
+                            } else {
+                                values.push(NetExpr::Param(name));
+                            }
+                        }
+                        NetExpr::UnaryOp { op, operand } => {
+                            tasks.push(Task::FinishUnary(op, depth));
+                            tasks.push(Task::Expand(*operand, depth));
+                        }
+                        NetExpr::BinOp { op, left, right } => {
+                            tasks.push(Task::FinishBinary(op, depth));
+                            tasks.push(Task::Expand(*right, depth));
+                            tasks.push(Task::Expand(*left, depth));
+                        }
+                        NetExpr::FnCall { name, args } if is_circuit_probe(&name) => {
+                            values.push(NetExpr::FnCall { name, args });
+                        }
+                        NetExpr::FnCall { name, args } => {
+                            let arg_count = args.len();
+                            tasks.push(Task::ApplyFunction(name, arg_count, depth));
+                            for arg in args.into_iter().rev() {
+                                tasks.push(Task::Expand(arg, depth));
+                            }
+                        }
+                    }
                 }
-            }
-            NetExpr::UnaryOp { op, operand } => Ok(NetExpr::UnaryOp {
-                op: *op,
-                operand: Box::new(self.expand_expr(operand, depth + 1)?),
-            }),
-            NetExpr::BinOp { op, left, right } => Ok(NetExpr::BinOp {
-                op: *op,
-                left: Box::new(self.expand_expr(left, depth + 1)?),
-                right: Box::new(self.expand_expr(right, depth + 1)?),
-            }),
-            NetExpr::FnCall { name, args } if is_circuit_probe(name) => Ok(NetExpr::FnCall {
-                name: name.clone(),
-                args: args.clone(),
-            }),
-            NetExpr::FnCall { name, args } => {
-                let expanded_args = args
-                    .iter()
-                    .map(|arg| self.expand_expr(arg, depth + 1))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                if let Some(func_def) = self.params.get_function(name) {
+                Task::FinishUnary(op, depth) => {
+                    let operand = values.pop().ok_or_else(|| {
+                        "Internal behavioral expansion stack underflow".to_string()
+                    })?;
+                    if let NetExpr::Number(value) = &operand
+                        && (self.fold_static_function_graph
+                            || depth >= STACK_SAFE_CONSTANT_FOLD_DEPTH
+                            || matches!(op, UnaryOpKind::Not))
+                    {
+                        values.push(NetExpr::Number(match op {
+                            UnaryOpKind::Neg => -*value,
+                            UnaryOpKind::Pos => *value,
+                            UnaryOpKind::Not => f64::from(*value == 0.0),
+                        }));
+                    } else {
+                        values.push(NetExpr::UnaryOp {
+                            op,
+                            operand: Box::new(operand),
+                        });
+                    }
+                }
+                Task::FinishBinary(op, depth) => {
+                    let right = values.pop().ok_or_else(|| {
+                        "Internal behavioral expansion stack underflow".to_string()
+                    })?;
+                    let left = values.pop().ok_or_else(|| {
+                        "Internal behavioral expansion stack underflow".to_string()
+                    })?;
+                    if let (NetExpr::Number(left_value), NetExpr::Number(right_value)) =
+                        (&left, &right)
+                        && let Some(value) = fold_real_binary(
+                            op,
+                            *left_value,
+                            *right_value,
+                            self.fold_static_function_graph
+                                || depth >= STACK_SAFE_CONSTANT_FOLD_DEPTH,
+                        )
+                    {
+                        values.push(NetExpr::Number(value));
+                    } else {
+                        values.push(NetExpr::BinOp {
+                            op,
+                            left: Box::new(left),
+                            right: Box::new(right),
+                        });
+                    }
+                }
+                Task::ApplyFunction(name, arg_count, depth) => {
+                    if values.len() < arg_count {
+                        return Err("Internal behavioral argument stack underflow".to_string());
+                    }
+                    let expanded_args = values.split_off(values.len() - arg_count);
+                    let Some(func_def) = self.params.get_function(&name) else {
+                        if let Some(value) = fold_condition_function(&name, &expanded_args) {
+                            values.push(value);
+                            continue;
+                        }
+                        values.push(NetExpr::FnCall {
+                            name,
+                            args: expanded_args,
+                        });
+                        continue;
+                    };
                     if expanded_args.len() != func_def.args.len() {
                         return Err(format!(
                             "Function '{}' expects {} args but got {}",
@@ -254,51 +351,105 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
                             expanded_args.len()
                         ));
                     }
-
                     let func_name = func_def.name.clone();
-                    if self.call_stack.iter().any(|s| s == &func_name) {
+                    if self.call_stack.iter().any(|active| active == &func_name) {
                         return Err(format!(
                             "Detected recursive .FUNC expansion for '{}'",
                             func_name
                         ));
                     }
-
                     let body_ast = if let Some(cached) = self.body_cache.get(&func_name) {
                         cached.clone()
                     } else {
                         let expanded_body = expand_spice_poly_expression(&func_def.body)?;
                         let protected_body = self.probe_protector.protect(&expanded_body);
-                        let parsed_body = parse_net_expr(&protected_body).map_err(|e| {
+                        let parsed_body = parse_net_expr(&protected_body).map_err(|error| {
                             format!(
                                 "Failed to parse .FUNC {} body '{}': {}",
-                                func_name, func_def.body, e
+                                func_name, func_def.body, error
                             )
                         })?;
                         self.body_cache
                             .insert(func_name.clone(), parsed_body.clone());
                         parsed_body
                     };
-
-                    let mut arg_bindings: HashMap<String, NetExpr> =
-                        HashMap::with_capacity(func_def.args.len());
-                    for (arg_name, arg_value) in func_def.args.iter().zip(expanded_args.iter()) {
-                        arg_bindings.insert(arg_name.to_ascii_uppercase(), arg_value.clone());
+                    let mut bindings = HashMap::with_capacity(func_def.args.len());
+                    for (arg_name, arg_value) in func_def.args.iter().zip(expanded_args) {
+                        bindings.insert(arg_name.to_ascii_uppercase(), arg_value);
                     }
-
+                    let substituted = substitute_function_args(&body_ast, &bindings);
                     self.call_stack.push(func_name.clone());
-                    let substituted = substitute_function_args(&body_ast, &arg_bindings);
-                    let result = self.expand_expr(&substituted, depth + 1);
+                    tasks.push(Task::ExitFunction(func_name));
+                    tasks.push(Task::Expand(substituted, depth + 1));
+                }
+                Task::ExitFunction(name) => {
+                    debug_assert_eq!(self.call_stack.last(), Some(&name));
                     self.call_stack.pop();
-                    result
-                } else {
-                    Ok(NetExpr::FnCall {
-                        name: name.clone(),
-                        args: expanded_args,
-                    })
+                }
+                Task::ExitGlobal(name) => {
+                    debug_assert_eq!(self.global_stack.last(), Some(&name));
+                    self.global_stack.pop();
                 }
             }
         }
+
+        if values.len() != 1 {
+            return Err(format!(
+                "Internal behavioral expansion produced {} results",
+                values.len()
+            ));
+        }
+        values
+            .pop()
+            .ok_or_else(|| "Internal behavioral expansion produced no result".to_string())
     }
+}
+
+fn fold_real_binary(
+    op: BinOpKind,
+    left: Value,
+    right: Value,
+    allow_arithmetic: bool,
+) -> Option<Value> {
+    let value = match op {
+        BinOpKind::Add if allow_arithmetic => left + right,
+        BinOpKind::Sub if allow_arithmetic => left - right,
+        BinOpKind::Mul if allow_arithmetic => left * right,
+        BinOpKind::Div if allow_arithmetic && right != 0.0 => left / right,
+        BinOpKind::Mod if allow_arithmetic && right != 0.0 => left % right,
+        BinOpKind::Pow if allow_arithmetic => left.powf(right),
+        BinOpKind::Gt => f64::from(left > right),
+        BinOpKind::Lt => f64::from(left < right),
+        BinOpKind::Ge => f64::from(left >= right),
+        BinOpKind::Le => f64::from(left <= right),
+        BinOpKind::Eq => f64::from((left - right).abs() < 1e-12),
+        BinOpKind::Ne => f64::from((left - right).abs() >= 1e-12),
+        BinOpKind::And => f64::from(left != 0.0 && right != 0.0),
+        BinOpKind::Or => f64::from(left != 0.0 || right != 0.0),
+        BinOpKind::Add
+        | BinOpKind::Sub
+        | BinOpKind::Mul
+        | BinOpKind::Div
+        | BinOpKind::Mod
+        | BinOpKind::Pow => return None,
+    };
+    value.is_finite().then_some(value)
+}
+
+fn fold_condition_function(name: &str, args: &[NetExpr]) -> Option<NetExpr> {
+    if !(name.eq_ignore_ascii_case("IF") || name.eq_ignore_ascii_case("TERNARY_FCN"))
+        || args.len() != 3
+    {
+        return None;
+    }
+    let NetExpr::Number(condition) = &args[0] else {
+        return None;
+    };
+    Some(if *condition != 0.0 {
+        args[1].clone()
+    } else {
+        args[2].clone()
+    })
 }
 
 fn is_behavioral_runtime_symbol(name: &str) -> bool {
@@ -646,52 +797,82 @@ fn substitute_function_args(expr: &NetExpr, args: &HashMap<String, NetExpr>) -> 
 }
 
 fn serialize_expr(expr: &NetExpr) -> String {
-    match expr {
-        NetExpr::Number(v) => {
-            if *v < 0.0 {
-                format!("({})", v)
-            } else {
-                format!("{}", v)
+    enum Task<'a> {
+        Expr(&'a NetExpr),
+        Static(&'static str),
+        Owned(String),
+    }
+
+    let mut output = String::new();
+    let mut tasks = vec![Task::Expr(expr)];
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Static(text) => output.push_str(text),
+            Task::Owned(text) => output.push_str(&text),
+            Task::Expr(NetExpr::Number(value)) => {
+                if *value < 0.0 {
+                    output.push('(');
+                    output.push_str(&value.to_string());
+                    output.push(')');
+                } else {
+                    output.push_str(&value.to_string());
+                }
+            }
+            Task::Expr(NetExpr::ComplexNumber(value)) => {
+                let projection = value.real_projection();
+                if projection < 0.0 {
+                    output.push('(');
+                    output.push_str(&projection.to_string());
+                    output.push(')');
+                } else {
+                    output.push_str(&projection.to_string());
+                }
+            }
+            Task::Expr(NetExpr::Param(name)) => output.push_str(name),
+            Task::Expr(NetExpr::UnaryOp { op, operand }) => {
+                tasks.push(Task::Static(")"));
+                tasks.push(Task::Expr(operand));
+                tasks.push(Task::Static(match op {
+                    UnaryOpKind::Neg => "(-",
+                    UnaryOpKind::Pos => "(",
+                    UnaryOpKind::Not => "(!",
+                }));
+            }
+            Task::Expr(NetExpr::BinOp { op, left, right }) => {
+                let symbol = match op {
+                    BinOpKind::Add => "+",
+                    BinOpKind::Sub => "-",
+                    BinOpKind::Mul => "*",
+                    BinOpKind::Div => "/",
+                    BinOpKind::Mod => "%",
+                    BinOpKind::Pow => "^",
+                    BinOpKind::Gt => ">",
+                    BinOpKind::Lt => "<",
+                    BinOpKind::Ge => ">=",
+                    BinOpKind::Le => "<=",
+                    BinOpKind::Eq => "==",
+                    BinOpKind::Ne => "!=",
+                    BinOpKind::And => "&&",
+                    BinOpKind::Or => "||",
+                };
+                tasks.push(Task::Static(")"));
+                tasks.push(Task::Expr(right));
+                tasks.push(Task::Static(symbol));
+                tasks.push(Task::Expr(left));
+                tasks.push(Task::Static("("));
+            }
+            Task::Expr(NetExpr::FnCall { name, args }) => {
+                tasks.push(Task::Static(")"));
+                for index in (0..args.len()).rev() {
+                    tasks.push(Task::Expr(&args[index]));
+                    if index > 0 {
+                        tasks.push(Task::Static(","));
+                    }
+                }
+                tasks.push(Task::Static("("));
+                tasks.push(Task::Owned(name.to_ascii_uppercase()));
             }
         }
-        NetExpr::ComplexNumber(v) => serialize_expr(&NetExpr::Number(v.real_projection())),
-        NetExpr::Param(name) => name.clone(),
-        NetExpr::UnaryOp { op, operand } => match op {
-            UnaryOpKind::Neg => format!("(-{})", serialize_expr(operand)),
-            UnaryOpKind::Pos => format!("({})", serialize_expr(operand)),
-            UnaryOpKind::Not => format!("(!{})", serialize_expr(operand)),
-        },
-        NetExpr::BinOp { op, left, right } => {
-            let symbol = match op {
-                BinOpKind::Add => "+",
-                BinOpKind::Sub => "-",
-                BinOpKind::Mul => "*",
-                BinOpKind::Div => "/",
-                BinOpKind::Mod => "%",
-                BinOpKind::Pow => "^",
-                BinOpKind::Gt => ">",
-                BinOpKind::Lt => "<",
-                BinOpKind::Ge => ">=",
-                BinOpKind::Le => "<=",
-                BinOpKind::Eq => "==",
-                BinOpKind::Ne => "!=",
-                BinOpKind::And => "&&",
-                BinOpKind::Or => "||",
-            };
-            format!(
-                "({}{}{})",
-                serialize_expr(left),
-                symbol,
-                serialize_expr(right)
-            )
-        }
-        NetExpr::FnCall { name, args } => {
-            let args_joined = args
-                .iter()
-                .map(serialize_expr)
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("{}({})", name.to_ascii_uppercase(), args_joined)
-        }
     }
+    output
 }

@@ -153,6 +153,39 @@ fn behavioral_preparation_expands_functions_without_substituting_probe_names() {
 }
 
 #[test]
+fn behavioral_preparation_handles_deep_acyclic_function_graphs_without_recursion() {
+    let mut ctx = ParamContext::new();
+    ctx.set("B", 1.0);
+    ctx.define_function("F0", vec!["X".to_string()], "X+B");
+    for index in 1..1000 {
+        ctx.define_function(
+            &format!("F{index}"),
+            vec!["X".to_string()],
+            &format!("F{}(X)+B", index - 1),
+        );
+    }
+
+    let prepared = prepare_behavioral_expression("F999(0.5)", &ctx)
+        .expect("one thousand acyclic function layers expand");
+
+    assert_eq!(
+        prepared.parse::<Value>().expect("constant folded result"),
+        1000.5
+    );
+}
+
+#[test]
+fn behavioral_preparation_still_rejects_recursive_functions() {
+    let mut ctx = ParamContext::new();
+    ctx.define_function("LOOP", vec!["X".to_string()], "LOOP(X)");
+
+    let error = prepare_behavioral_expression("LOOP(1)", &ctx)
+        .expect_err("recursive function must be rejected");
+
+    assert!(error.contains("recursive .FUNC expansion"), "{error}");
+}
+
+#[test]
 fn behavioral_preparation_treats_xyce_function_names_as_identifiers() {
     let mut ctx = ParamContext::new();
     ctx.define_function("#V", vec!["X".to_string()], "X+2");
