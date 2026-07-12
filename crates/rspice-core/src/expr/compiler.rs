@@ -142,7 +142,9 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 | Function::Akima
                 | Function::AkimaFile
                 | Function::Wodicka
-                | Function::WodickaFile => Instruction::PushConst(0.0),
+                | Function::WodickaFile
+                | Function::Barycentric
+                | Function::BarycentricFile => Instruction::PushConst(0.0),
                 Function::Mod => Instruction::Mod,
                 Function::SpicePulse => Instruction::SpicePulse(args.len()),
                 Function::SpiceSin => Instruction::SpiceSin(args.len()),

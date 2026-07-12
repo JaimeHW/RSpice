@@ -1123,7 +1123,9 @@ fn eval_function_with_derivative(
         | Function::Akima
         | Function::AkimaFile
         | Function::Wodicka
-        | Function::WodickaFile => Some((0.0, 0.0)),
+        | Function::WodickaFile
+        | Function::Barycentric
+        | Function::BarycentricFile => Some((0.0, 0.0)),
         Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
             None
         }

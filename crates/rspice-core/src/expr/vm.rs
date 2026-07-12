@@ -556,9 +556,29 @@ fn lookup_table_interpolate(x: Value, table: &LookupTable) -> Value {
                     let [p1, p2, p3] = coefficients[lower];
                     points[lower].1 + offset * (p1 + offset * (p2 + p3 * offset))
                 }
+                LookupInterpolation::Barycentric { weights } => {
+                    barycentric_interpolate(x, points, weights)
+                }
             }
         }
     }
+}
+
+fn barycentric_interpolate(x: Value, points: &[(Value, Value)], weights: &[Value]) -> Value {
+    let mut product = 1.0;
+    for &(knot, value) in points {
+        let offset = x - knot;
+        product *= offset;
+        if offset == 0.0 {
+            return value;
+        }
+    }
+
+    let mut result = 0.0;
+    for (index, &(knot, value)) in points.iter().enumerate() {
+        result += (weights[index] / (x - knot)) * value;
+    }
+    result * product
 }
 
 fn table_interpolate_from_args(x: Value, args: &[Value]) -> Value {

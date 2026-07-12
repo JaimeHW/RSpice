@@ -62,6 +62,7 @@ enum FileInterpolation {
     NaturalCubic,
     Akima,
     Wodicka,
+    Barycentric,
 }
 
 fn table_file_mode(func: Function) -> Option<(bool, FileInterpolation)> {
@@ -71,6 +72,9 @@ fn table_file_mode(func: Function) -> Option<(bool, FileInterpolation)> {
         Function::Cubic | Function::CubicFile => Some((false, FileInterpolation::NaturalCubic)),
         Function::Akima | Function::AkimaFile => Some((false, FileInterpolation::Akima)),
         Function::Wodicka | Function::WodickaFile => Some((false, FileInterpolation::Wodicka)),
+        Function::Barycentric | Function::BarycentricFile => {
+            Some((false, FileInterpolation::Barycentric))
+        }
         _ => None,
     }
 }
@@ -113,6 +117,9 @@ fn resolve_table_file_function(
         },
         FileInterpolation::Wodicka => LookupInterpolation::Wodicka {
             coefficients: Arc::from(wodicka_coefficients(&points).into_boxed_slice()),
+        },
+        FileInterpolation::Barycentric => LookupInterpolation::Barycentric {
+            weights: Arc::from(barycentric_weights(&points).into_boxed_slice()),
         },
     };
     Ok(Expr::LookupTable(LookupTable {
@@ -232,6 +239,20 @@ fn hermite_coefficients(
     ]
 }
 
+fn barycentric_weights(points: &[(Value, Value)]) -> Vec<Value> {
+    (0..points.len())
+        .map(|point_index| {
+            let mut denominator = 1.0;
+            for other_index in 0..points.len() {
+                if other_index != point_index {
+                    denominator *= points[point_index].0 - points[other_index].0;
+                }
+            }
+            1.0 / denominator
+        })
+        .collect()
+}
+
 fn resolve_table_path(path: &str, source_path: Option<&Path>) -> PathBuf {
     let raw = Path::new(path);
     if raw.is_absolute() {
@@ -340,6 +361,8 @@ fn function_name(func: Function) -> &'static str {
         Function::AkimaFile => "akimafile",
         Function::Wodicka => "wodicka",
         Function::WodickaFile => "wodickafile",
+        Function::Barycentric => "bli",
+        Function::BarycentricFile => "blifile",
         _ => "function",
     }
 }
@@ -527,6 +550,46 @@ mod tests {
         let mut vm = Vm::new();
         let midpoint = vm.execute(&compile(&akima), &Context::transient(&[], &[], 2.5));
         assert!((midpoint - 0.875).abs() < 1.0e-14);
+    }
+
+    #[test]
+    fn barycentric_uses_xyce_first_form_and_exact_knots() {
+        let dir = unique_temp_dir("xyce-barycentric");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        std::fs::write(dir.join("curve.dat"), "-1 3\n0 4\n1 9\n")
+            .expect("write interpolation data");
+        let deck_path = dir.join("deck.cir");
+
+        for function in ["bli", "blifile"] {
+            let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
+                .expect("barycentric expression parses");
+            let resolved = resolve_file_lookup_functions(ast, Some(&deck_path))
+                .expect("barycentric file resolves");
+            let Expr::LookupTable(table) = &resolved else {
+                panic!("barycentric file should resolve into lookup data");
+            };
+            assert!(!table.transient_breakpoints);
+            let LookupInterpolation::Barycentric { weights } = &table.interpolation else {
+                panic!("BLI should use barycentric interpolation");
+            };
+            assert_eq!(weights.as_ref(), &[0.5, -1.0, 0.5]);
+
+            let program = compile(&resolved);
+            let mut vm = Vm::new();
+            for (time, expected) in [
+                (-2.0, 3.0),
+                (-1.0, 3.0),
+                (-0.5, 3.0),
+                (0.0, 4.0),
+                (0.25, 4.875),
+                (0.5, 6.0),
+                (1.0, 9.0),
+                (2.0, 9.0),
+            ] {
+                let actual = vm.execute(&program, &Context::transient(&[], &[], time));
+                assert!((actual - expected).abs() < 1.0e-14, "time={time}");
+            }
+        }
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {

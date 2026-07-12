@@ -100,34 +100,36 @@ pub enum Function {
     Limit, // limit(x, lo, hi)
     Min,
     Max,
-    Sign,          // sign(x) = -1, 0, or 1
-    Uramp,         // uramp(x) = max(0, x) - positive ramp
-    Stp,           // stp(x) = 1 if x is positive outside expression-zero tolerance else 0
-    Ustep,         // u(x) / ustep(x) = 0, 0.5, or 1 at the exact ngspice step boundary
-    U2,            // u2(x) = clamp(x, 0, 1)
-    Eq0,           // eq0(x) = 1 if x == 0 else 0
-    Ne0,           // ne0(x) = 1 if x != 0 else 0
-    Gt0,           // gt0(x) = 1 if x > 0 else 0
-    Lt0,           // lt0(x) = 1 if x < 0 else 0
-    Ge0,           // ge0(x) = 1 if x >= 0 else 0
-    Le0,           // le0(x) = 1 if x <= 0 else 0
-    Pow,           // pow(x, y) = x^y
-    Table,         // table(x, x1,y1, x2,y2, ...)
-    Pwl,           // pwl(x, x1,y1, x2,y2, ...) alias for table
-    TableFile,     // tablefile("path") / tablefile(path) = file-backed table(time)
-    FastTable,     // fasttable("path") / fasttable(path) = file-backed table(time), no breakpoints
+    Sign,            // sign(x) = -1, 0, or 1
+    Uramp,           // uramp(x) = max(0, x) - positive ramp
+    Stp,             // stp(x) = 1 if x is positive outside expression-zero tolerance else 0
+    Ustep,           // u(x) / ustep(x) = 0, 0.5, or 1 at the exact ngspice step boundary
+    U2,              // u2(x) = clamp(x, 0, 1)
+    Eq0,             // eq0(x) = 1 if x == 0 else 0
+    Ne0,             // ne0(x) = 1 if x != 0 else 0
+    Gt0,             // gt0(x) = 1 if x > 0 else 0
+    Lt0,             // lt0(x) = 1 if x < 0 else 0
+    Ge0,             // ge0(x) = 1 if x >= 0 else 0
+    Le0,             // le0(x) = 1 if x <= 0 else 0
+    Pow,             // pow(x, y) = x^y
+    Table,           // table(x, x1,y1, x2,y2, ...)
+    Pwl,             // pwl(x, x1,y1, x2,y2, ...) alias for table
+    TableFile,       // tablefile("path") / tablefile(path) = file-backed table(time)
+    FastTable, // fasttable("path") / fasttable(path) = file-backed table(time), no breakpoints
     FastTableFile, // fasttablefile("path") / fasttablefile(path)
-    Cubic,         // cubic("path") = file-backed natural cubic spline of time
-    CubicFile,     // cubicfile("path") alias
-    Akima,         // akima("path") / spline("path") = file-backed Akima spline
-    AkimaFile,     // akimafile("path") / splinefile("path") alias
-    Wodicka,       // wodicka("path") = file-backed rounded-corner Akima variant
-    WodickaFile,   // wodickafile("path") alias
-    Mod,           // mod(x, y) = x % y - modulo
-    SpicePulse,    // spice_pulse(v1, v2, td, tr, tf, pw[, per])
-    SpiceSin,      // spice_sin(vo, va, freq, td, theta[, phase_degrees])
-    SpiceExp,      // spice_exp(v1, v2, td1, tau1, td2, tau2)
-    SpiceSffm,     // spice_sffm(vo, va[, fc[, mdi[, fs]]])
+    Cubic,     // cubic("path") = file-backed natural cubic spline of time
+    CubicFile, // cubicfile("path") alias
+    Akima,     // akima("path") / spline("path") = file-backed Akima spline
+    AkimaFile, // akimafile("path") / splinefile("path") alias
+    Wodicka,   // wodicka("path") = file-backed rounded-corner Akima variant
+    WodickaFile, // wodickafile("path") alias
+    Barycentric, // bli("path") = file-backed barycentric Lagrange interpolation
+    BarycentricFile, // blifile("path") alias
+    Mod,       // mod(x, y) = x % y - modulo
+    SpicePulse, // spice_pulse(v1, v2, td, tr, tf, pw[, per])
+    SpiceSin,  // spice_sin(vo, va, freq, td, theta[, phase_degrees])
+    SpiceExp,  // spice_exp(v1, v2, td1, tau1, td2, tau2)
+    SpiceSffm, // spice_sffm(vo, va[, fc[, mdi[, fs]]])
     // Conditional
     If, // if(cond, then, else)
 }
@@ -154,6 +156,8 @@ pub enum LookupInterpolation {
     Akima { coefficients: Arc<[[Value; 3]]> },
     /// Wodicka spline, with `(p1, p2, p3)` for each interval.
     Wodicka { coefficients: Arc<[[Value; 3]]> },
+    /// First-form barycentric Lagrange interpolation weights.
+    Barycentric { weights: Arc<[Value]> },
 }
 
 #[allow(clippy::should_implement_trait)]
