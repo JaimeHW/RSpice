@@ -156,6 +156,10 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.py().get_type::<errors::ConvergenceError>(),
     )?;
     m.add(
+        "CancelledError",
+        m.py().get_type::<errors::CancelledError>(),
+    )?;
+    m.add(
         "MeasurementError",
         m.py().get_type::<errors::MeasurementError>(),
     )?;
@@ -209,6 +213,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "ParseError",
             "SimulationError",
             "ConvergenceError",
+            "CancelledError",
             "MeasurementError",
         ],
     )?;

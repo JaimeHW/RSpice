@@ -14,6 +14,9 @@ Release numbers remain tied to the workspace version.
   and checkpoint/resume.
 - Cooperative `KeyboardInterrupt` handling across every exposed simulation
   family, including transfer-function, STB, and pole-zero solver boundaries.
+- Thread-safe `Engine.cancel()`, `is_running`, and `active_run_count` controls
+  with a dedicated `CancelledError` for application-managed cancellation and
+  single-analysis progress reporting.
 - Free-threaded CPython 3.14 support with dedicated `cp314t` wheels for Linux,
   macOS, and Windows on all shipped architectures.
 - Strict runtime/type-stub parity checks, structured exception attributes,

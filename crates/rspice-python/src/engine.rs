@@ -28,7 +28,7 @@ use rspice_core::{AbortSignal, Engine, SimulationConfigOverrides, resolve_simula
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
-use crate::abort::run_interruptible;
+use crate::abort::{ActiveRuns, run_interruptible};
 use crate::config::PySimulationConfig;
 use crate::measure;
 use crate::netlist::{PyNetlist, describe_analysis};
@@ -333,9 +333,10 @@ fn s_from_y(
 ///     >>> engine = Engine()
 ///     >>> result = engine.run_dc_op(netlist)
 ///     >>> print(f"V(out) = {result.voltage('out')} V")
-#[pyclass(name = "Engine", module = "rspice")]
+#[pyclass(name = "Engine", module = "rspice", frozen)]
 pub struct PyEngine {
     inner: Engine,
+    active_runs: ActiveRuns,
 }
 
 impl PyEngine {
@@ -394,7 +395,7 @@ impl PyEngine {
         start_time: f64,
     ) -> PyResult<PyTransientResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_tran_with_abort(&netlist.inner, stop_time, max_step, abort)
         })?;
         PyTransientResult::new_with_start(result, start_time)
@@ -408,7 +409,7 @@ impl PyEngine {
         frequencies: Vec<f64>,
     ) -> PyResult<PyAcResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = run_interruptible(py, |abort| {
+        let results = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_ac_with_abort(&netlist.inner, &frequencies, abort)
         })?;
         Ok(PyAcResult::new(frequencies, results))
@@ -434,7 +435,7 @@ impl PyEngine {
             )));
         }
 
-        let results = run_interruptible(py, |abort| match input_source {
+        let results = run_interruptible(py, &self.active_runs, |abort| match input_source {
             Some(source) => engine.run_noise_with_input_source_and_abort(
                 &netlist.inner,
                 output_node,
@@ -501,7 +502,7 @@ impl PyEngine {
         input_source: &str,
     ) -> PyResult<PyTransferFunctionResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_transfer_function_with_abort(
                 &netlist.inner,
                 output_node,
@@ -536,7 +537,7 @@ impl PyEngine {
             .with_probe(probe)
             .with_nyquist(true);
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_stb_with_abort(&netlist.inner, config, abort)
         })?;
         Ok(PyStbResult::from_core(&result))
@@ -564,7 +565,7 @@ impl PyEngine {
         let output_neg = output_neg
             .map(|node| self.resolve_node(&engine, &netlist.inner, node, "PZ output-"))
             .transpose()?;
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pz_ports_with_abort(
                 &netlist.inner,
                 input_pos,
@@ -592,7 +593,7 @@ impl PyEngine {
         let reference = reference
             .map(|node| self.resolve_node(&engine, &netlist.inner, node, "sensitivity reference"))
             .transpose()?;
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_sensitivity_linearized_with_abort(&netlist.inner, output, reference, abort)
         })?;
         Ok(PySensitivityResult::from_core(&result))
@@ -621,7 +622,7 @@ impl PyEngine {
             .map(|port| port.reference_impedance)
             .collect::<Vec<_>>();
         let engine = self.engine_for_netlist(&netlist.inner);
-        let parameters = run_interruptible(py, |abort| {
+        let parameters = run_interruptible(py, &self.active_runs, |abort| {
             let num_ports = ports.len();
             let num_points = frequencies.len();
             let zero = rspice_core::Complex64::new(0.0, 0.0);
@@ -707,7 +708,41 @@ impl PyEngine {
             Some(cfg) => Engine::new(cfg.inner),
             None => Engine::default(),
         };
-        Self { inner }
+        Self {
+            inner,
+            active_runs: ActiveRuns::default(),
+        }
+    }
+
+    /// Cancel every simulation currently running through this Engine.
+    ///
+    /// This method is thread-safe and is intended for GUI cancel buttons,
+    /// service-request cancellation, and application-managed deadlines. It
+    /// returns the number of active calls that were signalled. Each cancelled
+    /// call raises `CancelledError` in its calling thread.
+    fn cancel(&self) -> usize {
+        self.active_runs.cancel_all()
+    }
+
+    /// Whether at least one simulation is currently running on this Engine.
+    #[getter]
+    fn is_running(&self) -> bool {
+        self.active_runs.count() != 0
+    }
+
+    /// Number of simulations currently running on this Engine.
+    #[getter]
+    fn active_run_count(&self) -> usize {
+        self.active_runs.count()
+    }
+
+    /// Progress in [0.0, 1.0] for one active call, when available.
+    ///
+    /// Returns None when the Engine is idle, multiple calls are active, or
+    /// the current analysis has not reported measurable progress.
+    #[getter]
+    fn progress(&self) -> Option<f64> {
+        self.active_runs.progress()
     }
 
     /// Run every analysis directive in the netlist and evaluate .MEAS
@@ -774,7 +809,7 @@ impl PyEngine {
                         step: *step,
                         mode: mode.clone(),
                     };
-                    let results = run_interruptible(py, |abort| {
+                    let results = run_interruptible(py, &self.active_runs, |abort| {
                         engine.run_dc_sweep2_spec_with_report_and_abort(
                             &netlist.inner,
                             source,
@@ -1007,7 +1042,7 @@ impl PyEngine {
                 AnalysisCommand::Step(command) => {
                     let values = command.sweep.values();
                     let engine = self.engine_for_netlist(net);
-                    let results = run_interruptible(py, |abort| {
+                    let results = run_interruptible(py, &self.active_runs, |abort| {
                         engine.run_step_command_with_abort(net, command, &values, abort)
                     })?;
                     step_result = Some(PyDcSweepResult::new_named(results, &command.name));
@@ -1024,7 +1059,7 @@ impl PyEngine {
                         sweep: StepSweep::List(temperatures.clone()),
                     };
                     let engine = self.engine_for_netlist(net);
-                    let results = run_interruptible(py, |abort| {
+                    let results = run_interruptible(py, &self.active_runs, |abort| {
                         engine.run_step_command_with_abort(net, &command, temperatures, abort)
                     })?;
                     temperature = Some(PyDcSweepResult::new_named(results, "TEMP"));
@@ -1251,7 +1286,7 @@ impl PyEngine {
     ///     >>> print(f"V(out) = {result.voltage('out'):.3f} V")
     pub fn run_dc_op(&self, py: Python<'_>, netlist: &PyNetlist) -> PyResult<PySimulationResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let (result, device_op_report) = run_interruptible(py, |abort| {
+        let (result, device_op_report) = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_dc_op_with_report_and_abort(&netlist.inner, abort)
         })?;
         Ok(PySimulationResult::new_with_report(
@@ -1306,7 +1341,7 @@ impl PyEngine {
             )));
         }
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = run_interruptible(py, |abort| {
+        let results = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_dc_sweep_with_report_and_abort(
                 &netlist.inner,
                 source_name,
@@ -1533,7 +1568,7 @@ impl PyEngine {
             min_interval: max_interval,
         };
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_tran_compressed_with_abort(
                 &netlist.inner,
                 stop_time,
@@ -1568,7 +1603,7 @@ impl PyEngine {
         }
         let max_step = max_step.unwrap_or(stop_time / 50.0);
         let engine = self.engine_for_netlist(&netlist.inner);
-        let (result, checkpoint) = run_interruptible(py, |abort| {
+        let (result, checkpoint) = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_tran_checkpointed_with_abort(&netlist.inner, stop_time, max_step, abort)
         })?;
         Ok((
@@ -1602,7 +1637,7 @@ impl PyEngine {
         }
         let max_step = max_step.unwrap_or((stop_time - checkpoint.inner.time) / 50.0);
         let engine = self.engine_for_netlist(&netlist.inner);
-        let (result, next_checkpoint) = run_interruptible(py, |abort| {
+        let (result, next_checkpoint) = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_tran_resume_with_abort(
                 &netlist.inner,
                 &checkpoint.inner,
@@ -1808,7 +1843,7 @@ impl PyEngine {
         })?;
 
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pss_with_abort(&netlist.inner, config, abort)
         })?;
         Ok(PyPssResult::from_core(&result))
@@ -1864,7 +1899,7 @@ impl PyEngine {
         config.use_krylov = use_krylov;
         config.source_stepping = source_stepping;
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_hb_with_abort(&netlist.inner, config, abort)
         })?;
         Ok(PyHbResult::from_core(&result))
@@ -1927,7 +1962,7 @@ impl PyEngine {
             PyValueError::new_err(format!("invalid PAC configuration: {message}"))
         })?;
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pac_with_abort(&netlist.inner, config, abort)
         })?;
         Ok(PyPacResult::from_core(&result))
@@ -1965,7 +2000,7 @@ impl PyEngine {
             return Err(PyValueError::new_err("max_sideband must be at least 1"));
         }
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pnoise_with_abort(
                 &netlist.inner,
                 fundamental_frequency,
@@ -2016,7 +2051,7 @@ impl PyEngine {
             PyValueError::new_err(format!("invalid oscillator PSS configuration: {message}"))
         })?;
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_pnoise_oscillator_with_abort(&netlist.inner, config, &offsets, abort)
         })?;
         Ok(PyOscillatorNoiseResult::from_core(&result))
@@ -2083,7 +2118,7 @@ impl PyEngine {
         let seed = seed.unwrap_or_else(|| RandomState::new().build_hasher().finish());
 
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = run_interruptible(py, |abort| {
+        let result = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_monte_carlo_with_options_and_abort(
                 &netlist.inner,
                 num_runs,
@@ -2145,7 +2180,7 @@ impl PyEngine {
         }
         let engine = self.engine_for_netlist(&netlist.inner);
         let output = self.resolve_node(&engine, &netlist.inner, &output_node, "output")?;
-        run_interruptible(py, |abort| {
+        run_interruptible(py, &self.active_runs, |abort| {
             engine.run_sensitivity_with_abort(
                 &netlist.inner,
                 output,
@@ -2216,7 +2251,7 @@ impl PyEngine {
         validate_frequencies(&frequencies)?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let output = self.resolve_node(&engine, &netlist.inner, &output_node, "output")?;
-        let values = run_interruptible(py, |abort| {
+        let values = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_sensitivity_ac_with_abort(
                 &netlist.inner,
                 output,
@@ -2268,7 +2303,7 @@ impl PyEngine {
         }
 
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = run_interruptible(py, |abort| {
+        let results = run_interruptible(py, &self.active_runs, |abort| {
             engine.run_step_with_abort(&netlist.inner, param_name, &values, abort)
         })?;
 

@@ -5,6 +5,7 @@
 //! - `ParseError` - Netlist parsing failures
 //! - `SimulationError` - General simulation failures
 //! - `ConvergenceError` - Newton-Raphson convergence failures
+//! - `CancelledError` - Programmatic simulation cancellation
 //! - `MeasurementError` - Failed .MEAS verification (raised by
 //!   `RunReport.assert_passed`)
 
@@ -42,6 +43,14 @@ create_exception!(
     ConvergenceError,
     SimulationError,
     "Raised when Newton-Raphson iteration fails to converge."
+);
+
+// Programmatic cancellation (Ctrl-C remains KeyboardInterrupt).
+create_exception!(
+    rspice,
+    CancelledError,
+    SimulationError,
+    "Raised in a simulation's calling thread after Engine.cancel()."
 );
 
 // Measurement verification failures
@@ -92,6 +101,7 @@ pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> P
     };
     let error = match &err {
         CoreSimulationError::ConvergenceFailed(_) => ConvergenceError::new_err(err.to_string()),
+        CoreSimulationError::Aborted => CancelledError::new_err(err.to_string()),
         _ => SimulationError::new_err(err.to_string()),
     };
     let _attribute_result = Python::attach(|py| {

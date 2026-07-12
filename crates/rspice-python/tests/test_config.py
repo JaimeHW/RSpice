@@ -258,5 +258,6 @@ class TestModuleSurface:
         assert issubclass(rspice.ParseError, rspice.RSpiceError)
         assert issubclass(rspice.SimulationError, rspice.RSpiceError)
         assert issubclass(rspice.ConvergenceError, rspice.SimulationError)
+        assert issubclass(rspice.CancelledError, rspice.SimulationError)
         assert issubclass(rspice.MeasurementError, rspice.RSpiceError)
         assert issubclass(rspice.RSpiceError, Exception)

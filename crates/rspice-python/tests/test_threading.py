@@ -46,6 +46,15 @@ def start_sigint_timer(delay, done):
     return killer
 
 
+def wait_until(predicate, timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.001)
+    return predicate()
+
+
 class TestGilRelease:
     def test_main_thread_stays_live_during_simulation(self, engine):
         netlist = rspice.Netlist.parse(LONG_RC)
@@ -136,6 +145,65 @@ class TestGilRelease:
 
 
 class TestCancellation:
+    def test_engine_cancel_stops_all_active_calls(self):
+        engine = rspice.Engine()
+        netlist = rspice.Netlist.parse(LONG_RC)
+        errors = []
+
+        def work():
+            try:
+                engine.run_tran(netlist, stop_time=50.0, max_step=1e-7)
+            except BaseException as exc:  # cancellation is the expected result
+                errors.append(exc)
+
+        threads = [threading.Thread(target=work) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+
+        assert wait_until(lambda: engine.active_run_count == 2)
+        assert engine.is_running
+        assert engine.progress is None  # ambiguous with concurrent calls
+        assert engine.cancel() == 2
+
+        for thread in threads:
+            thread.join(timeout=10)
+        assert all(not thread.is_alive() for thread in threads)
+        assert len(errors) == 2
+        assert all(isinstance(error, rspice.CancelledError) for error in errors)
+        assert all(error.kind == "aborted" for error in errors)
+        assert not engine.is_running
+        assert engine.active_run_count == 0
+        assert engine.cancel() == 0
+
+        # Cancellation is scoped to calls that were active at cancel time;
+        # it must not poison the Engine for subsequent work.
+        result = engine.run_dc_op(rspice.Netlist.parse("V1 in 0 1\nR1 in 0 1k\n.end\n"))
+        assert result.voltage("in") == pytest.approx(1.0)
+
+    def test_single_active_run_reports_progress(self):
+        engine = rspice.Engine()
+        netlist = rspice.Netlist.parse(LONG_RC)
+        errors = []
+
+        def work():
+            try:
+                engine.run_tran(netlist, stop_time=50.0, max_step=1e-7)
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=work)
+        thread.start()
+        assert wait_until(lambda: engine.active_run_count == 1)
+        assert wait_until(lambda: engine.progress is not None)
+        assert 0.0 <= engine.progress <= 1.0
+        assert engine.cancel() == 1
+        thread.join(timeout=10)
+
+        assert not thread.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], rspice.CancelledError)
+        assert engine.progress is None
+
     def test_keyboard_interrupt_cancels_transient(self, engine):
         netlist = rspice.Netlist.parse(LONG_RC)
 

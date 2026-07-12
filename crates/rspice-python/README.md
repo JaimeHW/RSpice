@@ -22,6 +22,9 @@ regression tests in CI the same way you run unit tests.
 - **Ctrl-C works** — long-running DC, AC/RF, transient, noise, statistical,
   sensitivity, and periodic analyses are cooperatively cancellable with
   `KeyboardInterrupt` instead of blocking until completion
+- **Application cancellation** — `engine.cancel()` safely stops every active
+  call on that Engine from another Python thread and raises `CancelledError`
+  in each caller
 - **Strict error discipline** — accessors raise `IndexError`/`KeyError` for
   invalid nodes; argument errors raise `ValueError`; nothing fabricates
   silent zeros
@@ -294,7 +297,8 @@ All errors derive from `rspice.RSpiceError`:
 RSpiceError
 ├── ParseError           # netlist syntax/semantic errors
 ├── SimulationError      # circuit or solver failure
-│   └── ConvergenceError # Newton-Raphson failed to converge
+│   ├── ConvergenceError # Newton-Raphson failed to converge
+│   └── CancelledError   # Engine.cancel() stopped the active call
 └── MeasurementError     # RunReport.assert_passed() failures
 ```
 
@@ -322,6 +326,15 @@ simulate different netlists in parallel threads.
 RSpice also supports free-threaded CPython 3.14. Dedicated `cp314t` wheels keep
 the GIL disabled, and immutable `Netlist`, `Engine`, and result objects may be
 shared across Python threads.
+
+Applications do not need to synthesize operating-system signals. A GUI or
+service thread may inspect `engine.is_running` / `engine.active_run_count` and
+call `engine.cancel()`. The method returns the number of active calls signalled;
+those calling threads receive `rspice.CancelledError`, and later calls on the
+same Engine remain usable. When exactly one analysis is active,
+`engine.progress` returns its completed fraction when that solver provides one;
+it is `None` for idle Engines, concurrent calls, or analyses without a
+meaningful progress scale.
 
 DC operating points and sweeps, AC and S-parameter sweeps, transfer-function,
 STB, pole-zero, transient and checkpoint/resume runs, noise, Monte Carlo,

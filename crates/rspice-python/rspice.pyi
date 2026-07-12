@@ -53,6 +53,7 @@ __all__ = [
     "ParseError",
     "SimulationError",
     "ConvergenceError",
+    "CancelledError",
     "MeasurementError",
 ]
 
@@ -74,6 +75,9 @@ class SimulationError(RSpiceError):
 
 class ConvergenceError(SimulationError):
     """Raised when Newton-Raphson iteration fails to converge."""
+
+class CancelledError(SimulationError):
+    """Raised in a simulation's calling thread after Engine.cancel()."""
 
 class MeasurementError(RSpiceError):
     """Raised when .MEAS verification fails (see RunReport.assert_passed)."""
@@ -828,6 +832,13 @@ class RunReport:
 @final
 class Engine:
     def __new__(cls, config: SimulationConfig | None = None) -> Engine: ...
+    def cancel(self) -> int: ...
+    @property
+    def is_running(self) -> bool: ...
+    @property
+    def active_run_count(self) -> int: ...
+    @property
+    def progress(self) -> float | None: ...
     def run(self, netlist: Netlist) -> RunReport: ...
     def measure(
         self, netlist: Netlist, result: TransientResult | DcSweepResult
