@@ -63,6 +63,8 @@ pub struct SemanticAnalyzer {
     /// Hidden system-task variables ($bound_step, $discontinuity)
     /// registered on first use
     task_vars: HashMap<SmolStr, usize>,
+    /// Snapshotted guards for enclosing unfiltered `initial_step` events.
+    unfiltered_initial_step_guards: Vec<SmolStr>,
 }
 
 /// How an event expression lowers into the dataflow representation
@@ -95,6 +97,7 @@ impl SemanticAnalyzer {
             runtime_loop_depth: 0,
             arrays: HashMap::new(),
             task_vars: HashMap::new(),
+            unfiltered_initial_step_guards: Vec::new(),
         }
     }
 
@@ -710,6 +713,7 @@ impl SemanticAnalyzer {
                 expression,
                 expr_type,
                 span: localparam.span,
+                unfiltered_initial_step_guard: None,
             }));
         }
 
@@ -759,6 +763,7 @@ impl SemanticAnalyzer {
                             expression,
                             expr_type,
                             span: item.span,
+                            unfiltered_initial_step_guard: None,
                         }));
                     }
                     continue;
@@ -779,6 +784,7 @@ impl SemanticAnalyzer {
                     expression,
                     expr_type,
                     span: item.span,
+                    unfiltered_initial_step_guard: None,
                 }));
             }
         }
@@ -1333,6 +1339,7 @@ impl SemanticAnalyzer {
                                 expression,
                                 expr_type,
                                 span: item.span,
+                                unfiltered_initial_step_guard: None,
                             }));
                         }
                     }
@@ -1501,12 +1508,28 @@ impl SemanticAnalyzer {
                 }
             }
             AnalogStatement::EventControl(event_ctrl) => {
+                let unfiltered_initial_step = matches!(
+                    &event_ctrl.event,
+                    EventExpr::InitialStep { analyses, .. } if analyses.is_empty()
+                );
                 let EventLowering::Guard(guard) =
                     self.event_guard(&event_ctrl.event, module, sink)?;
                 // Snapshot: the body must not perturb its own guard.
                 let guard = self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
+                let initial_guard_name = match &guard {
+                    Expression::Identifier(identifier) if unfiltered_initial_step => {
+                        Some(identifier.name.clone())
+                    }
+                    _ => None,
+                };
                 self.guard_stack.push(guard);
+                if let Some(name) = initial_guard_name {
+                    self.unfiltered_initial_step_guards.push(name);
+                }
                 self.analyze_statement(&event_ctrl.statement, module, sink)?;
+                if unfiltered_initial_step {
+                    self.unfiltered_initial_step_guards.pop();
+                }
                 self.guard_stack.pop();
             }
             AnalogStatement::IndirectContribution(stmt) => {
@@ -1822,6 +1845,7 @@ impl SemanticAnalyzer {
             expression: condition,
             expr_type: ValueType::Real,
             span,
+            unfiltered_initial_step_guard: None,
         }));
 
         Ok(Expression::Identifier(Identifier { name, span }))
@@ -1956,6 +1980,7 @@ impl SemanticAnalyzer {
             expression: count_expr,
             expr_type: ValueType::Real,
             span,
+            unfiltered_initial_step_guard: None,
         }));
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             target: idx_name.clone(),
@@ -1964,6 +1989,7 @@ impl SemanticAnalyzer {
             expression: Self::number_expr(0.0, span),
             expr_type: ValueType::Real,
             span,
+            unfiltered_initial_step_guard: None,
         }));
 
         // while (guard && idx < cnt) { body; idx = idx + 1; }
@@ -1985,6 +2011,7 @@ impl SemanticAnalyzer {
             ),
             expr_type: ValueType::Real,
             span,
+            unfiltered_initial_step_guard: None,
         }));
 
         sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
@@ -2319,6 +2346,7 @@ impl SemanticAnalyzer {
             expression,
             expr_type: ValueType::Real,
             span: call.span,
+            unfiltered_initial_step_guard: None,
         }));
         Ok(())
     }
@@ -2360,6 +2388,7 @@ impl SemanticAnalyzer {
             expression,
             expr_type: ValueType::Real,
             span: call.span,
+            unfiltered_initial_step_guard: None,
         }));
         Ok(())
     }
@@ -2395,6 +2424,7 @@ impl SemanticAnalyzer {
             expression: Self::number_expr(reset, span),
             expr_type: ValueType::Real,
             span,
+            unfiltered_initial_step_guard: None,
         }));
         var_index
     }
@@ -2681,6 +2711,7 @@ impl SemanticAnalyzer {
             expression,
             expr_type: value_type,
             span,
+            unfiltered_initial_step_guard: self.unfiltered_initial_step_guards.last().cloned(),
         }));
 
         Ok(())
@@ -2712,6 +2743,7 @@ impl SemanticAnalyzer {
             expression,
             expr_type: value_type,
             span,
+            unfiltered_initial_step_guard: None,
         }));
         Ok(())
     }

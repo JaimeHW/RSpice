@@ -304,6 +304,68 @@ q1 c b e thermal qv
 }
 
 #[test]
+fn bjt_vbic_level_11_zero_bias_operating_points_converge() {
+    for transistor in ["q1 c b e qv", "q1 c b e thermal qv"] {
+        let deck = format!(
+            r#"
+vc c 0 dc 0
+vb b 0 dc 0
+ve e 0 dc 0
+rth thermal 0 1k
+{transistor}
+.model qv npn level=11
+.op
+.end
+"#
+        );
+        let netlist = Netlist::parse(&deck).expect("zero-bias VBIC deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|error| panic!("{transistor} zero-bias operating point: {error}"));
+        assert!(
+            result
+                .node_voltages
+                .iter()
+                .all(|voltage| voltage.is_finite()),
+            "{transistor} zero-bias operating point must be finite"
+        );
+    }
+}
+
+#[test]
+fn bjt_vbic_level_11_forward_bias_preserves_generated_polarity() {
+    for transistor in ["q1 c b e qv", "q1 c b e thermal qv"] {
+        let deck = format!(
+            r#"
+vcc supply 0 dc 5
+rc supply c 1k
+vb b 0 dc 0.7
+ve e 0 dc 0
+rth thermal 0 1k
+{transistor}
+.model qv npn level=11
+.op
+.end
+"#
+        );
+        let netlist = Netlist::parse(&deck).expect("forward-biased VBIC deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|error| panic!("{transistor} forward-biased operating point: {error}"));
+        let collector = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("c"))
+            .map(|index| result.node_voltages[index])
+            .expect("collector node");
+        assert!(
+            collector.is_finite() && (0.0..4.999).contains(&collector),
+            "{transistor} must draw forward collector current, got V(c)={collector}"
+        );
+    }
+}
+
+#[test]
 fn bjt_explicit_vbic13_4t_model_type_routes_to_generated_vbic13() {
     assert!(
         has_builtin("vbic13_4t"),

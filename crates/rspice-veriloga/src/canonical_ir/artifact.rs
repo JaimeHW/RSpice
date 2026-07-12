@@ -851,13 +851,18 @@ fn write_hir_statements(out: &mut String, prefix: &str, statements: &[HirStateme
 fn write_hir_assignment(out: &mut String, label: &str, assignment: &HirAssignment) {
     writeln!(
         out,
-        "{}=assignment target={} target_name={} index={} expr={} expr_type={} span={}",
+        "{}=assignment target={} target_name={} index={} expr={} expr_type={} unfiltered_initial_step_guard={} span={}",
         label,
         assignment.target.index(),
         enc_str(&assignment.target_name),
         expr_ref_label(assignment.index.as_ref()),
         expr_ref_label(Some(&assignment.expr)),
         value_type_label(assignment.expr_type),
+        assignment
+            .unfiltered_initial_step_guard
+            .as_deref()
+            .map(enc_str)
+            .unwrap_or_else(|| "-".to_string()),
         span_label(assignment.span)
     )
     .expect("write to string");

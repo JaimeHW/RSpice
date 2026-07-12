@@ -129,6 +129,105 @@ fn lower_fixture_parts(
     (metadata, hir, mir, opt)
 }
 
+fn equation_scalar_root(opt: &OptModel, equation: EquationId) -> ValueId {
+    let newton = opt
+        .schedules
+        .iter()
+        .find(|schedule| schedule.invalidation == InvalidationClass::NewtonIteration)
+        .expect("NewtonIteration schedule");
+    let position = newton
+        .ops
+        .iter()
+        .position(
+            |op| matches!(op, OptOp::EvaluateEquation { equation: found } if *found == equation),
+        )
+        .expect("equation evaluation");
+    newton.ops[..position]
+        .iter()
+        .rev()
+        .find_map(|op| match op {
+            OptOp::ComputeValue { value } => Some(*value),
+            OptOp::EvaluateEquation { .. } => None,
+        })
+        .expect("equation scalar root")
+}
+
+fn initial_step_assignment_source(body: &str) -> String {
+    format!(
+        r#"
+module initial_step_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    real seed;
+    analog begin
+        {body}
+        I(p, n) <+ seed * V(p, n);
+    end
+endmodule
+"#
+    )
+}
+
+fn evaluate_initial_step_assignment(source: &str) -> f64 {
+    let opt = lower_initial_step_assignment(source);
+    let root = equation_scalar_root(&opt, EquationId::new(0));
+    opt.evaluate(&OptEvalInputs {
+        parameters: vec![2.0],
+        node_potentials: vec![3.0, 0.0],
+        branch_flows: Vec::new(),
+    })
+    .expect("evaluate initial-step graph")
+    .real(root)
+    .expect("real equation root")
+}
+
+fn lower_initial_step_assignment(source: &str) -> OptModel {
+    let analyzed = analyze_fixture(source, "initial_step_assignment").expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
+    let mir = MirModel::from_hir(&hir).expect("lower MIR");
+    OptModel::from_hir_and_mir(&hir, &mir).expect("lower OptIR")
+}
+
+fn value_depends_on_initial_step(opt: &OptModel, value: ValueId) -> bool {
+    fn visit(
+        opt: &OptModel,
+        value: ValueId,
+        seen: &mut std::collections::HashSet<ValueId>,
+    ) -> bool {
+        if !seen.insert(value) {
+            return false;
+        }
+        match &opt.values[usize::from(value)].kind {
+            OptValueKind::Analysis { query } => query == "__rspice_initial_step",
+            OptValueKind::Ddx { value, .. }
+            | OptValueKind::Ddt { input: value, .. }
+            | OptValueKind::Unary { input: value, .. } => visit(opt, *value, seen),
+            OptValueKind::Binary { left, right, .. } => {
+                visit(opt, *left, seen) || visit(opt, *right, seen)
+            }
+            OptValueKind::Select {
+                condition,
+                then_value,
+                else_value,
+            } => {
+                visit(opt, *condition, seen)
+                    || visit(opt, *then_value, seen)
+                    || visit(opt, *else_value, seen)
+            }
+            OptValueKind::CountedSum {
+                count,
+                initial,
+                term,
+                ..
+            } => visit(opt, *count, seen) || visit(opt, *initial, seen) || visit(opt, *term, seen),
+            _ => false,
+        }
+    }
+    visit(opt, value, &mut std::collections::HashSet::new())
+}
+
 fn lower_tiny_resistor_parts() -> (CanonicalMetadata, HirModel, MirModel, OptModel) {
     lower_fixture_parts(tiny_resistor_source(), "tiny_res")
 }
@@ -785,7 +884,7 @@ fn metadata_digest_is_stable_and_hex_encoded() {
     assert_ne!(digest, StableDigest::from_text("module other; endmodule"));
 
     let metadata = CanonicalMetadata::for_source("fixture", "module tiny; endmodule");
-    assert_eq!(metadata.schema_version, 3);
+    assert_eq!(metadata.schema_version, 4);
     assert_eq!(metadata.source_package.as_str(), "fixture");
     assert_eq!(metadata.source_digest.as_str(), digest.as_hex());
 }
@@ -1337,6 +1436,139 @@ fn opt_lowering_schedules_temperature_dependent_derivatives_as_temperature_stati
         }),
         "Newton schedule should not compute temperature-static derivatives: {newton:?}"
     );
+}
+
+#[test]
+fn opt_lowering_folds_single_pure_unfiltered_initial_step_initialization() {
+    let source = initial_step_assignment_source("@(initial_step) seed = gain;");
+    assert_eq!(evaluate_initial_step_assignment(&source), 6.0);
+}
+
+#[test]
+fn opt_lowering_folds_temperature_static_unfiltered_initial_step_initialization() {
+    let source = initial_step_assignment_source("@(initial_step) seed = $temperature;");
+    let opt = lower_initial_step_assignment(&source);
+    let root = equation_scalar_root(&opt, EquationId::new(0));
+    assert!(!value_depends_on_initial_step(&opt, root));
+    assert!(
+        opt.schedules
+            .iter()
+            .any(|schedule| schedule.invalidation == InvalidationClass::TemperatureStatic)
+    );
+}
+
+#[test]
+fn opt_lowering_folds_mutually_exclusive_pure_assignments_in_one_initial_step_event() {
+    let source = initial_step_assignment_source(
+        "@(initial_step) begin if (gain > 1.0) seed = gain; else seed = 1.0; end",
+    );
+    assert_eq!(evaluate_initial_step_assignment(&source), 6.0);
+}
+
+#[test]
+fn opt_lowering_folds_parameter_given_polarity_selection_in_one_initial_step_event() {
+    let source = r#"
+module initial_step_assignment(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real gain = 2.0;
+    parameter integer npn = 0;
+    parameter integer pnp = 0;
+    parameter integer type = 1;
+    real seed;
+    analog begin
+        @(initial_step) begin
+            if ($param_given(npn)) seed = 1.0;
+            else if ($param_given(pnp)) seed = -1.0;
+            else if ($param_given(type)) seed = type;
+            else seed = 1.0;
+        end
+        I(p, n) <+ seed * gain * V(p, n);
+    end
+endmodule
+"#;
+    let opt = lower_initial_step_assignment(source);
+    let root = equation_scalar_root(&opt, EquationId::new(0));
+    assert!(!value_depends_on_initial_step(&opt, root));
+    assert_eq!(
+        opt.evaluate(&OptEvalInputs {
+            parameters: vec![2.0, 0.0, 0.0, -1.0],
+            node_potentials: vec![3.0, 0.0],
+            branch_flows: Vec::new(),
+        })
+        .expect("evaluate polarity selection")
+        .real(root),
+        Some(6.0)
+    );
+}
+
+#[test]
+fn opt_lowering_folds_sequential_pure_assignments_in_one_initial_step_event() {
+    let source =
+        initial_step_assignment_source("@(initial_step) begin seed = gain; seed = gain + 1.0; end");
+    assert_eq!(evaluate_initial_step_assignment(&source), 9.0);
+}
+
+#[test]
+fn opt_lowering_keeps_filtered_initial_step_assignment_guarded() {
+    let source = initial_step_assignment_source("@(initial_step(\"tran\")) seed = gain;");
+    let opt = lower_initial_step_assignment(&source);
+    assert!(value_depends_on_initial_step(
+        &opt,
+        equation_scalar_root(&opt, EquationId::new(0))
+    ));
+}
+
+#[test]
+fn opt_lowering_keeps_node_dependent_initial_step_assignment_guarded() {
+    let source = initial_step_assignment_source("@(initial_step) seed = V(p, n);");
+    let opt = lower_initial_step_assignment(&source);
+    assert!(value_depends_on_initial_step(
+        &opt,
+        equation_scalar_root(&opt, EquationId::new(0))
+    ));
+}
+
+#[test]
+fn opt_lowering_keeps_time_dependent_initial_step_assignment_guarded() {
+    let source = initial_step_assignment_source("@(initial_step) seed = $abstime + gain;");
+    let opt = lower_initial_step_assignment(&source);
+    assert!(value_depends_on_initial_step(
+        &opt,
+        equation_scalar_root(&opt, EquationId::new(0))
+    ));
+}
+
+#[test]
+fn opt_lowering_keeps_self_dependent_initial_step_assignment_guarded() {
+    let source = initial_step_assignment_source("@(initial_step) seed = seed + gain;");
+    let opt = lower_initial_step_assignment(&source);
+    assert!(value_depends_on_initial_step(
+        &opt,
+        equation_scalar_root(&opt, EquationId::new(0))
+    ));
+}
+
+#[test]
+fn opt_lowering_keeps_writes_from_separate_initial_step_events_guarded() {
+    let source = initial_step_assignment_source(
+        "@(initial_step) seed = gain; @(initial_step) seed = gain + 1.0;",
+    );
+    let opt = lower_initial_step_assignment(&source);
+    assert!(value_depends_on_initial_step(
+        &opt,
+        equation_scalar_root(&opt, EquationId::new(0))
+    ));
+}
+
+#[test]
+fn opt_lowering_keeps_mixed_unconditional_and_initial_step_writes_guarded() {
+    let source = initial_step_assignment_source("seed = gain + 1.0; @(initial_step) seed = gain;");
+    let opt = lower_initial_step_assignment(&source);
+    assert!(value_depends_on_initial_step(
+        &opt,
+        equation_scalar_root(&opt, EquationId::new(0))
+    ));
 }
 
 #[test]
@@ -2360,7 +2592,7 @@ fn artifact_dump_is_deterministic_and_contains_phase_summaries() {
 
     assert_eq!(first, second);
     assert!(first.contains("canonical-veriloga-ir"));
-    assert!(first.contains("schema_version=3"));
+    assert!(first.contains("schema_version=4"));
     assert!(first.contains("source_package=fixture"));
     assert!(first.contains("source_digest="));
     assert!(first.contains("compiler_version="));

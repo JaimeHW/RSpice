@@ -282,7 +282,7 @@ impl<'a> OptEvaluator<'a> {
                 then_value,
                 else_value,
             } => {
-                let condition = self.boolean_value(*condition)?;
+                let condition = self.truth_value(*condition)?;
                 if condition {
                     self.value_at(*then_value)
                 } else {
@@ -665,15 +665,6 @@ impl<'a> OptEvaluator<'a> {
         evaluated.real().ok_or(OptEvalError::TypeMismatch {
             value,
             expected: "real",
-            found: evaluated.label(),
-        })
-    }
-
-    fn boolean_value(&mut self, value: ValueId) -> Result<bool, OptEvalError> {
-        let evaluated = self.value_at(value)?;
-        evaluated.boolean().ok_or(OptEvalError::TypeMismatch {
-            value,
-            expected: "boolean",
             found: evaluated.label(),
         })
     }

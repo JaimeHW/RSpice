@@ -349,6 +349,7 @@ pub struct HirAssignment {
     pub expr: HirExprRef,
     pub expr_type: CanonicalValueType,
     pub span: SourceSpanRef,
+    pub unfiltered_initial_step_guard: Option<SmolStr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1489,6 +1490,7 @@ fn lower_statement(lowerer: &mut HirLowerer, statement: &AnalyzedStatement) -> H
             expr: lowerer.lower_expr(&assignment.expression),
             expr_type: CanonicalValueType::from(assignment.expr_type),
             span: SourceSpanRef::from(assignment.span),
+            unfiltered_initial_step_guard: assignment.unfiltered_initial_step_guard.clone(),
         }),
         AnalyzedStatement::Loop(loop_statement) => HirStatement::Loop(HirLoop {
             condition: lowerer.lower_expr(&loop_statement.condition),

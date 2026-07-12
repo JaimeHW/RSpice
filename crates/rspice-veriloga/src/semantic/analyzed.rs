@@ -165,4 +165,8 @@ pub struct AnalyzedAssignment {
     pub expr_type: ValueType,
     /// Source span
     pub span: Span,
+    /// Name of the snapshotted, unfiltered `initial_step` guard enclosing
+    /// this assignment. This provenance lets canonical lowering remove only
+    /// that guard when a single-assignment initialization is proven static.
+    pub unfiltered_initial_step_guard: Option<SmolStr>,
 }

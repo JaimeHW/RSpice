@@ -612,6 +612,9 @@ struct ScalarGraphBuilder<'a> {
     expr_variable_reference_cache: HashMap<(ExprId, VariableId), bool>,
     variable_values: HashMap<VariableId, Option<ValueId>>,
     variable_assignment_exprs: HashMap<VariableId, ExprId>,
+    foldable_initial_step_guards: HashMap<VariableId, SmolStr>,
+    assignments_by_variable: HashMap<VariableId, Vec<&'a HirAssignment>>,
+    initial_step_group_proofs: HashMap<VariableId, bool>,
     variable_assignment_history: HashMap<VariableId, Vec<AssignmentHistoryEntry>>,
     local_assignment_history: HashMap<VariableId, LocalAssignmentHistory>,
     guarded_path_assignment_exprs: HashMap<VariableId, GuardedPathAssignmentExpr>,
@@ -940,6 +943,23 @@ impl<'a> ScalarGraphBuilder<'a> {
             .iter()
             .map(|parameter| (parameter.name.clone(), parameter.id))
             .collect();
+        let mut assignments_by_variable = HashMap::new();
+        if let Some(hir) = hir {
+            collect_hir_assignments_by_variable(&hir.statements, &mut assignments_by_variable);
+        }
+        let foldable_initial_step_guards = assignments_by_variable
+            .iter()
+            .filter_map(|(variable, assignments)| {
+                let guard = assignments.first()?.unfiltered_initial_step_guard.clone()?;
+                assignments
+                    .iter()
+                    .all(|assignment| {
+                        assignment.index.is_none()
+                            && assignment.unfiltered_initial_step_guard.as_ref() == Some(&guard)
+                    })
+                    .then_some((*variable, guard))
+            })
+            .collect();
         Self {
             hir,
             mir,
@@ -951,6 +971,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             expr_variable_reference_cache: HashMap::new(),
             variable_values: HashMap::new(),
             variable_assignment_exprs: HashMap::new(),
+            foldable_initial_step_guards,
+            assignments_by_variable,
+            initial_step_group_proofs: HashMap::new(),
             variable_assignment_history: HashMap::new(),
             local_assignment_history: HashMap::new(),
             guarded_path_assignment_exprs: HashMap::new(),
@@ -1258,6 +1281,14 @@ impl<'a> ScalarGraphBuilder<'a> {
         self.clear_assignment_replay_caches();
         self.guarded_path_assignment_exprs
             .remove(&assignment.target);
+        if let Some(value) = self.lower_static_unfiltered_initial_step_assignment(assignment) {
+            self.variable_values.insert(assignment.target, Some(value));
+            self.variable_assignment_exprs.remove(&assignment.target);
+            self.variable_assignment_history.remove(&assignment.target);
+            self.local_assignment_history.remove(&assignment.target);
+            self.expression_values.clear();
+            return;
+        }
         let records_history = self.should_record_assignment_history(assignment)
             && assignment.index.is_none()
             && supported_assignment_value_type(assignment.expr_type);
@@ -1290,6 +1321,233 @@ impl<'a> ScalarGraphBuilder<'a> {
         self.absorb_local_assignment_history_value(assignment.target, value);
         self.trace_assignment_value(assignment, value, records_history);
         self.expression_values.clear();
+    }
+
+    /// Fold assignments only when every write to the variable belongs to one
+    /// unfiltered `initial_step` event and each sequential result is entirely
+    /// instance- or temperature-static. Exact semantic provenance ensures this
+    /// removes no nested user condition and fails closed for other event shapes.
+    fn lower_static_unfiltered_initial_step_assignment(
+        &mut self,
+        assignment: &HirAssignment,
+    ) -> Option<ValueId> {
+        let guard_name = self
+            .foldable_initial_step_guards
+            .get(&assignment.target)?
+            .clone();
+        if !self.prove_initial_step_group_static(assignment.target, &guard_name) {
+            return None;
+        }
+        let expression = self.mir.expressions.get(usize::from(assignment.expr.id))?;
+        let HirExprKind::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } = expression.kind
+        else {
+            return None;
+        };
+        if self.variable_identifier(else_expr) != Some(assignment.target)
+            || self.expr_references_variable(then_expr, assignment.target)
+        {
+            return None;
+        }
+
+        let remaining_conditions = self.strip_initial_step_guard(condition, &guard_name)?;
+        let active = self.lower_expression(then_expr)?;
+        let active = self.coerce_value_to_variable_type(assignment.target, active)?;
+        let value =
+            if let Some(condition) = self.lower_initial_step_conditions(&remaining_conditions)? {
+                let fallback = self.current_variable_value(assignment.target)?;
+                self.push_typed_select(
+                    self.variable_opt_value_type(assignment.target)?,
+                    condition,
+                    active,
+                    fallback,
+                )
+            } else {
+                active
+            };
+
+        let mut memo = vec![None; self.values.len()];
+        match value_invalidation(&self.values, value, &mut memo) {
+            InvalidationClass::InstanceStatic | InvalidationClass::TemperatureStatic => Some(value),
+            _ => None,
+        }
+    }
+
+    fn prove_initial_step_group_static(&mut self, variable: VariableId, guard_name: &str) -> bool {
+        if let Some(proven) = self.initial_step_group_proofs.get(&variable).copied() {
+            return proven;
+        }
+        let assignments = self
+            .assignments_by_variable
+            .get(&variable)
+            .cloned()
+            .unwrap_or_default();
+        self.materialize_static_guard_aliases();
+        let unavailable_variables: HashSet<_> = self
+            .variable_ids_by_name
+            .values()
+            .copied()
+            .filter(|candidate| {
+                *candidate != variable
+                    && !matches!(self.variable_values.get(candidate), Some(Some(_)))
+            })
+            .collect();
+        let Some(value_type) = self.variable_value_type(variable) else {
+            self.initial_step_group_proofs.insert(variable, false);
+            return false;
+        };
+        let Some(mut fallback) = self.default_variable_value(value_type) else {
+            self.initial_step_group_proofs.insert(variable, false);
+            return false;
+        };
+
+        let proven = assignments.into_iter().all(|assignment| {
+            let Some(expression) = self.mir.expressions.get(usize::from(assignment.expr.id)) else {
+                return false;
+            };
+            let HirExprKind::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } = expression.kind
+            else {
+                return false;
+            };
+            if self.variable_identifier(else_expr) != Some(variable)
+                || self.expr_references_variable(then_expr, variable)
+                || self.expr_references_any_variable(then_expr, &unavailable_variables)
+            {
+                return false;
+            }
+            let Some(remaining_conditions) = self.strip_initial_step_guard(condition, guard_name)
+            else {
+                return false;
+            };
+            if remaining_conditions.iter().any(|condition| {
+                self.expr_references_any_variable(*condition, &unavailable_variables)
+            }) {
+                return false;
+            }
+            let Some(active) = self.lower_expression(then_expr) else {
+                return false;
+            };
+            let Some(active) = self.coerce_value_to_variable_type(variable, active) else {
+                return false;
+            };
+            let Some(condition) = self.lower_initial_step_conditions(&remaining_conditions) else {
+                return false;
+            };
+            let value = if let Some(condition) = condition {
+                self.push_typed_select(
+                    self.variable_opt_value_type(variable)
+                        .expect("checked variable type"),
+                    condition,
+                    active,
+                    fallback,
+                )
+            } else {
+                active
+            };
+            let mut memo = vec![None; self.values.len()];
+            if !matches!(
+                value_invalidation(&self.values, value, &mut memo),
+                InvalidationClass::InstanceStatic | InvalidationClass::TemperatureStatic
+            ) {
+                return false;
+            }
+            fallback = value;
+            true
+        });
+        self.initial_step_group_proofs.insert(variable, proven);
+        proven
+    }
+
+    /// Guard snapshots are emitted before their guarded branch, but an
+    /// if/else-if chain emits later sibling snapshots between assignments to
+    /// the initialized variable. Materialize only single-assignment, pure
+    /// static guard aliases so the whole initialization group can be proven
+    /// before any member is folded.
+    fn materialize_static_guard_aliases(&mut self) {
+        loop {
+            let unavailable: HashSet<_> = self
+                .variable_ids_by_name
+                .values()
+                .copied()
+                .filter(|variable| !matches!(self.variable_values.get(variable), Some(Some(_))))
+                .collect();
+            let candidates: Vec<_> = self
+                .assignments_by_variable
+                .iter()
+                .filter_map(|(variable, assignments)| {
+                    let name = self.variable_name(*variable);
+                    (name.starts_with("__guard") && assignments.len() == 1)
+                        .then_some((*variable, assignments[0].expr.id))
+                })
+                .collect();
+            let mut progress = false;
+            for (variable, expr) in candidates {
+                if matches!(self.variable_values.get(&variable), Some(Some(_)))
+                    || self.expr_references_any_variable(expr, &unavailable)
+                {
+                    continue;
+                }
+                let Some(value) = self.lower_expression(expr) else {
+                    continue;
+                };
+                let Some(value) = self.coerce_value_to_variable_type(variable, value) else {
+                    continue;
+                };
+                let mut memo = vec![None; self.values.len()];
+                if matches!(
+                    value_invalidation(&self.values, value, &mut memo),
+                    InvalidationClass::InstanceStatic | InvalidationClass::TemperatureStatic
+                ) {
+                    self.variable_values.insert(variable, Some(value));
+                    progress = true;
+                }
+            }
+            if !progress {
+                break;
+            }
+        }
+    }
+
+    /// Return the conjunction terms left after removing the exact
+    /// snapshotted event guard from the left spine of an `And` tree.
+    fn strip_initial_step_guard(&self, condition: ExprId, guard_name: &str) -> Option<Vec<ExprId>> {
+        let expression = self.mir.expressions.get(usize::from(condition))?;
+        match &expression.kind {
+            HirExprKind::Identifier { name } if name == guard_name => Some(Vec::new()),
+            HirExprKind::Binary { op, left, right } if op.as_str() == "And" => {
+                let mut remaining = self.strip_initial_step_guard(*left, guard_name)?;
+                remaining.push(*right);
+                Some(remaining)
+            }
+            _ => None,
+        }
+    }
+
+    fn lower_initial_step_conditions(&mut self, conditions: &[ExprId]) -> Option<Option<ValueId>> {
+        let mut lowered = conditions.iter().copied();
+        let Some(first) = lowered.next() else {
+            return Some(None);
+        };
+        let mut condition = self.lower_expression(first)?;
+        for next in lowered {
+            let next = self.lower_expression(next)?;
+            condition = self.push_value(
+                OptValueType::Boolean,
+                OptValueKind::Binary {
+                    op: OptBinaryOp::And,
+                    left: condition,
+                    right: next,
+                },
+            );
+        }
+        Some(Some(condition))
     }
 
     fn lower_assignment_value_with_trace(&mut self, assignment: &HirAssignment) -> Option<ValueId> {
@@ -8459,6 +8717,25 @@ fn collect_hir_assignments<'a>(
     }
 }
 
+fn collect_hir_assignments_by_variable<'a>(
+    statements: &'a [HirStatement],
+    assignments: &mut HashMap<VariableId, Vec<&'a HirAssignment>>,
+) {
+    for statement in statements {
+        match statement {
+            HirStatement::Assignment(assignment) => {
+                assignments
+                    .entry(assignment.target)
+                    .or_default()
+                    .push(assignment);
+            }
+            HirStatement::Loop(loop_statement) => {
+                collect_hir_assignments_by_variable(&loop_statement.body, assignments);
+            }
+        }
+    }
+}
+
 fn collect_expression_variables(
     mir: &MirModel,
     variables_by_name: &HashMap<&str, VariableId>,
@@ -9857,6 +10134,7 @@ mod tests {
             expr: test_expr_ref(expr),
             expr_type: CanonicalValueType::Boolean,
             span: test_span(),
+            unfiltered_initial_step_guard: None,
         }
     }
 

@@ -60,6 +60,40 @@ fn generated_device_report_records_backend_selection() {
 }
 
 #[test]
+fn scalar_backend_compiles_real_snapshot_aliases_with_boolean_truth_expressions() {
+    let artifact = VerilogACompiler::default()
+        .compile_canonical_ir(
+            r#"
+module real_snapshot_boolean_truth(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer npn = 0;
+    parameter integer pnp = 0;
+    parameter integer type = 1;
+    real polarity;
+    analog begin
+        @(initial_step) begin
+            if ($param_given(npn)) polarity = 1.0;
+            else if ($param_given(pnp)) polarity = -1.0;
+            else if ($param_given(type)) polarity = type;
+            else polarity = 1.0;
+        end
+        I(p, n) <+ polarity * V(p, n);
+    end
+endmodule
+"#,
+        )
+        .expect("canonical polarity IR");
+    let generated = RustTranspiler::new_scalar(RustTranspileOptions {
+        runtime_path: "crate::runtime".to_string(),
+    })
+    .transpile(&artifact)
+    .expect("transpile polarity selection");
+
+    assert_generated_rust_compiles(&generated);
+}
+
+#[test]
 fn generated_registry_names_disambiguate_duplicate_public_models() {
     let devices = vec![
         GeneratedRustDevice {
