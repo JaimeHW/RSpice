@@ -3642,6 +3642,7 @@ impl SemanticAnalyzer {
                 span: c.span,
             }),
             Expression::SystemFunction(f) => {
+                self.validate_limit_call(f)?;
                 let args = f
                     .args
                     .iter()
@@ -3762,6 +3763,138 @@ impl SemanticAnalyzer {
             }
             Expression::AnalogOperator(_) | Expression::NoiseSource(_) => expr.clone(),
         })
+    }
+
+    /// Validate the selector and callable contract of named `$limit` forms.
+    ///
+    /// Numeric `$limit(value)` and `$limit(value, step)` calls intentionally
+    /// remain outside this check. A named limiter receives the proposed and
+    /// previous values implicitly, followed by every argument after its
+    /// selector in the `$limit` call.
+    fn validate_limit_call(&self, function: &SystemFunction) -> CompileResult<()> {
+        if function.name != "$limit" {
+            return Ok(());
+        }
+
+        let selector = match function.args.get(1) {
+            Some(Expression::StringLit(selector)) => selector.value.as_str(),
+            _ if function.args.len() <= 2 => return Ok(()),
+            _ => {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(
+                        "named $limit requires a literal string selector as its second argument"
+                            .into(),
+                    ),
+                    function.span,
+                )));
+            }
+        };
+
+        // Xyce's named limiter ABI has untyped and typed selector families.
+        // Typed built-ins carry one additional type/polarity argument; dummy
+        // selectors retain the same shape for initialization bookkeeping even
+        // though they intentionally leave the proposed value unchanged.
+        let expected_total = match selector {
+            "pnjlim" | "pnjlim_new" | "dummy" => Some(4),
+            "typedpnjlim" | "typedpnjlim_new" | "typeddummy" => Some(5),
+            _ => None,
+        };
+        if let Some(expected) = expected_total {
+            if function.args.len() != expected {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::ArgumentCountMismatch {
+                        name: format!("$limit(\"{selector}\")"),
+                        expected: expected.to_string(),
+                        got: function.args.len(),
+                    },
+                    function.span,
+                )));
+            }
+            return Ok(());
+        }
+
+        let Some(limiter) = self.user_functions.get(selector) else {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnknownFunction(selector.to_string()),
+                function.span,
+            )));
+        };
+
+        if limiter.return_type != VarType::Real {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "named $limit function '{selector}' must return real"
+                )),
+                function.span,
+            )));
+        }
+
+        // The source function's first two inputs receive the proposed and
+        // previous values. In Xyce's typed custom-limiter convention, the
+        // literal `"typed"` and the following type/polarity expression are
+        // metadata and are not forwarded to the analog function.
+        let typed_custom = function.args.get(2).is_some_and(|argument| {
+            matches!(
+                argument,
+                Expression::StringLit(marker) if marker.value == "typed"
+            )
+        });
+        if typed_custom && function.args.len() < 4 {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "typed named $limit function '{selector}' requires a type/polarity metadata argument after \"typed\""
+                )),
+                function.span,
+            )));
+        }
+        let expected_formals = if typed_custom {
+            function.args.len() - 2
+        } else {
+            function.args.len()
+        };
+        if limiter.params.len() != expected_formals {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::ArgumentCountMismatch {
+                    name: selector.to_string(),
+                    expected: expected_formals.to_string(),
+                    got: limiter.params.len(),
+                },
+                function.span,
+            )));
+        }
+        if let Some(param) = limiter
+            .params
+            .iter()
+            .find(|param| param.direction != ParamDirection::Input)
+        {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "named $limit function '{selector}' requires input formal '{}', found {}",
+                    param.name,
+                    match param.direction {
+                        ParamDirection::Input => unreachable!(),
+                        ParamDirection::Output => "output",
+                        ParamDirection::Inout => "inout",
+                    }
+                )),
+                function.span,
+            )));
+        }
+        if let Some(param) = limiter
+            .params
+            .iter()
+            .find(|param| param.param_type != VarType::Real)
+        {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "named $limit function '{selector}' requires real formal '{}', found {:?}",
+                    param.name, param.param_type
+                )),
+                function.span,
+            )));
+        }
+
+        Ok(())
     }
 
     fn validate_builtin_call_arity(&self, call: &CallExpr) -> CompileResult<()> {

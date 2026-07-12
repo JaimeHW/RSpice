@@ -724,3 +724,295 @@ fn runtime_repeat_synthesizes_counter() {
         "synthesized counter variables registered"
     );
 }
+
+#[test]
+fn limit_accepts_numeric_and_supported_named_forms() {
+    analyze(&module_src(
+        r#"
+            real x, step;
+            analog begin
+                x = $limit(V(p, n));
+                x = $limit(V(p, n), step);
+                x = $limit(V(p, n), "pnjlim", 0.026, 0.8);
+                x = $limit(V(p, n), "typedpnjlim", 0.026, 0.8, -1.0);
+                x = $limit(V(p, n), "pnjlim_new", 0.026, 0.8);
+                x = $limit(V(p, n), "typedpnjlim_new", 0.026, 0.8, 1.0);
+                x = $limit(V(p, n), "dummy", 0.026, 0.8);
+                x = $limit(V(p, n), "typeddummy", 0.026, 0.8, 1.0);
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect("supported numeric and named $limit forms must pass semantic analysis");
+}
+
+#[test]
+fn limit_accepts_source_defined_all_input_limiter() {
+    analyze(&module_src(
+        r#"
+            analog function real bounded_step;
+                input proposed, previous, bound;
+                real proposed, previous, bound;
+                begin
+                    bounded_step = proposed;
+                end
+            endfunction
+
+            real x;
+            analog begin
+                x = $limit(V(p, n), "bounded_step", 5.0);
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect("a source-defined limiter with proposed, previous, and explicit inputs is valid");
+}
+
+#[test]
+fn named_limit_requires_literal_string_selector() {
+    let error = analyze(&module_src(
+        r#"
+            real x, selector;
+            analog begin
+                x = $limit(V(p, n), selector, 0.026, 0.8);
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect_err("a named limiter selector must not be computed at runtime");
+    assert!(
+        error.to_string().contains("literal string selector"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn named_limit_builtin_arities_are_exact() {
+    for (selector, args, expected) in [
+        ("pnjlim", "0.026", "expects 4 argument(s), got 3"),
+        ("typedpnjlim", "0.026, 0.8", "expects 5 argument(s), got 4"),
+        (
+            "pnjlim_new",
+            "0.026, 0.8, 1.0",
+            "expects 4 argument(s), got 5",
+        ),
+        (
+            "typedpnjlim_new",
+            "0.026, 0.8",
+            "expects 5 argument(s), got 4",
+        ),
+        ("dummy", "0.026", "expects 4 argument(s), got 3"),
+        ("typeddummy", "0.026, 0.8", "expects 5 argument(s), got 4"),
+    ] {
+        let source = module_src(&format!(
+            r#"
+                real x;
+                analog begin
+                    x = $limit(V(p, n), "{selector}", {args});
+                    I(p, n) <+ x;
+                end
+                "#
+        ));
+        let error = analyze(&source).expect_err("invalid built-in limiter arity must fail");
+        assert!(
+            error.to_string().contains(expected),
+            "unexpected diagnostic for {selector}: {error}"
+        );
+    }
+}
+
+#[test]
+fn source_defined_typed_limit_excludes_both_metadata_arguments() {
+    analyze(&module_src(
+        r#"
+            analog function real typed_step;
+                input proposed, previous, lower, upper;
+                real proposed, previous, lower, upper;
+                begin
+                    typed_step = proposed;
+                end
+            endfunction
+
+            real x;
+            analog begin
+                x = $limit(V(p, n), "typed_step", "typed", -1.0, -0.5, 0.5);
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect("typed custom limiter metadata must not be forwarded as analog-function formals");
+}
+
+#[test]
+fn source_defined_typed_limit_requires_type_metadata_and_forwarded_signature() {
+    let missing_metadata = analyze(&module_src(
+        r#"
+            analog function real typed_step;
+                input proposed, previous;
+                real proposed, previous;
+                begin
+                    typed_step = proposed;
+                end
+            endfunction
+            real x;
+            analog begin
+                x = $limit(V(p, n), "typed_step", "typed");
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect_err("typed custom limiter requires its type/polarity metadata expression");
+    assert!(
+        missing_metadata
+            .to_string()
+            .contains("requires a type/polarity metadata argument"),
+        "unexpected diagnostic: {missing_metadata}"
+    );
+
+    let wrong_forwarded_count = analyze(&module_src(
+        r#"
+            analog function real typed_step;
+                input proposed, previous, extra;
+                real proposed, previous, extra;
+                begin
+                    typed_step = proposed;
+                end
+            endfunction
+            real x;
+            analog begin
+                x = $limit(V(p, n), "typed_step", "typed", -1.0);
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect_err("only arguments after typed metadata are forwarded to the limiter");
+    assert!(
+        wrong_forwarded_count
+            .to_string()
+            .contains("Function 'typed_step' expects 2 argument(s), got 3"),
+        "unexpected diagnostic: {wrong_forwarded_count}"
+    );
+}
+
+#[test]
+fn named_limit_unknown_selector_requires_source_function() {
+    let error = analyze(&module_src(
+        r#"
+            real x;
+            analog begin
+                x = $limit(V(p, n), "missing_limiter");
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect_err("an unknown named limiter must resolve to an analog function");
+    assert!(
+        error
+            .to_string()
+            .contains("Unknown function: 'missing_limiter'"),
+        "unexpected diagnostic: {error}"
+    );
+}
+
+#[test]
+fn source_defined_limit_requires_matching_all_input_signature() {
+    let wrong_count = analyze(&module_src(
+        r#"
+            analog function real wrong_count;
+                input proposed, previous;
+                real proposed, previous;
+                begin
+                    wrong_count = proposed;
+                end
+            endfunction
+            real x;
+            analog begin
+                x = $limit(V(p, n), "wrong_count", 5.0);
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect_err("explicit limiter arguments require matching source formals");
+    assert!(
+        wrong_count
+            .to_string()
+            .contains("Function 'wrong_count' expects 3 argument(s), got 2"),
+        "unexpected diagnostic: {wrong_count}"
+    );
+
+    let output_formal = analyze(&module_src(
+        r#"
+            analog function real wrong_direction;
+                input proposed;
+                output previous;
+                real proposed, previous;
+                begin
+                    wrong_direction = proposed;
+                end
+            endfunction
+            real x;
+            analog begin
+                x = $limit(V(p, n), "wrong_direction");
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect_err("implicit limiter values require input formals");
+    assert!(
+        output_formal
+            .to_string()
+            .contains("requires input formal 'previous', found output"),
+        "unexpected diagnostic: {output_formal}"
+    );
+}
+
+#[test]
+fn source_defined_limit_requires_real_return_and_formals() {
+    let integer_return = analyze(&module_src(
+        r#"
+            analog function integer wrong_return;
+                input proposed, previous;
+                real proposed, previous;
+                begin
+                    wrong_return = 0;
+                end
+            endfunction
+            real x;
+            analog begin
+                x = $limit(V(p, n), "wrong_return");
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect_err("a named limiter must return real");
+    assert!(
+        integer_return
+            .to_string()
+            .contains("named $limit function 'wrong_return' must return real"),
+        "unexpected diagnostic: {integer_return}"
+    );
+
+    let integer_formal = analyze(&module_src(
+        r#"
+            analog function real wrong_formal;
+                input real proposed;
+                input integer previous;
+                begin
+                    wrong_formal = proposed;
+                end
+            endfunction
+            real x;
+            analog begin
+                x = $limit(V(p, n), "wrong_formal");
+                I(p, n) <+ x;
+            end
+            "#,
+    ))
+    .expect_err("a named limiter must receive real values");
+    assert!(
+        integer_formal
+            .to_string()
+            .contains("requires real formal 'previous'"),
+        "unexpected diagnostic: {integer_formal}"
+    );
+}
