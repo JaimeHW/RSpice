@@ -662,6 +662,13 @@ struct ConditionalPathPredicate {
     truth: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CurrentPathInitialProof {
+    NoPathSensitiveState,
+    Proven(ValueId),
+    Unresolved,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AssignmentHistoryEntry {
     expr: ExprId,
@@ -1044,6 +1051,16 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
         observable_roots.extend(self.ddx_derivative_observable_roots(&live));
         observable_roots.extend(self.runtime_loop_derivative_observable_roots(&live));
+        // Ddx operands and derivative-bearing runtime-loop inputs become observable
+        // only after the initial equation-root walk. Their derivative values are
+        // emitted with the observable value, so close liveness over those lanes
+        // before compacting IDs.
+        for root in observable_roots.iter().copied().collect::<Vec<_>>() {
+            self.mark_live_value(root, &mut live);
+            for derivative in self.values[usize::from(root)].derivatives.clone() {
+                self.mark_live_value(derivative.value, &mut live);
+            }
+        }
 
         if live.iter().all(|is_live| *is_live) {
             return;
@@ -1119,6 +1136,28 @@ impl<'a> ScalarGraphBuilder<'a> {
             *slot = true;
             self.push_live_value_dependencies(index, &mut stack);
         }
+    }
+
+    fn value_graph_contains_live_simparam(&self, value: ValueId) -> bool {
+        let mut seen = HashSet::new();
+        let mut stack = vec![value];
+        while let Some(value) = stack.pop() {
+            if !seen.insert(value) {
+                continue;
+            }
+            let Some(slot) = self.values.get(usize::from(value)) else {
+                continue;
+            };
+            if matches!(
+                slot.kind,
+                OptValueKind::SimParam { .. } | OptValueKind::SimParamGiven { .. }
+            ) {
+                return true;
+            }
+            stack.extend(slot.derivatives.iter().map(|derivative| derivative.value));
+            self.push_live_value_dependencies(usize::from(value), &mut stack);
+        }
+        false
     }
 
     fn push_live_value_dependencies(&self, index: usize, stack: &mut Vec<ValueId>) {
@@ -2090,13 +2129,29 @@ impl<'a> ScalarGraphBuilder<'a> {
                 .current_variable_value(*variable)
                 .map(|value| self.coerce_value_to_type(value, value_type));
             let initial = if required_initials.contains(variable) {
-                let initial = current.or_else(|| {
-                    self.runtime_loop_current_path_initial(
-                        *variable,
-                        value_type,
-                        loop_statement.condition.id,
-                    )
-                });
+                // A carried value is consumed only after the loop condition has
+                // evaluated true.  Prefer the value reconstructed on that path;
+                // the unconditional graph may retain writes from paths on which
+                // the loop cannot execute.
+                let initial = match self.runtime_loop_current_path_initial_proof(
+                    *variable,
+                    value_type,
+                    loop_statement.condition.id,
+                ) {
+                    CurrentPathInitialProof::NoPathSensitiveState => current,
+                    CurrentPathInitialProof::Proven(initial) => Some(initial),
+                    CurrentPathInitialProof::Unresolved => {
+                        if trace {
+                            eprintln!(
+                                "OptIR {}: runtime loop rejected: unresolved path-specific initial for {} ({})",
+                                self.mir.module_name,
+                                variable.index(),
+                                self.variable_name(*variable)
+                            );
+                        }
+                        return false;
+                    }
+                };
                 let Some(initial) = initial else {
                     if trace {
                         eprintln!(
@@ -2550,7 +2605,7 @@ impl<'a> ScalarGraphBuilder<'a> {
 
     fn try_lower_counted_accumulator_loop(&mut self, loop_statement: &HirLoop) -> bool {
         self.expression_values.clear();
-        let Some((counter, bound, _guarded_loop)) =
+        let Some((counter, bound, loop_guard)) =
             self.counted_loop_condition(loop_statement.condition.id)
         else {
             return false;
@@ -2670,9 +2725,30 @@ impl<'a> ScalarGraphBuilder<'a> {
                 {
                     return false;
                 }
-                let Some(previous) =
-                    self.variable_value_from_snapshot(assignment.target, &original_variable_values)
-                else {
+                let snapshot =
+                    self.variable_value_from_snapshot(assignment.target, &original_variable_values);
+                let contextual =
+                    loop_guard.map_or(CurrentPathInitialProof::NoPathSensitiveState, |guard| {
+                        let Some(value_type) = self.variable_opt_value_type(assignment.target)
+                        else {
+                            return CurrentPathInitialProof::Unresolved;
+                        };
+                        self.runtime_loop_current_path_initial_proof(
+                            assignment.target,
+                            value_type,
+                            guard,
+                        )
+                    });
+                if matches!(contextual, CurrentPathInitialProof::Unresolved)
+                    || matches!(contextual, CurrentPathInitialProof::Proven(value) if Some(value) != snapshot)
+                {
+                    // CountedSum has no guard-local state: when its count is zero it
+                    // exposes `initial`.  A path-specialized initial would therefore
+                    // change the variable on paths where the guarded loop never ran.
+                    // Preserve the general runtime-loop representation in this case.
+                    return false;
+                }
+                let Some(previous) = snapshot else {
                     return false;
                 };
                 self.expression_values.clear();
@@ -2687,9 +2763,26 @@ impl<'a> ScalarGraphBuilder<'a> {
                 {
                     return false;
                 }
-                let Some(initial) =
-                    self.variable_value_from_snapshot(assignment.target, &original_variable_values)
-                else {
+                let snapshot =
+                    self.variable_value_from_snapshot(assignment.target, &original_variable_values);
+                let contextual =
+                    loop_guard.map_or(CurrentPathInitialProof::NoPathSensitiveState, |guard| {
+                        let Some(value_type) = self.variable_opt_value_type(assignment.target)
+                        else {
+                            return CurrentPathInitialProof::Unresolved;
+                        };
+                        self.runtime_loop_current_path_initial_proof(
+                            assignment.target,
+                            value_type,
+                            guard,
+                        )
+                    });
+                if matches!(contextual, CurrentPathInitialProof::Unresolved)
+                    || matches!(contextual, CurrentPathInitialProof::Proven(value) if Some(value) != snapshot)
+                {
+                    return false;
+                }
+                let Some(initial) = snapshot else {
                     return false;
                 };
                 self.expression_values.clear();
@@ -2743,10 +2836,13 @@ impl<'a> ScalarGraphBuilder<'a> {
         true
     }
 
-    fn counted_loop_condition(&mut self, condition: ExprId) -> Option<(VariableId, ValueId, bool)> {
+    fn counted_loop_condition(
+        &mut self,
+        condition: ExprId,
+    ) -> Option<(VariableId, ValueId, Option<ExprId>)> {
         if let Some(counted) = self.counted_loop_bound_condition(condition) {
             let (counter, bound) = counted;
-            return Some((counter, bound, false));
+            return Some((counter, bound, None));
         }
 
         let expression = self.mir.expressions.get(usize::from(condition))?;
@@ -2759,11 +2855,11 @@ impl<'a> ScalarGraphBuilder<'a> {
 
         if let Some((counter, bound)) = self.counted_loop_bound_condition(*left) {
             let count = self.guarded_loop_count(*right, bound)?;
-            return Some((counter, count, true));
+            return Some((counter, count, Some(*right)));
         }
         if let Some((counter, bound)) = self.counted_loop_bound_condition(*right) {
             let count = self.guarded_loop_count(*left, bound)?;
-            return Some((counter, count, true));
+            return Some((counter, count, Some(*left)));
         }
         None
     }
@@ -3068,14 +3164,22 @@ impl<'a> ScalarGraphBuilder<'a> {
         }
     }
 
-    fn runtime_loop_current_path_initial(
+    fn runtime_loop_current_path_initial_proof(
         &mut self,
         variable: VariableId,
         value_type: OptValueType,
         condition: ExprId,
-    ) -> Option<ValueId> {
+    ) -> CurrentPathInitialProof {
+        let has_path_sensitive_state = self.guarded_path_assignment_exprs.contains_key(&variable)
+            || self
+                .variable_assignment_history
+                .get(&variable)
+                .is_some_and(|history| !history.is_empty());
+        if !has_path_sensitive_state {
+            return CurrentPathInitialProof::NoPathSensitiveState;
+        }
         if self.conditional_path_stack.len() >= MAX_SCALAR_CURRENT_PATH_HISTORY_DEPTH {
-            return None;
+            return CurrentPathInitialProof::Unresolved;
         }
         self.conditional_path_stack.push(ConditionalPathPredicate {
             condition,
@@ -3086,7 +3190,10 @@ impl<'a> ScalarGraphBuilder<'a> {
             .map(|value| self.coerce_value_to_type(value, value_type));
         self.conditional_path_stack.pop();
         self.expression_values.clear();
-        initial
+        initial.map_or(
+            CurrentPathInitialProof::Unresolved,
+            CurrentPathInitialProof::Proven,
+        )
     }
 
     fn variable_value_type(&self, variable: VariableId) -> Option<CanonicalValueType> {
@@ -4528,6 +4635,30 @@ impl<'a> ScalarGraphBuilder<'a> {
                         .contains(&variable));
             let has_guarded_path_assignment =
                 self.guarded_path_assignment_exprs.contains_key(&variable);
+            let has_path_sensitive_assignment_history = has_guarded_path_assignment
+                || self
+                    .variable_assignment_history
+                    .get(&variable)
+                    .is_some_and(|history| {
+                        history.iter().any(|entry| {
+                            self.mir
+                                .expressions
+                                .get(usize::from(entry.expr))
+                                .is_some_and(|expression| {
+                                    matches!(expression.kind, HirExprKind::Conditional { .. })
+                                })
+                        })
+                    });
+            let current_value_has_live_simparam =
+                value.is_some_and(|value| self.value_graph_contains_live_simparam(value));
+            if !self.conditional_path_stack.is_empty()
+                && has_bounded_assignment_history
+                && has_path_sensitive_assignment_history
+                && current_value_has_live_simparam
+                && let Some(contextual) = self.lower_conditional_path_variable_identifier(variable)
+            {
+                return Some(Some(contextual));
+            }
             if value.is_none()
                 && name.starts_with("__guard")
                 && let Some(guard) = self.lower_guard_alias_variable_identifier(variable)
@@ -5600,6 +5731,33 @@ impl<'a> ScalarGraphBuilder<'a> {
                 .and_then(|value| self.coerce_value_to_variable_type(variable, value));
         };
 
+        // Assignment history is replayed while lowering guarded equations as well as
+        // while reconstructing stand-alone values.  When the surrounding path has
+        // already established this condition, lowering both arms needlessly retains
+        // values from the unreachable arm (notably live simulator parameters).  Pick
+        // the proven arm before lowering either operand so ordinary value liveness,
+        // rather than whether a value happens to be constant, controls retention.
+        if let Some(condition_truth) = self.condition_truth_in_current_path(*condition) {
+            let selected = if condition_truth {
+                *then_expr
+            } else {
+                *else_expr
+            };
+            if self.variable_identifier(selected) == Some(variable) {
+                return Some(previous_value);
+            }
+            return self
+                .lower_expression_with_assignment_previous_value_snapshot_and_path(
+                    variable,
+                    previous_value,
+                    entry,
+                    *condition,
+                    condition_truth,
+                    selected,
+                )
+                .and_then(|value| self.coerce_value_to_variable_type(variable, value));
+        }
+
         let then_lowered = if self.variable_identifier(*then_expr) == Some(variable) {
             Some(previous_value)
         } else {
@@ -5728,6 +5886,9 @@ impl<'a> ScalarGraphBuilder<'a> {
             *else_expr
         };
         if self.variable_identifier(selected) == Some(variable) {
+            return None;
+        }
+        if self.expr_references_variable(selected, variable) {
             return None;
         }
         self.lower_expression(selected)
@@ -6004,6 +6165,13 @@ impl<'a> ScalarGraphBuilder<'a> {
         };
         if self.variable_identifier(selected) == Some(variable) {
             return Some(CurrentPathAssignmentEffect::KeepPrevious);
+        }
+        // A nested conditional self-update is not a definite assignment merely
+        // because its outer guard is known.  Treat it as unresolved so the
+        // history scanner can prove coverage with the surrounding writes instead
+        // of retaining a stale base through the nested expression.
+        if self.expr_references_variable(selected, variable) {
+            return None;
         }
         self.lower_expression_with_assignment_snapshot_and_path(
             entry,
@@ -6885,6 +7053,18 @@ impl<'a> ScalarGraphBuilder<'a> {
     }
 
     fn expr_conjunctively_contains(&self, container: ExprId, target: ExprId) -> bool {
+        // Guard conditions are commonly materialized as generated aliases.  The
+        // containing conjunction was already resolved recursively, but leaving the
+        // target alias opaque prevented a loop guard such as `count_ok && enable`
+        // from proving the generated `enable` guard used by a carried initializer.
+        let mut target = target;
+        let mut aliases = HashSet::new();
+        while aliases.insert(target) {
+            let Some(alias) = self.guard_alias_expr(target) else {
+                break;
+            };
+            target = alias;
+        }
         let mut active = HashSet::new();
         self.expr_conjunctively_contains_inner(container, target, 0, &mut active)
     }
@@ -10290,6 +10470,98 @@ mod tests {
             span: test_span(),
             unfiltered_initial_step_guard: None,
         }
+    }
+
+    #[test]
+    fn dead_value_compaction_retains_derivatives_of_late_observable_ddx_operands() {
+        let mir = test_mir(Vec::new());
+        let mut builder = ScalarGraphBuilder::new(None, &mir);
+        builder.values = vec![
+            OptValue {
+                id: ValueId::from(0),
+                value_type: OptValueType::Real,
+                kind: OptValueKind::RealConstant(-1.0),
+                derivatives: Vec::new(),
+            },
+            OptValue {
+                id: ValueId::from(1),
+                value_type: OptValueType::Real,
+                kind: OptValueKind::RealConstant(2.0),
+                derivatives: Vec::new(),
+            },
+            OptValue {
+                id: ValueId::from(2),
+                value_type: OptValueType::Real,
+                kind: OptValueKind::NodePotential {
+                    node: NodeId::from(0),
+                },
+                derivatives: vec![OptDerivative {
+                    lane: DerivativeLane::node(NodeId::from(0)),
+                    value: ValueId::from(1),
+                }],
+            },
+            OptValue {
+                id: ValueId::from(3),
+                value_type: OptValueType::Real,
+                kind: OptValueKind::Ddx {
+                    value: ValueId::from(2),
+                    pos_node: None,
+                    neg_node: None,
+                },
+                derivatives: Vec::new(),
+            },
+        ];
+        let mut equation_values = [Some(ValueId::from(3))];
+
+        let (values, runtime_loops) = builder.finish(&mut equation_values);
+
+        assert!(runtime_loops.is_empty());
+        assert_eq!(equation_values, [Some(ValueId::from(2))]);
+        assert_eq!(values.len(), 3);
+        assert_eq!(values[1].derivatives[0].value, ValueId::from(0));
+        assert_eq!(
+            values[2].kind,
+            OptValueKind::Ddx {
+                value: ValueId::from(1),
+                pos_node: None,
+                neg_node: None,
+            }
+        );
+    }
+
+    #[test]
+    fn current_path_initial_proof_distinguishes_absent_state_from_depth_exhaustion() {
+        let mir = test_mir(Vec::new());
+        let variable = VariableId::from(0);
+        let condition = ExprId::from(0);
+        let mut builder = ScalarGraphBuilder::new(None, &mir);
+        builder.conditional_path_stack = (0..MAX_SCALAR_CURRENT_PATH_HISTORY_DEPTH)
+            .map(|_| ConditionalPathPredicate {
+                condition,
+                truth: true,
+            })
+            .collect();
+
+        assert_eq!(
+            builder.runtime_loop_current_path_initial_proof(
+                variable,
+                OptValueType::Real,
+                condition,
+            ),
+            CurrentPathInitialProof::NoPathSensitiveState
+        );
+
+        builder
+            .variable_assignment_history
+            .insert(variable, vec![test_assignment_history_entry(condition)]);
+        assert_eq!(
+            builder.runtime_loop_current_path_initial_proof(
+                variable,
+                OptValueType::Real,
+                condition,
+            ),
+            CurrentPathInitialProof::Unresolved
+        );
     }
 
     #[test]

@@ -13,6 +13,10 @@ const MAX_DIRECT_SCALAR_VALUES: usize = 12_000;
 const MAX_DIRECT_SCALAR_OPTIMIZER_NODES: usize = 32_000;
 const MIN_STRUCTURED_EXPANSION_RATIO: usize = 3;
 
+fn scalar_expansion_ratio(scalar_optimizer_nodes: usize, structured_operations: usize) -> usize {
+    scalar_optimizer_nodes / structured_operations.max(1)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PreferredKernelTier {
     DirectScalar,
@@ -153,9 +157,12 @@ impl KernelPlan {
             .map(|value| value.derivatives.len())
             .max()
             .unwrap_or(0);
-        let scalar_expansion_ratio = scalar_optimizer_nodes
-            .saturating_add(structured_operations - 1)
-            / structured_operations;
+        // This is a threshold metric: a model is "at least N times larger"
+        // only when the complete integer ratio reaches N.  Rounding up here
+        // would classify every expansion above 2x as 3x and can route sparse
+        // models through the substantially heavier structured backend.
+        let scalar_expansion_ratio =
+            scalar_expansion_ratio(scalar_optimizer_nodes, structured_operations);
 
         let plan = Self {
             metrics: KernelMetrics {
@@ -581,5 +588,37 @@ endmodule
             metrics.derivative_storage(),
             DerivativeStorageStrategy::Sparse
         );
+    }
+
+    #[test]
+    fn cost_model_does_not_round_subthreshold_expansion_up_to_structured() {
+        let structured_operations = 75_626;
+        let scalar_optimizer_nodes = 222_664;
+        let metrics = KernelMetrics {
+            scalar_values: scalar_optimizer_nodes - 518,
+            scalar_derivative_entries: 518,
+            scalar_optimizer_nodes,
+            structured_expressions: 83_853,
+            structured_operations,
+            structured_control_regions: 4_732,
+            runtime_loop_operations: 4,
+            derivative_lanes: 19,
+            maximum_value_derivative_lanes: 19,
+            scalar_expansion_ratio: scalar_expansion_ratio(
+                scalar_optimizer_nodes,
+                structured_operations,
+            ),
+        };
+
+        assert_eq!(metrics.scalar_expansion_ratio, 2);
+        assert_eq!(metrics.preferred_tier(), PreferredKernelTier::SparseLocal);
+    }
+
+    #[test]
+    fn expansion_ratio_observes_exact_threshold_boundaries() {
+        assert_eq!(scalar_expansion_ratio(299, 100), 2);
+        assert_eq!(scalar_expansion_ratio(300, 100), 3);
+        assert_eq!(scalar_expansion_ratio(3, 1), 3);
+        assert_eq!(scalar_expansion_ratio(3, 0), 3);
     }
 }

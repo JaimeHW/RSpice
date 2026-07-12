@@ -2187,7 +2187,7 @@ pub(super) fn scalar_transient_current_lowered_variable(
         .ok_or_else(|| unsupported(artifact, format!("missing root scalar value {root}")))?;
     let derivatives = scalar_derivatives(artifact, equation, root)?;
 
-    let root_name = cached_or_local_value_name(root, static_cache);
+    let root_name = cached_or_local_value_name(artifact, root, static_cache);
     let mut value = current_root_expr(root_value.value_type, &root_name);
     let mut derivative_scale = "1.0";
     match equation_transient_operator(artifact, equation)? {
@@ -2308,7 +2308,7 @@ pub(super) fn scalar_reactive_current_lowered_variable(
         }
         branch_derivatives[index] = value_ref(artifact, parameter_fields, *value, &context)?;
     }
-    let root_name = cached_or_local_value_name(root, static_cache);
+    let root_name = cached_or_local_value_name(artifact, root, static_cache);
     let value = current_root_expr(root_value.value_type, &root_name);
 
     Ok(LoweredVariable {
@@ -3935,30 +3935,6 @@ fn emit_runtime_loop(
     out.push_str("            }\n");
     out.push_str("        }\n");
 
-    let mut result_let_emitter = CompactLetEmitter::new("        ");
-    for (slot, variable) in runtime_loop.variables.iter().enumerate() {
-        if live.contains(&variable.result) {
-            let slot = u32::try_from(slot).expect("runtime loop slot exceeds u32::MAX");
-            let local = runtime_loop_value_name(loop_id, slot);
-            result_let_emitter.push(out, &value_name(variable.result), &local);
-        }
-    }
-    for value in &artifact.opt.values {
-        if !live.contains(&value.id) {
-            continue;
-        }
-        if let OptValueKind::RuntimeLoopResultDerivative {
-            loop_id: value_loop_id,
-            slot,
-            lane,
-        } = value.kind
-            && value_loop_id == loop_id
-        {
-            let local = runtime_loop_derivative_name(loop_id, slot, lane);
-            result_let_emitter.push(out, &value_name(value.id), &local);
-        }
-    }
-    result_let_emitter.flush(out);
     out.push('\n');
     Ok(())
 }
@@ -4438,9 +4414,15 @@ fn value_ref(
                         )
                     });
             }
-            OptValueKind::RuntimeLoopResult { .. }
-            | OptValueKind::RuntimeLoopResultDerivative { .. } => {
-                return Ok(value_name(value));
+            OptValueKind::RuntimeLoopResult { loop_id, slot } => {
+                return Ok(runtime_loop_value_name(loop_id, slot));
+            }
+            OptValueKind::RuntimeLoopResultDerivative {
+                loop_id,
+                slot,
+                lane,
+            } => {
+                return Ok(runtime_loop_derivative_name(loop_id, slot, lane));
             }
             _ => {}
         }
@@ -6234,14 +6216,33 @@ fn runtime_loop_guard_name(loop_id: u32) -> String {
     format!("r{loop_id}g")
 }
 
-fn cached_or_local_value_name(value: ValueId, static_cache: &ScalarStaticCache) -> String {
+fn cached_or_local_value_name(
+    artifact: &CanonicalIrArtifact,
+    value: ValueId,
+    static_cache: &ScalarStaticCache,
+) -> String {
     if static_cache.contains(value) {
         static_cache
             .cache_ref(value)
             .expect("cached scalar value must have generated state slot")
             .to_string()
     } else {
-        value_name(value)
+        match artifact
+            .opt
+            .values
+            .get(usize::from(value))
+            .map(|value| &value.kind)
+        {
+            Some(OptValueKind::RuntimeLoopResult { loop_id, slot }) => {
+                runtime_loop_value_name(*loop_id, *slot)
+            }
+            Some(OptValueKind::RuntimeLoopResultDerivative {
+                loop_id,
+                slot,
+                lane,
+            }) => runtime_loop_derivative_name(*loop_id, *slot, *lane),
+            _ => value_name(value),
+        }
     }
 }
 
