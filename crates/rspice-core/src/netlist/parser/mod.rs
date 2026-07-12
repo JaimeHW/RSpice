@@ -355,15 +355,16 @@ fn resolve_top_level_deferred_source_specs(
     params: &ParamContext,
 ) -> Result<(), ParseError> {
     for element in elements {
-        let replacement = match &element.kind {
-            ElementKind::VoltageSourceDeferred(raw_spec) => Some(ElementKind::VoltageSource(
-                resolve_top_level_source_spec(&element.name, raw_spec, params)?,
-            )),
-            ElementKind::CurrentSourceDeferred(raw_spec) => Some(ElementKind::CurrentSource(
-                resolve_top_level_source_spec(&element.name, raw_spec, params)?,
-            )),
-            _ => None,
-        };
+        let replacement =
+            match &element.kind {
+                ElementKind::VoltageSourceDeferred(raw_spec) => Some(
+                    resolve_top_level_source_kind(&element.name, raw_spec, params, true)?,
+                ),
+                ElementKind::CurrentSourceDeferred(raw_spec) => Some(
+                    resolve_top_level_source_kind(&element.name, raw_spec, params, false)?,
+                ),
+                _ => None,
+            };
 
         if let Some(kind) = replacement {
             element.kind = kind;
@@ -373,17 +374,58 @@ fn resolve_top_level_deferred_source_specs(
     Ok(())
 }
 
-fn resolve_top_level_source_spec(
+fn resolve_top_level_source_kind(
     element_name: &str,
     raw_spec: &str,
     params: &ParamContext,
-) -> Result<SourceSpec, ParseError> {
-    parse_source_spec_text(raw_spec, 0, params).map_err(|err| {
-        ParseError::InvalidValue(format!(
-            "source {element_name} specification '{}' could not be resolved after .PARAM processing: {err}",
-            raw_spec.trim()
-        ))
-    })
+    voltage_source: bool,
+) -> Result<ElementKind, ParseError> {
+    match parse_source_spec_text(raw_spec, 0, params) {
+        Ok(spec) if voltage_source => Ok(ElementKind::VoltageSource(spec)),
+        Ok(spec) => Ok(ElementKind::CurrentSource(spec)),
+        Err(source_error) => {
+            let Some(expression) = braced_source_expression(raw_spec) else {
+                return Err(top_level_source_resolution_error(
+                    element_name,
+                    raw_spec,
+                    source_error,
+                ));
+            };
+            prepare_behavioral_expression(expression, params).map_err(|_| {
+                top_level_source_resolution_error(element_name, raw_spec, source_error)
+            })?;
+            if voltage_source {
+                Ok(ElementKind::BehavioralVoltage {
+                    expression: expression.to_string(),
+                    tc1: 0.0,
+                    tc2: 0.0,
+                })
+            } else {
+                Ok(ElementKind::BehavioralCurrent {
+                    expression: expression.to_string(),
+                    tc1: 0.0,
+                    tc2: 0.0,
+                })
+            }
+        }
+    }
+}
+
+fn braced_source_expression(raw_spec: &str) -> Option<&str> {
+    let trimmed = raw_spec.trim();
+    let inner = trimmed.strip_prefix('{')?.strip_suffix('}')?.trim();
+    (!inner.is_empty()).then_some(inner)
+}
+
+fn top_level_source_resolution_error(
+    element_name: &str,
+    raw_spec: &str,
+    error: ParseError,
+) -> ParseError {
+    ParseError::InvalidValue(format!(
+        "source {element_name} specification '{}' could not be resolved after .PARAM processing: {error}",
+        raw_spec.trim()
+    ))
 }
 
 fn normalize_pspice_u_timing_aliases(state: &mut ParseState) {

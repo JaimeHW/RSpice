@@ -8512,6 +8512,64 @@ mod tests {
     }
 
     #[test]
+    fn braced_independent_source_expressions_lower_to_behavioral_sources() {
+        let netlist = Netlist::parse(
+            "independent source expression\n\
+             .global_param offset=2\n\
+             .func shifted(x) {x+offset}\n\
+             V1 out 0 {shifted(1)+TIME}\n\
+             I1 load 0 {shifted(2)+TIME}\n\
+             .tran 1n 1u\n\
+             .end\n",
+        )
+        .expect("runtime independent-source expressions parse");
+
+        assert!(netlist.elements.iter().any(|element| {
+            element.name == "V1"
+                && matches!(
+                    &element.kind,
+                    ElementKind::BehavioralVoltage { expression, .. }
+                        if expression.eq_ignore_ascii_case("shifted(1)+TIME")
+                )
+        }));
+        assert!(netlist.elements.iter().any(|element| {
+            element.name == "I1"
+                && matches!(
+                    &element.kind,
+                    ElementKind::BehavioralCurrent { expression, .. }
+                        if expression.eq_ignore_ascii_case("shifted(2)+TIME")
+                )
+        }));
+
+        let subcircuit = Netlist::parse(
+            "subcircuit source expression\n\
+             x1 out load source_cell gain=3\n\
+             .subckt source_cell p n gain=1\n\
+             V1 p 0 {gain+TIME}\n\
+             I1 n 0 {gain+2*TIME}\n\
+             .ends\n\
+             .tran 1n 1u\n\
+             .end\n",
+        )
+        .expect("subcircuit runtime independent-source expressions parse");
+        let flattened = flatten_netlist(&subcircuit).expect("source subcircuit flattens");
+        assert!(
+            flattened.iter().any(|element| {
+                element.name.eq_ignore_ascii_case("X1.V1")
+                    && matches!(&element.kind, ElementKind::BehavioralVoltage { .. })
+            }),
+            "{flattened:#?}"
+        );
+        assert!(
+            flattened.iter().any(|element| {
+                element.name.eq_ignore_ascii_case("X1.I1")
+                    && matches!(&element.kind, ElementKind::BehavioralCurrent { .. })
+            }),
+            "{flattened:#?}"
+        );
+    }
+
+    #[test]
     fn passive_unit_words_after_numeric_values_are_consumed() {
         let netlist = Netlist::parse(
             "passive unit words\n\

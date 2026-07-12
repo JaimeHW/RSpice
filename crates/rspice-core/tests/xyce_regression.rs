@@ -2174,6 +2174,26 @@ fn test_xyce_time_dependent_global_parameter_transient_runs() {
 }
 
 #[test]
+fn test_xyce_global_parameter_function_step_transient_runs() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/GLOBALPAR/gp_func.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native stepped transient with a global parameter captured by a function, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match every checked-in stepped Xyce .prn oracle block"
+    );
+    assert_eq!(result.contract, "static_prn_step_tran");
+}
+
+#[test]
 fn test_xyce_bug_616_wrapper_step_dc_case_runs_natively() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

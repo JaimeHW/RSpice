@@ -1272,12 +1272,12 @@ impl<'a> Flattener<'a> {
                 real_vector_expr_params: Vec::new(),
             },
 
-            ElementKind::VoltageSourceDeferred(raw_spec) => ElementKind::VoltageSource(
-                self.resolve_deferred_source_spec(raw_spec, scope, element_path)?,
-            ),
-            ElementKind::CurrentSourceDeferred(raw_spec) => ElementKind::CurrentSource(
-                self.resolve_deferred_source_spec(raw_spec, scope, element_path)?,
-            ),
+            ElementKind::VoltageSourceDeferred(raw_spec) => {
+                self.resolve_deferred_source_kind(raw_spec, scope, element_path, true)?
+            }
+            ElementKind::CurrentSourceDeferred(raw_spec) => {
+                self.resolve_deferred_source_kind(raw_spec, scope, element_path, false)?
+            }
 
             ElementKind::BehavioralVoltage {
                 expression,
@@ -1513,18 +1513,46 @@ impl<'a> Flattener<'a> {
         Ok(merged)
     }
 
-    fn resolve_deferred_source_spec(
+    fn resolve_deferred_source_kind(
         &self,
         raw_spec: &str,
         scope: &ParamContext,
         element_path: &str,
-    ) -> Result<SourceSpec, ParseError> {
-        parse_source_spec_text(raw_spec, 0, scope).map_err(|err| {
-            ParseError::InvalidValue(format!(
-                "source specification for element '{}' could not be resolved: {}",
-                element_path, err
-            ))
-        })
+        voltage_source: bool,
+    ) -> Result<ElementKind, ParseError> {
+        match parse_source_spec_text(raw_spec, 0, scope) {
+            Ok(spec) if voltage_source => Ok(ElementKind::VoltageSource(spec)),
+            Ok(spec) => Ok(ElementKind::CurrentSource(spec)),
+            Err(source_error) => {
+                let trimmed = raw_spec.trim();
+                let expression = trimmed
+                    .strip_prefix('{')
+                    .and_then(|inner| inner.strip_suffix('}'))
+                    .map(str::trim)
+                    .filter(|inner| !inner.is_empty())
+                    .ok_or_else(|| {
+                        ParseError::InvalidValue(format!(
+                            "source specification for element '{}' could not be resolved: {}",
+                            element_path, source_error
+                        ))
+                    })?;
+                let expression =
+                    self.prepare_scoped_behavioral_expression(expression, scope, element_path)?;
+                if voltage_source {
+                    Ok(ElementKind::BehavioralVoltage {
+                        expression,
+                        tc1: 0.0,
+                        tc2: 0.0,
+                    })
+                } else {
+                    Ok(ElementKind::BehavioralCurrent {
+                        expression,
+                        tc1: 0.0,
+                        tc2: 0.0,
+                    })
+                }
+            }
+        }
     }
 
     fn prepare_scoped_behavioral_expression(
