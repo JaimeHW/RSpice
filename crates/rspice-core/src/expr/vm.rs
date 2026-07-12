@@ -550,7 +550,8 @@ fn lookup_table_interpolate(x: Value, table: &LookupTable) -> Value {
                             * span.powi(2)
                             / 6.0
                 }
-                LookupInterpolation::Akima { coefficients } => {
+                LookupInterpolation::Akima { coefficients }
+                | LookupInterpolation::Wodicka { coefficients } => {
                     let offset = x - points[lower].0;
                     let [p1, p2, p3] = coefficients[lower];
                     points[lower].1 + offset * (p1 + offset * (p2 + p3 * offset))

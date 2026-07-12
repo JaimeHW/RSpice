@@ -121,6 +121,8 @@ pub enum Function {
     CubicFile,     // cubicfile("path") alias
     Akima,         // akima("path") / spline("path") = file-backed Akima spline
     AkimaFile,     // akimafile("path") / splinefile("path") alias
+    Wodicka,       // wodicka("path") = file-backed rounded-corner Akima variant
+    WodickaFile,   // wodickafile("path") alias
     Mod,           // mod(x, y) = x % y - modulo
     SpicePulse,    // spice_pulse(v1, v2, td, tr, tf, pw[, per])
     SpiceSin,      // spice_sin(vo, va, freq, td, theta[, phase_degrees])
@@ -150,6 +152,8 @@ pub enum LookupInterpolation {
     NaturalCubic { second_derivatives: Arc<[Value]> },
     /// Original Akima spline, with `(p1, p2, p3)` for each interval.
     Akima { coefficients: Arc<[[Value; 3]]> },
+    /// Wodicka spline, with `(p1, p2, p3)` for each interval.
+    Wodicka { coefficients: Arc<[[Value; 3]]> },
 }
 
 #[allow(clippy::should_implement_trait)]

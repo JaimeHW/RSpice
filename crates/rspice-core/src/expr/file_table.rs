@@ -61,6 +61,7 @@ enum FileInterpolation {
     Linear,
     NaturalCubic,
     Akima,
+    Wodicka,
 }
 
 fn table_file_mode(func: Function) -> Option<(bool, FileInterpolation)> {
@@ -69,6 +70,7 @@ fn table_file_mode(func: Function) -> Option<(bool, FileInterpolation)> {
         Function::FastTable | Function::FastTableFile => Some((false, FileInterpolation::Linear)),
         Function::Cubic | Function::CubicFile => Some((false, FileInterpolation::NaturalCubic)),
         Function::Akima | Function::AkimaFile => Some((false, FileInterpolation::Akima)),
+        Function::Wodicka | Function::WodickaFile => Some((false, FileInterpolation::Wodicka)),
         _ => None,
     }
 }
@@ -109,6 +111,9 @@ fn resolve_table_file_function(
         FileInterpolation::Akima => LookupInterpolation::Akima {
             coefficients: Arc::from(akima_coefficients(&points).into_boxed_slice()),
         },
+        FileInterpolation::Wodicka => LookupInterpolation::Wodicka {
+            coefficients: Arc::from(wodicka_coefficients(&points).into_boxed_slice()),
+        },
     };
     Ok(Expr::LookupTable(LookupTable {
         points: Arc::from(points.into_boxed_slice()),
@@ -144,17 +149,7 @@ fn natural_cubic_second_derivatives(points: &[(Value, Value)]) -> Vec<Value> {
 
 fn akima_coefficients(points: &[(Value, Value)]) -> Vec<[Value; 3]> {
     let count = points.len();
-    let mut slopes = vec![0.0; count + 3];
-    for index in 0..count - 1 {
-        slopes[index + 2] =
-            (points[index + 1].1 - points[index].1) / (points[index + 1].0 - points[index].0);
-    }
-
-    slopes[0] = 3.0 * slopes[2] - 2.0 * slopes[3];
-    slopes[1] = 2.0 * slopes[2] - slopes[3];
-    slopes[count + 1] = 2.0 * slopes[count] - slopes[count - 1];
-    slopes[count + 2] = 3.0 * slopes[count] - 2.0 * slopes[count - 1];
-
+    let slopes = extended_akima_slopes(points);
     let mut tangents = vec![0.0; count];
     for index in 0..count {
         let forward_weight = (slopes[index + 3] - slopes[index + 2]).abs();
@@ -169,16 +164,72 @@ fn akima_coefficients(points: &[(Value, Value)]) -> Vec<[Value; 3]> {
 
     (0..count - 1)
         .map(|index| {
-            let span = points[index + 1].0 - points[index].0;
-            let left_tangent = tangents[index];
-            let right_tangent = tangents[index + 1];
-            [
-                left_tangent,
-                (3.0 * slopes[index + 2] - 2.0 * left_tangent - right_tangent) / span,
-                (left_tangent + right_tangent - 2.0 * slopes[index + 2]) / span.powi(2),
-            ]
+            hermite_coefficients(
+                points[index + 1].0 - points[index].0,
+                slopes[index + 2],
+                tangents[index],
+                tangents[index + 1],
+            )
         })
         .collect()
+}
+
+fn extended_akima_slopes(points: &[(Value, Value)]) -> Vec<Value> {
+    let count = points.len();
+    let mut slopes = vec![0.0; count + 3];
+    for index in 0..count - 1 {
+        slopes[index + 2] =
+            (points[index + 1].1 - points[index].1) / (points[index + 1].0 - points[index].0);
+    }
+
+    slopes[0] = 3.0 * slopes[2] - 2.0 * slopes[3];
+    slopes[1] = 2.0 * slopes[2] - slopes[3];
+    slopes[count + 1] = 2.0 * slopes[count] - slopes[count - 1];
+    slopes[count + 2] = 3.0 * slopes[count] - 2.0 * slopes[count - 1];
+    slopes
+}
+
+fn wodicka_coefficients(points: &[(Value, Value)]) -> Vec<[Value; 3]> {
+    let slopes = extended_akima_slopes(points);
+    (0..points.len() - 1)
+        .map(|index| {
+            let denominator = (slopes[index + 3] - slopes[index + 2]).abs()
+                + (slopes[index + 1] - slopes[index]).abs();
+            if denominator == 0.0 {
+                return [slopes[index + 2], 0.0, 0.0];
+            }
+
+            let next_denominator = (slopes[index + 4] - slopes[index + 3]).abs()
+                + (slopes[index + 2] - slopes[index + 1]).abs();
+            let alpha = (slopes[index + 1] - slopes[index]).abs() / denominator;
+            let left_tangent = (1.0 - alpha) * slopes[index + 1] + alpha * slopes[index + 2];
+            let right_tangent = if next_denominator == 0.0 {
+                slopes[index + 2]
+            } else {
+                let next_alpha = (slopes[index + 2] - slopes[index + 1]).abs() / next_denominator;
+                (1.0 - next_alpha) * slopes[index + 2] + next_alpha * slopes[index + 3]
+            };
+            hermite_coefficients(
+                points[index + 1].0 - points[index].0,
+                slopes[index + 2],
+                left_tangent,
+                right_tangent,
+            )
+        })
+        .collect()
+}
+
+fn hermite_coefficients(
+    span: Value,
+    secant: Value,
+    left_tangent: Value,
+    right_tangent: Value,
+) -> [Value; 3] {
+    [
+        left_tangent,
+        (3.0 * secant - 2.0 * left_tangent - right_tangent) / span,
+        (left_tangent + right_tangent - 2.0 * secant) / span.powi(2),
+    ]
 }
 
 fn resolve_table_path(path: &str, source_path: Option<&Path>) -> PathBuf {
@@ -287,6 +338,8 @@ fn function_name(func: Function) -> &'static str {
         Function::CubicFile => "cubicfile",
         Function::Akima => "akima",
         Function::AkimaFile => "akimafile",
+        Function::Wodicka => "wodicka",
+        Function::WodickaFile => "wodickafile",
         _ => "function",
     }
 }
@@ -427,6 +480,53 @@ mod tests {
         let mut vm = Vm::new();
         let midpoint = vm.execute(&program, &Context::transient(&[], &[], 0.5));
         assert!((midpoint - 0.625).abs() < 1.0e-14);
+    }
+
+    #[test]
+    fn wodicka_uses_its_distinct_rounded_corner_construction() {
+        let dir = unique_temp_dir("xyce-wodicka");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        std::fs::write(dir.join("curve.dat"), "0 0\n1 0\n2 0\n3 2\n4 4\n5 4\n")
+            .expect("write spline data");
+        let deck_path = dir.join("deck.cir");
+
+        for function in ["wodicka", "wodickafile"] {
+            let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
+                .expect("Wodicka expression parses");
+            let resolved = resolve_file_lookup_functions(ast, Some(&deck_path))
+                .expect("Wodicka file resolves");
+            let Expr::LookupTable(table) = &resolved else {
+                panic!("Wodicka file should resolve into lookup data");
+            };
+            assert!(!table.transient_breakpoints);
+            assert!(matches!(
+                table.interpolation,
+                LookupInterpolation::Wodicka { .. }
+            ));
+
+            let program = compile(&resolved);
+            let mut vm = Vm::new();
+            for (time, expected) in [
+                (-1.0, 0.0),
+                (0.5, 0.0),
+                (1.5, 0.0),
+                (2.5, 1.0),
+                (3.5, 3.0),
+                (4.5, 4.375),
+                (6.0, 4.0),
+            ] {
+                let actual = vm.execute(&program, &Context::transient(&[], &[], time));
+                assert!((actual - expected).abs() < 1.0e-14, "time={time}");
+            }
+        }
+
+        let akima = parse_expression_strict("akima(\"curve.dat\")")
+            .expect("Akima comparison expression parses");
+        let akima = resolve_file_lookup_functions(akima, Some(&deck_path))
+            .expect("Akima comparison resolves");
+        let mut vm = Vm::new();
+        let midpoint = vm.execute(&compile(&akima), &Context::transient(&[], &[], 2.5));
+        assert!((midpoint - 0.875).abs() < 1.0e-14);
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {

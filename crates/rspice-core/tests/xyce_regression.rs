@@ -4816,6 +4816,32 @@ fn test_xyce_behavioral_akima_file_spline_transient_cases_run() {
 }
 
 #[test]
+fn test_xyce_behavioral_wodicka_file_spline_transient_cases_run() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/ABM_SPLINES/wodicka.cir",
+        "Netlists/ABM_SPLINES/wodicka2.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should run as a native Xyce Wodicka transient comparison, got {result:?}"
+        );
+        assert!(
+            result.mismatches.is_empty(),
+            "{relative} should match the checked-in Xyce .prn oracle"
+        );
+        assert_eq!(
+            result.contract, "static_prn_tran",
+            "{relative} should report the native transient .prn contract"
+        );
+    }
+}
+
+#[test]
 fn test_xyce_complex_param_harmonic_balance_wrapper_case_runs() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -767,6 +767,8 @@ impl<'a> Parser<'a> {
                 "CUBICFILE" => Some(Function::CubicFile),
                 "AKIMA" | "SPLINE" => Some(Function::Akima),
                 "AKIMAFILE" | "SPLINEFILE" => Some(Function::AkimaFile),
+                "WODICKA" => Some(Function::Wodicka),
+                "WODICKAFILE" => Some(Function::WodickaFile),
                 "PWL" => Some(Function::Pwl),
                 "MOD" | "FMOD" => Some(Function::Mod),
                 "SPICE_PULSE" => Some(Function::SpicePulse),
@@ -799,9 +801,12 @@ impl<'a> Parser<'a> {
             Function::SpiceSin => Some((3, 6)),
             Function::SpiceExp => Some((2, 6)),
             Function::SpiceSffm => Some((2, 5)),
-            Function::Cubic | Function::CubicFile | Function::Akima | Function::AkimaFile => {
-                Some((1, 1))
-            }
+            Function::Cubic
+            | Function::CubicFile
+            | Function::Akima
+            | Function::AkimaFile
+            | Function::Wodicka
+            | Function::WodickaFile => Some((1, 1)),
             _ => None,
         };
 
@@ -838,6 +843,8 @@ impl<'a> Parser<'a> {
                 | "AKIMAFILE"
                 | "SPLINE"
                 | "SPLINEFILE"
+                | "WODICKA"
+                | "WODICKAFILE"
         );
         if file_capable_table {
             match &self.current {
