@@ -107,18 +107,31 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Result classes
     m.add_class::<results::PySimulationResult>()?;
+    m.add_class::<results::PyDeviceOperatingPoint>()?;
     m.add_class::<results::PyTransientResult>()?;
+    m.add_class::<results::PyCompressedTransientResult>()?;
+    m.add_class::<results::PyTransientCheckpoint>()?;
     m.add_class::<results::PyAcResult>()?;
     m.add_class::<results::PyDcSweepResult>()?;
     m.add_class::<results::PyNoiseResult>()?;
     m.add_class::<results::PyNoiseContribution>()?;
     m.add_class::<results::PyMonteCarloResult>()?;
+    m.add_class::<results::PyElementSensitivity>()?;
+    m.add_class::<results::PySensitivityResult>()?;
     m.add_class::<results::PyVariableStatistics>()?;
     m.add_class::<results::PyPoleZeroResult>()?;
     m.add_class::<results::PyComplexValue>()?;
     m.add_class::<results::PyFourierResult>()?;
     m.add_class::<results::PyHarmonic>()?;
     m.add_class::<results::PyTransferFunctionResult>()?;
+    m.add_class::<results::PyStbResult>()?;
+    m.add_class::<results::PySParameterResult>()?;
+    m.add_class::<results::PyPssResult>()?;
+    m.add_class::<results::PyHbResult>()?;
+    m.add_class::<results::PyPacResult>()?;
+    m.add_class::<results::PyPeriodicNoiseContribution>()?;
+    m.add_class::<results::PyPeriodicNoiseResult>()?;
+    m.add_class::<results::PyOscillatorNoiseResult>()?;
     m.add_class::<results::PyMeasurement>()?;
     m.add_class::<results::PyAnalysisRecord>()?;
     m.add_class::<results::PyRunReport>()?;
@@ -150,6 +163,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "__version__",
             "__author__",
             "Netlist",
+            "ParseDiagnostic",
             "Engine",
             "SimulationConfig",
             "ConvergenceConfig",
@@ -157,18 +171,31 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "DampingStrategy",
             "IntegrationMethod",
             "SimulationResult",
+            "DeviceOperatingPoint",
             "TransientResult",
+            "CompressedTransientResult",
+            "TransientCheckpoint",
             "AcResult",
             "DcSweepResult",
             "NoiseResult",
             "NoiseContribution",
             "MonteCarloResult",
+            "ElementSensitivity",
+            "SensitivityResult",
             "VariableStatistics",
             "PoleZeroResult",
             "ComplexValue",
             "FourierResult",
             "Harmonic",
             "TransferFunctionResult",
+            "StbResult",
+            "SParameterResult",
+            "PssResult",
+            "HbResult",
+            "PacResult",
+            "PeriodicNoiseContribution",
+            "PeriodicNoiseResult",
+            "OscillatorNoiseResult",
             "Measurement",
             "AnalysisRecord",
             "RunReport",

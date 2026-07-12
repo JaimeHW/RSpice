@@ -70,6 +70,47 @@ C1 out 0 1u
 
 
 class TestPoleZero:
+    def test_explicit_ports_and_analysis_modes(self, engine, rc_lowpass):
+        full = engine.run_pz(
+            rc_lowpass,
+            "in",
+            "out",
+            input_negative="0",
+            output_negative="0",
+            input_type="current",
+            analysis="pz",
+        )
+        poles = engine.run_pz(
+            rc_lowpass, "in", "out", analysis="poles"
+        )
+        zeros = engine.run_pz(
+            rc_lowpass, "in", "out", analysis="zeros"
+        )
+        np.testing.assert_allclose(full.poles_array, poles.poles_array)
+        assert poles.num_zeros == 0
+        assert zeros.num_poles == 0
+
+    def test_engine_run_executes_pz_directive(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* RC PZ directive
+I1 in 0 AC 1
+R1 in out 1k
+C1 out 0 1u
+.pz in 0 out 0 cur pz
+.end
+"""
+        )
+        report = engine.run(netlist)
+        assert report.pz is not None
+        assert report.pz.num_poles == 1
+        assert report.analyses_run == ["pz"]
+
+    def test_pz_option_validation(self, engine, rc_lowpass):
+        with pytest.raises(ValueError, match="input_type"):
+            engine.run_pz(rc_lowpass, "in", "out", input_type="power")
+        with pytest.raises(ValueError, match="analysis"):
+            engine.run_pz(rc_lowpass, "in", "out", analysis="unknown")
+
     def test_rc_pole_location(self, engine, rc_lowpass):
         pz = engine.run_pz(rc_lowpass, "in", "out")
         assert pz.num_poles == 1
@@ -80,6 +121,7 @@ class TestPoleZero:
         assert pole.real == pytest.approx(-1000.0, rel=1e-6)
         assert pole.time_constant == pytest.approx(1e-3, rel=1e-6)
         assert pz.bandwidth_hz == pytest.approx(159.155, rel=1e-4)
+        assert pz.dominant_pole_decay_hz == pytest.approx(159.155, rel=1e-4)
 
     def test_poles_array_and_complex_conversion(self, engine, rc_lowpass):
         pz = engine.run_pz(rc_lowpass, "in", "out")
@@ -102,6 +144,22 @@ class TestPoleZero:
 
 
 class TestMonteCarlo:
+    def test_engine_run_executes_mc_directive(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* MC directive
+.param rval=1k
+V1 in 0 10
+R1 in out {rval}
+R2 out 0 1k
+.mc 12 seed 9 dist gauss spread 0.01 params rval
+.end
+"""
+        )
+        report = engine.run(netlist)
+        assert report.monte_carlo is not None
+        assert report.monte_carlo.num_runs == 12
+        assert report.analyses_run == ["mc"]
+
     def test_statistics_match_theory(self, engine, param_divider):
         netlist = rspice.Netlist.parse(
             """* Two-parameter divider
@@ -174,6 +232,36 @@ R2 out 0 {r2v}
 
 
 class TestSensitivity:
+    def test_linearized_sensitivity_reports_all_elements(self, engine, divider):
+        result = engine.run_sensitivity_linearized(divider, "out")
+        assert isinstance(result, rspice.SensitivityResult)
+        assert result.output_value == pytest.approx(5.0, abs=1e-9)
+        assert len(result) >= 2
+        r1 = result.get("R1")
+        r2 = result.get("r2")
+        assert isinstance(r1, rspice.ElementSensitivity)
+        assert r1.element_type == "Resistor"
+        assert r1.absolute == pytest.approx(-0.0025, rel=1e-5)
+        assert r2.absolute == pytest.approx(0.0025, rel=1e-5)
+        assert abs(result.top(1)[0].normalized) >= abs(result.top(2)[1].normalized)
+        with pytest.raises(KeyError):
+            result.get("missing")
+
+    def test_engine_run_executes_dc_sensitivity_directive(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* SENS directive
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
+.sens V(out)
+.end
+"""
+        )
+        report = engine.run(netlist)
+        assert report.sensitivity is not None
+        assert report.sensitivity.output_value == pytest.approx(5.0, abs=1e-9)
+        assert report.analyses_run == ["sens"]
+
     def test_divider_sensitivity_matches_analytic(self, engine, param_divider):
         # V(out) = 10 * 1k / (rval + 1k); dV/drval at 1k = -10*1k/(2k)^2.
         sens = engine.run_sensitivity(param_divider, "out", "rval", 1000.0)
@@ -216,6 +304,40 @@ C1 out 0 1u
 
 
 class TestStep:
+    def test_engine_run_executes_step_directive(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* STEP directive
+.param rval=1k
+V1 in 0 10
+R1 in out {rval}
+R2 out 0 1k
+.step param rval list 1k 2k 5k
+.end
+"""
+        )
+        report = engine.run(netlist)
+        assert report.step is not None
+        assert report.step.primary_source.casefold() == "rval"
+        np.testing.assert_array_equal(report.step.sweep_values, [1e3, 2e3, 5e3])
+        assert report.step.voltage(2, "out") == pytest.approx(10 / 6, abs=1e-6)
+        assert report.analyses_run == ["step"]
+
+    def test_engine_run_executes_temperature_directive(self, engine, divider):
+        netlist = rspice.Netlist.parse(
+            """* TEMP directive
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
+.temp 25 100
+.end
+"""
+        )
+        report = engine.run(netlist)
+        assert report.temperature is not None
+        assert report.temperature.primary_source == "TEMP"
+        np.testing.assert_array_equal(report.temperature.sweep_values, [25, 100])
+        assert report.analyses_run == ["temp"]
+
     def test_step_varies_results(self, engine, param_divider):
         results = engine.run_step(param_divider, "rval", [1e3, 2e3, 5e3])
         assert len(results) == 3
@@ -229,8 +351,17 @@ class TestStep:
             engine.run_step(divider, "R1", [1e3, 2e3])
 
     def test_step_empty_values_raise(self, engine, param_divider):
-        with pytest.raises(rspice.SimulationError, match="no sweep values"):
+        with pytest.raises(ValueError, match="must not be empty"):
             engine.run_step(param_divider, "rval", [])
+
+    def test_percentile_rejects_invalid_values(self, engine, param_divider):
+        stats = engine.run_monte_carlo(
+            param_divider, num_runs=10, seed=7
+        ).get_variable("V(OUT)")
+        assert stats is not None
+        for value in (-1.0, 101.0, float("nan"), float("inf")):
+            with pytest.raises(ValueError, match="0 to 100"):
+                stats.percentile(value)
 
     def test_step_non_finite_values_raise_valueerror(self, engine, param_divider):
         with pytest.raises(ValueError, match="finite"):

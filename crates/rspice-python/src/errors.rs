@@ -54,15 +54,51 @@ create_exception!(
 
 /// Convert a parse error to PyErr
 pub fn parse_error_to_pyerr(err: rspice_core::netlist::ParseError) -> PyErr {
-    ParseError::new_err(err.to_string())
+    use rspice_core::netlist::ParseError as CoreParseError;
+
+    let message = err.to_string();
+    let (kind, line, detail) = match &err {
+        CoreParseError::Syntax { line, message } => ("syntax", Some(*line), Some(message.as_str())),
+        CoreParseError::UnknownDevice(value) => ("unknown_device", None, Some(value.as_str())),
+        CoreParseError::InvalidNode(value) => ("invalid_node", None, Some(value.as_str())),
+        CoreParseError::DuplicateName(value) => ("duplicate_name", None, Some(value.as_str())),
+        CoreParseError::MissingParameter(value) => {
+            ("missing_parameter", None, Some(value.as_str()))
+        }
+        CoreParseError::InvalidValue(value) => ("invalid_value", None, Some(value.as_str())),
+        CoreParseError::Io(_) => ("io", None, None),
+    };
+    let error = ParseError::new_err(message);
+    let _attribute_result = Python::attach(|py| {
+        let value = error.value(py);
+        value.setattr("kind", kind)?;
+        value.setattr("line", line)?;
+        value.setattr("detail", detail)?;
+        Ok::<_, PyErr>(())
+    });
+    error
 }
 
 /// Convert a simulation error to PyErr
 pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> PyErr {
-    match &err {
-        rspice_core::engine::SimulationError::ConvergenceFailed(_) => {
-            ConvergenceError::new_err(err.to_string())
-        }
+    use rspice_core::engine::SimulationError as CoreSimulationError;
+
+    let (kind, iterations) = match &err {
+        CoreSimulationError::Circuit(_) => ("circuit", None),
+        CoreSimulationError::Solver(_) => ("solver", None),
+        CoreSimulationError::Netlist(_) => ("netlist", None),
+        CoreSimulationError::ConvergenceFailed(iterations) => ("convergence", Some(*iterations)),
+        CoreSimulationError::Aborted => ("aborted", None),
+    };
+    let error = match &err {
+        CoreSimulationError::ConvergenceFailed(_) => ConvergenceError::new_err(err.to_string()),
         _ => SimulationError::new_err(err.to_string()),
-    }
+    };
+    let _attribute_result = Python::attach(|py| {
+        let value = error.value(py);
+        value.setattr("kind", kind)?;
+        value.setattr("iterations", iterations)?;
+        Ok::<_, PyErr>(())
+    });
+    error
 }

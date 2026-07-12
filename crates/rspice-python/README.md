@@ -6,9 +6,12 @@ regression tests in CI the same way you run unit tests.
 
 ## Features
 
-- **Simulation API** — DC operating point, DC sweep, AC, transient, noise,
-  pole-zero, Monte Carlo, sensitivity (DC and AC), transfer function,
-  Fourier/THD, and parametric step analysis
+- **Simulation API** — DC, AC/AC-DATA, transient, noise, pole-zero, STB,
+  N-port S-parameters, PSS, HB, PAC, driven PNoise, oscillator phase noise,
+  Monte Carlo, sensitivity, transfer function, Fourier/THD, and parametric
+  analysis
+- **Long-run controls** — resumable netlist-fingerprinted transient
+  checkpoints and error-bounded compressed voltage waveforms
 - **Verification first** — `engine.run(netlist)` executes the netlist's own
   analysis directives, evaluates `.MEAS` statements, and
   `report.assert_passed()` turns them into a CI gate
@@ -34,8 +37,21 @@ cd crates/rspice-python
 maturin develop --release
 ```
 
-`maturin build --release` produces a redistributable abi3 wheel that works on
-Python 3.8+.
+`maturin build --release --locked` produces a redistributable abi3 wheel that
+works on Python 3.10+. Release CI builds manylinux2014 x86-64/AArch64, macOS
+Intel/Apple-Silicon, and Windows x86-64/ARM64 wheels.
+
+The workspace-aware source distribution requires one post-processing step to
+reconcile maturin's pruned workspace with the repository lockfile:
+
+```bash
+maturin sdist --out dist
+python scripts/repair_sdist_lock.py dist/rspice-*.tar.gz
+```
+
+The repair runs offline by default and verifies the resulting archive with
+Cargo's `--locked` mode. Run `cargo fetch --locked` first on a clean build
+machine so the dependency index and sources are present locally.
 
 ## Quick Start
 
@@ -89,11 +105,13 @@ def test_rc_step_response():
     assert report.measurement("trise").value == pytest.approx(219.7e-6, rel=0.02)
 ```
 
-`engine.run` executes the netlist's `.op`, `.dc`, `.ac`, `.tran`, `.noise`,
-`.tf`, and `.four` directives in order and returns a `RunReport`:
+`engine.run` executes the netlist's `.op`, `.dc`, `.ac`/`.ac data`, `.sp`,
+`.tran`, `.noise`, `.tf`, `.stb`, `.pz`, `.mc`, `.step`, `.temp`, DC `.sens`,
+and `.four` directives in order and returns a `RunReport`:
 
 - `report.tran` / `report.ac` / `report.op` / `report.dc` / `report.noise` /
-  `report.tf` / `report.fourier` — the analysis results
+  `report.s_parameters` / `report.tf` / `report.stb` / `report.pz` /
+  `report.fourier` — the analysis results
 - `report.measurements`, `report.measurement(name)`, `report.failures`,
   `report.all_passed` — `.MEAS` outcomes for TRAN, DC, AC, and NOISE analyses
   (`.MEAS AC` supports magnitude, dB, phase, real, and imaginary data;
@@ -212,6 +230,13 @@ tran = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)
 four = tran.fourier("out", fundamental=1e3)    # harmonics + THD
 print(f"THD = {four.thd_percent:.2f}%")
 
+# Long-run transient storage and continuation
+compressed = engine.run_tran_compressed(netlist, stop_time=1.0,
+                                        abs_tol=1e-6, rel_tol=1e-3)
+segment, checkpoint = engine.run_tran_checkpointed(netlist, stop_time=0.5)
+checkpoint.save("run.chk")
+continued, checkpoint = engine.resume_tran(netlist, checkpoint, stop_time=1.0)
+
 # Noise (temperature defaults to the engine configuration)
 for r in engine.run_noise(netlist, "out", [1e3, 1e4]):
     print(f"{r.frequency:.0f} Hz: {r.output_noise_rms*1e9:.2f} nV/sqrt(Hz)")
@@ -219,7 +244,15 @@ for r in engine.run_noise(netlist, "out", [1e3, 1e4]):
 
 # Pole-zero (input is a unit current: dc_gain is a transimpedance)
 pz = engine.run_pz(netlist, "in", "out")
-print(pz.is_stable, pz.bandwidth_hz, pz.poles_array)
+print(pz.is_stable, pz.dominant_pole_decay_hz, pz.poles_array)
+
+# RF and periodic analyses
+sparams = engine.run_s_parameters(netlist, np.logspace(6, 10, 101))
+s21_db = sparams.magnitude_db(2, 1)            # one-based engineering ports
+pss = engine.run_pss(netlist, fundamental_frequency=1e9)
+hb = engine.run_hb(netlist, fundamental_frequency=1e9, harmonics=9)
+pac = engine.run_pac(netlist, 1e9, 1e3, 100e6, 20, "VRF", "out")
+pnoise = engine.run_pnoise(netlist, 1e9, [1e3, 10e3], "out")
 
 # Transfer function (.TF): gain, input and output impedance
 tf = engine.run_transfer_function(netlist, "out", "V1")
@@ -282,9 +315,10 @@ Simulation calls release the GIL, so a long transient can run in a worker
 thread while the main thread stays responsive, and several engines can
 simulate different netlists in parallel threads.
 
-`run_tran` and `run_dc_sweep` poll Python signal handlers while they run:
-Ctrl-C (KeyboardInterrupt) cancels the simulation promptly instead of
-arriving after it completes.
+`run_tran`, `run_tran_compressed`, `run_dc_sweep`, `run_pss`, `run_hb`,
+`run_pac`, `run_pnoise`, and `run_oscillator_noise` poll Python signal
+handlers while they run: Ctrl-C (`KeyboardInterrupt`) cancels the simulation
+promptly instead of arriving after it completes.
 
 ## Testing
 

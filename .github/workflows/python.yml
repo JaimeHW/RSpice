@@ -34,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ["3.10", "3.13", "3.14"]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install Rust toolchain
@@ -68,6 +68,9 @@ jobs:
       - name: Run binding test suite
         working-directory: crates/rspice-python
         run: python -m pytest tests/ -v --tb=short
+      - name: Run Rust-side binding invariants
+        working-directory: crates/rspice-python
+        run: cargo test --locked -p rspice-python --lib
       - name: Validate type stubs against runtime
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.14'
         working-directory: crates/rspice-python
@@ -75,35 +78,63 @@ jobs:
           # Pinned: stubtest's checks change across mypy majors (2.1 began
           # comparing runtime __new__ signatures). Bump deliberately.
           pip install -c ci-constraints.txt "mypy==2.1.0"
-          python -m mypy.stubtest rspice --ignore-missing-stub --allowlist stubtest-allowlist.txt
+          python -m mypy.stubtest rspice --allowlist stubtest-allowlist.txt
 
   wheels:
-    name: abi3 wheel (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: abi3 wheel (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        platform:
+          - name: linux-x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2014"
+          - name: linux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            manylinux: "2014"
+          - name: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            manylinux: "off"
+          - name: macos-x86_64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            manylinux: "off"
+          - name: windows-x86_64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            manylinux: "off"
+          - name: windows-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            manylinux: "off"
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          shared-key: wheels-${{ matrix.os }}
+          shared-key: wheels-${{ matrix.platform.name }}
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.14"
       - name: Build abi3 wheel
-        working-directory: crates/rspice-python
-        run: |
-          pip install -c ci-constraints.txt "maturin==${{ env.MATURIN_VERSION }}" "pytest==${{ env.PYTEST_VERSION }}"
-          maturin build --release --locked --out dist
+        uses: PyO3/maturin-action@3e2bdf6ba6453a61e649744019b8a2d906c7eb38 # v1.51.0
+        with:
+          maturin-version: v${{ env.MATURIN_VERSION }}
+          rust-toolchain: ${{ env.RUST_TOOLCHAIN }}
+          working-directory: crates/rspice-python
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux }}
+          args: --release --locked --compatibility pypi --out dist
       - name: Install wheel and run smoke test
         shell: bash
         working-directory: crates/rspice-python
         run: |
-          python -m pip install --force-reinstall -c ci-constraints.txt dist/*.whl
+          python -m pip install --force-reinstall -c ci-constraints.txt "pytest==${{ env.PYTEST_VERSION }}" dist/*.whl
           python - <<'PY'
           import rspice
 
@@ -114,6 +145,49 @@ jobs:
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: wheels-${{ matrix.os }}
+          name: wheels-${{ matrix.platform.name }}
           path: crates/rspice-python/dist/*.whl
+          if-no-files-found: error
+
+  source-distribution:
+    name: locked source distribution
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: python-sdist
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - name: Populate the locked Cargo cache
+        run: cargo fetch --locked --manifest-path crates/rspice-python/Cargo.toml
+      - name: Build and repair source distribution
+        working-directory: crates/rspice-python
+        run: |
+          python -m pip install -c ci-constraints.txt "maturin==${{ env.MATURIN_VERSION }}"
+          maturin sdist --out dist
+          python scripts/repair_sdist_lock.py dist/rspice-*.tar.gz
+      - name: Build and install from source distribution offline
+        shell: bash
+        working-directory: crates/rspice-python
+        run: |
+          python -m venv .sdist-venv
+          source .sdist-venv/bin/activate
+          python -m pip install -c ci-constraints.txt "maturin==${{ env.MATURIN_VERSION }}" "numpy>=2.0,<3"
+          CARGO_NET_OFFLINE=true python -m pip install --no-build-isolation --no-deps dist/rspice-*.tar.gz
+          python - <<'PY'
+          import rspice
+
+          netlist = rspice.Netlist.parse("V1 in 0 1\nR1 in 0 1k\n.op\n.end\n")
+          result = rspice.Engine().run_dc_op(netlist)
+          assert abs(result.voltage("in") - 1.0) < 1e-12
+          print(f"rspice {rspice.__version__} source-distribution smoke passed")
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: source-distribution
+          path: crates/rspice-python/dist/*.tar.gz
           if-no-files-found: error

@@ -21,6 +21,7 @@
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use super::{Engine, SimulationError, TransientResult};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::{
     BreakpointManager, CompanionCoefficients, LteEstimator, TimestepController, TrapGearController,
 };
@@ -182,18 +183,33 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
     ) -> Result<PssAnalysisResult, SimulationError> {
-        self.run_pss_with_state(netlist, config)
+        self.run_pss_with_abort(netlist, config, &NoAbort)
+    }
+
+    /// Run PSS with cooperative cancellation across stabilization, shooting,
+    /// finite-difference columns, and Floquet analysis.
+    pub fn run_pss_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<PssAnalysisResult, SimulationError> {
+        self.run_pss_with_state_abort(netlist, config, abort)
             .map(|(result, _, _, _)| result)
     }
 
     /// `run_pss` plus the converged artifacts the oscillator phase-noise
     /// machinery needs: the prepared circuit/matrix pair and the converged
     /// shooting state x0.
-    pub(in crate::engine) fn run_pss_with_state(
+    pub(in crate::engine) fn run_pss_with_state_abort(
         &self,
         netlist: &Netlist,
         config: PssConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         config.validate().map_err(PssError::InvalidConfig)?;
 
         // Build and prepare circuit
@@ -208,7 +224,8 @@ impl Engine {
         }
 
         // Get DC operating point as initial condition.
-        let dc_solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let dc_solution =
+            self.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?;
 
         // Initialize capacitor/inductor state from DC
         self.pss_initialize_reactive_state(&mut circuit, &dc_solution);
@@ -218,7 +235,7 @@ impl Engine {
         // ==================================================================
         let period = config.period();
         let (stabilized_waveform, current_state) =
-            self.pss_run_stabilization(&mut circuit, &mut matrix, &dc_solution, &config)?;
+            self.pss_run_stabilization(&mut circuit, &mut matrix, &dc_solution, &config, abort)?;
 
         // ==================================================================
         // Phase 2: Period Detection (for autonomous oscillators)
@@ -253,11 +270,19 @@ impl Engine {
         let mut last_jacobian: Option<Vec<Vec<Value>>> = None;
 
         while iteration < config.max_iterations {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             // Simulate one period
             self.pss_set_reactive_state(&mut circuit, &shooting_state.x0);
 
-            let (x_t, waveform) =
-                self.pss_simulate_one_period(&mut circuit, &mut matrix, detected_period, &config)?;
+            let (x_t, waveform) = self.pss_simulate_one_period(
+                &mut circuit,
+                &mut matrix,
+                detected_period,
+                &config,
+                abort,
+            )?;
 
             shooting_state.x_t = x_t;
             shooting_state.compute_residual();
@@ -280,6 +305,7 @@ impl Engine {
                     detected_period,
                     &config,
                     FD_STEP,
+                    abort,
                 )?;
                 last_jacobian = Some(jacobian);
                 shooting_state.update_x0(&delta, solver.damping);
@@ -293,6 +319,7 @@ impl Engine {
                     detected_period,
                     &config,
                     FD_STEP,
+                    abort,
                 )?;
                 last_jacobian = Some(jacobian);
                 shooting_state.update_x0(&delta, solver.damping);
@@ -333,6 +360,7 @@ impl Engine {
                 detected_period,
                 &config,
                 FD_STEP,
+                abort,
             )?
         } else {
             match last_jacobian {
@@ -343,6 +371,7 @@ impl Engine {
                     detected_period,
                     &config,
                     FD_STEP,
+                    abort,
                 )?,
             }
         };
@@ -468,6 +497,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         dc_solution: &[Value],
         config: &PssConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<(TransientResult, Vec<Value>), SimulationError> {
         let period = config.period();
         let tstab = config.effective_tstab();
@@ -482,6 +512,7 @@ impl Engine {
                 max_step,
                 false,
                 None,
+                abort,
             )?;
 
             let final_state = self.pss_extract_reactive_state(circuit);
@@ -551,17 +582,19 @@ impl Engine {
         matrix: &mut StaticMatrix,
         period: Value,
         config: &PssConfig,
+        abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, TransientResult), SimulationError> {
         let max_step = period / config.points_per_period as f64;
 
         // Node voltages consistent with the frozen reactive state: they seed
         // the first Newton solve and become the genuine t=0 waveform sample.
-        let solution = self.pss_initial_node_solution(circuit, matrix, period)?;
+        let solution = self.pss_initial_node_solution(circuit, matrix, period, abort)?;
 
         // The period map must vary smoothly with the shooting state: run on
         // the fixed grid (see pss_run_tran_internal).
-        let waveform =
-            self.pss_run_tran_internal(circuit, matrix, solution, period, max_step, true, None)?;
+        let waveform = self.pss_run_tran_internal(
+            circuit, matrix, solution, period, max_step, true, None, abort,
+        )?;
 
         let final_state = self.pss_extract_reactive_state(circuit);
         Ok((final_state, waveform))
@@ -580,13 +613,14 @@ impl Engine {
         circuit: &mut Circuit,
         matrix: &mut StaticMatrix,
         period: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let dt_freeze = period * 1e-9;
         let coeff =
             CompanionCoefficients::for_method(crate::analysis::IntegrationMethod::BackwardEuler);
         let start = vec![0.0; circuit.matrix_size()];
 
-        match self.pss_newton_solve(circuit, matrix, &coeff, dt_freeze, dt_freeze, &start)? {
+        match self.pss_newton_solve(circuit, matrix, &coeff, dt_freeze, dt_freeze, &start, abort)? {
             Some(solution) => Ok(solution),
             None => Ok(start),
         }
@@ -614,7 +648,11 @@ impl Engine {
         config: &PssConfig,
         fd_step: Value,
         subtract_identity: bool,
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let n = x0.len();
         if n == 0 {
             return Ok(Vec::new());
@@ -624,19 +662,22 @@ impl Engine {
                       worker_matrix: &mut StaticMatrix,
                       j: usize|
          -> Result<Vec<Value>, SimulationError> {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let h = fd_step * (1.0 + x0[j].abs());
 
             let mut x_plus = x0.to_vec();
             x_plus[j] += h;
             self.pss_set_reactive_state(worker_circuit, &x_plus);
             let (x_t_plus, _) =
-                self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config)?;
+                self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
 
             let mut x_minus = x0.to_vec();
             x_minus[j] -= h;
             self.pss_set_reactive_state(worker_circuit, &x_minus);
             let (x_t_minus, _) =
-                self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config)?;
+                self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config, abort)?;
 
             Ok((0..n)
                 .map(|i| {
@@ -704,10 +745,11 @@ impl Engine {
         period: Value,
         config: &PssConfig,
         fd_step: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, Vec<Vec<Value>>), SimulationError> {
         let n = state.dimension();
         let columns =
-            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true)?;
+            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true, abort)?;
 
         let mut jacobian = vec![vec![0.0; n]; n];
         for (j, column) in columns.iter().enumerate() {
@@ -742,10 +784,11 @@ impl Engine {
         period: Value,
         config: &PssConfig,
         fd_step: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<AutonomousNewtonStep, SimulationError> {
         let n = state.dimension();
         let columns =
-            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true)?;
+            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true, abort)?;
 
         // dPhi/dT by forward difference; Phi_T(x0) is already in state.x_t.
         let h_t = period * 1e-7;
@@ -754,8 +797,13 @@ impl Engine {
         worker.link_indices(&m);
         let mut worker_matrix = m;
         self.pss_set_reactive_state(&mut worker, &state.x0);
-        let (x_t_plus, _) =
-            self.pss_simulate_one_period(&mut worker, &mut worker_matrix, period + h_t, config)?;
+        let (x_t_plus, _) = self.pss_simulate_one_period(
+            &mut worker,
+            &mut worker_matrix,
+            period + h_t,
+            config,
+            abort,
+        )?;
         let dphi_dt: Vec<Value> = (0..n).map(|i| (x_t_plus[i] - state.x_t[i]) / h_t).collect();
 
         let mut jacobian = vec![vec![0.0; n + 1]; n + 1];
@@ -799,10 +847,11 @@ impl Engine {
         period: Value,
         config: &PssConfig,
         fd_step: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
         let n = state.dimension();
-        let columns =
-            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, false)?;
+        let columns = self
+            .pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, false, abort)?;
 
         let mut monodromy = vec![vec![0.0; n]; n];
         for (j, column) in columns.iter().enumerate() {
@@ -892,12 +941,16 @@ impl Engine {
         t_next: Value,
         dt: Value,
         start: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<Value>>, SimulationError> {
         let size = circuit.matrix_size();
         let mut new_solution = start.to_vec();
         let mut rhs = vec![0.0; size];
 
         for _iter in 0..self.config.max_iterations {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             self.pss_stamp_system(circuit, matrix, &mut rhs, coeff, t_next, dt, &new_solution)?;
 
             match matrix.solve(&rhs) {
@@ -1066,7 +1119,11 @@ impl Engine {
         max_step: Value,
         fixed_grid: bool,
         mut trace: Option<&mut PssStateTrace>,
+        abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let num_nodes = circuit.num_nodes();
 
         let fixed_steps = (tstop / max_step).round().max(1.0) as usize;
@@ -1120,6 +1177,9 @@ impl Engine {
 
         let mut fixed_index = 0usize;
         while t < tstop && total_iterations < MAX_ITERATIONS {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             total_iterations += 1;
             let dt = if fixed_grid {
                 if fixed_index >= fixed_steps {
@@ -1146,7 +1206,7 @@ impl Engine {
             let coeff = accepted_step_history.coefficients_for_trial(current_method, dt);
 
             let Some(new_solution) =
-                self.pss_newton_solve(circuit, matrix, &coeff, t + dt, dt, &solution)?
+                self.pss_newton_solve(circuit, matrix, &coeff, t + dt, dt, &solution, abort)?
             else {
                 if fixed_grid {
                     // The grid is the contract: a Newton failure on it is a

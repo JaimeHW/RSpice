@@ -18,6 +18,18 @@ impl HbSolver {
     /// - Nonlinear part: FFT-based convolution of time-domain Jacobians
     /// - GMIN: diagonal conductance for numerical stability
     pub fn solve_newton(&mut self, state: &mut HbSolverState) -> Result<(), HbError> {
+        self.solve_newton_with_abort(state, &NoAbort)
+    }
+
+    /// Full nonlinear HB solve with cooperative cancellation.
+    pub fn solve_newton_with_abort(
+        &mut self,
+        state: &mut HbSolverState,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), HbError> {
+        if abort.is_aborted() {
+            return Err(HbError::Aborted);
+        }
         let tol = self.config.tolerance;
         let abstol = self.config.abstol;
 
@@ -36,7 +48,7 @@ impl HbSolver {
         // Step 0: Solve DC operating point first
         // This establishes the nonlinear device operating points and provides a much
         // better initial guess than starting from zero or a random guess.
-        match self.solve_dc_operating_point(state) {
+        match self.solve_dc_operating_point_with_abort(state, abort) {
             Ok(_dc_solution) => {
                 // DC solution is now stored in state.x[node][0]
                 // Initialize harmonic components to zero (small-signal around DC)
@@ -58,7 +70,7 @@ impl HbSolver {
         // returned above.
 
         // Step 1: Try direct Newton first
-        if self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)? {
+        if self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol, abort)? {
             state.converged = true;
             return Ok(());
         }
@@ -73,6 +85,7 @@ impl HbSolver {
                 self.config.max_iterations,
                 tol * 10.0,
                 abstol,
+                abort,
             )? {
                 // Converged at higher GMIN - now refine with progressively lower GMIN
                 // Save state before refinement in case we need to restore
@@ -89,6 +102,7 @@ impl HbSolver {
                         self.config.max_iterations,
                         tol,
                         abstol,
+                        abort,
                     )? {
                         // Success - update last good state
                         last_good_state = state.x.clone();
@@ -151,6 +165,7 @@ impl HbSolver {
                 self.config.max_iterations / 2,
                 tol * 10.0,
                 abstol,
+                abort,
             )?;
 
             total_iterations += state.iteration;
@@ -170,7 +185,14 @@ impl HbSolver {
 
         // If source stepping completed, do final Newton with original sources
         if source_stepper.is_complete()
-            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)?
+            && self.newton_inner_loop(
+                state,
+                gmin,
+                self.config.max_iterations,
+                tol,
+                abstol,
+                abort,
+            )?
         {
             state.converged = true;
             state.iteration = total_iterations;
@@ -194,6 +216,7 @@ impl HbSolver {
                 self.config.max_iterations / 4,
                 tol * 100.0, // Relaxed tolerance during stepping
                 abstol,
+                abort,
             )?;
 
             ptran_iterations += state.iteration;
@@ -209,7 +232,14 @@ impl HbSolver {
 
         // If pseudo-transient completed, do final high-accuracy Newton
         if ptran.is_complete()
-            && self.newton_inner_loop(state, gmin, self.config.max_iterations, tol, abstol)?
+            && self.newton_inner_loop(
+                state,
+                gmin,
+                self.config.max_iterations,
+                tol,
+                abstol,
+                abort,
+            )?
         {
             state.converged = true;
             state.iteration = total_iterations + ptran_iterations;
@@ -230,8 +260,12 @@ impl HbSolver {
         max_iter: usize,
         tol: Value,
         abstol: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<bool, HbError> {
         for iter in 0..max_iter {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
             state.iteration = iter;
             state.total_iterations += 1;
 
@@ -266,7 +300,7 @@ impl HbSolver {
             };
 
             // 5. Apply line search for robust convergence
-            match self.apply_line_search_with_gmin(state, &delta_x, gmin) {
+            match self.apply_line_search_with_gmin(state, &delta_x, gmin, abort) {
                 Ok(()) => {}
                 Err(HbError::SingularMatrix) => return Ok(false),
                 Err(err) => return Err(err),
@@ -341,6 +375,7 @@ impl HbSolver {
         state: &mut HbSolverState,
         delta_x: &[Vec<Complex64>],
         gmin: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<(), HbError> {
         let initial_norm = state.residual_norm;
         let armijo_c = 1e-4;
@@ -354,6 +389,9 @@ impl HbSolver {
         let x_orig: Vec<Vec<Complex64>> = state.x.clone();
 
         while alpha >= min_alpha {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
             for (node, dx_node) in delta_x.iter().enumerate() {
                 for (k, &dx) in dx_node.iter().enumerate() {
                     if node < state.x.len() && k < state.x[node].len() {

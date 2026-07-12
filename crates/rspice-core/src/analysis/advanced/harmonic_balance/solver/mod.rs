@@ -8,6 +8,7 @@ use super::config::HbConfig;
 use super::fft::HbFft;
 use super::result::{HbResult, SpectralVoltage};
 use crate::Value;
+use crate::abort_signal::{AbortSignal, NoAbort};
 #[cfg(feature = "veriloga")]
 use crate::device::veriloga::VerilogADevice;
 use num_complex::Complex64;
@@ -33,6 +34,8 @@ pub(super) const DC_SHORT_CONDUCTANCE: Value = 1e6;
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
 pub enum HbError {
+    /// The caller requested cooperative cancellation.
+    Aborted,
     /// Newton iteration did not converge
     ConvergenceFailed { iterations: usize, residual: Value },
     /// Matrix is singular
@@ -46,6 +49,7 @@ pub enum HbError {
 impl std::fmt::Display for HbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Aborted => write!(f, "Harmonic-balance solve aborted by user"),
             Self::ConvergenceFailed {
                 iterations,
                 residual,

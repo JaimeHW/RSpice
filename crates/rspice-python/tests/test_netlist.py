@@ -8,6 +8,17 @@ import rspice
 
 
 class TestParseStatementSemantics:
+    def test_parse_diagnostics_are_public_typed_objects(self):
+        netlist = rspice.Netlist.parse("* diagnostic\nR1 1 0\n.end")
+        assert len(netlist.diagnostics) == 1
+        diagnostic = netlist.diagnostics[0]
+        assert isinstance(diagnostic, rspice.ParseDiagnostic)
+        assert type(diagnostic).__module__ == "rspice"
+        assert diagnostic.line == 2
+        assert diagnostic.severity == "warning"
+        assert diagnostic.code == "xyce_resistor_missing_value"
+        assert diagnostic.message
+
     def test_titleless_content_parses_all_elements(self):
         netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
         assert netlist.num_elements == 2
@@ -24,8 +35,11 @@ class TestParseStatementSemantics:
     def test_first_line_typo_raises_instead_of_becoming_title(self):
         # Historically "Vfoo 1 0 banana" was silently consumed as a title,
         # yielding an empty circuit. parse() must surface the error.
-        with pytest.raises(rspice.ParseError):
+        with pytest.raises(rspice.ParseError) as exc_info:
             rspice.Netlist.parse("Vfoo 1 0 banana\n.end")
+        assert exc_info.value.kind
+        assert hasattr(exc_info.value, "line")
+        assert hasattr(exc_info.value, "detail")
 
     def test_statement_like_title_is_not_eaten_as_device(self):
         # A title like "C3 Amplifier Design 2024" must not become a 2024 F

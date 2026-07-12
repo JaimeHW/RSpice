@@ -23,6 +23,22 @@ R2 out 0 1k
 
 
 class TestTransient:
+    def test_start_time_clips_output_but_preserves_alignment(self, engine):
+        netlist = rspice.Netlist.parse(RC_STEP)
+        tran = engine.run_tran(
+            netlist, stop_time=1e-3, max_step=1e-6, start_time=5e-4
+        )
+        assert tran.time[0] >= 5e-4
+        assert tran.time[-1] == pytest.approx(1e-3, rel=1e-3)
+        assert len(tran.voltage_waveform("out")) == tran.num_points
+        assert len(tran.branch_current_waveform("V1")) == tran.num_points
+
+    @pytest.mark.parametrize("start_time", [-1.0, 1e-3, 2e-3, math.inf, math.nan])
+    def test_invalid_start_time_raises_valueerror(self, engine, start_time):
+        netlist = rspice.Netlist.parse(RC_STEP)
+        with pytest.raises(ValueError, match="start_time"):
+            engine.run_tran(netlist, stop_time=1e-3, start_time=start_time)
+
     def test_rc_step_settles_to_one(self, engine):
         netlist = rspice.Netlist.parse(RC_STEP)
         tran = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)
@@ -78,6 +94,32 @@ class TestTransientBranchCurrents:
             tran.branch_current_waveform("L99")
 
 
+class TestTransientDeviceParameters:
+    def test_saved_device_operating_point_waveforms(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* MOS transient operating parameters
+VDD d 0 5
+VG g 0 PULSE(0 3 1u 100n 100n 4u 10u)
+M1 d g 0 0 NM W=10u L=1u
+.model NM NMOS (LEVEL=1 VTO=1 KP=100u)
+.save @M1[gm] @M1[id]
+.end
+"""
+        )
+        result = engine.run_tran(netlist, stop_time=10e-6, max_step=100e-9)
+        assert {
+            "@m1[gm]",
+            "@m1[id]",
+        } <= {name.lower() for name in result.device_parameter_names}
+        gm = result.device_parameter_waveform("m1", "GM")
+        drain_current = result.device_parameter_waveform("M1", "id")
+        assert gm.shape == drain_current.shape == result.time.shape
+        assert np.nanmax(gm) > 0.0
+        assert np.nanmax(drain_current) > 0.0
+        with pytest.raises(KeyError, match="add it to .SAVE"):
+            result.device_parameter_waveform("M1", "missing")
+
+
 class TestTransientValidation:
     def test_zero_stop_time_raises(self, engine, rc_lowpass):
         with pytest.raises(ValueError):
@@ -96,6 +138,91 @@ class TestTransientValidation:
             engine.run_tran(rc_lowpass, stop_time=1e-3, max_step=-1.0)
         with pytest.raises(ValueError):
             engine.run_tran(rc_lowpass, stop_time=1e-3, max_step=0.0)
+
+
+class TestTransientCheckpoint:
+    def test_segmented_resume_matches_uninterrupted_final_state(self, engine):
+        netlist = rspice.Netlist.parse(RC_STEP)
+        full = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)
+        first, checkpoint = engine.run_tran_checkpointed(
+            netlist, stop_time=5e-4, max_step=1e-6
+        )
+        resumed, final_checkpoint = engine.resume_tran(
+            netlist, checkpoint, stop_time=1e-3, max_step=1e-6
+        )
+
+        assert isinstance(checkpoint, rspice.TransientCheckpoint)
+        assert checkpoint.time == pytest.approx(5e-4, rel=0.0, abs=1e-15)
+        assert final_checkpoint.time == pytest.approx(1e-3, rel=0.0, abs=1e-15)
+        assert first.time[-1] == pytest.approx(checkpoint.time)
+        assert resumed.time[0] == pytest.approx(checkpoint.time)
+        assert resumed.voltage_waveform("out")[-1] == pytest.approx(
+            full.voltage_waveform("out")[-1], rel=1e-8, abs=1e-12
+        )
+
+    def test_checkpoint_round_trips_and_enforces_netlist_identity(
+        self, engine, tmp_path
+    ):
+        netlist = rspice.Netlist.parse(RC_STEP)
+        _, checkpoint = engine.run_tran_checkpointed(
+            netlist, stop_time=2e-4, max_step=1e-6
+        )
+        path = tmp_path / "state.rspice-checkpoint"
+        checkpoint.save(path)
+        loaded = rspice.TransientCheckpoint.load(path)
+        assert loaded.time == checkpoint.time
+        assert loaded.netlist_fingerprint == checkpoint.netlist_fingerprint
+        assert np.array_equal(loaded.solution, checkpoint.solution)
+
+        other = rspice.Netlist.parse("V1 out 0 2\nR1 out 0 1k\n.end")
+        with pytest.raises(rspice.SimulationError, match="fingerprint"):
+            engine.resume_tran(other, loaded, stop_time=3e-4, max_step=1e-6)
+
+    def test_resume_requires_later_stop(self, engine):
+        netlist = rspice.Netlist.parse(RC_STEP)
+        _, checkpoint = engine.run_tran_checkpointed(
+            netlist, stop_time=2e-4, max_step=1e-6
+        )
+        with pytest.raises(ValueError):
+            engine.resume_tran(netlist, checkpoint, stop_time=checkpoint.time)
+
+
+class TestCompressedTransient:
+    def test_compressed_waveform_reduces_storage_and_resamples(self, engine):
+        netlist = rspice.Netlist.parse(RC_STEP)
+        full = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)
+        compressed = engine.run_tran_compressed(
+            netlist,
+            stop_time=1e-3,
+            max_step=1e-6,
+            abs_tol=1e-6,
+            rel_tol=1e-3,
+        )
+
+        assert isinstance(compressed, rspice.CompressedTransientResult)
+        assert compressed.input_points == full.num_points
+        assert compressed.num_points < compressed.input_points
+        assert compressed.compression_ratio > 1.0
+        assert compressed.voltage_waveform("out").shape == compressed.time.shape
+        reconstructed = np.array(
+            [compressed.voltage_at("out", float(time)) for time in full.time]
+        )
+        assert np.max(np.abs(reconstructed - full.voltage_waveform("out"))) < 2e-3
+        time, values = compressed.resample("out", 101)
+        assert time.shape == values.shape == (101,)
+        assert time[0] == pytest.approx(compressed.time[0])
+        assert time[-1] == pytest.approx(compressed.time[-1])
+        ground_time, ground = compressed.resample("0", 11)
+        assert ground_time.shape == ground.shape == (11,)
+        assert np.all(ground == 0.0)
+
+    def test_compression_arguments_are_validated(self, engine, rc_lowpass):
+        with pytest.raises(ValueError):
+            engine.run_tran_compressed(rc_lowpass, 1e-3, abs_tol=-1.0)
+        with pytest.raises(ValueError):
+            engine.run_tran_compressed(rc_lowpass, 1e-3, rel_tol=float("nan"))
+        with pytest.raises(ValueError):
+            engine.run_tran_compressed(rc_lowpass, 1e-3, max_interval=-1.0)
 
 
 class TestFourier:

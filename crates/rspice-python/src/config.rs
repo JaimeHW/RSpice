@@ -58,6 +58,16 @@ fn validate_timestep_window(min_timestep: f64, max_timestep: f64) -> PyResult<()
     }
 }
 
+fn validate_gmin_window(gmin_initial: f64, gmin_target: f64) -> PyResult<()> {
+    if gmin_initial >= gmin_target {
+        Ok(())
+    } else {
+        Err(PyValueError::new_err(format!(
+            "gmin_initial ({gmin_initial}) must be >= gmin_target ({gmin_target})"
+        )))
+    }
+}
+
 /// Damping strategy for Newton-Raphson iterations
 ///
 /// Controls how Newton iteration steps are modified to improve convergence:
@@ -66,7 +76,13 @@ fn validate_timestep_window(min_timestep: f64, max_timestep: f64) -> PyResult<()
 /// - `VOLTAGE_LIMITING` - Junction voltage limiting (SPICE-style)
 /// - `BANK_ROSE` - Bank-Rose adaptive damping
 /// - `COMBINED` - Voltage limiting + line search (most robust)
-#[pyclass(name = "DampingStrategy", eq, eq_int, from_py_object)]
+#[pyclass(
+    name = "DampingStrategy",
+    module = "rspice",
+    eq,
+    eq_int,
+    from_py_object
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PyDampingStrategy {
     #[pyo3(name = "NONE")]
@@ -125,7 +141,13 @@ impl PyDampingStrategy {
 /// - `GEAR2` - BDF2, good for stiff systems
 /// - `TRAP_GEAR` - Hybrid: trapezoidal that auto-switches to Gear2 at
 ///   discontinuities (default)
-#[pyclass(name = "IntegrationMethod", eq, eq_int, from_py_object)]
+#[pyclass(
+    name = "IntegrationMethod",
+    module = "rspice",
+    eq,
+    eq_int,
+    from_py_object
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PyIntegrationMethod {
     #[pyo3(name = "BACKWARD_EULER")]
@@ -181,7 +203,7 @@ impl PyIntegrationMethod {
 ///     >>> bypass = BypassConfig(enabled=True, reltol=1e-3)
 ///     >>> bypass.enabled
 ///     True
-#[pyclass(name = "BypassConfig", from_py_object)]
+#[pyclass(name = "BypassConfig", module = "rspice", from_py_object)]
 #[derive(Clone)]
 pub struct PyBypassConfig {
     pub(crate) inner: BypassConfig,
@@ -274,7 +296,7 @@ impl PyBypassConfig {
 ///
 /// Note: reading a nested config (e.g. `sim_config.convergence`) returns a
 /// copy; mutate it and assign it back, or construct with keywords.
-#[pyclass(name = "ConvergenceConfig", from_py_object)]
+#[pyclass(name = "ConvergenceConfig", module = "rspice", from_py_object)]
 #[derive(Clone)]
 pub struct PyConvergenceConfig {
     pub(crate) inner: ConvergenceConfig,
@@ -348,6 +370,7 @@ impl PyConvergenceConfig {
         if let Some(v) = verbose {
             inner.verbose = v;
         }
+        validate_gmin_window(inner.gmin_initial, inner.gmin_target)?;
         Ok(Self { inner })
     }
 
@@ -430,7 +453,9 @@ impl PyConvergenceConfig {
 
     #[setter]
     fn set_gmin_initial(&mut self, value: f64) -> PyResult<()> {
-        self.inner.gmin_initial = validate_nonnegative("gmin_initial", value)?;
+        let value = validate_nonnegative("gmin_initial", value)?;
+        validate_gmin_window(value, self.inner.gmin_target)?;
+        self.inner.gmin_initial = value;
         Ok(())
     }
 
@@ -442,7 +467,9 @@ impl PyConvergenceConfig {
 
     #[setter]
     fn set_gmin_target(&mut self, value: f64) -> PyResult<()> {
-        self.inner.gmin_target = validate_nonnegative("gmin_target", value)?;
+        let value = validate_nonnegative("gmin_target", value)?;
+        validate_gmin_window(self.inner.gmin_initial, value)?;
+        self.inner.gmin_target = value;
         Ok(())
     }
 
@@ -549,7 +576,7 @@ impl PyConvergenceConfig {
 /// Note: property getters for `convergence` and `bypass` return copies.
 /// `config.convergence.verbose = True` mutates a temporary and is silently
 /// lost — assign a whole ConvergenceConfig instead.
-#[pyclass(name = "SimulationConfig", from_py_object)]
+#[pyclass(name = "SimulationConfig", module = "rspice", from_py_object)]
 #[derive(Clone)]
 pub struct PySimulationConfig {
     pub(crate) inner: SimulationConfig,

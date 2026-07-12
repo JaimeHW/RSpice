@@ -2,11 +2,9 @@
 
 Device model libraries bundled with the repository.
 
-## `spice/`
-
-SPICE `.lib` model cards authored for RSpice: starter libraries of common
-discrete parts and op-amps for examples and tests: `diode.lib`,
-`transistor.lib`, `mosfet.lib`, `opamp.lib`.
+The built-in SPICE `.lib` model cards are owned and packaged by
+[`rspice-core`](../crates/rspice-core/models/spice). They provide starter
+libraries of common discrete parts and op-amps for examples and tests.
 
 ## `veriloga/`
 

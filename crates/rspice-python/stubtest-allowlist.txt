@@ -1,27 +1,3 @@
-rspice.AcResult
-rspice.AnalysisRecord
-rspice.BypassConfig
-rspice.BypassConfig.__init__
-rspice.ComplexValue
-rspice.ConvergenceConfig
-rspice.ConvergenceConfig.__init__
-rspice.DampingStrategy
-rspice.DcSweepResult
-rspice.Engine
-rspice.Engine.__init__
-rspice.FourierResult
-rspice.Harmonic
-rspice.IntegrationMethod
-rspice.Measurement
-rspice.MonteCarloResult
-rspice.Netlist
-rspice.NoiseContribution
-rspice.NoiseResult
-rspice.PoleZeroResult
-rspice.RunReport
-rspice.SimulationConfig
-rspice.SimulationConfig.__init__
-rspice.SimulationResult
-rspice.TransferFunctionResult
-rspice.TransientResult
-rspice.VariableStatistics
+# The compiled implementation is an intentionally private package submodule.
+# Its entire public surface is re-exported and typed by rspice/__init__.pyi.
+rspice.rspice

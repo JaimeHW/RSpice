@@ -27,6 +27,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::CompanionCoefficients;
 use crate::analysis::{IntegrationMethod, PssConfig};
 use crate::circuit::Circuit;
@@ -66,6 +67,22 @@ impl Engine {
         config: PssConfig,
         offsets: &[Value],
     ) -> Result<OscPnoiseResult, SimulationError> {
+        self.run_pnoise_oscillator_with_abort(netlist, config, offsets, &NoAbort)
+    }
+
+    /// Compute oscillator phase noise with cooperative cancellation across
+    /// PSS, finite-difference trajectories, adjoint propagation, and source
+    /// projection.
+    pub fn run_pnoise_oscillator_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+        offsets: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<OscPnoiseResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if offsets.is_empty() {
             return Err(SimulationError::Circuit(
                 "oscillator pnoise needs at least one offset frequency".to_string(),
@@ -78,7 +95,7 @@ impl Engine {
         }
 
         let (pss, mut circuit, mut matrix, x0) =
-            self.run_pss_with_state(netlist, config.clone())?;
+            self.run_pss_with_state_abort(netlist, config.clone(), abort)?;
         let period = pss.period;
         let f0 = 1.0 / period;
 
@@ -88,7 +105,7 @@ impl Engine {
         let mut base = super::pss::PssStateTrace::default();
         self.pss_set_reactive_state(&mut circuit, &x0);
         let max_step = period / config.points_per_period as f64;
-        let seed = self.pss_initial_node_solution(&mut circuit, &mut matrix, period)?;
+        let seed = self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
         self.pss_run_tran_internal(
             &mut circuit,
             &mut matrix,
@@ -97,6 +114,7 @@ impl Engine {
             max_step,
             true,
             Some(&mut base),
+            abort,
         )?;
 
         let n_state = x0.len();
@@ -120,13 +138,17 @@ impl Engine {
             }
         }
         for j in 0..n_state {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let h = fd_step * (1.0 + x0[j].abs());
 
             let mut x_plus = x0.clone();
             x_plus[j] += h;
             let mut tr_plus = super::pss::PssStateTrace::default();
             self.pss_set_reactive_state(&mut circuit, &x_plus);
-            let seed_p = self.pss_initial_node_solution(&mut circuit, &mut matrix, period)?;
+            let seed_p =
+                self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
             self.pss_run_tran_internal(
                 &mut circuit,
                 &mut matrix,
@@ -135,13 +157,15 @@ impl Engine {
                 max_step,
                 true,
                 Some(&mut tr_plus),
+                abort,
             )?;
 
             let mut x_minus = x0.clone();
             x_minus[j] -= h;
             let mut tr_minus = super::pss::PssStateTrace::default();
             self.pss_set_reactive_state(&mut circuit, &x_minus);
-            let seed_m = self.pss_initial_node_solution(&mut circuit, &mut matrix, period)?;
+            let seed_m =
+                self.pss_initial_node_solution(&mut circuit, &mut matrix, period, abort)?;
             self.pss_run_tran_internal(
                 &mut circuit,
                 &mut matrix,
@@ -150,6 +174,7 @@ impl Engine {
                 max_step,
                 true,
                 Some(&mut tr_minus),
+                abort,
             )?;
 
             for k in 0..n_grid {
@@ -177,6 +202,9 @@ impl Engine {
         let mut v1_0 = vec![1.0; n_state];
         // Inverse iteration on (M^T - (1+eps) I) for the unity left mode.
         for _ in 0..50 {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let mut shifted = vec![vec![0.0; n_state]; n_state];
             for r in 0..n_state {
                 for cidx in 0..n_state {
@@ -208,6 +236,9 @@ impl Engine {
         // numerically this absorbs grid-level drift).
         let mut v1: Vec<Vec<Value>> = Vec::with_capacity(n_grid);
         for k in 0..n_grid {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let v1_k = if k == 0 {
                 v1_0.clone()
             } else {
@@ -251,6 +282,9 @@ impl Engine {
         let mut c_integral = 0.0;
         let mut prev_integrand = 0.0;
         for k in 0..n_grid {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             // Restore the traced reactive state and linearize at the traced
             // node solution: pss_stamp_system reads cap/inductor history.
             self.pss_set_reactive_state(&mut circuit, &base.states[k]);
@@ -268,6 +302,9 @@ impl Engine {
 
             let mut integrand = 0.0;
             for source in &sources {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 let intensity = source.intensity(&circuit, &solution, temperature);
                 if !intensity.is_finite() || intensity <= 0.0 {
                     continue;

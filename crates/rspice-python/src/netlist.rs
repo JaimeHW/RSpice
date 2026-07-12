@@ -29,13 +29,13 @@ use std::borrow::Cow;
 /// Example:
 ///     >>> netlist = Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
 ///     >>> netlist = Netlist.parse_file("circuit.sp")
-#[pyclass(name = "Netlist")]
+#[pyclass(name = "Netlist", module = "rspice")]
 pub struct PyNetlist {
     pub(crate) inner: Netlist,
 }
 
 /// Non-fatal parser diagnostic attached to a parsed netlist.
-#[pyclass(name = "ParseDiagnostic", from_py_object)]
+#[pyclass(name = "ParseDiagnostic", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
 pub struct PyParseDiagnostic {
     #[pyo3(get)]

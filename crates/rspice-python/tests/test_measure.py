@@ -112,13 +112,28 @@ class TestDcMeasurements:
 
 
 class TestVerificationDiscipline:
+    def test_tran_tstart_limits_result_and_measurement_window(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* TSTART measurement window
+V1 out 0 PULSE(0 1 0 1n 1n 100u 2m)
+R1 out 0 1k
+.tran 10u 1m 500u
+.meas tran vmax MAX V(out)
+.end
+"""
+        )
+        report = engine.run(netlist)
+        report.assert_passed()
+        assert report.tran.time[0] >= 500e-6
+        assert report.measurement("vmax").value == pytest.approx(0.0, abs=1e-12)
+
     def test_assert_passed_raises_without_measurements(self, engine, divider):
         netlist = rspice.Netlist.parse(
             "* op only\nV1 in 0 10\nR1 in out 1k\nR2 out 0 1k\n.op\n.end"
         )
         report = engine.run(netlist)
         assert report.num_measurements == 0
-        assert report.all_passed  # vacuously
+        assert not report.all_passed
         with pytest.raises(rspice.MeasurementError):
             report.assert_passed()
 
@@ -205,7 +220,7 @@ V1 in 0 10
 R1 in out 1k
 R2 out 0 1k
 .op
-.temp 27 50 80
+.disto dec 10 1 1meg
 .end
 """
         )
@@ -213,7 +228,7 @@ R2 out 0 1k
         assert report.analyses_run == ["op"]
         skipped = report.skipped
         assert len(skipped) == 1
-        assert skipped[0].kind == "temp"
+        assert skipped[0].kind == "disto"
         assert skipped[0].reason
 
     def test_skipped_directive_fails_success_contract_even_when_measurement_passes(
@@ -226,7 +241,7 @@ R1 in out 1k
 R2 out 0 1k
 .dc V1 0 10 1
 .meas dc vout MAX V(out) GOAL=5 TOL=1e-9
-.temp 50
+.disto dec 10 1 1meg
 .end
 """
         )
@@ -234,9 +249,31 @@ R2 out 0 1k
         report = engine.run(netlist)
 
         assert report.measurement("vout").passed
-        assert [record.kind for record in report.skipped] == ["temp"]
+        assert [record.kind for record in report.skipped] == ["disto"]
         assert not report.all_passed
         with pytest.raises(rspice.MeasurementError, match="skipped"):
+            report.assert_passed()
+
+    def test_ac_sensitivity_is_explicitly_gated_not_approximated(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* AC sensitivity requires every eligible device/model parameter
+V1 in 0 DC 10 AC 1
+R1 in out 1k
+R2 out 0 1k
+.dc V1 0 10 1
+.meas dc vout MAX V(out) GOAL=5 TOL=1e-9
+.sens V(out) AC LIN 2 1 10
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert report.measurement("vout").passed
+        assert [record.kind for record in report.skipped] == ["sens_ac"]
+        assert "every eligible device and model parameter" in report.skipped[0].reason
+        assert not report.all_passed
+        with pytest.raises(rspice.MeasurementError, match="every eligible"):
             report.assert_passed()
 
 

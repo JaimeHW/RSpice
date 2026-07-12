@@ -1,13 +1,60 @@
 """Type stubs for the rspice extension module."""
 
 import os
-from typing import Iterator, Sequence
+from typing import Iterator, Sequence, final
 
 import numpy as np
 import numpy.typing as npt
 
 __version__: str
 __author__: str
+__all__ = [
+    "__version__",
+    "__author__",
+    "Netlist",
+    "ParseDiagnostic",
+    "Engine",
+    "SimulationConfig",
+    "ConvergenceConfig",
+    "BypassConfig",
+    "DampingStrategy",
+    "IntegrationMethod",
+    "SimulationResult",
+    "DeviceOperatingPoint",
+    "TransientResult",
+    "CompressedTransientResult",
+    "TransientCheckpoint",
+    "AcResult",
+    "DcSweepResult",
+    "NoiseResult",
+    "NoiseContribution",
+    "MonteCarloResult",
+    "ElementSensitivity",
+    "SensitivityResult",
+    "VariableStatistics",
+    "PoleZeroResult",
+    "ComplexValue",
+    "FourierResult",
+    "Harmonic",
+    "TransferFunctionResult",
+    "StbResult",
+    "SParameterResult",
+    "PssResult",
+    "HbResult",
+    "PacResult",
+    "PeriodicNoiseContribution",
+    "PeriodicNoiseResult",
+    "OscillatorNoiseResult",
+    "Measurement",
+    "AnalysisRecord",
+    "RunReport",
+    "ac_frequencies",
+    "RSpiceError",
+    "ParseError",
+    "SimulationError",
+    "ConvergenceError",
+    "MeasurementError",
+]
 
 class RSpiceError(Exception):
     """Base exception for all RSpice errors."""
@@ -15,8 +62,15 @@ class RSpiceError(Exception):
 class ParseError(RSpiceError):
     """Raised when netlist parsing fails due to syntax or semantic errors."""
 
+    kind: str
+    line: int | None
+    detail: str | None
+
 class SimulationError(RSpiceError):
     """Raised when simulation fails due to circuit or solver errors."""
+
+    kind: str
+    iterations: int | None
 
 class ConvergenceError(SimulationError):
     """Raised when Newton-Raphson iteration fails to converge."""
@@ -28,6 +82,18 @@ def ac_frequencies(
     variation: str, points: int, start_freq: float, stop_freq: float
 ) -> npt.NDArray[np.float64]: ...
 
+@final
+class ParseDiagnostic:
+    @property
+    def line(self) -> int: ...
+    @property
+    def severity(self) -> str: ...
+    @property
+    def code(self) -> str: ...
+    @property
+    def message(self) -> str: ...
+
+@final
 class Netlist:
     @staticmethod
     def parse(content: str) -> Netlist: ...
@@ -52,6 +118,8 @@ class Netlist:
     @property
     def title(self) -> str: ...
     @property
+    def diagnostics(self) -> list[ParseDiagnostic]: ...
+    @property
     def element_names(self) -> list[str]: ...
     @property
     def model_names(self) -> list[str]: ...
@@ -67,6 +135,7 @@ class Netlist:
     def analyses(self) -> list[str]: ...
     def is_global(self, node: str) -> bool: ...
 
+@final
 class DampingStrategy:
     NONE: DampingStrategy
     LINE_SEARCH: DampingStrategy
@@ -74,12 +143,14 @@ class DampingStrategy:
     BANK_ROSE: DampingStrategy
     COMBINED: DampingStrategy
 
+@final
 class IntegrationMethod:
     BACKWARD_EULER: IntegrationMethod
     TRAPEZOIDAL: IntegrationMethod
     GEAR2: IntegrationMethod
     TRAP_GEAR: IntegrationMethod
 
+@final
 class BypassConfig:
     def __new__(
         cls,
@@ -88,19 +159,13 @@ class BypassConfig:
         reltol: float | None = None,
         abstol: float | None = None,
     ) -> BypassConfig: ...
-    def __init__(
-        self,
-        *,
-        enabled: bool | None = None,
-        reltol: float | None = None,
-        abstol: float | None = None,
-    ) -> None: ...
     @staticmethod
     def with_tolerances(reltol: float, abstol: float) -> BypassConfig: ...
     enabled: bool
     reltol: float
     abstol: float
 
+@final
 class ConvergenceConfig:
     def __new__(
         cls,
@@ -119,23 +184,6 @@ class ConvergenceConfig:
         charge_abstol: float | None = None,
         verbose: bool | None = None,
     ) -> ConvergenceConfig: ...
-    def __init__(
-        self,
-        *,
-        gmin_stepping: bool | None = None,
-        source_stepping: bool | None = None,
-        pseudo_transient: bool | None = None,
-        arc_length: bool | None = None,
-        damping_strategy: DampingStrategy | None = None,
-        gmin_initial: float | None = None,
-        gmin_target: float | None = None,
-        voltage_reltol: float | None = None,
-        residual_reltol: float | None = None,
-        voltage_abstol: float | None = None,
-        current_abstol: float | None = None,
-        charge_abstol: float | None = None,
-        verbose: bool | None = None,
-    ) -> None: ...
     @staticmethod
     def fast() -> ConvergenceConfig: ...
     @staticmethod
@@ -154,6 +202,7 @@ class ConvergenceConfig:
     charge_abstol: float
     verbose: bool
 
+@final
 class SimulationConfig:
     def __new__(
         cls,
@@ -169,20 +218,6 @@ class SimulationConfig:
         convergence: ConvergenceConfig | None = None,
         bypass: BypassConfig | None = None,
     ) -> SimulationConfig: ...
-    def __init__(
-        self,
-        *,
-        tolerance: float | None = None,
-        max_iterations: int | None = None,
-        transient_max_iterations: int | None = None,
-        min_timestep: float | None = None,
-        max_timestep: float | None = None,
-        temperature: float | None = None,
-        integration_method: IntegrationMethod | None = None,
-        transient_trtol: float | None = None,
-        convergence: ConvergenceConfig | None = None,
-        bypass: BypassConfig | None = None,
-    ) -> None: ...
     tolerance: float
     max_iterations: int
     transient_max_iterations: int
@@ -194,6 +229,22 @@ class SimulationConfig:
     convergence: ConvergenceConfig
     bypass: BypassConfig
 
+@final
+class DeviceOperatingPoint:
+    @property
+    def name(self) -> str: ...
+    @property
+    def device_kind(self) -> str: ...
+    @property
+    def region(self) -> str | None: ...
+    @property
+    def params(self) -> dict[str, float]: ...
+    @property
+    def param_names(self) -> list[str]: ...
+    def param(self, name: str) -> float: ...
+    def __getitem__(self, name: str, /) -> float: ...
+
+@final
 class SimulationResult:
     def voltage(self, node: int | str) -> float: ...
     @property
@@ -207,7 +258,11 @@ class SimulationResult:
     def branch_names(self) -> list[str]: ...
     @property
     def num_nodes(self) -> int: ...
+    @property
+    def device_operating_points(self) -> list[DeviceOperatingPoint]: ...
+    def device_operating_point(self, name: str) -> DeviceOperatingPoint: ...
 
+@final
 class Harmonic:
     @property
     def n(self) -> int: ...
@@ -220,6 +275,7 @@ class Harmonic:
     @property
     def phase_degrees(self) -> float: ...
 
+@final
 class FourierResult:
     @property
     def dc_component(self) -> float: ...
@@ -234,11 +290,49 @@ class FourierResult:
     @property
     def fundamental_magnitude(self) -> float | None: ...
 
+@final
+class CompressedTransientResult:
+    @property
+    def time(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def node_names(self) -> list[str]: ...
+    @property
+    def num_nodes(self) -> int: ...
+    @property
+    def num_points(self) -> int: ...
+    @property
+    def input_points(self) -> int: ...
+    @property
+    def compression_ratio(self) -> float: ...
+    def voltage_waveform(self, node: int | str) -> npt.NDArray[np.float64]: ...
+    def voltage_at(self, node: int | str, time: float) -> float: ...
+    def resample(
+        self, node: int | str, num_points: int
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: ...
+
+@final
+class TransientCheckpoint:
+    @staticmethod
+    def load(path: str | os.PathLike[str]) -> TransientCheckpoint: ...
+    def save(self, path: str | os.PathLike[str]) -> None: ...
+    @property
+    def time(self) -> float: ...
+    @property
+    def solution(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def netlist_fingerprint(self) -> int: ...
+
+@final
 class TransientResult:
     @property
     def time(self) -> npt.NDArray[np.float64]: ...
     def voltage_waveform(self, node: int | str) -> npt.NDArray[np.float64]: ...
     def branch_current_waveform(self, name: str) -> npt.NDArray[np.float64]: ...
+    @property
+    def device_parameter_names(self) -> list[str]: ...
+    def device_parameter_waveform(
+        self, device: str, parameter: str
+    ) -> npt.NDArray[np.float64]: ...
     def voltage_at(self, node: int, time_index: int) -> float: ...
     def fourier(
         self, node: int | str, fundamental: float, num_harmonics: int = 9
@@ -254,6 +348,7 @@ class TransientResult:
     @property
     def stop_time(self) -> float: ...
 
+@final
 class AcResult:
     @property
     def frequencies(self) -> npt.NDArray[np.float64]: ...
@@ -273,7 +368,18 @@ class AcResult:
     def magnitude_at(self, freq_index: int, node: int | str) -> float: ...
     def phase_at(self, freq_index: int, node: int | str) -> float: ...
 
+@final
 class DcSweepResult:
+    @property
+    def primary_source(self) -> str | None: ...
+    @property
+    def secondary_source(self) -> str | None: ...
+    @property
+    def secondary_sweep_values(self) -> npt.NDArray[np.float64] | None: ...
+    @property
+    def shape(self) -> tuple[int, int]: ...
+    @property
+    def is_nested(self) -> bool: ...
     @property
     def sweep_values(self) -> npt.NDArray[np.float64]: ...
     def __len__(self) -> int: ...
@@ -282,9 +388,12 @@ class DcSweepResult:
     def points(self) -> list[tuple[float, SimulationResult]]: ...
     def result_at(self, index: int) -> SimulationResult: ...
     def sweep_value_at(self, index: int) -> float: ...
+    def secondary_value_at(self, index: int) -> float | None: ...
+    def device_operating_points_at(self, index: int) -> list[DeviceOperatingPoint]: ...
     def voltage(self, index: int, node: int | str) -> float: ...
     def voltage_array(self, node: int | str) -> npt.NDArray[np.float64]: ...
 
+@final
 class NoiseContribution:
     @property
     def device_name(self) -> str: ...
@@ -295,6 +404,7 @@ class NoiseContribution:
     @property
     def percentage(self) -> float: ...
 
+@final
 class NoiseResult:
     @property
     def frequency(self) -> float: ...
@@ -312,6 +422,7 @@ class NoiseResult:
     def contributions(self) -> list[NoiseContribution]: ...
     def dominant_source(self) -> NoiseContribution | None: ...
 
+@final
 class VariableStatistics:
     @property
     def name(self) -> str: ...
@@ -333,8 +444,9 @@ class VariableStatistics:
     @property
     def three_sigma_range(self) -> tuple[float, float]: ...
     @property
-    def cv_percent(self) -> float: ...
+    def cv_percent(self) -> float | None: ...
 
+@final
 class MonteCarloResult:
     @property
     def num_runs(self) -> int: ...
@@ -351,6 +463,38 @@ class MonteCarloResult:
     @property
     def success_rate(self) -> float: ...
 
+@final
+class ElementSensitivity:
+    @property
+    def element(self) -> str: ...
+    @property
+    def element_type(self) -> str: ...
+    @property
+    def parameter(self) -> str: ...
+    @property
+    def nominal_value(self) -> float: ...
+    @property
+    def absolute(self) -> float: ...
+    @property
+    def normalized(self) -> float: ...
+    @property
+    def percent_per_percent(self) -> float: ...
+
+@final
+class SensitivityResult:
+    @property
+    def output(self) -> str: ...
+    @property
+    def output_value(self) -> float: ...
+    @property
+    def sensitivities(self) -> list[ElementSensitivity]: ...
+    def __len__(self) -> int: ...
+    def get(
+        self, element: str, parameter: str | None = None
+    ) -> ElementSensitivity: ...
+    def top(self, count: int = 10) -> list[ElementSensitivity]: ...
+
+@final
 class ComplexValue:
     @property
     def real(self) -> float: ...
@@ -372,6 +516,7 @@ class ComplexValue:
     @property
     def time_constant(self) -> float | None: ...
 
+@final
 class PoleZeroResult:
     @property
     def poles(self) -> list[ComplexValue]: ...
@@ -389,6 +534,8 @@ class PoleZeroResult:
     @property
     def bandwidth_hz(self) -> float | None: ...
     @property
+    def dominant_pole_decay_hz(self) -> float | None: ...
+    @property
     def num_poles(self) -> int: ...
     @property
     def num_zeros(self) -> int: ...
@@ -401,6 +548,193 @@ class PoleZeroResult:
     @property
     def output(self) -> str: ...
 
+@final
+class StbResult:
+    @property
+    def frequencies(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def loop_gain(self) -> npt.NDArray[np.complex128]: ...
+    @property
+    def magnitude(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def magnitude_db(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def phase_degrees(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def probe_name(self) -> str: ...
+    @property
+    def gain_margin_db(self) -> float: ...
+    @property
+    def gain_margin_frequency(self) -> float: ...
+    @property
+    def phase_margin_degrees(self) -> float: ...
+    @property
+    def phase_margin_frequency(self) -> float: ...
+    @property
+    def dc_gain_db(self) -> float: ...
+    @property
+    def unity_gain_bandwidth(self) -> float: ...
+    @property
+    def conditionally_stable(self) -> bool: ...
+    @property
+    def num_crossovers(self) -> int: ...
+    @property
+    def success(self) -> bool: ...
+    @property
+    def warnings(self) -> list[str]: ...
+    @property
+    def is_stable(self) -> bool: ...
+    @property
+    def assessment(self) -> str: ...
+
+@final
+class SParameterResult:
+    @property
+    def frequencies(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def port_names(self) -> list[str]: ...
+    @property
+    def reference_impedances(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def num_ports(self) -> int: ...
+    @property
+    def num_points(self) -> int: ...
+    def s(self, output_port: int, input_port: int) -> npt.NDArray[np.complex128]: ...
+    def magnitude(
+        self, output_port: int, input_port: int
+    ) -> npt.NDArray[np.float64]: ...
+    def magnitude_db(
+        self, output_port: int, input_port: int
+    ) -> npt.NDArray[np.float64]: ...
+    def phase_degrees(
+        self, output_port: int, input_port: int
+    ) -> npt.NDArray[np.float64]: ...
+
+@final
+class PssResult:
+    @property
+    def time(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def frequency(self) -> float: ...
+    @property
+    def period(self) -> float: ...
+    @property
+    def iterations(self) -> int: ...
+    @property
+    def residual_norm(self) -> float: ...
+    @property
+    def is_stable(self) -> bool: ...
+    @property
+    def period_detected(self) -> bool: ...
+    @property
+    def floquet_multipliers(self) -> npt.NDArray[np.complex128]: ...
+    @property
+    def node_names(self) -> list[str]: ...
+    @property
+    def num_nodes(self) -> int: ...
+    @property
+    def num_points(self) -> int: ...
+    def voltage_waveform(self, node: int | str) -> npt.NDArray[np.float64]: ...
+    def voltage_at(self, node: int | str, time: float) -> float: ...
+    def dc(self, node: int | str) -> float: ...
+    def peak_to_peak(self, node: int | str) -> float: ...
+
+@final
+class HbResult:
+    @property
+    def converged(self) -> bool: ...
+    @property
+    def iterations(self) -> int: ...
+    @property
+    def residual_norm(self) -> float: ...
+    @property
+    def fundamental_frequency(self) -> float: ...
+    @property
+    def num_harmonics(self) -> int: ...
+    @property
+    def node_names(self) -> list[str]: ...
+    @property
+    def harmonic_frequencies(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def solve_time_seconds(self) -> float: ...
+    @property
+    def is_valid(self) -> bool: ...
+    def coefficients(self, node: str) -> npt.NDArray[np.complex128]: ...
+    def magnitude(self, node: str) -> npt.NDArray[np.float64]: ...
+    def phase_degrees(self, node: str) -> npt.NDArray[np.float64]: ...
+    def dc(self, node: str) -> float: ...
+    def rms(self, node: str) -> float: ...
+    def thd_percent(self, node: str) -> float: ...
+
+@final
+class PacResult:
+    @property
+    def frequencies(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def fundamental_frequency(self) -> float: ...
+    @property
+    def sideband_min(self) -> int: ...
+    @property
+    def sideband_max(self) -> int: ...
+    @property
+    def sidebands(self) -> list[int]: ...
+    @property
+    def node_names(self) -> list[str]: ...
+    @property
+    def input_source(self) -> str | None: ...
+    @property
+    def output_node(self) -> str | None: ...
+    @property
+    def converged(self) -> bool: ...
+    def voltage(self, node: str, sideband: int) -> npt.NDArray[np.complex128]: ...
+    def conversion_gain(
+        self, input_sideband: int, output_sideband: int
+    ) -> npt.NDArray[np.complex128]: ...
+    def conversion_gain_db(
+        self, input_sideband: int, output_sideband: int
+    ) -> npt.NDArray[np.float64]: ...
+
+@final
+class PeriodicNoiseContribution:
+    @property
+    def name(self) -> str: ...
+    @property
+    def power_spectral_density(self) -> npt.NDArray[np.float64]: ...
+
+@final
+class PeriodicNoiseResult:
+    @property
+    def frequencies(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def output_noise(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def output_noise_density(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def input_noise(self) -> npt.NDArray[np.float64] | None: ...
+    @property
+    def contributors(self) -> list[PeriodicNoiseContribution]: ...
+    @property
+    def fundamental_frequency(self) -> float: ...
+    @property
+    def converged(self) -> bool: ...
+    def contribution(self, name: str) -> PeriodicNoiseContribution: ...
+
+@final
+class OscillatorNoiseResult:
+    @property
+    def frequencies(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def phase_noise_dbc(self) -> npt.NDArray[np.float64]: ...
+    @property
+    def diffusion_constant(self) -> float: ...
+    @property
+    def period(self) -> float: ...
+    @property
+    def corner_frequency(self) -> float: ...
+    @property
+    def carrier_frequency(self) -> float: ...
+
+@final
 class TransferFunctionResult:
     @property
     def output(self) -> str: ...
@@ -415,6 +749,7 @@ class TransferFunctionResult:
     @property
     def output_impedance(self) -> float: ...
 
+@final
 class Measurement:
     @property
     def name(self) -> str: ...
@@ -432,6 +767,7 @@ class Measurement:
     def passed(self) -> bool: ...
     def __float__(self) -> float: ...
 
+@final
 class AnalysisRecord:
     @property
     def kind(self) -> str: ...
@@ -442,6 +778,7 @@ class AnalysisRecord:
     @property
     def reason(self) -> str | None: ...
 
+@final
 class RunReport:
     @property
     def op(self) -> SimulationResult | None: ...
@@ -452,9 +789,23 @@ class RunReport:
     @property
     def ac(self) -> AcResult | None: ...
     @property
+    def s_parameters(self) -> SParameterResult | None: ...
+    @property
     def noise(self) -> list[NoiseResult] | None: ...
     @property
     def tf(self) -> TransferFunctionResult | None: ...
+    @property
+    def stb(self) -> StbResult | None: ...
+    @property
+    def pz(self) -> PoleZeroResult | None: ...
+    @property
+    def monte_carlo(self) -> MonteCarloResult | None: ...
+    @property
+    def step(self) -> DcSweepResult | None: ...
+    @property
+    def temperature(self) -> DcSweepResult | None: ...
+    @property
+    def sensitivity(self) -> SensitivityResult | None: ...
     @property
     def fourier(self) -> list[FourierResult]: ...
     @property
@@ -474,9 +825,9 @@ class RunReport:
     def skipped(self) -> list[AnalysisRecord]: ...
     def assert_passed(self) -> None: ...
 
+@final
 class Engine:
     def __new__(cls, config: SimulationConfig | None = None) -> Engine: ...
-    def __init__(self, config: SimulationConfig | None = None) -> None: ...
     def run(self, netlist: Netlist) -> RunReport: ...
     def measure(
         self, netlist: Netlist, result: TransientResult | DcSweepResult
@@ -491,6 +842,7 @@ class Engine:
         step: float,
     ) -> DcSweepResult: ...
     def run_ac(self, netlist: Netlist, frequencies: Sequence[float]) -> AcResult: ...
+    def run_ac_data(self, netlist: Netlist, table_name: str) -> AcResult: ...
     def run_ac_sweep(
         self,
         netlist: Netlist,
@@ -499,12 +851,113 @@ class Engine:
         start_freq: float,
         stop_freq: float,
     ) -> AcResult: ...
+    def run_s_parameters(
+        self, netlist: Netlist, frequencies: Sequence[float]
+    ) -> SParameterResult: ...
+    def run_stb(
+        self,
+        netlist: Netlist,
+        probe: str,
+        variation: str = "dec",
+        points: int = 50,
+        start_freq: float = 1.0,
+        stop_freq: float = 100e6,
+    ) -> StbResult: ...
+    def run_pss(
+        self,
+        netlist: Netlist,
+        fundamental_frequency: float | None = None,
+        *,
+        harmonics: int = 9,
+        tstab: float = 0.0,
+        tstab_periods: int | None = None,
+        max_iterations: int = 100,
+        tolerance: float = 1e-6,
+        points_per_period: int = 256,
+        autonomous: bool = False,
+        period_guess: float | None = None,
+    ) -> PssResult: ...
+    def run_hb(
+        self,
+        netlist: Netlist,
+        fundamental_frequency: float,
+        *,
+        harmonics: int = 9,
+        tolerance: float = 1e-6,
+        max_iterations: int = 100,
+        damping: float = 1.0,
+        oversample: int = 2,
+        use_krylov: bool = False,
+        source_stepping: bool = False,
+    ) -> HbResult: ...
+    def run_pac(
+        self,
+        netlist: Netlist,
+        fundamental_frequency: float,
+        start_frequency: float,
+        stop_frequency: float,
+        points: int,
+        input_source: str,
+        output_node: str,
+        *,
+        variation: str = "dec",
+        sideband_min: int | None = None,
+        sideband_max: int = 5,
+        reference_node: str | None = None,
+    ) -> PacResult: ...
+    def run_pnoise(
+        self,
+        netlist: Netlist,
+        fundamental_frequency: float,
+        offsets: Sequence[float],
+        output_node: str,
+        *,
+        reference_node: str | None = None,
+        input_source: str | None = None,
+        max_sideband: int = 6,
+    ) -> PeriodicNoiseResult: ...
+    def run_oscillator_noise(
+        self,
+        netlist: Netlist,
+        offsets: Sequence[float],
+        *,
+        period_guess: float,
+        tstab_periods: int = 20,
+        max_iterations: int = 100,
+        tolerance: float = 1e-6,
+        points_per_period: int = 256,
+    ) -> OscillatorNoiseResult: ...
     def run_tran(
         self,
         netlist: Netlist,
         stop_time: float,
         max_step: float | None = None,
+        *,
+        start_time: float = 0.0,
     ) -> TransientResult: ...
+    def run_tran_checkpointed(
+        self,
+        netlist: Netlist,
+        stop_time: float,
+        max_step: float | None = None,
+    ) -> tuple[TransientResult, TransientCheckpoint]: ...
+    def run_tran_compressed(
+        self,
+        netlist: Netlist,
+        stop_time: float,
+        max_step: float | None = None,
+        *,
+        abs_tol: float = 1e-6,
+        rel_tol: float = 1e-3,
+        max_interval: float = 0.0,
+    ) -> CompressedTransientResult: ...
+    def resume_tran(
+        self,
+        netlist: Netlist,
+        checkpoint: TransientCheckpoint,
+        stop_time: float,
+        max_step: float | None = None,
+    ) -> tuple[TransientResult, TransientCheckpoint]: ...
     def run_noise(
         self,
         netlist: Netlist,
@@ -515,7 +968,15 @@ class Engine:
         reference_node: int | str | None = None,
     ) -> list[NoiseResult]: ...
     def run_pz(
-        self, netlist: Netlist, input_node: int | str, output_node: int | str
+        self,
+        netlist: Netlist,
+        input_node: int | str,
+        output_node: int | str,
+        *,
+        input_negative: int | str | None = None,
+        output_negative: int | str | None = None,
+        input_type: str = "current",
+        analysis: str = "pz",
     ) -> PoleZeroResult: ...
     def run_monte_carlo(
         self,
@@ -534,6 +995,12 @@ class Engine:
         param_value: float,
         delta: float | None = None,
     ) -> float: ...
+    def run_sensitivity_linearized(
+        self,
+        netlist: Netlist,
+        output_node: int | str,
+        reference_node: int | str | None = None,
+    ) -> SensitivityResult: ...
     def run_sensitivity_ac(
         self,
         netlist: Netlist,

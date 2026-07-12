@@ -7,6 +7,32 @@ import rspice
 
 
 class TestDcOp:
+    def test_device_operating_point_report(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* MOS operating point
+VDD d 0 5
+VG g 0 3
+M1 d g 0 0 NM W=10u L=1u
+.model NM NMOS (LEVEL=1 VTO=1 KP=100u)
+.op
+.end
+"""
+        )
+        result = engine.run_dc_op(netlist)
+        assert len(result.device_operating_points) == 1
+        m1 = result.device_operating_point("m1")
+        assert isinstance(m1, rspice.DeviceOperatingPoint)
+        assert m1.name == "M1"
+        assert m1.device_kind == "MOSFET"
+        assert m1.region
+        assert {"id", "gm", "gds", "vgs", "vds"} <= set(m1.param_names)
+        assert m1["gm"] > 0.0
+        assert m1.params["gm"] == m1.param("GM")
+        with pytest.raises(KeyError):
+            m1.param("missing")
+        with pytest.raises(KeyError):
+            result.device_operating_point("missing")
+
     def test_divider_voltage_by_name_and_index(self, engine, divider):
         op = engine.run_dc_op(divider)
         assert op.voltage("out") == pytest.approx(5.0, abs=1e-6)
@@ -44,6 +70,48 @@ class TestDcOp:
 
 
 class TestDcSweep:
+    def test_device_operating_points_are_preserved_at_every_sweep_point(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* MOS sweep operating points
+VDD d 0 5
+VG g 0 0
+M1 d g 0 0 NM W=10u L=1u
+.model NM NMOS (LEVEL=1 VTO=1 KP=100u)
+.end
+"""
+        )
+        sweep = engine.run_dc_sweep(netlist, "VG", 0.0, 3.0, 1.0)
+        assert len(sweep) == 4
+        for index in range(len(sweep)):
+            operating_points = sweep.device_operating_points_at(index)
+            assert [point.name for point in operating_points] == ["M1"]
+            _, result = sweep[index]
+            assert result.device_operating_point("M1").params == operating_points[0].params
+        assert sweep.device_operating_points_at(3)[0]["gm"] > 0.0
+        with pytest.raises(IndexError):
+            sweep.device_operating_points_at(99)
+
+    def test_two_source_sweep_preserves_both_coordinates(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* nested DC sweep
+V1 in 0 0
+V2 bias 0 0
+R1 in out 1k
+R2 bias out 1k
+.dc V1 0 2 1 V2 0 1 1
+.end
+"""
+        )
+        sweep = engine.run(netlist).dc
+        assert sweep.is_nested
+        assert sweep.primary_source == "V1"
+        assert sweep.secondary_source == "V2"
+        assert sweep.shape == (2, 3)
+        np.testing.assert_array_equal(sweep.sweep_values, [0, 1, 2, 0, 1, 2])
+        np.testing.assert_array_equal(sweep.secondary_sweep_values, [0, 1])
+        assert [sweep.secondary_value_at(i) for i in range(6)] == [0, 0, 0, 1, 1, 1]
+        assert sweep.voltage(4, "out") == pytest.approx(1.0, abs=1e-9)
+
     def test_sweep_values_and_results(self, engine, divider):
         sweep = engine.run_dc_sweep(divider, "V1", 0.0, 5.0, 1.0)
         assert len(sweep) == 6
@@ -103,6 +171,12 @@ R2 out 0 1k
         with pytest.raises(ValueError):
             engine.run_dc_sweep(divider, "V1", 0.0, 5.0, 0.0)
 
+    def test_wrong_direction_step_raises_valueerror(self, engine, divider):
+        with pytest.raises(ValueError, match="sign"):
+            engine.run_dc_sweep(divider, "V1", 0.0, 5.0, -1.0)
+        with pytest.raises(ValueError, match="sign"):
+            engine.run_dc_sweep(divider, "V1", 5.0, 0.0, 1.0)
+
     def test_non_finite_bounds_raise_valueerror(self, engine, divider):
         with pytest.raises(ValueError):
             engine.run_dc_sweep(divider, "V1", 0.0, float("inf"), 1.0)
@@ -110,5 +184,7 @@ R2 out 0 1k
             engine.run_dc_sweep(divider, "V1", float("nan"), 5.0, 1.0)
 
     def test_unknown_source_raises_simulationerror(self, engine, divider):
-        with pytest.raises(rspice.SimulationError):
+        with pytest.raises(rspice.SimulationError) as exc_info:
             engine.run_dc_sweep(divider, "Vmissing", 0.0, 5.0, 1.0)
+        assert exc_info.value.kind == "circuit"
+        assert exc_info.value.iterations is None

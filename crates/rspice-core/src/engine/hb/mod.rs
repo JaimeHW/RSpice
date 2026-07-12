@@ -19,6 +19,7 @@
 //! 4. **Result construction**: Build HbResult with spectral voltages and harmonics
 
 use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::{HbConfig, HbResult, HbSolver, HbSolverState};
 use crate::circuit::CircuitData;
 use crate::netlist::SourceSpec;
@@ -168,6 +169,19 @@ impl Engine {
         netlist: &Netlist,
         config: HbConfig,
     ) -> Result<HbAnalysisResult, SimulationError> {
+        self.run_hb_with_abort(netlist, config, &NoAbort)
+    }
+
+    /// Run harmonic balance with cooperative cancellation.
+    pub fn run_hb_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: HbConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<HbAnalysisResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         // Validate configuration
         if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
             return Err(HbError::InvalidConfig(
@@ -247,6 +261,9 @@ impl Engine {
         // failed OP falls back to the zero seed with a warning — HB's own
         // continuation may still succeed.
         if has_supported_nonlinear {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             match self.run_dc_op(netlist) {
                 Ok(dc) => {
                     for node in 0..num_nodes {
@@ -266,22 +283,33 @@ impl Engine {
         }
 
         if has_supported_nonlinear {
-            solver.solve_newton(&mut state).map_err(|e| match e {
-                crate::analysis::HbError::ConvergenceFailed {
-                    iterations,
-                    residual,
-                } => HbError::ConvergenceFailed {
-                    iterations,
-                    residual,
-                }
-                .into(),
-                other => SimulationError::Circuit(format!("HB nonlinear solve failed: {}", other)),
-            })?;
+            solver
+                .solve_newton_with_abort(&mut state, abort)
+                .map_err(|e| match e {
+                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
+                    crate::analysis::HbError::ConvergenceFailed {
+                        iterations,
+                        residual,
+                    } => HbError::ConvergenceFailed {
+                        iterations,
+                        residual,
+                    }
+                    .into(),
+                    other => {
+                        SimulationError::Circuit(format!("HB nonlinear solve failed: {}", other))
+                    }
+                })?;
         } else {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             // Solve linear HB system
             solver
                 .solve_linear(&mut state)
                 .map_err(|_| SimulationError::Circuit("HB linear solve failed".to_string()))?;
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
         }
 
         // Build result

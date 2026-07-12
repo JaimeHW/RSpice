@@ -11,6 +11,7 @@
 //! bias current.
 
 use super::*;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::HbSolverState;
 use crate::analysis::advanced::harmonic_balance::{
     HbConfig, PeriodicAcExcitation, PeriodicNoiseSource,
@@ -56,6 +57,34 @@ impl Engine {
         input_source: Option<&str>,
         max_sideband: i32,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        self.run_pnoise_with_abort(
+            netlist,
+            fundamental_freq,
+            offsets,
+            output_node,
+            output_ref,
+            input_source,
+            max_sideband,
+            &NoAbort,
+        )
+    }
+
+    /// Run driven periodic noise with cooperative cancellation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_pnoise_with_abort(
+        &self,
+        netlist: &Netlist,
+        fundamental_freq: Value,
+        offsets: &[Value],
+        output_node: &str,
+        output_ref: Option<&str>,
+        input_source: Option<&str>,
+        max_sideband: i32,
+        abort: &dyn AbortSignal,
+    ) -> Result<PnoiseAnalysisResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if !fundamental_freq.is_finite() || fundamental_freq <= 0.0 {
             return Err(SimulationError::Circuit(
                 "pnoise requires a positive fundamental frequency".to_string(),
@@ -101,10 +130,18 @@ impl Engine {
 
         let mut state = HbSolverState::new(num_nodes, op_harmonics);
         if has_nonlinear {
-            solver.solve_newton(&mut state).map_err(|e| {
-                SimulationError::Circuit(format!("pnoise operating-point solve failed: {e}"))
-            })?;
+            solver
+                .solve_newton_with_abort(&mut state, abort)
+                .map_err(|e| match e {
+                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
+                    _ => SimulationError::Circuit(format!(
+                        "pnoise operating-point solve failed: {e}"
+                    )),
+                })?;
         } else {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             solver.solve_linear(&mut state).map_err(|e| {
                 SimulationError::Circuit(format!("pnoise operating-point solve failed: {e}"))
             })?;
@@ -228,6 +265,9 @@ impl Engine {
             .map(|s| (s.name.clone(), Vec::with_capacity(offsets.len())))
             .collect();
         for &offset in offsets {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let per_source = solver
                 .solve_periodic_noise(
                     &state,
@@ -243,6 +283,9 @@ impl Engine {
                         "pnoise solve failed at offset {offset:.6e} Hz: {e}"
                     ))
                 })?;
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let total: Value = per_source.iter().sum();
             output_noise.push(total);
             for (slot, &value) in contributors.iter_mut().zip(&per_source) {

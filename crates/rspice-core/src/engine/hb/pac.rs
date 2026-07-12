@@ -10,6 +10,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use super::*;
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::advanced::harmonic_balance::PeriodicAcExcitation;
 use crate::analysis::advanced::pac::{PacConfig, PacResult};
 use crate::analysis::{HbConfig, HbSolverState};
@@ -41,6 +42,20 @@ impl Engine {
         netlist: &Netlist,
         config: PacConfig,
     ) -> Result<PacAnalysisResult, SimulationError> {
+        self.run_pac_with_abort(netlist, config, &NoAbort)
+    }
+
+    /// Run periodic AC with cooperative cancellation between operating-point
+    /// iterations and frequency/sideband solves.
+    pub fn run_pac_with_abort(
+        &self,
+        netlist: &Netlist,
+        config: PacConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<PacAnalysisResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if !config.fundamental_freq.is_finite() || config.fundamental_freq <= 0.0 {
             return Err(SimulationError::Circuit(
                 "PAC requires a positive fundamental frequency".to_string(),
@@ -99,10 +114,16 @@ impl Engine {
 
         let mut state = HbSolverState::new(num_nodes, op_harmonics);
         if has_nonlinear {
-            solver.solve_newton(&mut state).map_err(|e| {
-                SimulationError::Circuit(format!("PAC operating-point solve failed: {e}"))
-            })?;
+            solver
+                .solve_newton_with_abort(&mut state, abort)
+                .map_err(|e| match e {
+                    crate::analysis::HbError::Aborted => SimulationError::Aborted,
+                    _ => SimulationError::Circuit(format!("PAC operating-point solve failed: {e}")),
+                })?;
         } else {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             solver.solve_linear(&mut state).map_err(|e| {
                 SimulationError::Circuit(format!("PAC operating-point solve failed: {e}"))
             })?;
@@ -150,6 +171,9 @@ impl Engine {
         };
 
         for (freq_idx, &offset) in frequencies.iter().enumerate() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let excitations: Vec<PeriodicAcExcitation> = excitation_sidebands
                 .iter()
                 .map(|&m| PeriodicAcExcitation {
@@ -171,6 +195,10 @@ impl Engine {
                         "PAC solve failed at offset {offset:.6e} Hz: {e}"
                     ))
                 })?;
+
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
 
             for (col, &m) in excitation_sidebands.iter().enumerate() {
                 let by_node = &solutions[col];

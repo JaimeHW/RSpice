@@ -1,8 +1,6 @@
 """GIL release, parallel engines, and Ctrl-C cancellation."""
 
-import os
 import signal
-import sys
 import threading
 import time
 
@@ -29,7 +27,10 @@ D1 out 0 dmod
 def start_sigint_timer(delay, done):
     def fire_sigint():
         if not done.wait(delay):
-            os.kill(os.getpid(), signal.SIGINT)
+            # `raise_signal` is portable across POSIX and Windows and is
+            # delivered to Python's main thread when the binding polls signal
+            # handlers while waiting for the simulation worker.
+            signal.raise_signal(signal.SIGINT)
 
     killer = threading.Thread(target=fire_sigint)
     killer.start()
@@ -90,9 +91,6 @@ class TestGilRelease:
         assert elapsed < 60
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32", reason="POSIX signal delivery required"
-)
 class TestCancellation:
     def test_keyboard_interrupt_cancels_transient(self, engine):
         netlist = rspice.Netlist.parse(LONG_RC)
@@ -121,6 +119,40 @@ class TestCancellation:
         try:
             with pytest.raises(KeyboardInterrupt):
                 engine.run_dc_sweep(netlist, "V1", 0.0, 10.0, 5e-6)
+        finally:
+            done.set()
+            killer.join()
+        assert time.monotonic() - start < 10.0
+
+    def test_keyboard_interrupt_cancels_pss(self, engine):
+        # A moderately wide RC ladder makes the stabilization solve long
+        # enough that the signal cannot race with normal completion on fast
+        # release builds.
+        lines = ["V1 n0 0 SIN(0 1 1k)"]
+        for index in range(80):
+            input_node = "n0" if index == 0 else f"n{index}"
+            output_node = f"n{index + 1}"
+            lines.extend(
+                (
+                    f"R{index} {input_node} {output_node} 1k",
+                    f"C{index} {output_node} 0 1n",
+                )
+            )
+        lines.append(".end")
+        netlist = rspice.Netlist.parse("\n".join(lines))
+
+        done = threading.Event()
+        killer = start_sigint_timer(0.05, done)
+        start = time.monotonic()
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                engine.run_pss(
+                    netlist,
+                    1e3,
+                    tstab=20.0,
+                    max_iterations=10,
+                    points_per_period=64,
+                )
         finally:
             done.set()
             killer.join()

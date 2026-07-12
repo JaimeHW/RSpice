@@ -104,6 +104,18 @@ class TestSimulationConfig:
 
 
 class TestConvergenceConfig:
+    def test_gmin_range_must_progress_toward_target(self):
+        with pytest.raises(ValueError, match="gmin_initial"):
+            rspice.ConvergenceConfig(gmin_initial=1e-15, gmin_target=1e-12)
+
+        config = rspice.ConvergenceConfig(gmin_initial=1e-6, gmin_target=1e-12)
+        with pytest.raises(ValueError, match="gmin_initial"):
+            config.gmin_initial = 1e-15
+        assert config.gmin_initial == 1e-6
+        with pytest.raises(ValueError, match="gmin_target"):
+            config.gmin_target = 1e-3
+        assert config.gmin_target == 1e-12
+
     def test_kwargs_constructor(self):
         conv = rspice.ConvergenceConfig(
             gmin_stepping=False,

@@ -26,7 +26,7 @@ extension-module = ["pyo3/extension-module"]
 # selected Python installation only ships a versioned import library.
 pyo3 = { version = "0.29", features = ["abi3-py310", "generate-import-lib"] }
 
-# NumPy integration for zero-copy array access
+# NumPy integration for typed ndarray results
 numpy = "0.29"
 
 # Internal crate dependency

@@ -19,6 +19,18 @@ impl HbSolver {
         &mut self,
         state: &mut HbSolverState,
     ) -> Result<Vec<Value>, HbError> {
+        self.solve_dc_operating_point_with_abort(state, &NoAbort)
+    }
+
+    /// Solve the HB DC seed while polling a cooperative abort signal.
+    pub fn solve_dc_operating_point_with_abort(
+        &mut self,
+        state: &mut HbSolverState,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, HbError> {
+        if abort.is_aborted() {
+            return Err(HbError::Aborted);
+        }
         // DC tolerances (more realistic than HB defaults)
         // For DC analysis, we're solving KCL: sum of currents = 0
         // Typical circuit currents are in mA-µA range, so abstol should be ~pA
@@ -42,7 +54,14 @@ impl HbSolver {
         self.initialize_diode_voltages(state);
 
         // Step 1: Try direct DC Newton with minimal GMIN
-        if self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol)? {
+        if self.dc_newton_inner_loop(
+            state,
+            target_gmin,
+            dc_max_iter,
+            dc_reltol,
+            dc_abstol,
+            abort,
+        )? {
             return Ok(self.extract_dc_solution(state));
         }
 
@@ -55,6 +74,7 @@ impl HbSolver {
                 dc_max_iter,
                 dc_reltol * 10.0, // Relaxed tolerance during stepping
                 dc_abstol * 10.0,
+                abort,
             )? {
                 // Converged at this GMIN level - refine to target
                 let mut current_gmin = gmin_level;
@@ -70,6 +90,7 @@ impl HbSolver {
                         dc_max_iter,
                         dc_reltol,
                         dc_abstol,
+                        abort,
                     )? {
                         last_good_x = self.extract_dc_solution(state);
                         last_good_gmin = current_gmin;
@@ -137,6 +158,7 @@ impl HbSolver {
                 dc_max_iter / 2,
                 dc_reltol * 10.0,
                 dc_abstol * 10.0,
+                abort,
             )? {
                 source_stepper.advance_on_success();
             } else if !source_stepper.reduce_on_failure() {
@@ -149,7 +171,14 @@ impl HbSolver {
 
         // Final DC solve with full sources
         if source_stepper.is_complete()
-            && self.dc_newton_inner_loop(state, target_gmin, dc_max_iter, dc_reltol, dc_abstol)?
+            && self.dc_newton_inner_loop(
+                state,
+                target_gmin,
+                dc_max_iter,
+                dc_reltol,
+                dc_abstol,
+                abort,
+            )?
         {
             return Ok(self.extract_dc_solution(state));
         }
@@ -223,8 +252,12 @@ impl HbSolver {
         max_iterations: usize,
         tol: Value,
         abstol: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<bool, HbError> {
         for iteration in 0..max_iterations {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
             state.iteration = iteration;
 
             // Compute DC residual

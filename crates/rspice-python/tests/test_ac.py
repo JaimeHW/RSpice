@@ -7,6 +7,21 @@ import pytest
 
 import rspice
 
+
+AC_DATA_DECK = """
+V1 in 0 AC 1
+R1 in out 1k
+C1 out 0 159.154943091895p
+.AC DATA=pts
+.DATA pts
++ FREQ
++ 1
++ 1k
++ 1meg
+.ENDDATA
+.END
+"""
+
 FC = 1.0 / (2 * math.pi * 1e3 * 1e-6)  # RC corner: 159.155 Hz
 
 
@@ -133,3 +148,20 @@ class TestAcSweeps:
     def test_ac_frequencies_validates(self):
         with pytest.raises(ValueError):
             rspice.ac_frequencies("nope", 10, 1.0, 1e5)
+
+
+class TestAcData:
+    def test_named_data_table_frequency_grid(self, engine):
+        netlist = rspice.Netlist.parse(AC_DATA_DECK)
+        result = engine.run_ac_data(netlist, "PTS")
+        assert result.frequencies.tolist() == [1.0, 1.0e3, 1.0e6]
+
+    def test_engine_run_executes_ac_data_directive(self, engine):
+        report = engine.run(rspice.Netlist.parse(AC_DATA_DECK))
+        assert report.ac is not None
+        assert report.ac.frequencies.tolist() == [1.0, 1.0e3, 1.0e6]
+        assert any(record.kind == "ac_data" and not record.skipped for record in report.records)
+
+    def test_missing_data_table_is_rejected(self, engine, rc_lowpass):
+        with pytest.raises(ValueError, match="not found"):
+            engine.run_ac_data(rc_lowpass, "missing")

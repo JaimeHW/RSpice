@@ -13,7 +13,7 @@ use crate::analysis::transient::{
     BreakpointManager, CompanionCoefficients, IntegrationMethod, LteEstimator, TimestepController,
     TrapGearController,
 };
-use crate::analysis::waveform::{CompressionConfig, TransientResultCompressed, WaveformRecorder};
+use crate::analysis::waveform::{CompressionConfig, TransientResultCompressed};
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot,
@@ -3995,9 +3995,9 @@ impl Engine {
 
     /// Run transient analysis with waveform compression
     ///
-    /// Uses the `WaveformRecorder` to achieve 10-100x memory reduction for long
-    /// simulations. The compression uses linear interpolation-based point decimation
-    /// that preserves all significant signal transitions.
+    /// Uses multi-channel Ramer-Douglas-Peucker decimation. Every discarded
+    /// sample is checked against the linearly interpolated retained waveform,
+    /// using the configured absolute-plus-relative error bound.
     pub fn run_tran_compressed(
         &self,
         netlist: &Netlist,
@@ -4033,43 +4033,159 @@ impl Engine {
             });
         }
 
-        let initial_values: Vec<Value> = result
+        compress_transient_result(&result, &compression, abort)
+    }
+}
+
+fn compress_transient_result(
+    result: &TransientResult,
+    config: &CompressionConfig,
+    abort: &dyn AbortSignal,
+) -> Result<TransientResultCompressed, SimulationError> {
+    let point_count = result.time.len();
+    if !config.abs_tol.is_finite() || config.abs_tol < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Compression abs_tol must be finite and non-negative, got {}",
+            config.abs_tol
+        )));
+    }
+    if !config.rel_tol.is_finite() || config.rel_tol < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Compression rel_tol must be finite and non-negative, got {}",
+            config.rel_tol
+        )));
+    }
+    if !config.min_interval.is_finite() || config.min_interval < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Compression maximum interval must be finite and non-negative, got {}",
+            config.min_interval
+        )));
+    }
+    if result.voltages.len() != result.num_nodes
+        || result
             .voltages
             .iter()
-            .map(|wave| wave.first().copied().unwrap_or(0.0))
-            .collect();
-        let mut recorder = WaveformRecorder::new(
-            result.num_nodes,
-            result.time[0],
-            &initial_values,
-            compression,
-        )
-        .map_err(SimulationError::Circuit)?;
+            .any(|waveform| waveform.len() != point_count)
+    {
+        return Err(SimulationError::Circuit(
+            "Cannot compress a malformed transient voltage matrix".to_string(),
+        ));
+    }
+    if point_count <= 2 || !config.enabled {
+        return Ok(TransientResultCompressed {
+            time: result.time.clone(),
+            voltages: result.voltages.clone(),
+            num_nodes: result.num_nodes,
+            node_names: result.node_names.clone(),
+            compression_ratio: 1.0,
+            input_points: point_count,
+        });
+    }
+    if result
+        .time
+        .windows(2)
+        .any(|window| !window[0].is_finite() || window[1] <= window[0])
+        || result.time.last().is_some_and(|time| !time.is_finite())
+    {
+        return Err(SimulationError::Circuit(
+            "Cannot compress a transient with non-finite or non-increasing time points".to_string(),
+        ));
+    }
 
-        for point_idx in 1..result.time.len() {
-            let values: Vec<Value> = result
-                .voltages
-                .iter()
-                .map(|wave| wave.get(point_idx).copied().unwrap_or(0.0))
-                .collect();
-            recorder
-                .record(result.time[point_idx], &values)
-                .map_err(SimulationError::Circuit)?;
+    let mut retained = vec![false; point_count];
+    retained[0] = true;
+    retained[point_count - 1] = true;
+    let mut segments = vec![(0usize, point_count - 1)];
+    while let Some((start, end)) = segments.pop() {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if end <= start + 1 {
+            continue;
         }
 
-        let final_values: Vec<Value> = result
+        // The legacy CompressionConfig field is named min_interval, but its
+        // production-safe meaning here is a maximum gap between retained
+        // points: a positive value prevents excessive time-axis decimation.
+        let duration = result.time[end] - result.time[start];
+        let interval_split = if config.min_interval > 0.0 && duration > config.min_interval {
+            let target = result.time[start] + config.min_interval;
+            Some(
+                ((start + 1)..end)
+                    .min_by(|&lhs, &rhs| {
+                        (result.time[lhs] - target)
+                            .abs()
+                            .total_cmp(&(result.time[rhs] - target).abs())
+                    })
+                    .unwrap_or(start + 1),
+            )
+        } else {
+            None
+        };
+
+        let mut worst_index = interval_split;
+        let mut worst_ratio = if interval_split.is_some() {
+            Value::INFINITY
+        } else {
+            1.0
+        };
+        if interval_split.is_none() {
+            let t0 = result.time[start];
+            let inverse_dt = 1.0 / (result.time[end] - t0);
+            for point in (start + 1)..end {
+                if point.is_multiple_of(4096) && abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let fraction = (result.time[point] - t0) * inverse_dt;
+                for waveform in &result.voltages {
+                    let actual = waveform[point];
+                    let predicted = waveform[start] + fraction * (waveform[end] - waveform[start]);
+                    let tolerance = config.abs_tol + config.rel_tol * actual.abs();
+                    let error = (actual - predicted).abs();
+                    let ratio = if !error.is_finite() {
+                        Value::INFINITY
+                    } else if tolerance > 0.0 {
+                        error / tolerance
+                    } else if error == 0.0 {
+                        0.0
+                    } else {
+                        Value::INFINITY
+                    };
+                    if ratio > worst_ratio {
+                        worst_ratio = ratio;
+                        worst_index = Some(point);
+                    }
+                }
+            }
+        }
+
+        if let Some(split) = worst_index
+            && worst_ratio > 1.0
+        {
+            retained[split] = true;
+            segments.push((start, split));
+            segments.push((split, end));
+        }
+    }
+
+    let indices = retained
+        .iter()
+        .enumerate()
+        .filter_map(|(index, keep)| keep.then_some(index))
+        .collect::<Vec<_>>();
+    let stored_points = indices.len();
+    Ok(TransientResultCompressed {
+        time: indices.iter().map(|&index| result.time[index]).collect(),
+        voltages: result
             .voltages
             .iter()
-            .map(|wave| wave.last().copied().unwrap_or(0.0))
-            .collect();
-        recorder
-            .finalize(*result.time.last().unwrap_or(&tstop), &final_values)
-            .map_err(SimulationError::Circuit)?;
-
-        let mut compressed = recorder.to_transient_result();
-        compressed.node_names = result.node_names.clone();
-        Ok(compressed)
-    }
+            .map(|waveform| indices.iter().map(|&index| waveform[index]).collect())
+            .collect(),
+        num_nodes: result.num_nodes,
+        node_names: result.node_names.clone(),
+        compression_ratio: point_count as Value / stored_points as Value,
+        input_points: point_count,
+    })
 }
 
 fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), SimulationError> {
@@ -4089,6 +4205,48 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compressed_transient_enforces_interpolation_error_bound() {
+        let time = (0..=1000)
+            .map(|index| index as Value / 1000.0)
+            .collect::<Vec<_>>();
+        let waveform = time
+            .iter()
+            .map(|time| 1.0 - (-8.0 * time).exp())
+            .collect::<Vec<_>>();
+        let result = TransientResult {
+            time: time.clone(),
+            voltages: vec![waveform.clone()],
+            branch_currents: Vec::new(),
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            branch_names: Vec::new(),
+            digital_traces: Vec::new(),
+            real_traces: Vec::new(),
+            device_op_traces: Vec::new(),
+        };
+        let config = CompressionConfig {
+            abs_tol: 1e-6,
+            rel_tol: 1e-3,
+            enabled: true,
+            min_interval: 0.0,
+        };
+        let compressed = compress_transient_result(&result, &config, &NoAbort)
+            .expect("well-formed waveform compresses");
+        assert!(compressed.time.len() < time.len() / 4);
+        for (index, &sample_time) in time.iter().enumerate() {
+            let reconstructed = compressed
+                .interpolate(0, sample_time)
+                .expect("interpolates");
+            let tolerance = config.abs_tol + config.rel_tol * waveform[index].abs();
+            assert!(
+                (reconstructed - waveform[index]).abs() <= tolerance * (1.0 + 1e-12),
+                "sample {index}: reconstructed {reconstructed}, actual {}, tolerance {tolerance}",
+                waveform[index]
+            );
+        }
+    }
 
     #[test]
     fn locked_time_grid_preserves_picosecond_edges_at_large_times() {

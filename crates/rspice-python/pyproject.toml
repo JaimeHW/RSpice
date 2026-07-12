@@ -35,6 +35,7 @@ Repository = "https://github.com/JaimeHW/RSpice"
 [tool.maturin]
 # Build the PyO3 extension with the abi3 wheel for broad version support.
 features = ["extension-module"]
+locked = true
 module-name = "rspice"
 
 [tool.pytest.ini_options]
