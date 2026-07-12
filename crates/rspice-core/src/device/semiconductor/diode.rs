@@ -202,34 +202,6 @@ impl Diode {
         self.junction_gmin = if gmin.is_finite() { gmin.max(0.0) } else { 0.0 };
     }
 
-    /// ngspice `DEVpnjlim` (devsup.c): junction-voltage iteration limiting.
-    /// Returns the limited voltage and whether limiting engaged. The same
-    /// math as the validated JFET port; the guard `|vnew-vold| > 2·vte`
-    /// keeps the log arguments positive.
-    fn pnjlim(vnew: Value, vold: Value, vte: Value, vcrit: Value) -> (Value, bool) {
-        if vnew > vcrit && (vnew - vold).abs() > vte + vte {
-            if vold > 0.0 {
-                let arg = (vnew - vold) / vte;
-                if arg > 0.0 {
-                    return (vold + vte * (2.0 + (arg - 2.0).ln()), true);
-                }
-                return (vold - vte * (2.0 + (2.0 - arg).ln()), true);
-            }
-            return (vte * (vnew / vte).ln(), true);
-        }
-        if vnew < 0.0 {
-            let arg = if vold > 0.0 {
-                -vold - 1.0
-            } else {
-                2.0 * vold - 1.0
-            };
-            if vnew < arg {
-                return (arg, true);
-            }
-        }
-        (vnew, false)
-    }
-
     /// Limit the junction voltage against the previous iterate and
     /// linearize there, folding the engine junction gmin in (dioload.c:
     /// `gd += CKTgmin; cd += CKTgmin·vd`). Returns `(vd, id, gd)`.
@@ -251,13 +223,28 @@ impl Diode {
                 let transformed = -(vd_raw + bv);
                 let old_transformed = -(self.last_limited_vd.get() + bv);
                 let (limited_transformed, limited) =
-                    Self::pnjlim(transformed, old_transformed, vtebrk, vcrit);
+                    crate::device::veriloga_generated::limiting::pnjlim_new(
+                        transformed,
+                        old_transformed,
+                        vtebrk,
+                        vcrit,
+                    );
                 (-(limited_transformed + bv), limited)
             } else {
-                Self::pnjlim(vd_raw, self.last_limited_vd.get(), vte, vcrit)
+                crate::device::veriloga_generated::limiting::pnjlim_new(
+                    vd_raw,
+                    self.last_limited_vd.get(),
+                    vte,
+                    vcrit,
+                )
             }
         } else {
-            Self::pnjlim(vd_raw, self.last_limited_vd.get(), vte, vcrit)
+            crate::device::veriloga_generated::limiting::pnjlim_new(
+                vd_raw,
+                self.last_limited_vd.get(),
+                vte,
+                vcrit,
+            )
         };
         self.limited.set(limited);
         self.last_limited_vd.set(vd);

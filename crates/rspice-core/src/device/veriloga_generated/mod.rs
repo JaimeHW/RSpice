@@ -7,6 +7,8 @@
 use crate::Value;
 use crate::solver::{ComplexMatrix, CscIndex, StaticMatrix};
 
+pub(crate) mod limiting;
+
 #[cfg(feature = "veriloga-builtins")]
 pub mod builtins {
     include!("registry.rs");
