@@ -3055,7 +3055,21 @@ impl Engine {
                     #[cfg(not(feature = "veriloga-builtins"))]
                     let _ = deferred_params;
 
-                    if let Some(expression) = value_expr.as_deref()
+                    let prepared_value_expr = value_expr
+                        .as_deref()
+                        .map(|expression| {
+                            prepare_behavioral_expression(expression, &base_eval_context(netlist))
+                                .map_err(|error| {
+                                    SimulationError::Circuit(format!(
+                                        "Resistor '{}' value expression could not be prepared: {}",
+                                        element.name, error
+                                    ))
+                                })
+                        })
+                        .transpose()?;
+                    let value_expr = prepared_value_expr.as_deref();
+
+                    if let Some(expression) = value_expr
                         && model.is_none()
                         && expression_references_circuit_state(expression)
                     {
@@ -3089,7 +3103,7 @@ impl Engine {
                         netlist,
                         &element.name,
                         *value,
-                        value_expr.as_deref(),
+                        value_expr,
                         model.as_deref(),
                         instance_params,
                         self.config.temperature,

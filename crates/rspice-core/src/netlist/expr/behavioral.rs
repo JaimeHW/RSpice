@@ -39,11 +39,132 @@ pub fn prepare_behavioral_expression(
     Ok(probe_protector.restore(serialize_expr(&expanded)))
 }
 
+/// Return whether a prepared behavioral expression depends on a quantity that
+/// changes with the active analysis point. This shared classifier keeps
+/// flattening and circuit construction from making different static/runtime
+/// decisions for nested global-parameter expressions.
+pub fn behavioral_expression_references_runtime_quantity(expression: &str) -> bool {
+    if let Ok(expression) = crate::expr::parse_expression_strict(expression) {
+        return strict_expr_references_runtime_quantity(&expression);
+    }
+    let parsed = match parse_net_expr(expression) {
+        Ok(expression) => expression,
+        Err(_) => {
+            let upper = expression.to_ascii_uppercase();
+            return upper.contains("V(")
+                || upper.contains("I(")
+                || contains_runtime_identifier(expression);
+        }
+    };
+    net_expr_references_runtime_quantity(&parsed)
+}
+
+fn strict_expr_references_runtime_quantity(expression: &crate::expr::Expr) -> bool {
+    match expression {
+        crate::expr::Expr::NodeVoltage(_)
+        | crate::expr::Expr::BranchCurrent(_)
+        | crate::expr::Expr::LookupTable(_)
+        | crate::expr::Expr::Time
+        | crate::expr::Expr::Frequency => true,
+        crate::expr::Expr::Unary { operand, .. } => {
+            strict_expr_references_runtime_quantity(operand)
+        }
+        crate::expr::Expr::Binary { left, right, .. } => {
+            strict_expr_references_runtime_quantity(left)
+                || strict_expr_references_runtime_quantity(right)
+        }
+        crate::expr::Expr::Function { args, .. } => {
+            args.iter().any(strict_expr_references_runtime_quantity)
+        }
+        crate::expr::Expr::Const(_)
+        | crate::expr::Expr::StringLiteral(_)
+        | crate::expr::Expr::Temperature => false,
+    }
+}
+
+/// Validate every retained `.GLOBAL_PARAM` expression after the complete
+/// top-level scope has been parsed. This provides declaration-order-
+/// independent dependency resolution while rejecting cycles, undefined
+/// symbols, and circuit probes that Xyce does not permit in global parameters.
+pub fn validate_global_parameter_expressions(params: &ParamContext) -> Result<(), String> {
+    let mut definitions = params.all_global_expressions();
+    definitions.sort_by(|left, right| left.0.cmp(&right.0));
+    for (name, _) in definitions {
+        let prepared = prepare_behavioral_expression(&name, params)
+            .map_err(|error| format!("Unable to resolve global parameter {name}: {error}"))?;
+        let parsed = parse_net_expr(&prepared)
+            .map_err(|error| format!("Unable to resolve global parameter {name}: {error}"))?;
+        if net_expr_contains_circuit_probe(&parsed) {
+            return Err(format!(
+                "Global parameter {name} may not reference node voltages or branch currents"
+            ));
+        }
+        if let Some(identifier) = first_unresolved_global_identifier(&parsed) {
+            return Err(format!(
+                "Unable to resolve global parameter {name}: Undefined parameter: {identifier}"
+            ));
+        }
+        crate::expr::parse_expression_strict(&prepared)
+            .map_err(|error| format!("Unable to resolve global parameter {name}: {error}"))?;
+    }
+    Ok(())
+}
+
+fn net_expr_references_runtime_quantity(expression: &NetExpr) -> bool {
+    match expression {
+        NetExpr::Param(name) => {
+            name.eq_ignore_ascii_case("TIME") || name.eq_ignore_ascii_case("FREQ")
+        }
+        NetExpr::UnaryOp { operand, .. } => net_expr_references_runtime_quantity(operand),
+        NetExpr::BinOp { left, right, .. } => {
+            net_expr_references_runtime_quantity(left)
+                || net_expr_references_runtime_quantity(right)
+        }
+        NetExpr::FnCall { name, args } => {
+            is_circuit_probe(name) || args.iter().any(net_expr_references_runtime_quantity)
+        }
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => false,
+    }
+}
+
+fn net_expr_contains_circuit_probe(expression: &NetExpr) -> bool {
+    match expression {
+        NetExpr::UnaryOp { operand, .. } => net_expr_contains_circuit_probe(operand),
+        NetExpr::BinOp { left, right, .. } => {
+            net_expr_contains_circuit_probe(left) || net_expr_contains_circuit_probe(right)
+        }
+        NetExpr::FnCall { name, args } => {
+            is_circuit_probe(name) || args.iter().any(net_expr_contains_circuit_probe)
+        }
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) | NetExpr::Param(_) => false,
+    }
+}
+
+fn first_unresolved_global_identifier(expression: &NetExpr) -> Option<&str> {
+    match expression {
+        NetExpr::Param(name) if name.eq_ignore_ascii_case("TIME") => None,
+        NetExpr::Param(name) => Some(name.as_str()),
+        NetExpr::UnaryOp { operand, .. } => first_unresolved_global_identifier(operand),
+        NetExpr::BinOp { left, right, .. } => first_unresolved_global_identifier(left)
+            .or_else(|| first_unresolved_global_identifier(right)),
+        NetExpr::FnCall { args, .. } => args.iter().find_map(first_unresolved_global_identifier),
+        NetExpr::Number(_) | NetExpr::ComplexNumber(_) => None,
+    }
+}
+
+fn contains_runtime_identifier(expression: &str) -> bool {
+    expression
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .any(|token| token.eq_ignore_ascii_case("TIME") || token.eq_ignore_ascii_case("FREQ"))
+}
+
 struct FunctionExpander<'a, 'p> {
     params: &'a ParamContext,
     probe_protector: &'p mut ProbeProtector,
     body_cache: HashMap<String, NetExpr>,
     call_stack: Vec<String>,
+    global_body_cache: HashMap<String, NetExpr>,
+    global_stack: Vec<String>,
 }
 
 impl<'a, 'p> FunctionExpander<'a, 'p> {
@@ -53,6 +174,8 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             probe_protector,
             body_cache: HashMap::new(),
             call_stack: Vec::new(),
+            global_body_cache: HashMap::new(),
+            global_stack: Vec::new(),
         }
     }
 
@@ -70,6 +193,33 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
             NetExpr::Param(name) => {
                 if is_behavioral_runtime_symbol(name) {
                     Ok(NetExpr::Param(name.clone()))
+                } else if let Some(expression) = self.params.get_global_expression(name) {
+                    let key = name.to_ascii_uppercase();
+                    if self.global_stack.iter().any(|active| active == &key) {
+                        let mut cycle = self.global_stack.clone();
+                        cycle.push(key);
+                        return Err(format!(
+                            "Detected cyclic .GLOBAL_PARAM dependency: {}",
+                            cycle.join(" -> ")
+                        ));
+                    }
+                    let parsed = if let Some(cached) = self.global_body_cache.get(&key) {
+                        cached.clone()
+                    } else {
+                        let protected = self.probe_protector.protect(expression);
+                        let parsed = parse_net_expr(&protected).map_err(|error| {
+                            format!(
+                                "Failed to parse .GLOBAL_PARAM {} expression '{}': {}",
+                                name, expression, error
+                            )
+                        })?;
+                        self.global_body_cache.insert(key.clone(), parsed.clone());
+                        parsed
+                    };
+                    self.global_stack.push(key);
+                    let result = self.expand_expr(&parsed, depth + 1);
+                    self.global_stack.pop();
+                    result
                 } else if let Some(v) = self.params.get(name) {
                     Ok(NetExpr::Number(v))
                 } else {
@@ -152,7 +302,7 @@ impl<'a, 'p> FunctionExpander<'a, 'p> {
 }
 
 fn is_behavioral_runtime_symbol(name: &str) -> bool {
-    name.eq_ignore_ascii_case("TEMPER")
+    name.eq_ignore_ascii_case("TIME")
 }
 
 fn is_circuit_probe(name: &str) -> bool {

@@ -15,7 +15,9 @@
 //! - Proper parameter scoping with precedence resolution
 
 #![allow(clippy::too_many_arguments)]
-use super::expr::prepare_behavioral_expression;
+use super::expr::{
+    behavioral_expression_references_runtime_quantity, prepare_behavioral_expression,
+};
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::parser::parse_source_spec_text;
@@ -1431,11 +1433,24 @@ impl<'a> Flattener<'a> {
         scope: &ParamContext,
     ) -> Result<Value, ParseError> {
         match value_expr {
-            Some(expr) => resolve_parametric_value(
-                &ParametricValue::Expression(expr.clone()),
-                scope,
-                &self.random,
-            ),
+            Some(expr) => {
+                let prepared = prepare_behavioral_expression(expr, scope).map_err(|error| {
+                    ParseError::InvalidValue(format!(
+                        "element value expression could not be prepared: {error}"
+                    ))
+                })?;
+                if behavioral_expression_references_runtime_quantity(&prepared) {
+                    return Err(ParseError::InvalidValue(
+                        "runtime-dependent value expressions are not supported for this element"
+                            .to_string(),
+                    ));
+                }
+                resolve_parametric_value(
+                    &ParametricValue::Expression(prepared),
+                    scope,
+                    &self.random,
+                )
+            }
             None => Ok(value),
         }
     }
@@ -1448,14 +1463,22 @@ impl<'a> Flattener<'a> {
         element_path: &str,
     ) -> Result<(Value, Option<String>), ParseError> {
         match value_expr {
-            Some(expr) if expression_references_circuit_state(expr) => Ok((
-                Value::NAN,
-                Some(self.prepare_scoped_behavioral_expression(expr, scope, element_path)?),
-            )),
-            Some(_) => Ok((
-                self.resolve_optional_value_expr(value, value_expr, scope)?,
-                None,
-            )),
+            Some(expr) => {
+                let prepared =
+                    self.prepare_scoped_behavioral_expression(expr, scope, element_path)?;
+                if behavioral_expression_references_runtime_quantity(&prepared) {
+                    Ok((Value::NAN, Some(prepared)))
+                } else {
+                    Ok((
+                        resolve_parametric_value(
+                            &ParametricValue::Expression(prepared),
+                            scope,
+                            &self.random,
+                        )?,
+                        None,
+                    ))
+                }
+            }
             None => Ok((value, None)),
         }
     }
@@ -2018,11 +2041,6 @@ fn parametric_value_is_string(value: &ParametricValue) -> bool {
         value,
         ParametricValue::String(_) | ParametricValue::StringExpression(_)
     )
-}
-
-fn expression_references_circuit_state(expression: &str) -> bool {
-    let upper = expression.to_ascii_uppercase();
-    upper.contains("V(") || upper.contains("I(")
 }
 
 fn resolve_parametric_value(

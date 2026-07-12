@@ -159,6 +159,40 @@ r1 in out {10 + 1000*time}
 }
 
 #[test]
+fn transient_resolves_time_dependent_global_parameter_dag_for_resistor() {
+    let deck = "\
+* time-dependent global-parameter resistor
+.global_param x2={2+2*time}
+.global_param p={1+x2}
+v1 in 0 dc 1
+r1 in 0 {p}
+.tran 0.1 1
+.end
+";
+    let netlist = Netlist::parse(deck).expect("global-parameter deck parses");
+    let result = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        ..SimulationConfig::default()
+    })
+    .run_tran(&netlist, 1.0, 0.1)
+    .expect("transient solves");
+    let current = result
+        .try_branch_current_waveform_named("r1")
+        .expect("R1 branch current waveform exists");
+
+    assert_eq!(current.len(), result.time.len());
+    for (&time, &actual) in result.time.iter().zip(current) {
+        let expected = 1.0 / (3.0 + 2.0 * time);
+        assert!(
+            (actual - expected).abs() < 1.0e-12,
+            "R1 current should follow the live global expression at {time}, got {actual}, expected {expected}"
+        );
+    }
+    assert!((current[0] - 1.0 / 3.0).abs() < 1.0e-12);
+    assert!((current[current.len() - 1] - 0.2).abs() < 1.0e-12);
+}
+
+#[test]
 fn transient_records_switch_branch_current_waveforms() {
     let deck = "\
 * switch transient branch currents

@@ -854,3 +854,139 @@ fn number_suffixes_match_ngspice_numparam() {
     assert_eq!(eval_with(&ctx, "3x"), 3e6);
     assert_eq!(eval_with(&ctx, "3X"), 3e6);
 }
+
+#[test]
+fn global_parameter_expressions_expand_live_dependencies_case_insensitively() {
+    let mut ctx = ParamContext::new();
+    ctx.define_global_expression("X2", "2+TIME*2", None);
+    ctx.define_global_expression("p", "1+x2", None);
+
+    let prepared = prepare_behavioral_expression("P", &ctx).expect("global expression expands");
+
+    assert!(
+        behavioral_expression_references_runtime_quantity(&prepared),
+        "expanded expression must preserve TIME: {prepared}"
+    );
+    assert!(!prepared.to_ascii_uppercase().contains("X2"), "{prepared}");
+    assert!(!prepared.to_ascii_uppercase().contains("P"), "{prepared}");
+    crate::expr::parse_expression_strict(&prepared).expect("expanded expression compiles");
+}
+
+#[test]
+fn global_parameter_redefinitions_do_not_freeze_dependent_numeric_projections() {
+    let mut ctx = ParamContext::new();
+    ctx.define_global_expression("A", "2", Some(ComplexValue::real(2.0)));
+    ctx.define_global_expression("B", "A+1", Some(ComplexValue::real(3.0)));
+    ctx.define_global_expression("A", "TIME", None);
+
+    let prepared = prepare_behavioral_expression("B", &ctx).expect("live dependency expands");
+
+    assert!(
+        behavioral_expression_references_runtime_quantity(&prepared),
+        "B must follow the redefined live A expression: {prepared}"
+    );
+}
+
+#[test]
+fn merging_an_ordinary_parameter_clears_a_shadowed_global_expression() {
+    let mut base = ParamContext::new();
+    base.define_global_expression("A", "TIME", None);
+    let mut overlay = ParamContext::new();
+    overlay.set("A", 5.0);
+
+    base.merge(&overlay);
+
+    assert_eq!(base.get("A"), Some(5.0));
+    assert_eq!(base.get_global_expression("A"), None);
+}
+
+#[test]
+fn global_parameter_expression_validation_rejects_cycles_and_circuit_probes() {
+    let mut cyclic = ParamContext::new();
+    cyclic.define_global_expression("A", "B+1", Some(ComplexValue::real(1.0)));
+    cyclic.define_global_expression("B", "A+1", Some(ComplexValue::real(2.0)));
+    let cycle = validate_global_parameter_expressions(&cyclic)
+        .expect_err("cyclic global parameters must fail");
+    assert!(cycle.contains("cyclic .GLOBAL_PARAM dependency"), "{cycle}");
+
+    let mut probed = ParamContext::new();
+    probed.define_global_expression("A", "V(1)+1", None);
+    let probe = validate_global_parameter_expressions(&probed)
+        .expect_err("global parameters may not depend on circuit probes");
+    assert!(probe.contains("may not reference node voltages"), "{probe}");
+}
+
+#[test]
+fn parser_retains_dynamic_globals_and_static_numeric_projections() {
+    let netlist = crate::netlist::Netlist::parse(
+        "global expressions\n\
+         .global_param x2={2+time*2}\n\
+         .global_param p={1+x2}\n\
+         .global_param static={2+3}\n\
+         v1 1 0 1\n\
+         r1 1 0 {p}\n\
+         .tran 0 1\n\
+         .end\n",
+    )
+    .expect("dynamic global-parameter deck parses");
+
+    assert_eq!(netlist.params.get_global_expression("x2"), Some("2+time*2"));
+    assert_eq!(netlist.params.get_global_expression("P"), Some("1+x2"));
+    assert_eq!(netlist.params.get("static"), Some(5.0));
+    assert_eq!(netlist.params.get_global_expression("STATIC"), Some("2+3"));
+}
+
+#[test]
+fn parser_rejects_invalid_global_parameter_scopes_names_and_dependencies() {
+    for (label, deck, expected) in [
+        (
+            "undefined",
+            "bad global\n.global_param a={missing+1}\n.end\n",
+            "Unable to resolve global parameter A",
+        ),
+        (
+            "reserved",
+            "bad global\n.global_param time=2\n.end\n",
+            "reserved by the simulator",
+        ),
+        (
+            "subcircuit",
+            "bad global\n.subckt s 1 0\n.global_param a=2\nr1 1 0 1\n.ends\n.end\n",
+            "only valid in the top-level",
+        ),
+    ] {
+        let error = crate::netlist::Netlist::parse(deck)
+            .expect_err(&format!("{label} global parameter must fail"));
+        assert!(
+            error.to_string().contains(expected),
+            "unexpected {label} diagnostic: {error}"
+        );
+    }
+}
+
+#[test]
+fn forward_declared_static_global_dependencies_flatten_for_scalar_devices() {
+    let netlist = crate::netlist::Netlist::parse(
+        "forward static globals\n\
+         .global_param total={base+1}\n\
+         .global_param base=2\n\
+         ctop 1 0 {total}\n\
+         x1 1 0 cell\n\
+         .subckt cell p n\n\
+         c1 p n {total}\n\
+         .ends\n\
+         .end\n",
+    )
+    .expect("forward global dependency parses");
+
+    let flattened = crate::netlist::flatten_netlist(&netlist).expect("capacitor flattens");
+    let capacitances: Vec<_> = flattened
+        .iter()
+        .filter_map(|element| match &element.kind {
+            crate::netlist::ElementKind::Capacitor { value, .. } => Some(*value),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(capacitances, vec![3.0, 3.0]);
+}

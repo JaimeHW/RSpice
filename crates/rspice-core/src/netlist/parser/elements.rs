@@ -396,11 +396,27 @@ fn parse_passive_tail(
                 consume_passive_unit_word(stream, unit_words);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
-                if defer_simple_param_refs && matches!(stream.peek().kind, TokenKind::Expression(_))
-                {
-                    tail.value_expr = take_value_expression_string(stream, params);
+                let expr = take_value_expression_string(stream, params).ok_or_else(|| {
+                    ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Expected value for {element_label}"),
+                    }
+                })?;
+                if defer_simple_param_refs {
+                    tail.value_expr = Some(expr);
                 } else {
-                    tail.value = Some(expect_value(stream, line_num, params)?);
+                    match eval_expression(&expr, params) {
+                        Ok(value) => tail.value = Some(value),
+                        Err(error) => match prepare_behavioral_expression(&expr, params) {
+                            Ok(prepared) => match eval_expression(&prepared, params) {
+                                Ok(value) => tail.value = Some(value),
+                                Err(_) => tail.value_expr = Some(expr),
+                            },
+                            Err(_) => {
+                                return Err(ParseError::InvalidValue(error.to_string()));
+                            }
+                        },
+                    }
                 }
             }
             TokenKind::Ident(s) => {
@@ -522,13 +538,37 @@ fn parse_passive_tail(
                 consume_passive_unit_word(stream, unit_words);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
-                if defer_simple_param_refs && matches!(stream.peek().kind, TokenKind::Expression(_))
-                {
-                    tail.value_expr = take_value_expression_string(stream, params);
+                let expr = take_value_expression_string(stream, params).ok_or_else(|| {
+                    ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Expected value for {element_label}"),
+                    }
+                })?;
+                if defer_simple_param_refs {
+                    tail.value_expr = Some(expr);
                     tail.value = None;
                 } else {
-                    tail.value = Some(expect_value(stream, line_num, params)?);
-                    tail.value_expr = None;
+                    match eval_expression(&expr, params) {
+                        Ok(value) => {
+                            tail.value = Some(value);
+                            tail.value_expr = None;
+                        }
+                        Err(error) => match prepare_behavioral_expression(&expr, params) {
+                            Ok(prepared) => match eval_expression(&prepared, params) {
+                                Ok(value) => {
+                                    tail.value = Some(value);
+                                    tail.value_expr = None;
+                                }
+                                Err(_) => {
+                                    tail.value_expr = Some(expr);
+                                    tail.value = None;
+                                }
+                            },
+                            Err(_) => {
+                                return Err(ParseError::InvalidValue(error.to_string()));
+                            }
+                        },
+                    }
                 }
             }
             _ => {

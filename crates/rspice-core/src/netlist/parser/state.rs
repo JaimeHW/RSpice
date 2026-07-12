@@ -76,6 +76,8 @@ impl ParseState {
                 message: "Unterminated .SUBCKT block".to_string(),
             });
         }
+        super::super::expr::validate_global_parameter_expressions(&self.params)
+            .map_err(ParseError::InvalidValue)?;
 
         Ok(Netlist {
             title,

@@ -2154,6 +2154,26 @@ fn test_xyce_step_static_dc_cases_run() {
 }
 
 #[test]
+fn test_xyce_time_dependent_global_parameter_transient_runs() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/GLOBALPAR/gp3.cir";
+
+    let result = runner.run_test(root.join(relative));
+
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should run as a native time-dependent global-parameter transient comparison, got {result:?}"
+    );
+    assert!(
+        result.mismatches.is_empty(),
+        "{relative} should match the checked-in Xyce .prn oracle"
+    );
+    assert_eq!(result.contract, "static_prn_tran");
+}
+
+#[test]
 fn test_xyce_bug_616_wrapper_step_dc_case_runs_natively() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();

@@ -199,8 +199,11 @@ pub(super) fn parse_command(
         ".CODEMODEL" | ".RSPICE_UNSUPPORTED_CODEMODEL" => {
             parse_xspice_codemodel_command(stream, line_num, &cmd)?;
         }
-        ".PARAM" | ".CSPARAM" | ".GLOBAL_PARAM" => {
-            parse_param_statement(stream, line_num, params, deferred_body_params)?;
+        ".PARAM" | ".CSPARAM" => {
+            parse_param_statement(stream, line_num, params, deferred_body_params, false)?;
+        }
+        ".GLOBAL_PARAM" => {
+            parse_param_statement(stream, line_num, params, deferred_body_params, true)?;
         }
         ".STEP" => {
             let step_cmd = parse_step_command(stream, line_num, params)?;
@@ -1935,7 +1938,14 @@ pub(super) fn parse_param_statement(
     line_num: usize,
     params: &mut ParamContext,
     mut deferred_params: Option<&mut Vec<(String, String)>>,
+    retain_global_expression: bool,
 ) -> Result<(), ParseError> {
+    if retain_global_expression && deferred_params.is_some() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".GLOBAL_PARAM is only valid in the top-level netlist scope".to_string(),
+        });
+    }
     // Parse one or more NAME=VALUE pairs
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline) {
         // Skip commas
@@ -1946,6 +1956,17 @@ pub(super) fn parse_param_statement(
         }
 
         let name = expect_ident(stream, line_num)?;
+        if retain_global_expression
+            && matches!(
+                name.to_ascii_uppercase().as_str(),
+                "TIME" | "TEMP" | "TEMPER" | "VT" | "GMIN" | "FREQ" | "FREQUENCY"
+            )
+        {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".GLOBAL_PARAM name '{}' is reserved by the simulator", name),
+            });
+        }
 
         if matches!(stream.peek().kind, TokenKind::LParen) {
             parse_param_function_definition(stream, line_num, params, name)?;
@@ -1983,7 +2004,11 @@ pub(super) fn parse_param_statement(
                 let expr = collect_param_rhs_expression(stream, line_num, &name)?;
                 match eval_expression_complex(&expr, params) {
                     Ok(value) => {
-                        params.set_complex(&name, value);
+                        if retain_global_expression {
+                            params.define_global_expression(&name, &expr, Some(value));
+                        } else {
+                            params.set_complex(&name, value);
+                        }
                         upsert_deferred_param_expression(
                             deferred_params.as_deref_mut(),
                             &name,
@@ -1994,6 +2019,8 @@ pub(super) fn parse_param_statement(
                         let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
                         defer_param_expression_or_error(
                             deferred_params.as_deref_mut(),
+                            params,
+                            retain_global_expression,
                             name,
                             expr,
                             err,
@@ -2015,7 +2042,11 @@ pub(super) fn parse_param_statement(
                 stream.advance();
                 match eval_expression_complex(&expr, params) {
                     Ok(value) => {
-                        params.set_complex(&name, value);
+                        if retain_global_expression {
+                            params.define_global_expression(&name, &expr, Some(value));
+                        } else {
+                            params.set_complex(&name, value);
+                        }
                         upsert_deferred_param_expression(
                             deferred_params.as_deref_mut(),
                             &name,
@@ -2026,6 +2057,8 @@ pub(super) fn parse_param_statement(
                         let err = ParseError::InvalidValue(format!("line {}: {}", line_num, err));
                         defer_param_expression_or_error(
                             deferred_params.as_deref_mut(),
+                            params,
+                            retain_global_expression,
                             name,
                             expr,
                             err,
@@ -2039,7 +2072,11 @@ pub(super) fn parse_param_statement(
                     .expect("parameter presence checked");
                 let expr = param_name.clone();
                 stream.advance();
-                params.set_complex(&name, value);
+                if retain_global_expression {
+                    params.define_global_expression(&name, &expr, Some(value));
+                } else {
+                    params.set_complex(&name, value);
+                }
                 upsert_deferred_param_expression(deferred_params.as_deref_mut(), &name, &expr);
             }
             _ => {
@@ -2048,14 +2085,23 @@ pub(super) fn parse_param_statement(
                 match expect_value(&mut value_stream, line_num, params) {
                     Ok(value) => {
                         *stream = value_stream;
-                        params.set(&name, value);
                         if let Some(expr) = deferred_expr {
+                            if retain_global_expression {
+                                params.define_global_expression(
+                                    &name,
+                                    &expr,
+                                    Some(crate::netlist::expr::ComplexValue::real(value)),
+                                );
+                            } else {
+                                params.set(&name, value);
+                            }
                             upsert_deferred_param_expression(
                                 deferred_params.as_deref_mut(),
                                 &name,
                                 &expr,
                             );
                         } else {
+                            params.set(&name, value);
                             clear_deferred_param_expression(deferred_params.as_deref_mut(), &name);
                         }
                     }
@@ -2063,6 +2109,8 @@ pub(super) fn parse_param_statement(
                         let expr = collect_param_rhs_expression(stream, line_num, &name)?;
                         defer_param_expression_or_error(
                             deferred_params.as_deref_mut(),
+                            params,
+                            retain_global_expression,
                             name,
                             expr,
                             err,
@@ -2097,6 +2145,8 @@ fn clear_deferred_param_expression(
 
 fn defer_param_expression_or_error(
     deferred_params: Option<&mut Vec<(String, String)>>,
+    params: &mut ParamContext,
+    retain_global_expression: bool,
     name: String,
     expr: String,
     err: ParseError,
@@ -2105,6 +2155,10 @@ fn defer_param_expression_or_error(
         && parameter_error_can_defer(&err)
     {
         upsert_param_expression(deferred_params, name, expr);
+        return Ok(());
+    }
+    if retain_global_expression && parameter_error_can_defer(&err) {
+        params.define_global_expression(&name, expr, None);
         return Ok(());
     }
     Err(err)

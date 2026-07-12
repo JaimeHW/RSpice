@@ -158,6 +158,10 @@ pub struct ParamContext {
     params: HashMap<String, Value>,
     complex_params: HashMap<String, ComplexValue>,
     string_params: HashMap<String, String>,
+    /// Retained top-level `.GLOBAL_PARAM` expressions. Statically evaluable
+    /// definitions may also have a numeric projection in `params`, while
+    /// runtime-dependent definitions remain symbolic until device binding.
+    global_expressions: HashMap<String, String>,
     /// User-defined functions (.FUNC)
     functions: HashMap<String, FunctionDef>,
     /// Stream for the statistical functions; deterministic by default.
@@ -179,12 +183,14 @@ impl ParamContext {
         let key = name.to_uppercase();
         self.params.insert(key.clone(), value);
         self.complex_params.remove(&key);
+        self.global_expressions.remove(&key);
     }
 
     /// Set a parameter value while preserving its imaginary component.
     pub fn set_complex(&mut self, name: &str, value: ComplexValue) {
         let key = name.to_uppercase();
         self.params.insert(key.clone(), value.real_projection());
+        self.global_expressions.remove(&key);
         if value.is_real() {
             self.complex_params.remove(&key);
         } else {
@@ -194,7 +200,48 @@ impl ParamContext {
 
     /// Set a string parameter value.
     pub fn set_string(&mut self, name: &str, value: impl Into<String>) {
-        self.string_params.insert(name.to_uppercase(), value.into());
+        let key = name.to_uppercase();
+        self.string_params.insert(key.clone(), value.into());
+        self.global_expressions.remove(&key);
+    }
+
+    /// Define a top-level `.GLOBAL_PARAM` expression with an optional static
+    /// projection. The expression remains authoritative so dependencies that
+    /// contain `TIME` or `FREQ` cannot be accidentally frozen at parse time.
+    pub fn define_global_expression(
+        &mut self,
+        name: &str,
+        expression: impl Into<String>,
+        static_value: Option<ComplexValue>,
+    ) {
+        let key = name.to_uppercase();
+        self.params.remove(&key);
+        self.complex_params.remove(&key);
+        self.string_params.remove(&key);
+        if let Some(value) = static_value {
+            self.params.insert(key.clone(), value.real_projection());
+            if !value.is_real() {
+                self.complex_params.insert(key.clone(), value);
+            }
+        }
+        self.global_expressions.insert(key, expression.into());
+    }
+
+    /// Return the retained `.GLOBAL_PARAM` expression, if this name denotes
+    /// an expression-valued global definition.
+    pub fn get_global_expression(&self, name: &str) -> Option<&str> {
+        self.global_expressions
+            .get(&name.to_uppercase())
+            .map(String::as_str)
+    }
+
+    /// Return all retained global expressions for deterministic inspection
+    /// and propagation into derived parameter scopes.
+    pub fn all_global_expressions(&self) -> Vec<(String, String)> {
+        self.global_expressions
+            .iter()
+            .map(|(name, expression)| (name.clone(), expression.clone()))
+            .collect()
     }
 
     /// Get a parameter value
@@ -242,12 +289,28 @@ impl ParamContext {
             if !other.complex_params.contains_key(k) {
                 self.complex_params.remove(k);
             }
+            if !other.global_expressions.contains_key(k) {
+                self.global_expressions.remove(k);
+            }
         }
         for (k, v) in &other.complex_params {
             self.complex_params.insert(k.clone(), *v);
+            if !other.global_expressions.contains_key(k) {
+                self.global_expressions.remove(k);
+            }
         }
         for (k, v) in &other.string_params {
             self.string_params.insert(k.clone(), v.clone());
+            self.global_expressions.remove(k);
+        }
+        for (k, expression) in &other.global_expressions {
+            if !other.params.contains_key(k) {
+                self.params.remove(k);
+                self.complex_params.remove(k);
+            }
+            self.string_params.remove(k);
+            self.global_expressions
+                .insert(k.clone(), expression.clone());
         }
         for (k, v) in &other.functions {
             self.functions.insert(k.clone(), v.clone());

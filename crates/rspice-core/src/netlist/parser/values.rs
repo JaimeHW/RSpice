@@ -1780,6 +1780,25 @@ pub(super) fn take_deferrable_value(
     defer: bool,
 ) -> Option<DeferrableValue> {
     skip_commas(stream);
+    if !defer {
+        let expression = match (&stream.peek().kind, &stream.peek_n(1).kind) {
+            (TokenKind::Expression(expr), _) => Some(expr.clone()),
+            (TokenKind::Plus, TokenKind::Expression(expr)) => Some(expr.clone()),
+            (TokenKind::Minus, TokenKind::Expression(expr)) => Some(format!("-({expr})")),
+            _ => None,
+        };
+        if let Some(expression) = expression
+            && eval_expression(&expression, params).is_err()
+            && let Ok(prepared) =
+                super::super::expr::prepare_behavioral_expression(&expression, params)
+        {
+            let consumed = take_value_expression_string(stream, params)?;
+            return Some(match eval_expression(&prepared, params) {
+                Ok(value) => DeferrableValue::Resolved(value),
+                Err(_) => DeferrableValue::Deferred(consumed),
+            });
+        }
+    }
     if defer {
         match &stream.peek().kind {
             TokenKind::Expression(_) => {
