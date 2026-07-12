@@ -2,7 +2,7 @@
 //!
 //! Fast execution of compiled expressions without parsing overhead.
 
-use super::ast::LookupTable;
+use super::ast::{LookupInterpolation, LookupTable};
 use crate::{Value, netlist::ExpressionDialect};
 use std::collections::HashMap;
 
@@ -414,7 +414,7 @@ impl Vm {
                     let result = program
                         .lookup_tables
                         .get(*index)
-                        .map(|table| lookup_table_interpolate(ctx.time, table.points.as_ref()))
+                        .map(|table| lookup_table_interpolate(ctx.time, table))
                         .unwrap_or(0.0);
                     self.stack.push(result);
                 }
@@ -514,7 +514,8 @@ impl Vm {
     }
 }
 
-fn lookup_table_interpolate(x: Value, points: &[(Value, Value)]) -> Value {
+fn lookup_table_interpolate(x: Value, table: &LookupTable) -> Value {
+    let points = table.points.as_ref();
     match points {
         [] => 0.0,
         [(_, y)] => *y,
@@ -529,14 +530,27 @@ fn lookup_table_interpolate(x: Value, points: &[(Value, Value)]) -> Value {
 
             let upper = points.partition_point(|(time, _)| *time < x);
             let lower = upper.saturating_sub(1);
-            interpolate_segment(
-                x,
-                points[lower].0,
-                points[lower].1,
-                points[upper].0,
-                points[upper].1,
-                points[lower].1,
-            )
+            match &table.interpolation {
+                LookupInterpolation::Linear => interpolate_segment(
+                    x,
+                    points[lower].0,
+                    points[lower].1,
+                    points[upper].0,
+                    points[upper].1,
+                    points[lower].1,
+                ),
+                LookupInterpolation::NaturalCubic { second_derivatives } => {
+                    let span = points[upper].0 - points[lower].0;
+                    let lower_weight = (points[upper].0 - x) / span;
+                    let upper_weight = (x - points[lower].0) / span;
+                    lower_weight * points[lower].1
+                        + upper_weight * points[upper].1
+                        + ((lower_weight.powi(3) - lower_weight) * second_derivatives[lower]
+                            + (upper_weight.powi(3) - upper_weight) * second_derivatives[upper])
+                            * span.powi(2)
+                            / 6.0
+                }
+            }
         }
     }
 }

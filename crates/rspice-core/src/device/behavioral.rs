@@ -1115,7 +1115,11 @@ fn eval_function_with_derivative(
         }
         Function::Table => eval_table_function_with_derivative(args, context),
         Function::Pwl => eval_pwl_function_with_derivative(args, context),
-        Function::TableFile | Function::FastTable | Function::FastTableFile => Some((0.0, 0.0)),
+        Function::TableFile
+        | Function::FastTable
+        | Function::FastTableFile
+        | Function::Cubic
+        | Function::CubicFile => Some((0.0, 0.0)),
         Function::SpicePulse | Function::SpiceSin | Function::SpiceExp | Function::SpiceSffm => {
             None
         }

@@ -134,9 +134,11 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
                 Function::Pow => Instruction::Pow,
                 Function::Table => Instruction::Table(args.len()),
                 Function::Pwl => Instruction::Pwl(args.len()),
-                Function::TableFile | Function::FastTable | Function::FastTableFile => {
-                    Instruction::PushConst(0.0)
-                }
+                Function::TableFile
+                | Function::FastTable
+                | Function::FastTableFile
+                | Function::Cubic
+                | Function::CubicFile => Instruction::PushConst(0.0),
                 Function::Mod => Instruction::Mod,
                 Function::SpicePulse => Instruction::SpicePulse(args.len()),
                 Function::SpiceSin => Instruction::SpiceSin(args.len()),

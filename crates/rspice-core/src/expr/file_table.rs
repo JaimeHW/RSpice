@@ -1,6 +1,6 @@
 //! Build-time resolution for file-backed behavioral lookup functions.
 
-use super::ast::{Expr, Function, LookupTable};
+use super::ast::{Expr, Function, LookupInterpolation, LookupTable};
 use crate::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,12 +21,13 @@ fn resolve_expr(expr: Expr, source_path: Option<&Path>) -> Result<Expr, String> 
                 .map(|arg| resolve_expr(arg, source_path))
                 .collect::<Result<Vec<_>, _>>()?;
 
-            if let Some(transient_breakpoints) = table_file_breakpoint_mode(func) {
+            if let Some((transient_breakpoints, interpolation)) = table_file_mode(func) {
                 return resolve_table_file_function(
                     func,
                     resolved_args,
                     source_path,
                     transient_breakpoints,
+                    interpolation,
                 );
             }
 
@@ -55,10 +56,17 @@ fn resolve_expr(expr: Expr, source_path: Option<&Path>) -> Result<Expr, String> 
     }
 }
 
-fn table_file_breakpoint_mode(func: Function) -> Option<bool> {
+#[derive(Debug, Clone, Copy)]
+enum FileInterpolation {
+    Linear,
+    NaturalCubic,
+}
+
+fn table_file_mode(func: Function) -> Option<(bool, FileInterpolation)> {
     match func {
-        Function::Table | Function::TableFile => Some(true),
-        Function::FastTable | Function::FastTableFile => Some(false),
+        Function::Table | Function::TableFile => Some((true, FileInterpolation::Linear)),
+        Function::FastTable | Function::FastTableFile => Some((false, FileInterpolation::Linear)),
+        Function::Cubic | Function::CubicFile => Some((false, FileInterpolation::NaturalCubic)),
         _ => None,
     }
 }
@@ -68,6 +76,7 @@ fn resolve_table_file_function(
     args: Vec<Expr>,
     source_path: Option<&Path>,
     transient_breakpoints: bool,
+    interpolation: FileInterpolation,
 ) -> Result<Expr, String> {
     let Some(Expr::StringLiteral(path)) = args.first() else {
         if matches!(func, Function::Table) {
@@ -88,10 +97,44 @@ fn resolve_table_file_function(
 
     let path = resolve_table_path(path, source_path);
     let points = load_lookup_points(&path)?;
+    let interpolation = match interpolation {
+        FileInterpolation::Linear => LookupInterpolation::Linear,
+        FileInterpolation::NaturalCubic => LookupInterpolation::NaturalCubic {
+            second_derivatives: Arc::from(
+                natural_cubic_second_derivatives(&points).into_boxed_slice(),
+            ),
+        },
+    };
     Ok(Expr::LookupTable(LookupTable {
         points: Arc::from(points.into_boxed_slice()),
+        interpolation,
         transient_breakpoints,
     }))
+}
+
+fn natural_cubic_second_derivatives(points: &[(Value, Value)]) -> Vec<Value> {
+    let count = points.len();
+    let mut second_derivatives = vec![0.0; count];
+    let mut decomposition = vec![0.0; count - 1];
+
+    for index in 1..count - 1 {
+        let previous_span = points[index].0 - points[index - 1].0;
+        let combined_span = points[index + 1].0 - points[index - 1].0;
+        let next_span = points[index + 1].0 - points[index].0;
+        let sigma = previous_span / combined_span;
+        let pivot = sigma * second_derivatives[index - 1] + 2.0;
+        second_derivatives[index] = (sigma - 1.0) / pivot;
+        let slope_change = (points[index + 1].1 - points[index].1) / next_span
+            - (points[index].1 - points[index - 1].1) / previous_span;
+        decomposition[index] =
+            (6.0 * slope_change / combined_span - sigma * decomposition[index - 1]) / pivot;
+    }
+
+    for index in (0..count - 1).rev() {
+        second_derivatives[index] =
+            second_derivatives[index] * second_derivatives[index + 1] + decomposition[index];
+    }
+    second_derivatives
 }
 
 fn resolve_table_path(path: &str, source_path: Option<&Path>) -> PathBuf {
@@ -196,6 +239,8 @@ fn function_name(func: Function) -> &'static str {
         Function::TableFile => "tablefile",
         Function::FastTable => "fasttable",
         Function::FastTableFile => "fasttablefile",
+        Function::Cubic => "cubic",
+        Function::CubicFile => "cubicfile",
         _ => "function",
     }
 }
@@ -236,6 +281,57 @@ mod tests {
             vm.execute(&program, &Context::transient(&[], &[], 1.5)),
             4.0
         );
+    }
+
+    #[test]
+    fn natural_cubic_matches_xyce_spline_and_clamps_endpoints() {
+        let dir = unique_temp_dir("xyce-natural-cubic");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        std::fs::write(dir.join("curve.dat"), "0 0\n1 1\n2 0\n").expect("write spline data");
+        let deck_path = dir.join("deck.cir");
+
+        for function in ["cubic", "cubicfile"] {
+            let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
+                .expect("cubic expression parses");
+            let resolved =
+                resolve_file_lookup_functions(ast, Some(&deck_path)).expect("cubic file resolves");
+            let Expr::LookupTable(table) = &resolved else {
+                panic!("cubic file should resolve into lookup data");
+            };
+            assert!(!table.transient_breakpoints);
+            assert!(matches!(
+                table.interpolation,
+                LookupInterpolation::NaturalCubic { .. }
+            ));
+
+            let program = compile(&resolved);
+            let mut vm = Vm::new();
+            for (time, expected) in [
+                (-1.0, 0.0),
+                (0.0, 0.0),
+                (0.5, 0.6875),
+                (1.0, 1.0),
+                (1.5, 0.6875),
+                (2.0, 0.0),
+                (3.0, 0.0),
+            ] {
+                let actual = vm.execute(&program, &Context::transient(&[], &[], time));
+                assert!((actual - expected).abs() < 1.0e-14, "time={time}");
+            }
+        }
+    }
+
+    #[test]
+    fn natural_cubic_requires_exactly_one_file_argument() {
+        let too_few = parse_expression_strict("cubic()")
+            .expect_err("cubic without a path must fail")
+            .to_string();
+        assert!(too_few.contains("at least 1 argument"), "{too_few}");
+
+        let too_many = parse_expression_strict("cubic(\"curve.dat\", 4)")
+            .expect_err("unsupported resampling arguments must fail")
+            .to_string();
+        assert!(too_many.contains("at most 1 arguments"), "{too_many}");
     }
 
     fn unique_temp_dir(label: &str) -> PathBuf {

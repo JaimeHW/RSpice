@@ -117,6 +117,8 @@ pub enum Function {
     TableFile,     // tablefile("path") / tablefile(path) = file-backed table(time)
     FastTable,     // fasttable("path") / fasttable(path) = file-backed table(time), no breakpoints
     FastTableFile, // fasttablefile("path") / fasttablefile(path)
+    Cubic,         // cubic("path") = file-backed natural cubic spline of time
+    CubicFile,     // cubicfile("path") alias
     Mod,           // mod(x, y) = x % y - modulo
     SpicePulse,    // spice_pulse(v1, v2, td, tr, tf, pw[, per])
     SpiceSin,      // spice_sin(vo, va, freq, td, theta[, phase_degrees])
@@ -129,10 +131,21 @@ pub enum Function {
 /// File-backed one-dimensional lookup data resolved during circuit build.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LookupTable {
-    /// Sorted `(x, y)` pairs used for piecewise-linear interpolation.
+    /// Sorted `(x, y)` pairs used for interpolation.
     pub points: Arc<[(Value, Value)]>,
+    /// Interpolation algorithm and any build-time-precomputed coefficients.
+    pub interpolation: LookupInterpolation,
     /// Whether the transient integrator should land on each `x` knot.
     pub transient_breakpoints: bool,
+}
+
+/// Interpolation algorithm for a build-time-resolved lookup table.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LookupInterpolation {
+    /// Piecewise-linear interpolation.
+    Linear,
+    /// Natural cubic spline, with one second derivative per knot.
+    NaturalCubic { second_derivatives: Arc<[Value]> },
 }
 
 #[allow(clippy::should_implement_trait)]
