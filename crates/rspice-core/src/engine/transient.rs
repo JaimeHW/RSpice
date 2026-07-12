@@ -462,13 +462,24 @@ impl Engine {
         tstop: Value,
         max_step: Value,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        self.run_tran_checkpointed_with_abort(netlist, tstop, max_step, &NoAbort)
+    }
+
+    /// Run a checkpointed transient with cooperative cancellation.
+    pub fn run_tran_checkpointed_with_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
         validate_transient_window(tstop, max_step)?;
         let engine = self.resolved_for_netlist(netlist);
         match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => {
-                engine.run_tran_resolved_with_resume(&expanded, tstop, max_step, &NoAbort, None)
+                engine.run_tran_resolved_with_resume(&expanded, tstop, max_step, abort, None)
             }
-            None => engine.run_tran_resolved_with_resume(netlist, tstop, max_step, &NoAbort, None),
+            None => engine.run_tran_resolved_with_resume(netlist, tstop, max_step, abort, None),
         }
     }
 
@@ -494,6 +505,18 @@ impl Engine {
         tstop: Value,
         max_step: Value,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        self.run_tran_resume_with_abort(netlist, checkpoint, tstop, max_step, &NoAbort)
+    }
+
+    /// Resume a checkpointed transient with cooperative cancellation.
+    pub fn run_tran_resume_with_abort(
+        &self,
+        netlist: &Netlist,
+        checkpoint: &TransientCheckpoint,
+        tstop: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
         checkpoint
             .validate_for(netlist)
             .map_err(SimulationError::Circuit)?;
@@ -510,14 +533,14 @@ impl Engine {
                 &expanded,
                 tstop,
                 max_step,
-                &NoAbort,
+                abort,
                 Some(checkpoint),
             ),
             None => engine.run_tran_resolved_with_resume(
                 netlist,
                 tstop,
                 max_step,
-                &NoAbort,
+                abort,
                 Some(checkpoint),
             ),
         }

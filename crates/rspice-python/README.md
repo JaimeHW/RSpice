@@ -315,10 +315,11 @@ Simulation calls release the GIL, so a long transient can run in a worker
 thread while the main thread stays responsive, and several engines can
 simulate different netlists in parallel threads.
 
-`run_tran`, `run_tran_compressed`, `run_dc_sweep`, `run_pss`, `run_hb`,
-`run_pac`, `run_pnoise`, and `run_oscillator_noise` poll Python signal
-handlers while they run: Ctrl-C (`KeyboardInterrupt`) cancels the simulation
-promptly instead of arriving after it completes.
+DC operating points and sweeps, AC and S-parameter sweeps, transient and
+checkpoint/resume runs, noise, Monte Carlo, parameter steps, sensitivity,
+PSS, HB, PAC, driven PNoise, and oscillator-noise calls poll Python signal
+handlers while they run. Ctrl-C (`KeyboardInterrupt`) cancels these
+simulations promptly instead of arriving after completion.
 
 ## Testing
 

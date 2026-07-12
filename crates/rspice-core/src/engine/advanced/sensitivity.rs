@@ -80,6 +80,21 @@ impl Engine {
         output_pos: usize,
         output_neg: Option<usize>,
     ) -> Result<SensitivityResult, SimulationError> {
+        self.run_sensitivity_linearized_with_abort(netlist, output_pos, output_neg, &NoAbort)
+    }
+
+    /// Run adjoint DC sensitivity with cooperative cancellation of its
+    /// operating-point solve.
+    pub fn run_sensitivity_linearized_with_abort(
+        &self,
+        netlist: &Netlist,
+        output_pos: usize,
+        output_neg: Option<usize>,
+        abort: &dyn AbortSignal,
+    ) -> Result<SensitivityResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if output_pos == 0 {
             return Err(SimulationError::Circuit(
                 "Sensitivity output node must not be ground".to_string(),
@@ -101,7 +116,12 @@ impl Engine {
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
-        let dc_solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let dc_solution = engine.solve_dc_operating_point_with_abort(
+            netlist,
+            &mut circuit,
+            &mut matrix,
+            abort,
+        )?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
@@ -536,6 +556,30 @@ impl Engine {
         param_value: Value,
         delta: Option<Value>,
     ) -> Result<Value, SimulationError> {
+        self.run_sensitivity_with_abort(
+            netlist,
+            output_node,
+            param_name,
+            param_value,
+            delta,
+            &NoAbort,
+        )
+    }
+
+    /// Run finite-difference DC sensitivity with cooperative cancellation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_sensitivity_with_abort(
+        &self,
+        netlist: &Netlist,
+        output_node: usize,
+        param_name: &str,
+        param_value: Value,
+        delta: Option<Value>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Value, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let h = Self::sensitivity_step(param_value, delta)?;
 
         let (netlist_plus, rebuilt_plus) =
@@ -550,8 +594,8 @@ impl Engine {
             )));
         }
 
-        let result_plus = self.run_dc_op(&netlist_plus)?;
-        let result_minus = self.run_dc_op(&netlist_minus)?;
+        let result_plus = self.run_dc_op_with_abort(&netlist_plus, abort)?;
+        let result_minus = self.run_dc_op_with_abort(&netlist_minus, abort)?;
 
         let v_plus = result_plus.try_voltage(output_node).ok_or_else(|| {
             SimulationError::Circuit(format!(
@@ -582,6 +626,32 @@ impl Engine {
         frequencies: &[Value],
         delta: Option<Value>,
     ) -> Result<Vec<Value>, SimulationError> {
+        self.run_sensitivity_ac_with_abort(
+            netlist,
+            output_node,
+            param_name,
+            param_value,
+            frequencies,
+            delta,
+            &NoAbort,
+        )
+    }
+
+    /// Run finite-difference AC sensitivity with cooperative cancellation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_sensitivity_ac_with_abort(
+        &self,
+        netlist: &Netlist,
+        output_node: usize,
+        param_name: &str,
+        param_value: Value,
+        frequencies: &[Value],
+        delta: Option<Value>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let h = Self::sensitivity_step(param_value, delta)?;
 
         let (netlist_plus, rebuilt_plus) =
@@ -596,8 +666,8 @@ impl Engine {
             )));
         }
 
-        let plus = self.run_ac(&netlist_plus, frequencies)?;
-        let minus = self.run_ac(&netlist_minus, frequencies)?;
+        let plus = self.run_ac_with_abort(&netlist_plus, frequencies, abort)?;
+        let minus = self.run_ac_with_abort(&netlist_minus, frequencies, abort)?;
         if plus.len() != minus.len() {
             return Err(SimulationError::Circuit(
                 "AC sensitivity produced inconsistent sweep lengths".to_string(),

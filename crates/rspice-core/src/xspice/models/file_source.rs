@@ -927,11 +927,7 @@ mod tests {
     use super::*;
 
     fn data_file_test_guard() -> std::sync::MutexGuard<'static, ()> {
-        static GUARD: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        GUARD
-            .get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .expect("data-file test guard")
+        data_file::test_registry_guard()
     }
 
     fn single_value_rows(rows: &[(Value, Value)]) -> FileSourceRowsData {

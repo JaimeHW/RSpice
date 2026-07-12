@@ -18,17 +18,34 @@ impl Engine {
         param_name: &str,
         values: &[Value],
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        self.run_step_with_abort(netlist, param_name, values, &NoAbort)
+    }
+
+    /// Run a parameter sweep with cooperative cancellation.
+    pub fn run_step_with_abort(
+        &self,
+        netlist: &Netlist,
+        param_name: &str,
+        values: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         validate_step_values(values)?;
 
         let mut results = Vec::with_capacity(values.len());
         let mut any_binding = false;
 
         for &value in values {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let (modified_netlist, rebuilt) =
                 Self::create_perturbed_netlist(netlist, param_name, value)?;
             any_binding |= rebuilt > 0;
 
-            match self.run_dc_op(&modified_netlist) {
+            match self.run_dc_op_with_abort(&modified_netlist, abort) {
                 Ok(result) => results.push((value, result)),
                 Err(e) => return Err(step_point_error("PARAM", param_name, value, e)),
             }
@@ -51,11 +68,28 @@ impl Engine {
         step_cmd: &StepCommand,
         values: &[Value],
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        self.run_step_command_with_abort(netlist, step_cmd, values, &NoAbort)
+    }
+
+    /// Execute a parsed `.STEP` command with cooperative cancellation.
+    pub fn run_step_command_with_abort(
+        &self,
+        netlist: &Netlist,
+        step_cmd: &StepCommand,
+        values: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if matches!(step_cmd.sweep, StepSweep::Data { .. }) {
             let stepped_netlists = self.step_netlists_for_command(netlist, step_cmd, values)?;
             let mut results = Vec::with_capacity(stepped_netlists.len());
             for (index, stepped_netlist) in stepped_netlists {
-                match self.run_dc_op(&stepped_netlist) {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                match self.run_dc_op_with_abort(&stepped_netlist, abort) {
                     Ok(result) => results.push((index, result)),
                     Err(e) => return Err(step_point_error("DATA", &step_cmd.name, index, e)),
                 }
@@ -64,20 +98,22 @@ impl Engine {
         }
 
         match step_cmd.target {
-            StepTarget::Param => self.run_step(netlist, &step_cmd.name, values),
+            StepTarget::Param => self.run_step_with_abort(netlist, &step_cmd.name, values, abort),
             StepTarget::Device => self.run_step_device(
                 netlist,
                 &step_cmd.name,
                 step_cmd.param_name.as_deref(),
                 values,
+                abort,
             ),
             StepTarget::Model => self.run_step_model(
                 netlist,
                 &step_cmd.name,
                 step_cmd.param_name.as_deref(),
                 values,
+                abort,
             ),
-            StepTarget::Temp => self.run_step_temp(netlist, values),
+            StepTarget::Temp => self.run_step_temp(netlist, values, abort),
         }
     }
 
@@ -253,6 +289,7 @@ impl Engine {
         &self,
         netlist: &Netlist,
         values: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         if values.is_empty() {
             return Ok(Vec::new());
@@ -260,9 +297,12 @@ impl Engine {
 
         let mut results = Vec::with_capacity(values.len());
         for &value in values {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let (stepped, _) = Self::step_temperature_netlist(netlist, value)?;
 
-            match self.run_dc_op(&stepped) {
+            match self.run_dc_op_with_abort(&stepped, abort) {
                 Ok(result) => results.push((value, result)),
                 Err(e) => {
                     log::warn!("Step TEMP = {} failed: {}", value, e);
@@ -279,6 +319,7 @@ impl Engine {
         device_name: &str,
         param_name: Option<&str>,
         values: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         validate_step_values(values)?;
 
@@ -312,6 +353,9 @@ impl Engine {
 
         let mut results = Vec::with_capacity(values.len());
         for &value in values {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let mut stepped = netlist.clone();
             let target = format!(
                 "{}{}",
@@ -340,7 +384,7 @@ impl Engine {
             }
             Self::mark_ast_stepped_netlist(&mut stepped);
 
-            match self.run_dc_op(&stepped) {
+            match self.run_dc_op_with_abort(&stepped, abort) {
                 Ok(result) => results.push((value, result)),
                 Err(e) => {
                     return Err(step_point_error("DEVICE", &target, value, e));
@@ -357,6 +401,7 @@ impl Engine {
         model_name: &str,
         param_name: Option<&str>,
         values: &[Value],
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
         validate_step_values(values)?;
 
@@ -369,12 +414,15 @@ impl Engine {
 
         let mut results = Vec::with_capacity(values.len());
         for &value in values {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let mut stepped = netlist.clone();
             let model = Self::find_step_model_mut(&mut stepped, model_name)?;
             Self::apply_model_step_value(model, param_name, value);
             Self::mark_ast_stepped_netlist(&mut stepped);
 
-            match self.run_dc_op(&stepped) {
+            match self.run_dc_op_with_abort(&stepped, abort) {
                 Ok(result) => results.push((value, result)),
                 Err(e) => {
                     let target = format!("{}.{}", model_name, param_name.to_ascii_uppercase());

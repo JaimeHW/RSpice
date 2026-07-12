@@ -1813,6 +1813,7 @@ mod tests {
 
     #[test]
     fn xfer_cached_touchstone_reloads_when_virtual_file_changes() {
+        let _guard = data_file::test_registry_guard();
         let file = "virtual://xfer/cache-reloads-on-replace";
         let _ = data_file::unregister_data_file(file);
         data_file::register_data_file(file, "# Hz S RI R 50\n1 1 0\n")
@@ -1832,6 +1833,7 @@ mod tests {
 
     #[test]
     fn xfer_rejects_nonfinite_touchstone_format_overrides() {
+        let _guard = data_file::test_registry_guard();
         let file = "virtual://xfer/nonfinite-touchstone-format-overrides";
         let _ = data_file::unregister_data_file(file);
         data_file::register_data_file(file, "# Hz S RI R 50\n1 1 0\n")

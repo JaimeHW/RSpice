@@ -10,12 +10,14 @@ use crate::solver::{ComplexMatrix, CscIndex, StaticMatrix};
 pub(crate) mod limiting;
 
 #[cfg(feature = "veriloga-builtins")]
+#[allow(clippy::all)]
 pub mod builtins {
     include!("registry.rs");
 }
 
 #[cfg(feature = "veriloga-builtins")]
 #[rustfmt::skip]
+#[allow(clippy::all)]
 pub(crate) mod kernel_runtime;
 
 #[derive(Debug, Clone, Copy)]

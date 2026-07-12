@@ -976,7 +976,19 @@ impl Engine {
         frequencies: &[Value],
         temperature: Value,
     ) -> Result<Vec<NoiseResult>, SimulationError> {
-        self.run_noise_ports(netlist, output_node, None, frequencies, temperature)
+        self.run_noise_with_abort(netlist, output_node, frequencies, temperature, &NoAbort)
+    }
+
+    /// Run single-ended noise analysis with cooperative cancellation.
+    pub fn run_noise_with_abort(
+        &self,
+        netlist: &Netlist,
+        output_node: usize,
+        frequencies: &[Value],
+        temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<NoiseResult>, SimulationError> {
+        self.run_noise_ports_with_abort(netlist, output_node, None, frequencies, temperature, abort)
     }
 
     /// Run noise analysis with optional differential output reference and
@@ -990,6 +1002,29 @@ impl Engine {
         frequencies: &[Value],
         temperature: Value,
     ) -> Result<Vec<NoiseResult>, SimulationError> {
+        self.run_noise_with_input_source_and_abort(
+            netlist,
+            output_pos,
+            output_neg,
+            input_source,
+            frequencies,
+            temperature,
+            &NoAbort,
+        )
+    }
+
+    /// Run input-referred noise analysis with cooperative cancellation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_noise_with_input_source_and_abort(
+        &self,
+        netlist: &Netlist,
+        output_pos: usize,
+        output_neg: Option<usize>,
+        input_source: &str,
+        frequencies: &[Value],
+        temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<NoiseResult>, SimulationError> {
         self.run_noise_internal(
             netlist,
             output_pos,
@@ -997,6 +1032,7 @@ impl Engine {
             Some(input_source),
             frequencies,
             temperature,
+            abort,
         )
     }
 
@@ -1013,6 +1049,26 @@ impl Engine {
         frequencies: &[Value],
         temperature: Value,
     ) -> Result<Vec<NoiseResult>, SimulationError> {
+        self.run_noise_ports_with_abort(
+            netlist,
+            output_pos,
+            output_neg,
+            frequencies,
+            temperature,
+            &NoAbort,
+        )
+    }
+
+    /// Run differential noise analysis with cooperative cancellation.
+    pub fn run_noise_ports_with_abort(
+        &self,
+        netlist: &Netlist,
+        output_pos: usize,
+        output_neg: Option<usize>,
+        frequencies: &[Value],
+        temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<NoiseResult>, SimulationError> {
         self.run_noise_internal(
             netlist,
             output_pos,
@@ -1020,6 +1076,7 @@ impl Engine {
             None,
             frequencies,
             temperature,
+            abort,
         )
     }
 
@@ -1177,7 +1234,11 @@ impl Engine {
         input_source: Option<&str>,
         frequencies: &[Value],
         temperature: Value,
+        abort: &dyn AbortSignal,
     ) -> Result<Vec<NoiseResult>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         #[derive(Clone, Copy)]
         enum InputExcitation {
             VoltageSource { branch_matrix_index: usize },
@@ -1196,7 +1257,12 @@ impl Engine {
         circuit.link_indices(&matrix);
 
         // Get DC operating point for bias-dependent noise.
-        let dc_solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let dc_solution = engine.solve_dc_operating_point_with_abort(
+            netlist,
+            &mut circuit,
+            &mut matrix,
+            abort,
+        )?;
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
@@ -1277,6 +1343,9 @@ impl Engine {
         let results: Result<Vec<NoiseResult>, SimulationError> = frequencies
             .iter()
             .map(|&freq| {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 let omega = 2.0 * PI * freq;
                 let mut ac_matrix =
                     Self::try_build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega)?;
@@ -1323,6 +1392,9 @@ impl Engine {
                 let mut contributions = Vec::new();
 
                 for source in &noise_sources {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
                     let si = source.spectral_density(freq, temperature);
                     if !si.is_finite() || si <= 0.0 {
                         continue;
@@ -1353,6 +1425,9 @@ impl Engine {
                 }
 
                 for source in &correlated_noise_sources {
+                    if abort.is_aborted() {
+                        return Err(SimulationError::Aborted);
+                    }
                     let Some(densities) = source.spectral_densities(freq, temperature) else {
                         continue;
                     };

@@ -157,3 +157,29 @@ class TestCancellation:
             done.set()
             killer.join()
         assert time.monotonic() - start < 10.0
+
+    def test_keyboard_interrupt_cancels_ac_sweep(self, engine):
+        lines = ["V1 n0 0 AC 1"]
+        for index in range(120):
+            input_node = "n0" if index == 0 else f"n{index}"
+            output_node = f"n{index + 1}"
+            lines.extend(
+                (
+                    f"R{index} {input_node} {output_node} 1k",
+                    f"C{index} {output_node} 0 1n",
+                )
+            )
+        lines.append(".end")
+        netlist = rspice.Netlist.parse("\n".join(lines))
+        frequencies = [1.0e3] * 50_000
+
+        done = threading.Event()
+        killer = start_sigint_timer(0.01, done)
+        start = time.monotonic()
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                engine.run_ac(netlist, frequencies)
+        finally:
+            done.set()
+            killer.join()
+        assert time.monotonic() - start < 10.0

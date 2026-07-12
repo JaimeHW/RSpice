@@ -9,6 +9,7 @@
 
 #![allow(clippy::too_many_arguments)]
 use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::monte_carlo::{
     Distribution, MonteCarloResult, VariableStatistics, Xorshift128Plus,
 };

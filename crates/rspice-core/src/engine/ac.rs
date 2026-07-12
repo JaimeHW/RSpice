@@ -7,6 +7,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use super::{Engine, SimulationError};
+use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::ac::AcResult;
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
@@ -2170,6 +2171,20 @@ impl Engine {
         netlist: &Netlist,
         frequencies: &[Value],
     ) -> Result<Vec<AcResult>, SimulationError> {
+        self.run_ac_with_abort(netlist, frequencies, &NoAbort)
+    }
+
+    /// Run an AC sweep with cooperative cancellation during the operating
+    /// point and between independent frequency solves.
+    pub fn run_ac_with_abort(
+        &self,
+        netlist: &Netlist,
+        frequencies: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<AcResult>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         validate_ac_frequencies(frequencies)?;
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit(netlist)?;
@@ -2206,7 +2221,7 @@ impl Engine {
             );
             vec![0.0; circuit.matrix_size()]
         } else {
-            engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?
+            engine.solve_dc_operating_point_with_abort(netlist, &mut circuit, &mut matrix, abort)?
         };
         circuit.refresh_jiles_atherton_inductances(&dc_solution);
         if has_nonlinear {
@@ -2239,6 +2254,9 @@ impl Engine {
                              ac_matrix: &mut ComplexMatrix,
                              freq: Value|
          -> Result<AcResult, SimulationError> {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let omega = 2.0 * PI * freq;
             Self::try_fill_small_signal_ac_matrix_with_vbic_delay_mode(
                 circuit,
@@ -2250,6 +2268,9 @@ impl Engine {
             )?;
             let rhs = Self::build_ac_excitation_rhs(circuit);
             let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
 
             Ok(AcResult {
                 frequency: freq,

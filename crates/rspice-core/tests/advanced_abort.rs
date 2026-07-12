@@ -1,6 +1,7 @@
 //! Cooperative-cancellation contracts for long periodic/RF analyses.
 
 use rspice_core::AtomicAbort;
+use rspice_core::analysis::Distribution;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
 use rspice_core::analysis::advanced::pac::PacConfig;
@@ -64,4 +65,42 @@ fn oscillator_pnoise_honors_an_already_set_abort_signal() {
         &[1.0e3],
         &abort,
     ));
+}
+
+#[test]
+fn dc_ac_and_noise_honor_an_already_set_abort_signal() {
+    let (engine, netlist, abort) = fixture();
+    assert_aborted(engine.run_dc_op_with_abort(&netlist, &abort));
+    assert_aborted(engine.run_ac_with_abort(&netlist, &[1.0e3], &abort));
+    assert_aborted(engine.run_noise_with_abort(&netlist, 1, &[1.0e3], 300.15, &abort));
+}
+
+#[test]
+fn statistical_and_parametric_analyses_honor_abort() {
+    let (engine, netlist, abort) = fixture();
+    assert_aborted(engine.run_monte_carlo_with_options_and_abort(
+        &netlist,
+        100,
+        1,
+        Distribution::Gaussian { sigma: 0.01 },
+        None,
+        &abort,
+    ));
+    assert_aborted(engine.run_step_with_abort(&netlist, "rval", &[1.0], &abort));
+    assert_aborted(engine.run_sensitivity_with_abort(&netlist, 1, "rval", 1.0, None, &abort));
+    assert_aborted(engine.run_sensitivity_ac_with_abort(
+        &netlist,
+        1,
+        "rval",
+        1.0,
+        &[1.0e3],
+        None,
+        &abort,
+    ));
+}
+
+#[test]
+fn checkpointed_transient_honors_abort() {
+    let (engine, netlist, abort) = fixture();
+    assert_aborted(engine.run_tran_checkpointed_with_abort(&netlist, 1.0, 1.0e-6, &abort));
 }

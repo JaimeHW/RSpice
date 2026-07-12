@@ -149,7 +149,16 @@ impl Engine {
 
     /// Run DC operating point analysis
     pub fn run_dc_op(&self, netlist: &Netlist) -> Result<SimulationResult, SimulationError> {
-        self.run_dc_op_with_report(netlist)
+        self.run_dc_op_with_abort(netlist, &NoAbort)
+    }
+
+    /// Run a DC operating point with cooperative cancellation.
+    pub fn run_dc_op_with_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.run_dc_op_with_report_and_abort(netlist, abort)
             .map(|(result, _)| result)
     }
 
@@ -163,6 +172,18 @@ impl Engine {
         &self,
         netlist: &Netlist,
     ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+        self.run_dc_op_with_report_and_abort(netlist, &NoAbort)
+    }
+
+    /// Run a DC operating point and device report with cooperative cancellation.
+    pub fn run_dc_op_with_report_and_abort(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let engine = self.resolved_for_netlist(netlist);
 
         // Build circuit from netlist
@@ -183,7 +204,15 @@ impl Engine {
 
         let mut matrix = matrix;
 
-        let solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        let solution = engine.solve_dc_operating_point_with_abort(
+            netlist,
+            &mut circuit,
+            &mut matrix,
+            abort,
+        )?;
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let solution = if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
             engine
                 .dc_static_probe_polished_solution(&mut circuit, &mut matrix, &solution)
@@ -191,6 +220,9 @@ impl Engine {
         } else {
             solution
         };
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         if let Some(message) = circuit.take_xspice_evaluation_error() {
             return Err(SimulationError::Circuit(format!(
                 "XSPICE evaluation failed: {message}"

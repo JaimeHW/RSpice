@@ -28,6 +28,30 @@ impl Engine {
         distribution: Distribution,
         parameter_filter: Option<&[String]>,
     ) -> Result<MonteCarloResult, SimulationError> {
+        self.run_monte_carlo_with_options_and_abort(
+            netlist,
+            num_runs,
+            seed,
+            distribution,
+            parameter_filter,
+            &NoAbort,
+        )
+    }
+
+    /// Run Monte Carlo analysis with cooperative cancellation during deck
+    /// generation and independent operating-point solves.
+    pub fn run_monte_carlo_with_options_and_abort(
+        &self,
+        netlist: &Netlist,
+        num_runs: usize,
+        seed: u64,
+        distribution: Distribution,
+        parameter_filter: Option<&[String]>,
+        abort: &dyn AbortSignal,
+    ) -> Result<MonteCarloResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
         let spread = match distribution {
             Distribution::Gaussian { sigma } => sigma,
             Distribution::Uniform { tolerance } => tolerance,
@@ -131,6 +155,9 @@ impl Engine {
         let mut rng = Xorshift128Plus::new(seed);
         let mut run_netlists = Vec::with_capacity(num_runs);
         for _run in 0..num_runs {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
             let netlist_for_run = if monte_params.is_empty() {
                 netlist.clone()
             } else {
@@ -162,8 +189,11 @@ impl Engine {
         let mut run_outcomes: Vec<RunOutcome> = Vec::new();
         if workers <= 1 {
             for run_netlist in &run_netlists {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
                 run_outcomes.push(
-                    self.run_dc_op(run_netlist)
+                    self.run_dc_op_with_abort(run_netlist, abort)
                         .ok()
                         .map(|result| (result.node_voltages, result.node_names)),
                 );
@@ -182,11 +212,16 @@ impl Engine {
                     scope.spawn(|| {
                         let engine = Self::new(config.clone());
                         loop {
+                            if abort.is_aborted() {
+                                break;
+                            }
                             let index = next.fetch_add(1, Ordering::SeqCst);
                             if index >= run_netlists.len() {
                                 break;
                             }
-                            if let Ok(result) = engine.run_dc_op(&run_netlists[index]) {
+                            if let Ok(result) =
+                                engine.run_dc_op_with_abort(&run_netlists[index], abort)
+                            {
                                 *slots[index].lock().expect("mc slot") =
                                     Some((result.node_voltages, result.node_names));
                             }
@@ -199,6 +234,10 @@ impl Engine {
                 .into_iter()
                 .map(|slot| slot.into_inner().expect("mc slot lock"))
                 .collect();
+        }
+
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
         }
 
         let mut results = Vec::with_capacity(num_runs);

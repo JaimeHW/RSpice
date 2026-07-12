@@ -1469,14 +1469,9 @@ mod tests {
     use super::*;
     use crate::xspice::context::InputValue;
     use crate::xspice::{DigitalState, DigitalStrength, EvaluationPhase, ParamType, PortDirection};
-    use std::sync::{Mutex, MutexGuard, OnceLock};
 
-    fn data_file_test_guard() -> MutexGuard<'static, ()> {
-        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    fn data_file_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        data_file::test_registry_guard()
     }
 
     fn unregister_test_data_file(path: &str) {

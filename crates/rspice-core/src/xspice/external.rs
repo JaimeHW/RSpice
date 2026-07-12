@@ -1197,8 +1197,7 @@ mod native_cosim {
         fn cosim_library_search_candidates_try_configured_library_dirs() {
             let direct = cosim_library_candidates("cosim_model");
             let lib_dir = std::path::Path::new("ngspice-lib");
-            let candidates =
-                cosim_library_search_candidates_with_dirs("cosim_model", [lib_dir].into_iter());
+            let candidates = cosim_library_search_candidates_with_dirs("cosim_model", [lib_dir]);
 
             assert_eq!(&candidates[..direct.len()], direct.as_slice());
             for candidate in direct {

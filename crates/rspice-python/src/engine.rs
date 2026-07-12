@@ -24,7 +24,7 @@ use rspice_core::netlist::{
     AnalysisCommand, DcSweepSpec, FreqVariation, PoleZeroAnalysisType, PoleZeroTransferType,
     StepCommand, StepSweep, StepTarget,
 };
-use rspice_core::{Engine, SimulationConfigOverrides, resolve_simulation_config};
+use rspice_core::{AbortSignal, Engine, SimulationConfigOverrides, resolve_simulation_config};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
@@ -408,9 +408,9 @@ impl PyEngine {
         frequencies: Vec<f64>,
     ) -> PyResult<PyAcResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = py
-            .detach(|| engine.run_ac(&netlist.inner, &frequencies))
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let results = run_interruptible(py, |abort| {
+            engine.run_ac_with_abort(&netlist.inner, &frequencies, abort)
+        })?;
         Ok(PyAcResult::new(frequencies, results))
     }
 
@@ -434,28 +434,34 @@ impl PyEngine {
             )));
         }
 
-        let results = py
-            .detach(|| match input_source {
-                Some(source) => engine.run_noise_with_input_source(
+        let results = run_interruptible(py, |abort| match input_source {
+            Some(source) => engine.run_noise_with_input_source_and_abort(
+                &netlist.inner,
+                output_node,
+                output_neg,
+                source,
+                frequencies,
+                temp,
+                abort,
+            ),
+            None => match output_neg {
+                Some(_) => engine.run_noise_ports_with_abort(
                     &netlist.inner,
                     output_node,
                     output_neg,
-                    source,
                     frequencies,
                     temp,
+                    abort,
                 ),
-                None => match output_neg {
-                    Some(_) => engine.run_noise_ports(
-                        &netlist.inner,
-                        output_node,
-                        output_neg,
-                        frequencies,
-                        temp,
-                    ),
-                    None => engine.run_noise(&netlist.inner, output_node, frequencies, temp),
-                },
-            })
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+                None => engine.run_noise_with_abort(
+                    &netlist.inner,
+                    output_node,
+                    frequencies,
+                    temp,
+                    abort,
+                ),
+            },
+        })?;
 
         Ok(results)
     }
@@ -588,9 +594,9 @@ impl PyEngine {
         let reference = reference
             .map(|node| self.resolve_node(&engine, &netlist.inner, node, "sensitivity reference"))
             .transpose()?;
-        let result = py
-            .detach(|| engine.run_sensitivity_linearized(&netlist.inner, output, reference))
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let result = run_interruptible(py, |abort| {
+            engine.run_sensitivity_linearized_with_abort(&netlist.inner, output, reference, abort)
+        })?;
         Ok(PySensitivityResult::from_core(&result))
     }
 
@@ -617,25 +623,27 @@ impl PyEngine {
             .map(|port| port.reference_impedance)
             .collect::<Vec<_>>();
         let engine = self.engine_for_netlist(&netlist.inner);
-        let parameters = py
-            .detach(|| {
-                let num_ports = ports.len();
-                let num_points = frequencies.len();
-                let zero = rspice_core::Complex64::new(0.0, 0.0);
-                let mut admittances = vec![vec![vec![zero; num_points]; num_ports]; num_ports];
-                for excited_port in 0..num_ports {
-                    let mut excited = netlist.inner.clone();
-                    set_sparameter_excitations(&mut excited, &ports, excited_port)?;
-                    let points = engine.run_ac(&excited, &frequencies)?;
-                    if points.len() != num_points {
-                        return Err(rspice_core::engine::SimulationError::Circuit(format!(
-                            "S-parameter AC solve returned {} points for {num_points} requested frequencies",
-                            points.len()
-                        )));
-                    }
-                    for (frequency_index, point) in points.iter().enumerate() {
-                        for (output_port, port) in ports.iter().enumerate() {
-                            let branch_index = point
+        let parameters = run_interruptible(py, |abort| {
+            let num_ports = ports.len();
+            let num_points = frequencies.len();
+            let zero = rspice_core::Complex64::new(0.0, 0.0);
+            let mut admittances = vec![vec![vec![zero; num_points]; num_ports]; num_ports];
+            for excited_port in 0..num_ports {
+                if abort.is_aborted() {
+                    return Err(rspice_core::engine::SimulationError::Aborted);
+                }
+                let mut excited = netlist.inner.clone();
+                set_sparameter_excitations(&mut excited, &ports, excited_port)?;
+                let points = engine.run_ac_with_abort(&excited, &frequencies, abort)?;
+                if points.len() != num_points {
+                    return Err(rspice_core::engine::SimulationError::Circuit(format!(
+                        "S-parameter AC solve returned {} points for {num_points} requested frequencies",
+                        points.len()
+                    )));
+                }
+                for (frequency_index, point) in points.iter().enumerate() {
+                    for (output_port, port) in ports.iter().enumerate() {
+                        let branch_index = point
                                 .branch_names
                                 .iter()
                                 .position(|name| name.eq_ignore_ascii_case(&port.source_name))
@@ -645,36 +653,35 @@ impl PyEngine {
                                         port.source_name
                                     ))
                                 })?;
-                            let current = point.currents.get(branch_index).copied().ok_or_else(|| {
+                        let current = point.currents.get(branch_index).copied().ok_or_else(|| {
                                 rspice_core::engine::SimulationError::Circuit(format!(
                                     "S-parameter source '{}' branch-current vector is malformed at frequency point {frequency_index}",
                                     port.source_name
                                 ))
                             })?;
-                            admittances[output_port][excited_port][frequency_index] = -current;
-                        }
+                        admittances[output_port][excited_port][frequency_index] = -current;
                     }
                 }
+            }
 
-                let mut scattering = vec![vec![vec![zero; num_points]; num_ports]; num_ports];
-                for frequency_index in 0..num_points {
-                    let y = (0..num_ports)
-                        .map(|row| {
-                            (0..num_ports)
-                                .map(|column| admittances[row][column][frequency_index])
-                                .collect::<Vec<_>>()
-                        })
-                        .collect::<Vec<_>>();
-                    let matrix = s_from_y(&y, &impedances)?;
-                    for row in 0..num_ports {
-                        for column in 0..num_ports {
-                            scattering[row][column][frequency_index] = matrix[row][column];
-                        }
+            let mut scattering = vec![vec![vec![zero; num_points]; num_ports]; num_ports];
+            for frequency_index in 0..num_points {
+                let y = (0..num_ports)
+                    .map(|row| {
+                        (0..num_ports)
+                            .map(|column| admittances[row][column][frequency_index])
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                let matrix = s_from_y(&y, &impedances)?;
+                for row in 0..num_ports {
+                    for column in 0..num_ports {
+                        scattering[row][column][frequency_index] = matrix[row][column];
                     }
                 }
-                Ok(scattering)
-            })
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+            }
+            Ok(scattering)
+        })?;
         Ok(PySParameterResult::new(
             frequencies,
             port_names,
@@ -1002,9 +1009,9 @@ impl PyEngine {
                 AnalysisCommand::Step(command) => {
                     let values = command.sweep.values();
                     let engine = self.engine_for_netlist(net);
-                    let results = py
-                        .detach(|| engine.run_step_command(net, command, &values))
-                        .map_err(crate::errors::simulation_error_to_pyerr)?;
+                    let results = run_interruptible(py, |abort| {
+                        engine.run_step_command_with_abort(net, command, &values, abort)
+                    })?;
                     step_result = Some(PyDcSweepResult::new_named(results, &command.name));
                     records.push(PyAnalysisRecord::executed(
                         "step",
@@ -1019,9 +1026,9 @@ impl PyEngine {
                         sweep: StepSweep::List(temperatures.clone()),
                     };
                     let engine = self.engine_for_netlist(net);
-                    let results = py
-                        .detach(|| engine.run_step_command(net, &command, temperatures))
-                        .map_err(crate::errors::simulation_error_to_pyerr)?;
+                    let results = run_interruptible(py, |abort| {
+                        engine.run_step_command_with_abort(net, &command, temperatures, abort)
+                    })?;
                     temperature = Some(PyDcSweepResult::new_named(results, "TEMP"));
                     records.push(PyAnalysisRecord::executed(
                         "temp",
@@ -1246,9 +1253,9 @@ impl PyEngine {
     ///     >>> print(f"V(out) = {result.voltage('out'):.3f} V")
     pub fn run_dc_op(&self, py: Python<'_>, netlist: &PyNetlist) -> PyResult<PySimulationResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let (result, device_op_report) = py
-            .detach(|| engine.run_dc_op_with_report(&netlist.inner))
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let (result, device_op_report) = run_interruptible(py, |abort| {
+            engine.run_dc_op_with_report_and_abort(&netlist.inner, abort)
+        })?;
         Ok(PySimulationResult::new_with_report(
             result,
             device_op_report,
@@ -1563,9 +1570,9 @@ impl PyEngine {
         }
         let max_step = max_step.unwrap_or(stop_time / 50.0);
         let engine = self.engine_for_netlist(&netlist.inner);
-        let (result, checkpoint) = py
-            .detach(|| engine.run_tran_checkpointed(&netlist.inner, stop_time, max_step))
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let (result, checkpoint) = run_interruptible(py, |abort| {
+            engine.run_tran_checkpointed_with_abort(&netlist.inner, stop_time, max_step, abort)
+        })?;
         Ok((
             PyTransientResult::new(result),
             PyTransientCheckpoint::new(checkpoint),
@@ -1597,11 +1604,15 @@ impl PyEngine {
         }
         let max_step = max_step.unwrap_or((stop_time - checkpoint.inner.time) / 50.0);
         let engine = self.engine_for_netlist(&netlist.inner);
-        let (result, next_checkpoint) = py
-            .detach(|| {
-                engine.run_tran_resume(&netlist.inner, &checkpoint.inner, stop_time, max_step)
-            })
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let (result, next_checkpoint) = run_interruptible(py, |abort| {
+            engine.run_tran_resume_with_abort(
+                &netlist.inner,
+                &checkpoint.inner,
+                stop_time,
+                max_step,
+                abort,
+            )
+        })?;
         Ok((
             PyTransientResult::new(result),
             PyTransientCheckpoint::new(next_checkpoint),
@@ -2074,17 +2085,16 @@ impl PyEngine {
         let seed = seed.unwrap_or_else(|| RandomState::new().build_hasher().finish());
 
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = py
-            .detach(|| {
-                engine.run_monte_carlo_with_options(
-                    &netlist.inner,
-                    num_runs,
-                    seed,
-                    dist,
-                    params.as_deref(),
-                )
-            })
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let result = run_interruptible(py, |abort| {
+            engine.run_monte_carlo_with_options_and_abort(
+                &netlist.inner,
+                num_runs,
+                seed,
+                dist,
+                params.as_deref(),
+                abort,
+            )
+        })?;
 
         Ok(PyMonteCarloResult::from_core(&result))
     }
@@ -2137,8 +2147,16 @@ impl PyEngine {
         }
         let engine = self.engine_for_netlist(&netlist.inner);
         let output = self.resolve_node(&engine, &netlist.inner, &output_node, "output")?;
-        py.detach(|| engine.run_sensitivity(&netlist.inner, output, param_name, param_value, delta))
-            .map_err(crate::errors::simulation_error_to_pyerr)
+        run_interruptible(py, |abort| {
+            engine.run_sensitivity_with_abort(
+                &netlist.inner,
+                output,
+                param_name,
+                param_value,
+                delta,
+                abort,
+            )
+        })
     }
 
     /// Run single-solve adjoint DC sensitivity for all eligible linear
@@ -2200,18 +2218,17 @@ impl PyEngine {
         validate_frequencies(&frequencies)?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let output = self.resolve_node(&engine, &netlist.inner, &output_node, "output")?;
-        let values = py
-            .detach(|| {
-                engine.run_sensitivity_ac(
-                    &netlist.inner,
-                    output,
-                    param_name,
-                    param_value,
-                    &frequencies,
-                    delta,
-                )
-            })
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let values = run_interruptible(py, |abort| {
+            engine.run_sensitivity_ac_with_abort(
+                &netlist.inner,
+                output,
+                param_name,
+                param_value,
+                &frequencies,
+                delta,
+                abort,
+            )
+        })?;
         Ok(values.to_pyarray(py))
     }
 
@@ -2253,9 +2270,9 @@ impl PyEngine {
         }
 
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = py
-            .detach(|| engine.run_step(&netlist.inner, param_name, &values))
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
+        let results = run_interruptible(py, |abort| {
+            engine.run_step_with_abort(&netlist.inner, param_name, &values, abort)
+        })?;
 
         Ok(results
             .into_iter()
