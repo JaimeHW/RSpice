@@ -372,20 +372,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_offset_div_scaled_inputs2(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, offset: f64) {
-        self.mark_derivatives_dirty(index);
-        let first_value = first.value * first_scale;
-        let second_value = second.value * second_scale;
-        let numerator_value = first_value + second_value;
-        let denominator_value = denominator.value * denominator_scale;
-        let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient + offset;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) * reciprocal + denominator.dn[axis] * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) * reciprocal + denominator.db[axis] * denominator_derivative_scale; }
-    }
 
     #[inline(never)]
     pub(crate) fn store_div_scaled_inputs3(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
@@ -2089,17 +2075,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
 
-    #[inline(never)]
-    pub(crate) fn store_sub_div_rhs_ad(&mut self, index: usize, left: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.mark_derivatives_dirty(index);
-        let left_value = self.v[left];
-        let reciprocal = 1.0 / denominator.value;
-        let quotient = numerator.value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal;
-        self.v[index] = left_value - quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = self.dn[left][axis] - (numerator.dn[axis] * reciprocal + denominator.dn[axis] * denominator_derivative_scale); }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = self.db[left][axis] - (numerator.db[axis] * reciprocal + denominator.db[axis] * denominator_derivative_scale); }
-    }
 
 
     #[inline(never)]
@@ -2837,22 +2812,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { let quotient_derivative = numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_scale; self.db[index][axis] = source_db[axis] * quotient + source_value * quotient_derivative; }
     }
 
-    pub(crate) fn store_mul_square_exp_scaled_input(&mut self, index: usize, square_source: usize, exp_source: usize, exp_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let square_raw = self.v[square_source];
-        let square_value = square_raw * square_raw;
-        let exp_raw = self.v[exp_source] * exp_scale;
-        let exp_value = exp_raw.exp();
-        let square_dn = self.dn[square_source];
-        let exp_dn = self.dn[exp_source];
-        let square_db = self.db[square_source];
-        let exp_db = self.db[exp_source];
-        let square_derivative_scale = 2.0 * square_raw * exp_value;
-        let exp_derivative_scale = square_value * exp_value * exp_scale;
-        self.v[index] = square_value * exp_value;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + exp_dn[axis] * exp_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = square_db[axis] * square_derivative_scale + exp_db[axis] * exp_derivative_scale; }
-    }
 
     #[inline(never)]
     pub(crate) fn store_mul_square_lhs(&mut self, index: usize, value: usize, source: usize) {
@@ -6378,13 +6337,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
 
-    #[inline(never)]
-    pub(crate) fn store_offset_add_scaled_inputs3_offset_mixed_aii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, inner_offset: f64, outer_offset: f64) {
-        self.mark_derivatives_dirty(index);
-        self.v[index] = first.value * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + inner_offset + outer_offset;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale; }
-    }
 
 
     #[inline(never)]
@@ -6803,22 +6755,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_div_scaled_add_product_mixed_aaii(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let value_term = value.value * value_scale;
-        let product_left_value = product_left.value;
-        let product_right_value = self.v[product_right];
-        let product_term = product_left_value * product_right_value * product_scale;
-        let numerator_value = value_term + product_term;
-        let denominator_value = self.v[denominator] * denominator_scale;
-        let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (value.dn[axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale) * reciprocal + self.dn[denominator][axis] * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (value.db[axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale) * reciprocal + self.db[denominator][axis] * denominator_derivative_scale; }
-    }
 
 
 
@@ -7349,20 +7285,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_add_scaled_value_products_mixed_aiaii(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, first_product_left: usize, first_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, first_product_scale: f64, second_product_left: usize, second_product_right: usize, second_product_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let value_term = value.value * value_scale;
-        let first_product_left_value = self.v[first_product_left];
-        let first_product_right_value = first_product_right.value;
-        let second_product_left_value = self.v[second_product_left];
-        let second_product_right_value = self.v[second_product_right];
-        let first_product_term = first_product_left_value * first_product_right_value * first_product_scale;
-        let second_product_term = second_product_left_value * second_product_right_value * second_product_scale;
-        self.v[index] = value_term + first_product_term + second_product_term;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = value.dn[axis] * value_scale + (self.dn[first_product_left][axis] * first_product_right_value + first_product_left_value * first_product_right.dn[axis]) * first_product_scale + (self.dn[second_product_left][axis] * second_product_right_value + second_product_left_value * self.dn[second_product_right][axis]) * second_product_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = value.db[axis] * value_scale + (self.db[first_product_left][axis] * first_product_right_value + first_product_left_value * first_product_right.db[axis]) * first_product_scale + (self.db[second_product_left][axis] * second_product_right_value + second_product_left_value * self.db[second_product_right][axis]) * second_product_scale; }
-    }
 
 
 
@@ -8384,18 +8306,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_div_scalar_by_product_mixed_ai(&mut self, index: usize, scalar: f64, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right: usize, denominator_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let denominator_left_value = denominator_left.value;
-        let denominator_right_value = self.v[denominator_right];
-        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);
-        let quotient = scalar * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (denominator_left.dn[axis] * denominator_right_value + denominator_left_value * self.dn[denominator_right][axis]) * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (denominator_left.db[axis] * denominator_right_value + denominator_left_value * self.db[denominator_right][axis]) * denominator_derivative_scale; }
-    }
 
 
 
@@ -8465,19 +8375,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_sub_div_lhs_mixed_ia(&mut self, index: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
-        self.mark_derivatives_dirty(index);
-        let right_value = self.v[right];
-        let numerator_value = self.v[numerator];
-        let denominator_value = denominator.value;
-        let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal;
-        self.v[index] = quotient - right_value;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = self.dn[numerator][axis] * reciprocal + denominator.dn[axis] * denominator_derivative_scale - self.dn[right][axis]; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = self.db[numerator][axis] * reciprocal + denominator.db[axis] * denominator_derivative_scale - self.db[right][axis]; }
-    }
 
 
     #[inline(never)]
@@ -9365,21 +9262,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_div_scaled_inputs2_by_product_mixed_iaii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, denominator_left: usize, denominator_right: usize, denominator_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let first_value = self.v[first] * first_scale;
-        let second_value = second.value * second_scale;
-        let numerator_value = first_value + second_value;
-        let denominator_left_value = self.v[denominator_left];
-        let denominator_right_value = self.v[denominator_right];
-        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) * reciprocal + (self.dn[denominator_left][axis] * denominator_right_value + denominator_left_value * self.dn[denominator_right][axis]) * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) * reciprocal + (self.db[denominator_left][axis] * denominator_right_value + denominator_left_value * self.db[denominator_right][axis]) * denominator_derivative_scale; }
-    }
 
 
 
@@ -10377,23 +10259,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_div_scaled_inputs_product_mixed_iaiii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let first_value = self.v[first] * first_scale;
-        let second_value = second.value * second_scale;
-        let product_left_value = self.v[product_left];
-        let product_right_value = self.v[product_right];
-        let product_value = product_left_value * product_right_value * product_scale;
-        let numerator_value = (first_value + second_value) + product_value;
-        let denominator_value = self.v[denominator] * denominator_scale;
-        let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = ((self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale) * reciprocal + self.dn[denominator][axis] * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = ((self.db[first][axis] * first_scale + second.db[axis] * second_scale) + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale) * reciprocal + self.db[denominator][axis] * denominator_derivative_scale; }
-    }
 
 
 
@@ -14257,20 +14122,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_offset_div_scaled_inputs2(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64, offset: f64) {
-        self.mark_derivatives_dirty(index);
-        let first_value = first.value * first_scale;
-        let second_value = second.value * second_scale;
-        let numerator_value = first_value + second_value;
-        let denominator_value = denominator.value * denominator_scale;
-        let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient + offset;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (first.dn[axis] * first_scale + second.dn[axis] * second_scale) * reciprocal + denominator.dn[axis] * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (first.db[axis] * first_scale + second.db[axis] * second_scale) * reciprocal + denominator.db[axis] * denominator_derivative_scale; }
-    }
 
     #[inline(never)]
     pub(crate) fn store_div_scaled_inputs3(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, third: AdValue<NODE_COUNT, BRANCH_COUNT>, third_scale: f64, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_scale: f64) {
@@ -15974,17 +15825,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
 
-    #[inline(never)]
-    pub(crate) fn store_sub_div_rhs_ad(&mut self, index: usize, left: usize, numerator: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>) {
-        self.mark_derivatives_dirty(index);
-        let left_value = self.v[left];
-        let reciprocal = 1.0 / denominator.value;
-        let quotient = numerator.value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal;
-        self.v[index] = left_value - quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = self.dn[left][axis] - (numerator.dn[axis] * reciprocal + denominator.dn[axis] * denominator_derivative_scale); }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = self.db[left][axis] - (numerator.db[axis] * reciprocal + denominator.db[axis] * denominator_derivative_scale); }
-    }
 
 
     #[inline(never)]
@@ -16722,22 +16562,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
         let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { let quotient_derivative = numerator_db[axis] * reciprocal + denominator_db[axis] * denominator_scale; self.db[index][axis] = source_db[axis] * quotient + source_value * quotient_derivative; }
     }
 
-    pub(crate) fn store_mul_square_exp_scaled_input(&mut self, index: usize, square_source: usize, exp_source: usize, exp_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let square_raw = self.v[square_source];
-        let square_value = square_raw * square_raw;
-        let exp_raw = self.v[exp_source] * exp_scale;
-        let exp_value = exp_raw.exp();
-        let square_dn = self.dn[square_source];
-        let exp_dn = self.dn[exp_source];
-        let square_db = self.db[square_source];
-        let exp_db = self.db[exp_source];
-        let square_derivative_scale = 2.0 * square_raw * exp_value;
-        let exp_derivative_scale = square_value * exp_value * exp_scale;
-        self.v[index] = square_value * exp_value;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = square_dn[axis] * square_derivative_scale + exp_dn[axis] * exp_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = square_db[axis] * square_derivative_scale + exp_db[axis] * exp_derivative_scale; }
-    }
 
     #[inline(never)]
     pub(crate) fn store_mul_square_lhs(&mut self, index: usize, value: usize, source: usize) {
@@ -20263,13 +20087,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
     }
 
 
-    #[inline(never)]
-    pub(crate) fn store_offset_add_scaled_inputs3_offset_mixed_aii(&mut self, index: usize, first: AdValue<NODE_COUNT, BRANCH_COUNT>, first_scale: f64, second: usize, second_scale: f64, third: usize, third_scale: f64, inner_offset: f64, outer_offset: f64) {
-        self.mark_derivatives_dirty(index);
-        self.v[index] = first.value * first_scale + self.v[second] * second_scale + self.v[third] * third_scale + inner_offset + outer_offset;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = first.dn[axis] * first_scale + self.dn[second][axis] * second_scale + self.dn[third][axis] * third_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = first.db[axis] * first_scale + self.db[second][axis] * second_scale + self.db[third][axis] * third_scale; }
-    }
 
 
     #[inline(never)]
@@ -20688,22 +20505,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_div_scaled_add_product_mixed_aaii(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, product_left: AdValue<NODE_COUNT, BRANCH_COUNT>, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let value_term = value.value * value_scale;
-        let product_left_value = product_left.value;
-        let product_right_value = self.v[product_right];
-        let product_term = product_left_value * product_right_value * product_scale;
-        let numerator_value = value_term + product_term;
-        let denominator_value = self.v[denominator] * denominator_scale;
-        let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (value.dn[axis] * value_scale + (product_left.dn[axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale) * reciprocal + self.dn[denominator][axis] * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (value.db[axis] * value_scale + (product_left.db[axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale) * reciprocal + self.db[denominator][axis] * denominator_derivative_scale; }
-    }
 
 
 
@@ -21234,20 +21035,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_add_scaled_value_products_mixed_aiaii(&mut self, index: usize, value: AdValue<NODE_COUNT, BRANCH_COUNT>, value_scale: f64, first_product_left: usize, first_product_right: AdValue<NODE_COUNT, BRANCH_COUNT>, first_product_scale: f64, second_product_left: usize, second_product_right: usize, second_product_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let value_term = value.value * value_scale;
-        let first_product_left_value = self.v[first_product_left];
-        let first_product_right_value = first_product_right.value;
-        let second_product_left_value = self.v[second_product_left];
-        let second_product_right_value = self.v[second_product_right];
-        let first_product_term = first_product_left_value * first_product_right_value * first_product_scale;
-        let second_product_term = second_product_left_value * second_product_right_value * second_product_scale;
-        self.v[index] = value_term + first_product_term + second_product_term;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = value.dn[axis] * value_scale + (self.dn[first_product_left][axis] * first_product_right_value + first_product_left_value * first_product_right.dn[axis]) * first_product_scale + (self.dn[second_product_left][axis] * second_product_right_value + second_product_left_value * self.dn[second_product_right][axis]) * second_product_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = value.db[axis] * value_scale + (self.db[first_product_left][axis] * first_product_right_value + first_product_left_value * first_product_right.db[axis]) * first_product_scale + (self.db[second_product_left][axis] * second_product_right_value + second_product_left_value * self.db[second_product_right][axis]) * second_product_scale; }
-    }
 
 
 
@@ -22269,18 +22056,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_div_scalar_by_product_mixed_ai(&mut self, index: usize, scalar: f64, denominator_left: AdValue<NODE_COUNT, BRANCH_COUNT>, denominator_right: usize, denominator_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let denominator_left_value = denominator_left.value;
-        let denominator_right_value = self.v[denominator_right];
-        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);
-        let quotient = scalar * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (denominator_left.dn[axis] * denominator_right_value + denominator_left_value * self.dn[denominator_right][axis]) * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (denominator_left.db[axis] * denominator_right_value + denominator_left_value * self.db[denominator_right][axis]) * denominator_derivative_scale; }
-    }
 
 
 
@@ -22350,19 +22125,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_sub_div_lhs_mixed_ia(&mut self, index: usize, numerator: usize, denominator: AdValue<NODE_COUNT, BRANCH_COUNT>, right: usize) {
-        self.mark_derivatives_dirty(index);
-        let right_value = self.v[right];
-        let numerator_value = self.v[numerator];
-        let denominator_value = denominator.value;
-        let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal;
-        self.v[index] = quotient - right_value;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = self.dn[numerator][axis] * reciprocal + denominator.dn[axis] * denominator_derivative_scale - self.dn[right][axis]; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = self.db[numerator][axis] * reciprocal + denominator.db[axis] * denominator_derivative_scale - self.db[right][axis]; }
-    }
 
 
     #[inline(never)]
@@ -23250,21 +23012,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_div_scaled_inputs2_by_product_mixed_iaii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, denominator_left: usize, denominator_right: usize, denominator_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let first_value = self.v[first] * first_scale;
-        let second_value = second.value * second_scale;
-        let numerator_value = first_value + second_value;
-        let denominator_left_value = self.v[denominator_left];
-        let denominator_right_value = self.v[denominator_right];
-        let reciprocal = 1.0 / (denominator_left_value * denominator_right_value * denominator_scale);
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = (self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) * reciprocal + (self.dn[denominator_left][axis] * denominator_right_value + denominator_left_value * self.dn[denominator_right][axis]) * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = (self.db[first][axis] * first_scale + second.db[axis] * second_scale) * reciprocal + (self.db[denominator_left][axis] * denominator_right_value + denominator_left_value * self.db[denominator_right][axis]) * denominator_derivative_scale; }
-    }
 
 
 
@@ -24262,23 +24009,6 @@ impl<const VARIABLE_COUNT: usize, const NODE_COUNT: usize, const BRANCH_COUNT: u
 
 
 
-    #[inline(never)]
-    pub(crate) fn store_div_scaled_inputs_product_mixed_iaiii(&mut self, index: usize, first: usize, first_scale: f64, second: AdValue<NODE_COUNT, BRANCH_COUNT>, second_scale: f64, product_left: usize, product_right: usize, product_scale: f64, denominator: usize, denominator_scale: f64) {
-        self.mark_derivatives_dirty(index);
-        let first_value = self.v[first] * first_scale;
-        let second_value = second.value * second_scale;
-        let product_left_value = self.v[product_left];
-        let product_right_value = self.v[product_right];
-        let product_value = product_left_value * product_right_value * product_scale;
-        let numerator_value = (first_value + second_value) + product_value;
-        let denominator_value = self.v[denominator] * denominator_scale;
-        let reciprocal = 1.0 / denominator_value;
-        let quotient = numerator_value * reciprocal;
-        let denominator_derivative_scale = -quotient * reciprocal * denominator_scale;
-        self.v[index] = quotient;
-        let mut active_axes = self.activity.node_axes(index, NODE_COUNT); while let Some(axis) = active_axes.next() { self.dn[index][axis] = ((self.dn[first][axis] * first_scale + second.dn[axis] * second_scale) + (self.dn[product_left][axis] * product_right_value + product_left_value * self.dn[product_right][axis]) * product_scale) * reciprocal + self.dn[denominator][axis] * denominator_derivative_scale; }
-        let mut active_axes = self.activity.branch_axes(index, BRANCH_COUNT); while let Some(axis) = active_axes.next() { self.db[index][axis] = ((self.db[first][axis] * first_scale + second.db[axis] * second_scale) + (self.db[product_left][axis] * product_right_value + product_left_value * self.db[product_right][axis]) * product_scale) * reciprocal + self.db[denominator][axis] * denominator_derivative_scale; }
-    }
 
 
 
