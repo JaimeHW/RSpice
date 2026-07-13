@@ -20587,6 +20587,9 @@ impl XyceTestRunner {
             {
                 length / frequency
             }
+            (None, Some(frequency), None) if frequency.is_finite() && frequency > 0.0 => {
+                0.25 / frequency
+            }
             _ => {
                 return Err(format!(
                     "lossless transmission line '{element_name}' requires either TD or a finite positive F/NL pair"

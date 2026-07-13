@@ -5131,7 +5131,13 @@ impl Engine {
                     let p2n = circuit.get_or_create_node(&element.nodes[3]);
 
                     let freq_eff = (*freq).or(model_params.and_then(|m| m.freq));
-                    let nl_eff = (*nl).or(model_params.and_then(|m| m.nl));
+                    // Xyce's lossless TRA instance default is NL=0.25.  It
+                    // participates only in the F/NL delay form; an explicit
+                    // TD remains authoritative and does not acquire an
+                    // electrical-length parameter.
+                    let nl_eff = (*nl)
+                        .or(model_params.and_then(|m| m.nl))
+                        .or_else(|| (td.is_none() && freq_eff.is_some()).then_some(0.25));
                     // Keep scalar LTRA/TXL instances on the delayed-wave device path.
                     // A synthesized RLGC ladder is useful for diagnostics, but it is
                     // not behaviorally equivalent to ngspice's transmission-line models
