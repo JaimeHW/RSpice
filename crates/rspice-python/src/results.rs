@@ -4,6 +4,7 @@
 //! - `SimulationResult` - DC operating point results
 //! - `TransientResult` - Time-domain waveforms (voltages and branch currents)
 //! - `AcResult` - Frequency-domain complex phasors
+//! - `DistortionResult` - Harmonic and two-tone Volterra products
 //! - `DcSweepResult` - Collection of DC solutions
 //! - `FourierResult` - Harmonic decomposition / THD of a waveform
 //! - `TransferFunctionResult` - Small-signal gain and impedances
@@ -17,7 +18,7 @@ use numpy::{PyArray1, ToPyArray};
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use rspice_core::analysis::AcResult;
+use rspice_core::analysis::{AcResult, DistortionAnalysisResult, DistortionProduct};
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::engine::TransientResult;
 use rspice_core::solver::SimulationResult;
@@ -1109,6 +1110,417 @@ impl PyAcResult {
                 branch + 1
             )
         })
+    }
+}
+
+//=============================================================================
+// Distortion Results
+//=============================================================================
+
+/// Third-order Volterra distortion sweep.
+///
+/// Every returned `AcResult` contains actual sinusoidal peak phasors at the
+/// physical product frequency. They are not internal Volterra kernels or
+/// pre-normalized distortion ratios.
+#[pyclass(name = "DistortionResult", module = "rspice")]
+#[derive(Debug)]
+pub struct PyDistortionResult {
+    f2_over_f1: Option<f64>,
+    f1_frequencies: Vec<f64>,
+    fundamental_f1: Vec<AcResult>,
+    fundamental_f2: Option<Vec<AcResult>>,
+    products: Vec<(DistortionProduct, Vec<AcResult>)>,
+    node_names: Vec<String>,
+    branch_names: Vec<String>,
+}
+
+impl PyDistortionResult {
+    pub fn from_core(result: &DistortionAnalysisResult) -> PyResult<Self> {
+        if result.points.is_empty() {
+            return Err(PyValueError::new_err(
+                "malformed distortion result: no F1 points",
+            ));
+        }
+        let product_kinds: &[DistortionProduct] = if result.is_two_tone() {
+            &[
+                DistortionProduct::Sum,
+                DistortionProduct::Difference,
+                DistortionProduct::ThirdOrderDifference,
+            ]
+        } else {
+            &[
+                DistortionProduct::SecondHarmonic,
+                DistortionProduct::ThirdHarmonic,
+            ]
+        };
+        let f1_frequencies = result
+            .points
+            .iter()
+            .map(|point| point.fundamental_f1.frequency)
+            .collect();
+        let fundamental_f1: Vec<_> = result
+            .points
+            .iter()
+            .map(|point| point.fundamental_f1.clone())
+            .collect();
+        let fundamental_f2 = if result.is_two_tone() {
+            Some(
+                result
+                    .points
+                    .iter()
+                    .enumerate()
+                    .map(|(index, point)| {
+                        point.fundamental_f2.clone().ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "malformed distortion result: missing F2 response at F1 index {index}"
+                            ))
+                        })
+                    })
+                    .collect::<PyResult<Vec<_>>>()?,
+            )
+        } else {
+            None
+        };
+        let products = product_kinds
+            .iter()
+            .map(|&kind| {
+                let rows = result
+                    .points
+                    .iter()
+                    .enumerate()
+                    .map(|(index, point)| {
+                        point
+                            .product(kind)
+                            .map(|value| value.response.clone())
+                            .ok_or_else(|| {
+                                PyValueError::new_err(format!(
+                                    "malformed distortion result: missing '{}' response at F1 index {index}",
+                                    kind.label()
+                                ))
+                            })
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                Ok((kind, rows))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let node_names = fundamental_f1
+            .first()
+            .map(|row| row.node_names.clone())
+            .unwrap_or_default();
+        let branch_names = fundamental_f1
+            .first()
+            .map(|row| row.branch_names.clone())
+            .unwrap_or_default();
+        Ok(Self {
+            f2_over_f1: result.f2_over_f1,
+            f1_frequencies,
+            fundamental_f1,
+            fundamental_f2,
+            products,
+            node_names,
+            branch_names,
+        })
+    }
+
+    fn parse_product(&self, name: &str) -> PyResult<DistortionProduct> {
+        let normalized = name.trim().to_ascii_lowercase().replace([' ', '_'], "");
+        let product = match normalized.as_str() {
+            "2f1" | "hd2" | "secondharmonic" => DistortionProduct::SecondHarmonic,
+            "3f1" | "hd3" | "thirdharmonic" => DistortionProduct::ThirdHarmonic,
+            "f1+f2" | "sum" | "im2sum" => DistortionProduct::Sum,
+            "f1-f2" | "difference" | "im2difference" => DistortionProduct::Difference,
+            "2f1-f2" | "im3" | "thirdorderdifference" => DistortionProduct::ThirdOrderDifference,
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "unknown distortion product '{name}'; available products: {}",
+                    self.available_product_labels().join(", ")
+                )));
+            }
+        };
+        if self.products.iter().any(|(kind, _)| *kind == product) {
+            Ok(product)
+        } else {
+            Err(PyValueError::new_err(format!(
+                "distortion product '{}' is not available in {} mode; available products: {}",
+                product.label(),
+                if self.f2_over_f1.is_some() {
+                    "two-tone"
+                } else {
+                    "harmonic"
+                },
+                self.available_product_labels().join(", ")
+            )))
+        }
+    }
+
+    fn available_product_labels(&self) -> Vec<String> {
+        self.products
+            .iter()
+            .map(|(product, _)| product.label().to_string())
+            .collect()
+    }
+
+    fn product_rows(&self, product: DistortionProduct) -> PyResult<&[AcResult]> {
+        self.products
+            .iter()
+            .find(|(kind, _)| *kind == product)
+            .map(|(_, rows)| rows.as_slice())
+            .ok_or_else(|| PyValueError::new_err("distortion result is missing a product series"))
+    }
+
+    fn validate_series_length(&self, label: &str, rows: &[AcResult]) -> PyResult<()> {
+        if rows.len() == self.fundamental_f1.len() {
+            Ok(())
+        } else {
+            Err(PyValueError::new_err(format!(
+                "malformed distortion result: {label} has {} rows for {} F1 points",
+                rows.len(),
+                self.fundamental_f1.len()
+            )))
+        }
+    }
+
+    fn resolve_node(&self, node: &NodeIdentifier) -> AccessResult<usize> {
+        match node {
+            NodeIdentifier::Index(index) => {
+                let count = self
+                    .fundamental_f1
+                    .first()
+                    .map(|row| row.voltages.len())
+                    .unwrap_or(self.node_names.len());
+                if *index <= count {
+                    Ok(*index)
+                } else {
+                    Err(invalid_node_index_error(*index, count))
+                }
+            }
+            NodeIdentifier::Name(name) => {
+                if is_ground_name(name) {
+                    return Ok(0);
+                }
+                self.node_names
+                    .iter()
+                    .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                    .map(|index| index + 1)
+                    .ok_or_else(|| unknown_node_name_error(name))
+            }
+        }
+    }
+
+    fn resolve_branch(&self, name: &str) -> AccessResult<usize> {
+        self.branch_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            .ok_or_else(|| unknown_branch_name_error(name))
+    }
+
+    fn voltage_ratio_values(
+        &self,
+        product: DistortionProduct,
+        node: &NodeIdentifier,
+    ) -> PyResult<Vec<f64>> {
+        let node = self.resolve_node(node).map_err(PyErr::from)?;
+        let product_rows = self.product_rows(product)?;
+        self.validate_series_length(product.label(), product_rows)?;
+        product_rows
+            .iter()
+            .zip(self.fundamental_f1.iter())
+            .enumerate()
+            .map(|(index, (numerator, denominator))| {
+                if node == 0 {
+                    return Ok(0.0);
+                }
+                let numerator = numerator.voltages.get(node - 1).ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "malformed distortion product '{}' at F1 index {index}: missing node {node}",
+                        product.label()
+                    ))
+                })?;
+                let denominator = denominator.voltages.get(node - 1).ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "malformed F1 result at index {index}: missing node {node}"
+                    ))
+                })?;
+                Ok(magnitude_ratio(numerator.norm(), denominator.norm()))
+            })
+            .collect()
+    }
+
+    fn branch_ratio_values(&self, product: DistortionProduct, branch: &str) -> PyResult<Vec<f64>> {
+        let branch = self.resolve_branch(branch).map_err(PyErr::from)?;
+        let product_rows = self.product_rows(product)?;
+        self.validate_series_length(product.label(), product_rows)?;
+        product_rows
+            .iter()
+            .zip(self.fundamental_f1.iter())
+            .enumerate()
+            .map(|(index, (numerator, denominator))| {
+                let numerator = numerator.currents.get(branch).ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "malformed distortion product '{}' at F1 index {index}: missing branch current {branch}",
+                        product.label()
+                    ))
+                })?;
+                let denominator = denominator.currents.get(branch).ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "malformed F1 result at index {index}: missing branch current {branch}"
+                    ))
+                })?;
+                Ok(magnitude_ratio(numerator.norm(), denominator.norm()))
+            })
+            .collect()
+    }
+}
+
+fn magnitude_ratio(numerator: f64, denominator: f64) -> f64 {
+    if denominator == 0.0 {
+        if numerator == 0.0 { 0.0 } else { f64::INFINITY }
+    } else {
+        numerator / denominator
+    }
+}
+
+#[pymethods]
+impl PyDistortionResult {
+    /// Swept F1 frequencies in Hz.
+    #[getter]
+    fn f1_frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.f1_frequencies.to_pyarray(py)
+    }
+
+    /// Fixed F2 frequency in Hz in two-tone mode, otherwise None.
+    #[getter]
+    fn f2_frequency(&self) -> Option<f64> {
+        self.fundamental_f2
+            .as_ref()
+            .and_then(|rows| rows.first())
+            .map(|row| row.frequency)
+    }
+
+    #[getter]
+    fn f2_over_f1(&self) -> Option<f64> {
+        self.f2_over_f1
+    }
+
+    #[getter]
+    fn is_two_tone(&self) -> bool {
+        self.f2_over_f1.is_some()
+    }
+
+    #[getter]
+    fn num_points(&self) -> usize {
+        self.f1_frequencies.len()
+    }
+
+    #[getter]
+    fn node_names(&self) -> Vec<String> {
+        self.node_names.clone()
+    }
+
+    #[getter]
+    fn branch_names(&self) -> Vec<String> {
+        self.branch_names.clone()
+    }
+
+    /// Canonical product names accepted by `product()` for this mode.
+    #[getter]
+    fn available_products(&self) -> Vec<String> {
+        self.available_product_labels()
+    }
+
+    /// Actual first-order F1 response, aligned with `f1_frequencies`.
+    #[getter]
+    fn fundamental_f1(&self) -> PyAcResult {
+        PyAcResult::new(self.f1_frequencies.clone(), self.fundamental_f1.clone())
+    }
+
+    /// Actual first-order F2 response at each F1 sweep point.
+    ///
+    /// F2 is fixed by SPICE's two-tone contract, so its frequency array
+    /// repeats the same value. Returns None in harmonic mode.
+    #[getter]
+    fn fundamental_f2(&self) -> Option<PyAcResult> {
+        self.fundamental_f2.as_ref().map(|rows| {
+            PyAcResult::new(rows.iter().map(|row| row.frequency).collect(), rows.clone())
+        })
+    }
+
+    /// Actual complex response for a spectral product.
+    fn product(&self, name: &str) -> PyResult<PyAcResult> {
+        let product = self.parse_product(name)?;
+        let rows = self.product_rows(product)?;
+        self.validate_series_length(product.label(), rows)?;
+        Ok(PyAcResult::new(
+            rows.iter().map(|row| row.frequency).collect(),
+            rows.to_vec(),
+        ))
+    }
+
+    /// |V(product)| / |V(F1)| across the F1 sweep.
+    fn voltage_ratio<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let product = self.parse_product(name)?;
+        Ok(self.voltage_ratio_values(product, &node)?.to_pyarray(py))
+    }
+
+    /// Product voltage relative to F1 in dBc (20*log10 of the ratio).
+    fn voltage_db_relative<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let product = self.parse_product(name)?;
+        let values = self
+            .voltage_ratio_values(product, &node)?
+            .into_iter()
+            .map(|ratio| 20.0 * ratio.log10())
+            .collect::<Vec<_>>();
+        Ok(values.to_pyarray(py))
+    }
+
+    /// |I(product)| / |I(F1)| for a named MNA branch across the sweep.
+    fn branch_current_ratio<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+        branch: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let product = self.parse_product(name)?;
+        Ok(self.branch_ratio_values(product, branch)?.to_pyarray(py))
+    }
+
+    /// Product branch current relative to F1 in dBc.
+    fn branch_current_db_relative<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+        branch: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let product = self.parse_product(name)?;
+        let values = self
+            .branch_ratio_values(product, branch)?
+            .into_iter()
+            .map(|ratio| 20.0 * ratio.log10())
+            .collect::<Vec<_>>();
+        Ok(values.to_pyarray(py))
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "DistortionResult(mode={}, points={}, products=[{}])",
+            if self.is_two_tone() {
+                "two-tone"
+            } else {
+                "harmonic"
+            },
+            self.num_points(),
+            self.available_product_labels().join(", ")
+        )
     }
 }
 
@@ -3613,6 +4025,9 @@ pub struct PyRunReport {
     /// AC result (last .ac)
     #[pyo3(get)]
     pub ac: Option<Py<PyAcResult>>,
+    /// Third-order Volterra distortion result (last .disto)
+    #[pyo3(get)]
+    pub distortion: Option<Py<PyDistortionResult>>,
     /// N-port scattering parameters (last .sp)
     #[pyo3(get)]
     pub s_parameters: Option<PySParameterResult>,

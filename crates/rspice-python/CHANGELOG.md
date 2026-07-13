@@ -12,6 +12,10 @@ Release numbers remain tied to the workspace version.
 
 ### Added
 
+- Complete third-order Volterra `.DISTO` analysis, including harmonic 2F1/3F1
+  products, two-tone F1+F2/F1-F2/2F1-F2 products, complex peak phasors,
+  relative voltage/current metrics, direct sweep APIs, deck execution, and
+  cooperative cancellation.
 - Typed results and direct APIs for AC data sweeps, N-port S-parameters, STB,
   pole-zero, PSS, HB, PAC, driven and oscillator noise, Monte Carlo,
   sensitivity, parameter stepping, Fourier analysis, transient compression,
@@ -42,8 +46,8 @@ Release numbers remain tied to the workspace version.
 - Corrected transient `TSTART` clipping, DC sweep validation and nested axes,
   percentile validation, zero/noise logarithms, pole stability and bandwidth,
   and multi-channel waveform compression error bounds.
-- Eliminated silent approximations for `.DISTO`, complete AC `.SENS`, and
-  `.SP donoise`; these are reported as unsupported and invalidate successful
+- Eliminated silent approximations for complete AC `.SENS` and `.SP donoise`;
+  these are reported as unsupported and invalidate successful
   automated-verification reports until standards-equivalent core solvers exist.
 - Fixed a parallel XSPICE virtual-file test race and workspace-sdist lockfile
   reconciliation without permitting dependency upgrades.

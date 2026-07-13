@@ -34,9 +34,9 @@ use crate::measure;
 use crate::netlist::{PyNetlist, describe_analysis};
 use crate::results::{
     NodeIdentifier, PyAcResult, PyAnalysisRecord, PyCompressedTransientResult, PyDcSweepResult,
-    PyFourierResult, PyHbResult, PyMonteCarloResult, PyNoiseResult, PyOscillatorNoiseResult,
-    PyPacResult, PyPeriodicNoiseResult, PyPoleZeroResult, PyPssResult, PyRunReport,
-    PySParameterResult, PySensitivityResult, PySimulationResult, PyStbResult,
+    PyDistortionResult, PyFourierResult, PyHbResult, PyMonteCarloResult, PyNoiseResult,
+    PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult, PyPoleZeroResult, PyPssResult,
+    PyRunReport, PySParameterResult, PySensitivityResult, PySimulationResult, PyStbResult,
     PyTransferFunctionResult, PyTransientCheckpoint, PyTransientResult, is_ground_name,
 };
 
@@ -49,6 +49,38 @@ fn validate_frequencies(frequencies: &[f64]) -> PyResult<()> {
         if !f.is_finite() || f < 0.0 {
             return Err(PyValueError::new_err(format!(
                 "frequencies must be finite and non-negative, got {f}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Validate the stricter frequency and fixed-F2 contract used by `.DISTO`.
+fn validate_distortion_arguments(frequencies: &[f64], f2_over_f1: Option<f64>) -> PyResult<()> {
+    if frequencies.is_empty() {
+        return Err(PyValueError::new_err("frequencies must not be empty"));
+    }
+    for (index, &frequency) in frequencies.iter().enumerate() {
+        if !frequency.is_finite() || frequency <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "distortion F1 frequency at index {index} must be finite and positive, got {frequency}"
+            )));
+        }
+    }
+    if let Some(ratio) = f2_over_f1 {
+        if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
+            return Err(PyValueError::new_err(format!(
+                "f2_over_f1 must be finite and strictly between 0 and 1, got {ratio}"
+            )));
+        }
+        let f2 = ratio * frequencies[0];
+        if let Some((index, frequency)) = frequencies
+            .iter()
+            .enumerate()
+            .find(|(_, frequency)| **frequency <= f2)
+        {
+            return Err(PyValueError::new_err(format!(
+                "distortion F1 frequency at index {index} ({frequency}) must be greater than the fixed F2 frequency ({f2})"
             )));
         }
     }
@@ -415,6 +447,22 @@ impl PyEngine {
         Ok(PyAcResult::new(frequencies, results))
     }
 
+    /// Core distortion runner shared by the direct and deck APIs.
+    fn distortion_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        frequencies: Vec<f64>,
+        f2_over_f1: Option<f64>,
+    ) -> PyResult<PyDistortionResult> {
+        validate_distortion_arguments(&frequencies, f2_over_f1)?;
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let result = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_distortion_with_abort(&netlist.inner, &frequencies, f2_over_f1, abort)
+        })?;
+        PyDistortionResult::from_core(&result)
+    }
+
     /// Core noise runner shared by `run_noise` and `run()`.
     #[allow(clippy::too_many_arguments)]
     fn noise_core_impl(
@@ -747,8 +795,8 @@ impl PyEngine {
 
     /// Run every analysis directive in the netlist and evaluate .MEAS
     ///
-    /// Executes the netlist's own `.op`, `.dc`, `.ac`, `.tran`, `.noise`,
-    /// `.tf`, and `.four` directives in order, then evaluates `.MEAS`
+    /// Executes the netlist's own `.op`, `.dc`, `.ac`, `.disto`, `.tran`,
+    /// `.noise`, `.tf`, and `.four` directives in order, then evaluates `.MEAS`
     /// statements against the corresponding results. Directives the engine
     /// cannot execute are reported in `records` with `skipped=True` and a
     /// reason — nothing is dropped silently.
@@ -774,6 +822,7 @@ impl PyEngine {
         let mut dc: Option<Py<PyDcSweepResult>> = None;
         let mut tran: Option<Py<PyTransientResult>> = None;
         let mut ac: Option<Py<PyAcResult>> = None;
+        let mut distortion: Option<Py<PyDistortionResult>> = None;
         let mut s_parameters: Option<PySParameterResult> = None;
         let mut noise: Option<Vec<PyNoiseResult>> = None;
         let mut noise_core: Option<Vec<rspice_core::analysis::NoiseResult>> = None;
@@ -872,6 +921,22 @@ impl PyEngine {
                     ac = Some(Py::new(py, result)?);
                     records.push(PyAnalysisRecord::executed(
                         "ac_data",
+                        describe_analysis(analysis),
+                    ));
+                }
+                AnalysisCommand::Disto {
+                    variation,
+                    points,
+                    start_freq,
+                    stop_freq,
+                    f2_over_f1,
+                } => {
+                    let frequencies =
+                        sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+                    let result = self.distortion_impl(py, netlist, frequencies, *f2_over_f1)?;
+                    distortion = Some(Py::new(py, result)?);
+                    records.push(PyAnalysisRecord::executed(
+                        "disto",
                         describe_analysis(analysis),
                     ));
                 }
@@ -1104,17 +1169,10 @@ impl PyEngine {
                     pending_fourier.push((*fundamental, outputs.clone(), *num_harmonics));
                 }
                 other => {
-                    let (kind, reason) = match other {
-                        AnalysisCommand::Disto { .. } => (
-                            "disto",
-                            "the core does not yet provide a nonlinear .DISTO solver; use harmonic-balance analysis for distortion products",
-                        ),
-                        _ => ("unknown", "this analysis is not executed by Engine.run()"),
-                    };
                     records.push(PyAnalysisRecord::skipped(
-                        kind,
+                        "unknown",
                         format!("{other:?}"),
-                        reason,
+                        "this analysis is not executed by Engine.run()",
                     ));
                 }
             }
@@ -1213,6 +1271,7 @@ impl PyEngine {
             dc,
             tran,
             ac,
+            distortion,
             s_parameters,
             noise,
             tf,
@@ -1426,6 +1485,40 @@ impl PyEngine {
         let variation = parse_variation(variation)?;
         let frequencies = sweep_frequencies(variation, points, start_freq, stop_freq)?;
         self.ac_impl(py, netlist, frequencies)
+    }
+
+    /// Run third-order Volterra distortion analysis at explicit F1 frequencies.
+    ///
+    /// Sources opt into the analysis with `DISTOF1 magnitude [phase]` and,
+    /// in two-tone mode, `DISTOF2 magnitude [phase]`. With `f2_over_f1`, F2
+    /// is fixed at `f2_over_f1 * frequencies[0]` while F1 is swept.
+    #[pyo3(signature = (netlist, frequencies, f2_over_f1=None))]
+    fn run_distortion(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        frequencies: Vec<f64>,
+        f2_over_f1: Option<f64>,
+    ) -> PyResult<PyDistortionResult> {
+        self.distortion_impl(py, netlist, frequencies, f2_over_f1)
+    }
+
+    /// Run harmonic or two-tone `.DISTO` on a DEC/OCT/LIN F1 sweep.
+    #[pyo3(signature = (netlist, variation, points, start_freq, stop_freq, f2_over_f1=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_distortion_sweep(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        variation: &str,
+        points: usize,
+        start_freq: f64,
+        stop_freq: f64,
+        f2_over_f1: Option<f64>,
+    ) -> PyResult<PyDistortionResult> {
+        let variation = parse_variation(variation)?;
+        let frequencies = sweep_frequencies(variation, points, start_freq, stop_freq)?;
+        self.distortion_impl(py, netlist, frequencies, f2_over_f1)
     }
 
     /// Run N-port S-parameter analysis using annotated voltage-source ports.

@@ -213,10 +213,10 @@ C1 out 0 100n
         with pytest.raises(ValueError):
             float(m)
 
-    def test_unsupported_directives_are_recorded_not_dropped(self, engine):
+    def test_distortion_directive_is_executed_not_dropped(self, engine):
         netlist = rspice.Netlist.parse(
-            """* deck with an unsupported directive
-V1 in 0 10
+            """* deck with operating point and distortion analyses
+V1 in 0 DC 10 DISTOF1 1m 0
 R1 in out 1k
 R2 out 0 1k
 .op
@@ -225,18 +225,16 @@ R2 out 0 1k
 """
         )
         report = engine.run(netlist)
-        assert report.analyses_run == ["op"]
-        skipped = report.skipped
-        assert len(skipped) == 1
-        assert skipped[0].kind == "disto"
-        assert skipped[0].reason
+        assert report.analyses_run == ["op", "disto"]
+        assert report.distortion is not None
+        assert report.skipped == []
 
-    def test_skipped_directive_fails_success_contract_even_when_measurement_passes(
+    def test_executed_distortion_does_not_invalidate_passing_measurement(
         self, engine
     ):
         netlist = rspice.Netlist.parse(
-            """* passing measurement plus unsupported directive
-V1 in 0 10
+            """* passing measurement plus supported distortion directive
+V1 in 0 DC 10 DISTOF1 1m 0
 R1 in out 1k
 R2 out 0 1k
 .dc V1 0 10 1
@@ -249,10 +247,9 @@ R2 out 0 1k
         report = engine.run(netlist)
 
         assert report.measurement("vout").passed
-        assert [record.kind for record in report.skipped] == ["disto"]
-        assert not report.all_passed
-        with pytest.raises(rspice.MeasurementError, match="skipped"):
-            report.assert_passed()
+        assert report.skipped == []
+        assert report.all_passed
+        report.assert_passed()
 
     def test_ac_sensitivity_is_explicitly_gated_not_approximated(self, engine):
         netlist = rspice.Netlist.parse(

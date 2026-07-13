@@ -6,10 +6,10 @@ regression tests in CI the same way you run unit tests.
 
 ## Features
 
-- **Simulation API** — DC, AC/AC-DATA, transient, noise, pole-zero, STB,
-  N-port S-parameters, PSS, HB, PAC, driven PNoise, oscillator phase noise,
-  Monte Carlo, sensitivity, transfer function, Fourier/THD, and parametric
-  analysis
+- **Simulation API** — DC, AC/AC-DATA, third-order Volterra distortion,
+  transient, noise, pole-zero, STB, N-port S-parameters, PSS, HB, PAC, driven
+  PNoise, oscillator phase noise, Monte Carlo, sensitivity, transfer function,
+  Fourier/THD, and parametric analysis
 - **Long-run controls** — resumable netlist-fingerprinted transient
   checkpoints and error-bounded compressed voltage waveforms
 - **Verification first** — `engine.run(netlist)` executes the netlist's own
@@ -119,13 +119,13 @@ def test_rc_step_response():
     assert report.measurement("trise").value == pytest.approx(219.7e-6, rel=0.02)
 ```
 
-`engine.run` executes the netlist's `.op`, `.dc`, `.ac`/`.ac data`, `.sp`,
-`.tran`, `.noise`, `.tf`, `.stb`, `.pz`, `.mc`, `.step`, `.temp`, DC `.sens`,
-and `.four` directives in order and returns a `RunReport`:
+`engine.run` executes the netlist's `.op`, `.dc`, `.ac`/`.ac data`, `.disto`,
+`.sp`, `.tran`, `.noise`, `.tf`, `.stb`, `.pz`, `.mc`, `.step`, `.temp`, DC
+`.sens`, and `.four` directives in order and returns a `RunReport`:
 
-- `report.tran` / `report.ac` / `report.op` / `report.dc` / `report.noise` /
-  `report.s_parameters` / `report.tf` / `report.stb` / `report.pz` /
-  `report.fourier` — the analysis results
+- `report.tran` / `report.ac` / `report.distortion` / `report.op` /
+  `report.dc` / `report.noise` / `report.s_parameters` / `report.tf` /
+  `report.stb` / `report.pz` / `report.fourier` — the analysis results
 - `report.measurements`, `report.measurement(name)`, `report.failures`,
   `report.all_passed` — `.MEAS` outcomes for TRAN, DC, AC, and NOISE analyses
   (`.MEAS AC` supports magnitude, dB, phase, real, and imaginary data;
@@ -239,6 +239,25 @@ phase = ac.voltage_phase_degrees("out")
 h = ac.voltage_complex("out")                  # complex128 ndarray
 i_in = ac.branch_current_complex("V1")         # complex branch currents
 
+# Third-order Volterra distortion. Sources use DISTOF1 and optional DISTOF2.
+distortion_netlist = rspice.Netlist.parse("""
+* Biased nonlinear divider
+V1 in 0 DC 0.5 DISTOF1 1m 0 DISTOF2 1m 0
+R1 in out 100
+D1 out 0 DM
+.model DM D(IS=1e-12 N=1 CJO=1p)
+.end
+""")
+dist = engine.run_distortion(distortion_netlist, np.logspace(3, 6, 31))
+hd2 = dist.product("2f1")                     # AcResult at physical 2F1
+hd3_dbc = dist.voltage_db_relative("3f1", "out")
+
+# Two-tone mode: F2 is fixed at 0.9 * the first F1 while F1 is swept.
+imd = engine.run_distortion_sweep(
+    distortion_netlist, "dec", 10, 1e6, 100e6, f2_over_f1=0.9
+)
+im3 = imd.product("2f1-f2").voltage_complex("out")
+
 # Transient — Ctrl-C cancellable
 tran = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)
 four = tran.fourier("out", fundamental=1e3)    # harmonics + THD
@@ -343,9 +362,9 @@ same Engine remain usable. When exactly one analysis is active,
 it is `None` for idle Engines, concurrent calls, or analyses without a
 meaningful progress scale.
 
-DC operating points and sweeps, AC and S-parameter sweeps, transfer-function,
-STB, pole-zero, transient and checkpoint/resume runs, noise, Monte Carlo,
-parameter steps, sensitivity, PSS, HB, PAC, driven PNoise, and
+DC operating points and sweeps, AC, distortion, and S-parameter sweeps,
+transfer-function, STB, pole-zero, transient and checkpoint/resume runs,
+noise, Monte Carlo, parameter steps, sensitivity, PSS, HB, PAC, driven PNoise, and
 oscillator-noise calls poll Python signal handlers while they run. Ctrl-C
 (`KeyboardInterrupt`) cancels these simulations instead of arriving only
 after a completed result is returned.

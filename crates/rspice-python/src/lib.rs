@@ -84,9 +84,9 @@ fn ac_frequencies<'py>(
 /// RSpice Python module - circuit simulation engine
 ///
 /// This module provides Python bindings for the RSpice SPICE-compatible
-/// circuit simulation engine, supporting DC, AC, transient, noise,
-/// pole-zero, Monte Carlo, sensitivity, transfer-function, and Fourier
-/// analyses, plus .MEAS-based automated verification.
+/// circuit simulation engine, supporting DC, AC, third-order distortion,
+/// transient, noise, pole-zero, Monte Carlo, sensitivity, transfer-function,
+/// and Fourier analyses, plus .MEAS-based automated verification.
 #[pymodule]
 fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Every exposed Rust type is Send and internally immutable or protected by
@@ -117,6 +117,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyCompressedTransientResult>()?;
     m.add_class::<results::PyTransientCheckpoint>()?;
     m.add_class::<results::PyAcResult>()?;
+    m.add_class::<results::PyDistortionResult>()?;
     m.add_class::<results::PyDcSweepResult>()?;
     m.add_class::<results::PyNoiseResult>()?;
     m.add_class::<results::PyNoiseContribution>()?;
@@ -185,6 +186,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "CompressedTransientResult",
             "TransientCheckpoint",
             "AcResult",
+            "DistortionResult",
             "DcSweepResult",
             "NoiseResult",
             "NoiseContribution",
