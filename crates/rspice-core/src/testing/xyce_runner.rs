@@ -3229,13 +3229,6 @@ impl XyceTestRunner {
                 unreachable!("AC output request presence was checked before parsing");
             };
 
-        if reference_path.is_some() && !measurement_reference_paths.is_empty() {
-            return Err(
-                "combined AC waveform and measurement artifact comparison is not yet implemented"
-                    .to_string(),
-            );
-        }
-
         Ok(XyceStaticAcPlan {
             deck_path: deck.path.clone(),
             reference_path,
@@ -5892,6 +5885,38 @@ impl XyceTestRunner {
             }
         };
         if mismatches.is_empty() {
+            if !plan.measurement_reference_paths.is_empty() {
+                let measurements =
+                    crate::analysis::advanced::evaluate_ac_measurements(&netlist, &results);
+                let measurement_mismatches = match self.compare_measurement_references(
+                    &plan.measurement_reference_paths,
+                    &measurements,
+                    plan.measurement_tolerance,
+                ) {
+                    Ok(mismatches) => mismatches,
+                    Err(err) => {
+                        return self.failure_result(
+                            deck,
+                            start,
+                            contract,
+                            format!("AC measurement reference comparison error: {err}"),
+                            Vec::new(),
+                        );
+                    }
+                };
+                if !measurement_mismatches.is_empty() {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "{} Xyce AC measurement mismatch(es)",
+                            measurement_mismatches.len()
+                        ),
+                        measurement_mismatches,
+                    );
+                }
+            }
             let side_mismatches = match self.compare_ac_side_outputs(&plan, &netlist, &results) {
                 Ok(mismatches) => mismatches,
                 Err(err) => {
