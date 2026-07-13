@@ -5213,6 +5213,26 @@ fn test_xyce_stepped_lossless_transmission_line_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_mutual_inductor_device_parameter_print_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/MINDUCTORS/mutIndPrint1.cir",
+        "Netlists/MINDUCTORS/mutIndPrint2.cir",
+        "Netlists/MINDUCTORS/mutIndStep.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should route device-parameter expressions through the generic transient evaluator, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.

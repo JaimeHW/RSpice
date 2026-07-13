@@ -21203,16 +21203,13 @@ impl XyceTestRunner {
     }
 
     fn validate_tran_probe_expression(expression: &str, netlist: &Netlist) -> Result<(), String> {
-        let prepared =
-            prepare_behavioral_expression(expression, &netlist.params).map_err(|err| {
-                format!("could not prepare .PRINT TRAN expression '{{{expression}}}': {err}")
-            })?;
-        let ast = parse_expression_strict(&prepared).map_err(|err| {
-            format!("could not parse .PRINT TRAN expression '{{{expression}}}': {err}")
-        })?;
-        if Self::expression_contains_sdt(&ast) {
-            let program = compile(&ast);
-            for branch in program.branch_map.keys() {
+        if Self::print_expression_contains_named_call(expression, "sdt") {
+            let probe = format!("{{{expression}}}");
+            let runtime =
+                Self::stateful_tran_print_expression(&probe, netlist)?.ok_or_else(|| {
+                    format!("stateful expression '{{{expression}}}' lost its SDT call")
+                })?;
+            for branch in runtime.program.branch_map.keys() {
                 let probe = format!("i({branch})");
                 Self::validate_atomic_tran_probe(&Self::normalize_probe(&probe), &probe, netlist)?;
             }
@@ -22526,12 +22523,17 @@ impl XyceTestRunner {
         let Some(expression) = Self::print_expression_inner(probe) else {
             return Ok(None);
         };
-        let prepared =
-            prepare_behavioral_expression(expression, &netlist.params).map_err(|err| {
-                format!(
-                    "could not prepare stateful .PRINT TRAN expression '{{{expression}}}': {err}"
-                )
-            })?;
+        if !Self::print_expression_contains_named_call(expression, "sdt") {
+            return Ok(None);
+        }
+        let (expression, context, _) = Self::rewrite_print_device_parameter_tokens_maybe(
+            expression,
+            netlist.params.clone(),
+            |token| Self::static_transient_device_parameter_value(netlist, token),
+        )?;
+        let prepared = prepare_behavioral_expression(&expression, &context).map_err(|err| {
+            format!("could not prepare stateful .PRINT TRAN expression '{{{expression}}}': {err}")
+        })?;
         let ast = parse_expression_strict(&prepared).map_err(|err| {
             format!("could not parse stateful .PRINT TRAN expression '{{{expression}}}': {err}")
         })?;
@@ -22542,6 +22544,32 @@ impl XyceTestRunner {
             program: compile(&ast),
             vm: Vm::new(),
         }))
+    }
+
+    fn static_transient_device_parameter_value(
+        netlist: &Netlist,
+        token: &str,
+    ) -> Result<Value, String> {
+        let normalized = Self::normalize_probe(token);
+        let (element_name, parameter) = Self::parse_device_parameter_probe(&normalized)
+            .ok_or_else(|| format!("invalid transient device parameter token '{token}'"))?;
+        match parameter.as_str() {
+            "r" => Self::effective_resistor_value(netlist, &element_name).ok_or_else(|| {
+                format!("resistor parameter probe '{token}' has no finite resistance")
+            }),
+            "c" => Self::effective_capacitor_value(netlist, &element_name).ok_or_else(|| {
+                format!("capacitor parameter probe '{token}' has no finite capacitance")
+            }),
+            "l" => Self::effective_inductor_value(netlist, &element_name).ok_or_else(|| {
+                format!("inductor parameter probe '{token}' has no finite inductance")
+            }),
+            "temp" => Self::resistor_temperature_value(netlist, &element_name).ok_or_else(|| {
+                format!("resistor parameter probe '{token}' has no finite temperature")
+            }),
+            _ => Err(format!(
+                "device parameter probe '{token}' is not supported in stateful transient output"
+            )),
+        }
     }
 
     fn stateful_tran_probe_waveform(
@@ -23323,6 +23351,43 @@ impl XyceTestRunner {
                 .next()
                 .expect("valid char boundary");
             index += ch.len_utf8();
+        }
+        false
+    }
+
+    fn print_expression_contains_named_call(expression: &str, name: &str) -> bool {
+        let bytes = expression.as_bytes();
+        let mut index = 0usize;
+        while index < bytes.len() {
+            if matches!(bytes[index], b'\'' | b'"') {
+                let quote = bytes[index];
+                index += 1;
+                while index < bytes.len() && bytes[index] != quote {
+                    index += 1;
+                }
+                index = (index + 1).min(bytes.len());
+                continue;
+            }
+            if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
+                let start = index;
+                index += 1;
+                while index < bytes.len()
+                    && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+                {
+                    index += 1;
+                }
+                let identifier = &expression[start..index];
+                while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+                    index += 1;
+                }
+                if identifier.eq_ignore_ascii_case(name)
+                    && bytes.get(index).is_some_and(|byte| *byte == b'(')
+                {
+                    return true;
+                }
+                continue;
+            }
+            index += 1;
         }
         false
     }
@@ -30920,6 +30985,22 @@ default output
             err.contains("LOCA continuation"),
             "unexpected rejection message: {err}"
         );
+    }
+
+    #[test]
+    fn stateful_print_call_detection_is_token_aware() {
+        assert!(XyceTestRunner::print_expression_contains_named_call(
+            "SDT ( V(out) ) + 1",
+            "sdt"
+        ));
+        assert!(!XyceTestRunner::print_expression_contains_named_call(
+            "my_sdt(V(out)) + sdt_value",
+            "sdt"
+        ));
+        assert!(!XyceTestRunner::print_expression_contains_named_call(
+            "table(\"sdt(fake)\")",
+            "sdt"
+        ));
     }
 
     #[test]
