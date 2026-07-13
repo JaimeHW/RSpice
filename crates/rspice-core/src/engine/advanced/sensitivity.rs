@@ -1,5 +1,85 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy)]
+enum AcSensitivityElementField {
+    ResistorValue,
+    CapacitorValue,
+    InductorValue,
+    JilesAthertonValue,
+    VcvsGain,
+    CccsGain,
+    VccsTransconductance,
+    CcvsTransresistance,
+    BehavioralTc1,
+    BehavioralTc2,
+    TransmissionZ0,
+    TransmissionDelay,
+    TransmissionFrequency,
+    TransmissionLength,
+    Coupling,
+}
+
+#[derive(Debug, Clone)]
+enum AcSensitivityLocation {
+    ElementField {
+        element_index: usize,
+        field: AcSensitivityElementField,
+    },
+    ElementParameter {
+        element_index: usize,
+        parameter_index: usize,
+    },
+    ElementNamedParameter {
+        element_index: usize,
+        parameter: String,
+    },
+    ElementVectorParameter {
+        element_index: usize,
+        parameter_index: usize,
+        entry_index: usize,
+    },
+    ElementNamedVectorParameter {
+        element_index: usize,
+        parameter: String,
+        entry_index: usize,
+        resolved_values: Vec<Value>,
+    },
+    SourceDc {
+        element_index: usize,
+    },
+    SourceAcMagnitude {
+        element_index: usize,
+    },
+    SourceAcPhaseDegrees {
+        element_index: usize,
+    },
+    ModelParameter {
+        model_index: usize,
+        parameter: String,
+    },
+    ModelVectorParameter {
+        model_index: usize,
+        parameter_index: usize,
+        entry_index: usize,
+    },
+    ModelNamedVectorParameter {
+        model_index: usize,
+        parameter: String,
+        entry_index: usize,
+        resolved_values: Vec<Value>,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct AcSensitivityTarget {
+    vector_name: String,
+    element: String,
+    element_type: ElementType,
+    parameter: String,
+    nominal_value: Value,
+    location: AcSensitivityLocation,
+}
+
 impl Engine {
     pub(in crate::engine::advanced) fn collect_sensitivity_elements(
         circuit: &CircuitData,
@@ -683,12 +763,1472 @@ impl Engine {
             })
             .collect()
     }
+
+    fn flattened_sensitivity_netlist(netlist: &Netlist) -> Result<Netlist, SimulationError> {
+        let flattened = crate::netlist::flatten_netlist_with_models(netlist)
+            .map_err(|error| SimulationError::Netlist(error.to_string()))?;
+        let mut flat = netlist.clone();
+        flat.elements = flattened.elements;
+        flat.subcircuits.clear();
+        flat.models.extend(flattened.scoped_models);
+        flat.initial_conditions
+            .extend(flattened.scoped_initial_conditions);
+        flat.node_sets.extend(flattened.scoped_node_sets);
+        // Parameter perturbations below edit the resolved AST directly. A
+        // retained source would cause generic override helpers to reparse the
+        // original hierarchy and discard those edits.
+        flat.source_text = None;
+        flat.source_path = None;
+        Ok(flat)
+    }
+
+    fn source_has_explicit_ac(spec: &SourceSpec) -> bool {
+        match spec {
+            SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+                Self::source_has_explicit_ac(inner)
+            }
+            SourceSpec::Ac { .. } | SourceSpec::DcAc { .. } | SourceSpec::DcAcTransient { .. } => {
+                true
+            }
+            SourceSpec::DcTransient { transient, .. } => Self::source_has_explicit_ac(transient),
+            _ => false,
+        }
+    }
+
+    fn sensitivity_element_type(kind: &ElementKind) -> ElementType {
+        match kind {
+            ElementKind::Resistor { .. } => ElementType::Resistor,
+            ElementKind::Capacitor { .. } => ElementType::Capacitor,
+            ElementKind::Inductor { .. } | ElementKind::JilesAthertonInductor { .. } => {
+                ElementType::Inductor
+            }
+            ElementKind::VoltageSource(_) | ElementKind::VoltageSourceDeferred(_) => {
+                ElementType::VoltageSource
+            }
+            ElementKind::CurrentSource(_) | ElementKind::CurrentSourceDeferred(_) => {
+                ElementType::CurrentSource
+            }
+            ElementKind::Diode { .. } => ElementType::Diode,
+            ElementKind::Bjt { .. } => ElementType::Bjt,
+            ElementKind::Mosfet { .. } => ElementType::Mosfet,
+            ElementKind::Jfet { .. } => ElementType::Jfet,
+            ElementKind::Mesfet { .. } => ElementType::Mesfet,
+            ElementKind::Vccs { .. } => ElementType::Transconductance,
+            ElementKind::Ccvs { .. } => ElementType::Transresistance,
+            ElementKind::Vcvs { .. } | ElementKind::Cccs { .. } => ElementType::Other,
+            ElementKind::BehavioralVoltage { .. } | ElementKind::BehavioralCurrent { .. } => {
+                ElementType::BehavioralSource
+            }
+            ElementKind::VSwitch { .. }
+            | ElementKind::ISwitch { .. }
+            | ElementKind::GenericSwitch { .. } => ElementType::Switch,
+            ElementKind::TransmissionLine { .. } => ElementType::TransmissionLine,
+            ElementKind::Coupling { .. } => ElementType::Coupling,
+            ElementKind::Xspice { .. } => ElementType::Xspice,
+            ElementKind::Subcircuit { .. } => ElementType::Other,
+        }
+    }
+
+    fn sensitivity_instance_params(kind: &ElementKind) -> Option<&[(String, Value)]> {
+        match kind {
+            ElementKind::Resistor {
+                instance_params, ..
+            }
+            | ElementKind::Capacitor {
+                instance_params, ..
+            }
+            | ElementKind::Inductor {
+                instance_params, ..
+            }
+            | ElementKind::Diode {
+                instance_params, ..
+            }
+            | ElementKind::Bjt {
+                instance_params, ..
+            }
+            | ElementKind::Mosfet {
+                instance_params, ..
+            }
+            | ElementKind::Jfet {
+                instance_params, ..
+            }
+            | ElementKind::Mesfet {
+                instance_params, ..
+            } => Some(instance_params),
+            ElementKind::Xspice { params, .. } => Some(params),
+            _ => None,
+        }
+    }
+
+    fn sensitivity_model_name(kind: &ElementKind) -> Option<&str> {
+        match kind {
+            ElementKind::Resistor { model, .. }
+            | ElementKind::Capacitor { model, .. }
+            | ElementKind::Inductor { model, .. }
+            | ElementKind::TransmissionLine { model, .. } => model.as_deref(),
+            ElementKind::JilesAthertonInductor { model, .. }
+            | ElementKind::Diode { model, .. }
+            | ElementKind::Bjt { model, .. }
+            | ElementKind::Mosfet { model, .. }
+            | ElementKind::Jfet { model, .. }
+            | ElementKind::Mesfet { model, .. }
+            | ElementKind::VSwitch { model, .. }
+            | ElementKind::ISwitch { model, .. }
+            | ElementKind::GenericSwitch { model, .. }
+            | ElementKind::Xspice { model, .. } => Some(model),
+            _ => None,
+        }
+    }
+
+    fn is_discrete_sensitivity_parameter(parameter: &str) -> bool {
+        let upper = parameter.trim().to_ascii_uppercase();
+        matches!(
+            upper.as_str(),
+            "LEVEL"
+                | "VERSION"
+                | "TYPE"
+                | "POLARITY"
+                | "PARAMCHK"
+                | "BINUNIT"
+                | "OFF"
+                | "ON"
+                | "SELECT"
+                | "METHOD"
+        ) || upper.ends_with("MOD")
+            || upper.ends_with("MODE")
+            || upper.ends_with("FLAG")
+    }
+
+    fn add_ac_sensitivity_target(
+        targets: &mut Vec<AcSensitivityTarget>,
+        seen: &mut HashSet<String>,
+        target: AcSensitivityTarget,
+    ) {
+        if target.nominal_value.is_finite() && seen.insert(target.vector_name.to_ascii_uppercase())
+        {
+            targets.push(target);
+        }
+    }
+
+    fn resolved_model_scalar_params(
+        netlist: &Netlist,
+        model: &crate::netlist::ModelDef,
+    ) -> Result<Vec<(String, Value)>, SimulationError> {
+        Self::resolved_expression_params(
+            &netlist.params,
+            &model.params,
+            &model.expr_params,
+            &format!("model '{}'", model.name),
+        )
+    }
+
+    fn resolved_expression_params(
+        base_context: &crate::netlist::ParamContext,
+        numeric: &[(String, Value)],
+        expressions: &[(String, String)],
+        owner: &str,
+    ) -> Result<Vec<(String, Value)>, SimulationError> {
+        let mut resolved = Vec::new();
+        let mut seen = HashSet::new();
+        let mut context = base_context.clone();
+        for (name, value) in numeric {
+            context.set(name, *value);
+            if seen.insert(name.to_ascii_uppercase()) {
+                resolved.push((name.clone(), *value));
+            }
+        }
+
+        let mut pending = expressions.to_vec();
+        while !pending.is_empty() {
+            let mut next = Vec::new();
+            let mut progressed = false;
+            for (name, expression) in pending {
+                match crate::netlist::expr::eval_expression(&expression, &context) {
+                    Ok(value) if value.is_finite() => {
+                        context.set(&name, value);
+                        if seen.insert(name.to_ascii_uppercase()) {
+                            resolved.push((name, value));
+                        }
+                        progressed = true;
+                    }
+                    Ok(value) => {
+                        return Err(SimulationError::Circuit(format!(
+                            "AC sensitivity {owner} parameter '{name}' resolved to non-finite value {value}"
+                        )));
+                    }
+                    Err(_) => next.push((name, expression)),
+                }
+            }
+            if !progressed {
+                let unresolved = next
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(SimulationError::Circuit(format!(
+                    "AC sensitivity could not resolve {owner} parameter(s): {unresolved}"
+                )));
+            }
+            pending = next;
+        }
+        Ok(resolved)
+    }
+
+    fn resolved_vector_expression_params(
+        base_context: &crate::netlist::ParamContext,
+        scalar_params: &[(String, Value)],
+        vectors: &[(String, Vec<String>)],
+        owner: &str,
+    ) -> Result<Vec<(String, Vec<Value>)>, SimulationError> {
+        let mut context = base_context.clone();
+        for (name, value) in scalar_params {
+            context.set(name, *value);
+        }
+        vectors
+            .iter()
+            .map(|(name, expressions)| {
+                let values = expressions
+                    .iter()
+                    .map(|expression| {
+                        crate::netlist::expr::eval_expression(expression, &context).map_err(
+                            |error| {
+                                SimulationError::Circuit(format!(
+                                    "AC sensitivity could not resolve {owner} vector parameter '{name}' entry '{expression}': {error}"
+                                ))
+                            },
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if let Some(value) = values.iter().find(|value| !value.is_finite()) {
+                    return Err(SimulationError::Circuit(format!(
+                        "AC sensitivity {owner} vector parameter '{name}' resolved to non-finite value {value}"
+                    )));
+                }
+                Ok((name.clone(), values))
+            })
+            .collect()
+    }
+
+    fn collect_ac_sensitivity_targets(
+        netlist: &Netlist,
+    ) -> Result<Vec<AcSensitivityTarget>, SimulationError> {
+        let mut targets = Vec::new();
+        let mut seen = HashSet::new();
+        let mut referenced_models = HashSet::new();
+
+        for (element_index, element) in netlist.elements.iter().enumerate() {
+            let name = element.name.clone();
+            let element_type = Self::sensitivity_element_type(&element.kind);
+            if let Some(model) = Self::sensitivity_model_name(&element.kind) {
+                referenced_models.insert(model.to_ascii_uppercase());
+            }
+
+            let mut primary_aliases: &[&str] = &[];
+            let mut add_field =
+                |field: AcSensitivityElementField, parameter: &str, nominal_value: Value| {
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: name.clone(),
+                            element: name.clone(),
+                            element_type,
+                            parameter: parameter.to_string(),
+                            nominal_value,
+                            location: AcSensitivityLocation::ElementField {
+                                element_index,
+                                field,
+                            },
+                        },
+                    );
+                };
+
+            match &element.kind {
+                ElementKind::Resistor { value, .. } if value.is_finite() => {
+                    primary_aliases = &["R", "RES", "RESISTANCE", "VALUE"];
+                    add_field(AcSensitivityElementField::ResistorValue, "R", *value);
+                }
+                ElementKind::Capacitor { value, .. } if value.is_finite() => {
+                    primary_aliases = &["C", "CAP", "CAPACITANCE", "VALUE"];
+                    add_field(AcSensitivityElementField::CapacitorValue, "C", *value);
+                }
+                ElementKind::Inductor { value, .. } if value.is_finite() => {
+                    primary_aliases = &["L", "IND", "INDUCTANCE", "VALUE"];
+                    add_field(AcSensitivityElementField::InductorValue, "L", *value);
+                }
+                ElementKind::JilesAthertonInductor { value, .. } => {
+                    add_field(AcSensitivityElementField::JilesAthertonValue, "L", *value);
+                }
+                ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => {
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: name.clone(),
+                            element: name.clone(),
+                            element_type,
+                            parameter: "DC".to_string(),
+                            nominal_value: crate::engine::extract_dc_value(spec),
+                            location: AcSensitivityLocation::SourceDc { element_index },
+                        },
+                    );
+                    if Self::source_has_explicit_ac(spec) {
+                        let (magnitude, phase_radians) = crate::engine::extract_ac_value(spec);
+                        for (suffix, parameter, nominal_value, location) in [
+                            (
+                                "AC_MAG",
+                                "AC_MAG",
+                                magnitude,
+                                AcSensitivityLocation::SourceAcMagnitude { element_index },
+                            ),
+                            (
+                                "AC_PHASE",
+                                "AC_PHASE",
+                                phase_radians.to_degrees(),
+                                AcSensitivityLocation::SourceAcPhaseDegrees { element_index },
+                            ),
+                        ] {
+                            Self::add_ac_sensitivity_target(
+                                &mut targets,
+                                &mut seen,
+                                AcSensitivityTarget {
+                                    vector_name: format!("{name}_{suffix}"),
+                                    element: name.clone(),
+                                    element_type,
+                                    parameter: parameter.to_string(),
+                                    nominal_value,
+                                    location,
+                                },
+                            );
+                        }
+                    }
+                }
+                ElementKind::Vcvs { gain, .. } => {
+                    add_field(AcSensitivityElementField::VcvsGain, "GAIN", *gain);
+                }
+                ElementKind::Cccs { gain, .. } => {
+                    add_field(AcSensitivityElementField::CccsGain, "GAIN", *gain);
+                }
+                ElementKind::Vccs {
+                    transconductance, ..
+                } => add_field(
+                    AcSensitivityElementField::VccsTransconductance,
+                    "GM",
+                    *transconductance,
+                ),
+                ElementKind::Ccvs {
+                    transresistance, ..
+                } => add_field(
+                    AcSensitivityElementField::CcvsTransresistance,
+                    "RM",
+                    *transresistance,
+                ),
+                ElementKind::BehavioralVoltage { tc1, tc2, .. }
+                | ElementKind::BehavioralCurrent { tc1, tc2, .. } => {
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: format!("{name}_TC1"),
+                            element: name.clone(),
+                            element_type,
+                            parameter: "TC1".to_string(),
+                            nominal_value: *tc1,
+                            location: AcSensitivityLocation::ElementField {
+                                element_index,
+                                field: AcSensitivityElementField::BehavioralTc1,
+                            },
+                        },
+                    );
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: format!("{name}_TC2"),
+                            element: name.clone(),
+                            element_type,
+                            parameter: "TC2".to_string(),
+                            nominal_value: *tc2,
+                            location: AcSensitivityLocation::ElementField {
+                                element_index,
+                                field: AcSensitivityElementField::BehavioralTc2,
+                            },
+                        },
+                    );
+                }
+                ElementKind::TransmissionLine {
+                    z0, td, freq, nl, ..
+                } => {
+                    for (field, parameter, nominal) in [
+                        (AcSensitivityElementField::TransmissionZ0, "Z0", *z0),
+                        (AcSensitivityElementField::TransmissionDelay, "TD", *td),
+                        (
+                            AcSensitivityElementField::TransmissionFrequency,
+                            "FREQ",
+                            *freq,
+                        ),
+                        (AcSensitivityElementField::TransmissionLength, "NL", *nl),
+                    ] {
+                        if let Some(nominal) = nominal {
+                            Self::add_ac_sensitivity_target(
+                                &mut targets,
+                                &mut seen,
+                                AcSensitivityTarget {
+                                    vector_name: format!("{name}_{parameter}"),
+                                    element: name.clone(),
+                                    element_type,
+                                    parameter: parameter.to_string(),
+                                    nominal_value: nominal,
+                                    location: AcSensitivityLocation::ElementField {
+                                        element_index,
+                                        field,
+                                    },
+                                },
+                            );
+                        }
+                    }
+                }
+                ElementKind::Coupling { coefficient, .. } => {
+                    add_field(AcSensitivityElementField::Coupling, "K", *coefficient);
+                }
+                _ => {}
+            }
+
+            if let Some(parameters) = Self::sensitivity_instance_params(&element.kind) {
+                for (parameter_index, (parameter, nominal_value)) in parameters.iter().enumerate() {
+                    if Self::is_discrete_sensitivity_parameter(parameter)
+                        || (primary_aliases
+                            .iter()
+                            .any(|alias| parameter.eq_ignore_ascii_case(alias))
+                            && matches!(
+                                element.kind,
+                                ElementKind::Resistor { value, .. }
+                                    | ElementKind::Capacitor { value, .. }
+                                    | ElementKind::Inductor { value, .. }
+                                    if value.is_finite()
+                            ))
+                    {
+                        continue;
+                    }
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: format!("{name}_{}", parameter.to_ascii_uppercase()),
+                            element: name.clone(),
+                            element_type,
+                            parameter: parameter.to_ascii_uppercase(),
+                            nominal_value: *nominal_value,
+                            location: AcSensitivityLocation::ElementParameter {
+                                element_index,
+                                parameter_index,
+                            },
+                        },
+                    );
+                }
+            }
+
+            if let ElementKind::Xspice {
+                params,
+                expr_params,
+                real_vector_params,
+                real_vector_expr_params,
+                ..
+            } = &element.kind
+            {
+                let resolved_scalars = Self::resolved_expression_params(
+                    &netlist.params,
+                    params,
+                    expr_params,
+                    &format!("XSPICE instance '{name}'"),
+                )?;
+                for (parameter, nominal_value) in &resolved_scalars {
+                    if Self::is_discrete_sensitivity_parameter(parameter) {
+                        continue;
+                    }
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: format!("{name}_{}", parameter.to_ascii_uppercase()),
+                            element: name.clone(),
+                            element_type,
+                            parameter: parameter.to_ascii_uppercase(),
+                            nominal_value: *nominal_value,
+                            location: AcSensitivityLocation::ElementNamedParameter {
+                                element_index,
+                                parameter: parameter.clone(),
+                            },
+                        },
+                    );
+                }
+                for (parameter_index, (parameter, values)) in real_vector_params.iter().enumerate()
+                {
+                    if Self::is_discrete_sensitivity_parameter(parameter) {
+                        continue;
+                    }
+                    for (entry_index, nominal_value) in values.iter().copied().enumerate() {
+                        Self::add_ac_sensitivity_target(
+                            &mut targets,
+                            &mut seen,
+                            AcSensitivityTarget {
+                                vector_name: format!(
+                                    "{name}_{}[{entry_index}]",
+                                    parameter.to_ascii_uppercase()
+                                ),
+                                element: name.clone(),
+                                element_type,
+                                parameter: format!(
+                                    "{}[{entry_index}]",
+                                    parameter.to_ascii_uppercase()
+                                ),
+                                nominal_value,
+                                location: AcSensitivityLocation::ElementVectorParameter {
+                                    element_index,
+                                    parameter_index,
+                                    entry_index,
+                                },
+                            },
+                        );
+                    }
+                }
+                for (parameter, values) in Self::resolved_vector_expression_params(
+                    &netlist.params,
+                    &resolved_scalars,
+                    real_vector_expr_params,
+                    &format!("XSPICE instance '{name}'"),
+                )? {
+                    if Self::is_discrete_sensitivity_parameter(&parameter) {
+                        continue;
+                    }
+                    for (entry_index, nominal_value) in values.iter().copied().enumerate() {
+                        Self::add_ac_sensitivity_target(
+                            &mut targets,
+                            &mut seen,
+                            AcSensitivityTarget {
+                                vector_name: format!(
+                                    "{name}_{}[{entry_index}]",
+                                    parameter.to_ascii_uppercase()
+                                ),
+                                element: name.clone(),
+                                element_type,
+                                parameter: format!(
+                                    "{}[{entry_index}]",
+                                    parameter.to_ascii_uppercase()
+                                ),
+                                nominal_value,
+                                location: AcSensitivityLocation::ElementNamedVectorParameter {
+                                    element_index,
+                                    parameter: parameter.clone(),
+                                    entry_index,
+                                    resolved_values: values.clone(),
+                                },
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
+        for (model_index, model) in netlist.models.iter().enumerate() {
+            if !referenced_models.contains(&model.name.to_ascii_uppercase()) {
+                continue;
+            }
+            for (parameter, nominal_value) in Self::resolved_model_scalar_params(netlist, model)? {
+                if Self::is_discrete_sensitivity_parameter(&parameter) {
+                    continue;
+                }
+                Self::add_ac_sensitivity_target(
+                    &mut targets,
+                    &mut seen,
+                    AcSensitivityTarget {
+                        vector_name: format!("{}:{}", model.name, parameter.to_ascii_uppercase()),
+                        element: model.name.clone(),
+                        element_type: ElementType::Model,
+                        parameter: parameter.to_ascii_uppercase(),
+                        nominal_value,
+                        location: AcSensitivityLocation::ModelParameter {
+                            model_index,
+                            parameter,
+                        },
+                    },
+                );
+            }
+            for (parameter_index, (parameter, values)) in
+                model.real_vector_params.iter().enumerate()
+            {
+                if Self::is_discrete_sensitivity_parameter(parameter) {
+                    continue;
+                }
+                for (entry_index, nominal_value) in values.iter().copied().enumerate() {
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: format!(
+                                "{}:{}[{entry_index}]",
+                                model.name,
+                                parameter.to_ascii_uppercase()
+                            ),
+                            element: model.name.clone(),
+                            element_type: ElementType::Model,
+                            parameter: format!("{}[{entry_index}]", parameter.to_ascii_uppercase()),
+                            nominal_value,
+                            location: AcSensitivityLocation::ModelVectorParameter {
+                                model_index,
+                                parameter_index,
+                                entry_index,
+                            },
+                        },
+                    );
+                }
+            }
+            let resolved_scalars = Self::resolved_model_scalar_params(netlist, model)?;
+            for (parameter, values) in Self::resolved_vector_expression_params(
+                &netlist.params,
+                &resolved_scalars,
+                &model.real_vector_expr_params,
+                &format!("model '{}'", model.name),
+            )? {
+                if Self::is_discrete_sensitivity_parameter(&parameter) {
+                    continue;
+                }
+                for (entry_index, nominal_value) in values.iter().copied().enumerate() {
+                    Self::add_ac_sensitivity_target(
+                        &mut targets,
+                        &mut seen,
+                        AcSensitivityTarget {
+                            vector_name: format!(
+                                "{}:{}[{entry_index}]",
+                                model.name,
+                                parameter.to_ascii_uppercase()
+                            ),
+                            element: model.name.clone(),
+                            element_type: ElementType::Model,
+                            parameter: format!("{}[{entry_index}]", parameter.to_ascii_uppercase()),
+                            nominal_value,
+                            location: AcSensitivityLocation::ModelNamedVectorParameter {
+                                model_index,
+                                parameter: parameter.clone(),
+                                entry_index,
+                                resolved_values: values.clone(),
+                            },
+                        },
+                    );
+                }
+            }
+        }
+
+        targets.sort_by(|left, right| {
+            left.vector_name
+                .to_ascii_uppercase()
+                .cmp(&right.vector_name.to_ascii_uppercase())
+        });
+        Ok(targets)
+    }
+
+    fn update_primary_instance_aliases(
+        parameters: &mut [(String, Value)],
+        aliases: &[&str],
+        value: Value,
+    ) {
+        for (name, existing) in parameters {
+            if aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias)) {
+                *existing = value;
+            }
+        }
+    }
+
+    fn set_source_dc_for_sensitivity(spec: &mut SourceSpec, value: Value) {
+        let owned = std::mem::replace(spec, SourceSpec::Dc(0.0));
+        *spec = owned.with_dc_value(value);
+    }
+
+    fn set_source_ac_for_sensitivity(
+        spec: &mut SourceSpec,
+        magnitude: Value,
+        phase_radians: Value,
+    ) {
+        let owned = std::mem::replace(spec, SourceSpec::Dc(0.0));
+        *spec = owned.with_ac(magnitude, phase_radians);
+    }
+
+    fn apply_ac_sensitivity_target(
+        netlist: &mut Netlist,
+        target: &AcSensitivityTarget,
+        value: Value,
+    ) -> Result<(), SimulationError> {
+        if !value.is_finite() {
+            return Err(SimulationError::Circuit(format!(
+                "Sensitivity perturbation for '{}' is non-finite: {value}",
+                target.vector_name
+            )));
+        }
+        match &target.location {
+            AcSensitivityLocation::ElementField {
+                element_index,
+                field,
+            } => {
+                let element = netlist.elements.get_mut(*element_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing element index {}",
+                        target.vector_name, element_index
+                    ))
+                })?;
+                match (field, &mut element.kind) {
+                    (
+                        AcSensitivityElementField::ResistorValue,
+                        ElementKind::Resistor {
+                            value: nominal,
+                            value_expr,
+                            instance_params,
+                            ..
+                        },
+                    ) => {
+                        *nominal = value;
+                        *value_expr = None;
+                        Self::update_primary_instance_aliases(
+                            instance_params,
+                            &["R", "RES", "RESISTANCE", "VALUE"],
+                            value,
+                        );
+                    }
+                    (
+                        AcSensitivityElementField::CapacitorValue,
+                        ElementKind::Capacitor {
+                            value: nominal,
+                            value_expr,
+                            instance_params,
+                            ..
+                        },
+                    ) => {
+                        *nominal = value;
+                        *value_expr = None;
+                        Self::update_primary_instance_aliases(
+                            instance_params,
+                            &["C", "CAP", "CAPACITANCE", "VALUE"],
+                            value,
+                        );
+                    }
+                    (
+                        AcSensitivityElementField::InductorValue,
+                        ElementKind::Inductor {
+                            value: nominal,
+                            value_expr,
+                            instance_params,
+                            ..
+                        },
+                    ) => {
+                        *nominal = value;
+                        *value_expr = None;
+                        Self::update_primary_instance_aliases(
+                            instance_params,
+                            &["L", "IND", "INDUCTANCE", "VALUE"],
+                            value,
+                        );
+                    }
+                    (
+                        AcSensitivityElementField::JilesAthertonValue,
+                        ElementKind::JilesAthertonInductor { value: nominal, .. },
+                    ) => *nominal = value,
+                    (
+                        AcSensitivityElementField::VcvsGain,
+                        ElementKind::Vcvs {
+                            gain, gain_expr, ..
+                        },
+                    )
+                    | (
+                        AcSensitivityElementField::CccsGain,
+                        ElementKind::Cccs {
+                            gain, gain_expr, ..
+                        },
+                    ) => {
+                        *gain = value;
+                        *gain_expr = None;
+                    }
+                    (
+                        AcSensitivityElementField::VccsTransconductance,
+                        ElementKind::Vccs {
+                            transconductance,
+                            transconductance_expr,
+                            ..
+                        },
+                    ) => {
+                        *transconductance = value;
+                        *transconductance_expr = None;
+                    }
+                    (
+                        AcSensitivityElementField::CcvsTransresistance,
+                        ElementKind::Ccvs {
+                            transresistance,
+                            transresistance_expr,
+                            ..
+                        },
+                    ) => {
+                        *transresistance = value;
+                        *transresistance_expr = None;
+                    }
+                    (
+                        AcSensitivityElementField::BehavioralTc1,
+                        ElementKind::BehavioralVoltage { tc1, .. }
+                        | ElementKind::BehavioralCurrent { tc1, .. },
+                    ) => *tc1 = value,
+                    (
+                        AcSensitivityElementField::BehavioralTc2,
+                        ElementKind::BehavioralVoltage { tc2, .. }
+                        | ElementKind::BehavioralCurrent { tc2, .. },
+                    ) => *tc2 = value,
+                    (
+                        AcSensitivityElementField::TransmissionZ0,
+                        ElementKind::TransmissionLine { z0, .. },
+                    ) => *z0 = Some(value),
+                    (
+                        AcSensitivityElementField::TransmissionDelay,
+                        ElementKind::TransmissionLine { td, .. },
+                    ) => *td = Some(value),
+                    (
+                        AcSensitivityElementField::TransmissionFrequency,
+                        ElementKind::TransmissionLine { freq, .. },
+                    ) => *freq = Some(value),
+                    (
+                        AcSensitivityElementField::TransmissionLength,
+                        ElementKind::TransmissionLine { nl, .. },
+                    ) => *nl = Some(value),
+                    (
+                        AcSensitivityElementField::Coupling,
+                        ElementKind::Coupling { coefficient, .. },
+                    ) => *coefficient = value,
+                    _ => {
+                        return Err(SimulationError::Circuit(format!(
+                            "Sensitivity target '{}' no longer matches its element kind",
+                            target.vector_name
+                        )));
+                    }
+                }
+            }
+            AcSensitivityLocation::ElementParameter {
+                element_index,
+                parameter_index,
+            } => {
+                let element = netlist.elements.get_mut(*element_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing element index {}",
+                        target.vector_name, element_index
+                    ))
+                })?;
+                let parameters = match &mut element.kind {
+                    ElementKind::Resistor {
+                        instance_params, ..
+                    }
+                    | ElementKind::Capacitor {
+                        instance_params, ..
+                    }
+                    | ElementKind::Inductor {
+                        instance_params, ..
+                    }
+                    | ElementKind::Diode {
+                        instance_params, ..
+                    }
+                    | ElementKind::Bjt {
+                        instance_params, ..
+                    }
+                    | ElementKind::Mosfet {
+                        instance_params, ..
+                    }
+                    | ElementKind::Jfet {
+                        instance_params, ..
+                    }
+                    | ElementKind::Mesfet {
+                        instance_params, ..
+                    } => instance_params,
+                    ElementKind::Xspice { params, .. } => params,
+                    _ => {
+                        return Err(SimulationError::Circuit(format!(
+                            "Sensitivity target '{}' has no scalar instance parameters",
+                            target.vector_name
+                        )));
+                    }
+                };
+                let (_, nominal) = parameters.get_mut(*parameter_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing parameter index {}",
+                        target.vector_name, parameter_index
+                    ))
+                })?;
+                *nominal = value;
+            }
+            AcSensitivityLocation::ElementNamedParameter {
+                element_index,
+                parameter,
+            } => {
+                let element = netlist.elements.get_mut(*element_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing element index {}",
+                        target.vector_name, element_index
+                    ))
+                })?;
+                let ElementKind::Xspice {
+                    params,
+                    expr_params,
+                    ..
+                } = &mut element.kind
+                else {
+                    return Err(SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' is not a named XSPICE parameter",
+                        target.vector_name
+                    )));
+                };
+                expr_params.retain(|(name, _)| !name.eq_ignore_ascii_case(parameter));
+                if let Some((_, nominal)) = params
+                    .iter_mut()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+                {
+                    *nominal = value;
+                } else {
+                    params.push((parameter.to_ascii_uppercase(), value));
+                }
+            }
+            AcSensitivityLocation::ElementVectorParameter {
+                element_index,
+                parameter_index,
+                entry_index,
+            } => {
+                let element = netlist.elements.get_mut(*element_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing element index {}",
+                        target.vector_name, element_index
+                    ))
+                })?;
+                let ElementKind::Xspice {
+                    real_vector_params, ..
+                } = &mut element.kind
+                else {
+                    return Err(SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' is not an XSPICE vector parameter",
+                        target.vector_name
+                    )));
+                };
+                let (_, values) = real_vector_params.get_mut(*parameter_index).ok_or_else(
+                    || {
+                        SimulationError::Circuit(format!(
+                            "Sensitivity target '{}' references missing vector parameter index {}",
+                            target.vector_name, parameter_index
+                        ))
+                    },
+                )?;
+                let nominal = values.get_mut(*entry_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing vector entry {}",
+                        target.vector_name, entry_index
+                    ))
+                })?;
+                *nominal = value;
+            }
+            AcSensitivityLocation::ElementNamedVectorParameter {
+                element_index,
+                parameter,
+                entry_index,
+                resolved_values,
+            } => {
+                let element = netlist.elements.get_mut(*element_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing element index {}",
+                        target.vector_name, element_index
+                    ))
+                })?;
+                let ElementKind::Xspice {
+                    real_vector_params,
+                    real_vector_expr_params,
+                    ..
+                } = &mut element.kind
+                else {
+                    return Err(SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' is not a named XSPICE vector parameter",
+                        target.vector_name
+                    )));
+                };
+                real_vector_expr_params.retain(|(name, _)| !name.eq_ignore_ascii_case(parameter));
+                let values = if let Some((_, values)) = real_vector_params
+                    .iter_mut()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+                {
+                    values
+                } else {
+                    real_vector_params
+                        .push((parameter.to_ascii_uppercase(), resolved_values.clone()));
+                    &mut real_vector_params
+                        .last_mut()
+                        .expect("just inserted vector parameter")
+                        .1
+                };
+                let nominal = values.get_mut(*entry_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing vector entry {}",
+                        target.vector_name, entry_index
+                    ))
+                })?;
+                *nominal = value;
+            }
+            AcSensitivityLocation::SourceDc { element_index }
+            | AcSensitivityLocation::SourceAcMagnitude { element_index }
+            | AcSensitivityLocation::SourceAcPhaseDegrees { element_index } => {
+                let element = netlist.elements.get_mut(*element_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing source index {}",
+                        target.vector_name, element_index
+                    ))
+                })?;
+                let spec = match &mut element.kind {
+                    ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) => spec,
+                    _ => {
+                        return Err(SimulationError::Circuit(format!(
+                            "Sensitivity target '{}' is not an independent source",
+                            target.vector_name
+                        )));
+                    }
+                };
+                match target.location {
+                    AcSensitivityLocation::SourceDc { .. } => {
+                        Self::set_source_dc_for_sensitivity(spec, value);
+                    }
+                    AcSensitivityLocation::SourceAcMagnitude { .. } => {
+                        let (_, phase) = crate::engine::extract_ac_value(spec);
+                        Self::set_source_ac_for_sensitivity(spec, value, phase);
+                    }
+                    AcSensitivityLocation::SourceAcPhaseDegrees { .. } => {
+                        let (magnitude, _) = crate::engine::extract_ac_value(spec);
+                        Self::set_source_ac_for_sensitivity(spec, magnitude, value.to_radians());
+                    }
+                    _ => unreachable!("matched source sensitivity location"),
+                }
+            }
+            AcSensitivityLocation::ModelParameter {
+                model_index,
+                parameter,
+            } => {
+                let model = netlist.models.get_mut(*model_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing model index {}",
+                        target.vector_name, model_index
+                    ))
+                })?;
+                model
+                    .expr_params
+                    .retain(|(name, _)| !name.eq_ignore_ascii_case(parameter));
+                if let Some((_, nominal)) = model
+                    .params
+                    .iter_mut()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+                {
+                    *nominal = value;
+                } else {
+                    model.params.push((parameter.to_ascii_uppercase(), value));
+                }
+            }
+            AcSensitivityLocation::ModelVectorParameter {
+                model_index,
+                parameter_index,
+                entry_index,
+            } => {
+                let model = netlist.models.get_mut(*model_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing model index {}",
+                        target.vector_name, model_index
+                    ))
+                })?;
+                let (_, values) = model
+                    .real_vector_params
+                    .get_mut(*parameter_index)
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "Sensitivity target '{}' references missing model vector index {}",
+                            target.vector_name, parameter_index
+                        ))
+                    })?;
+                let nominal = values.get_mut(*entry_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing model vector entry {}",
+                        target.vector_name, entry_index
+                    ))
+                })?;
+                *nominal = value;
+            }
+            AcSensitivityLocation::ModelNamedVectorParameter {
+                model_index,
+                parameter,
+                entry_index,
+                resolved_values,
+            } => {
+                let model = netlist.models.get_mut(*model_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing model index {}",
+                        target.vector_name, model_index
+                    ))
+                })?;
+                model
+                    .real_vector_expr_params
+                    .retain(|(name, _)| !name.eq_ignore_ascii_case(parameter));
+                let values = if let Some((_, values)) = model
+                    .real_vector_params
+                    .iter_mut()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(parameter))
+                {
+                    values
+                } else {
+                    model
+                        .real_vector_params
+                        .push((parameter.to_ascii_uppercase(), resolved_values.clone()));
+                    &mut model
+                        .real_vector_params
+                        .last_mut()
+                        .expect("just inserted model vector parameter")
+                        .1
+                };
+                let nominal = values.get_mut(*entry_index).ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity target '{}' references missing model vector entry {}",
+                        target.vector_name, entry_index
+                    ))
+                })?;
+                *nominal = value;
+            }
+        }
+        Ok(())
+    }
+
+    fn sensitivity_glob_matches(pattern: &str, candidate: &str) -> bool {
+        let pattern = pattern.to_ascii_uppercase();
+        let candidate = candidate.to_ascii_uppercase();
+        let pattern = pattern.as_bytes();
+        let candidate = candidate.as_bytes();
+        let (mut p, mut c) = (0usize, 0usize);
+        let mut star = None;
+        while c < candidate.len() {
+            if p < pattern.len() && (pattern[p] == b'?' || pattern[p] == candidate[c]) {
+                p += 1;
+                c += 1;
+            } else if p < pattern.len() && pattern[p] == b'*' {
+                star = Some((p, c));
+                p += 1;
+            } else if let Some((star_p, star_c)) = star {
+                star = Some((star_p, star_c + 1));
+                p = star_p + 1;
+                c = star_c + 1;
+            } else {
+                return false;
+            }
+        }
+        while p < pattern.len() && pattern[p] == b'*' {
+            p += 1;
+        }
+        p == pattern.len()
+    }
+
+    fn sensitivity_target_selected(target: &AcSensitivityTarget, filters: &[String]) -> bool {
+        filters.is_empty()
+            || filters.iter().any(|filter| {
+                Self::sensitivity_glob_matches(filter, &target.vector_name)
+                    || Self::sensitivity_glob_matches(filter, &target.element)
+                    || Self::sensitivity_glob_matches(
+                        filter,
+                        &format!("{}:{}", target.element, target.parameter),
+                    )
+            })
+    }
+
+    fn complete_sensitivity_step(target: &AcSensitivityTarget) -> Value {
+        let parameter = target.parameter.to_ascii_uppercase();
+        let absolute_floor = if parameter.contains("PHASE") {
+            1.0e-3
+        } else if matches!(
+            parameter.as_str(),
+            "C" | "CAP" | "CAPACITANCE" | "CJ" | "CJO" | "CGSO" | "CGDO" | "CGBO"
+        ) || parameter.starts_with('C')
+            && (parameter.contains('J') || parameter.contains("CAP"))
+        {
+            1.0e-18
+        } else if matches!(parameter.as_str(), "L" | "IND" | "INDUCTANCE") {
+            1.0e-15
+        } else if matches!(parameter.as_str(), "DC" | "AC_MAG") {
+            1.0e-9
+        } else {
+            1.0e-12
+        };
+        (target.nominal_value.abs() * 1.0e-3).max(absolute_floor)
+    }
+
+    fn ac_sensitivity_output_value(
+        result: &crate::analysis::AcResult,
+        output: &AcSensitivityOutput,
+    ) -> Result<Complex64, SimulationError> {
+        let voltage = |node: usize| -> Result<Complex64, SimulationError> {
+            if node == 0 {
+                return Ok(Complex64::new(0.0, 0.0));
+            }
+            result.voltages.get(node - 1).copied().ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "Sensitivity output node {node} is outside circuit node range 0..={}",
+                    result.voltages.len()
+                ))
+            })
+        };
+        match output {
+            AcSensitivityOutput::Voltage { positive, negative } => {
+                Ok(voltage(*positive)? - voltage(negative.unwrap_or(0))?)
+            }
+            AcSensitivityOutput::BranchCurrent(element) => result
+                .branch_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(element))
+                .and_then(|index| result.currents.get(index).copied())
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "Sensitivity branch-current output I({element}) is unavailable; the element must own an AC MNA branch"
+                    ))
+                }),
+        }
+    }
+
+    fn ac_sensitivity_outputs(
+        results: &[crate::analysis::AcResult],
+        output: &AcSensitivityOutput,
+        expected_frequencies: &[Value],
+    ) -> Result<Vec<Complex64>, SimulationError> {
+        if results.len() != expected_frequencies.len() {
+            return Err(SimulationError::Circuit(format!(
+                "AC sensitivity produced {} samples for a {}-point frequency grid",
+                results.len(),
+                expected_frequencies.len()
+            )));
+        }
+        results
+            .iter()
+            .zip(expected_frequencies)
+            .map(|(result, expected)| {
+                let tolerance = expected.abs().max(1.0) * 1.0e-12;
+                if (result.frequency - expected).abs() > tolerance {
+                    return Err(SimulationError::Circuit(format!(
+                        "AC sensitivity frequency mismatch: expected {expected}, got {}",
+                        result.frequency
+                    )));
+                }
+                Self::ac_sensitivity_output_value(result, output)
+            })
+            .collect()
+    }
+
+    fn complete_ac_sensitivity_trace(
+        target: &AcSensitivityTarget,
+        nominal_output: &[Complex64],
+        derivative: Vec<Complex64>,
+    ) -> AcSensitivity {
+        let mut normalized = Vec::with_capacity(derivative.len());
+        let mut magnitude = Vec::with_capacity(derivative.len());
+        let mut phase = Vec::with_capacity(derivative.len());
+        for (&output, &sensitivity) in nominal_output.iter().zip(&derivative) {
+            let norm_sqr = output.norm_sqr();
+            if norm_sqr > 1.0e-60 {
+                normalized.push(sensitivity * target.nominal_value / output);
+                let product = output.conj() * sensitivity;
+                magnitude.push(product.re / norm_sqr.sqrt());
+                phase.push(product.im / norm_sqr);
+            } else {
+                normalized.push(Complex64::new(0.0, 0.0));
+                magnitude.push(0.0);
+                phase.push(0.0);
+            }
+        }
+        AcSensitivity {
+            vector_name: target.vector_name.clone(),
+            element: target.element.clone(),
+            element_type: target.element_type,
+            parameter: target.parameter.clone(),
+            nominal_value: target.nominal_value,
+            absolute: derivative,
+            normalized,
+            magnitude,
+            phase,
+        }
+    }
+
+    /// Run complete AC sensitivity for every eligible real-valued parameter
+    /// in the flattened netlist. The returned derivatives are complex and
+    /// unnormalized, matching SPICE `.SENS AC` semantics; normalized,
+    /// magnitude, and phase derivatives are retained alongside them.
+    pub fn run_sensitivity_ac_complete(
+        &self,
+        netlist: &Netlist,
+        output: AcSensitivityOutput,
+        frequencies: &[Value],
+        filters: &[String],
+    ) -> Result<AcSensitivityResult, SimulationError> {
+        self.run_sensitivity_ac_complete_with_abort(netlist, output, frequencies, filters, &NoAbort)
+    }
+
+    /// Complete AC sensitivity with cooperative cancellation.
+    pub fn run_sensitivity_ac_complete_with_abort(
+        &self,
+        netlist: &Netlist,
+        output: AcSensitivityOutput,
+        frequencies: &[Value],
+        filters: &[String],
+        abort: &dyn AbortSignal,
+    ) -> Result<AcSensitivityResult, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if frequencies.is_empty()
+            || frequencies
+                .iter()
+                .any(|frequency| !frequency.is_finite() || *frequency < 0.0)
+        {
+            return Err(SimulationError::Circuit(
+                "AC sensitivity frequencies must be a non-empty list of finite, non-negative values"
+                    .to_string(),
+            ));
+        }
+        if let AcSensitivityOutput::Voltage { positive: 0, .. } = output {
+            return Err(SimulationError::Circuit(
+                "Sensitivity output node must not be ground".to_string(),
+            ));
+        }
+
+        let flat = Self::flattened_sensitivity_netlist(netlist)?;
+        let nominal_results = self.run_ac_with_abort(&flat, frequencies, abort)?;
+        let nominal_output = Self::ac_sensitivity_outputs(&nominal_results, &output, frequencies)?;
+        let targets = Self::collect_ac_sensitivity_targets(&flat)?
+            .into_iter()
+            .filter(|target| Self::sensitivity_target_selected(target, filters))
+            .collect::<Vec<_>>();
+        if targets.is_empty() {
+            let detail = if filters.is_empty() {
+                "the flattened circuit has no eligible real-valued parameters".to_string()
+            } else {
+                format!("no parameter matched filter(s) {}", filters.join(", "))
+            };
+            return Err(SimulationError::Circuit(format!(
+                "AC sensitivity cannot run: {detail}"
+            )));
+        }
+
+        let output_name = match &output {
+            AcSensitivityOutput::Voltage { positive, negative } => negative.map_or_else(
+                || format!("V({positive})"),
+                |negative| format!("V({positive},{negative})"),
+            ),
+            AcSensitivityOutput::BranchCurrent(element) => format!("I({element})"),
+        };
+        let mut sensitivities = Vec::with_capacity(targets.len());
+        for target in targets {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let h = Self::complete_sensitivity_step(&target);
+            let mut plus_netlist = flat.clone();
+            let mut minus_netlist = flat.clone();
+            Self::apply_ac_sensitivity_target(
+                &mut plus_netlist,
+                &target,
+                target.nominal_value + h,
+            )?;
+            Self::apply_ac_sensitivity_target(
+                &mut minus_netlist,
+                &target,
+                target.nominal_value - h,
+            )?;
+
+            let plus = self.run_ac_with_abort(&plus_netlist, frequencies, abort);
+            let minus = self.run_ac_with_abort(&minus_netlist, frequencies, abort);
+            let derivative = match (plus, minus) {
+                (Ok(plus), Ok(minus)) => {
+                    let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies)?;
+                    let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies)?;
+                    plus.iter()
+                        .zip(&minus)
+                        .map(|(plus, minus)| (*plus - *minus) / (2.0 * h))
+                        .collect()
+                }
+                (Ok(plus), Err(minus_error)) => {
+                    let mut plus_two_netlist = flat.clone();
+                    Self::apply_ac_sensitivity_target(
+                        &mut plus_two_netlist,
+                        &target,
+                        target.nominal_value + 2.0 * h,
+                    )?;
+                    let plus_two = self
+                        .run_ac_with_abort(&plus_two_netlist, frequencies, abort)
+                        .map_err(|plus_two_error| {
+                            SimulationError::Circuit(format!(
+                                "AC sensitivity '{}' failed for the negative and second positive perturbations: {}; {}",
+                                target.vector_name, minus_error, plus_two_error
+                            ))
+                        })?;
+                    let plus = Self::ac_sensitivity_outputs(&plus, &output, frequencies)?;
+                    let plus_two = Self::ac_sensitivity_outputs(&plus_two, &output, frequencies)?;
+                    nominal_output
+                        .iter()
+                        .zip(&plus)
+                        .zip(&plus_two)
+                        .map(|((nominal, plus), plus_two)| {
+                            (-3.0 * *nominal + 4.0 * *plus - *plus_two) / (2.0 * h)
+                        })
+                        .collect()
+                }
+                (Err(plus_error), Ok(minus)) => {
+                    let mut minus_two_netlist = flat.clone();
+                    Self::apply_ac_sensitivity_target(
+                        &mut minus_two_netlist,
+                        &target,
+                        target.nominal_value - 2.0 * h,
+                    )?;
+                    let minus_two = self
+                        .run_ac_with_abort(&minus_two_netlist, frequencies, abort)
+                        .map_err(|minus_two_error| {
+                            SimulationError::Circuit(format!(
+                                "AC sensitivity '{}' failed for the positive and second negative perturbations: {}; {}",
+                                target.vector_name, plus_error, minus_two_error
+                            ))
+                        })?;
+                    let minus = Self::ac_sensitivity_outputs(&minus, &output, frequencies)?;
+                    let minus_two = Self::ac_sensitivity_outputs(&minus_two, &output, frequencies)?;
+                    nominal_output
+                        .iter()
+                        .zip(&minus)
+                        .zip(&minus_two)
+                        .map(|((nominal, minus), minus_two)| {
+                            (3.0 * *nominal - 4.0 * *minus + *minus_two) / (2.0 * h)
+                        })
+                        .collect()
+                }
+                (Err(plus_error), Err(minus_error)) => {
+                    return Err(SimulationError::Circuit(format!(
+                        "AC sensitivity '{}' failed at both perturbations: positive: {}; negative: {}",
+                        target.vector_name, plus_error, minus_error
+                    )));
+                }
+            };
+            sensitivities.push(Self::complete_ac_sensitivity_trace(
+                &target,
+                &nominal_output,
+                derivative,
+            ));
+        }
+
+        Ok(AcSensitivityResult {
+            output: output_name,
+            frequencies: frequencies.to_vec(),
+            output_values: nominal_output,
+            sensitivities,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::super::Engine;
     use crate::Netlist;
+    use crate::analysis::AcSensitivityOutput;
+    use crate::netlist::AnalysisCommand;
     use crate::netlist::{StepCommand, StepSweep, StepTarget};
 
     const PARAMETRIC_DIVIDER: &str = "\
@@ -732,6 +2272,151 @@ R2 2 0 1k
 
     /// Analytic dV(2)/drval for the divider at rval=1k: -10*1k/(1k+1k)^2.
     const EXPECTED_DIVIDER_SENSITIVITY: f64 = -2.5e-3;
+
+    const AC_DIVIDER: &str = "\
+AC sensitivity divider
+V1 in 0 DC 0 AC 1 0
+R1 in out 1k
+R2 out 0 1k
+.end
+";
+
+    #[test]
+    fn complete_ac_sensitivity_reports_complex_device_and_source_derivatives() {
+        let netlist = Netlist::parse(AC_DIVIDER).expect("deck parses");
+        let result = Engine::default()
+            .run_sensitivity_ac_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 2,
+                    negative: None,
+                },
+                &[1.0, 1.0e3],
+                &[],
+            )
+            .expect("complete AC sensitivity runs");
+
+        assert_eq!(result.frequencies, vec![1.0, 1.0e3]);
+        assert!((result.output_values[0].re - 0.5).abs() < 1e-12);
+        let r1 = result.get("R1").expect("R1 primary sensitivity");
+        let r2 = result.get("R2").expect("R2 primary sensitivity");
+        assert!((r1.absolute[0].re + 2.5e-4).abs() < 1e-9);
+        assert!((r2.absolute[0].re - 2.5e-4).abs() < 1e-9);
+        assert!(r1.absolute[0].im.abs() < 1e-12);
+
+        let ac_magnitude = result
+            .get("V1_AC_MAG")
+            .expect("source AC magnitude sensitivity");
+        assert!((ac_magnitude.absolute[0].re - 0.5).abs() < 1e-9);
+        let ac_phase = result
+            .get("V1_AC_PHASE")
+            .expect("source AC phase sensitivity");
+        assert!((ac_phase.absolute[0].im - 0.5_f64.to_radians()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn complete_ac_sensitivity_filters_and_flattens_hierarchy() {
+        let netlist = Netlist::parse(
+            "Hierarchical sensitivity\n\
+V1 in 0 AC 1\n\
+XDIV in out DIVIDER\n\
+.subckt DIVIDER input output\n\
+RTOP input output 1k\n\
+RBOT output 0 1k\n\
+.ends\n\
+.end\n",
+        )
+        .expect("deck parses");
+        let result = Engine::default()
+            .run_sensitivity_ac_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 2,
+                    negative: None,
+                },
+                &[1.0e3],
+                &["*RTOP".to_string()],
+            )
+            .expect("hierarchical filtered sensitivity runs");
+        assert_eq!(result.len(), 1);
+        assert!(
+            result.sensitivities[0]
+                .vector_name
+                .to_ascii_uppercase()
+                .ends_with("RTOP")
+        );
+        assert!((result.sensitivities[0].absolute[0].re + 2.5e-4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn complete_ac_sensitivity_supports_branch_current_outputs() {
+        let netlist = Netlist::parse(AC_DIVIDER).expect("deck parses");
+        let result = Engine::default()
+            .run_sensitivity_ac_complete(
+                &netlist,
+                AcSensitivityOutput::BranchCurrent("v1".to_string()),
+                &[1.0e3],
+                &["R1".to_string()],
+            )
+            .expect("branch current sensitivity runs");
+        assert_eq!(result.output, "I(v1)");
+        assert_eq!(result.len(), 1);
+        assert!((result.sensitivities[0].absolute[0].re - 2.5e-7).abs() < 1e-12);
+    }
+
+    #[test]
+    fn complete_ac_sensitivity_varies_expression_valued_model_parameters() {
+        let netlist = Netlist::parse(
+            "Model sensitivity\n\
+.param sheet=100\n\
+V1 in 0 AC 1\n\
+R1 in out RMOD L=10u W=1u\n\
+R2 out 0 1k\n\
+.model RMOD R RSH={sheet}\n\
+.end\n",
+        )
+        .expect("deck parses");
+        let result = Engine::default()
+            .run_sensitivity_ac_complete(
+                &netlist,
+                AcSensitivityOutput::Voltage {
+                    positive: 2,
+                    negative: None,
+                },
+                &[1.0e3],
+                &["RMOD:*".to_string()],
+            )
+            .expect("model sensitivity runs");
+        let rsh = result.get("RMOD:RSH").expect("RSH model sensitivity");
+        assert_eq!(rsh.nominal_value, 100.0);
+        assert!((rsh.absolute[0].re + 2.5e-3).abs() < 1e-8);
+    }
+
+    #[test]
+    fn sens_parser_retains_current_output_filters_and_ac_sweep() {
+        let netlist = Netlist::parse(
+            "Sensitivity syntax\nV1 1 0 AC 1\nR1 1 0 1k\n.sens I(V1) R* RMOD:* AC DEC 10 1 1k\n.end\n",
+        )
+        .expect("deck parses");
+        let AnalysisCommand::Sensitivity {
+            output_node,
+            reference_node,
+            output_is_current,
+            filters,
+            ac_sweep,
+        } = &netlist.analyses[0]
+        else {
+            panic!("expected sensitivity command");
+        };
+        assert_eq!(output_node, "V1");
+        assert!(reference_node.is_none());
+        assert!(*output_is_current);
+        assert_eq!(filters, &["R*", "RMOD:*"]);
+        let sweep = ac_sweep.expect("AC sweep");
+        assert_eq!(sweep.points, 10);
+        assert_eq!(sweep.start_freq, 1.0);
+        assert_eq!(sweep.stop_freq, 1.0e3);
+    }
 
     /// An element name is not a parameter binding: before the fix, the
     /// `R1 1 2 {rval}` line itself made "R1" look referenced, and the run

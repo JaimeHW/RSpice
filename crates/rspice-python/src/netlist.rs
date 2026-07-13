@@ -191,6 +191,36 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
             let probe = if *output_is_current { "i" } else { "v" };
             format!(".tf {probe}({output_node}) {input_source}")
         }
+        AnalysisCommand::Sensitivity {
+            output_node,
+            reference_node,
+            output_is_current,
+            filters,
+            ac_sweep,
+        } => {
+            let probe = if *output_is_current {
+                format!("i({output_node})")
+            } else if let Some(reference) = reference_node {
+                format!("v({output_node},{reference})")
+            } else {
+                format!("v({output_node})")
+            };
+            let mut description = format!(".sens {probe}");
+            if !filters.is_empty() {
+                description.push(' ');
+                description.push_str(&filters.join(" "));
+            }
+            if let Some(sweep) = ac_sweep {
+                description.push_str(&format!(
+                    " ac {} {} {} {}",
+                    format!("{:?}", sweep.variation).to_lowercase(),
+                    sweep.points,
+                    sweep.start_freq,
+                    sweep.stop_freq
+                ));
+            }
+            description
+        }
         AnalysisCommand::Four {
             fundamental,
             outputs,

@@ -302,6 +302,76 @@ C1 out 0 1u
         # At DC the divider has no R dependence; at the corner it does.
         assert abs(sens[1]) > abs(sens[0])
 
+    def test_complete_ac_sensitivity_is_complex_structured_and_filterable(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* Complete AC sensitivity
+V1 in 0 DC 0 AC 1 0
+R1 in out 1k
+R2 out 0 1k
+.end
+"""
+        )
+        result = engine.run_sensitivity_ac_complete(
+            netlist, "out", [1.0, 1000.0], filters=["R*"]
+        )
+
+        assert isinstance(result, rspice.AcSensitivityResult)
+        assert result.output == "V(2)"
+        assert result.vector_names == ["R1", "R2"]
+        assert result.frequencies.dtype == np.float64
+        assert result.output_complex.dtype == np.complex128
+        assert result.output_complex == pytest.approx([0.5 + 0j, 0.5 + 0j])
+
+        r1 = result.get("r1")
+        assert isinstance(r1, rspice.AcSensitivity)
+        assert r1.absolute.dtype == np.complex128
+        assert r1.absolute == pytest.approx([-2.5e-4 + 0j] * 2, rel=1e-6)
+        assert r1.normalized == pytest.approx([-0.5 + 0j] * 2, rel=1e-6)
+        assert r1.percent_per_percent == pytest.approx([-0.5 + 0j] * 2, rel=1e-6)
+        assert r1.magnitude == pytest.approx([-2.5e-4] * 2, rel=1e-6)
+        assert r1.phase == pytest.approx([0.0, 0.0], abs=1e-12)
+        assert result.top(0, 1)[0].vector_name in {"R1", "R2"}
+        with pytest.raises(KeyError):
+            result.get("missing")
+        with pytest.raises(IndexError):
+            result.top(2)
+
+    def test_complete_ac_sensitivity_supports_branch_current_output(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* Branch current sensitivity
+V1 in 0 AC 1
+R1 in out 1k
+R2 out 0 1k
+.end
+"""
+        )
+        result = engine.run_sensitivity_ac_complete(
+            netlist,
+            "V1",
+            [1000.0],
+            filters=["R1"],
+            output_is_current=True,
+        )
+        assert result.output == "I(V1)"
+        assert result.get("R1").absolute[0] == pytest.approx(2.5e-7 + 0j, rel=1e-6)
+
+    def test_engine_run_executes_complete_ac_sensitivity_directive(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* AC SENS directive
+V1 in 0 AC 1
+R1 in out 1k
+R2 out 0 1k
+.sens V(out) R* AC LIN 3 1 10
+.end
+"""
+        )
+        report = engine.run(netlist)
+        assert report.sensitivity is None
+        assert isinstance(report.sensitivity_ac, rspice.AcSensitivityResult)
+        assert report.sensitivity_ac.vector_names == ["R1", "R2"]
+        assert report.analyses_run == ["sens_ac"]
+        assert report.skipped == []
+
 
 class TestStep:
     def test_engine_run_executes_step_directive(self, engine):

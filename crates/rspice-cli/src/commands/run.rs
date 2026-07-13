@@ -288,11 +288,15 @@ impl<'a> RunContext<'a> {
             AnalysisCommand::Sensitivity {
                 output_node,
                 reference_node,
+                output_is_current,
+                filters,
                 ac_sweep,
             } => frequency::run_sensitivity_from_command(
                 self,
                 output_node,
                 reference_node.as_deref(),
+                *output_is_current,
+                filters,
                 *ac_sweep,
             )?,
             AnalysisCommand::Tf {

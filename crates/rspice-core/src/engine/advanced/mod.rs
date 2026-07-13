@@ -18,7 +18,10 @@ use crate::analysis::noise::{
     NoiseResult, NoiseSource,
 };
 use crate::analysis::pole_zero::{Matrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
-use crate::analysis::sensitivity::{ElementDesc, SensitivityAnalyzer, SensitivityResult};
+use crate::analysis::sensitivity::{
+    AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType,
+    SensitivityAnalyzer, SensitivityResult,
+};
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
 };

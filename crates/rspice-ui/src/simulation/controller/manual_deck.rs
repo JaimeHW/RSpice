@@ -836,11 +836,17 @@ fn command_to_queue_item(
         AnalysisCommand::Sensitivity {
             output_node,
             reference_node,
+            output_is_current,
             ac_sweep,
+            ..
         } => {
-            let output_var = match reference_node {
-                Some(reference) => format!("V({output_node},{reference})"),
-                None => format!("V({output_node})"),
+            let output_var = if *output_is_current {
+                format!("I({output_node})")
+            } else {
+                match reference_node {
+                    Some(reference) => format!("V({output_node},{reference})"),
+                    None => format!("V({output_node})"),
+                }
             };
             let frequency = ac_sweep.as_ref().map(|sweep| sweep.start_freq);
             let spec = AnalysisSpec::Sensitivity {

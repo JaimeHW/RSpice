@@ -122,6 +122,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyNoiseResult>()?;
     m.add_class::<results::PyNoiseContribution>()?;
     m.add_class::<results::PyMonteCarloResult>()?;
+    m.add_class::<results::PyAcSensitivity>()?;
+    m.add_class::<results::PyAcSensitivityResult>()?;
     m.add_class::<results::PyElementSensitivity>()?;
     m.add_class::<results::PySensitivityResult>()?;
     m.add_class::<results::PyVariableStatistics>()?;
@@ -191,6 +193,8 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "NoiseResult",
             "NoiseContribution",
             "MonteCarloResult",
+            "AcSensitivity",
+            "AcSensitivityResult",
             "ElementSensitivity",
             "SensitivityResult",
             "VariableStatistics",

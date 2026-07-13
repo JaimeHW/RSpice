@@ -121,11 +121,12 @@ def test_rc_step_response():
 
 `engine.run` executes the netlist's `.op`, `.dc`, `.ac`/`.ac data`, `.disto`,
 `.sp`, `.tran`, `.noise`, `.tf`, `.stb`, `.pz`, `.mc`, `.step`, `.temp`, DC
-`.sens`, and `.four` directives in order and returns a `RunReport`:
+and AC `.sens`, and `.four` directives in order and returns a `RunReport`:
 
 - `report.tran` / `report.ac` / `report.distortion` / `report.op` /
   `report.dc` / `report.noise` / `report.s_parameters` / `report.tf` /
-  `report.stb` / `report.pz` / `report.fourier` — the analysis results
+  `report.stb` / `report.pz` / `report.sensitivity` /
+  `report.sensitivity_ac` / `report.fourier` — the analysis results
 - `report.measurements`, `report.measurement(name)`, `report.failures`,
   `report.all_passed` — `.MEAS` outcomes for TRAN, DC, AC, and NOISE analyses
   (`.MEAS AC` supports magnitude, dB, phase, real, and imaginary data;
@@ -308,6 +309,14 @@ R2 out 0 1k
 """)
 s = engine.run_sensitivity(divider, "out", "rval", 1e3)
 s_ac = engine.run_sensitivity_ac(divider, "out", "rval", 1e3, [1e3, 1e4])
+complete = engine.run_sensitivity_ac_complete(
+    divider,
+    "out",
+    [1e3, 1e4],
+    filters=["R*", "RMOD:*"],
+)
+dr1 = complete.get("R1")
+print(dr1.absolute, dr1.normalized, dr1.magnitude, dr1.phase, dr1.db)
 for value, sol in engine.run_step(divider, "rval", [1e3, 2e3, 5e3]):
     print(value, sol.voltage("out"))
 ```

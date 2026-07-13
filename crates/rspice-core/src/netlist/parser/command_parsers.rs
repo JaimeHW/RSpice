@@ -409,21 +409,82 @@ fn parse_inline_current_probe(token: &str, line_num: usize) -> Result<String, Pa
     Ok(inner.to_uppercase())
 }
 
-/// Parse .SENS command: .SENS V(out[,ref]) [AC DEC|LIN|OCT np fstart fstop]
+/// Parse .SENS command:
+/// .SENS V(out[,ref])|I(vsource) [devspec ...] [AC DEC|LIN|OCT np fstart fstop]
 pub(super) fn parse_sens_command(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
 ) -> Result<AnalysisCommand, ParseError> {
-    let (output_node, reference_node) = parse_voltage_output_reference(stream, line_num)?;
+    let is_current_probe = matches!(&stream.peek().kind, TokenKind::Ident(s) if {
+        let upper = s.to_uppercase();
+        upper == "I" || upper.starts_with("I(")
+    });
+    let (output_node, reference_node, output_is_current) = if is_current_probe {
+        let ident = expect_ident(stream, line_num)?;
+        let element = if ident.len() > 1 {
+            parse_inline_current_probe(&ident, line_num)?
+        } else {
+            if !stream.consume(&TokenKind::LParen) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected '(' after I in .SENS current probe".to_string(),
+                });
+            }
+            let element = expect_ident(stream, line_num)?;
+            if !stream.consume(&TokenKind::RParen) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected ')' in I(element) specification".to_string(),
+                });
+            }
+            element
+        };
+        (element.to_uppercase(), None, true)
+    } else {
+        let (node, reference) = parse_voltage_output_reference(stream, line_num)?;
+        (node, reference, false)
+    };
+
+    let mut filters = Vec::new();
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let is_mode = matches!(
+            &stream.peek().kind,
+            TokenKind::Ident(mode)
+                if mode.eq_ignore_ascii_case("AC") || mode.eq_ignore_ascii_case("DC")
+        );
+        if is_mode {
+            break;
+        }
+        filters.push(consume_sensitivity_filter(stream));
+    }
+
     let mut ac_sweep = None;
 
     if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         let mode = expect_ident(stream, line_num)?;
+        if mode.eq_ignore_ascii_case("DC") {
+            if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".SENS DC does not accept a frequency sweep".to_string(),
+                });
+            }
+            return Ok(AnalysisCommand::Sensitivity {
+                output_node,
+                reference_node,
+                output_is_current,
+                filters,
+                ac_sweep,
+            });
+        }
         if !mode.eq_ignore_ascii_case("AC") {
             return Err(ParseError::Syntax {
                 line: line_num,
-                message: format!("Invalid .SENS mode '{}': expected AC or end-of-line", mode),
+                message: format!(
+                    "Invalid .SENS mode '{}': expected AC, DC, a device filter, or end-of-line",
+                    mode
+                ),
             });
         }
 
@@ -458,8 +519,30 @@ pub(super) fn parse_sens_command(
     Ok(AnalysisCommand::Sensitivity {
         output_node,
         reference_node,
+        output_is_current,
+        filters,
         ac_sweep,
     })
+}
+
+/// Consume one whitespace-delimited `.SENS` device specification. Wildcards
+/// are separate lexer tokens, so source spans are used to join adjacent pieces
+/// (`M*`, `MOD:*`, `R?_TC1`) without merging the next whitespace-separated
+/// filter.
+fn consume_sensitivity_filter(stream: &mut TokenStream) -> String {
+    let first = stream.advance().clone();
+    let line = first.span.line;
+    let mut end = first.span.end;
+    let mut filter = first.lexeme;
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+        && stream.peek().span.line == line
+        && stream.peek().span.start == end
+    {
+        let token = stream.advance().clone();
+        end = token.span.end;
+        filter.push_str(&token.lexeme);
+    }
+    filter.to_ascii_uppercase()
 }
 
 /// Parse .PZ command: .PZ in+ in- out+ out- VOL|CUR PZ|POL|ZER

@@ -251,7 +251,7 @@ R2 out 0 1k
         assert report.all_passed
         report.assert_passed()
 
-    def test_ac_sensitivity_is_explicitly_gated_not_approximated(self, engine):
+    def test_ac_sensitivity_executes_without_being_gated(self, engine):
         netlist = rspice.Netlist.parse(
             """* AC sensitivity requires every eligible device/model parameter
 V1 in 0 DC 10 AC 1
@@ -267,11 +267,11 @@ R2 out 0 1k
         report = engine.run(netlist)
 
         assert report.measurement("vout").passed
-        assert [record.kind for record in report.skipped] == ["sens_ac"]
-        assert "every eligible device and model parameter" in report.skipped[0].reason
-        assert not report.all_passed
-        with pytest.raises(rspice.MeasurementError, match="every eligible"):
-            report.assert_passed()
+        assert report.sensitivity_ac is not None
+        assert report.sensitivity_ac.vector_names == ["R1", "R2", "V1", "V1_AC_MAG", "V1_AC_PHASE"]
+        assert report.skipped == []
+        assert report.all_passed
+        report.assert_passed()
 
 
 class TestRunMultipleAnalyses:

@@ -18,7 +18,9 @@ use numpy::{PyArray1, ToPyArray};
 use pyo3::exceptions::{PyIndexError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use rspice_core::analysis::{AcResult, DistortionAnalysisResult, DistortionProduct};
+use rspice_core::analysis::{
+    AcResult, AcSensitivityResult, DistortionAnalysisResult, DistortionProduct,
+};
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::engine::TransientResult;
 use rspice_core::solver::SimulationResult;
@@ -2213,6 +2215,249 @@ impl PyNoiseResult {
 // Sensitivity Analysis Results
 //=============================================================================
 
+/// Frequency-dependent complex sensitivity to one circuit parameter.
+#[pyclass(name = "AcSensitivity", module = "rspice", from_py_object)]
+#[derive(Debug, Clone)]
+pub struct PyAcSensitivity {
+    #[pyo3(get)]
+    pub vector_name: String,
+    #[pyo3(get)]
+    pub element: String,
+    #[pyo3(get)]
+    pub element_type: String,
+    #[pyo3(get)]
+    pub parameter: String,
+    #[pyo3(get)]
+    pub nominal_value: f64,
+    absolute: Vec<rspice_core::Complex64>,
+    normalized: Vec<rspice_core::Complex64>,
+    magnitude: Vec<f64>,
+    phase: Vec<f64>,
+    db: Vec<f64>,
+}
+
+#[pymethods]
+impl PyAcSensitivity {
+    /// Complex unnormalized derivative of the selected output.
+    #[getter]
+    fn absolute<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
+        self.absolute.to_pyarray(py)
+    }
+
+    /// Complex normalized derivative `(parameter/output) * d(output)/dp`.
+    #[getter]
+    fn normalized<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
+        self.normalized.to_pyarray(py)
+    }
+
+    /// Derivative of output magnitude per unit parameter.
+    #[getter]
+    fn magnitude<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.magnitude.to_pyarray(py)
+    }
+
+    /// Derivative of output phase in radians per unit parameter.
+    #[getter]
+    fn phase<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.phase.to_pyarray(py)
+    }
+
+    /// Derivative of output phase in degrees per unit parameter.
+    #[getter]
+    fn phase_degrees<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.phase
+            .iter()
+            .map(|value| value.to_degrees())
+            .collect::<Vec<_>>()
+            .to_pyarray(py)
+    }
+
+    /// Derivative of `20*log10(|output|)` per unit parameter.
+    #[getter]
+    fn db<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.db.to_pyarray(py)
+    }
+
+    /// Complex percent output change for a one-percent parameter change.
+    /// Numerically this equals normalized sensitivity.
+    #[getter]
+    fn percent_per_percent<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
+        self.normalized.to_pyarray(py)
+    }
+
+    fn __len__(&self) -> usize {
+        self.absolute.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "AcSensitivity(vector_name='{}', parameter='{}', points={})",
+            self.vector_name,
+            self.parameter,
+            self.absolute.len()
+        )
+    }
+}
+
+/// Complete netlist-wide AC sensitivity result.
+#[pyclass(name = "AcSensitivityResult", module = "rspice", from_py_object)]
+#[derive(Debug, Clone)]
+pub struct PyAcSensitivityResult {
+    #[pyo3(get)]
+    pub output: String,
+    frequencies: Vec<f64>,
+    output_values: Vec<rspice_core::Complex64>,
+    sensitivities: Vec<PyAcSensitivity>,
+}
+
+impl PyAcSensitivityResult {
+    pub fn from_core(result: &AcSensitivityResult) -> Self {
+        let sensitivities = result
+            .sensitivities
+            .iter()
+            .map(|trace| {
+                let db = trace
+                    .magnitude
+                    .iter()
+                    .zip(&result.output_values)
+                    .map(|(derivative, output)| {
+                        let magnitude = output.norm();
+                        if magnitude > 1.0e-300 {
+                            20.0 / std::f64::consts::LN_10 * derivative / magnitude
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect();
+                PyAcSensitivity {
+                    vector_name: trace.vector_name.clone(),
+                    element: trace.element.clone(),
+                    element_type: format!("{:?}", trace.element_type),
+                    parameter: trace.parameter.clone(),
+                    nominal_value: trace.nominal_value,
+                    absolute: trace.absolute.clone(),
+                    normalized: trace.normalized.clone(),
+                    magnitude: trace.magnitude.clone(),
+                    phase: trace.phase.clone(),
+                    db,
+                }
+            })
+            .collect();
+        Self {
+            output: result.output.clone(),
+            frequencies: result.frequencies.clone(),
+            output_values: result.output_values.clone(),
+            sensitivities,
+        }
+    }
+}
+
+#[pymethods]
+impl PyAcSensitivityResult {
+    #[getter]
+    fn frequencies<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.frequencies.to_pyarray(py)
+    }
+
+    #[getter]
+    fn output_complex<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
+        self.output_values.to_pyarray(py)
+    }
+
+    #[getter]
+    fn output_magnitude<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.output_values
+            .iter()
+            .map(|value| value.norm())
+            .collect::<Vec<_>>()
+            .to_pyarray(py)
+    }
+
+    #[getter]
+    fn output_phase<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.output_values
+            .iter()
+            .map(|value| value.arg())
+            .collect::<Vec<_>>()
+            .to_pyarray(py)
+    }
+
+    #[getter]
+    fn output_phase_degrees<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.output_values
+            .iter()
+            .map(|value| value.arg().to_degrees())
+            .collect::<Vec<_>>()
+            .to_pyarray(py)
+    }
+
+    #[getter]
+    fn sensitivities(&self) -> Vec<PyAcSensitivity> {
+        self.sensitivities.clone()
+    }
+
+    #[getter]
+    fn vector_names(&self) -> Vec<String> {
+        self.sensitivities
+            .iter()
+            .map(|trace| trace.vector_name.clone())
+            .collect()
+    }
+
+    fn get(&self, vector_name: &str) -> PyResult<PyAcSensitivity> {
+        self.sensitivities
+            .iter()
+            .find(|trace| trace.vector_name.eq_ignore_ascii_case(vector_name))
+            .cloned()
+            .ok_or_else(|| {
+                PyKeyError::new_err(format!("unknown AC sensitivity vector '{vector_name}'"))
+            })
+    }
+
+    /// Most influential traces at one frequency by normalized magnitude.
+    #[pyo3(signature = (frequency_index, count=10))]
+    fn top(&self, frequency_index: usize, count: usize) -> PyResult<Vec<PyAcSensitivity>> {
+        if frequency_index >= self.frequencies.len() {
+            return Err(PyIndexError::new_err(format!(
+                "frequency index {frequency_index} is out of range for result with {} points",
+                self.frequencies.len()
+            )));
+        }
+        let mut traces = self.sensitivities.clone();
+        traces.sort_by(|left, right| {
+            let left_norm = left
+                .normalized
+                .get(frequency_index)
+                .map_or(0.0, |value| value.norm());
+            let right_norm = right
+                .normalized
+                .get(frequency_index)
+                .map_or(0.0, |value| value.norm());
+            right_norm
+                .total_cmp(&left_norm)
+                .then_with(|| left.vector_name.cmp(&right.vector_name))
+        });
+        traces.truncate(count);
+        Ok(traces)
+    }
+
+    fn __len__(&self) -> usize {
+        self.sensitivities.len()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "AcSensitivityResult(output='{}', frequencies={}, parameters={})",
+            self.output,
+            self.frequencies.len(),
+            self.sensitivities.len()
+        )
+    }
+}
+
 /// Sensitivity of one output to one device/source parameter.
 #[pyclass(name = "ElementSensitivity", module = "rspice", from_py_object)]
 #[derive(Debug, Clone)]
@@ -2248,7 +2493,7 @@ impl PyElementSensitivity {
 impl PyElementSensitivity {
     #[getter]
     fn percent_per_percent(&self) -> f64 {
-        self.normalized * 100.0
+        self.normalized
     }
 
     fn __repr__(&self) -> String {
@@ -4055,6 +4300,9 @@ pub struct PyRunReport {
     /// Adjoint DC sensitivity result (last DC .sens)
     #[pyo3(get)]
     pub sensitivity: Option<PySensitivityResult>,
+    /// Complete complex AC sensitivity result (last AC .sens)
+    #[pyo3(get)]
+    pub sensitivity_ac: Option<PyAcSensitivityResult>,
     /// Fourier results (one per .four output)
     #[pyo3(get)]
     pub fourier: Vec<PyFourierResult>,

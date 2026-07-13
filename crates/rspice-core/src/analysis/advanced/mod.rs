@@ -63,7 +63,8 @@ pub use s_param::{
     FrequencySweep, Port, SMatrix, SParameterAnalyzer, SParameterConfig, SParameterResult,
 };
 pub use sensitivity::{
-    ElementDesc, ElementType, Sensitivity, SensitivityAnalyzer, SensitivityResult,
+    AcSensitivity, AcSensitivityOutput, AcSensitivityResult, ElementDesc, ElementType, Sensitivity,
+    SensitivityAnalyzer, SensitivityResult,
 };
 pub use stb::{
     BodePoint, NyquistPoint, StabilityMargins, StbAnalyzer, StbConfig, StbResult, StbSweepType,

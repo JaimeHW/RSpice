@@ -14,12 +14,12 @@
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use rspice_core::analysis::Distribution;
 use rspice_core::analysis::PssConfig;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
 use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
 use rspice_core::analysis::advanced::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::advanced::stb::{StbConfig, StbSweepType};
+use rspice_core::analysis::{AcSensitivityOutput, Distribution};
 use rspice_core::netlist::{
     AnalysisCommand, DcSweepSpec, FreqVariation, PoleZeroAnalysisType, PoleZeroTransferType,
     StepCommand, StepSweep, StepTarget,
@@ -33,11 +33,12 @@ use crate::config::PySimulationConfig;
 use crate::measure;
 use crate::netlist::{PyNetlist, describe_analysis};
 use crate::results::{
-    NodeIdentifier, PyAcResult, PyAnalysisRecord, PyCompressedTransientResult, PyDcSweepResult,
-    PyDistortionResult, PyFourierResult, PyHbResult, PyMonteCarloResult, PyNoiseResult,
-    PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult, PyPoleZeroResult, PyPssResult,
-    PyRunReport, PySParameterResult, PySensitivityResult, PySimulationResult, PyStbResult,
-    PyTransferFunctionResult, PyTransientCheckpoint, PyTransientResult, is_ground_name,
+    NodeIdentifier, PyAcResult, PyAcSensitivityResult, PyAnalysisRecord,
+    PyCompressedTransientResult, PyDcSweepResult, PyDistortionResult, PyFourierResult, PyHbResult,
+    PyMonteCarloResult, PyNoiseResult, PyOscillatorNoiseResult, PyPacResult, PyPeriodicNoiseResult,
+    PyPoleZeroResult, PyPssResult, PyRunReport, PySParameterResult, PySensitivityResult,
+    PySimulationResult, PyStbResult, PyTransferFunctionResult, PyTransientCheckpoint,
+    PyTransientResult, is_ground_name,
 };
 
 /// Validate that every frequency is finite and non-negative.
@@ -647,6 +648,53 @@ impl PyEngine {
         Ok(PySensitivityResult::from_core(&result))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn sensitivity_ac_complete_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        output: &NodeIdentifier,
+        reference: Option<&NodeIdentifier>,
+        output_is_current: bool,
+        frequencies: &[f64],
+        filters: &[String],
+    ) -> PyResult<PyAcSensitivityResult> {
+        validate_frequencies(frequencies)?;
+        let engine = self.engine_for_netlist(&netlist.inner);
+        let output = if output_is_current {
+            if reference.is_some() {
+                return Err(PyValueError::new_err(
+                    "a branch-current sensitivity output cannot have a reference node",
+                ));
+            }
+            let NodeIdentifier::Name(element) = output else {
+                return Err(PyTypeError::new_err(
+                    "a branch-current sensitivity output must be an element name",
+                ));
+            };
+            AcSensitivityOutput::BranchCurrent(element.clone())
+        } else {
+            let positive =
+                self.resolve_node(&engine, &netlist.inner, output, "AC sensitivity output")?;
+            let negative = reference
+                .map(|node| {
+                    self.resolve_node(&engine, &netlist.inner, node, "AC sensitivity reference")
+                })
+                .transpose()?;
+            AcSensitivityOutput::Voltage { positive, negative }
+        };
+        let result = run_interruptible(py, &self.active_runs, |abort| {
+            engine.run_sensitivity_ac_complete_with_abort(
+                &netlist.inner,
+                output,
+                frequencies,
+                filters,
+                abort,
+            )
+        })?;
+        Ok(PyAcSensitivityResult::from_core(&result))
+    }
+
     #[allow(clippy::needless_range_loop)]
     fn sparameter_impl(
         &self,
@@ -833,6 +881,7 @@ impl PyEngine {
         let mut step_result: Option<PyDcSweepResult> = None;
         let mut temperature: Option<PyDcSweepResult> = None;
         let mut sensitivity: Option<PySensitivityResult> = None;
+        let mut sensitivity_ac: Option<PyAcSensitivityResult> = None;
         let mut fourier: Vec<PyFourierResult> = Vec::new();
         let mut pending_fourier: Vec<(f64, Vec<String>, usize)> = Vec::new();
 
@@ -1136,15 +1185,45 @@ impl PyEngine {
                 AnalysisCommand::Sensitivity {
                     output_node,
                     reference_node,
+                    output_is_current,
+                    filters,
                     ac_sweep,
                 } => {
-                    if ac_sweep.is_some() {
-                        records.push(PyAnalysisRecord::skipped(
+                    if let Some(sweep) = ac_sweep {
+                        let frequencies = ac_sweep_frequencies(
+                            sweep.variation,
+                            sweep.points,
+                            sweep.start_freq,
+                            sweep.stop_freq,
+                        );
+                        let output = NodeIdentifier::Name(output_node.clone());
+                        let reference = reference_node
+                            .as_ref()
+                            .map(|name| NodeIdentifier::Name(name.clone()));
+                        sensitivity_ac = Some(self.sensitivity_ac_complete_impl(
+                            py,
+                            netlist,
+                            &output,
+                            reference.as_ref(),
+                            *output_is_current,
+                            &frequencies,
+                            filters,
+                        )?);
+                        records.push(PyAnalysisRecord::executed(
                             "sens_ac",
                             describe_analysis(analysis),
-                            ".SENS AC requires sensitivities for every eligible device and model parameter; run_sensitivity_ac() intentionally covers one explicitly bound parameter and is not a standards-equivalent substitute",
                         ));
                     } else {
+                        if *output_is_current {
+                            return Err(crate::errors::SimulationError::new_err(
+                                "DC .SENS I(element) is not supported by the current DC adjoint solver",
+                            ));
+                        }
+                        if !filters.is_empty() {
+                            return Err(crate::errors::SimulationError::new_err(
+                                "DC .SENS device filters are not supported by the current DC adjoint solver",
+                            ));
+                        }
                         let output = NodeIdentifier::Name(output_node.clone());
                         let reference = reference_node
                             .as_ref()
@@ -1281,6 +1360,7 @@ impl PyEngine {
             step: step_result,
             temperature,
             sensitivity,
+            sensitivity_ac,
             fourier,
             records,
             measurements,
@@ -2356,6 +2436,42 @@ impl PyEngine {
             )
         })?;
         Ok(values.to_pyarray(py))
+    }
+
+    /// Run complete netlist-wide complex AC sensitivity analysis.
+    ///
+    /// Every eligible explicit real-valued device, instance, model, source,
+    /// and real-vector parameter in the flattened hierarchy is varied. The
+    /// result includes complex absolute and normalized derivatives plus
+    /// magnitude, phase, and dB derivatives.
+    #[pyo3(signature = (
+        netlist,
+        output,
+        frequencies,
+        reference=None,
+        filters=None,
+        output_is_current=false
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn run_sensitivity_ac_complete(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        output: NodeIdentifier,
+        frequencies: Vec<f64>,
+        reference: Option<NodeIdentifier>,
+        filters: Option<Vec<String>>,
+        output_is_current: bool,
+    ) -> PyResult<PyAcSensitivityResult> {
+        self.sensitivity_ac_complete_impl(
+            py,
+            netlist,
+            &output,
+            reference.as_ref(),
+            output_is_current,
+            &frequencies,
+            filters.as_deref().unwrap_or(&[]),
+        )
     }
 
     /// Run parametric step analysis

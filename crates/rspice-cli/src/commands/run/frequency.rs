@@ -891,45 +891,34 @@ pub(super) fn run_sensitivity_from_command(
     ctx: &RunContext<'_>,
     output_node: &str,
     reference_node: Option<&str>,
+    output_is_current: bool,
+    filters: &[String],
     ac_sweep: Option<rspice_core::netlist::SensitivityAcSweep>,
 ) -> Result<(), CliError> {
     let resolver = NodeResolver::from_netlist(ctx.engine, ctx.netlist)?;
-    let out_pos = resolver
-        .resolve_node(output_node)
-        .ok_or_else(|| CliError::SimulationError {
-            message: format!("Invalid .SENS output node '{}'", output_node),
-            analysis: Some("Sensitivity".to_string()),
-        })?;
-    let out_neg = match reference_node {
-        Some(node) => resolver
-            .resolve_node(node)
+    let out_pos = if output_is_current {
+        0
+    } else {
+        resolver
+            .resolve_node(output_node)
             .ok_or_else(|| CliError::SimulationError {
-                message: format!("Invalid .SENS reference node '{}'", node),
+                message: format!("Invalid .SENS output node '{}'", output_node),
                 analysis: Some("Sensitivity".to_string()),
-            })?,
-        None => 0,
+            })?
     };
-
-    let mut params: Vec<(String, f64)> = ctx
-        .netlist
-        .params
-        .all_params()
-        .into_iter()
-        .filter(|(name, value)| {
-            !name.starts_with("IC_")
-                && !name.starts_with("NODESET_")
-                && value.is_finite()
-                && value.abs() > 0.0
-        })
-        .collect();
-    params.sort_by(|a, b| a.0.cmp(&b.0));
-
-    if params.is_empty() {
-        return Err(CliError::SimulationError {
-            message: ".SENS requires at least one non-zero top-level .PARAM".to_string(),
-            analysis: Some("Sensitivity".to_string()),
-        });
-    }
+    let out_neg = if output_is_current {
+        0
+    } else {
+        match reference_node {
+            Some(node) => resolver
+                .resolve_node(node)
+                .ok_or_else(|| CliError::SimulationError {
+                    message: format!("Invalid .SENS reference node '{}'", node),
+                    analysis: Some("Sensitivity".to_string()),
+                })?,
+            None => 0,
+        }
+    };
 
     if let Some(ac) = ac_sweep {
         let freqs = generate_frequency_sweep(ac.variation, ac.points, ac.start_freq, ac.stop_freq);
@@ -949,38 +938,28 @@ pub(super) fn run_sensitivity_from_command(
             );
         }
 
-        let mut series: Vec<(String, Vec<f64>)> = Vec::with_capacity(params.len());
-        for (param_name, param_value) in &params {
-            let pos = ctx
-                .engine
-                .run_sensitivity_ac(ctx.netlist, out_pos, param_name, *param_value, &freqs, None)
-                .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity AC"))?;
-            let combined = if out_neg == 0 {
-                pos
-            } else {
-                let neg = ctx
-                    .engine
-                    .run_sensitivity_ac(
-                        ctx.netlist,
-                        out_neg,
-                        param_name,
-                        *param_value,
-                        &freqs,
-                        None,
-                    )
-                    .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity AC"))?;
-                pos.iter()
-                    .zip(neg.iter())
-                    .map(|(sp, sn)| sp - sn)
-                    .collect::<Vec<_>>()
-            };
+        let output = if output_is_current {
+            rspice_core::analysis::AcSensitivityOutput::BranchCurrent(output_node.to_string())
+        } else {
+            rspice_core::analysis::AcSensitivityOutput::Voltage {
+                positive: out_pos,
+                negative: (out_neg != 0).then_some(out_neg),
+            }
+        };
+        let result = ctx
+            .engine
+            .run_sensitivity_ac_complete(ctx.netlist, output, &freqs, filters)
+            .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity AC"))?;
+
+        for trace in &result.sensitivities {
+            let combined = &trace.magnitude;
 
             if !ctx.quiet {
                 let first = combined.first().copied().unwrap_or(0.0);
                 let last = combined.last().copied().unwrap_or(0.0);
                 println!(
                     "  d|V|/d{}: {:.6e} @ {:e} Hz, {:.6e} @ {:e} Hz",
-                    param_name,
+                    trace.vector_name,
                     first,
                     freqs.first().copied().unwrap_or(0.0),
                     last,
@@ -993,10 +972,8 @@ pub(super) fn run_sensitivity_from_command(
                     .iter()
                     .map(|v| v.abs())
                     .fold(0.0_f64, |acc, v| acc.max(v));
-                println!("    peak |d|V|/d{}| = {:.6e}", param_name, peak);
+                println!("    peak |d|V|/d{}| = {:.6e}", trace.vector_name, peak);
             }
-
-            series.push((param_name.clone(), combined));
         }
 
         if let Some(ref output_path) = ctx.output_path_for("sens") {
@@ -1009,12 +986,16 @@ pub(super) fn run_sensitivity_from_command(
                 scale_name: "frequency".to_string(),
                 scale_type: "frequency".to_string(),
                 scale: freqs.clone(),
-                columns: series
-                    .into_iter()
-                    .map(|(name, values)| ExportColumn {
-                        name: format!("dV/d({name})"),
+                columns: result
+                    .sensitivities
+                    .iter()
+                    .map(|trace| ExportColumn {
+                        name: format!("dV/d({})", trace.vector_name),
                         var_type: "sensitivity".to_string(),
-                        data: ColumnData::Real(values),
+                        data: ColumnData::Complex {
+                            real: trace.absolute.iter().map(|value| value.re).collect(),
+                            imag: trace.absolute.iter().map(|value| value.im).collect(),
+                        },
                     })
                     .collect(),
             }
@@ -1028,6 +1009,21 @@ pub(super) fn run_sensitivity_from_command(
         return Ok(());
     }
 
+    if output_is_current {
+        return Err(CliError::SimulationError {
+            message: "DC .SENS I(element) is not yet supported by the DC adjoint path".to_string(),
+            analysis: Some("Sensitivity".to_string()),
+        });
+    }
+
+    if !filters.is_empty() {
+        return Err(CliError::SimulationError {
+            message: "DC .SENS device filters are not yet supported by the DC adjoint path"
+                .to_string(),
+            analysis: Some("Sensitivity".to_string()),
+        });
+    }
+
     if !ctx.quiet {
         println!(
             "Running DC Sensitivity analysis: V({},{})",
@@ -1036,23 +1032,15 @@ pub(super) fn run_sensitivity_from_command(
         );
     }
 
-    let mut results: Vec<(String, f64)> = Vec::with_capacity(params.len());
-    for (param_name, param_value) in &params {
-        let pos = ctx
-            .engine
-            .run_sensitivity(ctx.netlist, out_pos, param_name, *param_value, None)
-            .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity"))?;
-        let combined = if out_neg == 0 {
-            pos
-        } else {
-            let neg = ctx
-                .engine
-                .run_sensitivity(ctx.netlist, out_neg, param_name, *param_value, None)
-                .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity"))?;
-            pos - neg
-        };
-        results.push((param_name.clone(), combined));
-    }
+    let linearized = ctx
+        .engine
+        .run_sensitivity_linearized(ctx.netlist, out_pos, (out_neg != 0).then_some(out_neg))
+        .map_err(|e| CliError::simulation_error_in(e.to_string(), "Sensitivity"))?;
+    let mut results = linearized
+        .sensitivities
+        .into_iter()
+        .map(|trace| (trace.element, trace.absolute))
+        .collect::<Vec<_>>();
 
     results.sort_by(|a, b| {
         b.1.abs()

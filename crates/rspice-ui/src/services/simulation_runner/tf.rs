@@ -320,33 +320,10 @@ fn infer_tf_run_config(
     })
 }
 
-fn source_dc_bias(spec: &SourceSpec) -> Value {
-    match spec {
-        SourceSpec::RfPort { inner, .. } => source_dc_bias(inner),
-        SourceSpec::Dc(v) => *v,
-        SourceSpec::Ac { .. } => 0.0,
-        SourceSpec::DcAc { dc_value, .. } => *dc_value,
-        SourceSpec::DcTransient { dc_value, .. } => *dc_value,
-        SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
-        SourceSpec::Pulse { v1, .. } => *v1,
-        SourceSpec::Sin { offset, .. } => *offset,
-        SourceSpec::Pwl { points, .. } => points.first().map(|(_, value)| *value).unwrap_or(0.0),
-        SourceSpec::PwlFile { .. } => 0.0,
-        SourceSpec::Exp { v1, .. } => *v1,
-        SourceSpec::Sffm { offset, .. } => *offset,
-        SourceSpec::Am { offset, .. } => *offset,
-        // Zero-mean noise contributes nothing to the operating point.
-        SourceSpec::TrNoise { .. } => 0.0,
-        SourceSpec::Pat { .. } => 0.0,
-    }
-}
-
 fn source_with_ac_excitation(spec: &SourceSpec, magnitude: Value, phase_deg: Value) -> SourceSpec {
-    SourceSpec::DcAc {
-        dc_value: source_dc_bias(spec),
-        ac_magnitude: magnitude,
-        ac_phase: phase_deg,
-    }
+    // Preserve DC, transient, RF-port, and distortion annotations. SourceSpec
+    // stores AC phase in radians while the UI contract is degrees.
+    spec.clone().with_ac(magnitude, phase_deg.to_radians())
 }
 
 fn source_without_ac(spec: &SourceSpec) -> SourceSpec {
@@ -458,7 +435,7 @@ mod tests {
     use rspice_core::netlist::SourceRfPort;
 
     #[test]
-    fn rf_port_sources_preserve_inner_dc_bias() {
+    fn rf_port_sources_preserve_annotations_and_convert_phase_to_radians() {
         let spec = SourceSpec::RfPort {
             inner: Box::new(SourceSpec::DcAc {
                 dc_value: 2.5,
@@ -474,6 +451,21 @@ mod tests {
             },
         };
 
-        assert_eq!(source_dc_bias(&spec), 2.5);
+        let excited = source_with_ac_excitation(&spec, 3.0, 90.0);
+        let SourceSpec::RfPort { inner, port } = excited else {
+            panic!("RF-port wrapper must be preserved");
+        };
+        assert_eq!(port.portnum, 1);
+        let SourceSpec::DcAc {
+            dc_value,
+            ac_magnitude,
+            ac_phase,
+        } = *inner
+        else {
+            panic!("inner DC+AC source must be preserved");
+        };
+        assert_eq!(dc_value, 2.5);
+        assert_eq!(ac_magnitude, 3.0);
+        assert!((ac_phase - std::f64::consts::FRAC_PI_2).abs() < 1e-15);
     }
 }

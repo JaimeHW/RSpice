@@ -16,6 +16,11 @@ Release numbers remain tied to the workspace version.
   products, two-tone F1+F2/F1-F2/2F1-F2 products, complex peak phasors,
   relative voltage/current metrics, direct sweep APIs, deck execution, and
   cooperative cancellation.
+- Complete complex AC `.SENS` analysis across flattened hierarchical devices,
+  explicit instance/model/source and real-vector parameters, with device
+  filters, differential-voltage and branch-current outputs, normalized,
+  magnitude, phase, and dB derivatives, direct APIs, deck execution, and
+  cooperative cancellation.
 - Typed results and direct APIs for AC data sweeps, N-port S-parameters, STB,
   pole-zero, PSS, HB, PAC, driven and oscillator noise, Monte Carlo,
   sensitivity, parameter stepping, Fourier analysis, transient compression,
@@ -46,8 +51,11 @@ Release numbers remain tied to the workspace version.
 - Corrected transient `TSTART` clipping, DC sweep validation and nested axes,
   percentile validation, zero/noise logarithms, pole stability and bandwidth,
   and multi-channel waveform compression error bounds.
-- Eliminated silent approximations for complete AC `.SENS` and `.SP donoise`;
-  these are reported as unsupported and invalidate successful
-  automated-verification reports until standards-equivalent core solvers exist.
+- Corrected sensitivity percent-per-percent scaling and transfer-function UI
+  source phase conversion while preserving RF-port, distortion, DC, and
+  transient source annotations.
+- Eliminated the silent `.SP donoise` approximation; it remains explicitly
+  unsupported and invalidates automated-verification reports until the
+  standards-equivalent two-port correlation solver is present.
 - Fixed a parallel XSPICE virtual-file test race and workspace-sdist lockfile
   reconciliation without permitting dependency upgrades.

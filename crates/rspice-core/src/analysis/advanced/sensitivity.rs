@@ -26,7 +26,7 @@
 //! ```
 
 #![allow(clippy::needless_range_loop)]
-use crate::Value;
+use crate::{Complex64, Value};
 
 //=============================================================================
 // Data Structures
@@ -42,6 +42,89 @@ pub enum ElementType {
     CurrentSource,
     Transconductance,
     Transresistance,
+    Diode,
+    Bjt,
+    Mosfet,
+    Jfet,
+    Mesfet,
+    BehavioralSource,
+    Switch,
+    TransmissionLine,
+    Coupling,
+    Xspice,
+    Model,
+    Other,
+}
+
+/// Output selected for a complete AC sensitivity analysis.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcSensitivityOutput {
+    /// Node voltage, optionally relative to a second node. Node indices use
+    /// the public SPICE convention: ground is zero and non-ground nodes are
+    /// one-based.
+    Voltage {
+        positive: usize,
+        negative: Option<usize>,
+    },
+    /// Current through a branch-producing element (normally a voltage
+    /// source), matched case-insensitively against the AC branch names.
+    BranchCurrent(String),
+}
+
+/// Frequency-dependent sensitivity of one output to one real-valued circuit
+/// parameter.
+#[derive(Debug, Clone)]
+pub struct AcSensitivity {
+    /// Stable SPICE-compatible vector name (`R1`, `M1_W`, `MOD:VTO`, ...).
+    pub vector_name: String,
+    /// Device or model that owns the parameter.
+    pub element: String,
+    /// Broad owner category.
+    pub element_type: ElementType,
+    /// Parameter name within the owner.
+    pub parameter: String,
+    /// Nominal real parameter value.
+    pub nominal_value: Value,
+    /// Complex derivative of the selected output at every frequency.
+    pub absolute: Vec<Complex64>,
+    /// Complex normalized derivative `(p / output) * d(output)/dp`.
+    pub normalized: Vec<Complex64>,
+    /// Derivative of output magnitude with respect to the parameter.
+    pub magnitude: Vec<Value>,
+    /// Derivative of output phase in radians with respect to the parameter.
+    pub phase: Vec<Value>,
+}
+
+/// Complete netlist-wide AC sensitivity result.
+#[derive(Debug, Clone)]
+pub struct AcSensitivityResult {
+    /// Human-readable selected output probe.
+    pub output: String,
+    /// Frequency grid in hertz.
+    pub frequencies: Vec<Value>,
+    /// Nominal complex output at every frequency.
+    pub output_values: Vec<Complex64>,
+    /// One trace for every eligible, selected real-valued parameter.
+    pub sensitivities: Vec<AcSensitivity>,
+}
+
+impl AcSensitivityResult {
+    /// Return the trace with this vector name, case-insensitively.
+    pub fn get(&self, vector_name: &str) -> Option<&AcSensitivity> {
+        self.sensitivities
+            .iter()
+            .find(|trace| trace.vector_name.eq_ignore_ascii_case(vector_name))
+    }
+
+    /// Number of parameter traces in this result.
+    pub fn len(&self) -> usize {
+        self.sensitivities.len()
+    }
+
+    /// Whether no parameter matched the requested selection.
+    pub fn is_empty(&self) -> bool {
+        self.sensitivities.is_empty()
+    }
 }
 
 /// A single sensitivity value
@@ -94,7 +177,10 @@ impl Sensitivity {
 
     /// Get sensitivity in percent per percent
     pub fn percent_per_percent(&self) -> Value {
-        self.normalized * 100.0
+        // If dy/y = S * dp/p, then a one-percent parameter change produces
+        // S percent output change. The numeric percent-per-percent value is
+        // therefore the normalized sensitivity itself, not 100*S.
+        self.normalized
     }
 }
 
@@ -478,7 +564,19 @@ impl SensitivityAnalyzer {
                 ElementType::VoltageSource => self.voltage_source_sensitivity(elem),
                 ElementType::Inductor
                 | ElementType::Transconductance
-                | ElementType::Transresistance => self.unsupported_linearized_sensitivity(elem),
+                | ElementType::Transresistance
+                | ElementType::Diode
+                | ElementType::Bjt
+                | ElementType::Mosfet
+                | ElementType::Jfet
+                | ElementType::Mesfet
+                | ElementType::BehavioralSource
+                | ElementType::Switch
+                | ElementType::TransmissionLine
+                | ElementType::Coupling
+                | ElementType::Xspice
+                | ElementType::Model
+                | ElementType::Other => self.unsupported_linearized_sensitivity(elem),
             };
 
             let sensitivity = Sensitivity::new(

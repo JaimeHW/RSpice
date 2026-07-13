@@ -1623,10 +1623,17 @@ pub enum AnalysisCommand {
         analysis_type: PoleZeroAnalysisType,
     },
 
-    /// Sensitivity analysis: .SENS V(out[,ref]) [AC DEC|LIN|OCT np fstart fstop]
+    /// Sensitivity analysis:
+    /// `.SENS V(out[,ref])|I(vsource) [devspec ...] [AC DEC|LIN|OCT np fstart fstop]`
     Sensitivity {
+        /// Output node for voltage probes, branch-owning element for current probes.
         output_node: String,
+        /// Optional reference node for differential voltage probes.
         reference_node: Option<String>,
+        /// True for an `I(element)` output probe.
+        output_is_current: bool,
+        /// Optional case-insensitive device/parameter glob filters.
+        filters: Vec<String>,
         ac_sweep: Option<SensitivityAcSweep>,
     },
 
