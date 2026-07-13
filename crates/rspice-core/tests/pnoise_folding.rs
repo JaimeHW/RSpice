@@ -100,7 +100,8 @@ c1 out 0 1f
     assert!(
         (got - expected).abs() < 0.04 * expected,
         "chopped-resistor output noise must fold to the time-average \
-         transfer: got {got:.4e}, want {expected:.4e} V^2/Hz"
+         transfer: got {got:.4e}, want {expected:.4e} V^2/Hz; contributors: {:?}",
+        result.contributors
     );
 }
 

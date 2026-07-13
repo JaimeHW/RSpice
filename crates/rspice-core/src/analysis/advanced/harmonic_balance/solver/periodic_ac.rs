@@ -397,7 +397,7 @@ impl HbSolver {
     /// analysis frequency — `e_out` carries +1 at the positive output node
     /// and -1 at the reference for differential outputs. Each periodically
     /// modulated white source then contributes
-    /// `sum_{k,m} conj(A_k) A_m S_{k-m}` with `A_k` the adjoint gain across
+    /// `sum_{k,m} A_k conj(A_m) S_{k-m}` with `A_k` the adjoint gain across
     /// its terminals at sideband k and `S_d` the Fourier coefficients of its
     /// intensity (`S_{-d} = conj(S_d)`). Stationary sources reduce to the
     /// textbook folding `S0 * sum_k |A_k|^2`.
@@ -476,7 +476,7 @@ impl HbSolver {
                     } else {
                         source.psd[d_abs].conj()
                     };
-                    contribution += gains[k_idx].conj() * gains[m_idx] * s_d;
+                    contribution += gains[k_idx] * gains[m_idx].conj() * s_d;
                 }
             }
 
