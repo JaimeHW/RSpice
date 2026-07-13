@@ -11,6 +11,7 @@ pub(super) fn parse_command(
 ) -> Result<(), ParseError> {
     let ParseCommandContext {
         analyses,
+        fft_analyses,
         unknown_warned,
         models,
         params,
@@ -224,6 +225,9 @@ pub(super) fn parse_command(
                 outputs,
                 num_harmonics: 9, // Default
             });
+        }
+        ".FFT" => {
+            fft_analyses.push(parse_fft_command(stream, line_num, params, diagnostics)?);
         }
         ".NOISE" => {
             let noise = parse_noise_command(stream, line_num, params)?;
@@ -1490,6 +1494,264 @@ fn parse_new_breakpoint_stepping_option(value: Value, line_num: usize) -> Result
             line: line_num,
             message: format!("NEWBPSTEPPING must be the integer 0 or 1, found {value}"),
         })
+    }
+}
+
+fn parse_fft_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Result<FftAnalysis, ParseError> {
+    let output = match &stream.peek().kind {
+        TokenKind::Expression(expression) => {
+            let expression = expression.clone();
+            if expression.trim().is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".FFT output expression must not be empty".to_string(),
+                });
+            }
+            stream.advance();
+            FftOutput::Expression(expression)
+        }
+        TokenKind::Ident(_) => {
+            let probe = parse_meas_signal(stream, line_num)?;
+            validate_fft_probe(&probe, line_num)?;
+            FftOutput::Probe(probe)
+        }
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".FFT requires one output probe or braced expression as its first field"
+                    .to_string(),
+            });
+        }
+    };
+
+    let mut start = None;
+    let mut stop = None;
+    let mut points = FftAnalysis::DEFAULT_POINTS;
+    let mut format = None;
+    let mut window = FftWindow::Rectangular;
+    let mut window_name = "RECT".to_string();
+    let mut alpha = FftAnalysis::DEFAULT_ALPHA;
+    let mut fundamental_frequency = None;
+    let mut minimum_frequency = None;
+    let mut maximum_frequency = None;
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let key = expect_ident(stream, line_num)?.to_ascii_uppercase();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".FFT qualifier {key} requires '=' and a value"),
+            });
+        }
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".FFT qualifier {key} is missing its value"),
+            });
+        }
+
+        match key.as_str() {
+            "START" | "FROM" => {
+                let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(non_finite_fft_qualifier(line_num, &key, value));
+                }
+                if value < 0.0 {
+                    diagnostics.push(ParseDiagnostic::warning(
+                        line_num,
+                        "fft-start-clamped",
+                        format!(".FFT {key}={value} is negative; Xyce resets the start time to 0"),
+                    ));
+                    start = Some(0.0);
+                } else {
+                    start = Some(value);
+                }
+            }
+            "STOP" | "TO" => {
+                let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(non_finite_fft_qualifier(line_num, &key, value));
+                }
+                stop = Some(value);
+            }
+            "NP" => {
+                let value = expect_value(stream, line_num, params)?;
+                points = normalize_fft_points(value, line_num, diagnostics)?;
+            }
+            "FORMAT" => {
+                let value = expect_ident(stream, line_num)?.to_ascii_uppercase();
+                format = Some(match value.as_str() {
+                    "NORM" => FftFormat::Normalized,
+                    "UNORM" => FftFormat::Unnormalized,
+                    _ => {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!("Invalid FORMAT type {value} on .FFT line"),
+                        });
+                    }
+                });
+            }
+            "WINDOW" => {
+                window_name = expect_ident(stream, line_num)?.to_ascii_uppercase();
+                window = parse_fft_window(&window_name, line_num)?;
+            }
+            "ALFA" => {
+                let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(non_finite_fft_qualifier(line_num, &key, value));
+                }
+                alpha = value.clamp(1.0, 20.0);
+            }
+            "FREQ" | "FMIN" | "FMAX" => {
+                let value = expect_value(stream, line_num, params)?;
+                if !value.is_finite() {
+                    return Err(non_finite_fft_qualifier(line_num, &key, value));
+                }
+                match key.as_str() {
+                    "FREQ" => fundamental_frequency = Some(value),
+                    "FMIN" => minimum_frequency = Some(value),
+                    "FMAX" => maximum_frequency = Some(value),
+                    _ => unreachable!(),
+                }
+            }
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Unknown .FFT qualifier {key}"),
+                });
+            }
+        }
+    }
+
+    Ok(FftAnalysis {
+        output,
+        start,
+        stop,
+        points,
+        format,
+        window,
+        window_name,
+        alpha,
+        fundamental_frequency,
+        minimum_frequency,
+        maximum_frequency,
+    })
+}
+
+fn validate_fft_probe(probe: &str, line_num: usize) -> Result<(), ParseError> {
+    let Some((operator, arguments)) = probe.split_once('(') else {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(".FFT output '{probe}' must be a parenthesized probe"),
+        });
+    };
+    if !arguments.ends_with(')') {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(".FFT output '{probe}' has an unterminated argument list"),
+        });
+    }
+    let operator = operator.to_ascii_uppercase();
+    let allowed = operator.starts_with('I') || matches!(operator.as_str(), "V" | "P" | "W" | "N");
+    if !allowed {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("Unsupported .FFT output operator {operator}"),
+        });
+    }
+    let argument_count = arguments[..arguments.len() - 1].split(',').count();
+    if operator == "V" && !(1..=2).contains(&argument_count) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".FFT voltage output requires one or two nodes".to_string(),
+        });
+    }
+    if operator != "V" && argument_count != 1 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(".FFT {operator} output requires exactly one argument"),
+        });
+    }
+    Ok(())
+}
+
+fn normalize_fft_points(
+    value: Value,
+    line_num: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Result<usize, ParseError> {
+    if !value.is_finite() || value > usize::MAX as Value {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(".FFT NP must be a finite representable integer, found {value}"),
+        });
+    }
+    let truncated = value.trunc();
+    if truncated <= 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".FFT NP must be positive".to_string(),
+        });
+    }
+    let raw = truncated as usize;
+    let normalized = if raw < 4 {
+        4
+    } else if raw.is_power_of_two() {
+        raw
+    } else {
+        let lower = 1usize << raw.ilog2();
+        let upper = lower.checked_mul(2).unwrap_or(lower);
+        if raw - lower >= (upper - lower) / 2 {
+            upper
+        } else {
+            lower
+        }
+    };
+    if normalized != raw {
+        diagnostics.push(ParseDiagnostic::warning(
+            line_num,
+            "fft-points-normalized",
+            format!(".FFT NP={value} is normalized to {normalized} samples"),
+        ));
+    }
+    Ok(normalized)
+}
+
+fn parse_fft_window(value: &str, line_num: usize) -> Result<FftWindow, ParseError> {
+    let window = match value {
+        "RECT" | "RECTANGULAR" => FftWindow::Rectangular,
+        "BART" | "BARTLETT" => FftWindow::Bartlett,
+        "BARTLETTHANN" => FftWindow::BartlettHann,
+        "HAMM" | "HAMMING" => FftWindow::Hamming,
+        "HANN" | "HANNING" => FftWindow::Hann,
+        "BLACK" => FftWindow::Blackman67Db,
+        "BLACKMAN" => FftWindow::Blackman,
+        "HARRIS" | "BLACKMANHARRIS" => FftWindow::BlackmanHarris,
+        "NUTTALL" => FftWindow::Nuttall,
+        "HALFCYCLESINE" => FftWindow::HalfCycleSine,
+        "HALFCYCLESINE3" => FftWindow::HalfCycleSine3,
+        "HALFCYCLESINE6" => FftWindow::HalfCycleSine6,
+        "COSINE2" => FftWindow::Cosine2,
+        "COSINE4" => FftWindow::Cosine4,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Invalid WINDOW type {value} on .FFT line"),
+            });
+        }
+    };
+    Ok(window)
+}
+
+fn non_finite_fft_qualifier(line_num: usize, key: &str, value: Value) -> ParseError {
+    ParseError::Syntax {
+        line: line_num,
+        message: format!(".FFT {key} must be finite, found {value}"),
     }
 }
 

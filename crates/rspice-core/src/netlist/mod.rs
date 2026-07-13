@@ -89,6 +89,9 @@ pub struct Netlist {
     pub elements: Vec<Element>,
     /// Analysis commands
     pub analyses: Vec<AnalysisCommand>,
+    /// Typed `.FFT` post-processing requests. These remain inert unless the
+    /// selected primary analysis is transient.
+    pub fft_analyses: Vec<FftAnalysis>,
     /// Named `.DATA` tables retained for table-driven analyses such as
     /// `.STEP DATA=<name>`.
     pub data_tables: Vec<DataTable>,
@@ -1139,6 +1142,7 @@ impl Default for Netlist {
             title: String::new(),
             elements: Vec::new(),
             analyses: Vec::new(),
+            fft_analyses: Vec::new(),
             data_tables: Vec::new(),
             models: Vec::new(),
             subcircuits: Vec::new(),
@@ -1372,6 +1376,93 @@ mod tests {
                 assert_eq!(*output, crate::analysis::ExtremaOutput::IndependentAxis)
             }
             other => panic!("expected MAX measurement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fft_directive_is_typed_but_not_a_primary_analysis() {
+        let netlist = Netlist::parse(
+            "inactive fft under ac\n\
+             V1 out 0 AC 1\n\
+             .ac dec 5 1 1k\n\
+             .fft v(out) np=8 window=hann format=unorm\n\
+             .end\n",
+        )
+        .expect("valid .FFT parses under AC");
+
+        assert_eq!(netlist.analyses.len(), 1);
+        assert_eq!(netlist.fft_analyses.len(), 1);
+        let fft = &netlist.fft_analyses[0];
+        assert_eq!(fft.output, FftOutput::Probe("V(OUT)".to_string()));
+        assert_eq!(fft.points, 8);
+        assert_eq!(fft.window, FftWindow::Hann);
+        assert_eq!(fft.window_name, "HANN");
+        assert_eq!(fft.format, Some(FftFormat::Unnormalized));
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unsupported-dot-command")
+        );
+    }
+
+    #[test]
+    fn fft_aliases_duplicates_and_normalization_match_xyce() {
+        let netlist = Netlist::parse(
+            "fft qualifier semantics\n\
+             V1 out 0 0\n\
+             .fft {v(out)} np=11 window=black from=1 start=-2 to=3 stop=4 alfa=25 freq=5 fmin=1 fmax=10\n\
+             .end\n",
+        )
+        .expect("Xyce-compatible .FFT aliases parse");
+
+        let fft = &netlist.fft_analyses[0];
+        assert_eq!(fft.output, FftOutput::Expression("v(out)".to_string()));
+        assert_eq!(fft.points, 8);
+        assert_eq!(fft.window, FftWindow::Blackman67Db);
+        assert_eq!(fft.window_name, "BLACK");
+        assert_eq!(fft.start, Some(0.0));
+        assert_eq!(fft.stop, Some(4.0));
+        assert_eq!(fft.alpha, 20.0);
+        assert_eq!(fft.fundamental_frequency, Some(5.0));
+        assert_eq!(fft.minimum_frequency, Some(1.0));
+        assert_eq!(fft.maximum_frequency, Some(10.0));
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "fft-points-normalized")
+        );
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "fft-start-clamped")
+        );
+    }
+
+    #[test]
+    fn malformed_fft_directives_fail_closed() {
+        for (line, expected) in [
+            (".fft", "requires one output"),
+            (".fft np=64 v(out)", "parenthesized probe"),
+            (".fft v(out) np 8", "requires '='"),
+            (".fft v(out) np=", "missing its value"),
+            (".fft v(out) bogo=2", "Unknown .FFT qualifier"),
+            (".fft v(out) format=bogo", "Invalid FORMAT"),
+            (".fft v(out) window=gauss", "Invalid WINDOW"),
+            (".fft v(out) np=0", ".FFT NP must be positive"),
+            (".fft v(out) v(alt)", "requires '='"),
+            (".fft {}", "expression must not be empty"),
+        ] {
+            let error = Netlist::parse(&format!(
+                "invalid fft\nV1 out 0 0\nV2 alt 0 0\n{line}\n.end\n"
+            ))
+            .expect_err("malformed .FFT must fail");
+            assert!(
+                error.to_string().contains(expected),
+                "line={line}, expected={expected}, error={error}"
+            );
         }
     }
 

@@ -1519,6 +1519,72 @@ impl SourceSpec {
 // Analysis Commands
 //=============================================================================
 
+/// Signal sampled by an HSPICE/Xyce-style `.FFT` post-processing directive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FftOutput {
+    /// A canonical probe such as `V(OUT)`, `V(P,N)`, or `I(V1)`.
+    Probe(String),
+    /// A braced expression evaluated at each transient sample.
+    Expression(String),
+}
+
+/// Coefficient normalization selected by `.FFT FORMAT=`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FftFormat {
+    /// Normalize coefficients by the largest magnitude, matching Xyce's default.
+    #[default]
+    Normalized,
+    /// Preserve unnormalized coefficient magnitudes.
+    Unnormalized,
+}
+
+/// Window function selected by `.FFT WINDOW=`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FftWindow {
+    #[default]
+    Rectangular,
+    Bartlett,
+    BartlettHann,
+    Hamming,
+    Hann,
+    Blackman67Db,
+    Blackman,
+    BlackmanHarris,
+    Nuttall,
+    HalfCycleSine,
+    HalfCycleSine3,
+    HalfCycleSine6,
+    Cosine2,
+    Cosine4,
+}
+
+/// Typed `.FFT` post-processing request.
+///
+/// The directive is parsed and validated for every deck, but is active only
+/// when transient analysis is selected. Xyce uses the same analysis gating.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FftAnalysis {
+    pub output: FftOutput,
+    pub start: Option<Value>,
+    pub stop: Option<Value>,
+    pub points: usize,
+    /// Explicit format. `None` preserves Xyce's `.OPTIONS FFT FFT_MODE`
+    /// dependent default selection.
+    pub format: Option<FftFormat>,
+    pub window: FftWindow,
+    /// Uppercase spelling retained for byte-exact Xyce-compatible headers.
+    pub window_name: String,
+    pub alpha: Value,
+    pub fundamental_frequency: Option<Value>,
+    pub minimum_frequency: Option<Value>,
+    pub maximum_frequency: Option<Value>,
+}
+
+impl FftAnalysis {
+    pub const DEFAULT_POINTS: usize = 1024;
+    pub const DEFAULT_ALPHA: Value = 3.0;
+}
+
 /// Analysis command from netlist
 #[derive(Debug, Clone)]
 pub enum AnalysisCommand {

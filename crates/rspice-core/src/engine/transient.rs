@@ -594,6 +594,11 @@ impl Engine {
         abort: &dyn AbortSignal,
         resume: Option<&TransientCheckpoint>,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        if !netlist.fft_analyses.is_empty() {
+            return Err(SimulationError::Circuit(
+                "transient .FFT post-processing is parsed but not yet implemented".to_string(),
+            ));
+        }
         let fingerprint = netlist_fingerprint(netlist);
         let record_xspice_event_traces = netlist.options.xspice_event_trace_save.unwrap_or(true);
         let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
@@ -4249,6 +4254,28 @@ fn validate_transient_window(tstop: Value, max_step: Value) -> Result<(), Simula
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SimulationConfig;
+
+    #[test]
+    fn transient_fft_fails_closed_until_postprocessing_is_implemented() {
+        let netlist = Netlist::parse(
+            "transient fft activation\n\
+             V1 out 0 1\n\
+             .tran 1n 10n\n\
+             .fft v(out) np=8\n\
+             .end\n",
+        )
+        .expect("valid transient .FFT parses");
+
+        let error = Engine::new(SimulationConfig::default())
+            .run_tran(&netlist, 10.0e-9, 1.0e-9)
+            .expect_err("transient .FFT must not be silently ignored");
+        assert!(
+            error
+                .to_string()
+                .contains("transient .FFT post-processing is parsed but not yet implemented")
+        );
+    }
 
     #[test]
     fn compressed_transient_enforces_interpolation_error_bound() {

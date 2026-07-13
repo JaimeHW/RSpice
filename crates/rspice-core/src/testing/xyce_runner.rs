@@ -5367,7 +5367,7 @@ impl XyceTestRunner {
     fn is_extra_wrapper_ac_output_analysis_command(command: &str) -> bool {
         matches!(
             command.to_ascii_lowercase().as_str(),
-            ".dc" | ".four" | ".fft" | ".hb" | ".noise" | ".probe" | ".save" | ".sens" | ".tran"
+            ".dc" | ".four" | ".hb" | ".noise" | ".probe" | ".save" | ".sens" | ".tran"
         )
     }
 

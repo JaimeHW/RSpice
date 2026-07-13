@@ -15,6 +15,7 @@ pub(super) struct SubcktFrame {
 pub(super) struct ParseState {
     pub(super) elements: Vec<Element>,
     pub(super) analyses: Vec<AnalysisCommand>,
+    pub(super) fft_analyses: Vec<FftAnalysis>,
     pub(super) data_tables: Vec<DataTable>,
     pub(super) models: Vec<ModelDef>,
     pub(super) subcircuits: Vec<SubcircuitDef>,
@@ -41,6 +42,7 @@ impl ParseState {
         Self {
             elements: Vec::new(),
             analyses: Vec::new(),
+            fft_analyses: Vec::new(),
             data_tables: Vec::new(),
             models: Vec::new(),
             subcircuits: Vec::new(),
@@ -83,6 +85,7 @@ impl ParseState {
             title,
             elements: self.elements,
             analyses: self.analyses,
+            fft_analyses: self.fft_analyses,
             data_tables: self.data_tables,
             models: self.models,
             subcircuits: self.subcircuits,
@@ -104,6 +107,7 @@ impl ParseState {
 
 pub(super) struct ParseLineContext<'a> {
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
+    pub(super) fft_analyses: &'a mut Vec<FftAnalysis>,
     pub(super) unknown_warned: &'a mut HashSet<String>,
     pub(super) models: &'a mut Vec<ModelDef>,
     pub(super) initial_conditions: &'a mut Vec<InitialCondition>,
@@ -118,6 +122,7 @@ pub(super) struct ParseLineContext<'a> {
 
 pub(super) struct ParseCommandContext<'a> {
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
+    pub(super) fft_analyses: &'a mut Vec<FftAnalysis>,
     pub(super) unknown_warned: &'a mut HashSet<String>,
     pub(super) models: &'a mut Vec<ModelDef>,
     pub(super) params: &'a mut ParamContext,

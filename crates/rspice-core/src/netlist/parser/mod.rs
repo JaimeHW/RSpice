@@ -10,13 +10,13 @@ use super::expr::{eval_expression, eval_expression_complex, prepare_behavioral_e
 use super::lexer::{LexError, TokenKind, TokenStream, parse_spice_value, tokenize};
 use super::xspice_parser;
 use super::{
-    AnalysisCommand, BjtType, DataTable, Element, ElementKind, ExpressionDialect, FreqVariation,
-    InitialCondition, JfetType, MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution,
-    MosType, Netlist, NodeSet, ParamContext, ParametricValue, ParseDiagnostic, ParseError,
-    PoleZeroAnalysisType, PoleZeroTransferType, PspiceUTiming, PspiceUTimingMode, SaveSet,
-    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceRfPort, SourceSpec,
-    StatisticalParamMode, StepCommand, StepSweep, StepTarget, SubcircuitDef, SwitchState,
-    VerilogAInclude,
+    AnalysisCommand, BjtType, DataTable, Element, ElementKind, ExpressionDialect, FftAnalysis,
+    FftFormat, FftOutput, FftWindow, FreqVariation, InitialCondition, JfetType, MesfetType,
+    ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet, ParamContext,
+    ParametricValue, ParseDiagnostic, ParseError, PoleZeroAnalysisType, PoleZeroTransferType,
+    PspiceUTiming, PspiceUTimingMode, SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions,
+    SourceRfPort, SourceSpec, StatisticalParamMode, StepCommand, StepSweep, StepTarget,
+    SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
