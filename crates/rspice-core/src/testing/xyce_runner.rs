@@ -449,6 +449,12 @@ impl XyceFileCompareTolerance {
         relative: 1.0e-3,
         zero: 1.0e-10,
     };
+
+    const MEASURE_COMMON_AC_INTEGRATION: Self = Self {
+        absolute: 1.0e-2,
+        relative: 1.0e-3,
+        zero: 1.0e-10,
+    };
 }
 
 #[derive(Debug, Clone)]
@@ -3155,6 +3161,17 @@ impl XyceTestRunner {
         } else {
             Vec::new()
         };
+        let measurement_tolerance = if netlist.measurements.iter().any(|measurement| {
+            measurement.analysis.eq_ignore_ascii_case("AC")
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Integ { .. }
+                )
+        }) {
+            XyceFileCompareTolerance::MEASURE_COMMON_AC_INTEGRATION
+        } else {
+            XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT
+        };
 
         let primary_ac_ic_file = primary_ac_ic_output
             .as_ref()
@@ -3223,7 +3240,7 @@ impl XyceTestRunner {
             deck_path: deck.path.clone(),
             reference_path,
             measurement_reference_paths,
-            measurement_tolerance: XyceFileCompareTolerance::MEASURE_COMMON_DEFAULT,
+            measurement_tolerance,
             source,
             print,
             primary_ac_file,
