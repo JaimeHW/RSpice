@@ -274,6 +274,9 @@ I1 0 osc PULSE(0 1 10u 10n 10n 1u 1)
         lambda engine, netlist: engine.run_oscillator_noise(
             netlist, [1.0], period_guess=1.0 / F0, harmonics=0
         ),
+        lambda engine, netlist: engine.run_oscillator_noise(
+            netlist, [0.0], period_guess=1.0 / F0
+        ),
     ],
 )
 def test_periodic_analysis_arguments_are_validated(call):

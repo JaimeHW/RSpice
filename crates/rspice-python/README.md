@@ -305,6 +305,11 @@ hb2 = engine.run_hb_multitone(
 )
 pac = engine.run_pac(netlist, 1e9, 1e3, 100e6, 20, "VRF", "out")
 pnoise = engine.run_pnoise(netlist, 1e9, [1e3, 10e3], "out")
+osc_noise = engine.run_oscillator_noise(
+    oscillator_netlist,
+    [1e3, 10e3, 100e3],
+    period_guess=1e-9,
+)
 
 # Transfer function (.TF): gain, input and output impedance
 tf = engine.run_transfer_function(netlist, "out", "V1")
@@ -342,6 +347,11 @@ for value, sol in engine.run_step(divider, "rval", [1e3, 2e3, 5e3]):
 
 Node arguments accept names or indices everywhere, including the advanced
 analyses.
+
+Autonomous oscillator noise uses the same complete device-noise model as
+stationary noise analysis, including resistor noise switches and temperature
+offsets, semiconductor thermal/shot/flicker noise, tabulated and Verilog-A
+sources, and correlated BSIM4 thermal noise.
 
 ## Error Handling
 

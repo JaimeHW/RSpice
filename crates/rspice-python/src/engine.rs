@@ -2747,6 +2747,10 @@ impl PyEngine {
     }
 
     /// Run autonomous-oscillator phase noise using PSS and PPV projection.
+    ///
+    /// Projects the complete device-noise model along the periodic orbit,
+    /// including thermal, shot, flicker, tabulated, Verilog-A, and correlated
+    /// BSIM4 sources. Offset frequencies must be finite and strictly positive.
     #[pyo3(signature = (netlist, offsets, *, period_guess, harmonics=9, tstab=0.0, tstab_periods=20, max_iterations=100, tolerance=1e-6, abstol=1e-12, damping=1.0, max_period_change=0.1, points_per_period=256, integration_method=None, verbose=false))]
     #[allow(clippy::too_many_arguments)]
     fn run_oscillator_noise(

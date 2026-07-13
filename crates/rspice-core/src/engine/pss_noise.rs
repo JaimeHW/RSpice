@@ -29,9 +29,9 @@
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::transient::CompanionCoefficients;
-use crate::analysis::{IntegrationMethod, PssConfig};
-use crate::circuit::Circuit;
+use crate::analysis::{IntegrationMethod, NoiseSource, NoiseSourceType, PssConfig};
 use crate::{Netlist, Value};
+use std::collections::HashMap;
 
 /// Result of oscillator phase-noise analysis.
 #[derive(Debug, Clone)]
@@ -40,7 +40,8 @@ pub struct OscPnoiseResult {
     pub frequencies: Vec<Value>,
     /// Single-sideband phase noise L(f_m) in dBc/Hz.
     pub phase_noise_dbc: Vec<Value>,
-    /// The scalar phase diffusion constant c (Demir Eq. 16).
+    /// The zero-frequency-equivalent phase diffusion constant c (Demir
+    /// Eq. 16 for white sources, including finite-DC colored sources).
     pub diffusion_constant: Value,
     /// Solved oscillation period (s).
     pub period: Value,
@@ -54,13 +55,12 @@ impl Engine {
     /// offsets.
     ///
     /// Runs autonomous PSS (period as a shooting unknown), extracts the
-    /// adjoint unity Floquet mode along the orbit, projects every white
-    /// noise source onto the state equations through the linearized
-    /// instantaneous network, and evaluates Demir's diffusion constant.
-    /// Modeled sources: resistor thermal 4kT/R (stationary) and diode shot
-    /// 2q|Id(t)| (modulated along the orbit). FET channel noise and flicker
-    /// are not yet projected; circuits whose noise is dominated by those
-    /// sources will read optimistic.
+    /// adjoint unity Floquet mode along the orbit, projects the complete
+    /// device-noise source set through the instantaneous linearized network,
+    /// and evaluates Demir's white- and colored-noise coefficients. This
+    /// includes disabled/noisy resistor semantics, temperature offsets,
+    /// diode and BJT shot noise, MOS/JFET/EKV/BSIM channel and flicker noise,
+    /// tabulated and Verilog-A sources, and correlated BSIM4 thermal noise.
     pub fn run_pnoise_oscillator(
         &self,
         netlist: &Netlist,
@@ -87,6 +87,15 @@ impl Engine {
             return Err(SimulationError::Circuit(
                 "oscillator pnoise needs at least one offset frequency".to_string(),
             ));
+        }
+        if let Some(offset) = offsets
+            .iter()
+            .copied()
+            .find(|offset| !offset.is_finite() || *offset <= 0.0)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "oscillator pnoise offset frequencies must be finite and strictly positive, got {offset}"
+            )));
         }
         if !config.is_autonomous() {
             return Err(SimulationError::Circuit(
@@ -272,18 +281,18 @@ impl Engine {
         // ------------------------------------------------------------------
         let dt_freeze = period * 1e-9;
         let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
-        let sources = Self::pss_noise_source_list(&circuit);
-        if sources.is_empty() {
-            return Err(SimulationError::Circuit(
-                "oscillator pnoise: no modeled noise sources in the circuit".to_string(),
-            ));
-        }
         let temperature = self.config.temperature;
+        let mut evaluation_frequencies = Vec::with_capacity(offsets.len() + 1);
+        evaluation_frequencies.push(0.0);
+        evaluation_frequencies.extend_from_slice(offsets);
 
         let n_caps = circuit.capacitors.len();
         let size = circuit.matrix_size();
-        let mut c_integral = 0.0;
-        let mut prev_integrand = 0.0;
+        let mut white_integrals = vec![0.0; evaluation_frequencies.len()];
+        let mut previous_white = vec![0.0; evaluation_frequencies.len()];
+        let mut colored_integrals: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
+        let mut previous_colored: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
+        let mut found_noise_source = false;
         for k in 0..n_grid {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -303,59 +312,187 @@ impl Engine {
                 &solution,
             )?;
 
-            let mut integrand = 0.0;
-            for source in &sources {
-                if abort.is_aborted() {
-                    return Err(SimulationError::Aborted);
+            let mut projection = |node_pos: usize,
+                                  node_neg: usize|
+             -> Result<Value, SimulationError> {
+                if node_pos > size || node_neg > size {
+                    return Err(SimulationError::Circuit(format!(
+                        "oscillator pnoise source injection ({node_pos}, {node_neg}) exceeds matrix size {size}"
+                    )));
                 }
-                let intensity = source.intensity(&circuit, &solution, temperature);
-                if !intensity.is_finite() || intensity <= 0.0 {
-                    continue;
+                let mut injection = vec![0.0; size];
+                if node_pos > 0 {
+                    injection[node_pos - 1] += 1.0;
                 }
-                let mut inj = vec![0.0; size];
-                if source.node_pos > 0 {
-                    inj[source.node_pos - 1] += 1.0;
+                if node_neg > 0 {
+                    injection[node_neg - 1] -= 1.0;
                 }
-                if source.node_neg > 0 {
-                    inj[source.node_neg - 1] -= 1.0;
-                }
-                let delta = match matrix.solve(&inj) {
-                    Ok(d) => d,
-                    Err(e) => return Err(SimulationError::Solver(e)),
-                };
+                let delta = matrix.solve(&injection).map_err(SimulationError::Solver)?;
 
-                // b entries: cap states first, then inductor branch states.
-                let mut proj = 0.0;
+                // b entries: capacitor states first, then inductor branch
+                // states. The frozen companion step maps a unit source into
+                // the state derivative used by the PPV projection.
+                let mut value = 0.0;
                 for (alpha, cap) in circuit.capacitors.stamps.iter().enumerate() {
                     let np = cap.pp.row;
                     let nn = cap.nn.row;
                     let dv = if np == 0 { 0.0 } else { delta[np - 1] }
                         - if nn == 0 { 0.0 } else { delta[nn - 1] };
-                    proj += v1[k][alpha] * dv / dt_freeze;
+                    value += v1[k][alpha] * dv / dt_freeze;
                 }
                 for l_idx in 0..circuit.inductors.names.len() {
-                    let br = circuit.inductors.branch_indices[l_idx];
-                    if br > 0 {
-                        let br_idx = circuit.num_nodes() + br - 1;
-                        proj += v1[k][n_caps + l_idx] * delta[br_idx] / dt_freeze;
+                    let branch = circuit.inductors.branch_indices[l_idx];
+                    if branch > 0 {
+                        let branch_index = circuit.num_nodes() + branch - 1;
+                        value += v1[k][n_caps + l_idx] * delta[branch_index] / dt_freeze;
                     }
                 }
-                integrand += intensity * proj * proj;
+                Ok(value)
+            };
+
+            let (sources, correlated_sources) =
+                Self::try_collect_noise_sources(&circuit, &solution)?;
+            found_noise_source |= !sources.is_empty() || !correlated_sources.is_empty();
+            let mut white = vec![0.0; evaluation_frequencies.len()];
+            let mut colored: HashMap<PssNoiseKey, Vec<Value>> = HashMap::new();
+            let mut colored_occurrences: HashMap<PssNoiseIdentity, usize> = HashMap::new();
+            for source in &sources {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let projected = projection(source.node_pos, source.node_neg)?;
+                if pss_noise_is_colored(source.noise_type) {
+                    let amplitudes = evaluation_frequencies
+                        .iter()
+                        .map(|&frequency| {
+                            let density = source.spectral_density(frequency, temperature);
+                            if density.is_finite() && density > 0.0 {
+                                projected * density.sqrt()
+                            } else {
+                                0.0
+                            }
+                        })
+                        .collect();
+                    let identity = PssNoiseIdentity::from(source);
+                    let occurrence = colored_occurrences.entry(identity.clone()).or_default();
+                    let key = PssNoiseKey {
+                        identity,
+                        occurrence: *occurrence,
+                    };
+                    *occurrence += 1;
+                    colored.insert(key, amplitudes);
+                } else {
+                    let density = source.spectral_density(0.0, temperature);
+                    if density.is_finite() && density > 0.0 {
+                        let contribution = density * projected * projected;
+                        for value in &mut white {
+                            *value += contribution;
+                        }
+                    }
+                }
+            }
+
+            // BSIM4 tnoiMod=2 is a single correlated thermal mechanism at
+            // two current-injection ports. Preserve its relative phase before
+            // taking the squared magnitude; treating the ports independently
+            // would double count or discard their covariance.
+            for source in &correlated_sources {
+                if abort.is_aborted() {
+                    return Err(SimulationError::Aborted);
+                }
+                let first = projection(source.first.node_pos, source.first.node_neg)?;
+                let second = projection(source.second.node_pos, source.second.node_neg)?;
+                for (index, &frequency) in evaluation_frequencies.iter().enumerate() {
+                    let Some(densities) = source.spectral_densities(frequency, temperature) else {
+                        continue;
+                    };
+                    if !densities.first_psd.is_finite()
+                        || !densities.second_psd.is_finite()
+                        || densities.first_psd < 0.0
+                        || densities.second_psd < 0.0
+                    {
+                        continue;
+                    }
+                    let first_amplitude = first * densities.first_psd.sqrt();
+                    let second_amplitude = second * densities.second_psd.sqrt();
+                    white[index] += first_amplitude * first_amplitude
+                        + second_amplitude * second_amplitude
+                        + 2.0 * first_amplitude * second_amplitude * densities.phase_rad.cos();
+                }
             }
 
             if k > 0 {
-                c_integral += 0.5 * (integrand + prev_integrand) * dt;
+                for index in 0..white_integrals.len() {
+                    white_integrals[index] += 0.5 * (white[index] + previous_white[index]) * dt;
+                }
+
+                for (key, amplitudes) in &colored {
+                    let previous = previous_colored.get(key);
+                    let integral = colored_integrals
+                        .entry(key.clone())
+                        .or_insert_with(|| vec![0.0; evaluation_frequencies.len()]);
+                    for index in 0..integral.len() {
+                        integral[index] += 0.5
+                            * (amplitudes[index] + previous.map_or(0.0, |values| values[index]))
+                            * dt;
+                    }
+                }
+                for (key, amplitudes) in &previous_colored {
+                    if colored.contains_key(key) {
+                        continue;
+                    }
+                    let integral = colored_integrals
+                        .entry(key.clone())
+                        .or_insert_with(|| vec![0.0; evaluation_frequencies.len()]);
+                    for index in 0..integral.len() {
+                        integral[index] += 0.5 * amplitudes[index] * dt;
+                    }
+                }
             }
-            prev_integrand = integrand;
+            previous_white = white;
+            previous_colored = colored;
         }
-        let c = c_integral / period;
+        if !found_noise_source {
+            return Err(SimulationError::Circuit(
+                "oscillator pnoise: no modeled noise sources in the circuit".to_string(),
+            ));
+        }
+
+        let mut coefficients: Vec<Value> = white_integrals
+            .into_iter()
+            .map(|integral| integral / period)
+            .collect();
+        for integrals in colored_integrals.values() {
+            for (coefficient, integral) in coefficients.iter_mut().zip(integrals) {
+                // Demir's colored-noise coefficient is |V0|^2, where V0 is
+                // the period-average signed PPV/source-amplitude projection;
+                // it is not the average of the squared projection used for
+                // white noise (ICCAD 1998, Eqs. 89-93).
+                *coefficient += (integral / period).powi(2);
+            }
+        }
+        let c = coefficients[0];
+        if !c.is_finite() || c < 0.0 {
+            return Err(SimulationError::Circuit(
+                "oscillator pnoise produced a non-finite diffusion coefficient".to_string(),
+            ));
+        }
 
         let corner_hz = std::f64::consts::PI * f0 * f0 * c;
         let phase_noise_dbc: Vec<Value> = offsets
             .iter()
-            .map(|&fm| {
-                let l = f0 * f0 * c / (corner_hz * corner_hz + fm * fm);
-                10.0 * l.max(1e-300).log10()
+            .zip(coefficients.iter().skip(1))
+            .map(|(&fm, &coefficient)| {
+                // This smooth form is exact for the white-noise Lorentzian
+                // and has Demir's colored-noise limiting forms: the finite-DC
+                // coefficient controls the carrier linewidth, while away
+                // from the carrier L(fm) -> f0^2*c(fm)/fm^2.
+                let l = f0 * f0 * coefficient / (corner_hz * corner_hz + fm * fm);
+                if l > 0.0 {
+                    10.0 * l.log10()
+                } else {
+                    Value::NEG_INFINITY
+                }
             })
             .collect();
 
@@ -367,71 +504,40 @@ impl Engine {
             corner_hz,
         })
     }
-
-    /// Enumerate the time-domain noise sources the PPV projection models:
-    /// resistor thermal (stationary 4kT G) and diode shot (2q|Id(v(t))|,
-    /// modulated along the orbit).
-    fn pss_noise_source_list(circuit: &Circuit) -> Vec<PssNoiseSource> {
-        let mut sources = Vec::new();
-        for i in 0..circuit.resistors.len() {
-            let g = circuit.resistors.conductances[i];
-            if g.is_finite() && g > 0.0 {
-                sources.push(PssNoiseSource {
-                    node_pos: circuit.resistors.stamps[i].pp.row,
-                    node_neg: circuit.resistors.stamps[i].nn.row,
-                    kind: PssNoiseKind::Thermal { g },
-                });
-            }
-        }
-        for diode in &circuit.diodes.devices {
-            sources.push(PssNoiseSource {
-                node_pos: diode.node_anode,
-                node_neg: diode.node_cathode,
-                kind: PssNoiseKind::DiodeShot {
-                    is: diode.is,
-                    n_vt: diode.n * diode.vt,
-                },
-            });
-        }
-        sources
-    }
 }
 
-/// One projected white-noise source in the time-domain (PSS) circuit.
-struct PssNoiseSource {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PssNoiseKey {
+    identity: PssNoiseIdentity,
+    occurrence: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PssNoiseIdentity {
+    device_name: String,
+    noise_type: NoiseSourceType,
     node_pos: usize,
     node_neg: usize,
-    kind: PssNoiseKind,
 }
 
-enum PssNoiseKind {
-    Thermal { g: Value },
-    DiodeShot { is: Value, n_vt: Value },
-}
-
-impl PssNoiseSource {
-    /// Instantaneous intensity in A^2/Hz at the given node solution.
-    fn intensity(&self, _circuit: &Circuit, solution: &[Value], temperature: Value) -> Value {
-        const K_B: Value = 1.380649e-23;
-        const Q_E: Value = 1.602176634e-19;
-        match self.kind {
-            PssNoiseKind::Thermal { g } => 4.0 * K_B * temperature * g,
-            PssNoiseKind::DiodeShot { is, n_vt } => {
-                let vp = if self.node_pos == 0 {
-                    0.0
-                } else {
-                    solution.get(self.node_pos - 1).copied().unwrap_or(0.0)
-                };
-                let vn = if self.node_neg == 0 {
-                    0.0
-                } else {
-                    solution.get(self.node_neg - 1).copied().unwrap_or(0.0)
-                };
-                let vd = vp - vn;
-                let arg = (vd / n_vt).min(40.0);
-                let id = is * (arg.exp() - 1.0);
-                2.0 * Q_E * id.abs()
-            }
+impl From<&NoiseSource> for PssNoiseIdentity {
+    fn from(source: &NoiseSource) -> Self {
+        Self {
+            device_name: source.device_name.clone(),
+            noise_type: source.noise_type,
+            node_pos: source.node_pos,
+            node_neg: source.node_neg,
         }
     }
+}
+
+fn pss_noise_is_colored(noise_type: NoiseSourceType) -> bool {
+    matches!(
+        noise_type,
+        NoiseSourceType::Flicker
+            | NoiseSourceType::Burst
+            | NoiseSourceType::Table
+            | NoiseSourceType::Bsim4Flicker
+            | NoiseSourceType::Bsim3Flicker
+    )
 }

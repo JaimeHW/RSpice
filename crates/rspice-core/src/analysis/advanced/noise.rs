@@ -382,7 +382,7 @@ impl CorrelatedNoisePair {
 }
 
 /// Types of noise sources in the circuit
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NoiseSourceType {
     /// Thermal (Johnson-Nyquist) noise: 4kTR
     Thermal,

@@ -84,3 +84,44 @@ i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
         "white-region slope must be -20 dB/decade: got {slope1:.2}, {slope2:.2}"
     );
 }
+
+#[test]
+fn oscillator_phase_noise_honors_quiet_resistors() {
+    let deck = "\
+* quiet tank resistor must not generate noise
+l1 osc 0 1u
+c1 osc 0 1u
+r1 osc 0 1k noisy=0
+b1 osc 0 i=-0.051*v(osc)+0.025*v(osc)*v(osc)*v(osc)
+i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let config = PssConfig::autonomous()
+        .with_period_guess(6.3e-6)
+        .with_tstab_periods(30)
+        .with_tolerance(1e-6)
+        .with_max_iterations(60);
+
+    let error = Engine::default()
+        .run_pnoise_oscillator(&netlist, config, &[1.0e3])
+        .expect_err("a quiet resistor must be excluded from oscillator noise");
+    assert!(
+        error.to_string().contains("no modeled noise sources"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn oscillator_phase_noise_rejects_invalid_offsets_before_solving() {
+    let netlist = Netlist::parse("V1 out 0 1\nR1 out 0 1k\n.end").expect("deck parses");
+    for offsets in [&[0.0][..], &[-1.0][..], &[f64::NAN][..]] {
+        let error = Engine::default()
+            .run_pnoise_oscillator(&netlist, PssConfig::autonomous(), offsets)
+            .expect_err("invalid offsets must be rejected");
+        assert!(
+            error.to_string().contains("strictly positive"),
+            "unexpected error: {error}"
+        );
+    }
+}

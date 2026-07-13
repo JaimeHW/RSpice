@@ -64,6 +64,10 @@ Release numbers remain tied to the workspace version.
 
 ### Fixed
 
+- Replaced the oscillator phase-noise solver's resistor/diode-only source
+  subset with the complete device-noise model, including colored-source PPV
+  averaging, correlated BSIM4 noise, resistor `NOISY` controls, and strict
+  offset validation.
 - Corrected transient `TSTART` clipping, DC sweep validation and nested axes,
   percentile validation, zero/noise logarithms, pole stability and bandwidth,
   and multi-channel waveform compression error bounds.

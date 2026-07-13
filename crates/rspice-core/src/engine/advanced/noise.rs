@@ -512,7 +512,7 @@ impl Engine {
         Self::try_collect_noise_sources(circuit, dc_solution).unwrap_or_else(|err| panic!("{err}"))
     }
 
-    pub(in crate::engine::advanced) fn try_collect_noise_sources(
+    pub(in crate::engine) fn try_collect_noise_sources(
         circuit: &CircuitData,
         dc_solution: &[Value],
     ) -> Result<(Vec<NoiseSource>, Vec<CorrelatedNoisePair>), SimulationError> {
