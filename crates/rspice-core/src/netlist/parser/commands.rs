@@ -1823,8 +1823,11 @@ pub(super) fn parse_meas_command(
     // Parse analysis type (TRAN, AC, DC)
     let analysis = expect_ident(stream, line_num)?;
 
-    // Parse measurement name
-    let name = expect_ident(stream, line_num)?;
+    // Xyce treats the measurement name as one whitespace-delimited source
+    // field.  It may therefore contain punctuation (for example
+    // `CONSTANT-AT`) that the general lexer correctly emits as multiple
+    // adjacent tokens.
+    let name = parse_measure_name(stream, line_num)?;
 
     // Parse measurement type keyword
     let measure_type_str = expect_ident(stream, line_num)?;
@@ -2069,6 +2072,38 @@ pub(super) fn parse_meas_command(
         goal,
         tolerance,
     })
+}
+
+fn parse_measure_name(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
+    let first = stream.peek().clone();
+    if matches!(first.kind, TokenKind::Newline | TokenKind::Eof) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Expected measurement name".to_string(),
+        });
+    }
+
+    let mut name = first.lexeme;
+    let mut end = first.span.end;
+    stream.advance();
+
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+        && stream.peek().span.line == first.span.line
+        && stream.peek().span.start == end
+    {
+        let token = stream.peek().clone();
+        name.push_str(&token.lexeme);
+        end = token.span.end;
+        stream.advance();
+    }
+
+    if name.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Expected measurement name".to_string(),
+        });
+    }
+    Ok(name.to_ascii_uppercase())
 }
 
 fn collect_measure_equation_expression(

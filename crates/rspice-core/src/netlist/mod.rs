@@ -1361,6 +1361,22 @@ mod tests {
     }
 
     #[test]
+    fn measurement_names_preserve_one_punctuated_source_field() {
+        let netlist = Netlist::parse(
+            "punctuated measurement names\n\
+             V1 out 0 0\n\
+             .dc V1 0 1 1\n\
+             .measure dc constant-at deriv V(out) at=0.5\n\
+             .measure dc ratio/output max V(out)\n\
+             .end\n",
+        )
+        .expect("punctuated measurement names parse");
+
+        assert_eq!(netlist.measurements[0].name, "CONSTANT-AT");
+        assert_eq!(netlist.measurements[1].name, "RATIO/OUTPUT");
+    }
+
+    #[test]
     fn extrema_output_frequency_alias_selects_independent_axis() {
         let netlist = Netlist::parse(
             "extrema output frequency\n\
