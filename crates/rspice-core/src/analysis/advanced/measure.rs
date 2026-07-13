@@ -744,13 +744,16 @@ impl MeasureEngine {
             .zip(time.last())
             .is_none_or(|(first, last)| last >= first);
         let (lower, upper) = match (from, to) {
-            (Some(from), Some(to)) => (from.min(to), from.max(to)),
+            (Some(from), Some(to)) => (from, to),
             (Some(from), None) if ascending => (from, Value::INFINITY),
             (Some(from), None) => (Value::NEG_INFINITY, from),
             (None, Some(to)) if ascending => (Value::NEG_INFINITY, to),
             (None, Some(to)) => (to, Value::INFINITY),
             (None, None) => (Value::NEG_INFINITY, Value::INFINITY),
         };
+        if lower > upper {
+            return MeasureResult::failed(name, "Empty range");
+        }
         let mut integral = 0.0;
         let mut width = 0.0;
         let mut previous = None;
@@ -1138,6 +1141,31 @@ mod tests {
 
         assert_eq!(results[0].value, Some(0.0));
         assert!(results[0].passed);
+    }
+
+    #[test]
+    fn average_rejects_reversed_windows_without_analysis_normalization() {
+        let statement = MeasureStatement {
+            goal: None,
+            tolerance: None,
+            name: "average".to_string(),
+            measure_type: MeasureType::Avg {
+                signal: "V(out)".to_string(),
+                from: Some(2.0),
+                to: Some(1.0),
+            },
+            analysis: "AC".to_string(),
+        };
+        let axis = [1.0, 2.0, 3.0];
+        let values = [1.0, 2.0, 3.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &values);
+
+        let results = engine_with(statement).evaluate(&axis, &signals);
+
+        assert_eq!(results[0].value, None);
+        assert!(!results[0].passed);
+        assert_eq!(results[0].error.as_deref(), Some("Empty range"));
     }
 
     #[test]
