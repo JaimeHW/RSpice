@@ -69,7 +69,18 @@ fn varactor_fundamental_sees_the_bias_point_capacitance() {
         "bias point must hold +5 V (no conduction), got {vdc}"
     );
 
-    let h1 = coefficient(&result, "vc", 1) / num_complex::Complex64::new(A, 0.0);
+    // The deck uses SPICE's SIN waveform, so its zero-phase drive is -jA in
+    // the solver's cosine-reference phasor convention.  Divide by the actual
+    // source-node coefficient to test the circuit transfer independently of
+    // that reference choice while still verifying that SIN was materialized
+    // with the correct phase.
+    let vin1 = coefficient(&result, "in", 1);
+    let expected_vin1 = num_complex::Complex64::new(0.0, -A);
+    assert!(
+        (vin1 - expected_vin1).norm() < 1e-10 * A,
+        "zero-phase SIN source must be -jA in a cosine-reference spectrum: got {vin1}, want {expected_vin1}"
+    );
+    let h1 = coefficient(&result, "vc", 1) / vin1;
     assert!(
         (h1 - h_expected).norm() < 5e-3 * h_expected.norm(),
         "fundamental transfer must be the RC divider at C(Vdc): got {h1}, want {h_expected}"
