@@ -583,6 +583,8 @@ impl<'a> ExprParser<'a> {
             match name.as_str() {
                 "PI" => Ok(Expr::Number(std::f64::consts::PI)),
                 "EXP" => Ok(Expr::Number(std::f64::consts::E)),
+                "TRUE" => Ok(Expr::Number(1.0)),
+                "FALSE" => Ok(Expr::Number(0.0)),
                 _ => Ok(Expr::Param(name)),
             }
         }

@@ -171,6 +171,12 @@ pub fn expect_value(
             if let Some(v) = params.get(s) {
                 stream.advance();
                 Ok(v * sign)
+            } else if s.eq_ignore_ascii_case("true") {
+                stream.advance();
+                Ok(sign)
+            } else if s.eq_ignore_ascii_case("false") {
+                stream.advance();
+                Ok(0.0)
             } else {
                 Err(ParseError::Syntax {
                     line: line_num,
@@ -204,6 +210,12 @@ pub fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Valu
             if let Some(v) = params.get(s) {
                 stream.advance();
                 Some(v)
+            } else if s.eq_ignore_ascii_case("true") {
+                stream.advance();
+                Some(1.0)
+            } else if s.eq_ignore_ascii_case("false") {
+                stream.advance();
+                Some(0.0)
             } else {
                 None
             }

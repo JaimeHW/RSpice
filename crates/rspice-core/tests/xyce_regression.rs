@@ -5135,6 +5135,27 @@ fn test_xyce_lotka_volterra_stepped_behavioral_transient_oracle() {
     assert!(result.mismatches.is_empty());
 }
 
+#[test]
+fn test_xyce_file_lookup_gradient_downsampling_oracles() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+
+    for relative in [
+        "Netlists/ABM_SPLINES/downsample1.cir",
+        "Netlists/ABM_SPLINES/downsample2.cir",
+        "Netlists/ABM_SPLINES/downsample3.cir",
+        "Netlists/ABM_SPLINES/downsample4.cir",
+    ] {
+        let result = runner.run_test(root.join(relative));
+        assert!(
+            result.passed && !result.expected_unsupported,
+            "{relative} should pass canonical Xyce file-table downsampling, got {result:?}"
+        );
+        assert!(result.mismatches.is_empty());
+    }
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.

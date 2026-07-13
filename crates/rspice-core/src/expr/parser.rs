@@ -689,6 +689,12 @@ impl<'a> Parser<'a> {
         if upper == "PI" {
             return Expr::Const(std::f64::consts::PI);
         }
+        if upper == "TRUE" {
+            return Expr::Const(1.0);
+        }
+        if upper == "FALSE" {
+            return Expr::Const(0.0);
+        }
 
         if upper == "TIME" || upper == "T" {
             return Expr::Time;
@@ -784,6 +790,11 @@ impl<'a> Parser<'a> {
 
             if let Some(f) = func {
                 self.validate_function_arity(name, f, args.len());
+                if matches!(f, Function::Table)
+                    && matches!(args.first(), Some(Expr::StringLiteral(_)))
+                {
+                    self.validate_arity_range(name, args.len(), 1, 3);
+                }
                 return Expr::Function { func: f, args };
             }
 
@@ -804,6 +815,7 @@ impl<'a> Parser<'a> {
             Function::SpiceSin => Some((3, 6)),
             Function::SpiceExp => Some((2, 6)),
             Function::SpiceSffm => Some((2, 5)),
+            Function::TableFile | Function::FastTable | Function::FastTableFile => Some((1, 3)),
             Function::Cubic
             | Function::CubicFile
             | Function::Akima
@@ -811,8 +823,8 @@ impl<'a> Parser<'a> {
             | Function::Wodicka
             | Function::WodickaFile
             | Function::Barycentric
-            | Function::BarycentricFile
-            | Function::Sdt => Some((1, 1)),
+            | Function::BarycentricFile => Some((1, 3)),
+            Function::Sdt => Some((1, 1)),
             _ => None,
         };
 
@@ -820,6 +832,16 @@ impl<'a> Parser<'a> {
             return;
         };
 
+        self.validate_arity_range(function_name, arg_count, min, max);
+    }
+
+    fn validate_arity_range(
+        &mut self,
+        function_name: &str,
+        arg_count: usize,
+        min: usize,
+        max: usize,
+    ) {
         if arg_count < min {
             self.errors.push(format!(
                 "{} expects at least {} argument{}, got {}",
@@ -1037,6 +1059,38 @@ mod tests {
 
         let err = parse_expression_strict("spice_sffm(-0.5)").expect_err("arity rejected");
         assert!(err.message.contains("expects at least 2 arguments"));
+    }
+
+    #[test]
+    fn named_boolean_constants_and_file_lookup_arities_are_strict() {
+        assert_eq!(parse_expression_strict("TRUE").unwrap(), Expr::Const(1.0));
+        assert_eq!(parse_expression_strict("false").unwrap(), Expr::Const(0.0));
+
+        for expression in [
+            r#"table("data.dat")"#,
+            r#"table("data.dat",100)"#,
+            r#"table("data.dat",100,TRUE)"#,
+            r#"spline("data.dat",100,FALSE)"#,
+            r#"fasttablefile("data.dat",100,TRUE)"#,
+        ] {
+            parse_expression_strict(expression)
+                .unwrap_or_else(|error| panic!("`{expression}` should parse: {error}"));
+        }
+
+        for expression in [
+            "tablefile()",
+            r#"table("data.dat",1,TRUE,0)"#,
+            r#"spline("data.dat",1,TRUE,0)"#,
+            r#"fasttable("data.dat",1,TRUE,0)"#,
+        ] {
+            assert!(
+                parse_expression_strict(expression).is_err(),
+                "`{expression}` should reject invalid file-function arity"
+            );
+        }
+
+        // Numeric TABLE retains its separate inline point-list grammar.
+        parse_expression_strict("table(time,0,0,1,1)").expect("inline table remains variadic");
     }
 
     #[test]

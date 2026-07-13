@@ -1619,6 +1619,9 @@ pub(super) fn expect_value(
             if let Some(v) = params.get(s) {
                 stream.advance();
                 Ok(v * sign)
+            } else if let Some(v) = parse_boolean_literal(s) {
+                stream.advance();
+                Ok(v * sign)
             } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(s) {
                 stream.advance();
                 Ok(v * sign)

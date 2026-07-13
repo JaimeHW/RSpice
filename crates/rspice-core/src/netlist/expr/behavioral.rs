@@ -512,6 +512,25 @@ impl ProbeProtector {
 
         while i < chars.len() {
             let c = chars[i];
+            if c == '"' {
+                let start = i;
+                i += 1;
+                let mut escaped = false;
+                while i < chars.len() {
+                    let current = chars[i];
+                    i += 1;
+                    if escaped {
+                        escaped = false;
+                    } else if current == '\\' {
+                        escaped = true;
+                    } else if current == '"' {
+                        break;
+                    }
+                }
+                let original: String = chars[start..i].iter().collect();
+                out.push_str(&self.placeholder_for_literal(&original));
+                continue;
+            }
             if is_ident_start(c) {
                 let ident_start = i;
                 i += 1;
@@ -570,6 +589,13 @@ impl ProbeProtector {
         let placeholder = format!("__RSPICE_PROBE_REF_{}__", self.replacements.len());
         self.replacements
             .push((placeholder.clone(), original.trim().to_string()));
+        placeholder
+    }
+
+    fn placeholder_for_literal(&mut self, original: &str) -> String {
+        let placeholder = format!("__RSPICE_STRING_LITERAL_{}__", self.replacements.len());
+        self.replacements
+            .push((placeholder.clone(), original.to_string()));
         placeholder
     }
 

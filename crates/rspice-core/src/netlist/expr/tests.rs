@@ -17,6 +17,8 @@ fn bare_named_constants_parse_as_numbers() {
     assert!((eval_with(&ctx, "exp") - std::f64::consts::E).abs() < 1.0e-15);
     assert!((eval_with(&ctx, "2*exp") - 2.0 * std::f64::consts::E).abs() < 1.0e-15);
     assert!((eval_with(&ctx, "exp(1)") - std::f64::consts::E).abs() < 1.0e-15);
+    assert_eq!(eval_with(&ctx, "true"), 1.0);
+    assert_eq!(eval_with(&ctx, "FALSE"), 0.0);
 }
 
 #[test]
@@ -213,6 +215,24 @@ fn behavioral_preparation_expands_unknown_function_arguments() {
     assert_eq!(
         prepared,
         "SPICE_PULSE(1.1,2,0.0000000000005,0.0000000000003,0.0000000000004,0.00000000001)"
+    );
+}
+
+#[test]
+fn behavioral_preparation_preserves_file_literals_and_expands_numeric_arguments() {
+    let mut ctx = ParamContext::new();
+    ctx.set("NUMSAMPLES", 100.0);
+    ctx.set("LOGSCALE", 1.0);
+
+    let prepared = prepare_behavioral_expression(
+        r#"spline("big Pulse.dat", numSamples, logScale)+table("other.dat", numSamples)"#,
+        &ctx,
+    )
+    .expect("file-backed lookup expression prepares");
+
+    assert_eq!(
+        prepared,
+        r#"(SPLINE("big Pulse.dat",100,1)+TABLE("other.dat",100))"#
     );
 }
 

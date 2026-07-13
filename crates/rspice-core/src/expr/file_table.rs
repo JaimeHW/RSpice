@@ -95,16 +95,38 @@ fn resolve_table_file_function(
             function_name(func)
         ));
     };
-    if args.len() > 1 {
+    if args.len() > 3 {
         return Err(format!(
-            "{} file lookup currently accepts exactly one file argument, got {}",
+            "{} file lookup accepts a path, optional sample count, and optional log-scale flag; got {} arguments",
             function_name(func),
             args.len()
         ));
     }
 
     let path = resolve_table_path(path, source_path);
-    let points = load_lookup_points(&path)?;
+    let mut points = load_lookup_points(&path)?;
+    if let Some(sample_count) = args.get(1) {
+        let Expr::Const(sample_count) = sample_count else {
+            return Err(format!(
+                "{} sample count must be constant after parameter expansion",
+                function_name(func)
+            ));
+        };
+        let sample_count = exact_sample_count(*sample_count, func)?;
+        let log_scale = match args.get(2) {
+            None => false,
+            Some(Expr::Const(value)) => *value > 0.0,
+            Some(_) => {
+                return Err(format!(
+                    "{} log-scale flag must be constant after parameter expansion",
+                    function_name(func)
+                ));
+            }
+        };
+        if sample_count > 0 {
+            points = gradient_density_downsample(&points, sample_count, log_scale)?;
+        }
+    }
     let interpolation = match interpolation {
         FileInterpolation::Linear => LookupInterpolation::Linear,
         FileInterpolation::NaturalCubic => LookupInterpolation::NaturalCubic {
@@ -127,6 +149,148 @@ fn resolve_table_file_function(
         interpolation,
         transient_breakpoints,
     }))
+}
+
+fn exact_sample_count(value: Value, func: Function) -> Result<usize, String> {
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return Err(format!(
+            "{} sample count must be a finite non-negative integer, got {value}",
+            function_name(func)
+        ));
+    }
+    if value > usize::MAX as Value {
+        return Err(format!("{} sample count is too large", function_name(func)));
+    }
+    let count = value as usize;
+    if count == 1 {
+        return Err(format!(
+            "{} sample count must be zero (disabled) or at least two",
+            function_name(func)
+        ));
+    }
+    Ok(count)
+}
+
+/// Xyce's gradient-density table reduction (Zhao/Tsiotras mesh density).
+///
+/// The absolute derivative of an Akima interpolant is itself sampled at the
+/// original knots and Akima-integrated into a normalized density CDF. Uniform
+/// samples of that CDF are mapped back through another Akima interpolant. The
+/// final ordinate scale preserves the original trapezoidal integral.
+fn gradient_density_downsample(
+    points: &[(Value, Value)],
+    sample_count: usize,
+    log_scale: bool,
+) -> Result<Vec<(Value, Value)>, String> {
+    let filtered = points
+        .iter()
+        .copied()
+        .filter(|(_, value)| *value != 0.0)
+        .collect::<Vec<_>>();
+    if filtered.len() < 2 {
+        return Err("gradient-density downsampling needs at least two non-zero samples".into());
+    }
+    if log_scale && filtered.iter().any(|(_, value)| *value <= 0.0) {
+        return Err("log-scale gradient-density downsampling requires positive values".into());
+    }
+
+    let density_points = if log_scale {
+        filtered
+            .iter()
+            .map(|(x, y)| (*x, y.log10()))
+            .collect::<Vec<_>>()
+    } else {
+        filtered.clone()
+    };
+    let source_coefficients = akima_coefficients(&filtered);
+    let density_coefficients = akima_coefficients(&density_points);
+    let derivative_magnitudes = density_points
+        .iter()
+        .enumerate()
+        .map(|(index, (x, _))| {
+            akima_derivative_at(&density_points, &density_coefficients, index, *x).abs()
+        })
+        .collect::<Vec<_>>();
+    let derivative_points = filtered
+        .iter()
+        .zip(derivative_magnitudes)
+        .map(|((x, _), derivative)| (*x, derivative))
+        .collect::<Vec<_>>();
+    let derivative_coefficients = akima_coefficients(&derivative_points);
+
+    let mut cumulative = Vec::with_capacity(filtered.len());
+    cumulative.push((0.0, filtered[0].0));
+    let mut total = 0.0;
+    for index in 0..filtered.len() - 1 {
+        let span = filtered[index + 1].0 - filtered[index].0;
+        let [p1, p2, p3] = derivative_coefficients[index];
+        total += span
+            * (derivative_points[index].1
+                + span * (0.5 * p1 + span * (p2 / 3.0 + 0.25 * p3 * span)));
+        cumulative.push((total, filtered[index + 1].0));
+    }
+    if !total.is_finite() || total <= 0.0 {
+        return Err("gradient-density downsampling requires a non-constant table".into());
+    }
+    for (cdf, _) in &mut cumulative {
+        *cdf /= total;
+    }
+    if cumulative.windows(2).any(|pair| pair[1].0 <= pair[0].0) {
+        return Err("gradient-density CDF is not strictly increasing".into());
+    }
+    let inverse_coefficients = akima_coefficients(&cumulative);
+
+    let mut reduced = Vec::with_capacity(sample_count);
+    for index in 0..sample_count {
+        let fraction = index as Value / (sample_count - 1) as Value;
+        let time = akima_value_at(&cumulative, &inverse_coefficients, fraction);
+        let value = akima_value_at(&filtered, &source_coefficients, time);
+        if time.is_finite() && value.is_finite() {
+            reduced.push((time, value));
+        }
+    }
+    if reduced.len() < 2 {
+        return Err("gradient-density downsampling produced fewer than two finite samples".into());
+    }
+
+    let original_integral = trapezoidal_integral(&filtered);
+    let reduced_integral = trapezoidal_integral(&reduced);
+    if reduced_integral != 0.0 {
+        let scale = original_integral / reduced_integral;
+        for (_, value) in &mut reduced {
+            *value *= scale;
+        }
+    }
+    Ok(reduced)
+}
+
+fn akima_value_at(points: &[(Value, Value)], coefficients: &[[Value; 3]], x: Value) -> Value {
+    let index = points
+        .partition_point(|point| point.0 <= x)
+        .saturating_sub(1)
+        .min(points.len() - 2);
+    let delta = x - points[index].0;
+    let [p1, p2, p3] = coefficients[index];
+    points[index].1 + delta * (p1 + delta * (p2 + p3 * delta))
+}
+
+fn akima_derivative_at(
+    points: &[(Value, Value)],
+    coefficients: &[[Value; 3]],
+    index: usize,
+    x: Value,
+) -> Value {
+    let segment = index.min(points.len() - 2);
+    let delta = x - points[segment].0;
+    let [p1, p2, p3] = coefficients[segment];
+    p1 + delta * (2.0 * p2 + 3.0 * p3 * delta)
+}
+
+fn trapezoidal_integral(points: &[(Value, Value)]) -> Value {
+    points
+        .windows(2)
+        .map(|pair| 0.5 * (pair[0].1 + pair[1].1) * (pair[1].0 - pair[0].0))
+        .sum()
 }
 
 fn natural_cubic_second_derivatives(points: &[(Value, Value)]) -> Vec<Value> {
@@ -444,16 +608,74 @@ mod tests {
     }
 
     #[test]
-    fn natural_cubic_requires_exactly_one_file_argument() {
+    fn natural_cubic_requires_a_path_and_at_most_two_downsampling_arguments() {
         let too_few = parse_expression_strict("cubic()")
             .expect_err("cubic without a path must fail")
             .to_string();
         assert!(too_few.contains("at least 1 argument"), "{too_few}");
 
-        let too_many = parse_expression_strict("cubic(\"curve.dat\", 4)")
+        let too_many = parse_expression_strict("cubic(\"curve.dat\", 4, 0, 1)")
             .expect_err("unsupported resampling arguments must fail")
             .to_string();
-        assert!(too_many.contains("at most 1 arguments"), "{too_many}");
+        assert!(too_many.contains("at most 3 arguments"), "{too_many}");
+    }
+
+    #[test]
+    fn file_tables_use_xyce_gradient_density_downsampling_and_preserve_area() {
+        let dir = unique_temp_dir("xyce-gradient-density");
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        std::fs::write(
+            dir.join("pulse.dat"),
+            "0 0.1\n1 0.1\n2 0.2\n3 4\n4 0.2\n5 0.1\n6 0.1\n",
+        )
+        .expect("write table data");
+        let deck_path = dir.join("deck.cir");
+
+        let ast =
+            parse_expression_strict("table(\"pulse.dat\", 5)").expect("downsampled table parses");
+        let resolved = resolve_file_lookup_functions(ast, Some(&deck_path))
+            .expect("downsampled table resolves");
+        let Expr::LookupTable(table) = resolved else {
+            panic!("file table should resolve into lookup data");
+        };
+        assert_eq!(table.points.len(), 5);
+        assert!((table.points[0].0 - 0.0).abs() < 1.0e-14);
+        assert!((table.points[4].0 - 6.0).abs() < 1.0e-12);
+        assert!(
+            table.points[1].0 > 1.5 && table.points[1].0 < 3.0,
+            "{:?}",
+            table.points
+        );
+        assert!(
+            table.points[3].0 > 3.0 && table.points[3].0 < 4.5,
+            "{:?}",
+            table.points
+        );
+        let original = vec![
+            (0.0, 0.1),
+            (1.0, 0.1),
+            (2.0, 0.2),
+            (3.0, 4.0),
+            (4.0, 0.2),
+            (5.0, 0.1),
+            (6.0, 0.1),
+        ];
+        assert!(
+            (trapezoidal_integral(&table.points) - trapezoidal_integral(&original)).abs() < 1.0e-12
+        );
+    }
+
+    #[test]
+    fn log_scale_changes_density_domain_and_validates_positive_ordinates() {
+        let points = vec![(0.0, 0.01), (1.0, 0.1), (2.0, 10.0), (3.0, 100.0)];
+        let linear = gradient_density_downsample(&points, 4, false).expect("linear density");
+        let logarithmic =
+            gradient_density_downsample(&points, 4, true).expect("logarithmic density");
+        assert_ne!(linear, logarithmic);
+
+        let error = gradient_density_downsample(&[(0.0, -1.0), (1.0, 2.0)], 3, true)
+            .expect_err("logarithmic density rejects negative values");
+        assert!(error.contains("requires positive values"), "{error}");
     }
 
     #[test]
