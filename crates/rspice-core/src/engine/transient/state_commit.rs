@@ -10,6 +10,7 @@ impl Engine {
         accepted_time: Value,
         dt: Value,
         coeff: &CompanionCoefficients,
+        bsim4_trnqs_coeff: &CompanionCoefficients,
         bjt_history: &mut BjtTransientHistory,
         jfet_history: &mut JfetTransientHistory,
         diode_history: &mut DiodeTransientHistory,
@@ -744,7 +745,14 @@ impl Engine {
 
         Self::update_b3soi_history(circuit, accepted_solution, coeff, dt, b3soi_history);
         Self::update_bsim3_history(circuit, accepted_solution, coeff, dt, bsim3_history);
-        Self::update_bsim4_history(circuit, accepted_solution, coeff, dt, bsim4_history);
+        Self::update_bsim4_history(
+            circuit,
+            accepted_solution,
+            coeff,
+            bsim4_trnqs_coeff,
+            dt,
+            bsim4_history,
+        );
         Self::update_ekv26_history(circuit, accepted_solution, coeff, dt, ekv26_history);
     }
 }

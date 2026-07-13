@@ -925,24 +925,6 @@ impl Engine {
             fixed_method.unwrap_or_else(|| tg.current_method())
         };
         let native_predictor_local = !lte_estimator.uses_accepted_solution_reference();
-        // Predictor-local Gear2 is RSpice's fixed-BDF2 compatibility mode.
-        // Accepted-reference policies implement Xyce Gear12 and therefore use
-        // the nonuniform-step coefficients. Keeping this distinction here is
-        // essential when a rejected compact-model step shrinks by many orders
-        // of magnitude: silently changing fixed BDF2 into variable Gear12
-        // changes the simulated device trajectory.
-        let companion_coefficients_for_step =
-            |method: IntegrationMethod, dt: Value, previous_dt: Value| {
-                if native_predictor_local && method == IntegrationMethod::Gear2 {
-                    CompanionCoefficients::gear2()
-                } else {
-                    CompanionCoefficients::for_method_with_previous_step(
-                        method,
-                        dt,
-                        previous_dt,
-                    )
-                }
-            };
         let native_order_after_restart = |method: IntegrationMethod| -> u8 {
             if native_predictor_local && method == IntegrationMethod::Gear2 {
                 2
@@ -1540,11 +1522,24 @@ impl Engine {
             }
             let effective_companion_method =
                 Self::effective_companion_method(current_method, step_trap_order);
-            let coeff = companion_coefficients_for_step(
+            let coeff = CompanionCoefficients::for_method_with_previous_step(
                 effective_companion_method,
                 dt,
                 bjt_history.accepted_dt_prev,
             );
+            // The native BSIM4 transient-NQS state was validated and released
+            // with fixed BDF2 coefficients. Keep that compact-model contract
+            // isolated from variable-step Gear12; applying the latter to the
+            // charge-deficit state produces a large ngspice-46 mismatch after
+            // sharp source edges. QS BSIM4 and every other device family keep
+            // the requested nonuniform coefficients.
+            let bsim4_trnqs_coeff = if native_predictor_local
+                && effective_companion_method == IntegrationMethod::Gear2
+            {
+                CompanionCoefficients::gear2()
+            } else {
+                coeff
+            };
             let suppress_gate_charge = false;
             let mut rejected_attempt_nonlinear_state = circuit
                 .has_nonlinear_devices()
@@ -1725,6 +1720,7 @@ impl Engine {
                     dt,
                     &residual::TransientSystemContext {
                         coeff: &coeff,
+                        bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                         bjt_history: &bjt_history,
                         jfet_history: &jfet_history,
                         diode_history: &diode_history,
@@ -2027,6 +2023,7 @@ impl Engine {
                                 dt,
                                 &residual::TransientSystemContext {
                                     coeff: &coeff,
+                                    bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                                     bjt_history: &bjt_history,
                                     jfet_history: &jfet_history,
                                     diode_history: &diode_history,
@@ -2133,6 +2130,7 @@ impl Engine {
                         dt,
                         &residual::TransientSystemContext {
                             coeff: &coeff,
+                            bsim4_trnqs_coeff: &bsim4_trnqs_coeff,
                             bjt_history: &bjt_history,
                             jfet_history: &jfet_history,
                             diode_history: &diode_history,
@@ -2612,17 +2610,13 @@ impl Engine {
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
-                    let accepted_coeff = companion_coefficients_for_step(
-                        Self::effective_companion_method(current_method, accepted_step_trap_order),
-                        dt,
-                        bjt_history.accepted_dt_prev,
-                    );
                     Self::update_reactive_history(
                         &mut circuit,
                         &new_solution,
                         t,
                         dt,
-                        &accepted_coeff,
+                        &coeff,
+                        &bsim4_trnqs_coeff,
                         &mut bjt_history,
                         &mut jfet_history,
                         &mut diode_history,
@@ -3515,17 +3509,13 @@ impl Engine {
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
-                    let accepted_coeff = companion_coefficients_for_step(
-                        Self::effective_companion_method(current_method, accepted_step_trap_order),
-                        dt,
-                        bjt_history.accepted_dt_prev,
-                    );
                     Self::update_reactive_history(
                         &mut circuit,
                         &new_solution,
                         t,
                         dt,
-                        &accepted_coeff,
+                        &coeff,
+                        &bsim4_trnqs_coeff,
                         &mut bjt_history,
                         &mut jfet_history,
                         &mut diode_history,
@@ -3767,6 +3757,7 @@ impl Engine {
                 t,
                 dt,
                 &coeff,
+                &bsim4_trnqs_coeff,
                 &mut bjt_history,
                 &mut jfet_history,
                 &mut diode_history,

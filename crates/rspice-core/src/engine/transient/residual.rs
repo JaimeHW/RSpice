@@ -13,6 +13,7 @@ use super::*;
 /// mutated when a step is accepted) and dropped before the commit walks.
 pub(super) struct TransientSystemContext<'a> {
     pub(super) coeff: &'a CompanionCoefficients,
+    pub(super) bsim4_trnqs_coeff: &'a CompanionCoefficients,
     pub(super) bjt_history: &'a BjtTransientHistory,
     pub(super) jfet_history: &'a JfetTransientHistory,
     pub(super) diode_history: &'a DiodeTransientHistory,
@@ -182,6 +183,7 @@ impl Engine {
             rhs,
             solution,
             ctx.coeff,
+            ctx.bsim4_trnqs_coeff,
             dt,
             ctx.bsim4_history,
         );
@@ -450,6 +452,7 @@ Q1 C B E 0 QN
         let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
             coeff: &coeff,
+            bsim4_trnqs_coeff: &coeff,
             bjt_history: &bjt_history,
             jfet_history: &jfet_history,
             diode_history: &diode_history,
@@ -885,6 +888,7 @@ Q1 C B E 0 QN
             let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
                 coeff: &coeff,
+                bsim4_trnqs_coeff: &coeff,
                 bjt_history: &bjt_history,
                 jfet_history: &jfet_history,
                 diode_history: &diode_history,

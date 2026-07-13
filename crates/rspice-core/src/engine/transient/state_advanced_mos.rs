@@ -959,19 +959,25 @@ impl Engine {
         rhs: &mut [Value],
         voltages: &[Value],
         coeff: &CompanionCoefficients,
+        trnqs_coeff: &CompanionCoefficients,
         dt: Value,
         history: &Bsim4TransientHistory,
     ) {
         if !circuit.has_bsim4v8_devices() {
             return;
         }
-        // ag0 = the bare integration gain (companion geq for unit capacitance).
-        let ag0 = Self::jfet_companion_geq(coeff, 1.0, dt);
-        if ag0 <= 0.0 {
-            return;
-        }
         let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
         for (idx, dev) in circuit.bsim4v8.devices.iter().enumerate() {
+            let coeff = if dev.uses_trnqs() {
+                trnqs_coeff
+            } else {
+                coeff
+            };
+            // ag0 = the bare integration gain (companion geq for unit capacitance).
+            let ag0 = Self::jfet_companion_geq(coeff, 1.0, dt);
+            if ag0 <= 0.0 {
+                continue;
+            }
             let (charge, mode) = dev.charge_at(voltages);
             let rbody = dev.rbody_enabled();
             let (qg, qgmid, qb, qd, qbs, qbd) = if dev.uses_trnqs() {
@@ -1039,6 +1045,7 @@ impl Engine {
         circuit: &crate::circuit::Circuit,
         voltages: &[Value],
         coeff: &CompanionCoefficients,
+        trnqs_coeff: &CompanionCoefficients,
         dt: Value,
         history: &mut Bsim4TransientHistory,
     ) {
@@ -1046,6 +1053,11 @@ impl Engine {
             return;
         }
         for (idx, dev) in circuit.bsim4v8.devices.iter().enumerate() {
+            let coeff = if dev.uses_trnqs() {
+                trnqs_coeff
+            } else {
+                coeff
+            };
             let (charge, _mode) = dev.charge_at(voltages);
             let rbody = dev.rbody_enabled();
             let (qg, qgmid, qb, qd, qbs, qbd) = if dev.uses_trnqs() {
