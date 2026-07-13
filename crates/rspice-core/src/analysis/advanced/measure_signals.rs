@@ -1176,6 +1176,8 @@ mod tests {
              V1 out 0 0\n\
              .dc V1 3 1 -1\n\
              .meas dc reversed AVG V(GND,out) FROM=2 TO=1\n\
+             .meas dc from_only AVG V(GND,out) FROM=2\n\
+             .meas dc to_only AVG V(GND,out) TO=2\n\
              .end\n",
         )
         .expect("DC average parses");
@@ -1190,9 +1192,11 @@ mod tests {
             .collect::<Vec<_>>();
 
         let results = evaluate_dc_measurements(&netlist, &sweep);
-        assert_eq!(results.len(), 1);
+        assert_eq!(results.len(), 3);
         assert_eq!(results[0].value, Some(-1.5));
-        assert!(results[0].passed);
+        assert_eq!(results[1].value, Some(-1.5));
+        assert_eq!(results[2].value, Some(-2.5));
+        assert!(results.iter().all(|result| result.passed));
     }
 
     fn dc_equation_sweep() -> Vec<(Value, SimulationResult)> {

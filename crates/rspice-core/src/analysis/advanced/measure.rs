@@ -739,10 +739,16 @@ impl MeasureEngine {
             }
         };
 
+        let ascending = time
+            .first()
+            .zip(time.last())
+            .is_none_or(|(first, last)| last >= first);
         let (lower, upper) = match (from, to) {
             (Some(from), Some(to)) => (from.min(to), from.max(to)),
-            (Some(from), None) => (from, Value::INFINITY),
-            (None, Some(to)) => (Value::NEG_INFINITY, to),
+            (Some(from), None) if ascending => (from, Value::INFINITY),
+            (Some(from), None) => (Value::NEG_INFINITY, from),
+            (None, Some(to)) if ascending => (Value::NEG_INFINITY, to),
+            (None, Some(to)) => (to, Value::INFINITY),
             (None, None) => (Value::NEG_INFINITY, Value::INFINITY),
         };
         let mut integral = 0.0;

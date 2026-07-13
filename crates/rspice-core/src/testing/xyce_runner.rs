@@ -2313,12 +2313,10 @@ impl XyceTestRunner {
             )?
         };
         if !measurement_reference_paths.is_empty()
-            && (static_plan.dc_data.is_some()
-                || !static_plan.steps.is_empty()
-                || static_plan.dc.sweep2.is_some())
+            && (static_plan.dc_data.is_some() || static_plan.dc.sweep2.is_some())
         {
             return Err(
-                "scalar DC measurement artifact contract currently requires one ordinary unstepped primary sweep"
+                "scalar DC measurement artifact contract currently requires one ordinary primary sweep"
                     .to_string(),
             );
         }
@@ -7023,16 +7021,19 @@ impl XyceTestRunner {
         };
 
         if !plan.steps.is_empty() {
-            let Some(reference) = reference else {
-                return self.failure_result(
+            return if let Some(reference) = reference {
+                self.run_static_prn_step_dc_plan(deck, plan, netlist, reference, start)
+            } else if !plan.measurement_reference_paths.is_empty() {
+                self.run_static_step_dc_measurement_plan(deck, plan, netlist, start)
+            } else {
+                self.failure_result(
                     deck,
                     start,
                     contract,
                     "file-output-only .STEP DC comparison is not implemented".to_string(),
                     Vec::new(),
-                );
+                )
             };
-            return self.run_static_prn_step_dc_plan(deck, plan, netlist, reference, start);
         }
 
         if let Some(dc_data) = &plan.dc_data {
@@ -8629,6 +8630,150 @@ impl XyceTestRunner {
             format!("{} Xyce reference mismatch(es)", mismatches.len()),
             mismatches,
         )
+    }
+
+    fn run_static_step_dc_measurement_plan(
+        &self,
+        deck: &XyceDeck,
+        plan: XyceExecutionPlan,
+        netlist: Netlist,
+        start: Instant,
+    ) -> XyceTestResult {
+        let contract = "wrapper_scalar_measure_step_dc";
+        let engine = self.create_dc_engine();
+        let step_runs = match Self::nested_step_runs_for_commands(&engine, &netlist, &plan.steps) {
+            Ok(runs) => runs,
+            Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                return self.expected_unsupported_result(
+                    deck,
+                    start,
+                    "unsupported_xyce_runtime",
+                    &format!("RSpice runtime does not yet support this .STEP DC deck: {err}"),
+                );
+            }
+            Err(err) => {
+                return self.failure_result(
+                    deck,
+                    start,
+                    contract,
+                    format!(".STEP expansion error: {err}"),
+                    Vec::new(),
+                );
+            }
+        };
+        if step_runs.len() != plan.measurement_reference_paths.len() {
+            return self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    ".STEP expansion produced {} batches but {} contiguous measurement artifacts exist",
+                    step_runs.len(),
+                    plan.measurement_reference_paths.len()
+                ),
+                Vec::new(),
+            );
+        }
+
+        let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
+        let mut all_mismatches = Vec::new();
+        for (step_index, (run, reference_path)) in step_runs
+            .iter()
+            .zip(&plan.measurement_reference_paths)
+            .enumerate()
+        {
+            let results = match engine.run_dc_sweep2_spec_with_report_and_abort(
+                &run.netlist,
+                &plan.dc.source,
+                &plan.dc.primary_spec(),
+                plan.dc.sweep2.as_ref(),
+                &abort,
+            ) {
+                Ok(results) => results,
+                Err(SimulationError::Aborted) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "simulation exceeded timeout ({}ms)",
+                            self.config.max_time_per_test_ms
+                        ),
+                        Vec::new(),
+                    );
+                }
+                Err(err) if Self::is_expected_unsupported_runtime_error(&err) => {
+                    return self.expected_unsupported_result(
+                        deck,
+                        start,
+                        "unsupported_xyce_runtime",
+                        &format!(
+                            "RSpice runtime does not yet support DC step {}: {err}",
+                            step_index + 1
+                        ),
+                    );
+                }
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!("simulation error in DC step {}: {err}", step_index + 1),
+                        Vec::new(),
+                    );
+                }
+            };
+            let measurement_sweep = results
+                .iter()
+                .map(|point| (point.sweep_value, point.result.clone()))
+                .collect::<Vec<_>>();
+            let measurements = crate::analysis::advanced::evaluate_dc_measurements(
+                &run.netlist,
+                &measurement_sweep,
+            );
+            let mut mismatches = match self.compare_measurement_references(
+                std::slice::from_ref(reference_path),
+                &measurements,
+                plan.measurement_tolerance,
+            ) {
+                Ok(mismatches) => mismatches,
+                Err(err) => {
+                    return self.failure_result(
+                        deck,
+                        start,
+                        contract,
+                        format!(
+                            "DC measurement comparison error in step {}: {err}",
+                            step_index + 1
+                        ),
+                        Vec::new(),
+                    );
+                }
+            };
+            for mismatch in &mut mismatches {
+                mismatch.probe = format!("step[{}]:{}", step_index + 1, mismatch.probe);
+            }
+            all_mismatches.extend(mismatches);
+            if all_mismatches.len() >= self.config.max_mismatches {
+                all_mismatches.truncate(self.config.max_mismatches);
+                break;
+            }
+        }
+
+        if all_mismatches.is_empty() {
+            self.passed_result(deck, start, contract)
+        } else {
+            self.failure_result(
+                deck,
+                start,
+                contract,
+                format!(
+                    "{} Xyce stepped DC measurement mismatch(es)",
+                    all_mismatches.len()
+                ),
+                all_mismatches,
+            )
+        }
     }
 
     fn nested_step_runs_for_commands(
