@@ -445,6 +445,8 @@ pub struct DcSweepSeries {
     axis: Vec<Value>,
     /// (raw name, prefix, series)
     storage: Vec<(String, char, Vec<Value>)>,
+    /// (complete SPICE probe name, series)
+    observables: Vec<(String, Vec<Value>)>,
 }
 
 impl DcSweepSeries {
@@ -483,7 +485,38 @@ impl DcSweepSeries {
             storage.push((name.clone(), 'I', series));
         }
 
-        Some(Self { axis, storage })
+        // Parameter sweeps can rebuild the circuit at every point and may
+        // change the lowering topology (for example, a resistor can cross the
+        // threshold between nodal and explicit-branch forms). Form a
+        // case-insensitive union before requiring a complete waveform so a
+        // name first introduced after row zero is not silently omitted.
+        let mut observable_names = Vec::<String>::new();
+        for (_, result) in sweep {
+            for (name, _) in &result.dc_observables {
+                if !observable_names
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(name))
+                {
+                    observable_names.push(name.clone());
+                }
+            }
+        }
+        let observables = observable_names
+            .into_iter()
+            .filter_map(|name| {
+                let values = sweep
+                    .iter()
+                    .map(|(_, result)| result.try_dc_observable_named(&name))
+                    .collect::<Option<Vec<_>>>()?;
+                Some((name, values))
+            })
+            .collect();
+
+        Some(Self {
+            axis,
+            storage,
+            observables,
+        })
     }
 
     /// The swept values, used as the measurement abscissa.
@@ -501,6 +534,9 @@ impl DcSweepSeries {
             if *prefix == 'V' {
                 insert_case_variants(&mut signals, raw, series.as_slice());
             }
+        }
+        for (name, series) in &self.observables {
+            insert_case_variants(&mut signals, name, series.as_slice());
         }
         signals
     }

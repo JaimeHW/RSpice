@@ -71,6 +71,75 @@ impl DcSweepSource {
 }
 
 impl Engine {
+    fn populate_dc_observables(
+        circuit: &CircuitData,
+        solution: &[Value],
+        result: &mut SimulationResult,
+    ) {
+        let node_voltage = |node: usize| {
+            if node == 0 {
+                0.0
+            } else {
+                // A converged MNA solution contains one slot for every
+                // non-ground circuit node. Callers construct the result only
+                // after a successful solve of this exact circuit topology.
+                solution[node - 1]
+            }
+        };
+
+        // Every MNA branch unknown is an internal solution variable in Xyce.
+        // Its exported solution name is the canonical instance name followed
+        // by `_BRANCH`, independently of whether the owning element also has
+        // a conventional I(...) accessor.
+        for (name, current) in result.branch_names.iter().zip(&result.branch_currents) {
+            if !name.is_empty() {
+                let internal_name = if name.to_ascii_uppercase().ends_with("_BRANCH") {
+                    name.clone()
+                } else {
+                    format!("{name}_BRANCH")
+                };
+                result
+                    .dc_observables
+                    .push((format!("N({internal_name})"), *current));
+            }
+        }
+
+        // A nodal resistor has no MNA branch unknown, so evaluate its lead
+        // current directly from the converged terminal voltages and the
+        // conductance actually installed in this circuit instance.
+        for ((name, stamp), conductance) in circuit
+            .resistors
+            .names
+            .iter()
+            .zip(&circuit.resistors.stamps)
+            .zip(&circuit.resistors.conductances)
+        {
+            let voltage = node_voltage(stamp.pp.row) - node_voltage(stamp.nn.row);
+            let current = voltage * conductance;
+            let power = voltage * current;
+            result.dc_observables.push((format!("I({name})"), current));
+            result.dc_observables.push((format!("P({name})"), power));
+            result.dc_observables.push((format!("W({name})"), power));
+        }
+
+        // Zero and near-zero resistors use an explicit MNA branch. Preserve
+        // the same positive-to-negative lead convention and use the actual
+        // solved branch current rather than dividing by a tiny resistance.
+        for index in 0..circuit.resistor_branches.names.len() {
+            let name = &circuit.resistor_branches.names[index];
+            let voltage = node_voltage(circuit.resistor_branches.node_pos[index])
+                - node_voltage(circuit.resistor_branches.node_neg[index]);
+            let branch_ordinal = circuit.resistor_branches.branch_indices[index];
+            // Explicit resistor branches are allocated after the node slots
+            // and use the same one-based branch ordinal as every MNA branch.
+            let current = solution[circuit.num_nodes() + branch_ordinal - 1];
+            let power = voltage * current;
+            result.dc_observables.push((format!("I({name})"), current));
+            result.dc_observables.push((format!("P({name})"), power));
+            result.dc_observables.push((format!("W({name})"), power));
+        }
+    }
+
     fn build_empty_dc_result() -> SimulationResult {
         let mut result = SimulationResult::new(0, 0);
         result.node_names = vec!["0".to_string()];
@@ -247,6 +316,7 @@ impl Engine {
                 result.branch_currents[i - circuit.num_nodes()] = v;
             }
         }
+        Self::populate_dc_observables(&circuit, &solution, &mut result);
 
         Ok((result, circuit.device_op_report()))
     }
@@ -686,6 +756,7 @@ impl Engine {
                         result.branch_currents[i - circuit.num_nodes()] = v;
                     }
                 }
+                Self::populate_dc_observables(&circuit, &solution, &mut result);
 
                 results.push(DcSweepPointResult {
                     sweep_value,
@@ -878,6 +949,91 @@ R1 in 0 1k
                 "unexpected V(in) at I1={actual_sweep}: {actual_voltage}, expected {expected_voltage}"
             );
         }
+    }
+
+    #[test]
+    fn dc_sweep_retains_resistor_lead_power_and_internal_branch_observables() {
+        let deck = "\
+DC observable retention
+VSRC1 1a 0 1
+RLOAD1A 1a 1b 0.1
+RLOAD1B 1b 0 1
+.dc VSRC1 1 5 1
+.end
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let results = Engine::default()
+            .run_dc_sweep(&netlist, "VSRC1", 1.0, 5.0, 1.0)
+            .expect("DC sweep solves");
+
+        assert_eq!(results.len(), 5);
+        for (sweep_value, result) in &results {
+            let current = sweep_value / 1.1;
+            let resistor_voltage = current * 0.1;
+            let power = resistor_voltage * current;
+            assert!(
+                (result.try_dc_observable_named("I(rload1a)").unwrap() - current).abs() < 1e-12
+            );
+            assert!((result.try_dc_observable_named("P(RLOAD1A)").unwrap() - power).abs() < 1e-12);
+            assert!((result.try_dc_observable_named("W(rLoAd1A)").unwrap() - power).abs() < 1e-12);
+            assert!(
+                (result.try_dc_observable_named("N(VSRC1_BRANCH)").unwrap() + current).abs()
+                    < 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn parameter_dc_sweep_observables_use_each_rebuilt_circuit() {
+        let deck = "\
+parameter-dependent DC observable
+.param RVAL=1
+V1 in 0 4
+R1 in 0 {RVAL}
+.dc RVAL 1 4 1
+.end
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let results = Engine::default()
+            .run_dc_sweep(&netlist, "RVAL", 1.0, 4.0, 1.0)
+            .expect("parameter DC sweep solves");
+
+        assert_eq!(results.len(), 4);
+        for (resistance, result) in &results {
+            let expected_current = 4.0 / resistance;
+            let actual = result
+                .try_dc_observable_named("I(R1)")
+                .expect("per-point resistor current is retained");
+            assert!(
+                (actual - expected_current).abs() < 1e-12,
+                "R={resistance}: expected I(R1)={expected_current}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_branch_resistor_observables_use_solved_lead_current() {
+        let deck = "\
+zero-resistance branch observable
+V1 in 0 1
+R1 in mid 1
+RZERO mid 0 0
+.op
+.end
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let result = Engine::default()
+            .run_dc_op(&netlist)
+            .expect("zero-resistance branch circuit solves");
+
+        let current = result
+            .try_dc_observable_named("I(RZERO)")
+            .expect("explicit resistor branch current is retained");
+        let power = result
+            .try_dc_observable_named("P(RZERO)")
+            .expect("explicit resistor branch power is retained");
+        assert!((current - 1.0).abs() < 1e-12, "expected 1 A, got {current}");
+        assert!(power.abs() < 1e-12, "expected zero power, got {power}");
     }
 
     #[test]

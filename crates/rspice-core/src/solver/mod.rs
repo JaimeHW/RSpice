@@ -59,6 +59,14 @@ pub struct SimulationResult {
     pub branch_currents: Vec<Value>,
     /// Canonical branch names aligned with `branch_currents`
     pub branch_names: Vec<String>,
+    /// Named real-valued operating-point observables evaluated from the
+    /// converged circuit state. Keys use their canonical SPICE probe form
+    /// (for example `I(R1)`, `P(R1)`, or `N(V1_BRANCH)`).
+    ///
+    /// Unlike reconstructing a device quantity from the source netlist,
+    /// these values preserve the actual per-point circuit configuration for
+    /// parameter, temperature, and nested DC sweeps.
+    pub dc_observables: Vec<(String, Value)>,
     /// Time points (for transient analysis)
     pub time_points: Vec<Value>,
     /// Voltage waveforms: waveforms[node_id][time_index]
@@ -74,9 +82,17 @@ impl SimulationResult {
             node_names,
             branch_currents: vec![0.0; num_branches],
             branch_names: vec![String::new(); num_branches],
+            dc_observables: Vec::new(),
             time_points: Vec::new(),
             voltage_waveforms: Vec::new(),
         }
+    }
+
+    /// Look up a converged DC observable by its SPICE probe name.
+    pub fn try_dc_observable_named(&self, name: &str) -> Option<Value> {
+        self.dc_observables
+            .iter()
+            .find_map(|(candidate, value)| candidate.eq_ignore_ascii_case(name).then_some(*value))
     }
 
     /// Get voltage at a node.
