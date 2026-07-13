@@ -37,7 +37,7 @@ pub use harmonic_balance::{
     SpectralVoltage,
 };
 pub use measure::{
-    EdgeType, MeasureEngine, MeasureResult, MeasureStatement, MeasureType, TrigSpec,
+    EdgeType, ExtremaOutput, MeasureEngine, MeasureResult, MeasureStatement, MeasureType, TrigSpec,
 };
 pub use measure_signals::{
     AcSweepSeries, DcSweepSeries, EquationMeasureTrace, NoiseSweepSeries,

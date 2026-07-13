@@ -36,6 +36,15 @@ pub enum EdgeType {
     Cross,
 }
 
+/// Selects whether an extrema measurement reports the dependent value or the
+/// independent-axis location where that value first occurs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExtremaOutput {
+    #[default]
+    Value,
+    IndependentAxis,
+}
+
 /// Trigger/Target specification for delay measurements
 #[derive(Debug, Clone)]
 pub struct TrigSpec {
@@ -120,6 +129,7 @@ pub enum MeasureType {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
+        output: ExtremaOutput,
     },
 
     /// Maximum value over range
@@ -127,6 +137,7 @@ pub enum MeasureType {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
+        output: ExtremaOutput,
     },
 
     /// Peak-to-peak (max - min) over range
@@ -424,12 +435,36 @@ impl MeasureEngine {
                 &measurement.name,
                 "continuous equation measures evaluate on the analysis-point stream",
             ),
-            MeasureType::Min { signal, from, to } => {
-                self.eval_min_max(&measurement.name, signal, *from, *to, time, signals, false)
-            }
-            MeasureType::Max { signal, from, to } => {
-                self.eval_min_max(&measurement.name, signal, *from, *to, time, signals, true)
-            }
+            MeasureType::Min {
+                signal,
+                from,
+                to,
+                output,
+            } => self.eval_min_max(
+                &measurement.name,
+                signal,
+                *from,
+                *to,
+                *output,
+                time,
+                signals,
+                false,
+            ),
+            MeasureType::Max {
+                signal,
+                from,
+                to,
+                output,
+            } => self.eval_min_max(
+                &measurement.name,
+                signal,
+                *from,
+                *to,
+                *output,
+                time,
+                signals,
+                true,
+            ),
             MeasureType::PeakToPeak { signal, from, to } => {
                 self.eval_pp(&measurement.name, signal, *from, *to, time, signals)
             }
@@ -617,6 +652,7 @@ impl MeasureEngine {
         signal_name: &str,
         from: Option<Value>,
         to: Option<Value>,
+        output: ExtremaOutput,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
         is_max: bool,
@@ -637,10 +673,20 @@ impl MeasureEngine {
             return MeasureResult::failed(name, "Empty range");
         }
 
-        let result = if is_max {
-            slice.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
-        } else {
-            slice.iter().cloned().fold(f64::INFINITY, f64::min)
+        let mut selected = 0;
+        for index in 1..slice.len() {
+            let replaces = if is_max {
+                slice[index] > slice[selected]
+            } else {
+                slice[index] < slice[selected]
+            };
+            if replaces {
+                selected = index;
+            }
+        }
+        let result = match output {
+            ExtremaOutput::Value => slice[selected],
+            ExtremaOutput::IndependentAxis => time[start + selected],
         };
 
         MeasureResult::success(name, result)
@@ -1038,6 +1084,30 @@ mod tests {
         assert!(results[0].passed);
     }
 
+    #[test]
+    fn extrema_independent_axis_output_keeps_first_tie() {
+        let statement = MeasureStatement {
+            goal: None,
+            tolerance: None,
+            name: "peak_frequency".to_string(),
+            measure_type: MeasureType::Max {
+                signal: "V(out)".to_string(),
+                from: None,
+                to: None,
+                output: ExtremaOutput::IndependentAxis,
+            },
+            analysis: "AC".to_string(),
+        };
+        let axis = [10.0, 20.0, 30.0];
+        let values = [2.0, 5.0, 5.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &values);
+
+        let results = engine_with(statement).evaluate(&axis, &signals);
+
+        assert_eq!(results[0].value, Some(20.0));
+    }
+
     fn max_statement(signal: &str) -> MeasureStatement {
         MeasureStatement {
             goal: None,
@@ -1047,6 +1117,7 @@ mod tests {
                 signal: signal.to_string(),
                 from: None,
                 to: None,
+                output: ExtremaOutput::Value,
             },
             analysis: "TRAN".to_string(),
         }

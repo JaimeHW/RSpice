@@ -61,15 +61,15 @@ pub use core::{
 pub use advanced::{
     AcSensitivity, AcSensitivityOutput, AcSensitivityResult, DistortionAnalysisResult,
     DistortionPointResult, DistortionProduct, DistortionProductResult, Distribution, EdgeType,
-    ElementDesc, ElementType, FourierAnalysis, FourierConfig, FourierResult, FrequencySweep,
-    HarmonicComponent, IntegratedContribution, IntegratedNoise, MeasureEngine, MeasureResult,
-    MeasureStatement, MeasureType, MonteCarloConfig, MonteCarloResult, MonteCarloRunner,
-    NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, ParametricResults, ParametricSweep,
-    PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port, PortNoiseCorrelationResult, PzMatrix,
-    SMatrix, SParameterAnalyzer, SParameterConfig, SParameterResult, Sensitivity,
-    SensitivityAnalyzer, SensitivityResult, StepSpec, StepTarget, StepType, Tolerance,
-    TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult, TrigSpec, VariableStatistics,
-    VariationSet,
+    ElementDesc, ElementType, ExtremaOutput, FourierAnalysis, FourierConfig, FourierResult,
+    FrequencySweep, HarmonicComponent, IntegratedContribution, IntegratedNoise, MeasureEngine,
+    MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig, MonteCarloResult,
+    MonteCarloRunner, NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, ParametricResults,
+    ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port,
+    PortNoiseCorrelationResult, PzMatrix, SMatrix, SParameterAnalyzer, SParameterConfig,
+    SParameterResult, Sensitivity, SensitivityAnalyzer, SensitivityResult, StepSpec, StepTarget,
+    StepType, Tolerance, TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult,
+    TrigSpec, VariableStatistics, VariationSet,
 };
 
 // Re-export PSS types

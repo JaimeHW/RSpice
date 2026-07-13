@@ -1643,19 +1643,23 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "MAX" => {
-                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, output) =
+                        parse_measure_extrema_options(stream, line_num, params)?;
                     MeasureType::Max {
                         signal: signal.clone(),
                         from,
                         to,
+                        output,
                     }
                 }
                 "MIN" => {
-                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, output) =
+                        parse_measure_extrema_options(stream, line_num, params)?;
                     MeasureType::Min {
                         signal: signal.clone(),
                         from,
                         to,
+                        output,
                     }
                 }
                 "PP" => {
@@ -2045,6 +2049,60 @@ pub(super) fn parse_measure_range_options(
     }
 
     Ok((from, to))
+}
+
+fn parse_measure_extrema_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<
+    (
+        Option<crate::Value>,
+        Option<crate::Value>,
+        crate::analysis::ExtremaOutput,
+    ),
+    ParseError,
+> {
+    use crate::analysis::ExtremaOutput;
+
+    let mut from = None;
+    let mut to = None;
+    let mut output = ExtremaOutput::Value;
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            stream.advance();
+            continue;
+        };
+        let key = key.to_ascii_uppercase();
+        if matches!(key.as_str(), "GOAL" | "TOL") {
+            break;
+        }
+        stream.advance();
+        if !matches!(key.as_str(), "FROM" | "TO" | "OUTPUT") {
+            continue;
+        }
+        let has_equals = stream.consume(&TokenKind::Equals);
+        if key != "OUTPUT" && !has_equals {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected '=' after {key} in .MEAS"),
+            });
+        }
+        if key == "OUTPUT" {
+            let value = expect_ident(stream, line_num)?;
+            if matches!(value.to_ascii_uppercase().as_str(), "TIME" | "FREQ" | "SV") {
+                output = ExtremaOutput::IndependentAxis;
+            }
+        } else {
+            let value = expect_value(stream, line_num, params)?;
+            if key == "FROM" {
+                from = Some(value);
+            } else {
+                to = Some(value);
+            }
+        }
+    }
+    Ok((from, to, output))
 }
 
 fn parse_measure_equation_options(

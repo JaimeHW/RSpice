@@ -1318,10 +1318,16 @@ mod tests {
             assert_eq!(measurement.goal, Some(4.0), "title={title}");
             assert_eq!(measurement.tolerance, Some(0.1), "title={title}");
             match &measurement.measure_type {
-                crate::analysis::MeasureType::Max { signal, from, to } => {
+                crate::analysis::MeasureType::Max {
+                    signal,
+                    from,
+                    to,
+                    output,
+                } => {
                     assert_eq!(signal, "V(OUT)");
                     assert_eq!(*from, None);
                     assert_eq!(*to, None);
+                    assert_eq!(*output, crate::analysis::ExtremaOutput::Value);
                 }
                 other => panic!("expected MAX measurement, got {other:?}"),
             }
@@ -1347,6 +1353,25 @@ mod tests {
                 assert_eq!(*to, Some(100.0));
             }
             other => panic!("expected INTEG measurement, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extrema_output_frequency_alias_selects_independent_axis() {
+        let netlist = Netlist::parse(
+            "extrema output frequency\n\
+             V1 out 0 AC 1\n\
+             .ac dec 5 1 1k\n\
+             .measure ac peak_frequency max vm(out) output freq\n\
+             .end\n",
+        )
+        .expect("OUTPUT FREQ parses without an equals sign");
+
+        match &netlist.measurements[0].measure_type {
+            crate::analysis::MeasureType::Max { output, .. } => {
+                assert_eq!(*output, crate::analysis::ExtremaOutput::IndependentAxis)
+            }
+            other => panic!("expected MAX measurement, got {other:?}"),
         }
     }
 
