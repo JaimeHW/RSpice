@@ -22490,6 +22490,7 @@ impl XyceTestRunner {
                 && matches!(
                     measurement.measure_type,
                     crate::analysis::MeasureType::Avg { .. }
+                        | crate::analysis::MeasureType::Rms { .. }
                         | crate::analysis::MeasureType::Equation { .. }
                 )
         }) {
