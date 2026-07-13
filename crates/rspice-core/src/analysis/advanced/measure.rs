@@ -623,27 +623,37 @@ impl MeasureEngine {
         MeasureResult::success(name, t_targ - t_trig)
     }
 
-    fn get_range_indices(
-        &self,
+    fn measurement_window_bounds(
         time: &[Value],
         from: Option<Value>,
         to: Option<Value>,
-    ) -> Option<(usize, usize)> {
-        let start = match from {
-            Some(bound) => {
-                let inclusive_bound = bound - bound.abs() * 1.0e-12;
-                time.iter().position(|&value| value >= inclusive_bound)?
-            }
-            None => 0,
+    ) -> (Value, Value) {
+        let ascending = time
+            .windows(2)
+            .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
+            .unwrap_or(true);
+        match (from, to) {
+            (Some(from), Some(to)) => (from.min(to), from.max(to)),
+            (Some(from), None) if ascending => (from, Value::INFINITY),
+            (Some(from), None) => (Value::NEG_INFINITY, from),
+            (None, Some(to)) if ascending => (Value::NEG_INFINITY, to),
+            (None, Some(to)) => (to, Value::INFINITY),
+            (None, None) => (Value::NEG_INFINITY, Value::INFINITY),
+        }
+    }
+
+    fn axis_in_measurement_window(axis: Value, lower: Value, upper: Value) -> bool {
+        let lower_tolerance = if lower.is_finite() {
+            lower.abs() * 1.0e-12
+        } else {
+            0.0
         };
-        let end = match to {
-            Some(bound) => {
-                let inclusive_bound = bound + bound.abs() * 1.0e-12;
-                time.iter().rposition(|&value| value <= inclusive_bound)?
-            }
-            None => time.len() - 1,
+        let upper_tolerance = if upper.is_finite() {
+            upper.abs() * 1.0e-12
+        } else {
+            0.0
         };
-        (start <= end).then_some((start, end))
+        axis >= lower - lower_tolerance && axis <= upper + upper_tolerance
     }
 
     fn eval_min_max(
@@ -664,29 +674,29 @@ impl MeasureEngine {
             }
         };
 
-        let Some((start, end)) = self.get_range_indices(time, from, to) else {
-            return MeasureResult::failed(name, "Empty range");
-        };
-        let slice = &signal[start..=end];
-
-        if slice.is_empty() {
-            return MeasureResult::failed(name, "Empty range");
-        }
-
-        let mut selected = 0;
-        for index in 1..slice.len() {
-            let replaces = if is_max {
-                slice[index] > slice[selected]
-            } else {
-                slice[index] < slice[selected]
-            };
+        let (lower, upper) = Self::measurement_window_bounds(time, from, to);
+        let mut selected: Option<(usize, Value)> = None;
+        for (index, (&axis, &value)) in time.iter().zip(signal).enumerate() {
+            if !Self::axis_in_measurement_window(axis, lower, upper) {
+                continue;
+            }
+            let replaces = selected.is_none_or(|(_, selected_value)| {
+                if is_max {
+                    value > selected_value
+                } else {
+                    value < selected_value
+                }
+            });
             if replaces {
-                selected = index;
+                selected = Some((index, value));
             }
         }
+        let Some((selected_index, selected_value)) = selected else {
+            return MeasureResult::failed(name, "Empty range");
+        };
         let result = match output {
-            ExtremaOutput::Value => slice[selected],
-            ExtremaOutput::IndependentAxis => time[start + selected],
+            ExtremaOutput::Value => selected_value,
+            ExtremaOutput::IndependentAxis => time[selected_index],
         };
 
         MeasureResult::success(name, result)
@@ -708,17 +718,20 @@ impl MeasureEngine {
             }
         };
 
-        let Some((start, end)) = self.get_range_indices(time, from, to) else {
-            return MeasureResult::failed(name, "Empty range");
-        };
-        let slice = &signal[start..=end];
-
-        if slice.is_empty() {
+        let (lower, upper) = Self::measurement_window_bounds(time, from, to);
+        let mut min_val = Value::INFINITY;
+        let mut max_val = Value::NEG_INFINITY;
+        let mut selected = false;
+        for (&axis, &value) in time.iter().zip(signal) {
+            if Self::axis_in_measurement_window(axis, lower, upper) {
+                min_val = min_val.min(value);
+                max_val = max_val.max(value);
+                selected = true;
+            }
+        }
+        if !selected {
             return MeasureResult::failed(name, "Empty range");
         }
-
-        let min_val = slice.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max_val = slice.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
         MeasureResult::success(name, max_val - min_val)
     }

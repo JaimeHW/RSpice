@@ -5414,6 +5414,21 @@ fn test_xyce_stepped_dc_integration_measurement_artifact_oracle() {
 }
 
 #[test]
+fn test_xyce_stepped_dc_extrema_measurement_artifact_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/MEASURE_DC/STEP/MaxMinPPTest1DC.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should filter descending extrema windows in every step artifact, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
+#[test]
 fn test_xyce_stepped_ac_equation_measurement_artifact_oracle() {
     let _xyce_runner_guard = lock_xyce_runner();
     let root = get_xyce_tests_dir();
