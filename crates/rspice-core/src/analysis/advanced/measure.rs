@@ -518,9 +518,15 @@ impl MeasureEngine {
                 time,
                 signals,
             ),
-            MeasureType::Integ { signal, from, to } => {
-                self.eval_integ(&measurement.name, signal, *from, *to, time, signals)
-            }
+            MeasureType::Integ { signal, from, to } => self.eval_integ(
+                &measurement.name,
+                &measurement.analysis,
+                signal,
+                *from,
+                *to,
+                time,
+                signals,
+            ),
         }
     }
 
@@ -1041,6 +1047,7 @@ impl MeasureEngine {
     fn eval_integ(
         &self,
         name: &str,
+        analysis: &str,
         signal_name: &str,
         from: Option<Value>,
         to: Option<Value>,
@@ -1053,6 +1060,11 @@ impl MeasureEngine {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
             }
         };
+        if !analysis.eq_ignore_ascii_case("DC")
+            && matches!((from, to), (Some(from), Some(to)) if from > to)
+        {
+            return MeasureResult::failed(name, "Empty range");
+        }
 
         let sweep_direction = time
             .first()
@@ -1202,6 +1214,35 @@ mod tests {
         assert_eq!(results[0].value, None);
         assert!(!results[0].passed);
         assert_eq!(results[0].error.as_deref(), Some("Empty range"));
+    }
+
+    #[test]
+    fn integration_accepts_reversed_windows_only_for_dc() {
+        let statement = |name: &str, analysis: &str| MeasureStatement {
+            goal: None,
+            tolerance: None,
+            name: name.to_string(),
+            measure_type: MeasureType::Integ {
+                signal: "V(out)".to_string(),
+                from: Some(2.0),
+                to: Some(1.0),
+            },
+            analysis: analysis.to_string(),
+        };
+        let axis = [1.0, 2.0];
+        let values = [1.0, 2.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &values);
+        let mut engine = MeasureEngine::new();
+        engine.add(statement("ac_integral", "AC"));
+        engine.add(statement("dc_integral", "DC"));
+
+        let results = engine.evaluate(&axis, &signals);
+
+        assert_eq!(results[0].value, None);
+        assert!(!results[0].passed);
+        assert_eq!(results[1].value, Some(-1.5));
+        assert!(results[1].passed);
     }
 
     #[test]
