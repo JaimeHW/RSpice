@@ -1,4 +1,5 @@
 use super::*;
+use crate::product::{DatasetId, RunId};
 
 /// A simulation run containing multiple analysis results.
 ///
@@ -11,7 +12,17 @@ use super::*;
 /// - Retained in history for comparison
 #[derive(Debug, Clone)]
 pub struct SimulationRun {
-    /// Unique run identifier (monotonically increasing)
+    /// Stable product identity. This survives project moves, history reorder,
+    /// and save/reload; it is the authoritative reference for selections and
+    /// dataset provenance.
+    pub run_id: RunId,
+    /// Stable identity of the result dataset assembled by this run. The
+    /// dataset contains the run's analyses and becomes the immutable unit
+    /// addressed by result documents, comparisons, and overlays after
+    /// completion.
+    pub dataset_id: DatasetId,
+    /// Human-facing run sequence (monotonically increasing within a project).
+    /// It is a label/order value, not persistent object identity.
     pub id: u64,
     /// Human-readable label with timestamp (e.g., "Run 3 (1:04:01 PM)")
     pub label: String,
@@ -31,6 +42,8 @@ impl SimulationRun {
         let timestamp = Self::current_timestamp();
         let time_str = Self::format_time(timestamp);
         Self {
+            run_id: RunId::new(),
+            dataset_id: DatasetId::new(),
             id: run_number,
             label: format!("Run {} ({})", run_number, time_str),
             timestamp,
@@ -122,11 +135,15 @@ mod tests {
     #[test]
     fn add_analysis_assigns_unique_ids_when_converters_reuse_placeholder() {
         let mut run = SimulationRun::new(7);
+        let stable_id = run.run_id;
+        let dataset_id = run.dataset_id;
 
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
 
         let ids: Vec<_> = run.analyses.iter().map(|analysis| analysis.id).collect();
         assert_eq!(ids, vec![1, 2]);
+        assert_eq!(run.run_id, stable_id);
+        assert_eq!(run.dataset_id, dataset_id);
     }
 }

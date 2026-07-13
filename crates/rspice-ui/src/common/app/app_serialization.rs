@@ -75,19 +75,15 @@ impl<'de> serde::Deserialize<'de> for AppState {
             license,
             ..Default::default()
         };
-        let (simulation_results, simulation_results_warning) = match de
+        let simulation_results_warning = de
             .simulation_results
-            .validate()
-        {
-            Ok(()) => (de.simulation_results, None),
-            Err(error) => (
-                ProjectSimulationResults::default(),
-                Some(format!(
+            .apply_to_state(&mut state.simulation)
+            .err()
+            .map(|error| {
+                format!(
                     "Simulation results were not restored because their persisted session data is invalid: {error}"
-                )),
-            ),
-        };
-        simulation_results.apply_to_state(&mut state.simulation);
+                )
+            });
         if let Some(warning) = simulation_results_warning {
             state.push_user_message(ConsoleMessage::warning(warning));
         }
@@ -151,6 +147,51 @@ mod tests {
         assert_eq!(restored.simulation.run_count(), 0);
         assert!(restored.simulation.waveforms.is_empty());
         assert!(!restored.simulation.is_running);
+    }
+
+    #[test]
+    fn legacy_session_result_sequences_migrate_to_stable_identities() {
+        let mut state = AppState::default();
+        let mut run = crate::state::SimulationRun::new(3);
+        run.add_analysis(crate::state::AnalysisResult::new(
+            7,
+            crate::state::AnalysisType::Transient,
+            "TRAN legacy session",
+        ));
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 3;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        let mut value = serde_json::to_value(&state).expect("session converts to JSON");
+        let results = value["simulation_results"]
+            .as_object_mut()
+            .expect("simulation result object");
+        results.insert("schema_version".to_owned(), serde_json::Value::from(1));
+        results.remove("active_run_stable_id");
+        results.remove("active_dataset_id");
+        results.remove("active_analysis_sequence");
+        results.insert("active_run_id".to_owned(), serde_json::Value::from(3));
+        results.insert("active_analysis_id".to_owned(), serde_json::Value::from(7));
+        let persisted_run = results["runs"][0]
+            .as_object_mut()
+            .expect("persisted run object");
+        persisted_run.remove("run_id");
+        persisted_run.remove("dataset_id");
+
+        let restored: AppState = serde_json::from_value(value).expect("legacy session migrates");
+
+        let active_run = restored
+            .simulation
+            .active_run()
+            .expect("active run restores");
+        let active_analysis = restored
+            .simulation
+            .active_analysis()
+            .expect("active analysis restores");
+        assert!(!active_run.run_id.as_uuid().is_nil());
+        assert!(!active_run.dataset_id.as_uuid().is_nil());
+        assert_eq!(active_run.id, 3);
+        assert_eq!(active_analysis.id, 7);
     }
 
     #[test]
@@ -243,7 +284,7 @@ mod tests {
         state.simulation.active_analysis_idx = Some(0);
         let json = serde_json::to_string(&state)
             .expect("session serializes")
-            .replace("\"schema_version\":1", "\"schema_version\":999");
+            .replace("\"schema_version\":2", "\"schema_version\":999");
 
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 

@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::app::ActiveViewer;
 use crate::common::{AppState, RSpiceApp};
+use crate::product::DatasetId;
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
 use crate::state::{SharedWaveformValues, WaveformData};
@@ -823,7 +824,7 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
 /// per-run overlay toggles ("signal owns hue, run owns weight").
 fn run_selector(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
-    let overlay_count = state.simulation.overlay_run_ids.len();
+    let overlay_count = state.simulation.overlay_dataset_ids.len();
     let label = match state.simulation.active_run() {
         Some(run) if overlay_count > 0 => format!("run #{} +{overlay_count}", run.id),
         Some(run) => format!("run #{}", run.id),
@@ -831,18 +832,18 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
     };
 
     let mut select_run: Option<usize> = None;
-    let mut toggle_overlay: Option<u64> = None;
+    let mut toggle_overlay: Option<DatasetId> = None;
     let mut clear_overlays = false;
 
     ui.menu_button(
         egui::RichText::new(label).font(theme::mono(tokens::FS_1, FontWeight::Regular)),
         |ui| {
             ui.set_min_width(290.0);
-            let active_id = state.simulation.active_run().map(|run| run.id);
+            let active_id = state.simulation.active_run().map(|run| run.dataset_id);
 
             for (index, run) in state.simulation.runs.iter().enumerate() {
-                let is_active = Some(run.id) == active_id;
-                let overlaid = state.simulation.is_run_overlaid(run.id);
+                let is_active = Some(run.dataset_id) == active_id;
+                let overlaid = state.simulation.is_dataset_overlaid(run.dataset_id);
 
                 ui.horizontal(|ui| {
                     // Status dot: ok / failed.
@@ -903,7 +904,7 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
                                 )
                                 .changed()
                             {
-                                toggle_overlay = Some(run.id);
+                                toggle_overlay = Some(run.dataset_id);
                             }
                         }
                     });
@@ -926,12 +927,12 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
         state.simulation.select_run(index);
         state.shell.results.clear_cursors();
     }
-    if let Some(run_id) = toggle_overlay {
-        state.simulation.toggle_run_overlay(run_id);
+    if let Some(dataset_id) = toggle_overlay {
+        state.simulation.toggle_dataset_overlay(dataset_id);
         state.shell.results.clear_cursors();
     }
     if clear_overlays {
-        state.simulation.clear_run_overlays();
+        state.simulation.clear_dataset_overlays();
         state.shell.results.clear_cursors();
     }
 }

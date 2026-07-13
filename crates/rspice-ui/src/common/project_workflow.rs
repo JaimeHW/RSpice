@@ -196,13 +196,19 @@ pub(crate) fn apply_loaded_project(
         }
     }
     let simulation_results = project.simulation_results;
-    let simulation_results_warning = project.simulation_results_warning;
+    let mut simulation_results_warning = project.simulation_results_warning;
     state.clear_design_execution_context();
     state.library_manager = project.libraries;
     state.workspace = project.workspace;
     state.restore_active_schematic_from_workspace();
     state.simulation = crate::state::SimulationState::default();
-    simulation_results.apply_to_state(&mut state.simulation);
+    if let Err(error) = simulation_results.apply_to_state(&mut state.simulation)
+        && simulation_results_warning.is_none()
+    {
+        simulation_results_warning = Some(format!(
+            "Simulation results were not restored because their persisted data is invalid: {error}"
+        ));
+    }
     if let Some(path) = origin.recent_path() {
         state.remember_recent_file(crate::common::app::RecentKind::Project, path);
     }

@@ -175,6 +175,52 @@ impl RunEvent {
     }
 }
 
+/// Exact source binding used to produce a dataset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DatasetProvenance {
+    project_id: ProjectId,
+    run_id: RunId,
+    source_revision: ObjectRevision,
+    input_digest: ContentDigest,
+}
+
+impl DatasetProvenance {
+    #[must_use]
+    pub const fn new(
+        project_id: ProjectId,
+        run_id: RunId,
+        source_revision: ObjectRevision,
+        input_digest: ContentDigest,
+    ) -> Self {
+        Self {
+            project_id,
+            run_id,
+            source_revision,
+            input_digest,
+        }
+    }
+
+    #[must_use]
+    pub const fn project_id(self) -> ProjectId {
+        self.project_id
+    }
+
+    #[must_use]
+    pub const fn run_id(self) -> RunId {
+        self.run_id
+    }
+
+    #[must_use]
+    pub const fn source_revision(self) -> ObjectRevision {
+        self.source_revision
+    }
+
+    #[must_use]
+    pub const fn input_digest(self) -> ContentDigest {
+        self.input_digest
+    }
+}
+
 /// Immutable identity of a completed dataset. No mutation methods are
 /// exposed; new processing creates a new dataset and digest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,8 +228,7 @@ impl RunEvent {
 pub struct DatasetManifest {
     schema_version: u16,
     id: DatasetId,
-    run_id: RunId,
-    input_digest: ContentDigest,
+    provenance: DatasetProvenance,
     content_digest: ContentDigest,
     analysis_ids: Vec<String>,
     created_at_unix_ms: u64,
@@ -193,20 +238,18 @@ pub struct DatasetManifest {
 struct DatasetManifestData {
     schema_version: u16,
     id: DatasetId,
-    run_id: RunId,
-    input_digest: ContentDigest,
+    provenance: DatasetProvenance,
     content_digest: ContentDigest,
     analysis_ids: Vec<String>,
     created_at_unix_ms: u64,
 }
 
 impl DatasetManifest {
-    pub const SCHEMA_VERSION: u16 = 1;
+    pub const SCHEMA_VERSION: u16 = 2;
 
     pub fn new(
         id: DatasetId,
-        run_id: RunId,
-        input_digest: ContentDigest,
+        provenance: DatasetProvenance,
         content_digest: ContentDigest,
         analysis_ids: Vec<String>,
         created_at_unix_ms: u64,
@@ -215,8 +258,7 @@ impl DatasetManifest {
         Ok(Self {
             schema_version: Self::SCHEMA_VERSION,
             id,
-            run_id,
-            input_digest,
+            provenance,
             content_digest,
             analysis_ids,
             created_at_unix_ms,
@@ -229,8 +271,23 @@ impl DatasetManifest {
     }
 
     #[must_use]
+    pub const fn project_id(&self) -> ProjectId {
+        self.provenance.project_id()
+    }
+
+    #[must_use]
     pub const fn run_id(&self) -> RunId {
-        self.run_id
+        self.provenance.run_id()
+    }
+
+    #[must_use]
+    pub const fn source_revision(&self) -> ObjectRevision {
+        self.provenance.source_revision()
+    }
+
+    #[must_use]
+    pub const fn input_digest(&self) -> ContentDigest {
+        self.provenance.input_digest()
     }
 
     #[must_use]
@@ -260,8 +317,7 @@ impl TryFrom<DatasetManifestData> for DatasetManifest {
         }
         Self::new(
             data.id,
-            data.run_id,
-            data.input_digest,
+            data.provenance,
             data.content_digest,
             data.analysis_ids,
             data.created_at_unix_ms,
@@ -928,8 +984,12 @@ mod tests {
     fn dataset_manifest_is_immutable_and_validates_deserialization() {
         let dataset = DatasetManifest::new(
             DatasetId::new(),
-            RunId::new(),
-            digest(1),
+            DatasetProvenance::new(
+                ProjectId::new(),
+                RunId::new(),
+                ObjectRevision::new(7).expect("source revision"),
+                digest(1),
+            ),
             digest(2),
             vec!["tran".to_owned(), "ac".to_owned()],
             20,
@@ -941,7 +1001,8 @@ mod tests {
 
         let duplicate = json.replace("\"ac\"", "\"tran\"");
         assert!(serde_json::from_str::<DatasetManifest>(&duplicate).is_err());
-        let future = json.replace("\"schema_version\":1", "\"schema_version\":99");
+        assert_eq!(restored.source_revision().get(), 7);
+        let future = json.replace("\"schema_version\":2", "\"schema_version\":99");
         assert!(serde_json::from_str::<DatasetManifest>(&future).is_err());
     }
 

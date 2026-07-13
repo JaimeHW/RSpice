@@ -1,4 +1,5 @@
 use super::*;
+use crate::product::{DatasetId, RunId};
 
 impl SimulationState {
     pub fn request_simulate_run_set(&mut self) {
@@ -177,7 +178,7 @@ impl SimulationState {
 
         // Prune history if needed
         self.prune_runs_history();
-        self.prune_overlay_ids();
+        self.prune_overlay_dataset_ids();
 
         // Return mutable reference to the new run
         &mut self.runs[0]
@@ -267,27 +268,41 @@ impl SimulationState {
     // Run overlay (signal owns hue, run owns weight)
     // =========================================================================
 
-    /// Look up a run by its stable ID.
-    pub fn run_by_id(&self, run_id: u64) -> Option<&SimulationRun> {
-        self.runs.iter().find(|run| run.id == run_id)
+    /// Look up a run by its legacy display sequence.
+    ///
+    /// New persistence and cross-object references must use
+    /// [`Self::run_by_stable_id`]. This sequence lookup remains while runner
+    /// internals migrate independently from customer-visible history.
+    pub fn run_by_sequence(&self, run_sequence: u64) -> Option<&SimulationRun> {
+        self.runs.iter().find(|run| run.id == run_sequence)
     }
 
-    /// Look up a mutable run by its stable ID.
-    pub fn run_by_id_mut(&mut self, run_id: u64) -> Option<&mut SimulationRun> {
-        self.runs.iter_mut().find(|run| run.id == run_id)
+    /// Look up a mutable run by its legacy display sequence.
+    pub fn run_by_sequence_mut(&mut self, run_sequence: u64) -> Option<&mut SimulationRun> {
+        self.runs.iter_mut().find(|run| run.id == run_sequence)
     }
 
-    /// Select a run by stable ID.
-    pub fn select_run_by_id(&mut self, run_id: u64) -> bool {
-        let Some(run_idx) = self.runs.iter().position(|run| run.id == run_id) else {
+    /// Look up a run by its stable product identity.
+    pub fn run_by_stable_id(&self, run_id: RunId) -> Option<&SimulationRun> {
+        self.runs.iter().find(|run| run.run_id == run_id)
+    }
+
+    /// Look up the run that owns an immutable result dataset.
+    pub fn run_by_dataset_id(&self, dataset_id: DatasetId) -> Option<&SimulationRun> {
+        self.runs.iter().find(|run| run.dataset_id == dataset_id)
+    }
+
+    /// Select a run by its legacy display sequence.
+    pub fn select_run_by_sequence(&mut self, run_sequence: u64) -> bool {
+        let Some(run_idx) = self.runs.iter().position(|run| run.id == run_sequence) else {
             return false;
         };
         self.select_run(run_idx)
     }
 
-    /// Select the most recently added analysis within a stable run ID.
-    pub fn select_latest_analysis_in_run(&mut self, run_id: u64) -> bool {
-        let Some(run_idx) = self.runs.iter().position(|run| run.id == run_id) else {
+    /// Select the latest analysis in a run addressed by display sequence.
+    pub fn select_latest_analysis_in_run_sequence(&mut self, run_sequence: u64) -> bool {
+        let Some(run_idx) = self.runs.iter().position(|run| run.id == run_sequence) else {
             return false;
         };
         let Some(last_idx) = self
@@ -303,25 +318,32 @@ impl SimulationState {
         true
     }
 
-    /// Whether a run is currently overlaid onto the active run.
-    pub fn is_run_overlaid(&self, run_id: u64) -> bool {
-        self.overlay_run_ids.contains(&run_id)
+    /// Whether a dataset is currently overlaid onto the active dataset.
+    pub fn is_dataset_overlaid(&self, dataset_id: DatasetId) -> bool {
+        self.overlay_dataset_ids.contains(&dataset_id)
     }
 
-    /// Toggle a run in or out of the overlay set. The active run is always
-    /// drawn and cannot be overlaid onto itself; toggling it is a no-op.
+    /// Toggle a dataset in or out of the overlay set. The active dataset is
+    /// always drawn and cannot be overlaid onto itself; toggling it is a no-op.
     /// Returns the new membership state.
-    pub fn toggle_run_overlay(&mut self, run_id: u64) -> bool {
-        if self.active_run().is_some_and(|run| run.id == run_id) {
+    pub fn toggle_dataset_overlay(&mut self, dataset_id: DatasetId) -> bool {
+        if self
+            .active_run()
+            .is_some_and(|run| run.dataset_id == dataset_id)
+        {
             return false;
         }
-        if let Some(pos) = self.overlay_run_ids.iter().position(|id| *id == run_id) {
-            self.overlay_run_ids.remove(pos);
-            self.data_version += 1;
+        if let Some(pos) = self
+            .overlay_dataset_ids
+            .iter()
+            .position(|id| *id == dataset_id)
+        {
+            self.overlay_dataset_ids.remove(pos);
+            self.data_version = self.data_version.wrapping_add(1);
             false
-        } else if self.run_by_id(run_id).is_some() {
-            self.overlay_run_ids.push(run_id);
-            self.data_version += 1;
+        } else if self.run_by_dataset_id(dataset_id).is_some() {
+            self.overlay_dataset_ids.push(dataset_id);
+            self.data_version = self.data_version.wrapping_add(1);
             true
         } else {
             false
@@ -329,10 +351,10 @@ impl SimulationState {
     }
 
     /// Remove every overlay toggle in one action.
-    pub fn clear_run_overlays(&mut self) {
-        if !self.overlay_run_ids.is_empty() {
-            self.overlay_run_ids.clear();
-            self.data_version += 1;
+    pub fn clear_dataset_overlays(&mut self) {
+        if !self.overlay_dataset_ids.is_empty() {
+            self.overlay_dataset_ids.clear();
+            self.data_version = self.data_version.wrapping_add(1);
         }
     }
 
@@ -341,12 +363,14 @@ impl SimulationState {
     /// repeats even when its ID is also in the overlay set.
     pub fn display_runs(&self) -> Vec<&SimulationRun> {
         let mut out = Vec::new();
-        let active_id = self.active_run().map(|run| run.id);
+        let active_id = self.active_run().map(|run| run.dataset_id);
         if let Some(run) = self.active_run() {
             out.push(run);
         }
         for run in &self.runs {
-            if Some(run.id) != active_id && self.overlay_run_ids.contains(&run.id) {
+            if Some(run.dataset_id) != active_id
+                && self.overlay_dataset_ids.contains(&run.dataset_id)
+            {
                 out.push(run);
             }
         }
@@ -354,9 +378,9 @@ impl SimulationState {
     }
 
     /// Drop overlay IDs whose runs have left the history.
-    fn prune_overlay_ids(&mut self) {
-        self.overlay_run_ids
-            .retain(|id| self.runs.iter().any(|run| run.id == *id));
+    fn prune_overlay_dataset_ids(&mut self) {
+        self.overlay_dataset_ids
+            .retain(|id| self.runs.iter().any(|run| run.dataset_id == *id));
     }
 
     /// Get the currently active analysis (if any)
@@ -387,23 +411,25 @@ impl SimulationState {
         self.runs.clear();
         self.active_run_idx = None;
         self.active_analysis_idx = None;
+        self.overlay_dataset_ids.clear();
         self.sync_selected_analysis_waveforms();
         // Don't reset next_run_id to preserve uniqueness
     }
 
     /// Replace persisted run history and rebuild every derived selection cache.
     ///
-    /// Project files persist stable run/analysis IDs rather than fragile vector
-    /// indices. On restore, this method maps those IDs back to the current
-    /// history layout and falls back to the newest analysis when the saved
-    /// selection is missing or stale.
+    /// Project files persist stable run and dataset IDs plus a run-local
+    /// analysis sequence rather than fragile vector indices. On restore, this
+    /// method maps that composite reference back to the current history layout
+    /// and falls back to the first available analysis when no selection exists.
     pub fn restore_run_history(
         &mut self,
         runs: Vec<SimulationRun>,
         next_run_id: u64,
-        active_run_id: Option<u64>,
-        active_analysis_id: Option<u64>,
-        overlay_run_ids: Vec<u64>,
+        active_run_id: Option<RunId>,
+        active_dataset_id: Option<DatasetId>,
+        active_analysis_sequence: Option<u64>,
+        overlay_dataset_ids: Vec<DatasetId>,
     ) {
         self.runs = runs;
         self.prune_runs_history();
@@ -411,25 +437,35 @@ impl SimulationState {
         let max_run_id = self.runs.iter().map(|run| run.id).max().unwrap_or(0);
         self.next_run_id = next_run_id.max(max_run_id);
 
-        self.active_run_idx = active_run_id
-            .and_then(|id| self.runs.iter().position(|run| run.id == id))
-            .or_else(|| (!self.runs.is_empty()).then_some(0));
+        self.active_run_idx = match (active_run_id, active_dataset_id) {
+            (Some(run_id), Some(dataset_id)) => self
+                .runs
+                .iter()
+                .position(|run| run.run_id == run_id && run.dataset_id == dataset_id),
+            (Some(run_id), None) => self.runs.iter().position(|run| run.run_id == run_id),
+            (None, Some(dataset_id)) => self
+                .runs
+                .iter()
+                .position(|run| run.dataset_id == dataset_id),
+            (None, None) => None,
+        }
+        .or_else(|| (!self.runs.is_empty()).then_some(0));
 
         self.active_analysis_idx = self.active_run_idx.and_then(|run_idx| {
             let run = &self.runs[run_idx];
-            active_analysis_id
+            active_analysis_sequence
                 .and_then(|id| run.analyses.iter().position(|analysis| analysis.id == id))
                 .or_else(|| (!run.analyses.is_empty()).then_some(0))
         });
 
-        let active_id = self.active_run().map(|run| run.id);
-        self.overlay_run_ids.clear();
-        for id in overlay_run_ids {
+        let active_id = self.active_run().map(|run| run.dataset_id);
+        self.overlay_dataset_ids.clear();
+        for id in overlay_dataset_ids {
             if Some(id) != active_id
-                && self.runs.iter().any(|run| run.id == id)
-                && !self.overlay_run_ids.contains(&id)
+                && self.runs.iter().any(|run| run.dataset_id == id)
+                && !self.overlay_dataset_ids.contains(&id)
             {
-                self.overlay_run_ids.push(id);
+                self.overlay_dataset_ids.push(id);
             }
         }
 
@@ -449,6 +485,8 @@ impl SimulationState {
     pub fn delete_run(&mut self, run_idx: usize) -> bool {
         if run_idx < self.runs.len() {
             self.runs.remove(run_idx);
+            self.prune_overlay_dataset_ids();
+            self.data_version = self.data_version.wrapping_add(1);
 
             // Adjust active indices
             if let Some(active) = self.active_run_idx {
@@ -485,5 +523,83 @@ impl SimulationState {
             .unwrap_or_default();
 
         self.replace_waveforms(selected_waveforms);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stable_restore_rebuilds_selection_overlays_and_waveform_cache() {
+        let mut run_one = SimulationRun::new(1);
+        run_one.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Transient, "TRAN one").with_waveforms(vec![
+                WaveformData::new("V(one)", vec![0.0, 1.0], vec![0.0, 1.0], "#00aaff"),
+            ]),
+        );
+        let overlay_dataset_id = run_one.dataset_id;
+
+        let mut run_two = SimulationRun::new(2);
+        run_two.add_analysis(
+            AnalysisResult::new(1, AnalysisType::Ac, "AC two").with_waveforms(vec![
+                WaveformData::new("V(two)", vec![1.0, 10.0], vec![2.0, 3.0], "#ffaa00"),
+            ]),
+        );
+        let active_run_id = run_two.run_id;
+        let active_dataset_id = run_two.dataset_id;
+        let active_analysis_sequence = run_two.analyses[0].id;
+
+        let mut state = SimulationState::default();
+        state.restore_run_history(
+            vec![run_one, run_two],
+            2,
+            Some(active_run_id),
+            Some(active_dataset_id),
+            Some(active_analysis_sequence),
+            vec![
+                overlay_dataset_id,
+                overlay_dataset_id,
+                active_dataset_id,
+                DatasetId::new(),
+            ],
+        );
+
+        assert_eq!(
+            state.active_run().map(|run| run.run_id),
+            Some(active_run_id)
+        );
+        assert_eq!(
+            state.active_analysis().map(|analysis| analysis.id),
+            Some(active_analysis_sequence)
+        );
+        assert_eq!(state.overlay_dataset_ids, vec![overlay_dataset_id]);
+        assert_eq!(state.waveforms[0].name, "V(two)");
+        assert_eq!(
+            state
+                .display_runs()
+                .into_iter()
+                .map(|run| run.dataset_id)
+                .collect::<Vec<_>>(),
+            vec![active_dataset_id, overlay_dataset_id]
+        );
+    }
+
+    #[test]
+    fn overlay_commands_accept_only_existing_non_active_stable_ids() {
+        let active = SimulationRun::new(1);
+        let active_id = active.dataset_id;
+        let overlay = SimulationRun::new(2);
+        let overlay_id = overlay.dataset_id;
+        let mut state = SimulationState::default();
+        state.runs = vec![active, overlay];
+        state.active_run_idx = Some(0);
+
+        assert!(!state.toggle_dataset_overlay(active_id));
+        assert!(!state.toggle_dataset_overlay(DatasetId::new()));
+        assert!(state.toggle_dataset_overlay(overlay_id));
+        assert!(state.is_dataset_overlaid(overlay_id));
+        assert!(!state.toggle_dataset_overlay(overlay_id));
+        assert!(!state.is_dataset_overlaid(overlay_id));
     }
 }

@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::product::{DatasetId, RunId};
 use crate::state::{
     AnalysisResult, AnalysisType, CellViewRef, DcOpResult, LibraryManager, NoiseContributorRow,
     NoiseSummary, OperatingPointValue, ProjectWorkspace, SimulationRun, SimulationState, ViewType,
@@ -223,10 +224,13 @@ fn project_view_requires_schematic_buffer(view_type: ViewType) -> bool {
     matches!(view_type, ViewType::Schematic | ViewType::Testbench)
 }
 
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 1;
+const LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 1;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = 2;
 
 fn default_simulation_results_schema_version() -> u32 {
-    PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+    // A present result-history object without a version predates the stable-ID
+    // schema. New objects set v2 explicitly through `Default`/`from_state`.
+    LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION
 }
 
 fn analysis_type_key(analysis_type: AnalysisType) -> &'static str {
@@ -303,11 +307,25 @@ pub struct ProjectSimulationResults {
     pub runs: Vec<ProjectSimulationRun>,
     #[serde(default)]
     pub next_run_id: u64,
-    #[serde(default)]
+    /// Stable v2 selection identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_run_stable_id: Option<RunId>,
+    /// Stable v2 selected immutable dataset identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_dataset_id: Option<DatasetId>,
+    /// Run-local analysis sequence within the selected immutable dataset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_analysis_sequence: Option<u64>,
+    /// Stable v2 dataset overlay identities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overlay_dataset_ids: Vec<DatasetId>,
+    /// Legacy v1 display-sequence selection; consumed during migration and
+    /// never written by a current project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_run_id: Option<u64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_analysis_id: Option<u64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlay_run_ids: Vec<u64>,
 }
 
@@ -317,6 +335,10 @@ impl Default for ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: Vec::new(),
             next_run_id: 0,
+            active_run_stable_id: None,
+            active_dataset_id: None,
+            active_analysis_sequence: None,
+            overlay_dataset_ids: Vec::new(),
             active_run_id: None,
             active_analysis_id: None,
             overlay_run_ids: Vec::new(),
@@ -328,6 +350,10 @@ impl ProjectSimulationResults {
     pub fn is_empty(&self) -> bool {
         self.runs.is_empty()
             && self.next_run_id == 0
+            && self.active_run_stable_id.is_none()
+            && self.active_dataset_id.is_none()
+            && self.active_analysis_sequence.is_none()
+            && self.overlay_dataset_ids.is_empty()
             && self.active_run_id.is_none()
             && self.active_analysis_id.is_none()
             && self.overlay_run_ids.is_empty()
@@ -344,31 +370,126 @@ impl ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs,
             next_run_id: state.next_run_id.max(max_run_id),
-            active_run_id: state.active_run().map(|run| run.id),
-            active_analysis_id: state.active_analysis().map(|analysis| analysis.id),
-            overlay_run_ids: state.overlay_run_ids.clone(),
+            active_run_stable_id: state.active_run().map(|run| run.run_id),
+            active_dataset_id: state.active_run().map(|run| run.dataset_id),
+            active_analysis_sequence: state.active_analysis().map(|analysis| analysis.id),
+            overlay_dataset_ids: state.overlay_dataset_ids.clone(),
+            active_run_id: None,
+            active_analysis_id: None,
+            overlay_run_ids: Vec::new(),
         }
     }
 
-    pub fn into_simulation_state(self) -> SimulationState {
+    pub fn into_simulation_state(self) -> Result<SimulationState, String> {
         let mut state = SimulationState::default();
-        self.apply_to_state(&mut state);
-        state
+        self.apply_to_state(&mut state)?;
+        Ok(state)
     }
 
-    pub fn apply_to_state(self, state: &mut SimulationState) {
+    pub fn apply_to_state(mut self, state: &mut SimulationState) -> Result<(), String> {
+        self.migrate_to_current()?;
+        self.validate()?;
         let runs = self
             .runs
             .into_iter()
             .map(ProjectSimulationRun::into_run)
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         state.restore_run_history(
             runs,
             self.next_run_id,
-            self.active_run_id,
-            self.active_analysis_id,
-            self.overlay_run_ids,
+            self.active_run_stable_id,
+            self.active_dataset_id,
+            self.active_analysis_sequence,
+            self.overlay_dataset_ids,
         );
+        Ok(())
+    }
+
+    /// Upgrade v1 display-sequence references to stable run and dataset IDs.
+    /// Missing identities remain explicit after deserialization and are minted
+    /// only in this v1 branch. The next save persists them under schema v2.
+    pub(crate) fn migrate_to_current(&mut self) -> Result<(), String> {
+        if self.schema_version != LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        for run in &mut self.runs {
+            if run.run_id.is_none() {
+                run.run_id = Some(RunId::new());
+            }
+            if run.dataset_id.is_none() {
+                run.dataset_id = Some(DatasetId::new());
+            }
+        }
+
+        if let Some(run_sequence) = self.active_run_id {
+            let active_run = self
+                .runs
+                .iter()
+                .find(|run| run.id == run_sequence)
+                .ok_or_else(|| {
+                    format!("legacy active simulation run sequence {run_sequence} does not exist")
+                })?;
+            self.active_run_stable_id = Some(active_run.run_id.ok_or_else(|| {
+                format!(
+                    "legacy simulation run sequence {} has no stable id",
+                    active_run.id
+                )
+            })?);
+            self.active_dataset_id = Some(active_run.dataset_id.ok_or_else(|| {
+                format!(
+                    "legacy simulation run sequence {} has no dataset id",
+                    active_run.id
+                )
+            })?);
+            self.active_analysis_sequence = if let Some(sequence) = self.active_analysis_id {
+                if !active_run
+                    .analyses
+                    .iter()
+                    .any(|analysis| analysis.id == sequence)
+                {
+                    return Err(format!(
+                        "legacy active analysis sequence {sequence} does not exist in run {}",
+                        active_run.id
+                    ));
+                }
+                Some(sequence)
+            } else {
+                None
+            };
+        } else if self.active_analysis_id.is_some() {
+            return Err("legacy active analysis has no active simulation run".to_owned());
+        }
+
+        if !self.overlay_run_ids.is_empty() {
+            self.overlay_dataset_ids.clear();
+            for sequence in &self.overlay_run_ids {
+                let dataset_id = self
+                    .runs
+                    .iter()
+                    .find(|run| run.id == *sequence)
+                    .map(|run| {
+                        run.dataset_id.ok_or_else(|| {
+                            format!("legacy overlay run sequence {sequence} has no dataset id")
+                        })
+                    })
+                    .transpose()?
+                    .ok_or_else(|| {
+                        format!("legacy overlay run sequence {sequence} does not exist")
+                    })?;
+                if Some(dataset_id) != self.active_dataset_id
+                    && !self.overlay_dataset_ids.contains(&dataset_id)
+                {
+                    self.overlay_dataset_ids.push(dataset_id);
+                }
+            }
+        }
+
+        self.active_run_id = None;
+        self.active_analysis_id = None;
+        self.overlay_run_ids.clear();
+        self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
+        Ok(())
     }
 
     pub(crate) fn validate(&self) -> Result<(), String> {
@@ -378,14 +499,38 @@ impl ProjectSimulationResults {
                 self.schema_version
             ));
         }
+        if self.active_run_id.is_some()
+            || self.active_analysis_id.is_some()
+            || !self.overlay_run_ids.is_empty()
+        {
+            return Err("current simulation results retain unmigrated v1 references".to_owned());
+        }
+
+        let mut run_sequences = HashSet::new();
         let mut run_ids = HashSet::new();
+        let mut dataset_ids = HashSet::new();
         for (run_idx, run) in self.runs.iter().enumerate() {
-            if !run_ids.insert(run.id) {
+            if run.id == 0 {
+                return Err(format!("runs[{run_idx}].id must be greater than zero"));
+            }
+            if !run_sequences.insert(run.id) {
                 return Err(format!("duplicate simulation run id {}", run.id));
+            }
+            let run_id = run.run_id.ok_or_else(|| {
+                format!("runs[{run_idx}].run_id is required by simulation results schema v2")
+            })?;
+            if !run_ids.insert(run_id) {
+                return Err(format!("duplicate stable simulation run id {run_id}"));
+            }
+            let dataset_id = run.dataset_id.ok_or_else(|| {
+                format!("runs[{run_idx}].dataset_id is required by simulation results schema v2")
+            })?;
+            if !dataset_ids.insert(dataset_id) {
+                return Err(format!("duplicate immutable dataset id {dataset_id}"));
             }
             run.validate(run_idx)?;
         }
-        if let Some(active_run_id) = self.active_run_id
+        if let Some(active_run_id) = self.active_run_stable_id
             && !run_ids.contains(&active_run_id)
         {
             return Err(format!(
@@ -393,40 +538,69 @@ impl ProjectSimulationResults {
                 active_run_id
             ));
         }
-        if let Some(active_analysis_id) = self.active_analysis_id {
-            let Some(active_run_id) = self.active_run_id else {
+        match (self.active_run_stable_id, self.active_dataset_id) {
+            (Some(active_run_id), Some(active_dataset_id)) => {
+                let Some(active_run) = self
+                    .runs
+                    .iter()
+                    .find(|run| run.run_id == Some(active_run_id))
+                else {
+                    return Err(format!(
+                        "active simulation run id {} does not exist in persisted history",
+                        active_run_id
+                    ));
+                };
+                if active_run.dataset_id != Some(active_dataset_id) {
+                    return Err(format!(
+                        "active dataset id {} does not belong to active run {}",
+                        active_dataset_id, active_run_id
+                    ));
+                }
+                if let Some(sequence) = self.active_analysis_sequence
+                    && !active_run
+                        .analyses
+                        .iter()
+                        .any(|analysis| analysis.id == sequence)
+                {
+                    return Err(format!(
+                        "active analysis sequence {} does not exist in active dataset {}",
+                        sequence, active_dataset_id
+                    ));
+                }
+            }
+            (Some(active_run_id), None) => {
                 return Err(format!(
-                    "active analysis id {} has no active run id",
-                    active_analysis_id
-                ));
-            };
-            let Some(active_run) = self.runs.iter().find(|run| run.id == active_run_id) else {
-                return Err(format!(
-                    "active simulation run id {} does not exist in persisted history",
+                    "active simulation run id {} has no active dataset id",
                     active_run_id
                 ));
-            };
-            if !active_run
-                .analyses
-                .iter()
-                .any(|analysis| analysis.id == active_analysis_id)
-            {
+            }
+            (None, Some(active_dataset_id)) => {
                 return Err(format!(
-                    "active analysis id {} does not exist in active run {}",
-                    active_analysis_id, active_run_id
+                    "active dataset id {} has no active run id",
+                    active_dataset_id
                 ));
             }
+            (None, None) if self.active_analysis_sequence.is_some() => {
+                return Err("active analysis sequence has no active dataset".to_owned());
+            }
+            (None, None) => {}
         }
         let mut overlay_ids = HashSet::new();
-        for overlay_id in &self.overlay_run_ids {
-            if !run_ids.contains(overlay_id) {
+        for overlay_id in &self.overlay_dataset_ids {
+            if !dataset_ids.contains(overlay_id) {
                 return Err(format!(
-                    "overlay run id {} does not exist in persisted history",
+                    "overlay dataset id {} does not exist in persisted history",
                     overlay_id
                 ));
             }
             if !overlay_ids.insert(*overlay_id) {
-                return Err(format!("duplicate overlay run id {}", overlay_id));
+                return Err(format!("duplicate overlay dataset id {}", overlay_id));
+            }
+            if Some(*overlay_id) == self.active_dataset_id {
+                return Err(format!(
+                    "active dataset id {} cannot also be an overlay",
+                    overlay_id
+                ));
             }
         }
         Ok(())
@@ -435,6 +609,11 @@ impl ProjectSimulationResults {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSimulationRun {
+    #[serde(default)]
+    pub run_id: Option<RunId>,
+    #[serde(default)]
+    pub dataset_id: Option<DatasetId>,
+    /// Display sequence retained for labels and v1 migration.
     pub id: u64,
     pub label: String,
     pub timestamp: f64,
@@ -447,19 +626,28 @@ pub struct ProjectSimulationRun {
 }
 
 impl ProjectSimulationRun {
-    fn into_run(self) -> SimulationRun {
-        SimulationRun {
+    fn into_run(self) -> Result<SimulationRun, String> {
+        let run_id = self
+            .run_id
+            .ok_or_else(|| format!("simulation run sequence {} has no stable id", self.id))?;
+        let dataset_id = self
+            .dataset_id
+            .ok_or_else(|| format!("simulation run sequence {} has no dataset id", self.id))?;
+        let analyses = self
+            .analyses
+            .into_iter()
+            .map(ProjectAnalysisResult::into_analysis)
+            .collect();
+        Ok(SimulationRun {
+            run_id,
+            dataset_id,
             id: self.id,
             label: self.label,
             timestamp: self.timestamp,
-            analyses: self
-                .analyses
-                .into_iter()
-                .map(ProjectAnalysisResult::into_analysis)
-                .collect(),
+            analyses,
             elapsed_time: self.elapsed_time,
             success: self.success,
-        }
+        })
     }
 
     fn validate(&self, run_idx: usize) -> Result<(), String> {
@@ -467,6 +655,11 @@ impl ProjectSimulationRun {
         require_finite(self.elapsed_time, &format!("runs[{run_idx}].elapsed_time"))?;
         let mut analysis_ids = HashSet::new();
         for (analysis_idx, analysis) in self.analyses.iter().enumerate() {
+            if analysis.id == 0 {
+                return Err(format!(
+                    "runs[{run_idx}].analyses[{analysis_idx}].id must be greater than zero"
+                ));
+            }
             if !analysis_ids.insert(analysis.id) {
                 return Err(format!(
                     "duplicate analysis id {} in runs[{run_idx}]",
@@ -482,6 +675,8 @@ impl ProjectSimulationRun {
 impl From<&SimulationRun> for ProjectSimulationRun {
     fn from(run: &SimulationRun) -> Self {
         Self {
+            run_id: Some(run.run_id),
+            dataset_id: Some(run.dataset_id),
             id: run.id,
             label: run.label.clone(),
             timestamp: run.timestamp,
@@ -498,6 +693,7 @@ impl From<&SimulationRun> for ProjectSimulationRun {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectAnalysisResult {
+    /// Run-local display sequence retained for labels and v1 migration.
     pub id: u64,
     pub analysis_type: String,
     pub label: String,
@@ -1281,7 +1477,12 @@ pub(crate) fn load_project_text(
     let mut project: ProjectFile =
         serde_json::from_str(contents).map_err(|e| ProjectIoError::ParseError(e.to_string()))?;
     project.validate()?;
-    if let Err(error) = project.simulation_results.validate() {
+    let simulation_results_error = project
+        .simulation_results
+        .migrate_to_current()
+        .err()
+        .or_else(|| project.simulation_results.validate().err());
+    if let Some(error) = simulation_results_error {
         project.simulation_results = ProjectSimulationResults::default();
         project.simulation_results_warning = Some(format!(
             "Simulation results were not restored because their persisted data is invalid: {error}"
@@ -1374,6 +1575,8 @@ mod tests {
                 })
                 .with_measurements(vec![rspice_core::MeasureResult::success("gain", 3.0)]),
         );
+        let expected_run_id = run.run_id;
+        let expected_dataset_id = run.dataset_id;
         simulation.runs = vec![run];
         simulation.next_run_id = 12;
         simulation.active_run_idx = Some(0);
@@ -1388,18 +1591,53 @@ mod tests {
 
         assert!(json.contains("\"simulation_results\""));
         let loaded = load_project_text(&json, None).expect("project reloads");
-        let restored = loaded.simulation_results.into_simulation_state();
+        let restored = loaded
+            .simulation_results
+            .into_simulation_state()
+            .expect("validated project results restore");
 
         assert_eq!(restored.run_count(), 1);
+        assert_eq!(
+            restored.active_run().map(|run| run.run_id),
+            Some(expected_run_id)
+        );
+        assert_eq!(
+            restored.active_run().map(|run| run.dataset_id),
+            Some(expected_dataset_id)
+        );
         assert_eq!(
             restored.active_run().expect("active run").label,
             "Run 12 (fixture)"
         );
         let analysis = restored.active_analysis().expect("active analysis");
+        assert_eq!(analysis.id, 7);
         assert_eq!(analysis.analysis_type, AnalysisType::Ac);
         assert_eq!(analysis.measurements[0].name, "gain");
         assert_eq!(analysis.waveforms[0].complex.as_ref().unwrap().imag[2], 0.3);
         assert_eq!(restored.waveforms[0].name, "|V(out)|");
+
+        let mut unversioned_value: serde_json::Value =
+            serde_json::from_str(&json).expect("current project parses as JSON");
+        unversioned_value["simulation_results"]
+            .as_object_mut()
+            .expect("simulation result object")
+            .remove("schema_version");
+        let unversioned_json =
+            serde_json::to_string(&unversioned_value).expect("unversioned project serializes");
+        let unversioned =
+            load_project_text(&unversioned_json, None).expect("unversioned project migrates");
+        assert_eq!(
+            unversioned.simulation_results.active_run_stable_id,
+            Some(expected_run_id)
+        );
+        assert_eq!(
+            unversioned.simulation_results.active_dataset_id,
+            Some(expected_dataset_id)
+        );
+        assert_eq!(
+            unversioned.simulation_results.active_analysis_sequence,
+            Some(7)
+        );
     }
 
     #[test]
@@ -1481,7 +1719,7 @@ mod tests {
     }
 
     #[test]
-    fn project_results_restore_deduplicates_overlay_run_ids() {
+    fn project_results_restore_rejects_invalid_overlay_references() {
         let run_one = SimulationRun::new(1);
         let run_two = SimulationRun::new(2);
         let results = ProjectSimulationResults {
@@ -1491,14 +1729,25 @@ mod tests {
                 ProjectSimulationRun::from(&run_two),
             ],
             next_run_id: 2,
-            active_run_id: Some(1),
+            active_run_stable_id: Some(run_one.run_id),
+            active_dataset_id: Some(run_one.dataset_id),
+            active_analysis_sequence: None,
+            overlay_dataset_ids: vec![
+                run_two.dataset_id,
+                run_two.dataset_id,
+                run_one.dataset_id,
+                DatasetId::new(),
+            ],
+            active_run_id: None,
             active_analysis_id: None,
-            overlay_run_ids: vec![2, 2, 1, 99],
+            overlay_run_ids: Vec::new(),
         };
 
-        let restored = results.into_simulation_state();
+        let error = results
+            .into_simulation_state()
+            .expect_err("invalid overlay references fail closed");
 
-        assert_eq!(restored.overlay_run_ids, vec![2]);
+        assert!(error.contains("duplicate overlay dataset id"));
     }
 
     #[test]
@@ -1512,7 +1761,11 @@ mod tests {
                 ProjectSimulationRun::from(&run_duplicate),
             ],
             next_run_id: 1,
-            active_run_id: Some(1),
+            active_run_stable_id: Some(run_one.run_id),
+            active_dataset_id: Some(run_one.dataset_id),
+            active_analysis_sequence: None,
+            overlay_dataset_ids: Vec::new(),
+            active_run_id: None,
             active_analysis_id: None,
             overlay_run_ids: Vec::new(),
         };
@@ -1523,10 +1776,217 @@ mod tests {
     }
 
     #[test]
+    fn project_results_v2_requires_unique_stable_run_and_dataset_ids() {
+        let mut run_one = SimulationRun::new(1);
+        run_one.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN one"));
+        let mut run_two = SimulationRun::new(2);
+        run_two.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN two"));
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run_one, run_two];
+        simulation.next_run_id = 2;
+
+        let baseline = ProjectSimulationResults::from_state(&simulation);
+
+        let mut missing_run_identity = baseline.clone();
+        missing_run_identity.runs[0].run_id = None;
+        let error = missing_run_identity
+            .validate()
+            .expect_err("schema v2 must not regenerate a missing run id");
+        assert!(error.contains("run_id is required"));
+
+        let mut missing_dataset_identity = baseline.clone();
+        missing_dataset_identity.runs[0].dataset_id = None;
+        let error = missing_dataset_identity
+            .validate()
+            .expect_err("schema v2 must not regenerate a missing dataset id");
+        assert!(error.contains("dataset_id is required"));
+
+        let mut duplicate_run_identity = baseline.clone();
+        duplicate_run_identity.runs[1].run_id = duplicate_run_identity.runs[0].run_id;
+        let error = duplicate_run_identity
+            .validate()
+            .expect_err("stable run ids are globally unique");
+        assert!(error.contains("duplicate stable simulation run id"));
+
+        let mut duplicate_dataset_identity = baseline;
+        duplicate_dataset_identity.runs[1].dataset_id =
+            duplicate_dataset_identity.runs[0].dataset_id;
+        let error = duplicate_dataset_identity
+            .validate()
+            .expect_err("dataset ids are globally unique");
+        assert!(error.contains("duplicate immutable dataset id"));
+    }
+
+    #[test]
+    fn project_results_v2_rejects_cross_bound_selection_and_active_overlay() {
+        let mut run_one = SimulationRun::new(1);
+        run_one.add_analysis(AnalysisResult::new(3, AnalysisType::Transient, "TRAN one"));
+        let mut run_two = SimulationRun::new(2);
+        run_two.add_analysis(AnalysisResult::new(8, AnalysisType::Ac, "AC two"));
+        let run_one_dataset_id = run_one.dataset_id;
+        let run_two_dataset_id = run_two.dataset_id;
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run_one, run_two];
+        simulation.next_run_id = 2;
+        simulation.active_run_idx = Some(0);
+        simulation.active_analysis_idx = Some(0);
+        let baseline = ProjectSimulationResults::from_state(&simulation);
+
+        let mut cross_bound = baseline.clone();
+        cross_bound.active_dataset_id = Some(run_two_dataset_id);
+        let error = cross_bound
+            .validate()
+            .expect_err("a dataset cannot be rebound to a different active run");
+        assert!(error.contains("does not belong to active run"));
+
+        let mut missing_analysis = baseline.clone();
+        missing_analysis.active_analysis_sequence = Some(999);
+        let error = missing_analysis
+            .validate()
+            .expect_err("the selected analysis must belong to the active dataset");
+        assert!(error.contains("does not exist in active dataset"));
+
+        let mut active_overlay = baseline;
+        active_overlay.overlay_dataset_ids = vec![run_one_dataset_id];
+        let error = active_overlay
+            .validate()
+            .expect_err("the active dataset cannot also be an overlay");
+        assert!(error.contains("cannot also be an overlay"));
+    }
+
+    #[test]
+    fn project_text_migrates_v1_result_sequences_once_to_stable_identities() {
+        let mut libraries = LibraryManager::with_primitives();
+        let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
+        let mut run_one = SimulationRun::new(1);
+        run_one.add_analysis(AnalysisResult::new(
+            4,
+            AnalysisType::Transient,
+            "TRAN legacy one",
+        ));
+        let mut run_two = SimulationRun::new(2);
+        run_two.add_analysis(AnalysisResult::new(9, AnalysisType::Ac, "AC legacy two"));
+        let overlay_dataset_id = run_one.dataset_id;
+        let mut simulation = SimulationState::default();
+        simulation.runs = vec![run_one, run_two];
+        simulation.next_run_id = 2;
+        simulation.active_run_idx = Some(1);
+        simulation.active_analysis_idx = Some(0);
+        simulation.overlay_dataset_ids = vec![overlay_dataset_id];
+        let project = ProjectFile::new_with_simulation_results(
+            workspace,
+            libraries,
+            ProjectSimulationResults::from_state(&simulation),
+        );
+        let mut value = serde_json::to_value(project).expect("project converts to JSON");
+        let results = value["simulation_results"]
+            .as_object_mut()
+            .expect("simulation result object");
+        results.insert(
+            "schema_version".to_owned(),
+            serde_json::Value::from(LEGACY_SIMULATION_RESULTS_SCHEMA_VERSION),
+        );
+        results.remove("active_run_stable_id");
+        results.remove("active_dataset_id");
+        results.remove("active_analysis_sequence");
+        results.remove("overlay_dataset_ids");
+        results.insert("active_run_id".to_owned(), serde_json::Value::from(2));
+        results.insert("active_analysis_id".to_owned(), serde_json::Value::from(9));
+        results.insert("overlay_run_ids".to_owned(), serde_json::json!([1]));
+        for run in results["runs"].as_array_mut().expect("legacy run array") {
+            let run = run.as_object_mut().expect("legacy run object");
+            run.remove("run_id");
+            run.remove("dataset_id");
+        }
+
+        let mut unversioned_value = value.clone();
+        unversioned_value["simulation_results"]
+            .as_object_mut()
+            .expect("unversioned result object")
+            .remove("schema_version");
+        let unversioned_json = serde_json::to_string_pretty(&unversioned_value)
+            .expect("unversioned legacy fixture serializes");
+        let unversioned = load_project_text(&unversioned_json, None)
+            .expect("unversioned legacy project migrates as v1");
+        assert!(unversioned.simulation_results_warning.is_none());
+        assert_eq!(
+            unversioned.simulation_results.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+
+        let legacy_json = serde_json::to_string_pretty(&value).expect("legacy fixture serializes");
+        let migrated = load_project_text(&legacy_json, None).expect("legacy project migrates");
+
+        assert!(migrated.simulation_results_warning.is_none());
+        assert_eq!(
+            migrated.simulation_results.schema_version,
+            PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION
+        );
+        assert!(
+            migrated
+                .simulation_results
+                .runs
+                .iter()
+                .all(|run| run.run_id.is_some() && run.dataset_id.is_some())
+        );
+        let active_run_id = migrated.simulation_results.runs[1]
+            .run_id
+            .expect("migrated active run id");
+        let active_dataset_id = migrated.simulation_results.runs[1]
+            .dataset_id
+            .expect("migrated active dataset id");
+        let migrated_overlay_id = migrated.simulation_results.runs[0]
+            .dataset_id
+            .expect("migrated overlay id");
+        assert_eq!(
+            migrated.simulation_results.active_run_stable_id,
+            Some(active_run_id)
+        );
+        assert_eq!(
+            migrated.simulation_results.active_dataset_id,
+            Some(active_dataset_id)
+        );
+        assert_eq!(
+            migrated.simulation_results.active_analysis_sequence,
+            Some(9)
+        );
+        assert_eq!(
+            migrated.simulation_results.overlay_dataset_ids,
+            vec![migrated_overlay_id]
+        );
+        assert!(migrated.simulation_results.active_run_id.is_none());
+        assert!(migrated.simulation_results.active_analysis_id.is_none());
+        assert!(migrated.simulation_results.overlay_run_ids.is_empty());
+
+        let current_json = serialize_project_file(&migrated).expect("migration persists");
+        let reloaded = load_project_text(&current_json, None).expect("migrated project reloads");
+        assert_eq!(
+            reloaded.simulation_results.active_run_stable_id,
+            Some(active_run_id)
+        );
+        assert_eq!(
+            reloaded.simulation_results.active_dataset_id,
+            Some(active_dataset_id)
+        );
+        assert_eq!(
+            reloaded.simulation_results.active_analysis_sequence,
+            Some(9)
+        );
+        assert_eq!(
+            reloaded.simulation_results.overlay_dataset_ids,
+            vec![migrated_overlay_id]
+        );
+    }
+
+    #[test]
     fn project_results_validation_rejects_duplicate_waveform_names_in_analysis() {
+        let run_id = RunId::new();
+        let dataset_id = DatasetId::new();
         let results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![ProjectSimulationRun {
+                run_id: Some(run_id),
+                dataset_id: Some(dataset_id),
                 id: 1,
                 label: "Run 1".to_string(),
                 timestamp: 1.0,
@@ -1564,8 +2024,12 @@ mod tests {
                 success: true,
             }],
             next_run_id: 1,
-            active_run_id: Some(1),
-            active_analysis_id: Some(1),
+            active_run_stable_id: Some(run_id),
+            active_dataset_id: Some(dataset_id),
+            active_analysis_sequence: Some(1),
+            overlay_dataset_ids: Vec::new(),
+            active_run_id: None,
+            active_analysis_id: None,
             overlay_run_ids: Vec::new(),
         };
 
@@ -1579,9 +2043,13 @@ mod tests {
 
     #[test]
     fn project_results_validation_rejects_non_monotonic_waveform_x() {
+        let run_id = RunId::new();
+        let dataset_id = DatasetId::new();
         let results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![ProjectSimulationRun {
+                run_id: Some(run_id),
+                dataset_id: Some(dataset_id),
                 id: 1,
                 label: "Run 1".to_string(),
                 timestamp: 1.0,
@@ -1609,8 +2077,12 @@ mod tests {
                 success: true,
             }],
             next_run_id: 1,
-            active_run_id: Some(1),
-            active_analysis_id: Some(1),
+            active_run_stable_id: Some(run_id),
+            active_dataset_id: Some(dataset_id),
+            active_analysis_sequence: Some(1),
+            overlay_dataset_ids: Vec::new(),
+            active_run_id: None,
+            active_analysis_id: None,
             overlay_run_ids: Vec::new(),
         };
 
@@ -1624,9 +2096,13 @@ mod tests {
 
     #[test]
     fn project_results_preserve_core_noise_mechanism_labels() {
+        let run_id = RunId::new();
+        let dataset_id = DatasetId::new();
         let results = ProjectSimulationResults {
             schema_version: PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION,
             runs: vec![ProjectSimulationRun {
+                run_id: Some(run_id),
+                dataset_id: Some(dataset_id),
                 id: 1,
                 label: "Run 1".to_string(),
                 timestamp: 1.0,
@@ -1664,14 +2140,20 @@ mod tests {
                 success: true,
             }],
             next_run_id: 1,
-            active_run_id: Some(1),
-            active_analysis_id: Some(1),
+            active_run_stable_id: Some(run_id),
+            active_dataset_id: Some(dataset_id),
+            active_analysis_sequence: Some(1),
+            overlay_dataset_ids: Vec::new(),
+            active_run_id: None,
+            active_analysis_id: None,
             overlay_run_ids: Vec::new(),
         };
 
         results.validate().expect("core noise labels are valid");
 
-        let restored = results.into_simulation_state();
+        let restored = results
+            .into_simulation_state()
+            .expect("valid result history restores");
         let summary = restored
             .active_analysis()
             .and_then(|analysis| analysis.noise_summary.as_ref())

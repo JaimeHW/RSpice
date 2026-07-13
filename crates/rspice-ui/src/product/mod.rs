@@ -26,10 +26,11 @@ pub use identity::{
     VerificationEvidenceId, VerificationPlanId,
 };
 pub use lifecycle::{
-    DatasetBinding, DatasetManifest, JobEvent, JobState, LifecycleError, ReleaseCandidate,
-    ReleaseCandidateState, ReleaseGateSnapshot, ResultDocument, ResultDocumentLayout, RunEvent,
-    RunState, VerificationDisposition, VerificationDispositionEntry, VerificationEvidence,
+    DatasetBinding, DatasetManifest, DatasetProvenance, JobEvent, JobState, LifecycleError,
+    ReleaseCandidate, ReleaseCandidateState, ReleaseGateSnapshot, ResultDocument,
+    ResultDocumentLayout, RunEvent, RunState, VerificationDisposition,
+    VerificationDispositionEntry, VerificationEvidence,
 };
 
 /// Version of the implemented product-contract vocabulary.
-pub const PRODUCT_CONTRACT_SCHEMA_VERSION: &str = "1.0.0";
+pub const PRODUCT_CONTRACT_SCHEMA_VERSION: &str = "1.1.0";

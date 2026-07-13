@@ -492,7 +492,7 @@ impl SimulationController {
             state.push_sim_message(ConsoleMessage::error(message));
             let target_run_id = self.target_run_id(state);
             if let Some(run_id) = target_run_id
-                && let Some(run) = state.simulation.run_by_id_mut(run_id)
+                && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
             {
                 run.success = false;
             }
@@ -530,7 +530,7 @@ impl SimulationController {
                 // Mark run as failed but continue with remaining analyses
                 let target_run_id = self.target_run_id(state);
                 if let Some(run_id) = target_run_id
-                    && let Some(run) = state.simulation.run_by_id_mut(run_id)
+                    && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                 {
                     run.success = false;
                 }
@@ -553,14 +553,14 @@ impl SimulationController {
     fn finish_simulation_batch(&mut self, state: &mut AppState) {
         let completed_run_id = self.target_run_id(state);
         let run_success = completed_run_id
-            .and_then(|run_id| state.simulation.run_by_id(run_id))
+            .and_then(|run_id| state.simulation.run_by_sequence(run_id))
             .map(|run| run.success)
             .or_else(|| state.simulation.active_run().map(|run| run.success))
             .unwrap_or(true);
 
         // Complete the run (syncs waveforms and selects first analysis)
         if let Some(run_id) = completed_run_id {
-            state.simulation.select_run_by_id(run_id);
+            state.simulation.select_run_by_sequence(run_id);
             state.simulation.complete_run();
         } else {
             state.simulation.complete_run();
@@ -901,7 +901,7 @@ impl SimulationController {
                         )
                     };
                     if let Some(run_id) = target_run_id
-                        && let Some(run) = state.simulation.run_by_id_mut(run_id)
+                        && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                     {
                         run.add_analysis(analysis_result);
                         log::info!(
@@ -913,7 +913,9 @@ impl SimulationController {
 
                     // Display the just-completed analysis without rebuilding waveform buffers.
                     if let Some(run_id) = target_run_id {
-                        state.simulation.select_latest_analysis_in_run(run_id);
+                        state
+                            .simulation
+                            .select_latest_analysis_in_run_sequence(run_id);
                     } else {
                         state.simulation.select_latest_analysis();
                     }
@@ -979,7 +981,7 @@ impl SimulationController {
                         AnalysisResult::failed(1, failed_type, failed_label, e.to_string());
                     let target_run_id = self.target_run_id(state);
                     if let Some(run_id) = target_run_id
-                        && let Some(run) = state.simulation.run_by_id_mut(run_id)
+                        && let Some(run) = state.simulation.run_by_sequence_mut(run_id)
                     {
                         run.add_analysis(failed_analysis);
                         run.success = false;
@@ -1244,11 +1246,11 @@ mod tests {
 
         let older_run = state
             .simulation
-            .run_by_id(older_run_id)
+            .run_by_sequence(older_run_id)
             .expect("older run remains");
         let started_run = state
             .simulation
-            .run_by_id(started_run_id)
+            .run_by_sequence(started_run_id)
             .expect("started run remains");
         assert!(
             older_run.analyses.is_empty(),
