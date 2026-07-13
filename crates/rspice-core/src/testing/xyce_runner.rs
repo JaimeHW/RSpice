@@ -5200,17 +5200,7 @@ impl XyceTestRunner {
     fn is_extra_wrapper_ac_output_analysis_command(command: &str) -> bool {
         matches!(
             command.to_ascii_lowercase().as_str(),
-            ".dc"
-                | ".four"
-                | ".fft"
-                | ".hb"
-                | ".measure"
-                | ".meas"
-                | ".noise"
-                | ".probe"
-                | ".save"
-                | ".sens"
-                | ".tran"
+            ".dc" | ".four" | ".fft" | ".hb" | ".noise" | ".probe" | ".save" | ".sens" | ".tran"
         )
     }
 
@@ -17510,6 +17500,8 @@ impl XyceTestRunner {
         }
 
         let data_columns = Self::reference_ac_data_columns(reference, print, data_column_offset)?;
+        let equation_traces =
+            crate::analysis::advanced::evaluate_ac_equation_measurements(netlist, results)?;
         let phase_output_radians = Self::source_requests_ac_phase_output_radians(source);
         let comp_columns = data_columns
             .iter()
@@ -17581,12 +17573,24 @@ impl XyceTestRunner {
 
             for (column_index, column) in data_columns.iter().enumerate() {
                 let expected = row[column_index + data_column_offset];
-                let actual = Self::evaluate_ac_reference_column(
-                    column,
-                    netlist,
-                    result,
-                    phase_output_radians,
-                )?;
+                let actual = if let Some(trace) = equation_traces
+                    .iter()
+                    .find(|trace| trace.name.eq_ignore_ascii_case(column.probe_name()))
+                {
+                    *trace.values.get(row_index).ok_or_else(|| {
+                        format!(
+                            "AC equation measure '{}' has no value for row {}",
+                            trace.name, row_index
+                        )
+                    })?
+                } else {
+                    Self::evaluate_ac_reference_column(
+                        column,
+                        netlist,
+                        result,
+                        phase_output_radians,
+                    )?
+                };
                 let normalized_probe = Self::normalize_probe(column.probe_name());
                 let tolerance = comp_tolerances
                     .get(&normalized_probe)
@@ -19894,6 +19898,20 @@ impl XyceTestRunner {
             return Err(".AC analysis produced no frequency points".to_string());
         }
 
+        for measurement in &netlist.measurements {
+            if !measurement.analysis.eq_ignore_ascii_case("AC")
+                || !matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Equation { .. }
+                )
+            {
+                return Err(format!(
+                    "native static AC comparison does not cover .MEASURE {} '{}'",
+                    measurement.analysis, measurement.name
+                ));
+            }
+        }
+
         for probe in &print.probes {
             Self::validate_ac_probe(probe, netlist)?;
         }
@@ -21118,6 +21136,16 @@ impl XyceTestRunner {
                 }
                 _ => {}
             }
+        }
+        if netlist.measurements.iter().any(|measurement| {
+            measurement.analysis.eq_ignore_ascii_case("AC")
+                && measurement.name.eq_ignore_ascii_case(original)
+                && matches!(
+                    measurement.measure_type,
+                    crate::analysis::MeasureType::Equation { .. }
+                )
+        }) {
+            return Ok(());
         }
         Err(format!("unsupported .PRINT AC probe '{}'", original))
     }

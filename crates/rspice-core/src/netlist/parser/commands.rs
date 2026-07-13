@@ -1595,6 +1595,9 @@ pub(super) fn parse_meas_command(
                     stream.advance();
                     expr
                 }
+                _ if params.expression_dialect() == crate::netlist::ExpressionDialect::Xyce => {
+                    collect_measure_equation_expression(stream, line_num)?
+                }
                 other => {
                     return Err(ParseError::Syntax {
                         line: line_num,
@@ -1795,6 +1798,44 @@ pub(super) fn parse_meas_command(
         goal,
         tolerance,
     })
+}
+
+fn collect_measure_equation_expression(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    let mut expression = String::new();
+    let mut depth = 0usize;
+
+    loop {
+        let token = stream.peek().clone();
+        match &token.kind {
+            TokenKind::Newline | TokenKind::Eof => break,
+            TokenKind::Ident(name)
+                if depth == 0
+                    && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+                    && matches!(
+                        name.to_ascii_uppercase().as_str(),
+                        "FROM" | "TO" | "TD" | "DEFAULT"
+                    ) =>
+            {
+                break;
+            }
+            TokenKind::LParen | TokenKind::LBracket => depth += 1,
+            TokenKind::RParen | TokenKind::RBracket => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        append_param_rhs_token(&mut expression, &token.kind, &token.lexeme);
+        stream.advance();
+    }
+
+    if expression.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".MEAS EQN expects an expression".to_string(),
+        });
+    }
+    Ok(expression)
 }
 
 /// Scan the remainder of a .MEAS line for `GOAL=value` / `TOL=value`

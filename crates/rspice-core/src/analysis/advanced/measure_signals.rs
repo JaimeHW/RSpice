@@ -148,6 +148,24 @@ pub fn evaluate_dc_equation_measurements(
     evaluate_equation_measurements(netlist, "DC", series.axis(), &signals, 0.0, true)
 }
 
+/// Evaluate Xyce continuous equation measurements over an AC sweep.
+///
+/// AC equation probes follow Xyce's scalar accessor semantics: bare `V()`
+/// and `I()` project the real component, while `VM`/`IM`, `VR`/`IR`,
+/// `VI`/`II`, `VP`/`IP`, and `VDB`/`IDB` select magnitude, real part,
+/// imaginary part, phase in degrees, and decibels respectively. `FREQ` and
+/// `HERTZ` both denote the current sweep frequency.
+pub fn evaluate_ac_equation_measurements(
+    netlist: &Netlist,
+    sweep: &[AcResult],
+) -> Result<Vec<EquationMeasureTrace>, String> {
+    let Some(series) = AcSweepSeries::from_sweep(sweep) else {
+        return Ok(Vec::new());
+    };
+    let signals = series.equation_signal_map();
+    evaluate_equation_measurements(netlist, "AC", series.axis(), &signals, -1.0, false)
+}
+
 /// Shared continuous-equation evaluator for analyses with a real-valued
 /// axis and real signal waveforms.
 fn evaluate_equation_measurements(
@@ -266,11 +284,23 @@ fn bind_equation_expression(
     measures: &HashMap<String, Value>,
 ) -> Result<NetExpr, String> {
     Ok(match expression {
-        NetExpr::Param(name) => measures
-            .get(&name.to_ascii_uppercase())
-            .copied()
-            .map(NetExpr::Number)
-            .unwrap_or_else(|| expression.clone()),
+        NetExpr::Param(name) => {
+            let is_axis_symbol = matches!(
+                name.to_ascii_uppercase().as_str(),
+                "TIME" | "FREQ" | "FREQUENCY" | "HERTZ"
+            );
+            if is_axis_symbol
+                && let Some(value) = lookup_equation_signal_optional(signals, name, row)
+            {
+                NetExpr::Number(value)
+            } else if let Some(value) = measures.get(&name.to_ascii_uppercase()).copied() {
+                NetExpr::Number(value)
+            } else if let Some(value) = lookup_equation_signal_optional(signals, name, row) {
+                NetExpr::Number(value)
+            } else {
+                expression.clone()
+            }
+        }
         NetExpr::UnaryOp { op, operand } => NetExpr::UnaryOp {
             op: *op,
             operand: Box::new(bind_equation_expression(operand, row, signals, measures)?),
@@ -280,9 +310,7 @@ fn bind_equation_expression(
             left: Box::new(bind_equation_expression(left, row, signals, measures)?),
             right: Box::new(bind_equation_expression(right, row, signals, measures)?),
         },
-        NetExpr::FnCall { name, args }
-            if name.eq_ignore_ascii_case("V") || name.eq_ignore_ascii_case("I") =>
-        {
+        NetExpr::FnCall { name, args } if is_equation_probe_accessor(name) => {
             let prefix = name.to_ascii_uppercase();
             let first = equation_probe_argument(args.first()).ok_or_else(|| {
                 format!("{prefix}() in continuous measure has an invalid first argument")
@@ -313,6 +341,13 @@ fn bind_equation_expression(
     })
 }
 
+fn is_equation_probe_accessor(name: &str) -> bool {
+    matches!(
+        name.to_ascii_uppercase().as_str(),
+        "V" | "VM" | "VR" | "VI" | "VP" | "VDB" | "I" | "IM" | "IR" | "II" | "IP" | "IDB"
+    )
+}
+
 fn equation_probe_argument(argument: Option<&NetExpr>) -> Option<String> {
     match argument? {
         NetExpr::Param(name) => Some(name.clone()),
@@ -328,11 +363,19 @@ fn lookup_equation_signal(
     name: &str,
     row: usize,
 ) -> Result<Value, String> {
+    lookup_equation_signal_optional(signals, name, row)
+        .ok_or_else(|| format!("continuous measure signal '{name}' is unavailable at row {row}"))
+}
+
+fn lookup_equation_signal_optional(
+    signals: &HashMap<String, &[Value]>,
+    name: &str,
+    row: usize,
+) -> Option<Value> {
     signals
         .iter()
         .find_map(|(candidate, values)| candidate.eq_ignore_ascii_case(name).then_some(*values))
         .and_then(|values| values.get(row).copied())
-        .ok_or_else(|| format!("continuous measure signal '{name}' is unavailable at row {row}"))
 }
 
 /// Owned per-signal series extracted from a DC sweep, from which a
@@ -482,6 +525,31 @@ impl AcSweepSeries {
         insert_case_variants(&mut signals, "Freq", self.axis.as_slice());
         for (key, series) in &self.storage {
             insert_case_variants(&mut signals, key, series.as_slice());
+        }
+        signals
+    }
+
+    /// Signal table used by continuous AC equation measures.
+    ///
+    /// Ordinary scalar AC measures historically address `V()`/`I()` as
+    /// magnitude. Xyce equation expressions instead define the unqualified
+    /// accessors as the real projection, so this deliberately supplies a
+    /// distinct view without changing the established scalar-measure API.
+    pub fn equation_signal_map(&self) -> HashMap<String, &[Value]> {
+        let mut signals = self.signal_map();
+        insert_case_variants(&mut signals, "Hertz", self.axis.as_slice());
+        for (key, series) in &self.storage {
+            let upper = key.to_ascii_uppercase();
+            let unqualified = if upper.starts_with("VR(") {
+                Some(format!("V{}", &key[2..]))
+            } else if upper.starts_with("IR(") {
+                Some(format!("I{}", &key[2..]))
+            } else {
+                None
+            };
+            if let Some(unqualified) = unqualified {
+                insert_case_variants(&mut signals, &unqualified, series.as_slice());
+            }
         }
         signals
     }
@@ -707,6 +775,75 @@ mod tests {
         assert_eq!(signals["VI(out)"], &[0.0, -1.0][..], "imaginary part");
         assert_eq!(signals["VP(out)"][1], -90.0, "phase in degrees");
         assert!(signals.contains_key("FREQUENCY"));
+    }
+
+    #[test]
+    fn ac_equations_use_xyce_accessors_frequency_aliases_and_windows() {
+        let netlist = Netlist::parse(
+            "* continuous AC equations\n\
+             V1 out 0 AC 1\n\
+             .ac lin 2 10 20\n\
+             .meas ac bare EQN {1+V(out)}\n\
+             .meas ac mag EQN {1+VM(out)}\n\
+             .meas ac real EQN {1+VR(out)}\n\
+             .meas ac imag EQN {1+VI(out)}\n\
+             .meas ac phase EQN {1+VP(out)}\n\
+             .meas ac db EQN {1+VDB(out)}\n\
+             .meas ac current EQN {1+IM(V1)}\n\
+             .meas ac freq EQN {FREQ}\n\
+             .meas ac hertz EQN {HERTZ}\n\
+             .meas ac bounded EQN {VM(out)} FROM=20 TO=20\n\
+             .meas ac invalid EQN {VM(out)} FROM=30 TO=40\n\
+             .end\n",
+        )
+        .expect("AC equations parse");
+        let point = |frequency, voltage, current| AcResult {
+            frequency,
+            node_names: vec!["out".to_string()],
+            branch_names: vec!["V1".to_string()],
+            voltages: vec![voltage],
+            currents: vec![current],
+        };
+        let sweep = vec![
+            point(
+                10.0,
+                crate::Complex64::new(3.0, 4.0),
+                crate::Complex64::new(0.0, -2.0),
+            ),
+            point(
+                20.0,
+                crate::Complex64::new(0.0, -2.0),
+                crate::Complex64::new(3.0, 4.0),
+            ),
+        ];
+
+        let traces =
+            evaluate_ac_equation_measurements(&netlist, &sweep).expect("AC equations evaluate");
+        let trace = |name: &str| {
+            traces
+                .iter()
+                .find(|trace| trace.name.eq_ignore_ascii_case(name))
+                .expect("named trace")
+        };
+
+        assert_eq!(trace("bare").values, vec![4.0, 1.0]);
+        assert_eq!(trace("mag").values, vec![6.0, 3.0]);
+        assert_eq!(trace("real").values, vec![4.0, 1.0]);
+        assert_eq!(trace("imag").values, vec![5.0, -1.0]);
+        assert_eq!(
+            trace("phase").values,
+            vec![1.0 + 4.0_f64.atan2(3.0).to_degrees(), -89.0]
+        );
+        assert_eq!(
+            trace("db").values,
+            vec![1.0 + 20.0 * 5.0_f64.log10(), 1.0 + 20.0 * 2.0_f64.log10()]
+        );
+        assert_eq!(trace("current").values, vec![3.0, 6.0]);
+        assert_eq!(trace("freq").values, vec![10.0, 20.0]);
+        assert_eq!(trace("hertz").values, vec![10.0, 20.0]);
+        assert_eq!(trace("bounded").values, vec![-1.0, 2.0]);
+        assert!(!trace("invalid").initialized);
+        assert_eq!(trace("invalid").values, vec![-1.0, -1.0]);
     }
 
     #[test]
