@@ -639,7 +639,7 @@ impl MeasureEngine {
             .find_map(|pair| (pair[0] != pair[1]).then_some(pair[1] > pair[0]))
             .unwrap_or(true);
         match (from, to) {
-            (Some(from), Some(to)) => (from.min(to), from.max(to)),
+            (Some(from), Some(to)) => (from, to),
             (Some(from), None) if ascending => (from, Value::INFINITY),
             (Some(from), None) => (Value::NEG_INFINITY, from),
             (None, Some(to)) if ascending => (Value::NEG_INFINITY, to),
@@ -1271,6 +1271,45 @@ mod tests {
         assert_eq!(results[0].value, None);
         assert!(!results[0].passed);
         assert_eq!(results[0].error.as_deref(), Some("Empty range"));
+    }
+
+    #[test]
+    fn extrema_reject_reversed_windows_without_dc_normalization() {
+        let maximum = MeasureStatement {
+            goal: None,
+            tolerance: None,
+            name: "maximum".to_string(),
+            measure_type: MeasureType::Max {
+                signal: "V(out)".to_string(),
+                from: Some(2.0),
+                to: Some(1.0),
+                output: ExtremaOutput::Value,
+            },
+            analysis: "AC".to_string(),
+        };
+        let peak_to_peak = MeasureStatement {
+            goal: None,
+            tolerance: None,
+            name: "peak_to_peak".to_string(),
+            measure_type: MeasureType::PeakToPeak {
+                signal: "V(out)".to_string(),
+                from: Some(2.0),
+                to: Some(1.0),
+            },
+            analysis: "AC".to_string(),
+        };
+        let axis = [1.0, 2.0, 3.0];
+        let values = [1.0, 3.0, 2.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &values);
+        let mut engine = MeasureEngine::new();
+        engine.add(maximum);
+        engine.add(peak_to_peak);
+
+        let results = engine.evaluate(&axis, &signals);
+
+        assert!(results.iter().all(|result| result.value.is_none()));
+        assert!(results.iter().all(|result| !result.passed));
     }
 
     #[test]
