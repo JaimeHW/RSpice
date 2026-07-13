@@ -20436,6 +20436,21 @@ impl XyceTestRunner {
                         *coefficient,
                     )?;
                 }
+                ElementKind::TransmissionLine {
+                    z0,
+                    td,
+                    freq,
+                    nl,
+                    model,
+                } => Self::validate_lossless_transmission_line_contract(
+                    &element.name,
+                    element.nodes.len(),
+                    *z0,
+                    *td,
+                    *freq,
+                    *nl,
+                    model.as_deref(),
+                )?,
                 ElementKind::VSwitch { .. } => {}
                 ElementKind::ISwitch {
                     control_element, ..
@@ -20531,6 +20546,57 @@ impl XyceTestRunner {
                     });
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn validate_lossless_transmission_line_contract(
+        element_name: &str,
+        node_count: usize,
+        z0: Option<Value>,
+        td: Option<Value>,
+        freq: Option<Value>,
+        nl: Option<Value>,
+        model: Option<&str>,
+    ) -> Result<(), String> {
+        if node_count != 4 {
+            return Err(format!(
+                "lossless transmission line '{element_name}' requires four electrical terminals, found {node_count}"
+            ));
+        }
+        if let Some(model) = model {
+            return Err(format!(
+                "native static .PRINT TRAN comparison does not yet admit model-backed transmission line '{element_name}' using model '{model}'"
+            ));
+        }
+        let z0 = z0.ok_or_else(|| {
+            format!("lossless transmission line '{element_name}' requires an explicit Z0")
+        })?;
+        if !z0.is_finite() || z0 <= 0.0 {
+            return Err(format!(
+                "lossless transmission line '{element_name}' requires finite positive Z0, got {z0}"
+            ));
+        }
+        let delay = match (td, freq, nl) {
+            (Some(delay), None, None) => delay,
+            (None, Some(frequency), Some(length))
+                if frequency.is_finite()
+                    && frequency > 0.0
+                    && length.is_finite()
+                    && length > 0.0 =>
+            {
+                length / frequency
+            }
+            _ => {
+                return Err(format!(
+                    "lossless transmission line '{element_name}' requires either TD or a finite positive F/NL pair"
+                ));
+            }
+        };
+        if !delay.is_finite() || delay <= 0.0 {
+            return Err(format!(
+                "lossless transmission line '{element_name}' requires finite positive propagation delay, got {delay}"
+            ));
         }
         Ok(())
     }

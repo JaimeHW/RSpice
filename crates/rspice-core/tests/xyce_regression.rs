@@ -5156,6 +5156,21 @@ fn test_xyce_file_lookup_gradient_downsampling_oracles() {
     }
 }
 
+#[test]
+fn test_xyce_lossless_transmission_line_tiny_delay_oracle() {
+    let _xyce_runner_guard = lock_xyce_runner();
+    let root = get_xyce_tests_dir();
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let relative = "Netlists/Certification_Tests/BUG_1370/bug1370.cir";
+
+    let result = runner.run_test(root.join(relative));
+    assert!(
+        result.passed && !result.expected_unsupported,
+        "{relative} should pass the native lossless transmission-line transient oracle, got {result:?}"
+    );
+    assert!(result.mismatches.is_empty());
+}
+
 // The aggregate intentionally replays every retained deck and therefore has
 // release-profile runtime requirements. Individual supported contracts remain
 // in the normal test tier above, while nightly release CI runs this full census.
