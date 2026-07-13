@@ -1952,105 +1952,25 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "FIND" => {
-                    let mut at = None;
-                    let mut when_signal = None;
-                    let mut when_value = None;
-
-                    while !stream.is_eof()
-                        && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
-                    {
-                        match &stream.peek().kind {
-                            TokenKind::Ident(s) if s.eq_ignore_ascii_case("AT") => {
-                                stream.advance();
-                                if !stream.consume(&TokenKind::Equals) {
-                                    return Err(ParseError::Syntax {
-                                        line: line_num,
-                                        message: "Expected '=' after AT in .MEAS FIND".to_string(),
-                                    });
-                                }
-                                at = Some(expect_value(stream, line_num, params)?);
-                            }
-                            TokenKind::Ident(s) if s.eq_ignore_ascii_case("WHEN") => {
-                                stream.advance();
-                                when_signal = Some(parse_meas_signal(stream, line_num)?);
-                                if !stream.consume(&TokenKind::Equals) {
-                                    return Err(ParseError::Syntax {
-                                        line: line_num,
-                                        message: "Expected '=' after WHEN signal in .MEAS FIND"
-                                            .to_string(),
-                                    });
-                                }
-                                when_value = Some(expect_value(stream, line_num, params)?);
-                            }
-                            // Verification options belong to the statement,
-                            // not the FIND clause.
-                            TokenKind::Ident(s)
-                                if s.eq_ignore_ascii_case("GOAL")
-                                    || s.eq_ignore_ascii_case("TOL") =>
-                            {
-                                break;
-                            }
-                            _ => {
-                                stream.advance();
-                            }
-                        }
-                    }
+                    let options = parse_point_measure_options(stream, line_num, params, "FIND")?;
 
                     MeasureType::Find {
                         signal: signal.clone(),
-                        at,
-                        when_signal,
-                        when_value,
+                        at: options.at,
+                        when: options.when,
+                        from: options.from,
+                        to: options.to,
                     }
                 }
                 "DERIV" | "DERIVATIVE" => {
-                    let mut at = None;
-                    let mut when_signal = None;
-                    let mut when_value = None;
-
-                    while !stream.is_eof()
-                        && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
-                    {
-                        match &stream.peek().kind {
-                            TokenKind::Ident(s) if s.eq_ignore_ascii_case("AT") => {
-                                stream.advance();
-                                if !stream.consume(&TokenKind::Equals) {
-                                    return Err(ParseError::Syntax {
-                                        line: line_num,
-                                        message: "Expected '=' after AT in .MEAS DERIV".to_string(),
-                                    });
-                                }
-                                at = Some(expect_value(stream, line_num, params)?);
-                            }
-                            TokenKind::Ident(s) if s.eq_ignore_ascii_case("WHEN") => {
-                                stream.advance();
-                                when_signal = Some(parse_meas_signal(stream, line_num)?);
-                                if !stream.consume(&TokenKind::Equals) {
-                                    return Err(ParseError::Syntax {
-                                        line: line_num,
-                                        message: "Expected '=' after WHEN signal in .MEAS DERIV"
-                                            .to_string(),
-                                    });
-                                }
-                                when_value = Some(expect_value(stream, line_num, params)?);
-                            }
-                            TokenKind::Ident(s)
-                                if s.eq_ignore_ascii_case("GOAL")
-                                    || s.eq_ignore_ascii_case("TOL") =>
-                            {
-                                break;
-                            }
-                            _ => {
-                                stream.advance();
-                            }
-                        }
-                    }
+                    let options = parse_point_measure_options(stream, line_num, params, "DERIV")?;
 
                     MeasureType::Derivative {
                         signal: signal.clone(),
-                        at,
-                        when_signal,
-                        when_value,
+                        at: options.at,
+                        when: options.when,
+                        from: options.from,
+                        to: options.to,
                     }
                 }
                 _ => {
@@ -2072,6 +1992,85 @@ pub(super) fn parse_meas_command(
         goal,
         tolerance,
     })
+}
+
+struct PointMeasureOptions {
+    at: Option<Value>,
+    when: Option<crate::analysis::WhenCondition>,
+    from: Option<Value>,
+    to: Option<Value>,
+}
+
+fn parse_point_measure_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    measure_type: &str,
+) -> Result<PointMeasureOptions, ParseError> {
+    use crate::analysis::{MeasureOperand, WhenCondition};
+
+    let mut options = PointMeasureOptions {
+        at: None,
+        when: None,
+        from: None,
+        to: None,
+    };
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        let TokenKind::Ident(keyword) = &stream.peek().kind else {
+            stream.advance();
+            continue;
+        };
+        let keyword = keyword.to_ascii_uppercase();
+        match keyword.as_str() {
+            "AT" | "FROM" | "TO" => {
+                stream.advance();
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Expected '=' after {keyword} in .MEAS {measure_type}"),
+                    });
+                }
+                let value = expect_value(stream, line_num, params)?;
+                match keyword.as_str() {
+                    "AT" => options.at = Some(value),
+                    "FROM" => options.from = Some(value),
+                    "TO" => options.to = Some(value),
+                    _ => unreachable!(),
+                }
+            }
+            "WHEN" => {
+                stream.advance();
+                let left = parse_meas_signal(stream, line_num)?;
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Expected '=' after WHEN signal in .MEAS {measure_type}"),
+                    });
+                }
+                let right = match &stream.peek().kind {
+                    TokenKind::Expression(_) => {
+                        MeasureOperand::Waveform(parse_meas_signal(stream, line_num)?)
+                    }
+                    TokenKind::Ident(_) if matches!(stream.peek_n(1).kind, TokenKind::LParen) => {
+                        MeasureOperand::Waveform(parse_meas_signal(stream, line_num)?)
+                    }
+                    TokenKind::Ident(name) if params.get(name).is_none() => {
+                        MeasureOperand::Waveform(parse_meas_signal(stream, line_num)?)
+                    }
+                    _ => MeasureOperand::Constant(expect_value(stream, line_num, params)?),
+                };
+                options.when = Some(WhenCondition { left, right });
+            }
+            "GOAL" | "TOL" => break,
+            // Preserve the legacy parser's tolerance of analysis-specific
+            // qualifiers that are modeled by other measurement families.
+            // Their tokens remain outside this DC point-event contract.
+            _ => {
+                stream.advance();
+            }
+        }
+    }
+    Ok(options)
 }
 
 fn parse_measure_name(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {

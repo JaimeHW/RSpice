@@ -63,13 +63,13 @@ pub use advanced::{
     DistortionPointResult, DistortionProduct, DistortionProductResult, Distribution, EdgeType,
     ElementDesc, ElementType, ExtremaOutput, FourierAnalysis, FourierConfig, FourierResult,
     FrequencySweep, HarmonicComponent, IntegratedContribution, IntegratedNoise, MeasureEngine,
-    MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig, MonteCarloResult,
-    MonteCarloRunner, NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, ParametricResults,
-    ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port,
+    MeasureOperand, MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig,
+    MonteCarloResult, MonteCarloRunner, NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType,
+    ParametricResults, ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port,
     PortNoiseCorrelationResult, PzMatrix, SMatrix, SParameterAnalyzer, SParameterConfig,
     SParameterResult, Sensitivity, SensitivityAnalyzer, SensitivityResult, StepSpec, StepTarget,
     StepType, Tolerance, TransferAnalyzer, TransferFunctionConfig, TransferFunctionResult,
-    TrigSpec, VariableStatistics, VariationSet,
+    TrigSpec, VariableStatistics, VariationSet, WhenCondition,
 };
 
 // Re-export PSS types

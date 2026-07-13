@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use super::measure::{MeasureEngine, MeasureResult, MeasureStatement, MeasureType};
+use super::measure::{MeasureEngine, MeasureOperand, MeasureResult, MeasureStatement, MeasureType};
 use crate::Value;
 use crate::analysis::AcResult;
 use crate::engine::TransientResult;
@@ -829,19 +829,14 @@ fn materialize_measure_expression_signals(
                 add(&trig.signal);
                 add(&targ.signal);
             }
-            MeasureType::Find {
-                signal,
-                when_signal,
-                ..
-            }
-            | MeasureType::Derivative {
-                signal,
-                when_signal,
-                ..
-            } => {
+            MeasureType::Find { signal, when, .. }
+            | MeasureType::Derivative { signal, when, .. } => {
                 add(signal);
-                if let Some(when_signal) = when_signal {
-                    add(when_signal);
+                if let Some(when) = when {
+                    add(&when.left);
+                    if let MeasureOperand::Waveform(right) = &when.right {
+                        add(right);
+                    }
                 }
             }
             MeasureType::Min { signal, .. }
@@ -898,19 +893,14 @@ fn materialize_differential_voltage_signals(
                 add(&trig.signal);
                 add(&targ.signal);
             }
-            MeasureType::Find {
-                signal,
-                when_signal,
-                ..
-            }
-            | MeasureType::Derivative {
-                signal,
-                when_signal,
-                ..
-            } => {
+            MeasureType::Find { signal, when, .. }
+            | MeasureType::Derivative { signal, when, .. } => {
                 add(signal);
-                if let Some(when_signal) = when_signal {
-                    add(when_signal);
+                if let Some(when) = when {
+                    add(&when.left);
+                    if let MeasureOperand::Waveform(right) = &when.right {
+                        add(right);
+                    }
                 }
             }
             MeasureType::Min { signal, .. }
@@ -1036,10 +1026,10 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::Max { from, to, .. }
         | MeasureType::PeakToPeak { from, to, .. }
         | MeasureType::Avg { from, to, .. }
-        | MeasureType::Rms { from, to, .. } => Some((from, to)),
+        | MeasureType::Rms { from, to, .. }
+        | MeasureType::Find { from, to, .. }
+        | MeasureType::Derivative { from, to, .. } => Some((from, to)),
         MeasureType::Delay { .. }
-        | MeasureType::Find { .. }
-        | MeasureType::Derivative { .. }
         | MeasureType::Param { .. }
         | MeasureType::RiseTime { .. }
         | MeasureType::FallTime { .. }

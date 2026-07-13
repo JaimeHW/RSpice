@@ -1377,6 +1377,41 @@ mod tests {
     }
 
     #[test]
+    fn derivative_measurements_preserve_waveform_conditions_and_windows() {
+        let netlist = Netlist::parse(
+            "typed derivative condition\n\
+             V1 one 0 0\n\
+             V2 two 0 0\n\
+             .dc V1 5 1 -1\n\
+             .measure dc slope deriv {V(one)-V(two)} when V(two)={2*V(one)} from=4 to=2\n\
+             .end\n",
+        )
+        .expect("waveform-valued DERIV condition parses");
+
+        match &netlist.measurements[0].measure_type {
+            crate::analysis::MeasureType::Derivative {
+                signal,
+                at,
+                when,
+                from,
+                to,
+            } => {
+                assert_eq!(signal, "{V(one)-V(two)}");
+                assert_eq!(*at, None);
+                assert_eq!(*from, Some(4.0));
+                assert_eq!(*to, Some(2.0));
+                let when = when.as_ref().expect("WHEN condition retained");
+                assert_eq!(when.left, "V(TWO)");
+                assert_eq!(
+                    when.right,
+                    crate::analysis::MeasureOperand::Waveform("{2*V(one)}".to_string())
+                );
+            }
+            other => panic!("expected DERIV measurement, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn extrema_output_frequency_alias_selects_independent_axis() {
         let netlist = Netlist::parse(
             "extrema output frequency\n\

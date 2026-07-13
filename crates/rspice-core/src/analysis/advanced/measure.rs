@@ -45,6 +45,24 @@ pub enum ExtremaOutput {
     IndependentAxis,
 }
 
+/// Right-hand operand of a `WHEN left=right` measurement condition.
+///
+/// Numeric values are retained as scalars. Signal references and braced
+/// expressions are retained as waveform names and materialized against the
+/// accepted analysis-point stream before evaluation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MeasureOperand {
+    Constant(Value),
+    Waveform(String),
+}
+
+/// A typed conditional event used by FIND and DERIV measurements.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WhenCondition {
+    pub left: String,
+    pub right: MeasureOperand,
+}
+
 /// Trigger/Target specification for delay measurements
 #[derive(Debug, Clone)]
 pub struct TrigSpec {
@@ -95,8 +113,9 @@ pub enum MeasureType {
     Find {
         signal: String,
         at: Option<Value>,
-        when_signal: Option<String>,
-        when_value: Option<Value>,
+        when: Option<WhenCondition>,
+        from: Option<Value>,
+        to: Option<Value>,
     },
 
     /// Time-derivative of a signal at a point
@@ -104,8 +123,9 @@ pub enum MeasureType {
     Derivative {
         signal: String,
         at: Option<Value>,
-        when_signal: Option<String>,
-        when_value: Option<Value>,
+        when: Option<WhenCondition>,
+        from: Option<Value>,
+        to: Option<Value>,
     },
 
     /// Expression over previously evaluated measurement results
@@ -416,14 +436,16 @@ impl MeasureEngine {
             MeasureType::Derivative {
                 signal,
                 at,
-                when_signal,
-                when_value,
+                when,
+                from,
+                to,
             } => self.eval_derivative(
                 &measurement.name,
                 signal,
                 *at,
-                when_signal.as_deref(),
-                *when_value,
+                when.as_ref(),
+                *from,
+                *to,
                 time,
                 signals,
             ),
@@ -507,14 +529,16 @@ impl MeasureEngine {
             MeasureType::Find {
                 signal,
                 at,
-                when_signal,
-                when_value,
+                when,
+                from,
+                to,
             } => self.eval_find(
                 &measurement.name,
                 signal,
                 *at,
-                when_signal.as_deref(),
-                *when_value,
+                when.as_ref(),
+                *from,
+                *to,
                 time,
                 signals,
             ),
@@ -920,8 +944,9 @@ impl MeasureEngine {
         name: &str,
         signal_name: &str,
         at: Option<Value>,
-        when_signal: Option<&str>,
-        when_value: Option<Value>,
+        when: Option<&WhenCondition>,
+        from: Option<Value>,
+        to: Option<Value>,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
@@ -934,32 +959,41 @@ impl MeasureEngine {
         if time.len() < 2 {
             return MeasureResult::failed(name, "Not enough points for a derivative");
         }
-        let target_time = if at.is_some() {
-            at
-        } else if let (Some(when_name), Some(threshold)) = (when_signal, when_value) {
-            let when_sig = match lookup_signal(signals, when_name) {
-                Some(s) => s,
-                None => {
-                    return MeasureResult::failed(
-                        name,
-                        &format!("When signal '{}' not found", when_name),
-                    );
-                }
+        let (lower, upper) = Self::measurement_window_bounds(time, from, to);
+
+        if let Some(target) = at {
+            if !Self::axis_in_measurement_window(target, lower, upper) {
+                return MeasureResult::failed(name, "AT point is outside the measurement window");
+            }
+            let Some(segment) = measurement_segment_containing(time, target) else {
+                return MeasureResult::failed(name, "Time point not in simulation range");
             };
-            self.find_crossing(time, when_sig, threshold, EdgeType::Cross, 1, None)
-        } else {
+            return measurement_segment_slope(name, time, signal, segment);
+        }
+
+        let Some(condition) = when else {
             return MeasureResult::failed(name, "DERIV requires AT=time or WHEN signal=value");
         };
-        let Some(t_star) = target_time else {
-            return MeasureResult::failed(name, "WHEN condition never met");
+        let left = match lookup_signal(signals, &condition.left) {
+            Some(signal) => signal,
+            None => {
+                return MeasureResult::failed(
+                    name,
+                    &format!("When signal '{}' not found", condition.left),
+                );
+            }
         };
-        for i in 0..time.len() - 1 {
-            if time[i] <= t_star && time[i + 1] >= t_star && time[i + 1] > time[i] {
-                let slope = (signal[i + 1] - signal[i]) / (time[i + 1] - time[i]);
-                return MeasureResult::success(name, slope);
+        let right = match resolve_measure_operand(&condition.right, signals) {
+            Ok(operand) => operand,
+            Err(error) => return MeasureResult::failed(name, &error),
+        };
+        for (segment, fraction) in measurement_condition_crossings(left, right, time.len()) {
+            let axis = time[segment] + fraction * (time[segment + 1] - time[segment]);
+            if Self::axis_in_measurement_window(axis, lower, upper) {
+                return measurement_segment_slope(name, time, signal, segment);
             }
         }
-        MeasureResult::failed(name, "Time point not in simulation range")
+        MeasureResult::failed(name, "WHEN condition never met in the measurement window")
     }
 
     /// Evaluate a PARAM expression against the named results computed so far.
@@ -1002,8 +1036,9 @@ impl MeasureEngine {
         name: &str,
         signal_name: &str,
         at: Option<Value>,
-        when_signal: Option<&str>,
-        when_value: Option<Value>,
+        when: Option<&WhenCondition>,
+        from: Option<Value>,
+        to: Option<Value>,
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
@@ -1014,34 +1049,44 @@ impl MeasureEngine {
             }
         };
 
+        let (lower, upper) = Self::measurement_window_bounds(time, from, to);
         if let Some(t_at) = at {
             // FIND ... AT=time
+            if !Self::axis_in_measurement_window(t_at, lower, upper) {
+                return MeasureResult::failed(name, "AT point is outside the measurement window");
+            }
             if let Some(value) = interpolate_measure_signal(time, signal, t_at) {
                 return MeasureResult::success(name, value);
             }
             return MeasureResult::failed(name, "Time point not in simulation range");
         }
 
-        if let (Some(when_sig_name), Some(threshold)) = (when_signal, when_value) {
-            // FIND ... WHEN condition=value
-            let when_sig = match lookup_signal(signals, when_sig_name) {
+        if let Some(condition) = when {
+            let left = match lookup_signal(signals, &condition.left) {
                 Some(s) => s,
                 None => {
                     return MeasureResult::failed(
                         name,
-                        &format!("When signal '{}' not found", when_sig_name),
+                        &format!("When signal '{}' not found", condition.left),
                     );
                 }
             };
-
-            if let Some(t_when) =
-                self.find_crossing(time, when_sig, threshold, EdgeType::Cross, 1, None)
-            {
-                if let Some(value) = interpolate_measure_signal(time, signal, t_when) {
+            let right = match resolve_measure_operand(&condition.right, signals) {
+                Ok(operand) => operand,
+                Err(error) => return MeasureResult::failed(name, &error),
+            };
+            for (segment, fraction) in measurement_condition_crossings(left, right, time.len()) {
+                let axis = time[segment] + fraction * (time[segment + 1] - time[segment]);
+                if Self::axis_in_measurement_window(axis, lower, upper) {
+                    let value =
+                        signal[segment] + fraction * (signal[segment + 1] - signal[segment]);
                     return MeasureResult::success(name, value);
                 }
             }
-            return MeasureResult::failed(name, "WHEN condition not found");
+            return MeasureResult::failed(
+                name,
+                "WHEN condition not found in the measurement window",
+            );
         }
 
         MeasureResult::failed(name, "FIND requires AT= or WHEN condition")
@@ -1116,6 +1161,112 @@ impl MeasureEngine {
             MeasureResult::success(name, integral * direction)
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum ResolvedMeasureOperand<'a> {
+    Constant(Value),
+    Waveform(&'a [Value]),
+}
+
+impl ResolvedMeasureOperand<'_> {
+    fn value_at(self, index: usize) -> Option<Value> {
+        match self {
+            Self::Constant(value) => Some(value),
+            Self::Waveform(values) => values.get(index).copied(),
+        }
+    }
+}
+
+fn resolve_measure_operand<'a>(
+    operand: &MeasureOperand,
+    signals: &HashMap<String, &'a [Value]>,
+) -> Result<ResolvedMeasureOperand<'a>, String> {
+    match operand {
+        MeasureOperand::Constant(value) => Ok(ResolvedMeasureOperand::Constant(*value)),
+        MeasureOperand::Waveform(name) => lookup_signal(signals, name)
+            .map(ResolvedMeasureOperand::Waveform)
+            .ok_or_else(|| format!("When signal '{name}' not found")),
+    }
+}
+
+/// Return every qualifying `WHEN left=right` crossing interval in traversal
+/// order. Xyce requires the left operand itself to change over the interval;
+/// a moving right operand cannot trigger against a constant left operand.
+fn measurement_condition_crossings(
+    left: &[Value],
+    right: ResolvedMeasureOperand<'_>,
+    point_count: usize,
+) -> Vec<(usize, Value)> {
+    const XYCE_WHEN_ABSOLUTE_TOLERANCE: Value = 1.0e-12;
+    if left.len() != point_count || point_count < 2 {
+        return Vec::new();
+    }
+
+    let mut crossings = Vec::new();
+    for segment in 0..point_count - 1 {
+        let left_previous = left[segment];
+        let left_current = left[segment + 1];
+        if left_current == left_previous {
+            continue;
+        }
+        let Some(right_previous) = right.value_at(segment) else {
+            return Vec::new();
+        };
+        let Some(right_current) = right.value_at(segment + 1) else {
+            return Vec::new();
+        };
+        let previous_difference = left_previous - right_previous;
+        let current_difference = left_current - right_current;
+        let current_equal = current_difference.abs() < XYCE_WHEN_ABSOLUTE_TOLERANCE;
+        let strict_crossing = (previous_difference < 0.0 && current_difference > 0.0)
+            || (previous_difference > 0.0 && current_difference < 0.0);
+        if !current_equal && !strict_crossing {
+            continue;
+        }
+
+        let denominator = current_difference - previous_difference;
+        let fraction = if denominator == 0.0 {
+            // Parallel, identical moving operands are considered equal at the
+            // current accepted point by Xyce.
+            1.0
+        } else {
+            -previous_difference / denominator
+        };
+        if fraction.is_finite() && (0.0..=1.0).contains(&fraction) {
+            crossings.push((segment, fraction));
+        }
+    }
+    crossings
+}
+
+fn measurement_segment_containing(axis: &[Value], target: Value) -> Option<usize> {
+    const XYCE_AT_ABSOLUTE_TOLERANCE: Value = 1.0e-12;
+    axis.windows(2).enumerate().find_map(|(segment, pair)| {
+        let previous = pair[0];
+        let current = pair[1];
+        if previous == current {
+            return None;
+        }
+        let strictly_between = target > previous.min(current) && target < previous.max(current);
+        let matches_endpoint = (target - previous).abs() < XYCE_AT_ABSOLUTE_TOLERANCE
+            || (target - current).abs() < XYCE_AT_ABSOLUTE_TOLERANCE;
+        (strictly_between || matches_endpoint).then_some(segment)
+    })
+}
+
+fn measurement_segment_slope(
+    name: &str,
+    axis: &[Value],
+    signal: &[Value],
+    segment: usize,
+) -> MeasureResult {
+    let delta_axis = axis[segment + 1] - axis[segment];
+    if delta_axis == 0.0 || !delta_axis.is_finite() {
+        return MeasureResult::failed(name, "Derivative interval has zero or non-finite width");
+    }
+    let slope = (signal[segment + 1] - signal[segment]) / delta_axis;
+    MeasureResult::success(name, slope)
 }
 
 fn interpolate_measure_signal(axis: &[Value], signal: &[Value], target: Value) -> Option<Value> {
@@ -1490,6 +1641,155 @@ mod tests {
                 .unwrap_or("")
                 .contains("complex value")
         );
+    }
+
+    fn derivative_statement(
+        name: &str,
+        signal: &str,
+        at: Option<Value>,
+        when: Option<WhenCondition>,
+        from: Option<Value>,
+        to: Option<Value>,
+    ) -> MeasureStatement {
+        MeasureStatement {
+            name: name.to_string(),
+            measure_type: MeasureType::Derivative {
+                signal: signal.to_string(),
+                at,
+                when,
+                from,
+                to,
+            },
+            analysis: "DC".to_string(),
+            goal: None,
+            tolerance: None,
+        }
+    }
+
+    #[test]
+    fn derivative_at_uses_first_traversed_secant_and_honors_windows() {
+        let ascending_axis = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let squares = [1.0, 4.0, 9.0, 16.0, 25.0];
+        let mut ascending_signals = HashMap::new();
+        ascending_signals.insert("Y".to_string(), squares.as_slice());
+        let mut ascending = MeasureEngine::new();
+        ascending.add(derivative_statement(
+            "start",
+            "Y",
+            Some(1.0),
+            None,
+            None,
+            None,
+        ));
+        ascending.add(derivative_statement(
+            "interior",
+            "Y",
+            Some(2.5),
+            None,
+            None,
+            None,
+        ));
+        ascending.add(derivative_statement(
+            "windowed_start",
+            "Y",
+            Some(1.0),
+            None,
+            Some(1.0),
+            Some(1.0),
+        ));
+        ascending.add(derivative_statement(
+            "outside",
+            "Y",
+            Some(2.0),
+            None,
+            None,
+            Some(1.0),
+        ));
+
+        let results = ascending.evaluate(&ascending_axis, &ascending_signals);
+        assert_eq!(results[0].value, Some(3.0));
+        assert_eq!(results[1].value, Some(5.0));
+        assert_eq!(results[2].value, Some(3.0));
+        assert!(!results[3].passed);
+
+        let descending_axis = [5.0, 4.0, 3.0, 2.0, 1.0];
+        let half_squares = [12.5, 8.0, 4.5, 2.0, 0.5];
+        let mut descending_signals = HashMap::new();
+        descending_signals.insert("Y".to_string(), half_squares.as_slice());
+        let mut descending = MeasureEngine::new();
+        descending.add(derivative_statement(
+            "interior",
+            "Y",
+            Some(2.5),
+            None,
+            None,
+            None,
+        ));
+        descending.add(derivative_statement(
+            "stop",
+            "Y",
+            Some(1.0),
+            None,
+            None,
+            None,
+        ));
+
+        let results = descending.evaluate(&descending_axis, &descending_signals);
+        assert_eq!(results[0].value, Some(2.5));
+        assert_eq!(results[1].value, Some(1.5));
+    }
+
+    #[test]
+    fn derivative_when_intersects_moving_operands_and_filters_each_crossing() {
+        let axis = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let squares = [1.0, 4.0, 9.0, 16.0, 25.0];
+        let four_x = [4.0, 8.0, 12.0, 16.0, 20.0];
+        let double_crossing = [4.2, 1.1, 0.0, 0.9, 3.8];
+        let constant = [1.0; 5];
+        let mut signals = HashMap::new();
+        signals.insert("Y".to_string(), squares.as_slice());
+        signals.insert("TARGET".to_string(), four_x.as_slice());
+        signals.insert("DOUBLE".to_string(), double_crossing.as_slice());
+        signals.insert("CONSTANT".to_string(), constant.as_slice());
+        let mut engine = MeasureEngine::new();
+        engine.add(derivative_statement(
+            "moving",
+            "Y",
+            None,
+            Some(WhenCondition {
+                left: "Y".to_string(),
+                right: MeasureOperand::Waveform("TARGET".to_string()),
+            }),
+            None,
+            None,
+        ));
+        engine.add(derivative_statement(
+            "second_crossing",
+            "DOUBLE",
+            None,
+            Some(WhenCondition {
+                left: "DOUBLE".to_string(),
+                right: MeasureOperand::Constant(0.5),
+            }),
+            Some(2.75),
+            None,
+        ));
+        engine.add(derivative_statement(
+            "constant_left_fails",
+            "Y",
+            None,
+            Some(WhenCondition {
+                left: "CONSTANT".to_string(),
+                right: MeasureOperand::Constant(1.0),
+            }),
+            None,
+            None,
+        ));
+
+        let results = engine.evaluate(&axis, &signals);
+        assert_eq!(results[0].value, Some(7.0));
+        assert_eq!(results[1].value, Some(0.9));
+        assert!(!results[2].passed);
     }
 
     #[test]
