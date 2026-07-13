@@ -1440,6 +1440,36 @@ impl XyceTestRunner {
             || message.contains("UNDEFINED PARAMETER: HERTZ")
     }
 
+    fn text_contains_ascii_identifier(text: &str, identifier: &str) -> bool {
+        text.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .any(|token| token.eq_ignore_ascii_case(identifier))
+    }
+
+    fn parse_error_is_unbound_ac_frequency_dependency(
+        source: &str,
+        err: &crate::netlist::ParseError,
+    ) -> bool {
+        if Self::parse_error_is_undefined_ac_frequency_symbol(err) {
+            return true;
+        }
+        if !err
+            .to_string()
+            .to_ascii_uppercase()
+            .contains("UNDEFINED PARAMETER:")
+        {
+            return false;
+        }
+
+        Self::logical_netlist_lines(source).into_iter().any(|line| {
+            let trimmed = Self::strip_netlist_comment(&line).trim().to_string();
+            let command = trimmed.split_whitespace().next().unwrap_or_default();
+            (command.eq_ignore_ascii_case(".PARAM")
+                || command.eq_ignore_ascii_case(".GLOBAL_PARAM"))
+                && (Self::text_contains_ascii_identifier(&trimmed, "FREQ")
+                    || Self::text_contains_ascii_identifier(&trimmed, "HERTZ"))
+        })
+    }
+
     fn source_with_ac_frequency_bindings(source: &str, frequency: Value) -> String {
         let mut lines = source.lines();
         let title = lines.next().unwrap_or("Untitled");
@@ -2285,11 +2315,10 @@ impl XyceTestRunner {
         if !measurement_reference_paths.is_empty()
             && (static_plan.dc_data.is_some()
                 || !static_plan.steps.is_empty()
-                || static_plan.dc.sweep2.is_some()
-                || static_plan.dc.primary_spec().points().len() != 1)
+                || static_plan.dc.sweep2.is_some())
         {
             return Err(
-                "scalar DC measurement artifact contract currently requires exactly one unstepped sweep point"
+                "scalar DC measurement artifact contract currently requires one ordinary unstepped primary sweep"
                     .to_string(),
             );
         }
@@ -3115,7 +3144,7 @@ impl XyceTestRunner {
 
         let (netlist, frequency_bound) = match Self::parse_xyce_netlist(&source, &deck.path) {
             Ok(netlist) => (netlist, false),
-            Err(err) if Self::parse_error_is_undefined_ac_frequency_symbol(&err) => {
+            Err(err) if Self::parse_error_is_unbound_ac_frequency_dependency(&source, &err) => {
                 let frequency_bound_source = Self::source_with_ac_frequency_bindings(&source, 1.0);
                 let netlist = Self::parse_xyce_netlist(&frequency_bound_source, &deck.path)
                     .map_err(|retry_err| {
@@ -21668,12 +21697,8 @@ impl XyceTestRunner {
     }
 
     fn validate_tran_probe_expression(expression: &str, netlist: &Netlist) -> Result<(), String> {
-        if Self::print_expression_contains_named_call(expression, "sdt") {
-            let probe = format!("{{{expression}}}");
-            let runtime =
-                Self::stateful_tran_print_expression(&probe, netlist)?.ok_or_else(|| {
-                    format!("stateful expression '{{{expression}}}' lost its SDT call")
-                })?;
+        let probe = format!("{{{expression}}}");
+        if let Some(runtime) = Self::stateful_tran_print_expression(&probe, netlist)? {
             for branch in runtime.program.branch_map.keys() {
                 let probe = format!("i({branch})");
                 Self::validate_atomic_tran_probe(&Self::normalize_probe(&probe), &probe, netlist)?;
@@ -22998,9 +23023,6 @@ impl XyceTestRunner {
         let Some(expression) = Self::print_expression_inner(probe) else {
             return Ok(None);
         };
-        if !Self::print_expression_contains_named_call(expression, "sdt") {
-            return Ok(None);
-        }
         let (expression, context, _) = Self::rewrite_print_device_parameter_tokens_maybe(
             expression,
             netlist.params.clone(),
@@ -23830,6 +23852,7 @@ impl XyceTestRunner {
         false
     }
 
+    #[cfg(test)]
     fn print_expression_contains_named_call(expression: &str, name: &str) -> bool {
         let bytes = expression.as_bytes();
         let mut index = 0usize;
@@ -31820,6 +31843,28 @@ V1 a 0 AC 1
                 .abs()
                 < 1.0e-12
         );
+    }
+
+    #[test]
+    fn ac_frequency_bindings_detect_indirect_parameter_dependencies() {
+        let source = "\
+xyce indirect ac freq binding
+.GLOBAL_PARAM MAG={LOG10(FREQ)+1}
+V1 a 0 AC {MAG}
+R1 a 0 1k
+.AC DEC 1 10 100
+.PRINT AC FREQ V(a)
+.END
+";
+
+        let err = XyceTestRunner::parse_xyce_netlist(source, Path::new("indirect-freq.cir"))
+            .expect_err("plain parse should reject the unresolved dependent parameter");
+        assert!(!XyceTestRunner::parse_error_is_undefined_ac_frequency_symbol(&err));
+        assert!(XyceTestRunner::parse_error_is_unbound_ac_frequency_dependency(source, &err));
+
+        let rebound = XyceTestRunner::source_with_ac_frequency_bindings(source, 10.0);
+        XyceTestRunner::parse_xyce_netlist(&rebound, Path::new("indirect-freq.cir"))
+            .expect("frequency binding should resolve the dependent source parameter");
     }
 
     #[test]

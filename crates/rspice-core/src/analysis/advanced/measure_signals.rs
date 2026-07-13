@@ -655,6 +655,62 @@ fn evaluate_statements(
     engine.evaluate(axis, &augmented_signals)
 }
 
+fn overlay_continuous_equation_results(
+    statements: &[&MeasureStatement],
+    results: &mut [MeasureResult],
+    traces: Result<Vec<EquationMeasureTrace>, String>,
+    analysis: &str,
+) {
+    match traces {
+        Ok(traces) => {
+            for (statement, result) in statements.iter().zip(results) {
+                if !matches!(statement.measure_type, MeasureType::Equation { .. }) {
+                    continue;
+                }
+                let Some(trace) = traces
+                    .iter()
+                    .find(|trace| trace.name.eq_ignore_ascii_case(&statement.name))
+                else {
+                    *result = MeasureResult::failed(
+                        &statement.name,
+                        &format!("continuous {analysis} equation trace was not produced"),
+                    );
+                    continue;
+                };
+                *result = if trace.initialized {
+                    trace
+                        .values
+                        .last()
+                        .copied()
+                        .map(|value| MeasureResult::success(&statement.name, value))
+                        .unwrap_or_else(|| {
+                            MeasureResult::failed(
+                                &statement.name,
+                                &format!("continuous {analysis} equation trace is empty"),
+                            )
+                        })
+                } else {
+                    MeasureResult::failed(
+                        &statement.name,
+                        &format!("continuous {analysis} equation window was never active"),
+                    )
+                }
+                .check_goal(statement);
+            }
+        }
+        Err(err) => {
+            for (statement, result) in statements.iter().zip(results) {
+                if matches!(statement.measure_type, MeasureType::Equation { .. }) {
+                    *result = MeasureResult::failed(
+                        &statement.name,
+                        &format!("continuous {analysis} equation evaluation failed: {err}"),
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn materialize_measure_expression_signals(
     statements: &[&MeasureStatement],
     axis: &[Value],
@@ -735,7 +791,14 @@ pub fn evaluate_tran_measurements(
         return Vec::new();
     }
     let signals = transient_signal_map(result);
-    evaluate_statements(&statements, &result.time, &signals, &netlist.params)
+    let mut results = evaluate_statements(&statements, &result.time, &signals, &netlist.params);
+    overlay_continuous_equation_results(
+        &statements,
+        &mut results,
+        evaluate_tran_equation_measurements(netlist, result),
+        "TRAN",
+    );
+    results
 }
 
 /// Evaluate the netlist's DC .MEAS statements against a sweep.
@@ -757,7 +820,14 @@ pub fn evaluate_dc_measurements(
             .collect();
     };
     let signals = series.signal_map();
-    evaluate_statements(&statements, series.axis(), &signals, &netlist.params)
+    let mut results = evaluate_statements(&statements, series.axis(), &signals, &netlist.params);
+    overlay_continuous_equation_results(
+        &statements,
+        &mut results,
+        evaluate_dc_equation_measurements(netlist, sweep),
+        "DC",
+    );
+    results
 }
 
 /// Evaluate the netlist's AC .MEAS statements against a sweep.
@@ -781,54 +851,12 @@ pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<Me
     };
     let signals = series.equation_signal_map();
     let mut results = evaluate_statements(&statements, series.axis(), &signals, &netlist.params);
-    match evaluate_ac_equation_measurements(netlist, sweep) {
-        Ok(traces) => {
-            for (statement, result) in statements.iter().zip(&mut results) {
-                if !matches!(statement.measure_type, MeasureType::Equation { .. }) {
-                    continue;
-                }
-                let Some(trace) = traces
-                    .iter()
-                    .find(|trace| trace.name.eq_ignore_ascii_case(&statement.name))
-                else {
-                    *result = MeasureResult::failed(
-                        &statement.name,
-                        "continuous AC equation trace was not produced",
-                    );
-                    continue;
-                };
-                *result = if trace.initialized {
-                    trace
-                        .values
-                        .last()
-                        .copied()
-                        .map(|value| MeasureResult::success(&statement.name, value))
-                        .unwrap_or_else(|| {
-                            MeasureResult::failed(
-                                &statement.name,
-                                "continuous AC equation trace is empty",
-                            )
-                        })
-                } else {
-                    MeasureResult::failed(
-                        &statement.name,
-                        "continuous AC equation window was never active",
-                    )
-                }
-                .check_goal(statement);
-            }
-        }
-        Err(err) => {
-            for (statement, result) in statements.iter().zip(&mut results) {
-                if matches!(statement.measure_type, MeasureType::Equation { .. }) {
-                    *result = MeasureResult::failed(
-                        &statement.name,
-                        &format!("continuous AC equation evaluation failed: {err}"),
-                    );
-                }
-            }
-        }
-    }
+    overlay_continuous_equation_results(
+        &statements,
+        &mut results,
+        evaluate_ac_equation_measurements(netlist, sweep),
+        "AC",
+    );
     results
 }
 
@@ -873,6 +901,25 @@ mod tests {
         assert!(signals.contains_key("v(OUT)"));
         assert!(signals.contains_key("I(v1)"));
         assert_eq!(signals["TIME"], result.time.as_slice());
+    }
+
+    #[test]
+    fn transient_equation_scalar_results_match_final_trace_values() {
+        let netlist = Netlist::parse(
+            "* continuous transient equations\n\
+             V1 out 0 0\n\
+             .tran 1 3\n\
+             .meas tran bounded EQN {V(out)+1} FROM=1 TO=2\n\
+             .meas tran invalid EQN {V(out)} FROM=4 TO=5 DEFAULT_VAL=-9\n\
+             .end\n",
+        )
+        .expect("transient equations parse");
+
+        let results = evaluate_tran_measurements(&netlist, &tran_result());
+        assert_eq!(results[0].value, Some(3.0));
+        assert!(results[0].passed);
+        assert_eq!(results[1].value, None);
+        assert!(!results[1].passed);
     }
 
     #[test]
@@ -1028,6 +1075,11 @@ mod tests {
         assert!(traces[0].initialized);
         assert_eq!(traces[1].name, "DERIVED");
         assert_eq!(traces[1].values, vec![0.0, 4.0, 6.0, 8.0, 8.0]);
+
+        let results = evaluate_dc_measurements(&netlist, &dc_equation_sweep());
+        assert_eq!(results[0].value, Some(4.0));
+        assert_eq!(results[1].value, Some(8.0));
+        assert!(results.iter().all(|result| result.passed));
     }
 
     #[test]
