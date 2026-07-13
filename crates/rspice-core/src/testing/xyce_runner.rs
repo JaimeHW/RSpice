@@ -23023,6 +23023,9 @@ impl XyceTestRunner {
         let Some(expression) = Self::print_expression_inner(probe) else {
             return Ok(None);
         };
+        if !Self::print_expression_contains_stateful_sdt(expression, &netlist.params) {
+            return Ok(None);
+        }
         let (expression, context, _) = Self::rewrite_print_device_parameter_tokens_maybe(
             expression,
             netlist.params.clone(),
@@ -23852,7 +23855,6 @@ impl XyceTestRunner {
         false
     }
 
-    #[cfg(test)]
     fn print_expression_contains_named_call(expression: &str, name: &str) -> bool {
         let bytes = expression.as_bytes();
         let mut index = 0usize;
@@ -23888,6 +23890,41 @@ impl XyceTestRunner {
             index += 1;
         }
         false
+    }
+
+    fn print_expression_contains_stateful_sdt(
+        expression: &str,
+        params: &crate::netlist::ParamContext,
+    ) -> bool {
+        if Self::print_expression_contains_named_call(expression, "sdt") {
+            return true;
+        }
+
+        let functions = params.all_functions();
+        let mut stateful_functions: BTreeSet<String> = BTreeSet::new();
+        loop {
+            let mut changed = false;
+            for function in &functions {
+                if stateful_functions.contains(&function.name) {
+                    continue;
+                }
+                let contains_sdt =
+                    Self::print_expression_contains_named_call(&function.body, "sdt")
+                        || stateful_functions.iter().any(|name| {
+                            Self::print_expression_contains_named_call(&function.body, name)
+                        });
+                if contains_sdt {
+                    changed |= stateful_functions.insert(function.name.clone());
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        stateful_functions
+            .iter()
+            .any(|name| Self::print_expression_contains_named_call(expression, name))
     }
 
     fn print_expression_contains_probe_reference(expression: &str) -> bool {
@@ -31702,6 +31739,23 @@ default output
         assert!(!XyceTestRunner::print_expression_contains_named_call(
             "table(\"sdt(fake)\")",
             "sdt"
+        ));
+    }
+
+    #[test]
+    fn stateful_print_call_detection_follows_user_function_graph() {
+        let mut params = crate::netlist::ParamContext::new();
+        params.define_function("square", vec!["x".to_string()], "x*x");
+        params.define_function("integral", vec!["x".to_string()], "sdt(square(x))");
+        params.define_function("wrapped", vec!["x".to_string()], "integral(x)+1");
+
+        assert!(XyceTestRunner::print_expression_contains_stateful_sdt(
+            "wrapped(I(v1))",
+            &params
+        ));
+        assert!(!XyceTestRunner::print_expression_contains_stateful_sdt(
+            "P(c1)+square(V(out))",
+            &params
         ));
     }
 
